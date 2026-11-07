@@ -13,7 +13,7 @@ import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 // side. Every leg completes or fails by name; nothing recovers a fault, breaks an invariant or jumps. Each turn is a fresh world.
 const defs = (process.env.YARD_DEFS ?? 'core/door@3,core/door@2').split(',');
 const turns = (process.env.YARD_TURNS ?? '0,0.4,0.571,0.785,1.2,1.571,1.9,2.356,2.9,3.7,4.712,5.5,5.712').split(',').map(Number);
-const once = async (ref, r, stubs = [], {tight = false, more = null, only = null} = {}) => {
+const once = async (ref, r, stubs = [], {more = null, only = null} = {}) => {
  const f = fixture(':memory:', factory, {durableClockV1: true}); f.brain.quiesce();
  const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false}), app = new Hono(); let soul;
  const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: edge, soul: () => soul});
@@ -35,8 +35,6 @@ const once = async (ref, r, stubs = [], {tight = false, more = null, only = null
    ...(more?.(ax, az) ?? []),
   ]});
   assert.equal(placed.accepted, true, JSON.stringify(placed)); await tick(45);
-  // every close says it has no room, so the walk's own refusal can be read without building the wall for it
-  if (tight) {const plan = edge.contactActuator.plan.bind(edge.contactActuator); edge.contactActuator.plan = (...a) => {const p = plan(...a); return a[2] === 'close' && p ? {...p, noRoom: true} : p;};}
   const moved = [], out = [];
   const leg = async (capability, name) => {
    const a = await (await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability})}))).json();
@@ -50,7 +48,8 @@ const once = async (ref, r, stubs = [], {tight = false, more = null, only = null
   };
   if (only) {await leg(only, only); return out;}
   const id = god.model.get('door').id, inside = () => (body().pose.p[0] - o[0]) * s + (body().pose.p[2] - o[1]) * c > 0, shut = () => god.model.get('door').state?.open === false;
-  const through = async (name, wantInside) => {await leg(wantInside ? 'walk:inside-bench' : 'walk:outside-lamp', name); if (out.at(-1)[1] === 'completed') {assert.equal(inside(), wantInside, `${ref} r=${r} ${name}: the far side`); assert.ok(shut(), `${ref} r=${r} ${name}: shut behind her`);}};
+  const through = async (name, wantInside) => {await leg(wantInside ? 'walk:inside-bench' : 'walk:outside-lamp', name); if (out.at(-1)[1] === 'completed') {assert.equal(inside(), wantInside, `${ref} r=${r} ${name}: the far side`); if (!stubs.length) assert.ok(shut(), `${ref} r=${r} ${name}: shut behind her`);}};
+  // with a wall in the way the shutting can fail by name, and the walk goes on with the door left open
   await through('in', true); await through('out', false);
   // by hand from each side: the hand opens it, she crosses the open doorway, and it is shut from there
   for (const wantInside of [true, false]) {
@@ -87,9 +86,8 @@ test('a wall just behind where a close would end: refused by name', {timeout: 12
 });
 
 test('a walk whose close would have no room is refused by name', {timeout: 120000}, async () => {
- const legs = await once('core/door@3', 0.571, [], {tight: true});
- if (process.env.YARD_LOG) console.log('TIGHT', JSON.stringify(legs));
- assert.deepEqual(legs[0], ['in', 'contact.no-room']);
+ const legs = await once('core/door@3', 3.7, [[-1.01, -0.59, -0.34, -0.59], [-1.98, -0.97, -0.6, -0.97]]);
+ assert.deepEqual(legs[1], ['out', 'contact.no-room']);
 });
 
 test('a close that ends clear carries nothing new, one that would not eases clear', {timeout: 120000}, async () => {
@@ -111,4 +109,10 @@ test('a door beside the way, with no room to shut it, does not answer for the wa
   {op: 'place', def: 'core/bench@1', name: 'store-bench', p: at(-2.5, 1.5)}];};
  const legs = await once('core/door@3', 0.571, [[0, 0.8, 1.2, 0.8]], {more, only: 'walk:store-bench'});
  assert.deepEqual(legs, [['walk:store-bench', 'door.locked']]);
+});
+
+test('a sidestep still held when the gap turns solid fails by name, never a fault', {timeout: 120000}, async () => {
+ for (const [r, stubs] of [[0.4, [[-1, 0.62, -0.3, 0.62]]], [0.571, [[-1, 0.62, -0.3, 0.62]]], [0.4, [[-1.1, 0.62, -0.4, 0.62]]]]) {
+  for (const [name, code] of await once('core/door@3', r, stubs)) assert.notEqual(code, 'engine.fault-recovered', `r=${r} ${name}`);
+ }
 });

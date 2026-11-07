@@ -377,6 +377,8 @@ export const handActuator:ActionDef<HandActuatorParams,true,Exec>={
   if(ex.p.stroke&&!ex.strokeHeld&&!staticStepClear(rt,a,[point.root[0],point.root[2]])){ex.strokeHeld=true;point.root=[...a.pose.p];}
   if(ex.p.opening||ex.p.slide){const was=ex.shift;if(!sidestep(rt,ex,a,point.root)){clear(rt,ex);return {status:'failed',diagnostic:issue('step-blocked','There is no clear place to step while holding this handle.',[ex.p.actor,ex.p.target])};}
    const moved=ex.shift!==was?blocked(rt,ex,point.root,f.angle):null;if(moved){clear(rt,ex);return {status:'failed',diagnostic:moved};}}
+  // #1070: the plan read the gap at the path's end, not a shifted one, and what `sidestep` reads can't see a gap that isn't solid yet
+  if(ex.shift&&ex.p.opening&&ex.p.opening.from!==0&&ex.p.opening.to===0&&!ex.p.op&&ex.t+dt>=handReachSeconds(ex.motion)+handSwingSeconds(ex.motion)){clear(rt,ex);return {status:'failed',diagnostic:issue('step-blocked','There is no clear place to stand once this is shut.',[ex.p.actor,ex.p.target])};}
   const before=[...a.pose.p];a.pose.p=[...point.root];
   const face=ex.p.slide?heading([-ex.p.slide.dir[0],-ex.p.slide.dir[1]]):ex.p.opening?heading([-dsin(ex.p.opening.yaw+(ex.p.opening.bodyPolicy==='door-natural-v2'?(ex.p.opening.side===-1?f.angle*.34:0):f.angle))*ex.p.opening.side,-dcos(ex.p.opening.yaw+(ex.p.opening.bodyPolicy==='door-natural-v2'?(ex.p.opening.side===-1?f.angle*.34:0):f.angle))*ex.p.opening.side]):ex.p.stroke?heading([-dsin(ex.p.stroke.yaw),-dcos(ex.p.stroke.yaw)]):heading([point.hand[0]-a.pose.p[0],point.hand[2]-a.pose.p[2]]),turn=((face-ex.yaw+Math.PI*3)%(Math.PI*2))-Math.PI;
   // Soul Actions entry 33: a switch or valve contact turns the body over the whole reach (a door, drawer or board stroke

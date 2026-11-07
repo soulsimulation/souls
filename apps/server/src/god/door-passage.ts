@@ -42,13 +42,13 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
    const end=actuatorPoint(c,0).root;if(!eng.walkFromReachesV1(soul.entityId,[end[0],end[2]],steps))continue;
    const name=e.name??id,denied=d.access(id,soul);
-   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened.`};continue;}
    if(denied){refusal??={refuse:true,code:denied.code,reason:`The way to ${what} goes through ${name}: ${denied.reason.replace(/[.\s]+$/,'')}. It was not opened.`};continue;}
    // Entry 32, the safe way out: from inside (the back), a lockable door's thumb-turn opens for anyone, and its owner's
    // key opens it from outside. The walk turns it first and the latch locks it again as it is shut behind (a guest cannot
    // lock it again from outside, and must not leave the owner's door open to all). Anyone else outside is refused.
    const lockedNow=actuatedState(e,def).locked===true,inside=o.side<0,own=lockedNow?d.owner?.(id,soul):null;
    if(lockedNow&&(!def.tags.includes('lockable')||(!inside&&own?.mine!==true))){refusal??={refuse:true,code:'door.locked',reason:lockedReason(id,soul,what,name)};continue;}
+   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened.`};continue;}
    const unlock=lockedNow?d.contact.plan(soul,id,'unlock'):null;if(lockedNow&&!unlock)continue;
    const intent=d.contact.prepare(soul,id,'open');if(!intent)continue;
    const passage={door:[wp.x,wp.z] as [number,number],from:o.side};
