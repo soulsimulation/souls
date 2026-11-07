@@ -36,7 +36,7 @@ export function parseSince(text = '12h', now = Date.now()) {
 export function checkStates({ runs = [], statuses = [], workflowRuns = [], required = DEFAULT_CHECKS }) {
   const bySuite = new Map(workflowRuns.filter(w => w.check_suite_id != null).map(w => [w.check_suite_id, w]));
   const newest = new Map();
-  for (const w of workflowRuns) { const prev = newest.get(w.workflow_id); if (!prev || w.id > prev.id) newest.set(w.workflow_id, w); }
+  for (const w of workflowRuns) { if (w.conclusion === 'skipped') continue; const prev = newest.get(w.workflow_id); if (!prev || w.id > prev.id) newest.set(w.workflow_id, w); }
   const stale = r => { const w = r.check_suite?.id != null && bySuite.get(r.check_suite.id); return !!w && (w.conclusion === 'cancelled' || newest.get(w.workflow_id) !== w); };
   const latest = new Map(), seen = new Set();
   for (const r of runs) { seen.add(r.name); if (stale(r)) continue; const prev = latest.get(r.name); if (!prev || r.id > prev.id) latest.set(r.name, r); }
