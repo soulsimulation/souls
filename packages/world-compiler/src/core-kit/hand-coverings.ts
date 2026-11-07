@@ -59,20 +59,20 @@ const blindWindow = {
   actions: [{ ...actions('blind')[0], label: 'Open the blind' }, { ...actions('blind')[1], label: 'Close the blind' }],
 } as unknown as DefInput;
 
-// #427 (W043): an Open / Closed sign, the same contact at a knob on its post. The board shows OPEN on its front and CLOSED on
-// its back and turns on the post, so the side you read is the state (role flip, a half turn over 0.7 s, opening-motion.ts).
+// #427 (W043): an Open / Closed sign, the same contact at a knob on its post. The board reads the same from both sides, as it
+// stands on a post anyone can walk round, and turns over 0.7 s when it changes (role flip, opening-motion.ts).
+const signBoard = (when: string, text: string, ink: string): Shape[] => [{ kind: 'box', at: [0, 1.42, 0], size: [0.56, 0.32, 0.024], round: 0.008, tint: 'board', role: 'flip', pivot: [0, 1.42, 0], when, faces: [
+  { side: 'front', text, bg: '#f1e7cf', ink, font: 'sans' }, { side: 'back', text, bg: '#f1e7cf', ink, font: 'sans' }] }];
 const signPalette = { post: '#4a3a2c', board: '#f1e7cf', valve: '#b08a3e' };
 const openSign = {
   schema: 'def/1', name: 'core-open-sign', version: 1, form: 'point',
-  description: 'A small sign on a post for a shop or stall: OPEN on one side of its board, CLOSED on the other. A Soul turns it by hand at the knob on the post, and anyone nearby can read which it says.',
+  description: 'A small sign on a post for a shop or stall: its board says OPEN or CLOSED, from both sides. A Soul turns it by hand at the knob on the post, and anyone nearby can read which it says.',
   tags: ['signage', 'shop', 'hand-operated', 'local-fixture'],
-  make: { kind: 'gen', gen: 'kit/2', args: { round: 0.006, shapes: [
+  make: { kind: 'gen', gen: 'kit/2', args: { v: 2, round: 0.006, shapes: [
     { kind: 'box', at: [0, 0.02, 0], size: [0.34, 0.04, 0.34], tint: 'post', collide: true },
     { kind: 'box', at: [0, 0.63, 0], size: [0.05, 1.18, 0.05], tint: 'post', collide: true },
-    { kind: 'cyl', at: [0, 1.1, 0.04], r: 0.022, h: 0.03, segments: 10, tint: 'valve', pitch: Math.PI / 2 },
-    { kind: 'box', at: [0, 1.42, 0], size: [0.56, 0.32, 0.024], round: 0.008, tint: 'board', role: 'flip', pivot: [0, 1.42, 0], faces: [
-      { side: 'front', text: 'OPEN', bg: '#f1e7cf', ink: '#2f6b3a', font: '700' },
-      { side: 'back', text: 'CLOSED', bg: '#f1e7cf', ink: '#8c2f25', font: '700' }] }] } },
+    { kind: 'cyl', at: [0.04, 1.1, 0], r: 0.022, h: 0.03, segments: 10, tint: 'valve', roll: Math.PI / 2 },   // on the post's side, so she stands clear of the board's face
+    ...signBoard('@open=true', 'OPEN', '#2f6b3a'), ...signBoard('@open=false', 'CLOSED', '#8c2f25')] } },
   params: Object.fromEntries(Object.entries(signPalette).map(([k, v]) => [k, { type: 'color', default: v, doc: `${k} colour${k === 'valve' ? ' (the knob; the hand goes here)' : ''}` }])),
   palette: signPalette,
   state: { open: { type: 'bool', default: true } },
