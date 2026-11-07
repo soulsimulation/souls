@@ -1236,11 +1236,21 @@ export class EngineBridge {
   }
   /** Last tick each Soul was stepped out (nav-connect/1): at most once a minute each, as the ledger's walk rescue. */
   private navRescuedAt = new Map<string, number>();
-  /** #1287: Souls a rescue passed over because a program was running, asked again once it has ended. */
+  /** #1287: Souls a rescue passed over, cut off, because a program was running: asked again once it has ended. */
   private navWaiting = new Set<string>();
   private navRescueWaiting() {
-    const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m ? [m] : []; });
-    this.navRescueSouls(0, souls.filter((m) => !this.engine.programOf(m.entityId)));
+    try {
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
+      const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
+      if (!souls.length) return;
+      if (!E.navWarmV1?.(0)) { this.navWarm = false; return; }   // stale labels answer "not cut off": navStep warms them, and they stay queued
+      this.navRescueSouls(0, souls);
+    } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
+  }
+  /** Is this body off the main walkable area where it stands now? Asked with the labels warm. */
+  private navCutOff(id: string) {
+    const E = this.engine as unknown as { navCheckV1?: (pts: { id: string; p: Vec2; level?: number; tol?: number }[]) => { ok: boolean }[] }, b = this.engine.world.entities[id] as { pose: { p: number[] }; human?: { level?: number } } | undefined;
+    return !!b && E.navCheckV1?.([{ id, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0, tol: 0.6 }])[0]?.ok === false;
   }
   /** Step every Soul cut off from the main walkable area to open ground (logged). Returns how many were moved. A seated
    *  Soul is judged where it would stand up (its seat's approach): connected there, it stays seated and nothing is
@@ -1253,14 +1263,13 @@ export class EngineBridge {
     let n = 0;
     for (const m of souls) {
       if (isVerificationProbe(m.soulId)) continue;
-      if (this.engine.programOf(m.entityId)) { this.navWaiting.add(m.soulId); continue; }
+      if (this.engine.programOf(m.entityId)) { if (this.navCutOff(m.entityId)) this.navWaiting.add(m.soulId); else this.navWaiting.delete(m.soulId); continue; }
       if ((this.navRescuedAt.get(m.soulId) ?? -1e9) > tick - 1200) continue;
-      this.navWaiting.delete(m.soulId);
-      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) continue;
+      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) { this.navWaiting.delete(m.soulId); continue; }
       const where = `${r.seated ? 'sat' : 'stood'} ${r.level ? `upstairs (floor ${r.level}) with no way down` : `in a closed-off ${r.pocket !== undefined ? `${Math.round(r.pocket)} m² ` : ''}pocket`}`;
       this.log(`${m.name} ${where} (${r.code}): steps to open ground at (${r.to.join(', ')})`);
       const payload = { soulId: m.soulId, entityId: m.entityId, to: r.to, why: `nav-connect/1: ${where}, no walk out: ${r.seated ? 'stood up and ' : ''}stepped to the nearest open ground`, policy: 'nav-connect/1', ...(r.seated ? { godWalkout: true, released: [], level: 0 } : {}) };
-      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); n++; } catch { /* clock not ready */ }
+      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); this.navWaiting.delete(m.soulId); n++; } catch { /* clock not ready */ }
     }
     return n;
   }

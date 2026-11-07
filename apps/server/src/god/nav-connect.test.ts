@@ -184,23 +184,57 @@ test('a Soul already cut off (an edit the hook did not see) steps out when its w
   assert.equal(out.receipt.reason, 'Moved to open ground first: no walk led out from where you stood.', 'the receipt says so');
 });
 
-test('#1287: a Soul mid-walk when walls close round it is passed over, then steps out when its walk ends', async t => {
+/** #1287: Di, 20 m out on open ground beside a crate, every call to the rescue counted. */
+async function walker(t: TestContext, name: string) {
   const w = world(t); await w.settle(1);
-  await invite(w, 'di'); const row: any = await accept(w.host, w.souls.create('dev:di', { name: 'Di', description: 'steady' })); await w.settle(8);
+  await invite(w, name); const row: any = await accept(w.host, w.souls.create(`dev:${name}`, { name: 'Di', description: 'steady' })); await w.settle(8);
   const s = { soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner };
   const b0 = w.host.engine.world.entities[row.entity_id]!; assert.equal(w.E.relocateHumanV1(row.entity_id, [b0.pose.p[0] + 20, b0.pose.p[2]]), true); await w.settle(2);
   const b = w.host.engine.world.entities[row.entity_id]!, at: [number, number] = [b.pose.p[0], b.pose.p[2]];
   assert.equal((w.god.act({ ops: [{ op: 'define', def: box('crate', 0.6, 0.6) }, { op: 'place', def: 'crate@1', name: 'crate', p: [at[0] + 2.5, at[1] + 2.5] }] }) as any).accepted, true); await w.settle(3);
-  const walk: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:crate' })); assert.equal(walk.accepted, true, JSON.stringify(walk)); await w.settle(3);
-  assert.ok(w.host.engine.programOf(row.entity_id), 'walking');
-  const r: any = w.god.act({ ops: ring(at, 9, 'd') }); assert.equal(r.accepted, true, JSON.stringify(r.failures));
+  const asked: unknown[] = [], rescue = w.E.navRescueV1.bind(w.E); w.E.navRescueV1 = (...a: unknown[]) => { const r = rescue(...a); asked.push(r); return r; };
   const steps = () => w.db.events(w.host.worldId).filter((e: any) => e.kind === 'edge-relocate' && e.payload.policy === 'nav-connect/1');
-  assert.equal(steps().length, 0, 'not moved while it walks');
-  for (let i = 0; i < 600 && w.host.engine.programOf(row.entity_id); i++) await w.settle(1);
-  assert.equal(w.host.engine.programOf(row.entity_id), null, 'the walk ended');
-  await w.settle(15);
-  assert.equal(steps().length, 1, 'one logged step out, once it stopped');
-  const p = w.host.engine.world.entities[row.entity_id]!.pose.p;
-  assert.equal(w.E.navCheckV1([{ id: 'di', p: [p[0], p[2]], level: 0 }])[0].ok, true, 'out on the main area');
-  await w.settle(30); assert.equal(steps().length, 1, 'asked once, not every tick');
+  const ended = async () => { for (let i = 0; i < 600 && w.host.engine.programOf(row.entity_id); i++) await w.settle(1); assert.equal(w.host.engine.programOf(row.entity_id), null, 'the walk ended'); };
+  const open = () => { const p = w.host.engine.world.entities[row.entity_id]!.pose.p; return w.E.navCheckV1([{ id: name, p: [p[0], p[2]], level: 0 }])[0].ok; };
+  return { w, s, at, asked, steps, ended, open };
+}
+
+test('#1287: a Soul mid-walk when walls close round it is passed over, then steps out when its walk ends', async t => {
+  const { w, s, at, asked, steps, ended, open } = await walker(t, 'di');
+  const walk: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:crate' })); assert.equal(walk.accepted, true, JSON.stringify(walk)); await w.settle(3);
+  const r: any = w.god.act({ ops: ring(at, 9, 'd') }); assert.equal(r.accepted, true, JSON.stringify(r.failures));
+  assert.equal(asked.length, 0, 'not asked while it walks');
+  await ended(); await w.settle(15);
+  assert.equal(steps().length, 1, 'one logged step out, once it stopped'); assert.equal(open(), true, 'out on the main area');
+  await w.settle(30); assert.equal(asked.length, 1, 'asked once, not every tick');
+});
+
+test('#1287: labels stale when the walk ends do not lose the Soul: it waits for them, then steps out', async t => {
+  const { w, s, at, asked, steps, ended, open } = await walker(t, 'el');
+  const walk: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:crate' })); assert.equal(walk.accepted, true, JSON.stringify(walk)); await w.settle(3);
+  assert.equal((w.god.act({ ops: ring(at, 9, 'e') }) as any).accepted, true);
+  // a door moved by a hand changes the world with no god edit's nav pass, so a poll can read stale: three polls here do
+  const warm = w.E.navWarmV1.bind(w.E); let stale = 3; w.E.navWarmV1 = (ms: number) => (ms === 0 && stale > 0 ? (stale--, false) : warm(ms));
+  await ended(); await w.settle(60);
+  assert.equal(stale < 3, true, 'it polled first'); assert.equal(asked.length, 1, 'and asked only once the labels were good');
+  assert.equal(steps().length, 1, 'stepped out all the same'); assert.equal(open(), true);
+});
+
+test('#1287: a walker on open ground at a far edit is not queued, so its arrival is not judged again', async t => {
+  const { w, s, at, asked, ended } = await walker(t, 'fy');
+  const walk: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:crate' })); assert.equal(walk.accepted, true, JSON.stringify(walk)); await w.settle(3);
+  assert.equal((w.god.act({ ops: [{ op: 'place', def: 'crate@1', name: 'far', p: [at[0] - 25, at[1] - 15] }] }) as any).accepted, true);
+  await ended(); await w.settle(30);
+  assert.equal(asked.length, 0, 'never asked');
+});
+
+test('#1287: a step out that did not happen is not reported', async t => {
+  const { w, s, at, asked, steps } = await walker(t, 'gi');
+  assert.equal((w.god.act({ ops: [{ op: 'place', def: 'crate@1', name: 'outer', p: [at[0] - 20, at[1] + 5] }] }) as any).accepted, true); await w.settle(3);
+  (w.god as any).bodies.navNote = undefined;
+  assert.equal((w.god.act({ ops: ring(at, 9, 'g') }) as any).accepted, true); await w.settle(3);
+  w.E.relocateHumanV1 = () => false;
+  const out: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:outer' }));
+  assert.ok(asked.some(Boolean), 'the rescue ran'); assert.equal(steps().length, 1, 'and logged its step');
+  assert.doesNotMatch(JSON.stringify(out), /Moved to open ground/, JSON.stringify(out).slice(0, 300));
 });
