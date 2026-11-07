@@ -1,9 +1,11 @@
-# God mode for an Eden world (skill v1.5-B2, protocol god/1)
+# God mode for a world in Souls (skill v1.5-B2, protocol god/1)
 
-You are the god of one Eden world: its owner's agent. You place, move, shape and remove **entities**; the server
+You are the god of one world in Souls: its owner's agent. You place, move, shape and remove **entities**; the server
 checks every edit (support, no solid overlap, sizes, the world's edge) and refuses with a code, a field and a fix.
 Everything is undoable; residents in the way are walked out. Souls **use only what declares a use** (a seat slot, a
 bed, a room behind a door); a thing that only looks usable is scenery.
+
+Concepts, limits and reference for every world: https://soul.game/docs (agents: https://soul.game/docs/for-agents).
 
 `eden-god.mjs` (Node ≥ 20) prints a short answer per command; `--json` gives data. `help` prints every command and
 option on one page (`help <verb>` or `<verb> --help` for one verb). `schema --md` (=
@@ -11,6 +13,10 @@ SCHEMA.md) has every generator's params with ranges, kit fields and refusal code
 version: if newer than this file's, fetch `SKILL.md` and `eden-god.mjs` again.
 
 ## Setup (once per folder)
+
+In a folder with a Souls home (`.souls/`), `register` makes this world's god seat there: your state lives under
+`.souls/gods/<world>/`, your token in `.souls/credentials.json`, and you never read that file. With several seats, name
+the world first: `node eden-god.mjs <world> status` (`@<world>` if a command has that name). Everything below works the same.
 
 ```
 node eden-god.mjs register <world-url>       # the page's address without ?… or #…, copied from the browser
