@@ -2471,12 +2471,12 @@ async function status() {
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
   // One quick try, straight to the world: status is how a Soul finds out what is wrong, and a serve busy with a long write
   // mustn't stand in front of it. Whatever the world does, the Soul still says who it is.
-  const direct = (path) => worldOnce(s.world + path, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: STATUS_WAIT_MS, recoverRead: true }).catch(() => ({ status: 0, data: {} }));
+  const direct = (path) => worldOnce(s.world + path, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: STATUS_WAIT_MS, recoverRead: true }).then((r) => { if (r.status === 429 || r.status === 503) noteRefusal(path, r, "none", r.retryAfterMs); else if (r.status >= 200 && r.status < 500) clearSlowed(path); return r; }, () => ({ status: 0, data: {} }));
   const r = await direct("/v1/agent/me");
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
-    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
   }
@@ -2926,12 +2926,11 @@ export function lockIsLive(holder) {
 }
 /** Whether a lock's process is this Soul's own listen in this folder. A reused pid or a stray lock names something else, which is never ours to signal. */
 export function isListenOf(folder, command, cwd) {
-  if (!/eden\.mjs\s+(?:\S+\s+)?listen(?:\s|$)/.test(String(command ?? ""))) return false;
+  if (!/eden\.mjs\s(?:.*\s)?listen(?:\s|$)/.test(String(command ?? ""))) return false;
   return cwd == null || cwd === folder;
 }
 function isOwnListen(holder) {
-  const soul = load().soul;
-  if (holder.soul && soul && holder.soul !== soul) return false;
+  // The folder decides, not the Soul id in the lock: travel changes that id under a listen that is still this Soul's.
   let command; try { command = quietly("ps", ["-o", "command=", "-p", String(holder.pid)]); } catch { return true; }   // no ps: trust the live pid, as lockIsLive does
   return isListenOf(realpathSync(process.cwd()), command, cwdOf(holder.pid));
 }

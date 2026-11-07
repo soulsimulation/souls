@@ -99,6 +99,9 @@ test('a world that answers badly is not a world that is down, and status still a
   assert.equal(stalled.code, 0, stalled.err); assert.equal(stalled.d.reachable, false);
   const refused = await say((res) => json(res, 401, { code: 'unauthorized', message: 'Bad token.' }));
   assert.equal(refused.code, 0); assert.equal(refused.d.paired, false); assert.equal(refused.d.control, 'unauthorized'); assert.match(refused.d.next, /adopt s_a1/);
+  await say((res) => json(res, 503, { code: 'world.busy', retry_after_s: 1 }));
+  await f.run('status');
+  assert.equal((await f.run('status')).d.slowed, undefined, 'an answer clears a slowed sentence');
   const gone = await say((res) => json(res, 404, { code: 'no-world' }));
   assert.equal(gone.code, 0); assert.equal(gone.d.reachable, false); assert.equal(gone.d.worldSaid, 'no-world');
 });
@@ -111,6 +114,13 @@ test('a write in flight through serve does not stand in front of status', async 
   const now = await f.run('status');
   assert.equal(now.d.reachable, true); assert.ok(now.ms < 3000, `${now.ms} ms`);
   await writing;
+});
+
+test('its own listen is known however it was started, and only in its own folder', async () => {
+  const { isListenOf } = await import('./soul/eden.mjs');
+  for (const c of ['node eden.mjs listen', 'node eden.mjs listen --take', 'node /a/eden.mjs Tess listen', 'node eden.mjs Mary Ann listen', 'node eden.mjs @a listen --after msg_1']) assert.equal(isListenOf('/f', c, '/f'), true, c);
+  assert.equal(isListenOf('/f', 'node eden.mjs listen', '/g'), false, 'another folder');
+  for (const c of ['node eden.mjs status', '/bin/sh -c listener-daemon', 'node other.mjs listen']) assert.equal(isListenOf('/f', c, '/f'), false, c);
 });
 
 test('a lock naming some other process is not a listener, and --take leaves that process alone', async (t) => {
