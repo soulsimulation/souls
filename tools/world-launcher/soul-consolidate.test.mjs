@@ -14,8 +14,11 @@ import { openSoulMemory } from './soul/memory.mjs';
 const tmp = (t) => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-cons-'))); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
 const NOW = () => '2026-11-10T12:00:00.000Z';
 const big = 'x'.repeat(3000);
+/** A clock for what the Soul writes: a second a call. A note's id holds its moment, so two in one real millisecond are one note, and
+ *  the real date would decide which journal page is past `NOW`. */
+const ticking = () => { let n = 0; return () => new Date(Date.parse('2026-11-07T09:00:00.000Z') + 1000 * n++).toISOString(); };
 function lived(t, days = 5) {
-  const dir = tmp(t), m = openSoulMemory(dir, { world: 'eden', soul: 's_me' });
+  const dir = tmp(t), m = openSoulMemory(dir, { world: 'eden', soul: 's_me', now: ticking() });
   m.sawHere({ tick: 1, clock: '09:00', now: '· world day 1', me: { place: 'pier', placePath: ['the pier'], posture: 'standing' }, near: [{ id: 's_ana', name: 'Ana', dist: 2 }] });
   m.remember('person', 's_ana', 'Keeps her word.'); m.remember('person', 's_ana', 'Keeps her word.'); m.remember('self', undefined, 'I am patient.');
   for (let d = 1; d <= days; d++) m.sawEvents([{ id: `c_${d}`, kind: 'receipt', tick: d * 100, at: Date.parse(`2026-11-0${d}T10:00:00.000Z`), clock: '10:00', receipt: { id: `r_${d}`, capability: 'play:x', phase: 'completed', outcome: { summary: `Played on day ${d}.`, learned: [], produced: [], met: [] } } }]);
