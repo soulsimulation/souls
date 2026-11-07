@@ -3,7 +3,7 @@ import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-a
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
 import {holdsSecret,withoutSecrets,withoutSecretsBut} from '../perception/public-scrub.ts';
 import {StallGuard} from './stall-guard.ts';
-import {randomUUID} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import {hasDeclaredProfile} from '../../../../../mars/viewer/engine/bodies/action-profile.ts';
 import {DT} from '../../../../../mars/viewer/engine/runtime/runtime.ts';
 import {bodyCapabilityProblem,bodyVerbProblem,isRigidBody,shapeRigidCapabilities} from '../body/actions.ts';
@@ -62,7 +62,7 @@ import {semanticDiscovery, PURPOSE} from '../intents/semantic-discovery.ts';
 import {knownPart} from '../intents/resolved-parts.ts';
 import {Intents,walkWithDestinationWords,walkWithFallback, attentionWords, offeredAttention, type IntentInput} from '../intents/intents.ts';
 import {classWords} from '../intents/class-words.ts';
-import {offerCheck, strictCheck, type OfferRefusal} from '../intents/strict.ts';
+import {OFFER_ID, offerCheck, strictCheck, type OfferRefusal} from '../intents/strict.ts';
 import {paramsByVerb, type ParamSchema} from '../intents/offer-schema.ts';
 import {bodyEnd} from '../perception/here.ts';
 import {bootAliases,explicitPlaceCapability,knownBootPlaces,lookupPlaceIdentity,resolvePlaceForVerb} from '../boot/world-places.ts';
@@ -475,7 +475,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       previewRaise: params => (this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message?: string; subjects?: string[]} | null}).previewMarsVerbV1?.('raise_hold_v1', params) ?? null,
       previewSeat: (verb, params) => (this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message?: string; subjects?: string[]} | null}).previewMarsVerbV1?.(verb, params) ?? null,
       previewBeam: params => (this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message?: string; subjects?: string[]} | null}).previewMarsVerbV1?.('connect_beam_v1', params) ?? null});
-    this.receiptListeners.push(r => {if(!OPEN.includes(r.phase))this.menusChangedBy('receipt-closed', r.soulId, r.capability);});
+    this.receiptListeners.push(r => {if(!OPEN.includes(r.phase)){this.actKeys.delete(r.id);this.menusChangedBy('receipt-closed', r.soulId, r.capability);}});
     if (this.readOnly) return;
     // D1: the card's doing line names an edge act's approach ("walking to Kitchen chair") from this ledger's plans
     host.approachV1 = m => {const program = host.engine.programOf(m.entityId), r = program ? this.rows("soul_id=? AND phase='started' AND program_id=?", m.soulId, program)[0] : undefined; return r ? this.approachFor(m, r.receipt_id) : null;};
@@ -1590,7 +1590,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // message stays unacked; the agent decides what to do
     const again = this.repeatOf(soul, input);
     if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); this.comms?.fading.touch?.(soul.soulId); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}
-    try {const out = await this.actWork(soul, input); this.noteAct(input, out); return out;}
+    const replay = typeof input.clientRef === 'string' && !!this.coreA.byClientRef(soul.soulId, input.clientRef);   // its answer is another act's: nothing to note
+    try {const out = await this.actWork(soul, input); if (!replay) this.noteAct(input, out); return out;}
     catch (e) {
       if (!(e instanceof EdgeError) || e.code !== 'shared.busy') throw e;
       const capability = typeof input.capability === 'string' ? input.capability : String(input.verb ?? '');
@@ -1598,16 +1599,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
       return {accepted: false, code: e.code, reason: e.message, capability, ...(e.extra ?? {})};
     }
   }
-  /** #1272: what was sent for each act still worth matching, by receipt. An id and its alias can reach one act. */
+  /** #1272: what was sent for each open act, by receipt, hashed. An id and its alias can reach one act. */
   private actKeys = new Map<string, string[]>();
   /** #1272: the clientRefs of repeats, whose own act never made a row: a retry of one finds the receipt it was answered with.
    *  Bounded, and lost on a restart, when such a retry acts again. */
   private repeatRefs = new Map<string, string>();
   private actKey(input: {capability?: unknown; params?: unknown}): string | null {
     const id = typeof input.capability === 'string' ? input.capability.trim() : '';
-    if (!REPEATABLE.has(id.split(':')[0]!)) return null;
+    if (!OFFER_ID.test(id) || !REPEATABLE.has(id.split(':')[0]!)) return null;   // an id: bare words replace as they did
     const params = input.params && typeof input.params === 'object' ? Object.entries(input.params).sort(([a], [b]) => a < b ? -1 : 1) : input.params ?? [];
-    return `${id}\u0000${JSON.stringify(params)}`;
+    return createHash('sha256').update(`${id}\u0000${JSON.stringify(params)}`).digest('base64');
   }
   /** #1272: the receipt under way that this act repeats, or null. A repeat isn't a new intention, and replacing the act would
    *  cut it short. Matched against what's open, so a look mid-walk or a retried old request changes nothing. */

@@ -52,7 +52,37 @@ test('#1272 R2: words, answers, stands and hand acts are not repeats', {timeout:
   const words = await act('walk to the cottage bench'); assert.equal(words.repeat, undefined);
   assert.equal(receipt(a.receipt.id).phase, 'replaced', 'words replace, as they did');
   // answers and stands do something each time: a stand has a job in the stall guard, a stale accept is shared.busy
-  for (const capability of ['stand:here', 'accept:inv_1', 'decline:inv_1', 'pick-up:letter']) assert.equal((w.edge as any).actKey({capability}), null, capability);
+  for (const capability of ['stand:here', 'accept:inv_1', 'decline:inv_1', 'pick-up:letter', 'rest', 'walk', 'sit']) assert.equal((w.edge as any).actKey({capability}), null, capability);
+  const r1 = await act('rest'); await w.settle(4);
+  const r2 = await act('rest'); assert.equal(r2.repeat, undefined, 'a bare verb is words'); assert.notEqual(r2.receipt.id, r1.receipt.id);
+});
+
+test('#1272 R1: a replayed clientRef never files its act on the receipt it answers with', {timeout: 300000}, async t => {
+  const {w, act, receipt} = await world(t);
+  const rest = await act('rest:here', {seconds: 60}, 'one-ref'); await w.settle(10);
+  assert.equal((await act(WALK, undefined, 'one-ref')).receipt.id, rest.receipt.id, 'the ref answers with its own act');
+  const walk = await act(WALK);
+  assert.equal(walk.repeat, undefined, 'the walk was never under way'); assert.notEqual(walk.receipt.id, rest.receipt.id);
+  assert.equal(receipt(rest.receipt.id).phase, 'replaced');
+});
+
+test('#1272 R1: a receipt still waiting is under way, and what was sent is kept only while it is open', {timeout: 300000}, async t => {
+  const {w, act, receipt, ended} = await world(t);
+  const edge = w.edge as any, first = await act(WALK);
+  edge.update(first.receipt.id, {phase: 'waiting'}); assert.equal(receipt(first.receipt.id).phase, 'waiting');
+  const again = await act(WALK); assert.equal(again.repeat, true); assert.equal(again.receipt.id, first.receipt.id);
+  edge.update(first.receipt.id, {phase: 'started'});
+  assert.equal(edge.actKeys.get(first.receipt.id).length, 1);
+  assert.equal((await ended(first.receipt.id)).phase, 'completed');
+  assert.equal(edge.actKeys.has(first.receipt.id), false);
+});
+
+test('#1272 R1: an alias reaches the act its id started', {timeout: 300000}, async t => {
+  const {w, act} = await world(t);
+  const edge = w.edge as any, first = await act(WALK); await w.settle(10);
+  const key = edge.actKey({capability: 'walk:bench'}); assert.ok(key);
+  edge.noteAct({capability: 'walk:bench'}, first);
+  const again = await act('walk:bench'); assert.equal(again.repeat, true); assert.equal(again.receipt.id, first.receipt.id);
 });
 
 test('#1272 R2: a receipt in a shared operation is never a repeat', {timeout: 300000}, async t => {
