@@ -2644,7 +2644,7 @@ async function act(...argv) {
   // wait once the body holds the pose.
   if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
-  if (await closedBy(out.receipt, d.for)) out = { ...out, closed: true };
+  if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   return json ? out : brief(out);
 }
 
@@ -2781,7 +2781,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
 
 // say "<text>" [--for <message-id>]: with --for, the speech is what the owner asked for, so it closes that message too.
 async function say(...words) {
-  const at = words.findIndex((w, i) => w === "--for" && /^msg_/.test(words[i + 1] ?? "")), forId = at < 0 ? undefined : words[at + 1];   // "what --for means" is speech
+  const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
   if (!text) throw new Error('usage: say "<text>" [--for <message-id>]');
   const said = clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
@@ -2917,21 +2917,32 @@ export function clipped(text, max = 140) {
 // ack <id> ["reply"] [--close done|failed]: with --close, the reply is the whole answer: an answer to a question, or a no.
 async function ack(id, ...rest) {
   const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
-  if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"] [--close done|failed]');
+  if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ")) : {}, reply = line.text;
-  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
+  // with --close the text is the result: the owner's card shows a reply and a result, so sending both shows it twice
+  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply && !close ? { reply } : {} }), "ack"));
   save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
   return { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}), ...d, ...(close ? await closing(id, close, reply) : {}) };
 }
 
-/** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0. */
+/** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
+ *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
+ *  closed or is about to: `closed` here means this command closed it. */
 async function closing(id, outcome, text) {
-  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: e.message }; }
+  const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
+  if (link?.message === id && link.receipt) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+    if (going?.status === 200 && !TERMINAL.has(going.data?.receipt?.phase)) return { closed: false, why: "its act is still going: the world closes it when the act ends" };
+  }
+  const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+  if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+  if (read.data?.message?.result !== undefined) return { closed: false, why: `already closed, ${read.data.message.outcome}: nothing more to do` };
+  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
   const line = clipped(text.join(" ")), t = line.text;
-  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened, up to 140 chars"');
+  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }

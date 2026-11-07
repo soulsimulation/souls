@@ -11,7 +11,7 @@ import {clipped} from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 
-async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt} = {}) {
+async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, reads = 200} = {}) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
@@ -25,7 +25,8 @@ async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt} = 
       if (m?.[2] === '/result' && results.refuse) return send(404, {error: {code: 'not-found', message: 'no such message'}});
       if (m?.[2] === '/result') {results[m[1]] = body; return send(200, {inbox: {}});}
       if (m?.[2] === '/ack') return send(200, {inbox: {}});
-      if (m) return send(200, {message: {id: m[1], ...(results[m[1]] ? {result: results[m[1]].text ?? results[m[1]]} : {})}});
+      if (m && reads !== 200) return send(reads, {error: {code: 'broken', message: 'the inbox broke'}});
+      if (m) return send(200, {message: {id: m[1], ...(results[m[1]] ? {result: results[m[1]].text ?? results[m[1]], outcome: results[m[1]].outcome} : {})}});
       send(200, {});
     });
   });
@@ -52,13 +53,47 @@ test('say --for says it and closes the message; a refused say closes nothing; wi
 
 test('a close that fails after the speech says so and exits 0: what was said stays said', async t => {
   const w = await world(t, {results: {refuse: true}}), r = await w.cli('say', 'Hello', '--for', 'msg_gone');
-  assert.equal(r.code, 0); assert.equal(r.json.closed, false); assert.match(r.json.why, /no such message/);
+  assert.equal(r.code, 0); assert.equal(r.json.closed, false); assert.match(r.json.why, /no such message/); assert.match(r.json.why, /not by repeating/);
+  const unread = await world(t, {reads: 500}), u = await unread.cli('say', 'Hello', '--for', 'msg_1');
+  assert.equal(u.code, 0); assert.equal(u.json.closed, false); assert.equal(posted(unread.seen, '/result').length, 0, 'unread, so unclosed: it may be the world\'s already');
+});
+
+test('a message the world closed keeps its outcome: say --for and ack --close never replace it', async t => {
+  const w = await world(t, {results: {msg_1: {text: 'walk:a failed: blocked', outcome: 'failed'}}}), r = await w.cli('say', 'I could not', '--for', 'msg_1');
+  assert.equal(r.code, 0); assert.equal(r.json.said.id, 'sp_1', 'the speech still goes'); assert.equal(r.json.closed, false); assert.match(r.json.why, /already closed, failed/);
+  assert.equal(posted(w.seen, '/result').length, 0);
+  assert.equal((await w.cli('ack', 'msg_1', 'It went fine', '--close', 'done')).json.closed, false); assert.equal(posted(w.seen, '/result').length, 0);
+});
+
+test('say --for leaves a message alone while its linked act is going, and closes it once the act has ended', async t => {
+  const started = {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: 'msg_1'};
+  const w = await world(t, {actAnswer: () => started, waitReceipt: started.receipt});
+  await w.cli('act', 'walk:a', '--for', 'msg_1');
+  const r = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(r.json.closed, false); assert.match(r.json.why, /still going/); assert.equal(posted(w.seen, '/result').length, 0);
+  const ended = await world(t, {actAnswer: () => started, waitReceipt: {...started.receipt, phase: 'completed', done: 'walked.'}});
+  await ended.cli('act', 'walk:a', '--for', 'msg_1');
+  assert.equal((await ended.cli('say', 'Here', '--for', 'msg_1')).json.closed, true);
+});
+
+test('say --for none is the flag, not speech', async t => {
+  const w = await world(t), r = await w.cli('say', 'Hi', '--for', 'none');
+  assert.deepEqual(posted(w.seen, '/say')[0][2], {text: 'Hi'}); assert.equal(r.json.closed, undefined); assert.equal(posted(w.seen, '/result').length, 0);
+});
+
+test('after a close the next act carries no message', async t => {
+  const answer = () => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'completed', done: 'walked.'}});
+  const w = await world(t, {actAnswer: answer});
+  await w.cli('ack', 'msg_1', 'Got it'); await w.cli('say', 'Done', '--for', 'msg_1'); await w.cli('act', 'walk:a');
+  assert.equal(posted(w.seen, '/act')[0][2].for, undefined, 'say --for');
+  await w.cli('ack', 'msg_2', 'A mill.', '--close', 'done'); await w.cli('act', 'walk:a');
+  assert.equal(posted(w.seen, '/act')[1][2].for, undefined, 'ack --close');
 });
 
 test('ack --close acks and closes with the reply; plain ack does not close', async t => {
   const w = await world(t), r = await w.cli('ack', 'msg_1', 'It is about a mill.', '--close', 'done');
   assert.equal(r.json.acked, 'msg_1'); assert.equal(r.json.closed, true);
-  assert.deepEqual(posted(w.seen, '/msg_1/ack')[0][2], {reply: 'It is about a mill.'});
+  assert.deepEqual(posted(w.seen, '/msg_1/ack')[0][2], {}, 'the card shows a reply and a result: the text goes once');
   assert.deepEqual(posted(w.seen, '/msg_1/result')[0][2], {outcome: 'done', text: 'It is about a mill.'});
   const no = await w.cli('ack', 'msg_2', 'There is no orchard here.', '--close', 'failed'); assert.equal(posted(w.seen, '/msg_2/result')[0][2].outcome, 'failed'); assert.equal(no.json.closed, true);
   await w.cli('ack', 'msg_5', 'No', 'orchard', 'here', '--close', 'failed'); assert.equal(posted(w.seen, '/msg_5/result')[0][2].text, 'No orchard here');
@@ -71,6 +106,11 @@ test('act prints closed only when the world has closed the message', async t => 
   const ended = (extra = {}) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'completed', done: 'walked.'}, for: 'msg_1', ...extra});
   const closed = await world(t, {results: {msg_1: {text: 'walked.'}}, actAnswer: () => ended()});
   assert.equal((await closed.cli('act', 'walk:a', '--for', 'msg_1')).json.closed, true);
+  const failed = await world(t, {results: {msg_1: {text: 'walk:a failed: blocked'}}, actAnswer: () => ({...ended(), receipt: {id: 'r_1', capability: 'walk:a', phase: 'failed', code: 'blocked'}})});
+  assert.equal((await failed.cli('act', 'walk:a', '--for', 'msg_1')).json.closed, true, 'a failed receipt the world closed');
+  const broken = await world(t, {reads: 500, actAnswer: () => ended()}), quiet = await broken.cli('act', 'walk:a', '--for', 'msg_1');
+  assert.equal(quiet.code, 0); assert.equal(quiet.json.closed, undefined, 'unread: says nothing, as before');
+  assert.equal(broken.seen.filter(([m, u]) => m === 'GET' && u.includes('/inbox/')).length, 1, 'one quick read, no retries');
   const notYet = await world(t, {actAnswer: () => ended()});
   assert.equal((await notYet.cli('act', 'walk:a', '--for', 'msg_1')).json.closed, undefined, 'ended, but the world did not close it');
   const unlinked = await world(t, {results: {msg_1: {text: 'x'}}, actAnswer: () => ended({for: undefined})});
@@ -80,6 +120,7 @@ test('act prints closed only when the world has closed the message', async t => 
   assert.equal((await going.cli('act', 'walk:a', '--for', 'msg_1')).json.closed, undefined, 'still going');
   const opened = await world(t, {results: {msg_1: {text: 'walked.'}}, actAnswer: () => ended({open: true})}), both = (await opened.cli('act', 'walk:a', '--for', 'msg_1')).json;
   assert.equal(both.closed, true, 'open at the start, closed at the end: the world has the last word'); assert.equal(both.open, undefined);
+  const raw = (await opened.cli('act', 'walk:a', '--for', 'msg_1', '--json')).json; assert.equal(raw.closed, true); assert.equal(raw.open, undefined, 'the same under --json');
   const stillOpen = await world(t, {actAnswer: () => ended({open: true})}), left = (await stillOpen.cli('act', 'walk:a', '--for', 'msg_1')).json;
   assert.equal(left.open, true); assert.equal(left.closed, undefined);
   const replaced = await world(t, {results: {msg_1: {text: 'an earlier step.'}}, actAnswer: () => ({...ended(), receipt: {id: 'r_1', capability: 'walk:a', phase: 'replaced'}})});
@@ -100,6 +141,7 @@ test('wait prints closed and the message it closed, for the linked receipt only'
 test('text over 140 characters is clipped at a word and says so', async t => {
   const long = 'a walk along the pond and back again '.repeat(6), c = clipped(long);
   assert.ok(c.text.length <= 140, c.text); assert.ok(c.text.endsWith('…')); assert.equal(c.clipped, true);
+  assert.equal(long[c.text.length - 1], ' ', 'cut at a word'); assert.ok(long.startsWith(c.text.slice(0, -1)));
   assert.deepEqual(clipped('short'), {text: 'short'}); assert.ok(clipped('x'.repeat(200)).text.length <= 140);
   const w = await world(t), r = await w.cli('result', 'msg_1', 'done', long);
   assert.equal(r.code, 0); assert.equal(r.json.clipped, true); assert.ok(posted(w.seen, '/msg_1/result')[0][2].text.length <= 140);
