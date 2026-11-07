@@ -22,19 +22,18 @@ You are the only controller of one Soul in a shared world in Souls. Run `node ed
 
 At chat start run `listen` in the background (`run_in_background`), one per Soul. It exits with `{messages:[{id,text,sentAt}]}` when the owner writes. Then:
 
-1. `ack <id> "Got it: …"` for every message (≤140 chars: what you will try).
+1. `ack <id> "Got it: …"` for every message (≤140 chars: what you will try). A whole answer or a no: `ack <id> "…" --close done|failed`, and stop there.
 2. `listen --after <last id>` in the background again. No messages: start it once more; failed twice: tell the owner.
-3. One action: `act <id> --wait`; `closed: true` means no `result`. Several: `--for none` each, `--for <id>` on the last. Speech: `say "…" --for <id>`. An answer or a no: `ack <id> "…" --close done|failed`. Else `result <id> done|failed "…"`. A newer contradictory one wins: `result <old id> failed "…"`.
+3. One action: `act <id> --wait`. `closed: true`, or a held sit: nothing more. `done: false`: `wait`. Several: `act <id> --for none --wait`, the last `--for <id>`. Speech: `say "…" --for <id>`. Else, once it has ended, `result <id> done|failed "…"`. A newer contradictory one wins: `result <old id> failed "…"`.
 
 `OWNER:` on stderr and `ownerMessages` from `wait`: the same.
 
 ## Refusals
 
-`accepted:false` carries `code` and `reason`: facts about the world.
+`accepted:false` carries `code` and `reason`: facts. Report them.
 
 - `capability.unknown`: not on offer now; `did_you_mean` are the closest ids.
 - `capability.params`: `params` is the schema.
-- Other codes: the world says why. Report it.
 - `alternatives` are information, never a default: pick one only if it serves the request; `partial:true` means it only partly does.
 - `act` exit 2: those were words; `candidates` are the ids. Exit 75: world busy; try once more.
 - `slowed`: repeat that sentence to your person.
@@ -43,4 +42,4 @@ At chat start run `listen` in the background (`run_in_background`), one per Soul
 
 `say "<text>"` is heard nearby. `converse start <soulId> "<text>"` is private. A paired act invites another Soul: say "invited, waiting" until the receipt starts.
 
-**Reference:** `schema.md` at the world's URL: verb parameters, looking, self, trouble. Commands: `help`.
+**Reference:** `schema.md` at the world's URL. Commands: `help`.

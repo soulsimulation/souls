@@ -2611,17 +2611,19 @@ async function act(...argv) {
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
+  if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
-  if (d.for && !d.open) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
   if (await closedBy(out.receipt, d.for)) out = { ...out, closed: true };
   return json ? out : brief(out);
 }
 
 /** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
- *  an act can end without closing (a later step remains, or `replaced`). Not closed, or not known: say nothing, as before. */
+ *  an act can end without closing (a later step remains), and one the world called `open` at the start can close at its end.
+ *  `replaced` writes no line, so a result found then is an earlier act's. Not closed, or not known: say nothing, as before.
+ *  One quick try: the act has already ended, and this read must not hold its answer back. */
 async function closedBy(receipt, message) {
-  if (!message || !TERMINAL.has(receipt?.phase)) return false;
-  const r = await call(`/v1/edge/inbox/${encodeURIComponent(message)}`).catch(() => null);
+  if (!message || !["completed", "failed"].includes(receipt?.phase)) return false;
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(message)}`, { retry: false, timeoutMs: 5000 }).catch(() => null);
   return r?.status === 200 && r.data?.message?.result !== undefined;
 }
 
@@ -2651,7 +2653,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.open ? { open: true } : {}), ...(out.closed ? { closed: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2748,11 +2750,11 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
 
 // say "<text>" [--for <message-id>]: with --for, the speech is what the owner asked for, so it closes that message too.
 async function say(...words) {
-  const at = words.indexOf("--for"), forId = at < 0 ? undefined : words[at + 1];
+  const at = words.findIndex((w, i) => w === "--for" && /^msg_/.test(words[i + 1] ?? "")), forId = at < 0 ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
-  if (!text || (at >= 0 && !forId)) throw new Error('usage: say "<text>" [--for <message-id>]');
+  if (!text) throw new Error('usage: say "<text>" [--for <message-id>]');
   const said = clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
-  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text}`)) } : said;
+  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
 }
 
 async function converse(op, arg, ...text) {
@@ -2885,7 +2887,7 @@ export function clipped(text, max = 140) {
 async function ack(id, ...rest) {
   const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
   if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"] [--close done|failed]');
-  const line = words[0] ? clipped(words[0]) : {}, reply = line.text;
+  const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ")) : {}, reply = line.text;
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
   return { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}), ...d, ...(close ? await closing(id, close, reply) : {}) };
