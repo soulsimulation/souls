@@ -33,15 +33,18 @@ const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
 const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval"]);
+/** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
+const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
 const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
-const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
+const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "links", "pendingCreate"];
 const IMPORTED_RUNTIME = [".eden-serve.json"];
 const GOD_LEGACY = ".eden-god.json", GOD_KEPT = /^\.eden-god\.(cache|bakes|claim-c_[0-9a-f]{8})\.json$/;
 
 const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
-const isHome = (root) => existsSync(join(root, "config.json"));
+/** A home with its config moved aside is still a home: doctor finds its Souls again. */
+const isHome = (root) => existsSync(join(root, "config.json")) || existsSync(join(root, "souls"));
 
 /** Where this folder's Souls live. SOULS_HOME wins; else the nearest `.souls/` going up, stopping at the user's home
  *  folder without crossing it; a `.eden-agent.json` in this very folder is a legacy one-Soul folder. */
@@ -64,8 +67,17 @@ function writeJson(file, value, mode = 0o600) {
 }
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, "utf8")); }
-  catch (e) { if (e.code === "ENOENT") return fallback; throw new Error(`${basename(file)} cannot be read: ${e.message}`); }
+  catch (e) {
+    if (e.code === "ENOENT") return fallback;
+    // A parser quotes what it choked on: the credentials file's bytes never reach a message.
+    throw new Error(`${basename(file)} cannot be read${basename(file) === CREDENTIALS ? "" : `: ${e.message}`}.${UNREADABLE[basename(file)] ?? ""}`);
+  }
 }
+/** What a person can do about a home file that no longer parses. Nothing here rewrites it: it may still be mendable by hand. */
+const UNREADABLE = {
+  "credentials.json": " It holds every token, so restore it from a backup if you have one. If not, move it aside: memory is safe, list still shows your Souls, and adopt <id> --for <CODE> gets each one back.",
+  "config.json": " Restore it from a backup if you have one. If not, move it aside: the next command finds your Souls in souls/ again.",
+};
 
 /** What a home never commits: tokens, and a Soul's memory, which holds private conversations. A home made before a line was added gets it. */
 function keepOutOfGit(root) {
@@ -119,10 +131,10 @@ function splitSecrets(s) {
 }
 
 /** The Soul a person named, among those that can be addressed. `sel` is name, id, name@world or id@world. */
-function selectSoul(cfg, sel) {
+function selectSoul(cfg, sel, { cmd } = {}) {
   const at = sel.lastIndexOf("@"), who = at > 0 ? sel.slice(0, at) : sel, world = at > 0 ? sel.slice(at + 1) : null;
   const named = Object.entries(cfg.souls).filter(([id, e]) => (id === who || norm(e.name) === norm(who)) && (!world || e.world === world || e.at === world));
-  const live = named.filter(([, e]) => e.state === "active");
+  const live = named.filter(([, e]) => e.state === "active" || (e.state === "unpaired" && LOCAL_READS.has(cmd)));
   if (live.length === 1) return live[0][0];
   if (live.length > 1) throw new Error(`Several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
   if (named.length) throw new Error(`${named[0][1].name} is ${named[0][1].state} and takes no commands here. See: list, doctor, adopt.`);
@@ -137,7 +149,7 @@ const looksLikeSelector = (cfg, word) => word.startsWith("@") ? !!cfg.worlds[wor
 function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
   const live = Object.entries(cfg.souls).filter(([, e]) => e.state === "active");
   const atWorld = selector?.startsWith("@") ? selector.slice(1) : null;
-  const named = selector && !atWorld ? selectSoul(cfg, selector) : null;
+  const named = selector && !atWorld ? selectSoul(cfg, selector, { cmd }) : null;
   if (selector && !atWorld && !named) throw new Error(`No Soul here answers to ${selector}.`);
   if (SEAT_COMMANDS.has(cmd)) {
     if (cmd === "register" && url) return { seat: keyOf(cfg.worlds, url) };
@@ -162,6 +174,8 @@ function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
     if (cfg.default && cfg.souls[cfg.default]?.state === "active") return { soul: cfg.default };
     throw new Error(`Several Souls live here: ${live.map(([, e]) => norm(e.name)).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
   }
+  const unpaired = Object.entries(cfg.souls).filter(([, e]) => e.state === "unpaired");
+  if (LOCAL_READS.has(cmd) && unpaired.length === 1) return { soul: unpaired[0][0] };
   return cfg.currentWorld ? { seat: cfg.currentWorld } : {};
 }
 
@@ -393,13 +407,27 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().souls[me.id]) return { imported: false, soul: me.id, reason: "This Soul already lives in this home." };
     const key = me.world ? ensureWorld(me.world) : null;
     cpSync(folder, at("souls", me.id), { recursive: true, filter: (p) => basename(p) !== "runtime" && basename(p) !== CREDENTIALS });
-    updateConfig((c) => { c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" }; });
-    return { imported: true, soul: me.id, world: key, paired: false };
+    updateConfig((c) => { c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" }; c.currentWorld ??= key; });
+    if (me.world) writeJson(join(soul(me.id).dir, STATE_FILE), { world: me.world, soul: me.id });
+    return { imported: true, soul: me.id, world: key, paired: false, next: `adopt ${me.id} --for <CODE> takes control again; memory and status work now` };
+  }
+
+  /** A Soul on disk that config.json lost (a config rebuilt by hand): back on the list, paired only if its token is still here. */
+  function rediscover() {
+    const creds = credentials();
+    for (const id of existsSync(at("souls")) ? readdirSync(at("souls")) : []) {
+      if (!SOUL_ID.test(id) || config().souls[id]) continue;
+      const me = readJsonQuietly(at("souls", id, "soul.json")), url = me?.world;
+      if (!url) continue;
+      const key = ensureWorld(url);
+      updateConfig((c) => { c.souls[id] = { name: plainName(me.name) || id, world: key, state: creds.souls[id]?.[key]?.token ? "active" : "unpaired" }; c.currentWorld ??= key; });
+    }
   }
 
   /** The account against the home, world by world. `ask(url, bearer)` answers {status, data}. Prints no token. */
-  async function doctor(ask, { alive }) {
-    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], orphanCredentials: [], locksCleared: [] };
+  async function doctor(ask, { alive, accountSouls = null, codeWorld = null }) {
+    rediscover();
+    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], unpaired: [], orphanCredentials: [], locksCleared: [] };
     const retire = (id) => {
       updateConfig((c) => { c.souls[id].state = "retired"; c.souls[id].retiredAt = new Date().toISOString(); });
       out.retired.push({ id, name: config().souls[id].name });
@@ -436,9 +464,13 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (r.status === 401 && r.data?.code === "control.revoked" && r.data?.reason === "retired") retire(id);
         else out.controlLost.push({ id, name: cfg.souls[id].name, why: r.data?.reason ?? r.data?.code ?? `http-${r.status}` });
       }
-      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable ? { note: "This world shows a Soul token its own Soul only, so account Souls that are not here cannot be listed. Adopt one by its id from the Soul card." } : {}) });
+      // A window code belongs to one world: it goes to that world and no other.
+      const asked = reachable && accountSouls && key === codeWorld, got = asked ? await accountSouls(w.url) : null, held = Array.isArray(got) ? got : null;
+      for (const s of held ?? []) if (config().souls[s.id]?.state !== "active") out.adoptable.push({ id: s.id, name: plainName(s.name) || s.id, world: key });
+      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: got?.note ?? (asked ? "That window code is unknown here or has expired. Ask your person for the one on this world's open page." : `This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: @${key} doctor --for <CODE>.`) } : {}) });
     }
     const after = config();
+    for (const [id, e] of Object.entries(after.souls)) if (e.state === "unpaired") out.unpaired.push({ id, name: e.name, world: e.world, next: `adopt ${id} --for <CODE>` });
     for (const [id, worlds] of Object.entries(creds.souls)) if (!after.souls[id]) for (const world of Object.keys(worlds)) out.orphanCredentials.push({ principal: id, world });
     for (const world of Object.keys(creds.worlds)) if (!after.worlds[world]) out.orphanCredentials.push({ principal: "account", world });
     for (const world of Object.keys(creds.gods)) if (!after.gods[world]) out.orphanCredentials.push({ principal: "god", world });
@@ -450,8 +482,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (lock.name === ".eden-serve.lock") try { unlinkSync(join(dir, SERVE_SOCKET)); } catch { /* no socket left */ }
       }
     }
-    if ((statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
-    out.healthy = !out.retired.length && !out.controlLost.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
+    if (existsSync(at(CREDENTIALS)) && (statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
+    out.healthy = !out.retired.length && !out.controlLost.length && !out.unpaired.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
     return out;
   }
 
@@ -467,9 +499,10 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
+  if (!existsSync(at("config.json"))) rediscover();
   return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
-return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
+return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
 // </inline home.mjs>
 
@@ -1682,7 +1715,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.3";
+const VERSION = "2.23.6";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -1763,7 +1796,7 @@ async function note(expected, observed) {
 // runtime folder, so every lock, socket and small state file below stays per Soul. A legacy folder works as ever.
 const INVOKED = process.cwd();
 const userPath = (p) => resolvePath(INVOKED, p);   // a file the person named, wherever this run is working
-let HOME = null, SEAT = null, DELEGATE = null;
+let HOME = null, SEAT = null, DELEGATE = null, AT_WORLD = null;
 const load = () => (HOME ? (SEAT ? HOME.load(SEAT) : {}) : existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {});
 function save(patch) {
   const s = { ...load(), ...patch };
@@ -1826,8 +1859,8 @@ export async function flushNow() {
   try { await setNowLine(text); } catch (e) { console.error("now not set: " + e.message); }
 }
 /** The link state the owner sees (connected / disconnected and why) and the public `now` line, as the world says. */
-async function selfLink() {
-  const r = await call("/v1/edge/self/link");
+async function selfLink(get = (path) => call(path)) {
+  const r = await get("/v1/edge/self/link");
   if (r.status === 200) return { link: r.data.link, now: r.data.now ?? null };
   if (r.status === 401 && r.data?.code === "control.revoked") { const why = r.data.reason; return { link: { state: "disconnected", reason: why === "replaced" ? "replaced" : why === "revoked" || why === "refused" ? "revoked" : "stopped-listening", since: r.data.revokedAt ? Date.parse(r.data.revokedAt) : null }, now: null }; }
   return { link: null, now: null };
@@ -2159,7 +2192,7 @@ function ok(r, what) {
   if (r.status === 401) {
     throw new Error(
       `${what}: this folder no longer controls the Soul (${code}: ${msg}). ` +
-      `Control moves when the owner pairs the Soul from another folder. To take it back: ${CLI} pair <soulId> --for <CODE>`
+      `Control moves when the owner pairs the Soul from another folder. To take it back: ${CLI} pair ${load().soul ?? "<soulId>"} --for <CODE>`
     );
   }
   throw new Error(`${what}: HTTP ${r.status} ${code}: ${msg}`);
@@ -2174,9 +2207,10 @@ const clean = (d) => {
 
 // ---------------------------------------------------------------- setup and pairing
 
-async function register(world) {
+async function register(world, { asked = true } = {}) {
   const prev = load();
   if (!world && !prev.world) throw new Error("usage: register <world-url>");
+  const named = asked && !!world;   // a url a person typed; a bare register reuses what is saved, which may have come from a file
   const w = (world ?? prev.world).replace(/\/+$/, "");
   if (!/^https?:\/\/.+\/w\/[a-z0-9-]+$/.test(w)) throw new Error("world must look like https://host/w/<world>");
   if (prev.world && prev.world !== w && prev.soul) throw new Error(`This folder already belongs to another world's Soul. Use a fresh folder, or move this one into a Souls home first: ${CLI} import`);
@@ -2184,21 +2218,21 @@ async function register(world) {
   const cfg = ok(await call("/v1/config", { as: "none" }), "config");
   if (cfg.accountAuthRequired) {
     save({ accountAuth: true, worldId: cfg.worldId });
-    noteWorld(w, cfg, true);
+    noteWorld(w, cfg, true, named);
     return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)` };
   }
   if (!cfg.devAuth) throw new Error("This world accepts neither account approvals nor self-made identities.");
   save({ accountAuth: false, identity: prev.identity ?? "agent-" + randomBytes(12).toString("hex") });
-  noteWorld(w, cfg, false);
+  noteWorld(w, cfg, false, named);
   return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"` };
 }
 
-function noteWorld(url, cfg, accountAuth) {
+function noteWorld(url, cfg, accountAuth, asked = true) {
   if (!HOME) return;
   const c = cfg.soulClient, key = HOME.ensureWorld(url, { name: soulHome.plainName(cfg.worldName) || undefined, worldId: cfg.worldId, accountAuth, ...(c ? { contract: c.contract, bundle: c.version, minClient: c.minVersion } : {}) });
   if (c && soulHome.newerThan(c.minVersion, VERSION)) throw new Error(`This world needs eden ${c.minVersion} or newer; this is ${VERSION}. Run: ${CLI} upgrade ${key}`);
   HOME.setCurrentWorld(key);
-  HOME.madeFor(url);
+  if (asked) HOME.madeFor(url);   // only a world a person named earns trust: a url out of an imported file never does
 }
 
 function forOption(argv) {
@@ -2235,6 +2269,7 @@ function publicApproval(a, world) {
     approvalId: a.id, status: a.status, name: a.name, soulId: a.soulId ?? null,
     approvalURL: `${world}/#approve/${a.id}`,
     ...(a.inWindow ? { delivery: "window" } : {}),
+    ...(a.mode === "repair" ? { reconnects: `${a.name} already exists: this brings it here, nothing new is made.` } : {}),
     ...(a.reason?.message ? { reason: a.reason.message } : {}),
     next: a.status === "pending" ? `Tell your human to approve it in their open Sim window (backup: the link). Then: ${CLI} approval wait` : undefined,
   };
@@ -2350,14 +2385,42 @@ async function adopt(...argv) {
   const { rest: [who], code } = forOption(argv);
   if (!who) throw new Error("usage: adopt <name|soulId> [--for <CODE>]");
   const forCode = code ? ["--for", code] : [];
+  const kept = keptSoul(who);
+  if (kept) await seatFor(kept);   // a Soul this home knows answers from its own world's seat, registered or not
   if (/^s_[A-Za-z0-9_-]+$/.test(who)) return pair(who, ...forCode);
-  const s = load(), kept = HOME.principals().find((p) => soulHome.norm(p.name) === soulHome.norm(who) && p.world === SEAT?.key);
   if (kept) return pair(kept.id, ...forCode);
-  if (!s.identity) throw new Error(`This world shows a Soul token its own Soul only, so adopt ${who} by the id on its Soul card: ${CLI} adopt <soulId> --for <CODE>`);
+  const s = load();
+  if (s.accountAuth) {
+    if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>`);
+    try { return await startApproval({ name: who, existing: true }, code); }
+    catch (e) { if (/HTTP 400/.test(e.message) && soulHome.newerThan("2.23.5", HOME.config().worlds[SEAT?.key]?.bundle)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
+  }
+  if (!s.identity) throw new Error(`Register its world first: ${CLI} register <world-url>`);
   const owned = ok(await call("/v1/me", { as: "dev" }), "adopt").souls ?? [];
   const soul = owned.find((x) => soulHome.norm(x.name) === soulHome.norm(who));
   if (!soul) throw new Error(`Your account has no Soul called ${who} in this world.`);
   return pair(soul.id, ...forCode);
+}
+
+/** The Soul `adopt <who>` means in this home: one of this seat's world first. Elsewhere only a Soul that needs adopting, so a
+ *  Soul held safely in another world doesn't answer for this one's; @world keeps it to that world. */
+function keptSoul(who) {
+  const same = HOME.principals().filter((p) => p.state !== "retired" && (p.id === who || soulHome.norm(p.name) === soulHome.norm(who)));
+  const byId = same.find((p) => p.id === who);
+  if (byId) return AT_WORLD && byId.world !== AT_WORLD ? null : byId;   // an id is one Soul in one world, wherever this seat is
+  const here = same.filter((p) => p.world === SEAT?.key);
+  if (here.length || AT_WORLD) return here[0] ?? null;
+  const loose = same.filter((p) => p.state === "unpaired" || !HOME.load(HOME.soul(p.id)).token);
+  // A window code belongs to one world, and only the person knows which: with a world in hand, ask rather than send it to another.
+  if (loose.length > 1 || (loose.length && load().world)) throw new Error(`${who} could mean ${[...loose.map((p) => `the one in ${p.world}: ${CLI} @${p.world} adopt ${p.id} --for <CODE>`), ...(load().world ? [`one in ${SEAT.key}: ${CLI} @${SEAT.key} adopt ${who} --for <CODE>`] : [])].join("; or ")}`);
+  return loose[0] ?? null;
+}
+/** Adopt speaks from the seat of the Soul's own world. An imported Soul's world may not be registered in this home yet. */
+async function seatFor(kept) {
+  const url = HOME.config().worlds[kept.world]?.url;
+  if (!url) return;
+  if (SEAT?.key !== kept.world) { SEAT = HOME.seat(kept.world); process.chdir(SEAT.dir); }
+  if (load().accountAuth === undefined) await register(url, { asked: false });
 }
 
 async function devPair(id) {
@@ -2394,24 +2457,52 @@ async function approval(action = "status") {
   }
 }
 
+/** How long `status` gives the world. A person is waiting on it, and a busy world still answers well inside this. */
+const STATUS_WAIT_MS = 5_000;
 async function status() {
-  const s = load();
+  const s = load(), loose = !s.token && HOME ? HOME.principals().filter((p) => p.state === "unpaired") : [];
+  if (loose.length && SEAT?.kind !== "soul" && !s.pendingApproval) return { paired: false, souls: loose.map((p) => ({ id: p.id, name: p.name, world: p.world })), why: "These Souls are in this home without a token. Their memory is safe here.", next: `${CLI} adopt <name> --for <CODE>   (the code is on your person's open world page)` };
   if (!s.world) return { paired: false, next: `${CLI} register <world-url>` };
   if (!s.token && s.pendingCreate) return { paired: false, world: s.world, arriving: s.pendingCreate.name, next: `${ARRIVING}: ${CLI} create "${s.pendingCreate.name}" to keep waiting` };
+  if (!s.token && SEAT?.kind === "soul") {
+    const e = HOME.config().souls[SEAT.id], asked = HOME.seatState(e?.world).pendingApproval?.input, waiting = asked?.soulId === SEAT.id || (!!asked?.name && asked.name === e?.name);
+    return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
+  }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
-  const me = ok(await call("/v1/agent/me"), "status");
+  // One quick try, straight to the world: status is how a Soul finds out what is wrong, and a serve busy with a long write
+  // mustn't stand in front of it. Whatever the world does, the Soul still says who it is.
+  const direct = (path) => worldOnce(s.world + path, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: STATUS_WAIT_MS, recoverRead: true }).then((r) => { if (r.status === 429 || r.status === 503) noteRefusal(path, r, "none", r.retryAfterMs); else if (r.status >= 200 && r.status < 500) clearSlowed(path); return r; }, () => ({ status: 0, data: {} }));
+  const r = await direct("/v1/agent/me");
+  if (r.status < 200 || r.status >= 300) {
+    const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
+    const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
+    return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
+  }
+  const me = ok(r, "status");
   if (HOME && SEAT?.id && me.soul?.name) HOME.named(SEAT.id, me.soul.name);
-  const inbox = me.inbox ?? {};
-  const self = await selfLink();
+  const inbox = me.inbox ?? {}, last = inbox.latest, here = listenerNow();
+  // An older world only has `latest`, so a newer message hides an unfinished one there.
+  const unfinished = inbox.unfinished ?? (last?.state === "acknowledged" && !last.result && !last.outcome ? [{ id: last.id, text: last.text }] : []);
+  const self = await selfLink(direct);
   return {
-    soul: me.soul, paired: true, world: s.world, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
-    listening: inbox.connected === true, link: self.link, now: self.now,
+    soul: me.soul, paired: true, world: s.world, reachable: true, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
+    ...here, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
+    ...(unfinished.length ? { unfinished } : {}),
     lastReceipt: s.lastReceipt ?? null,
-    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()), ...consolidationStatus() } : {}),
-    note: inbox.connected ? "A listen is open: owner messages reach this folder." : `Nobody is listening. Start: ${CLI} listen (in the background).`,
+    ...whereIWas(), ...(HOME && SEAT?.kind === "soul" ? consolidationStatus() : {}), ...briefNow(),
+    note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
   };
 }
+/** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
+function listenerNow() {
+  const l = listenLockHolder(), v = serveHolder(), own = l && isOwnListen(l) ? l : null;
+  const listener = own ? { kind: "listen", pid: own.pid, since: own.start ?? null } : v ? { kind: "serve", pid: v.pid, since: v.start ?? null } : null;
+  return { listening: !!listener, ...(listener ? { listener } : {}) };
+}
+const whereIWas = () => (HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {});
 
 // ---------------------------------------------------------------- reading the world
 
@@ -2638,14 +2729,30 @@ async function act(...argv) {
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
-  if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
+  // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
+  // still going while a later step of it has ended (#1289)
+  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for }], d.receipt.id) });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
+  forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+/** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
+export function keepLinks(links, open, max = 64) {
+  const out = [...links];
+  for (let i = 0; out.length > max && i < out.length;) if (out[i].receipt !== open) out.splice(i, 1); else i++;
+  return out;
+}
+
+/** A receipt that has ended guards nothing, so its links make room: the list must never lose one that may still be open. */
+function forgetLinks(receipt) {
+  const links = load().links ?? [];
+  if (TERMINAL.has(receipt?.phase) && links.some((l) => l.receipt === receipt.id)) save({ links: links.filter((l) => l.receipt !== receipt.id) });
 }
 
 /** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
@@ -2684,7 +2791,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2725,8 +2832,9 @@ async function resolve(...args) {
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
   let out = await waitRaw(secArg, idArg);
-  const link = load().lastLink;
-  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
+  const link = (load().links ?? []).findLast((l) => l.receipt === out.receipt?.id);
+  if (link?.receipt && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
+  forgetLinks(out.receipt);
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -2833,6 +2941,16 @@ export function lockIsLive(holder) {
   try { const cmd = execFileSync("ps", ["-o", "command=", "-p", String(holder.pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); return /listen/.test(cmd); }
   catch { return true; }   // no ps (or it failed): trust the live pid
 }
+/** Whether a lock's process is this Soul's own listen in this folder. A reused pid or a stray lock names something else, which is never ours to signal. */
+export function isListenOf(folder, command, cwd) {
+  if (!/eden\.mjs\s(?:.*\s)?listen(?:\s|$)/.test(String(command ?? ""))) return false;
+  return cwd == null || cwd === folder;
+}
+function isOwnListen(holder) {
+  // The folder decides, not the Soul id in the lock: travel changes that id under a listen that is still this Soul's.
+  let command; try { command = quietly("ps", ["-o", "command=", "-p", String(holder.pid)]); } catch { return true; }   // no ps: trust the live pid, as lockIsLive does
+  return isListenOf(realpathSync(process.cwd()), command, cwdOf(holder.pid));
+}
 export function listenLockHolder() { const h = readLock(); return h && lockIsLive(h) ? h : null; }
 export function takeListenLock() {
   const start = now(), mine = { pid: process.pid, start, beatAt: start, soul: load().soul ?? null };
@@ -2854,7 +2972,7 @@ export function takeListenLock() {
         if (age < LISTEN_STALE_MS) return { ok: false, holder };
         // alive but silent for a minute: stop it (it is this folder's own listen, same user), then take the lock
         process.stderr.write(`listen: the listener pid ${holder.pid} has not renewed its lock for ${Number.isFinite(age) ? Math.round(age / 1000) + " s" : "ever"}; stopping it and taking over\n`);
-        try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
+        if (isOwnListen(holder)) try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
       }
       try { renameSync(LISTEN_LOCK, `${LISTEN_LOCK}.stale-${process.pid}`); unlinkSync(`${LISTEN_LOCK}.stale-${process.pid}`); } catch { /* another listen took it over first */ }
     }
@@ -2863,21 +2981,33 @@ export function takeListenLock() {
   return { ok: false, holder: holder ?? { pid: null } };
 }
 function alreadyListening(holder) {
-  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); you are fine, one listen per Soul is enough\n`);
-  return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: "nothing to do: the open listen prints owner messages when they arrive" };
+  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); one listen per Soul is enough. If this chat started it you are fine; \`status\` shows it as \`listener\`, and if it isn't yours: ${CLI} listen --take\n`);
+  return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: `nothing to do if this chat started it: it prints owner messages when they arrive. If another chat or agent did, or it may be gone, take it over: ${CLI} listen --take` };
 }
 
-// listen [--after <id>] [--once]: hold one long-poll open (this is also the Soul's "agent is
+/** --take: this folder's other listen ends, so a new chat or agent is the one that hears the owner. It holds no message: the world keeps them until acked. */
+async function stopListen() {
+  const holder = listenLockHolder();
+  if (!holder || holder.pid === process.pid) return;
+  if (!isOwnListen(holder)) { calm(`listen: the lock named pid ${holder.pid}, which is not this Soul's listen: that process is left alone`); try { unlinkSync(LISTEN_LOCK); } catch { /* gone */ } return; }
+  try { process.kill(holder.pid, "SIGTERM"); } catch { return; }
+  for (let i = 0; i < 40 && pidAlive(holder.pid); i++) await sleep(100);
+  calm(`listen: took over from pid ${holder.pid}`);
+}
+
+// listen [--after <id>] [--once] [--take]: hold one long-poll open (this is also the Soul's "agent is
 // listening" presence) and exit as soon as the owner has written, printing every waiting message.
 async function listen(...args) {
-  let after, once = false;
+  let after, once = false, take = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--after") after = args[++i];
     else if (args[i] === "--once") once = true;
-    else throw new Error("usage: listen [--after <message-id>] [--once]");
+    else if (args[i] === "--take") take = true;
+    else throw new Error("usage: listen [--after <message-id>] [--once] [--take]");
   }
-  // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone.
+  // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone, unless it says --take.
   if (!once) {
+    if (take) await stopListen();
     const lock = takeListenLock();
     if (!lock.ok) return alreadyListening(lock.holder);
   }
@@ -2920,10 +3050,10 @@ async function ack(id, ...rest) {
   if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
-  // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
-  const shut = close ? await closing(id, close, reply) : {};
+  // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
+  const seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
   if (shut.closed) return { ...said, closed: true };
-  if (shut.already) return { acked: id, ...shut };   // a closed message is acked already: nothing to send
+  if (seen.acked || shut.already) return { acked: id, ...shut };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
   return { ...said, ...d, ...shut };
@@ -2932,26 +3062,42 @@ async function ack(id, ...rest) {
 /** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
  *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
  *  closed or is about to: `closed` here means this command closed it. */
-async function closing(id, outcome, text) {
-  const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
-  if (link?.message === id && link.receipt) {
-    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+const ACT_RUNNING = "its act is still going: the world closes it with that act's outcome when it ends; nothing to send";
+async function closing(id, outcome, text, seen = {}) {
+  const quick = { retry: false, timeoutMs: 5000 }, read = () => call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+  // why this command won't close: the message can't be read, or it has a result, which an agent's would replace
+  const stop = (m) => {
+    if (m?.status !== 200) return { closed: false, why: `${m?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+    if (m.data?.message?.result === undefined) return null;
+    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
+    return { closed: false, already: m.data.message.outcome, why: "already closed: nothing more to do" };
+  };
+  const first = await read(), early = stop(first);
+  seen.acked = first?.data?.message?.state === "acknowledged";
+  if (early) return early;
+  // a serve that is gone or hung still has its plan on disk, and the next serve resumes it
+  const asked = await askServe({ op: "planStatus" }), plan = asked && !asked.lost ? asked.plan : loadServeState().plan;
+  if (plan?.for === id && !PLAN_OVER.has(plan.state)) return { closed: false, why: "its plan is still going: if `closed` doesn't follow, `result` once it has ended" };
+  const mine = [...new Set((load().links ?? []).filter((l) => l.message === id).map((l) => l.receipt))].reverse();
+  for (const receipt of mine) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(receipt)}`, quick).catch(() => null);
     // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
     if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
   }
-  const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
-  if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
-  if (read.data?.message?.result !== undefined) {
-    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
-    return { closed: false, already: read.data.message.outcome, why: "already closed: nothing more to do" };
+  if (mine.length) {
+    const late = stop(await read());   // an act may have ended between the reads, and then the world's close stands
+    if (late) return late;
   }
-  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
+  try { const r = await result(id, outcome, text); return r.reported === false ? { closed: false, why: r.why } : { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
   const line = clipped(text.join(" ")), t = line.text;
   if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
-  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } });
+  // #1295: the world refuses a close while the message's own act runs, and closes it with that act's outcome: a true answer, not a failure
+  if (r.status === 409 && (r.data?.error?.code ?? r.data?.code) === "message.act-running") return { reported: false, closed: false, why: ACT_RUNNING };
+  const d = clean(ok(r, "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
   return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
@@ -3382,7 +3528,7 @@ async function serveForeground() {
   st.folder = folderKey(s);
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
 
@@ -3397,9 +3543,10 @@ async function serveForeground() {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
         if (next !== code) log(`inbox: ${next}; next try in ${secs(ms)}`);
-        code = next; await pause(ms); continue;
+        code = next; if (r.status === 0 || (r.status >= 500 && !isBusy(r.status, r.data))) worldDown ??= { code: next, since: now() };
+        await pause(ms); continue;
       }
-      attempt = 0; code = undefined;
+      attempt = 0; code = undefined; worldDown = null;
       if (r.status >= 200 && r.status < 300) {
         const got = messagesOf(r.data);
         if (!recovered) { recovered = true; if (Array.isArray(r.data?.backlog)) { reconcileMessages(st, got); persist(); } }
@@ -3617,7 +3764,11 @@ async function serveForeground() {
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
     if (m.op === "pending") { const out = takePending(st); persist(); return out; }
-    if (m.op === "status") return { serving: true, pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    if (m.op === "status") {
+      // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
+      if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "http") {
       const path = routeOf(m.url);
@@ -3628,14 +3779,20 @@ async function serveForeground() {
       if (known?.full && ENDED.has(known.phase)) return { status: 200, data: { receipt: known.full } };
       // An act for the plan's own message serves it, so the plan won't close it. Noted before the request: on a real world the step's
       // replaced comes down the stream before this act's answer comes back.
+      // A repeat of the step under way, for the plan's own message, goes without its `for`: linked, the world would close the
+      // message when that step ends, with later steps still to run (#1289). The plan closes it.
+      const step = st.plan && !PLAN_OVER.has(st.plan.state) ? st.plan.steps?.[st.plan.at] : null;
+      if (path === "/v1/edge/act" && m.method === "POST" && step && m.body?.for && m.body.for === st.plan.for && step.id === m.body.capability && JSON.stringify(step.params ?? {}) === JSON.stringify(m.body.params ?? {})) {
+        const { for: _for, forDefault: _default, ...body } = m.body; m = { ...m, body };
+      }
       const planActFor = path === "/v1/edge/act" && m.method === "POST" && st.plan && m.body?.for && m.body.for === st.plan.for ? st.plan : null;
       if (planActFor) planActFor.servedByAct = (planActFor.servedByAct ?? 0) + 1;
       const r = await forward(m);
-      if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id) planActFor.resultSent = true; }
+      if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id && !r.data.repeat) planActFor.resultSent = true; }
       // A newer body act replaces the plan; talk and attention don't. A body act's answer names no channel: the receipt says what
       // isn't one (attention for a look, none for a prayer or a mark). Swept on a real world: every other accepted act replaced a
-      // running walk, a wave and a stand included. (The plan's own acts don't come through here.)
-      if (path === "/v1/edge/act" && m.method === "POST" && st.plan && !PLAN_OVER.has(st.plan.state) && r.data?.accepted && r.data.receipt?.id && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel)) {
+      // running walk, a wave and a stand included, except a repeat of the act under way, which goes on (#1289). (The plan's own acts don't come through here.)
+      if (path === "/v1/edge/act" && m.method === "POST" && st.plan && !PLAN_OVER.has(st.plan.state) && r.data?.accepted && r.data.receipt?.id && !r.data.repeat && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel)) {
         const p = st.plan;
         if (p.for && p.for === m.body?.for) p.resultSent = true;
         planOver(p, "replaced", Date.now()); persist(); tick();
@@ -3656,7 +3813,8 @@ async function serveForeground() {
     });
   });
   const shutdown = (code) => {
-    stopping = true; persist();
+    stopping = true;
+    try { persist(); } catch { /* its folder is gone: the signal still stops it, or nothing could */ }
     try { unlinkSync(SERVE_SOCK); } catch { /* gone */ }
     try { if (readServeLock()?.pid === process.pid) unlinkSync(SERVE_LOCK); } catch { /* gone */ }
     process.exit(code);
@@ -3788,7 +3946,7 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 
 setup     register <world-url>            create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
@@ -3797,7 +3955,7 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
           say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
+owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
@@ -3820,9 +3978,11 @@ async function defaultCommand(sel) {
   const id = needHome().setDefault(sel);
   return { default: HOME.principals().find((p) => p.id === id) };
 }
-async function doctorCommand() {
+async function doctorCommand(...argv) {
+  const { code } = forOption(argv);
+  const accountSouls = code ? async (url) => { const r = await worldOnce(`${url}/v1/agent/approval/souls`, { method: "POST", headers: { "content-type": "application/json" }, body: { for: code }, timeoutMs: 25_000 }); return r.status === 200 ? r.data?.souls ?? [] : codeOf(r.data) === "code-unknown" ? null : { note: `This world could not list the account's Souls just now (${codeOf(r.data) ?? `http-${r.status}`}). Try again in a minute.` }; } : null;
   const ask = async (url, bearer) => { const { status, data } = await worldOnce(url, { method: "GET", headers: { authorization: `Bearer ${bearer}` }, timeoutMs: 25_000 }); return { status, data }; };
-  const out = await needHome().doctor(ask, { alive: pidAlive });
+  const out = await needHome().doctor(ask, { alive: pidAlive, accountSouls, codeWorld: AT_WORLD ?? HOME.config().currentWorld });
   for (const [world, w] of Object.entries(HOME.config().worlds)) {
     const { status, data } = await worldOnce(`${w.url}/v1/config`, { method: "GET", headers: {}, timeoutMs: 25_000 }), c = status === 200 ? data?.soulClient : null;
     if (!c) continue;
@@ -3917,6 +4077,7 @@ export function enterHome(argv) {
   let line = argv, selector;
   const cfg = HOME.config();
   if (first && !commands[first] && soulHome.looksLikeSelector(cfg, first)) { selector = first; line = argv.slice(1); }
+  AT_WORLD = selector?.startsWith("@") ? selector.slice(1) : null;
   // A Soul named like a command: the command wins, but `say here` was meant for the Soul and must not be said aloud.
   if (first && commands[first] && commands[second] && soulHome.looksLikeSelector(cfg, first)) throw new Error(`${first} is a command and a Soul here. For the Soul use its address: ${HOME.principals().find((p) => soulHome.norm(p.name) === first)?.address ?? `${first}@<world>`}`);
   const cmd = line[0];

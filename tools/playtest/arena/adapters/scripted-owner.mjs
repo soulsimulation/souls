@@ -16,7 +16,8 @@
 //              step's JSON output (a refusal's too), e.g. "{{prev.did_you_mean[0].id}}", reading own properties only; a
 //              placeholder that does not resolve fails its step without running it, and that skipped step leaves no JSON.
 //              A `resolve` step keeps its first candidate's id as "{resolved}" for the steps after it, as an agent reads an
-//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run.
+//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run. One
+//              that reads nothing stops the rule, unless it says onRefused "continue", as a refused act can.
 //   close      "done" (default): `result <id> done|failed` from the steps' outcome. "open": leave the request open (the
 //              activity continues in the world) until a later rule supersedes it or the run ends.
 //   supersede  text for `result <old> failed "<text>"` on every request still open when this rule fires (owner redirection)
@@ -181,6 +182,7 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
     await cli(['register', state.base]);
     await cli(['create', state.soulName]);
     await cli(['status']);
+    if (process.env.SOUL_RUNS_RESIDENT) await cli(['serve']); // #1096 A6: the candidate arm; every later command goes through it
     say(`Set up ${state.soulName}; waiting for messages.`);
     return done(0);
   }
@@ -228,6 +230,7 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
         if (args[0] !== 'resolve') continue;
         resolved = firstCandidate(r);
         if (resolved) continue;
+        if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] resolve found nothing, continuing: ${clip(args[1])}`); continue; }
         failed = `resolve: nothing on offer reads as "${clip(args[1])}"`; break;
       }
       if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] ${args[0]} refused, continuing: ${o.why}`); continue; }

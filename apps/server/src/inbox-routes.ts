@@ -59,7 +59,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
     // MSG: a Soul's messages have one consumer, its listen (which hands over the whole backlog). Other answers carry a
     // private notice of the oldest waiting message but do not mark it received, so a listen never misses its wake-up.
     const soulListen = current.kind === 'soul' && c.res.status === 200 && c.req.path.endsWith('/v1/edge/inbox/listen');
-    const carry = (own?: unknown) => (acked || soulListen) && own ? own : current.kind === 'god' ? inbox.deliver(current.scope) : inbox.view(current.scope);
+    const carry = (own?: unknown) => (acked || soulListen) && own ? own : current.kind === 'god' ? inbox.deliver(current.scope) : c.req.path.endsWith('/v1/agent/me') ? {...inbox.view(current.scope), unfinished: inbox.unfinished(current.scope)} : inbox.view(current.scope);
     if (contract || !c.res.headers.get('content-type')?.includes('application/json')) {
       if (c.res.status < 200 || c.res.status >= 300) return;
       inbox.touch(current.scope);

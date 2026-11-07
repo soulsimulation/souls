@@ -1,3 +1,4 @@
+import {RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
@@ -656,9 +657,26 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (r.programOk && r.programId) this.update(m[1], {phase: 'started', program_id: r.programId});
     else this.update(m[1], {phase: 'failed', code: r.programCode ?? 'program.refused', reason: humanBlockedExplanationV1(r.programCode, 'That action')});
   }
+  /** #1150 decision 1: the world landed on these bodies and moved them. Each Soul hears it on its own stream. */
+  private onRelocated(bodies: string[]) {
+    for (const id of bodies) { const soul = this.host.mindByEntity.get(id)?.soulId; if (soul) this.comms?.streams.deliver?.(soul, RELOCATED.code, this.host.engine.world.tick, {text: RELOCATED.message}); }
+  }
+  /** #1150 rung 3: nothing running survived, so every open act ends here, and each Soul is told. */
+  private onRewound(relocated: string[]) {
+    this.together.rewound(REWOUND.code, REWOUND.message);
+    for (const r of this.rows("phase IN ('waiting','started')")) this.update(r.receipt_id, {phase: 'failed', code: REWOUND.code, reason: REWOUND.message});
+    this.pending.clear(); this.dropMenus('engine-recovery');
+    // a walk finished since the baseline did not happen either, and that receipt is closed: every Soul hears it
+    for (const m of this.host.minds.values()) this.comms?.streams.deliver?.(m.soulId, REWOUND.code, this.host.engine.world.tick, {text: REWOUND.message});
+    this.onRelocated(relocated);
+  }
   /** Hotfix: a recovered engine fault ends the open receipts of the Souls whose programmes were set aside. */
   private onRecovery(e: {kind: string; payload: unknown}) {
-    const edge = (e.payload as {recovery?: {edge?: {souls: string[]}}} | null)?.recovery?.edge; if (e.kind !== 'rules' || !edge) return;
+    const fact = e.payload as {recovery?: {edge?: {souls: string[]}; lastRung?: {relocated?: string[]}}; lastRungInPlace?: {relocated?: string[]; stopped?: number}; refusal?: {relocated?: true; bodies: string[]}} | null;
+    if (e.kind === 'rules' && fact?.lastRungInPlace && !fact.lastRungInPlace.stopped) return this.onRelocated(fact.lastRungInPlace.relocated ?? []);   // nothing ended, so there is nothing to tell
+    if (e.kind === 'rules' && (fact?.recovery?.lastRung || fact?.lastRungInPlace)) return this.onRewound((fact.recovery?.lastRung ?? fact.lastRungInPlace)!.relocated ?? []);
+    if (e.kind === 'rules' && fact?.refusal?.relocated) return this.onRelocated(fact.refusal.bodies);
+    const edge = fact?.recovery?.edge; if (e.kind !== 'rules' || !edge) return;
     for (const soulId of edge.souls) {
       this.pending.delete(soulId);
       for (const r of this.openReceipts(soulId)) this.update(r.id, {phase: 'failed', code: 'engine.fault-recovered', reason: 'That would have pushed bodies into each other, so the world set it aside and carried on; choose again.'});
@@ -874,6 +892,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const hit = this.routeMemo.get(key); if (hit !== undefined) return hit;
     const issue = this.mw.feasibility.canPerform({actor: soul.entityId, label: plan.label, steps: plan.steps}, 'route|' + scope);   // B-facade: a verdict per (nav epoch, 0.5 m cell) on a replica
     const out = issue && ROUTE_DEAD.has(issue.code) ? {code: issue.code, reason: humanBlockedExplanationV1(issue.code, plan.label)} : null;
+    if (this.readOnly && !out) return out;   // #1281: on a replica no issue can be a verdict not yet here: keep asking
     this.routeMemo.set(key, out); if (this.routeMemo.size > 4096) this.routeMemo.delete(this.routeMemo.keys().next().value!);
     return out;
   }
@@ -1688,6 +1707,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
     if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true, receipt: this.view(old)};}
     const refuse = (code: string, reason: string, extra?: {retry_after?: number}) => {this.recordRefusal(soul.soulId, 'act', capability, code, reason); return this.withInPlaceAlternative(soul, {accepted: false as const, code, reason, capability, ...extra});};
+    if (this.host.stepFailing) return refuse(STEP_FAILING.code, STEP_FAILING.message);
     const askedVerb=asked.split(/[:\s]/)[0]!;const unsupported=askedVerb==='object'?null:this.bodyVerbProblem(soul,askedVerb);if(unsupported)return refuse(unsupported.code,unsupported.reason);
     if (this.faded.has(soul.soulId)) {
       // Reclaim: fall onto feet at a starting place, identity and history intact (C9).
@@ -1725,6 +1745,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     let v: VocabResult;
     // (srv-act-words: focused words were resolved already, on these offers, by wordsFocused)
     ({v, caps, plans} = bound.pre && !social && text === asked ? bound.pre : this.resolveOnDemand(soul, text, caps, plans));
+    // #849: `resolve` names the one seat; an act on words still asks for its id, so nothing is taken on a reading of the words
+    if (v.kind === 'alias' && v.oneSeat) v = {kind: 'unknown', code: 'capability.choose', reason: 'Choose a bound seat by its exact sit capability ID. No seat has been selected.', didYouMean: [{id: v.cap.id, label: v.cap.label}]};
     if (words) {plans = new Map(plans); v = this.exactWords(soul, words, text, v, plans);}
     // PC04 (#683): answering a shared proposal that has closed is refused as gone, not unknown
     if (v.kind === 'unknown' && /^(?:accept|decline):inv_/.test(asked)) {
@@ -2140,6 +2162,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   async performBodies(soul: EdgeSoul, capability: string, label: string, steps: Program['steps'], clientRef?: string,effects?:ConfirmedEffects,admission?:ObjectBodyAdmission): Promise<{accepted: true; receipt: EdgeReceipt} | {accepted: false; code: string; reason: string}> {
     if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true, receipt: this.view(old)};}
     const refuse = (code: string, reason: string) => {this.recordRefusal(soul.soulId, 'object', capability, code, reason); return {accepted: false as const, code, reason};};
+    if (this.host.stepFailing) return refuse(STEP_FAILING.code, STEP_FAILING.message);
     const busy = this.sharedBusy(soul.soulId); if (busy) return {...refuse('shared.busy', busy.reason), ...this.busyExtra(busy)};
     const nativeUse = this.nativeUseRefusal?.(capability, steps);
     if (nativeUse) return refuse(nativeUse.code, nativeUse.reason);
@@ -2900,7 +2923,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
   resolveOnDemand(soul: EdgeSoul, text: string, caps: EdgeCapability[], plans: Plans, typos = true): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} {
     const exact = caps.find(c => c.id === text);
     if(exact && this.secretOffer(soul,exact))return {v:{kind:'unknown',code:'capability.unknown',reason:'That action is not known here.',didYouMean:[]},caps,plans};
-    if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery)return {v:discovery,caps,plans};}
+    if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery){
+      // #849: the one seat the words name was taken: bind it by its exact id (offered on demand when the listing leaves it out)
+      if(discovery.kind==='alias'){const r=this.resolveOnDemand(soul,discovery.cap.id,caps,plans,typos);if(r.v.kind==='unknown')return r;
+        if(r.v.cap.id!==discovery.cap.id)return {v:{kind:'unknown',code:'capability.choose',reason:'Choose a bound seat by its exact sit capability ID. No seat has been selected.',didYouMean:[{id:discovery.cap.id,label:discovery.cap.label}]},caps,plans};
+        return {...r,v:{kind:'alias',cap:r.v.cap,note:discovery.note,oneSeat:true}};}
+      return {v:discovery,caps,plans};}}
     // RESOLVE: a building's floor ("go upstairs", "go inside the cottage and go upstairs", "the top floor of the tower")
     const fl = exact || !this.floorOnDemand ? null : floorWords(text);
     if (fl) {
@@ -2990,7 +3018,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const r = fix ? this.resolveOnDemand(soul, fix.text, caps, plans, false) : null;
       if (fix && r && r.v.kind !== 'unknown') {
         const read = fix.fixes.map(([a, b]) => `"${a}" as "${b}"`).join(', ');
-        return {...r, v: {kind: 'alias', cap: r.v.cap, ...(r.v.kind === 'alias' && r.v.params ? {params: r.v.params} : {}), note: `read ${read}: ${r.v.kind === 'alias' ? r.v.note : `${fix.text} is ${r.v.cap.id} (${r.v.cap.label}).`}`}};
+        return {...r, v: {kind: 'alias', cap: r.v.cap, ...(r.v.kind === 'alias' && r.v.params ? {params: r.v.params} : {}), ...(r.v.kind === 'alias' && r.v.oneSeat ? {oneSeat: true as const} : {}), note: `read ${read}: ${r.v.kind === 'alias' ? r.v.note : `${fix.text} is ${r.v.cap.id} (${r.v.cap.label}).`}`}};
       }
     }
     return {v, caps, plans};

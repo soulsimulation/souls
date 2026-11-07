@@ -3,30 +3,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
-import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, writeFileSync, rmSync, readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {clipped} from './soul/eden.mjs';
+import {clipped, keepLinks} from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 
-async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, reads = 200, receipts = 200} = {}) {
-  const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
+async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, reads = 200, receipts = 200, receiptOf} = {}) {
+  const seen = [], acked = new Set(), dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
       const body = JSON.parse(b || '{}'), url = req.url.split('?')[0], send = (s, j) => {res.writeHead(s, {'content-type': 'application/json'}); res.end(JSON.stringify(j));};
       seen.push([req.method, url, body]);
       if (url === '/v1/edge/say') return saySays === 200 ? send(200, {said: {id: 'sp_1', heardBy: 1}}) : send(saySays, {error: {code: 'say.refused', message: 'No.'}});
       if (url === '/v1/edge/act') return send(200, actAnswer(body));
+      if (url.startsWith('/v1/edge/receipts/') && receiptOf) return send(200, {receipt: receiptOf(url.split('/').pop())});
       if (url.startsWith('/v1/edge/receipts/')) return receipts === 200 ? send(200, {receipt: waitReceipt}) : send(receipts, {error: {code: 'broken', message: 'the receipts broke'}});
       if (url === '/v1/edge/wait') return send(200, {cursor: 'c_1', events: [{kind: 'receipt.updated', receipt: waitReceipt}]});
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
       if (m?.[2] === '/result' && results.refuse) return send(404, {error: {code: 'not-found', message: 'no such message'}});
+      if (m?.[2] === '/result' && results.running) return send(409, {error: {code: 'message.act-running', message: 'not closed: walk:a is still going'}});
       if (m?.[2] === '/result') {results[m[1]] = body; return send(200, {inbox: {}});}
-      if (m?.[2] === '/ack') return send(200, {inbox: {}});
+      if (m?.[2] === '/ack') {acked.add(m[1]); return send(200, {inbox: {}});}
       if (m && reads !== 200) return send(reads, {error: {code: reads === 503 ? 'world.busy' : 'broken', message: 'the inbox broke'}});
-      if (m) return send(200, {message: {id: m[1], ...(results[m[1]] ? {result: results[m[1]].text ?? results[m[1]], outcome: results[m[1]].outcome} : {})}});
+      if (m) return send(200, {message: {id: m[1], ...(acked.has(m[1]) ? {state: 'acknowledged'} : {}), ...(results[m[1]] ? {result: results[m[1]].text ?? results[m[1]], outcome: results[m[1]].outcome} : {})}});
       send(200, {});
     });
   });
@@ -34,7 +36,7 @@ async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, re
   t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
   writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: `http://127.0.0.1:${server.address().port}`, soul: 's_pip', token: 'tok'}));
   const cli = (...args) => new Promise(res => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (e, out, err) => {let json = null; try {json = JSON.parse(out);} catch {/* words */} res({code: e?.code ?? 0, json, err});}));
-  return {seen, cli, results};
+  return {seen, cli, results, dir};
 }
 const posted = (seen, tail) => seen.filter(([m, u]) => m === 'POST' && u.endsWith(tail));
 
@@ -103,6 +105,86 @@ test('say --for leaves a message alone while its linked act is going, and closes
   const pruned = await world(t, {actAnswer: () => started, receipts: 404});
   await pruned.cli('act', 'walk:a', '--for', 'msg_1');
   assert.equal((await pruned.cli('say', 'Here', '--for', 'msg_1')).json.closed, true, 'a receipt too old to hold has ended');
+});
+
+test('every message linked to a running receipt is guarded, not only the last (#1289)', async t => {
+  const started = (id) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: id});
+  const w = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: started().receipt});
+  await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'walk:a', '--for', 'msg_2');
+  for (const id of ['msg_1', 'msg_2']) {
+    const said = await w.cli('say', 'On my way', '--for', id); assert.equal(said.json.closed, false, id); assert.match(said.json.why, /still going/);
+    assert.equal((await w.cli('ack', id, 'Nearly', '--close', 'failed')).json.closed, false, id);
+  }
+  assert.equal(posted(w.seen, '/result').length, 0);
+  const ended = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: {...started().receipt, phase: 'completed', done: 'walked.'}});
+  await ended.cli('act', 'walk:a', '--for', 'msg_1'); await ended.cli('act', 'walk:a', '--for', 'msg_2');
+  assert.equal((await ended.cli('say', 'Here', '--for', 'msg_1')).json.closed, true, 'once the act has ended');
+});
+
+test('the links outlast a long run of repeats, and a re-linked message is guarded by its newest act (#1289)', async t => {
+  const started = (id) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'sit:a', phase: 'started'}, for: id});
+  const w = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: started().receipt});
+  for (let i = 1; i <= 12; i++) await w.cli('act', 'sit:a', '--for', `msg_${i}`);
+  assert.equal((await w.cli('say', 'Still here', '--for', 'msg_1')).json.closed, false, 'the first of twelve, on a receipt still open');
+  assert.equal(posted(w.seen, '/result').length, 0);
+  const receipts = {r_1: {id: 'r_1', capability: 'walk:a', phase: 'replaced'}, r_2: {id: 'r_2', capability: 'walk:b', phase: 'started'}};
+  let next = 0;
+  const re = await world(t, {actAnswer: (b) => ({accepted: true, channel: 'body', receipt: {...receipts[`r_${++next}`], phase: 'started'}, for: b.for}), receiptOf: (id) => receipts[id]});
+  await re.cli('act', 'walk:a', '--for', 'msg_1'); await re.cli('act', 'walk:b', '--for', 'msg_1');
+  assert.equal((await re.cli('say', 'On my way', '--for', 'msg_1')).json.closed, false, 'its newest act is the one running');
+});
+
+test('links: past the cap, the open receipt keeps all of its own; an ended receipt makes room and leaves the others (#1289)', async t => {
+  const many = Array.from({length: 70}, (_, i) => ({receipt: 'r_1', message: `msg_${i}`}));
+  assert.equal(keepLinks(many, 'r_1').length, 70, 'none on the open receipt goes');
+  const mixed = [...Array.from({length: 10}, (_, i) => ({receipt: `r_old${i}`, message: `msg_o${i}`})), ...many.slice(0, 60)];
+  const kept = keepLinks(mixed, 'r_1'); assert.equal(kept.length, 64); assert.equal(kept.filter((l) => l.receipt === 'r_1').length, 60, 'others go first, oldest first');
+  const receipts = {r_1: {id: 'r_1', capability: 'walk:a', phase: 'started'}, r_2: {id: 'r_2', capability: 'make:mark', phase: 'completed'}};
+  let next = 0;
+  const w = await world(t, {actAnswer: (b) => ({accepted: true, channel: 'body', receipt: receipts[`r_${++next}`], for: b.for}), receiptOf: (id) => receipts[id]});
+  await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'make:mark', '--for', 'msg_1');
+  const links = JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).links;
+  assert.deepEqual(links, [{receipt: 'r_1', message: 'msg_1'}], 'the ended mark made room; the walk stays');
+  assert.equal((await w.cli('say', 'On my way', '--for', 'msg_1')).json.closed, false, 'a later step ended, the walk is still going');
+});
+
+test('an act that ends between the reads keeps the world\'s close (#1289)', async t => {
+  const started = {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: 'msg_1'};
+  const results = {}, w = await world(t, {results, actAnswer: () => started, receiptOf: () => {results.msg_1 = {text: 'walk completed.', outcome: 'done'}; return {...started.receipt, phase: 'completed'};}});
+  await w.cli('act', 'walk:a', '--for', 'msg_1');
+  const r = await w.cli('ack', 'msg_1', 'I could not get there.', '--close', 'failed');
+  assert.equal(r.json.closed, false); assert.equal(r.json.already, 'done'); assert.equal(posted(w.seen, '/result').length, 0);
+});
+
+test('wait names the newest message on the receipt (#1289)', async t => {
+  const started = (id) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: id});
+  const w = await world(t, {results: {msg_1: {text: 'walked.'}, msg_2: {text: 'walked.'}}, actAnswer: (b) => started(b.for), waitReceipt: {...started().receipt, phase: 'completed', done: 'walked.'}});
+  await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'walk:a', '--for', 'msg_2');
+  const done = await w.cli('wait', '1', 'r_1'); assert.equal(done.json.closed, true); assert.equal(done.json.for, 'msg_2');
+});
+
+test('a world that refuses a close while the act runs (#1295) gets a true answer, exit 0 (#1289)', async t => {
+  const w = await world(t, {results: {running: true}});
+  const r = await w.cli('result', 'msg_1', 'done', 'Walked there.');
+  assert.equal(r.code, 0); assert.equal(r.json.reported, false); assert.equal(r.json.closed, false); assert.match(r.json.why, /still going.*nothing to send/);
+  const s = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(s.code, 0); assert.equal(s.json.closed, false); assert.match(s.json.why, /nothing to send/); assert.doesNotMatch(s.json.why, /Close it with result/);
+});
+
+test('act says when the world answered with the act under way (#1289)', async t => {
+  const answer = (extra) => () => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, ...extra});
+  const w = await world(t, {actAnswer: answer({repeat: true})});
+  assert.equal((await w.cli('act', 'walk:a')).json.repeat, true); assert.equal((await w.cli('act', 'walk:a', '--json')).json.repeat, true);
+  const fresh = await world(t, {actAnswer: answer({})});
+  assert.equal((await fresh.cli('act', 'walk:a')).json.repeat, undefined); assert.equal((await fresh.cli('act', 'walk:a', '--json')).json.repeat, undefined);
+});
+
+test('ack --close on a message already acked claims no reply: the first one stands (#1289)', async t => {
+  const started = {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: 'msg_1'};
+  const w = await world(t, {actAnswer: () => started, waitReceipt: started.receipt});
+  await w.cli('ack', 'msg_1', 'Got it'); await w.cli('act', 'walk:a', '--for', 'msg_1');
+  const r = await w.cli('ack', 'msg_1', 'Nearly there.', '--close', 'done');
+  assert.equal(r.json.closed, false); assert.equal(r.json.reply, undefined); assert.equal(posted(w.seen, '/msg_1/ack').length, 1, 'only the first');
 });
 
 test('say --for none is the flag, not speech', async t => {

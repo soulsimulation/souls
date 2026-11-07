@@ -13,6 +13,7 @@ import type {SQLInputValue} from 'node:sqlite';
 import type {Db} from './db.ts';
 import {ApiError} from './souls.ts';
 
+const UNFINISHED_VIEW = 5;
 export type InboxScope = {scope: string; owner: string};
 export type Outcome = 'done' | 'failed' | 'withdrawn';
 /** `reply` = the agent's first answer ("Got it: walking to the cottage"); a Soul's `result` = its second, the outcome
@@ -156,6 +157,8 @@ export class AgentInbox {
     const listened = this.god(s) ? {listenedAt, ...this.godLeases(lastSeenAt, listenedAt, head)} : {listenedAt: this.listeners.get(this.key(s)) ? this.now() : listenedAt};
     return {connected: presence !== 'away', lastSeenAt, ...listened, latest: shown ? this.message(shown) : null, queued: head ? this.waiting(s) : 0, presence};
   }
+  /** #1278: messages acked with no result yet, newest first: a request another harness can finish. `latest` can't show them once a newer one comes. */
+  unfinished(s: InboxScope) { return this.all(s, 'AND acknowledged_at IS NOT NULL AND outcome IS NULL AND result IS NULL ORDER BY n DESC LIMIT ?', UNFINISHED_VIEW).map(r => ({id: r.id, text: r.text})); }
   /** What the owner sees: `latest` = the newest message (its state and reply); the god's adds its recent log, newest first. */
   ownerView(s: InboxScope): InboxView {
     const v = this.view(s), newest = this.newest(s);
