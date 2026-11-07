@@ -185,7 +185,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   </div>;
   return <>
     {!arriving && <TouchHints />}
-    {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={`Loading ${worldName ?? 'the world'}`} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
+    {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={worldName ?? ''} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
     {followCue && !arriving && <div className="viewer-follow-hint" role="status" aria-live="polite" data-cue={followCue}>{followCue === 'follow'
       ? coarse ? <>Following <b>{followName ?? 'a Soul'}</b> · swipe for the next Soul · tap the ground to take over</> : <>Following <b>{followName ?? 'a Soul'}</b> · drag to look around, scroll to zoom · press <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to look around freely</>
       : <>Your camera · <b>Return to Broadcast</b> is top left</>}</div>}

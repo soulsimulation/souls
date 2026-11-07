@@ -31,10 +31,10 @@ test('it runs from just covering the text to the corners, on any aspect ratio, a
 
 test('first paint is the same picture: black, the disc and the words, and no card', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8'), css = readFileSync(new URL('./world-chrome.css', import.meta.url), 'utf8');
-  assert.match(html, /class="arrival-disc"/); assert.match(html, /Loading the world/);
+  assert.match(html, /class="arrival-disc"/); assert.doesNotMatch(html, /Loading the world|%'/, '#1266: the name and the bar, no other words');
   assert.doesNotMatch(html, /viewer-arrival-card|viewer-arrival-spinner|Arriving/);
   assert.match(html, /early-world-poster[\s\S]*dataset\.fill/, 'a phone\'s poster does not wait for the app\'s code: the boot light finishes the arrival');
-  assert.match(html, /worldName[\s\S]*textContent='Loading '\+n/, 'it names the world from the page, as text');
+  assert.match(html, /worldName[\s\S]*textContent=n/, 'it names the world from the page, as text, and nothing else');
   assert.match(css, /\.viewer-arrival\{[^}]*background:#000/);
 });
 

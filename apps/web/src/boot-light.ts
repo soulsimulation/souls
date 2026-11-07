@@ -11,12 +11,12 @@ export function followBootLight(): void {
   const off = assetBytes.subscribe(() => {
     const boot = document.getElementById('boot-arrival');
     if (boot?.dataset.fill) return off();
-    const disc = boot?.querySelector<HTMLElement>('.arrival-disc'), bar = boot?.querySelector('progress'), label = boot?.querySelector('.viewer-arrival-progress span');
+    const disc = boot?.querySelector<HTMLElement>('.arrival-disc'), bar = boot?.querySelector('progress');
     const { loaded, total, known } = assetBytes.snapshot();
-    if (!disc || !bar || !label || !known || !total) return;
+    if (!disc || !bar || !known || !total) return;
     const next = Math.max(peak, downloadShare(loaded / total));   // #1266: the download's share, as the app's light
     if (next - peak < 0.005 && peak) return;
-    peak = next; bar.value = Math.round(peak * 1000); label.textContent = `${Math.round(peak * 100)}%`;
+    peak = next; bar.value = Math.round(peak * 1000);
     const corners = Math.hypot(innerWidth, innerHeight) / 2;
     disc.style.setProperty('--s', String((DISC_RADIUS + (corners - DISC_RADIUS) * peak) / DISC_RADIUS));
   });

@@ -7,7 +7,7 @@ import { DISC_RADIUS, DISSOLVE_MS, FILL_MS, FRAME_MS, TEXT_MARGIN, easeFraction,
  *  `done` means the world is drawn; the dissolve needs that and full white. `instant` (a ?shot page) never dissolves, so a
  *  picture is never taken through it. */
 export function ArrivalLight({ title, progress, done, card, instant, onGone }: { title: string; progress: number | null; done: boolean; card: boolean; instant: boolean; onGone: () => void }) {
-  const root = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null), disc = useRef<HTMLDivElement>(null), text = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null), disc = useRef<HTMLDivElement>(null), text = useRef<HTMLDivElement>(null), bar = useRef<HTMLProgressElement>(null);
   const live = useRef({ progress, done, onGone }); live.current = { progress, done, onGone };
   const run = useRef<{ fill(): void; settle(): void } | null>(null);
   useEffect(() => {
@@ -31,6 +31,7 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
       const { w, h, half } = size();
       // from where the light is now, on the compositor: nothing after this needs the main thread to reach white
       plain.hidden = false; plain.style.setProperty('--s', String(lightRadius(fraction, w, h, half) / DISC_RADIUS)); void plain.offsetWidth;
+      if (bar.current) bar.current.value = 1000;   // the world is drawn: the whole of it
       frame.dataset.fill = 'true'; plain.style.setProperty('--s', String(lightRadius(1, w, h, half) / DISC_RADIUS));
       fillTimer = window.setTimeout(() => { stopLight(); white = true; frame.dataset.white = 'true'; settle(); }, FILL_MS);
     };
@@ -40,6 +41,8 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
       if (now - last < FRAME_MS) return;
       const seconds = last ? (now - last) / 1000 : 0; last = now;
       fraction = easeFraction(fraction, live.current.progress ?? 0, seconds);
+      // #1266: the bar shows the same eased fraction as the light, so both move gradually together, never ahead of the work
+      if (bar.current && !filling) bar.current.value = Math.round(fraction * 1000);
       const { w, h, half } = size(), radius = lightRadius(fraction, w, h, half);
       if (light) { light.draw(lightScale(radius, w, h), still ? 0 : (now - first) / 1000); if (!drawn) { drawn = true; if (!filling) plain.hidden = true; } }
       else plain.style.setProperty('--s', String(radius / DISC_RADIUS));
@@ -56,7 +59,7 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
     <div ref={disc} className="arrival-disc" aria-hidden="true" />
     <div ref={text} className="arrival-text">
       <p className="viewer-arrival-title">{title}</p>
-      <div className="viewer-arrival-progress"><progress aria-label="World loading progress" max={1000} value={Math.round((progress ?? 0) * 1000)} /><span>{progress === null ? '' : `${Math.round(progress * 100)}%`}</span></div>
+      <div className="viewer-arrival-progress"><progress ref={bar} aria-label="World loading progress" max={1000} defaultValue={Math.round(Math.min(1, progress ?? 0) * 1000)} /></div>
     </div>
   </div>;
 }
