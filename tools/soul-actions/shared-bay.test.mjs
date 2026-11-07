@@ -633,6 +633,56 @@ test('#1250: a beam joined between uprights lying flat leaves the clock running,
   ok(w.god.act({ops: [{op: 'move', id: 'bm', in: {parent: 'world'}, p: [m[0], m[1] - 0.0508, m[2]], r: 0}, {op: 'connect', a: {id: 'bm', connector: 'end-l'}, b: {id: 'fa', connector: seat}}, {op: 'connect', a: {id: 'bm', connector: 'end-r'}, b: {id: 'fb', connector: seat}}]})); await w.tick(40);
   assert.equal(w.E()[w.idOf('bm')].support.kind, 'ground'); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(glitches(w), 0);
   await reboot(w); assert.equal(w.host.clockFailure, undefined); assert.equal(glitches(w), 0);
+// #1150 on shared building: whatever a god's batch or a late verb leaves, the world goes on, a Soul can act, and a crash reboot boots
+const goesOn = async (w, ticks = 60) => {
+  await w.tick(ticks); assert.equal(w.host.clockFailure, undefined); assert.equal(w.host.paused, false); assert.equal(w.host.stepFailing, null);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); await w.tick(20); assert.equal(w.host.clockFailure, undefined);
+  const s = Object.values(w.souls)[0]; ok(await act(w, s, {capability: 'wave:here'}));
+};
+test('the ladder: a god joining a third upright to released frames, live', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await goesOn(w);
+});
+test('the ladder: a beam joined between uprights lying flat', {timeout: 240000}, async (t) => {
+  const w = await world(t, {names: ['Ada']}), x = w.ax + 11, z = w.az + 8, seat = 'front-l-5';
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-upright@2', name: 'fa', p: [x, z], r: 0}, {op: 'place', def: 'core/rack-upright@2', name: 'fb', p: [x + BEAM_L, z], r: 0}, {op: 'place', def: 'core/rack-beam@5', name: 'bm', p: [x + 8, z + 5], r: 0}]})); await w.tick(20);
+  const m = mid(seatAt(w, w.idOf('fa'), seat), seatAt(w, w.idOf('fb'), seat));
+  ok(w.god.act({ops: [{op: 'move', id: 'bm', in: {parent: 'world'}, p: [m[0], m[1] - 0.0508, m[2]], r: 0}, {op: 'connect', a: {id: 'bm', connector: 'end-l'}, b: {id: 'fa', connector: seat}}, {op: 'connect', a: {id: 'bm', connector: 'end-r'}, b: {id: 'fb', connector: seat}}]})); await goesOn(w);
+});
+const placedAt = (r, what) => {const m = new RegExp(`${what} at \\(([-\\d.]+), ([-\\d.]+), ([-\\d.]+)\\)`).exec(r.failures?.[0]?.detail ?? ''); assert.ok(m, JSON.stringify(r)); return [+m[1], +m[2], +m[3]];};
+test('the ladder: a tread joined to a flight lying on the ground', {timeout: 240000}, async (t) => {
+  const w = await world(t, {names: ['Ada']}), x = w.ax + 11, z = w.az + 8;
+  ok(w.god.act({ops: [{op: 'place', def: 'core/deck-stair@1', name: 'fl', p: [x, z], r: 0}, {op: 'place', def: 'core/deck-stair-tread@1', name: 'tr', p: [x + 4, z + 4], r: 0}]})); await w.tick(20);
+  const join = {op: 'connect', a: {id: 'tr', connector: 'seat'}, b: {id: 'fl', connector: 'tread-1'}}, p = placedAt(w.god.act({ops: [join]}), 'fl tread-1');
+  ok(w.god.act({ops: [{op: 'move', id: 'tr', in: {parent: 'world'}, p, r: 0}, join]})); await goesOn(w);
+});
+test('the ladder: a sheet joined to joists lying on the ground', {timeout: 240000}, async (t) => {
+  const w = await world(t, {names: ['Ada']}), x = w.ax + 11, z = w.az + 8;
+  ok(w.god.act({ops: [...[0, 1, 2, 3, 4].map((i) => ({op: 'place', def: 'core/deck-joist@1', name: `j${i}`, p: [x + (i - 2) * SPAN, z], r: R})), {op: 'place', def: 'core/plywood-sheet@2', name: 'sh', p: [x, z + 6], r: 0}]})); await w.tick(20);
+  const p = placedAt(w.god.act({ops: [{op: 'connect', a: {id: 'sh', connector: 'on-2'}, b: {id: 'j2', connector: 'top'}}]}), 'j2 top');
+  ok(w.god.act({ops: [{op: 'move', id: 'sh', in: {parent: 'world'}, p, r: 0}, ...[0, 1, 2, 3, 4].map((i) => ({op: 'connect', a: {id: 'sh', connector: `on-${i}`}, b: {id: `j${i}`, connector: 'top'}}))]})); await goesOn(w);
+});
+async function beamInTheAir(t) {
+  const {w, frames, bays} = await released(t), {Ada, Bo} = w.souls, b = bays.filter((x) => x.height > 0.9)[0], sa = seatAt(w, b.a, b.seats[0]), sb = seatAt(w, b.b, b.seats[1]), beam = w.idOf('beam5');
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: [(sa[0] + sb[0]) / 2, (sa[2] + sb[2]) / 2 + (sa[2] > 0 ? -0.15 : 0.15)], r: 0}]})); await w.tick(30);
+  const q = w.E()[beam].pose.p; await w.at(Ada, q[0] - 2, q[2] + 1.2); await w.at(Bo, q[0] + 2, q[2] + 1.2); await w.tick(10);
+  const cap = offers(w, Ada).find((c) => c.verb === 'connect-beam-with'); ok(await act(w, Ada, {capability: cap.id, params: {column: b.column, height: b.height, with: 'Bo'}})); await w.tick(5);
+  const inv = offers(w, Bo).find((c) => c.id.startsWith('accept:')); if (inv) ok(await act(w, Bo, {capability: inv.id, params: {revision: 1}}));
+  await until(w, () => w.E()[beam].pose.p[1] > 0.3, 2500); assert.ok(w.E()[beam].pose.p[1] > 0.3, 'it is in the air');
+  return {w, frames, beam};
+}
+test('the ladder: a frame laid flat under a beam in the air, so a verb lands on what no longer stands', {timeout: 900000}, async (t) => {
+  const {w, frames, beam} = await beamInTheAir(t), fa = frames[0], others = [...new Set(w.E()[fa].connections.map((c) => c.to))].filter((id) => id !== beam), m = w.god.model.entities.get(fa);
+  ok(w.god.act({ops: [...others.map((id) => ({op: 'remove', id})), {op: 'move', id: fa, in: {parent: 'world'}, p: [m.p[0] - 3, m.p[2]], r: 0}]})); await goesOn(w, 800);
+});
+test('the ladder: a frame removed under a beam in the air, so a verb lands on nothing', {timeout: 900000}, async (t) => {
+  const {w, frames, beam} = await beamInTheAir(t), fa = frames[0], others = [...new Set(w.E()[fa].connections.map((c) => c.to))].filter((id) => id !== beam);
+  ok(w.god.act({ops: [...others.map((id) => ({op: 'remove', id})), {op: 'remove', id: fa}]})); await goesOn(w, 800);
+});
+test('shared building brings the ladder, and an explicit false turns it off', async () => {
+  assert.match(factory.rulesVersion, /\+souls-repair\//);
+  assert.doesNotMatch((await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: false})).rulesVersion, /\+souls-repair\//);
+  assert.doesNotMatch((await marsFactory({...GREEN_FIELD_WORLD})).rulesVersion, /\+souls-repair\//);
 });
 
 test('R12: with the flag off, nothing is offered and no project exists', {timeout: 120000}, async (t) => {

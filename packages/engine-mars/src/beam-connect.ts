@@ -286,12 +286,15 @@ export function beamBays(w: WorldState, beamId: string, near = 3.5): BeamBay[] {
   return out.sort((x, y) => x.height - y.height || (x.column < y.column ? -1 : 1));
 }
 
-/** #1250: what a god's edit leaves, judged where it lands, on the whole group. A frame or beam whose `connected` claim the rule
- *  no longer supports stands on the ground instead, as a god's joined upright does: an edit can change what a frame it never
- *  touched is judged on, and extending a bay shouldn't rewind the world. Runs in the fold, so replay does the same. This is a
+/** #1250, #1150: what the rule no longer supports stands on the ground instead, as a god's joined upright does: the frames and
+ *  beams of a group something has just changed, judged on the whole group. An edit can change what a frame it never touched is
+ *  judged on, and extending a bay shouldn't rewind the world. It runs where the change lands, so replay does the same. This is a
  *  courtesy, not the guarantee: whatever it doesn't catch is the repair ladder's. Returns the ids it stood down. */
 export function settleFrames(rt: Runtime): string[] {
-  const ids = [...new Set(framesStand(rt).flatMap((d) => d.subjects ?? []))];
+  const ids = [...new Set(framesStand(rt).flatMap((d) => d.subjects ?? []))].filter((id) => rt.world.entities[id]).sort();
+  for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
+  return ids;
+}
   for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
   return ids;
 }

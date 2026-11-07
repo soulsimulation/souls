@@ -143,6 +143,17 @@ test('the Soul\'s own direct act pauses the plan; say does not; holding a postur
   } finally { f.destroy(); }
 });
 
+test('#485: a sit taken over from the seat ends done, and its plan still pauses, as on a replaced step', async () => {
+  const f = eventsFixture(['Roger']);
+  try {
+    const p = (await f.post('Roger', '/v1/edge/plan', {steps: [{do: 'walk:pond'}, {do: 'walk:mill'}]})).body.plan;
+    f.actor.set([...f.actor.receipts.keys()].at(-1)!, 'completed', 'seat.kept', 'Still seated: the newer action goes on from the seat.');
+    await flush(); f.plans.tick(); await flush();
+    const now = (await f.get('Roger', `/v1/edge/plan/${p.id}`)).body.plan;
+    assert.equal(now.state, 'paused'); assert.match(now.reason, /own act/); assert.equal(f.actor.acts.length, 1, 'the next step did not start');
+  } finally { f.destroy(); }
+});
+
 test('invalid intents refuse honestly without a plain-word substitute; seconds the capability refuses are dropped', async () => {
   const f = eventsFixture(['Roger']);
   try {
