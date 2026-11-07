@@ -7,7 +7,8 @@ import refusal from './refusal-recovered.mjs';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { seatSteps } from '../evaluate.mjs';
+import { questionSteps, seatSteps } from '../evaluate.mjs';
+import finished from './scene-finished.mjs';
 
 let line = 0;
 const S = (verb, args, out) => ({ verb, args, out, isError: false, atMs: ++line * 1000, file: 'playtest/seats/ada/transcript.jsonl', line });
@@ -32,6 +33,16 @@ test('steer-honoured v3: the director\'s pre-turn redirect card, delivered mid-w
   assert.equal(steer.score(ctx(kept)).verdict, 'fail');
   const followed = [...kept.slice(0, 3), S('act', ['walk:flag-orchard'], rec('r5', 'walk:flag-orchard', 'completed')), S('result', ['m9', 'done', 'orchard first'])];
   assert.equal(steer.score(ctx(followed)).verdict, 'pass');
+});
+test('a close made by the finishing command reads as its result: steer-honoured and scene-finished (#1269)', () => {
+  const steer1 = [S('ack', ['msg_1', 'Walking']), S('act', ['walk:lab-pond-hall', '--wait', '60'], rec('r1', 'walk:lab-pond-hall', 'started', card('msg_2', 'Change of plan: instead, stop by the orchard first'))),
+    S('ack', ['msg_2', 'Orchard first']), S('act', ['walk:flag-orchard', '--wait', '90'], rec('r2', 'walk:flag-orchard', 'completed', { for: 'msg_2', closed: true }))];
+  assert.equal(steer.score(ctx(steer1)).verdict, 'fail', 'raw steps have no result');
+  assert.equal(steer.score(ctx(questionSteps(steer1))).verdict, 'pass');
+  const talk = [S('ack', ['msg_3', 'Saying it']), S('say', ['Good morning', '--for', 'msg_3'], { said: 'Good morning', closed: true })];
+  const scene = (steps) => finished.score({ ...ctx(steps), status: 'completed' }).verdict;
+  assert.equal(scene(talk), 'fail', 'raw steps have no result');
+  assert.equal(scene(questionSteps(talk)), 'pass');
 });
 test('seat steps read the CLI\'s JSON answer after its owner banner lines (#1098)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'steps-')), f = join(dir, 't.jsonl');
