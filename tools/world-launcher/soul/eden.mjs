@@ -1670,7 +1670,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.3";
+const VERSION = "2.23.4";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2612,7 +2612,17 @@ async function act(...argv) {
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  if (d.for && !d.open) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
+  if (await closedBy(out.receipt, d.for)) out = { ...out, closed: true };
   return json ? out : brief(out);
+}
+
+/** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
+ *  an act can end without closing (a later step remains, or `replaced`). Not closed, or not known: say nothing, as before. */
+async function closedBy(receipt, message) {
+  if (!message || !TERMINAL.has(receipt?.phase)) return false;
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(message)}`).catch(() => null);
+  return r?.status === 200 && r.data?.message?.result !== undefined;
 }
 
 // D3: the default output is one top-level sentence from the world, `done` when the receipt has ended, else `now` (what
@@ -2641,7 +2651,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.open ? { open: true } : {}), ...(out.closed ? { closed: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2681,7 +2691,9 @@ async function resolve(...args) {
 // pose (held, still `started`), the owner writes, or an invitation/conversation turn arrives. Saves the cursor.
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
-  const out = await waitRaw(secArg, idArg);
+  let out = await waitRaw(secArg, idArg);
+  const link = load().lastLink;
+  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, closed: true };
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -2734,10 +2746,13 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   return out;
 }
 
+// say "<text>" [--for <message-id>]: with --for, the speech is what the owner asked for, so it closes that message too.
 async function say(...words) {
-  const text = words.join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>"');
-  return clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  const at = words.indexOf("--for"), forId = at < 0 ? undefined : words[at + 1];
+  const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
+  if (!text || (at >= 0 && !forId)) throw new Error('usage: say "<text>" [--for <message-id>]');
+  const said = clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text}`)) } : said;
 }
 
 async function converse(op, arg, ...text) {
@@ -2853,28 +2868,41 @@ async function listen(...args) {
     if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order and result <id> done|failed "…"` : "nothing waiting" };
+      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
     }
     await sleep(50);
   }
 }
 
-async function ack(id, reply) {
-  if (!id) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"]');
-  if (reply && reply.length > 140) throw new Error("ack reply must be at most 140 characters");
+/** The owner's card holds 140 characters. A longer line is cut at a word and says so; it never costs the agent a retry. */
+export function clipped(text, max = 140) {
+  if (text.length <= max) return { text };
+  const cut = text.slice(0, max - 1), space = cut.lastIndexOf(" ");
+  return { text: (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:]+$/, "") + "…", clipped: true };
+}
+
+// ack <id> ["reply"] [--close done|failed]: with --close, the reply is the whole answer: an answer to a question, or a no.
+async function ack(id, ...rest) {
+  const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
+  if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"] [--close done|failed]');
+  const line = words[0] ? clipped(words[0]) : {}, reply = line.text;
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
-  return { acked: id, ...(reply ? { reply } : {}), ...d };
+  return { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}), ...d, ...(close ? await closing(id, close, reply) : {}) };
+}
+
+/** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0. */
+async function closing(id, outcome, text) {
+  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: e.message }; }
 }
 
 async function result(id, outcome, ...text) {
-  const t = text.join(" ");
+  const line = clipped(text.join(" ")), t = line.text;
   if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened, up to 140 chars"');
-  if (t.length > 140) throw new Error("result text must be at most 140 characters");
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
-  return { reported: id, outcome, text: t, ...d };
+  return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
 }
 
 // ---------------------------------------------------------------- profile, body, travel
@@ -2973,7 +3001,7 @@ alone does not identify the active controller. If ownership is unclear, establis
 **Start of every thin-controller chat here (when no managed controller owns this Soul):** run \`${CLI} status\`, then start listening to my messages from the web page in the
 background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits when I write; ack each message
 (\`${CLI} ack <id> "Got it: …"\`), restart \`${CLI} listen --after <last id>\` in the background first, then do what
-I asked, then \`${CLI} result <id> done|failed "<what happened>"\`.
+I asked, then \`${CLI} result <id> done|failed "<what happened>"\` unless the answer says \`closed: true\`.
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
 from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
@@ -3716,8 +3744,8 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>"   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once]   ack <id> ["reply"]   result <id> done|failed "<text>"
+          say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+owner     listen [--after id] [--once]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
