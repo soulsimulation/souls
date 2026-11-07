@@ -104,7 +104,7 @@ to the list, so a Soul moved in with `import` starts with no trusted site. `upgr
 Reconciling needs the account's list, which `/v1/me` gives a dev identity. A delegated Soul token sees only its own Soul,
 so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one.
 A window code stands in for the account there: `doctor --for <CODE>` (`@<world> doctor --for <CODE>` for another world: a code goes
-only to its own world) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name, and `create <name> --for <CODE>` for a name
+only to the world the home records for that Soul, and an imported Soul's world comes from its file, so import only your own export) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name, and `create <name> --for <CODE>` for a name
 the account already holds reconnects that Soul instead of making a second one. The code conveys no control: approval
 still does. Without a code, a taken name stays `name-taken` and reveals nothing.
 

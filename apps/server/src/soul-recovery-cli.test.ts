@@ -67,6 +67,16 @@ test('create in a fresh folder for a Soul the account owns reconnects it; anyone
   assert.equal(s.f.db.soulByName(s.f.host.worldId, 'Wren')?.id, wren.id);
 });
 
+for (const [name, typed] of [['Мира', ['мира', ' Мира']], ['Zoë', ['ZOË', 'Zoe\u0308']]] as const) test(`${name}, however it is typed, is that Soul: case, spacing or composed form never makes a second`, async t => {
+  const s = await site(t), soul = await s.make(s.folder('one'), name);
+  for (const [i, asked] of typed.entries()) {
+    const fresh = s.folder(`fresh-${i}`); await fresh.run('register', s.world);
+    assert.equal((await fresh.run('create', asked, '--for', await s.code())).soulId, soul.id, JSON.stringify(asked));
+  }
+  const adopter = s.folder('adopter'); await adopter.run('register', s.world);
+  assert.equal((await adopter.run('adopt', typed[0], '--for', await s.code())).soulId, soul.id, 'adopt folds the same way');
+});
+
 test('adopt finds a Soul by name with a window code, and never creates one', async t => {
   const s = await site(t), wren = await s.make(s.folder('one'), 'Wren');
   const fresh = s.folder('two'); await fresh.run('register', s.world);
@@ -92,6 +102,15 @@ test('doctor --for lists what the account holds and this home lacks; without a c
   const wrong = await fresh.run('doctor', '--for', 'ZZZZ-ZZZZ');
   assert.deepEqual(wrong.adoptable, [], 'a code that means nothing lists nothing');
   assert.match(wrong.worlds[0].note, /unknown here or has expired/);
+});
+
+test('a world that can\'t list the Souls just now says so; it doesn\'t blame the code', async t => {
+  const s = await site(t), home = s.folder('one'); await s.make(home, 'Wren');
+  const code = await s.code();
+  let out = await home.run('doctor', '--for', code);
+  for (let i = 0; i < 6; i++) out = await home.run('doctor', '--for', code);
+  const note = out.worlds.map((w: { note?: string }) => w.note).join(' ');
+  assert.match(note, /could not list/); assert.doesNotMatch(note, /unknown here or has expired/);
 });
 
 test('a retried create stays the request it was, before and after its approval', async t => {
