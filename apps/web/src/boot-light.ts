@@ -14,6 +14,7 @@ export function followBootLight(): void {
     const disc = boot?.querySelector<HTMLElement>('.arrival-disc'), bar = boot?.querySelector('progress');
     const { loaded, total, known } = assetBytes.snapshot();
     if (!disc || !bar || !known || !total) return;
+    peak = Math.max(peak, bar.value / 1000);   // the code share the page's own script already showed
     const next = Math.max(peak, downloadShare(loaded / total));   // #1266: the download's share, as the app's light
     if (next - peak < 0.005 && peak) return;
     peak = next; bar.value = Math.round(peak * 1000);

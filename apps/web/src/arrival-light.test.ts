@@ -35,6 +35,7 @@ test('first paint is the same picture: black, the disc and the words, and no car
   assert.doesNotMatch(html, /viewer-arrival-card|viewer-arrival-spinner|Arriving/);
   assert.match(html, /early-world-poster[\s\S]*dataset\.fill/, 'a phone\'s poster does not wait for the app\'s code: the boot light finishes the arrival');
   assert.match(html, /worldName[\s\S]*textContent=n/, 'it names the world from the page, as text, and nothing else');
+  assert.match(html, /__simCodeBytes[\s\S]*getEntriesByType\('resource'\)/, '#1266: the code share is counted in bytes from the first paint');
   assert.match(css, /\.viewer-arrival\{[^}]*background:#000/);
 });
 
