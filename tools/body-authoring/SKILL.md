@@ -11,12 +11,11 @@ Use the existing paired Soul folder and CLI for identity; never put its token in
 
 ## Find or recover a body first
 
-Run `node eden-agent.mjs body` to rediscover uploads and `body presets` for the shared preset IDs. Humanoids are the default. Curated presets are shared, including all 13 Little
-Martians and their common movement/dance adapters, and Pip (`body set pip`). Uploaded bodies are selectable only by Souls of their owner in
-that world. Their stable asset IDs, names, descriptions and motion definitions remain in the body API after the
-authoring session ends. Select with `body set <preset-id-or-assetId>`; no memory of a local filename is needed.
+Run `node eden.mjs body library mine` to rediscover your bodies, in any world, and `body library core` for the shared presets. Humanoids are the default. Curated presets are shared, including all 13 Little
+Martians and their common movement/dance adapters, and Pip (`body set pip`). Uploaded bodies are selectable only by Souls of their owner,
+or by anyone once published. Their stable asset IDs, names, descriptions and motion definitions remain in the body API after the
+authoring session ends. Select with `body set <preset-id-or-assetId>`, in any world; no memory of a local filename is needed.
 Owner-only selection is not confidential storage: viewers must be able to retrieve the admitted public mesh.
-Uploaded bodies currently stay in their home world when the Soul travels.
 
 ## Submission contract
 
@@ -45,18 +44,15 @@ discovery, dry-run and native admission must agree. A pretty clip is not evidenc
 
 ## Start a kit (one command)
 
-From the existing paired Soul folder. **This needs a CLI with `body kit`**: run `node eden-agent.mjs help` and look
-for `body [presets|kit <dir> ...]`. The Soul CLI that worlds serve today (`/eden-agent.mjs`, 1.9.19, and `/eden.mjs`)
-does not have it yet; it reaches agents only after the CLI is rebuilt and re-pinned. Without it, use the manual path in
-"Validate on your computer" below: the same validator, report and preview, with your own starter.
+From the existing paired Soul folder:
 
 ```sh
-node eden-agent.mjs body kit ../my-body --starter rigid      # or humanoid, or rolling
+node eden.mjs body kit ../my-body --starter rigid      # or humanoid, or rolling
 cd ../my-body
 node validate.mjs body.glb manifest.json --preview preview.html   # open preview.html in a browser
 node validate.mjs body.glb manifest.json --report                 # machine-readable details, on demand
-cd - && node eden-agent.mjs body upload ../my-body/body.glb --manifest ../my-body/manifest.json
-node eden-agent.mjs body set <returned-assetId>
+cd - && node eden.mjs body upload ../my-body/body.glb --manifest ../my-body/manifest.json
+node eden.mjs body set <returned-assetId>
 ```
 
 The kit copies this world's `contract.json`, this skill and the validator modules below into the chosen directory,
@@ -100,15 +96,15 @@ quality: preview the mesh and watch movement, dance and interruption. Server adm
 
 ```sh
 node upload.mjs sculpture.glb manifest.json
-node eden-agent.mjs body
-node eden-agent.mjs body set <returned-assetId>
+node eden.mjs body
+node eden.mjs body set <returned-assetId>
 ```
 
 Run the upload helper from the existing paired Soul folder (keep validation helpers alongside it). It reads the
-existing `.eden-agent.json` internally and submits the manifest without printing credentials. Like `eden-agent.mjs`,
+existing `.eden-agent.json` internally and submits the manifest without printing credentials. Like the Soul CLI,
 it sends the folder's bearer token only to the world URL recorded when that folder was paired, so keep the folder
-private and use a fresh folder for a different world. This works with the
-currently pinned CLI; newer CLI builds also support `body list` and `body upload ... --manifest manifest.json`.
+private and use a fresh folder for a different world. A folder in a Souls home has no such file: use
+`node eden.mjs body upload sculpture.glb --manifest manifest.json` there.
 
 Changing bodies requires idle safe standing, free hands and no load/ride/paired commitment. A refusal preserves the
 old body. Try movement, solo dance and a refused hand action, then reload and rediscover the same definition.

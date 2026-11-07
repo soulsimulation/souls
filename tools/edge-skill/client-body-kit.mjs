@@ -102,9 +102,9 @@ export async function starterSource(starter,{origin,world=origin,info,seed,fetch
 }
 
 /** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report. */
-export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaultValidate}){
- const opts=parseKitArgs(args),dir=resolve(opts.dir),state=load();
- if(!state.world)throw Error('Run this from a paired Soul folder (node eden-agent.mjs register <world-url>)');
+export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaultValidate,cli='node eden-agent.mjs',base=process.cwd()}){
+ const opts=parseKitArgs(args),dir=resolve(base,opts.dir),state=load();
+ if(!state.world)throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
  const r=await call('/v1/edge/body');if(r.status!==200)throw Error(`kit: body discovery answered HTTP ${r.status}`);
  const info=r.data,origin=new URL(state.world).origin;
  if(!info.available||!info.authoring?.skill)throw Error('kit: this world does not admit uploaded bodies');
@@ -121,9 +121,9 @@ export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaul
  writeFileSync(join(dir,'kit.json'),JSON.stringify(kit,null,1)+'\n');
  const validation=runValidate(dir);
  return {kit:opts.dir,starter:opts.starter,source:start.source,files:readdirSync(dir).sort(),validation,
-  recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:'node eden-agent.mjs body set <assetId or preset>'},
+  recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:`${cli} body set <assetId or preset>`},
   next:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`,
-   `from the paired folder: node eden-agent.mjs body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,'node eden-agent.mjs body set <returned assetId>']};
+   `from the paired folder: ${cli} body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,`${cli} body set <returned assetId>`]};
 }
 function defaultValidate(dir){
  const r=spawnSync(process.execPath,['validate.mjs','body.glb','manifest.json'],{cwd:dir,encoding:'utf8',timeout:60_000});
