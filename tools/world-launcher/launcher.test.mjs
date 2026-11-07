@@ -1,6 +1,6 @@
 // node --test tools/world-launcher/launcher.test.mjs
-// Uses fake world processes (fake-world.mjs) on one block of 25 ports from LAUNCHER_TEST_PORT_BASE (default 6200, which
-// CI uses): base+0..19 (proxy base+19, children base+11..18; the smaller launchers below take base+0..10), the flood
+// Uses fake world processes (fake-world.mjs) on one block of 25 ports from LAUNCHER_TEST_PORT_BASE (default: a free
+// block): base+0..19 (proxy base+19, children base+11..18; the smaller launchers below take base+0..10), the flood
 // launcher base+20..21 and the Eyes launcher base+22..24. Set the base to run beside other local processes.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,8 +12,9 @@ import { openLauncher } from './launcher.mjs';
 import { slugFor, listTemplates } from './registry.mjs';
 import { productionSettings, decorateCommand, shadowsExisting } from './production.mjs';
 import { backoffMs } from './children.mjs';
+import { testPort } from '../../apps/server/test/test-port.ts';
 
-const BASE = Number(process.env.LAUNCHER_TEST_PORT_BASE ?? 6200);
+const BASE = Number(process.env.LAUNCHER_TEST_PORT_BASE ?? await testPort(25));
 if (!Number.isInteger(BASE) || BASE < 1024 || BASE > 65535 - 24) throw Error(`LAUNCHER_TEST_PORT_BASE must be 1024–65511 (got ${process.env.LAUNCHER_TEST_PORT_BASE})`);
 const at = (offset) => BASE + offset;
 const PORT = at(19), RANGE = [at(11), at(18)];
@@ -109,6 +110,18 @@ test('proxy: request bodies, host header, SSE streaming and upgrades pass throug
     let buf = ''; s.on('data', (d) => { buf += d; if (buf.includes('101') && !buf.includes('PING')) s.write('ping'); if (buf.includes('PING')) { s.destroy(); yes(buf); } }); s.on('error', no);
   });
   assert.match(echoed, /101 Switching/); assert.match(echoed, /PING/);
+});
+test('#1141: the read cache keeps whole answers and answers a matching tag itself', async () => {
+  const A = '/w/genes-valley/v1/edge/public/souls/s_tagged', asked = (tag) => api(A, { headers: { 'if-none-match': tag } });
+  const cold = await asked('"t1"');   // the first caller's tag must not be what the shared entry is filled with
+  assert.equal(cold.status, 304); assert.equal(cold.headers.get('etag'), '"t1"'); assert.equal(cold.headers.get('x-sim-cache'), 'miss'); assert.equal(await cold.text(), '');
+  const plain = await api(A); assert.equal(plain.status, 200); assert.equal(await plain.text(), '{"soul":"s_tagged"}', 'the next caller reads the whole answer');
+  const hit = await asked('W/"t1"'); assert.equal(hit.status, 304, 'a weak form matches'); assert.equal(hit.headers.get('etag'), '"t1"'); assert.ok(hit.headers.get('x-sim-cache'));
+  const stale = await asked('"old"'); assert.equal(stale.status, 200); assert.equal(await stale.text(), '{"soul":"s_tagged"}', 'a tag that does not match reads it all');
+  // callers sharing one flight, the first of them with a tag: the others still read the whole answer
+  const flight = await Promise.all([api(`${A}2`, { headers: { 'if-none-match': '"t1"' } }), api(`${A}2`), api(`${A}2`)]);
+  assert.deepEqual(await Promise.all(flight.map(async (r) => [r.status, (await r.text()).length > 0])), [[304, false], [200, true], [200, true]]);
+  assert.equal(await (await api('/w/genes-valley/conditional')).text(), '0', 'the world never saw a tag');
 });
 test('the launcher notes looks, agents and previews; previews need a god token', async () => {
   await api('/w/genes-valley/?shot=1&eye=1,2,3');
