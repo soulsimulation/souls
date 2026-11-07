@@ -484,14 +484,24 @@ export class MarsEngine implements Engine {
     return !!grid && clearanceAt(grid, [e.pose.p[0], e.pose.p[2]]) >= this.bodyRadiusV1(e);
   }
   private tryRelocateV1(id: string): boolean { const e = this.ents[id]; try { return this.restoreHumanPoseV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: e.human.level }, this.bodyRadiusV1(e)); } catch { return false; } }
-  /** Contained entries don't fault again, and leave the list once they have been quiet for a hold. A key that fired last tick
-   *  is a break still standing, and a body inside something may walk out of it. Anything else on the list only absorbs what has
-   *  no plan, so the list never switches off rung 1 for a move that started a break. */
+  /** Did this step take a body further into the break it is already in? Nearer the solid thing, or nearer the other body. */
+  private pressesInV1(v: { code: string; subjects?: string[] }, copy: Map<string, RefusalCopy>): boolean {
+    const ents = this.ents, was = (id: string) => copy.get(id)?.pose.p ?? ents[id]?.pose.p, ids = (v.subjects ?? []).filter(id => ents[id]);
+    if (v.code !== 'collision.human-static') { const [a, b] = ids, [p, q] = [was(a), was(b)]; return !!p && !!q && Math.hypot(ents[a].pose.p[0] - ents[b].pose.p[0], ents[a].pose.p[2] - ents[b].pose.p[2]) < Math.hypot(p[0] - q[0], p[2] - q[2]); }
+    const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
+    return ids.some(id => {
+      const e = ents[id], c = copy.get(id), grid = c && spatial.levelAt(c.level ?? 0, [c.pose.p[0], c.pose.p[2]]); if (!grid || !e.human) return false;
+      const now = clearanceAt(grid, [e.pose.p[0], e.pose.p[2]]); return now < this.bodyRadiusV1(e) && now < clearanceAt(grid, [c!.pose.p[0], c!.pose.p[2]]);
+    });
+  }
+  /** Contained entries don't fault again, and leave the list once they have been quiet for a hold. A key that fired
+   *  last tick is a break still standing, and a body inside something may walk out of it, never further in. Anything else on
+   *  the list only absorbs what has no plan, so the list never switches off rung 1 for a move that started or deepened a break. */
   private stillContainedV1(seen: number, copy: Map<string, RefusalCopy>) {
     const rt = this.rt, key = containedKey, list = this.world.containedV1!, tick: number = rt.tick, entries = new Map(list.map(c => [key(c), c]));
     const fresh = rt.violations.splice(seen) as (Diag & { subjects?: string[] })[], firing = new Set<string>();
     for (const v of fresh) {
-      const own = entries.get(key(v)), entry = own ?? entries.get(containedByRule(v.code)), standing = own?.until === tick - 1 + CONTAINED_HOLD_TICKS;
+      const own = entries.get(key(v)), entry = own ?? entries.get(containedByRule(v.code)), standing = own?.until === tick - 1 + CONTAINED_HOLD_TICKS && !v.code.startsWith('motion.') && !this.pressesInV1(v, copy);
       const plan = entry && !standing ? this.refusalPlanV1(v, copy, tick) : null;
       if (entry && (!plan || plan.relocate)) firing.add(key(entry));   // a relocation that can't answer it is still this break firing
       if (!entry || plan) rt.violations.push(v as any);
@@ -541,13 +551,13 @@ export class MarsEngine implements Engine {
     return v => known.has(containedKey(v)) || known.has(containedByRule(v.code));
   }
   /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
-  stopAllV1(why: { code: string; message: string }): number {
-    let stopped = 0;   // what this call changed, so a host knows if a replay has to make the same stops
-    const cancel = (id: string) => this.cancelOrAbandonV1(id, why);
+  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): number {
+    let stopped = 0;   // what this call changed, deadlines too, so a host knows if a replay has to make the same stops
+    const cancel = (id: string) => { try { this.cancelOrAbandonV1(id, why); } catch (e) { console.error('[engine] a stop could not end its action:', String(e).slice(0, 200)); } };   // this rung can't fail
     for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
-      if (p.stopping && p.action && this.rt.isActive(p.action)) { p.stopByV1 ??= this.rt.tick + LADDER_STOP_TICKS; continue; }   // already on its way down: its own reason and cleanup stand, for a while
+      if (p.stopping && p.action && this.rt.isActive(p.action)) { if (p.stopByV1 === undefined) { p.stopByV1 = from + LADDER_STOP_TICKS; stopped++; } continue; }   // already on its way down: its own reason and cleanup stand, for a while
       if (p.action && this.rt.isActive(p.action)) cancel(p.action);
-      if (p.action && this.rt.isActive(p.action)) { stopped++; p.stopping = why; p.refusalsV1 ??= []; p.stopByV1 = this.rt.tick + LADDER_STOP_TICKS; continue; }
+      if (p.action && this.rt.isActive(p.action)) { stopped++; p.stopping = why; p.refusalsV1 ??= []; p.stopByV1 = from + LADDER_STOP_TICKS; continue; }
       stopped++;
       try { this.end(p, p.build ? 'cancelled' : 'failed', why); } catch { this.programs.delete(p.id); if (this.byActor.get(p.actor) === p.id) this.byActor.delete(p.actor); }
     }

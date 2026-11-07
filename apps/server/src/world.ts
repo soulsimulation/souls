@@ -267,7 +267,7 @@ export class WorldHost {
     const stepReplay=()=>{
       const before=this.engine.runtime.violations.length;
       let out:ReturnType<Engine['step']>;
-      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
+      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;bootTick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
       this.advanceLives();replayTicks++;bootTick(this.engine.world.tick);
       replayedRefusals+=out.refusals?.length??0;
       if(this.durableClockV1){
@@ -548,7 +548,7 @@ export class WorldHost {
     const previousViolations = this.engine.runtime.violations.length;
     const tStep = performance.now();
     try { out = this.stepEngine(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
-    catch (error) { for (const r of out!?.refusals ?? []) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); this.recoverFault(error); this.faultedPrograms = null; if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
+    catch (error) { for (const r of out!?.refusals ?? []) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
     this.noteCleanTick();
     this.advanceLives();
     this.kernel.tick = this.engine.world.tick;
@@ -1541,7 +1541,7 @@ export class WorldHost {
     if (this.bootedFaulted) { this.bootedFaulted = false; this.snapshotSoon ??= 'first clean tick since a faulted head'; }
     if (!this.faultTicks.length) return;
     this.pruneFaultTicks();
-    if (this.stepFailing && this.faultTicks.length < STEP_FAILING_FAULTS / 4) { this.stepFailing = null; this.snapshotSoon ??= 'steps are clean again'; }   // the first clean baseline since
+    if (this.stepFailing && this.faultTicks.length < STEP_FAILING_FAULTS * 3 / 4) { this.stepFailing = null; this.snapshotSoon ??= 'steps are clean again'; }   // the first clean baseline since
   }
   /** #1150: a step that throws before its tick moves still moves the clock, live and in a replay alike, so a cooldown never
    *  waits on a tick that isn't coming and a replay can't spin on one. */
@@ -1601,7 +1601,7 @@ export class WorldHost {
   }
   /** The replayable half of rung 3: no engine step, so no rule can fire during it. */
   private applyLastRung(recipe: RecoveryRecipe) {
-    this.engine.stopAllV1!(REWOUND);
+    this.engine.stopAllV1!(REWOUND, recipe.untilTick);
     const skipped: number[] = [];   // one event that won't re-apply costs only itself. It fails the same way on every replay.
     for (const e of recipe.events) { try { this.apply(e, true); } catch { skipped.push(e.seq); } this.seq = e.seq; }
     if (skipped.length) recipe.lastRung!.skipped = skipped;
@@ -1621,22 +1621,30 @@ export class WorldHost {
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
     const stopped = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
-    if (repeat && !stopped && !keys.length) { this.tellQuietly(false); return; }
+    if (!keys.length) this.snapshotSoon ??= 'a step threw';   // the next clean tick is what a boot should start from
+    if (repeat && !stopped && !keys.length) return;
     if (!repeat) this.inPlaceAt.set(rule, tick);
-    if (!keys.length) this.snapshotSoon ??= 'a step threw';   // the same: the next clean tick is what a boot should start from
     const inPlace = {...this.engine.containV1!(keys), stopped, reason: String(error).slice(0, 300)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
-    if (!repeat || keys.length) this.recordGlitch(stopped ? 'rewind' : 'contained', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
+    if (!repeat || keys.length || stopped) this.recordGlitch(stopped ? 'rewind' : 'contained', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
     for (const m of this.minds.values()) { m.pending = null; this.acc.dirty.add(m.soulId); }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a stop in place:', String(failure).slice(0, 200)); }
-    this.tellQuietly(true);
+    this.tellQuietly(() => { this.flush(); this.heartbeat(); });
   }
-  /** What goes out to clients after a stop in place. A broken head can break that too, and this rung can't fail. */
-  private tellQuietly(batch: boolean) {
-    try { if (batch) this.flush(); this.heartbeat(); }
-    catch (failure) { console.error('[world] could not tell clients about a stop in place:', String(failure).slice(0, 200)); }
+  /** What goes out to clients from a faulted tick. A broken head can break that too, and this rung can't fail. */
+  private tellQuietly(tell: () => void) {
+    try { tell(); }
+    catch (failure) { console.error('[world] could not tell clients about a fault:', String(failure).slice(0, 200)); }
+  }
+  /** #1150: a faulted tick keeps the ordinary beat, so what was said and logged still reaches clients and nothing piles up. What
+   *  the step refused stands if the head did, and its row is how a relocated Soul hears of it. */
+  private afterFaultedTick(head: WorldHost['engine'], refusals?: EngineRefusalV1[]) {
+    if (!this.clockAvailable) return;
+    if (this.engine === head) for (const r of refusals ?? []) { void this.enqueue('rules', 'world:refusal', {refusal: r}); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }
+    const now = this.engine.world.tick;
+    this.tellQuietly(() => { if (now % BATCH_TICKS === 0) this.flush(); if (now % HEARTBEAT_TICKS === 0) this.heartbeat(); });
   }
   /** Where each Soul's body is now (sorted by entity id). */
   private soulPoses(): Map<string, RecoveryPose> {

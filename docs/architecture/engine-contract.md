@@ -109,7 +109,8 @@ would break a rule is not applied ([#1150](https://github.com/soulsimulation/sou
   refused pose for that one tick.
 - **The one relocation exception.** A `collision.human-static` naming a body that did not move means the world landed on it
   (a god edit past the bridge's own walk-out). There is no pose to go back to, so it stands at the nearest free spot,
-  logged and told to the Soul: the only time a body changes place without moving there.
+  logged and told to the Soul. Apart from a body a rung 3 finds inside something, below, this is the only time a body
+  changes place without moving there.
 - `step().refusals` reports each one. The host logs it as a `rules` event from `world:refusal`. Replay reads those only to
   compare the count, and a difference is reported, not fatal.
 
@@ -134,8 +135,9 @@ can only see across ticks, like `motion.teleport`, is contained the same way.
 
 An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
 once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
-of it. Anything else on the list only absorbs what has no plan: a body that moves into forbidden geometry under a held key
-is refused by rung 1 as it would be with nothing held. The list keeps eight subjects of a rule; past that the rule goes on
+of it, never further in: a move that takes it nearer the solid thing, inside its own width, or nearer the other body, goes to
+rung 1 as any move would. A `motion.*` key never counts as standing. Anything else on the list only absorbs what has no plan:
+a body that moves into forbidden geometry under a held key is refused by rung 1 as it would be with nothing held. The list keeps eight subjects of a rule; past that the rule goes on
 whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that names someone new each tick writes a few rows
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
 started what it stopped. A body inside something is relocated once.
@@ -145,7 +147,8 @@ ladder boots. A world made with the ladder can't go back: it needs these rules t
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
 a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
-`clock-frontier.replay-differs`. What ran since the last snapshot can be lost that way, so a snapshot follows any throw.
+`clock-frontier.replay-differs`. What ran since the last snapshot can be lost that way, so the next clean tick after a throw
+asks for a snapshot.
 
 **An action whose step or stop throws ends alone** (`engine.action-threw`, logged and counted as a refusal). Its whole tree ends,
 its Soul is told, and whatever it held is set down where it is, on the bearer's level: the one time a load is let go without its
@@ -155,8 +158,10 @@ it flat would keep the joints and the crew at the other end could never let go. 
 in the same way, since nobody can finish it with them now. What a part does to a rule after that is the ladder's like anything else.
 
 **A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
-that long, and is then abandoned the same way. So a stop that is refused (`support.release-premature`) or a set-down that can't
-finish doesn't hold a body for good. A stop a Soul asked for isn't bounded here.
+that long, counted from the fault's tick, and is then abandoned the same way. So a stop that is refused
+(`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for gets the same
+deadline the next time the ladder fires, and that deadline is written as a stop in place, so a replay has it. Until then it isn't
+bounded here.
 
 Going back doesn't answer a rule twice: a rule a rung 3 has gone back for stays on the head after that, a thrown step counting as
 one rule, so what returns past the hold writes a small row, not a whole world. A restart allows it one more.
@@ -165,7 +170,7 @@ one rule, so what returns past the hold writes a small row, not a whole world. A
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get
 anywhere, so acts are refused with `world.step-failing`, nothing rewinds, the launcher alerts as for a halt, and a due
 snapshot is taken at once on a faulted tick. That snapshot is marked: it serves a boot, never a rewind, and one that won't
-capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below a quarter of that, and a clean snapshot follows at once. What still reaches it is a throw outside
+capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below three quarters of that, and a clean snapshot follows at once. While it lasts a faulted tick keeps the ordinary beat of batches and heartbeats. What still reaches it is a throw outside
 any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
 placed clears it, and a rung 3 keeps god edits, so it survives a restart until then.
 

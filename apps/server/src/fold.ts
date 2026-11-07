@@ -332,7 +332,7 @@ export function replayFromGenesis(factory: { genesis(seed: string): unknown; cre
     const recipe=repair.payload.recovery as import('./world.ts').RecoveryRecipe;
     if (!factory.restore) throw new Error('recovery requires a checkpoint factory');
     engine=factory.restore(structuredClone(recipe.baseline.runtime)); kernel=structuredClone(recipe.baseline.kernel!); counts={...recipe.baseline.counts};
-    if (recipe.lastRung) { engine.stopAllV1!(REWOUND); for (const e of recipe.events) { try { foldEvent(engine,kernel,e,counts); } catch { /* as the live rewind: it costs only itself */ } } engine.setClockV1!(recipe.untilTick); engine.containV1!(recipe.lastRung.contained ?? []); }
+    if (recipe.lastRung) { engine.stopAllV1!(REWOUND, recipe.untilTick); for (const e of recipe.events) { try { foldEvent(engine,kernel,e,counts); } catch { /* as the live rewind: it costs only itself */ } } engine.setClockV1!(recipe.untilTick); engine.containV1!(recipe.lastRung.contained ?? []); }
     else {
     for (const m of recipe.baseline.minds) if (m.pending && recipe.excluded.includes(m.pending.card)) engine.stop(m.pending.program);
     for (const actor of recipe.edge?.stopActors ?? []) { const program=engine.programOf(actor); if (program) engine.stop(program); }
