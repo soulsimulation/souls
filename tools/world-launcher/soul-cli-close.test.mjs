@@ -62,7 +62,8 @@ test('a message the world closed keeps its outcome: say --for and ack --close ne
   const w = await world(t, {results: {msg_1: {text: 'walk:a failed: blocked', outcome: 'failed'}}}), r = await w.cli('say', 'I could not', '--for', 'msg_1');
   assert.equal(r.code, 0); assert.equal(r.json.said.id, 'sp_1', 'the speech still goes'); assert.equal(r.json.closed, false); assert.equal(r.json.already, 'failed'); assert.match(r.json.why, /already closed/);
   assert.equal(posted(w.seen, '/result').length, 0);
-  assert.equal((await w.cli('ack', 'msg_1', 'It went fine', '--close', 'done')).json.closed, false); assert.equal(posted(w.seen, '/result').length, 0);
+  const late = await w.cli('ack', 'msg_1', 'It went fine', '--close', 'done');
+  assert.equal(late.json.closed, false); assert.equal(late.json.reply, undefined, 'nothing went to the card'); assert.equal(posted(w.seen, '/result').length, 0); assert.equal(posted(w.seen, '/ack').length, 0);
 });
 
 test('a closed message leaves no default link: the next act can\'t replace the world\'s line', async t => {
@@ -74,10 +75,13 @@ test('a closed message leaves no default link: the next act can\'t replace the w
   assert.equal(posted(w.seen, '/act')[1][2].for, undefined, 'say --for');
 });
 
-test('ack --close that does not close still gets its text to the card', async t => {
-  const w = await world(t, {reads: 500}), r = await w.cli('ack', 'msg_1', 'A mill by the pond.', '--close', 'done');
+test('ack --close that does not close still gets its text to the card, and arms no default link', async t => {
+  const answer = () => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'wave:here', phase: 'completed', done: 'waved.'}});
+  const w = await world(t, {reads: 503, actAnswer: answer}), r = await w.cli('ack', 'msg_1', 'A mill by the pond.', '--close', 'done');
   assert.equal(r.code, 0); assert.equal(r.json.closed, false); assert.equal(posted(w.seen, '/result').length, 0);
   assert.deepEqual(posted(w.seen, '/msg_1/ack')[0][2], {reply: 'A mill by the pond.'});
+  assert.equal(w.seen.filter(([m, u]) => m === 'GET' && u.includes('/inbox/msg_1')).length, 1, 'one quick read, no retries');
+  await w.cli('act', 'wave:here'); assert.equal(posted(w.seen, '/act')[0][2].for, undefined, 'an unrelated act must not close what --close declined to');
   const ok = await world(t), two = await ok.cli('ack', 'msg_2', 'one\ntwo', '--close', 'done');
   assert.equal(two.code, 0); assert.equal(two.json.closed, true); assert.equal(posted(ok.seen, '/msg_2/result')[0][2].text, 'one two', 'a result is one line');
 });

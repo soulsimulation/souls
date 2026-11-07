@@ -2923,8 +2923,9 @@ async function ack(id, ...rest) {
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
   const shut = close ? await closing(id, close, reply) : {};
   if (shut.closed) return { ...said, closed: true };
+  if (shut.already) return { acked: id, ...shut };   // a closed message is acked already: nothing to send
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
-  if (!shut.already) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
+  if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
   return { ...said, ...d, ...shut };
 }
 
