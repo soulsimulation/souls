@@ -33,6 +33,8 @@ const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
 const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval"]);
+/** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
+const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
 const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
@@ -41,7 +43,8 @@ const IMPORTED_RUNTIME = [".eden-serve.json"];
 const GOD_LEGACY = ".eden-god.json", GOD_KEPT = /^\.eden-god\.(cache|bakes|claim-c_[0-9a-f]{8})\.json$/;
 
 const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
-const isHome = (root) => existsSync(join(root, "config.json"));
+/** A home with its config moved aside is still a home: doctor finds its Souls again. */
+const isHome = (root) => existsSync(join(root, "config.json")) || existsSync(join(root, "souls"));
 
 /** Where this folder's Souls live. SOULS_HOME wins; else the nearest `.souls/` going up, stopping at the user's home
  *  folder without crossing it; a `.eden-agent.json` in this very folder is a legacy one-Soul folder. */
@@ -64,8 +67,17 @@ function writeJson(file, value, mode = 0o600) {
 }
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, "utf8")); }
-  catch (e) { if (e.code === "ENOENT") return fallback; throw new Error(`${basename(file)} cannot be read: ${e.message}`); }
+  catch (e) {
+    if (e.code === "ENOENT") return fallback;
+    // A parser quotes what it choked on: the credentials file's bytes never reach a message.
+    throw new Error(`${basename(file)} cannot be read${basename(file) === CREDENTIALS ? "" : `: ${e.message}`}.${UNREADABLE[basename(file)] ?? ""}`);
+  }
 }
+/** What a person can do about a home file that no longer parses. Nothing here rewrites it: it may still be mendable by hand. */
+const UNREADABLE = {
+  "credentials.json": " It holds every token, so restore it from a backup if you have one. If not, move it aside: memory is safe, list still shows your Souls, and adopt <id> --for <CODE> gets each one back.",
+  "config.json": " Restore it from a backup if you have one. If not, move it aside: the next command finds your Souls in souls/ again.",
+};
 
 /** What a home never commits: tokens, and a Soul's memory, which holds private conversations. A home made before a line was added gets it. */
 function keepOutOfGit(root) {
@@ -119,10 +131,10 @@ function splitSecrets(s) {
 }
 
 /** The Soul a person named, among those that can be addressed. `sel` is name, id, name@world or id@world. */
-function selectSoul(cfg, sel) {
+function selectSoul(cfg, sel, { cmd } = {}) {
   const at = sel.lastIndexOf("@"), who = at > 0 ? sel.slice(0, at) : sel, world = at > 0 ? sel.slice(at + 1) : null;
   const named = Object.entries(cfg.souls).filter(([id, e]) => (id === who || norm(e.name) === norm(who)) && (!world || e.world === world || e.at === world));
-  const live = named.filter(([, e]) => e.state === "active");
+  const live = named.filter(([, e]) => e.state === "active" || (e.state === "unpaired" && LOCAL_READS.has(cmd)));
   if (live.length === 1) return live[0][0];
   if (live.length > 1) throw new Error(`Several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
   if (named.length) throw new Error(`${named[0][1].name} is ${named[0][1].state} and takes no commands here. See: list, doctor, adopt.`);
@@ -137,7 +149,7 @@ const looksLikeSelector = (cfg, word) => word.startsWith("@") ? !!cfg.worlds[wor
 function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
   const live = Object.entries(cfg.souls).filter(([, e]) => e.state === "active");
   const atWorld = selector?.startsWith("@") ? selector.slice(1) : null;
-  const named = selector && !atWorld ? selectSoul(cfg, selector) : null;
+  const named = selector && !atWorld ? selectSoul(cfg, selector, { cmd }) : null;
   if (selector && !atWorld && !named) throw new Error(`No Soul here answers to ${selector}.`);
   if (SEAT_COMMANDS.has(cmd)) {
     if (cmd === "register" && url) return { seat: keyOf(cfg.worlds, url) };
@@ -162,6 +174,8 @@ function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
     if (cfg.default && cfg.souls[cfg.default]?.state === "active") return { soul: cfg.default };
     throw new Error(`Several Souls live here: ${live.map(([, e]) => norm(e.name)).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
   }
+  const unpaired = Object.entries(cfg.souls).filter(([, e]) => e.state === "unpaired");
+  if (LOCAL_READS.has(cmd) && unpaired.length === 1) return { soul: unpaired[0][0] };
   return cfg.currentWorld ? { seat: cfg.currentWorld } : {};
 }
 
@@ -218,6 +232,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().awaitingFirstWorld) updateConfig((c) => { if (c.awaitingFirstWorld) { delete c.awaitingFirstWorld; c.trustedOrigins ??= [originOf(url)]; } });
   }
   const setCurrentWorld = (key) => updateConfig((c) => { c.currentWorld = key; });
+  /** The owner's answer to the reflective pass, or that they've been asked, beside its caps. */
+  const noteConsolidation = (patch) => updateConfig((c) => { c.consolidation = { ...(c.consolidation && typeof c.consolidation === "object" && !Array.isArray(c.consolidation) ? c.consolidation : {}), ...patch }; });
   const seat = (key) => { const dir = at("pending", key); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "seat", key, dir }; };
   // The id names a folder and it comes from a world or a file, so it must be one folder name here.
   const soul = (id) => { if (!SOUL_ID.test(id ?? "")) throw new Error(`"${String(id).slice(0, 40)}" is not a Soul id; nothing was kept for it.`); const dir = at("souls", id, "runtime"); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "soul", id, dir }; };
@@ -391,13 +407,27 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().souls[me.id]) return { imported: false, soul: me.id, reason: "This Soul already lives in this home." };
     const key = me.world ? ensureWorld(me.world) : null;
     cpSync(folder, at("souls", me.id), { recursive: true, filter: (p) => basename(p) !== "runtime" && basename(p) !== CREDENTIALS });
-    updateConfig((c) => { c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" }; });
-    return { imported: true, soul: me.id, world: key, paired: false };
+    updateConfig((c) => { c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" }; c.currentWorld ??= key; });
+    if (me.world) writeJson(join(soul(me.id).dir, STATE_FILE), { world: me.world, soul: me.id });
+    return { imported: true, soul: me.id, world: key, paired: false, next: `adopt ${me.id} --for <CODE> takes control again; memory and status work now` };
+  }
+
+  /** A Soul on disk that config.json lost (a config rebuilt by hand): back on the list, paired only if its token is still here. */
+  function rediscover() {
+    const creds = credentials();
+    for (const id of existsSync(at("souls")) ? readdirSync(at("souls")) : []) {
+      if (!SOUL_ID.test(id) || config().souls[id]) continue;
+      const me = readJsonQuietly(at("souls", id, "soul.json")), url = me?.world;
+      if (!url) continue;
+      const key = ensureWorld(url);
+      updateConfig((c) => { c.souls[id] = { name: plainName(me.name) || id, world: key, state: creds.souls[id]?.[key]?.token ? "active" : "unpaired" }; c.currentWorld ??= key; });
+    }
   }
 
   /** The account against the home, world by world. `ask(url, bearer)` answers {status, data}. Prints no token. */
-  async function doctor(ask, { alive }) {
-    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], orphanCredentials: [], locksCleared: [] };
+  async function doctor(ask, { alive, accountSouls = null, codeWorld = null }) {
+    rediscover();
+    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], unpaired: [], orphanCredentials: [], locksCleared: [] };
     const retire = (id) => {
       updateConfig((c) => { c.souls[id].state = "retired"; c.souls[id].retiredAt = new Date().toISOString(); });
       out.retired.push({ id, name: config().souls[id].name });
@@ -434,9 +464,13 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (r.status === 401 && r.data?.code === "control.revoked" && r.data?.reason === "retired") retire(id);
         else out.controlLost.push({ id, name: cfg.souls[id].name, why: r.data?.reason ?? r.data?.code ?? `http-${r.status}` });
       }
-      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable ? { note: "This world shows a Soul token its own Soul only, so account Souls that are not here cannot be listed. Adopt one by its id from the Soul card." } : {}) });
+      // A window code belongs to one world: it goes to that world and no other.
+      const asked = reachable && accountSouls && key === codeWorld, got = asked ? await accountSouls(w.url) : null, held = Array.isArray(got) ? got : null;
+      for (const s of held ?? []) if (config().souls[s.id]?.state !== "active") out.adoptable.push({ id: s.id, name: plainName(s.name) || s.id, world: key });
+      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: got?.note ?? (asked ? "That window code is unknown here or has expired. Ask your person for the one on this world's open page." : `This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: @${key} doctor --for <CODE>.`) } : {}) });
     }
     const after = config();
+    for (const [id, e] of Object.entries(after.souls)) if (e.state === "unpaired") out.unpaired.push({ id, name: e.name, world: e.world, next: `adopt ${id} --for <CODE>` });
     for (const [id, worlds] of Object.entries(creds.souls)) if (!after.souls[id]) for (const world of Object.keys(worlds)) out.orphanCredentials.push({ principal: id, world });
     for (const world of Object.keys(creds.worlds)) if (!after.worlds[world]) out.orphanCredentials.push({ principal: "account", world });
     for (const world of Object.keys(creds.gods)) if (!after.gods[world]) out.orphanCredentials.push({ principal: "god", world });
@@ -448,8 +482,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (lock.name === ".eden-serve.lock") try { unlinkSync(join(dir, SERVE_SOCKET)); } catch { /* no socket left */ }
       }
     }
-    if ((statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
-    out.healthy = !out.retired.length && !out.controlLost.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
+    if (existsSync(at(CREDENTIALS)) && (statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
+    out.healthy = !out.retired.length && !out.controlLost.length && !out.unpaired.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
     return out;
   }
 
@@ -465,9 +499,10 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
-  return { root, config, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  if (!existsSync(at("config.json"))) rediscover();
+  return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
-return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
+return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
 // </inline home.mjs>
 
@@ -1108,6 +1143,16 @@ function settingsOf(config) {
   return { callsPerDay: whole(c.callsPerDay, CAPS.callsPerDay, 100), tokensPerPass: whole(c.tokensPerPass, CAPS.tokensPerPass, 1_000_000), everyHours: whole(c.everyHours, CAPS.everyHours, EVERY_HOURS_MAX) };
 }
 
+/** The owner's answer: a pass spends their money and sends journal text to a model, so nothing runs until they say yes. `null` is not asked yet. */
+const answerOf = (config) => (config?.enabled === true || config?.enabled === false ? config.enabled : null);
+/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. Each sentence is
+ *  checked against what a pass does: a cap of zero means no pass can run, so no question. */
+function offerOf(config) {
+  const { callsPerDay, tokensPerPass, everyHours } = settingsOf(config);
+  if (!callsPerDay || !tokensPerPass) return null;
+  return `This Soul's journal has outgrown what it can look back on. A reflective pass has a model read a Soul's oldest journal days and write a short summary into MEMORY.md, so the Soul carries those days in its brief and its journal stops growing. The pages it read then go from the Soul's own search, replaced by that summary; the full log stays on this machine. Here, with no model, a pass also gathers notes written more than once and proposes lines for SOUL.md for you to apply or ignore. A yes covers every Soul in this home, now and later${everyHours ? "" : ", and only when a pass is asked for: idle passes are off in your settings"}. Cost: your own claude CLI on your account: for each Soul, up to ${callsPerDay} passes a day of about ${tokensPerPass} tokens, each with a $${PASS_USD} limit. What leaves this machine: each Soul's oldest journal days, which include what worlds said, sent to that model, and nothing else of the Soul's. Yes: consolidate on. No: consolidate off.`;
+}
+
 /** The stand-in a world with fake minds gets: the same plumbing, with no model. */
 function fakeMind(prompt) {
   const lines = prompt.split("\n").filter((l) => l.startsWith("- ")).map(clean);
@@ -1281,7 +1326,7 @@ function writeMemoryMd(soulDir, { lines, taken, notes }) {
   writeFileSync(tmp, `${owner}${MARK}\n\n${body}\n`, { mode: 0o600 });
   renameSync(tmp, file);
 }
-return { CAPS, JOURNAL_BYTES, SUMMARY, settingsOf, fakeMind, ownerMind, overBudget, nextPassIn, consolidate };
+return { CAPS, JOURNAL_BYTES, SUMMARY, settingsOf, answerOf, offerOf, fakeMind, ownerMind, overBudget, nextPassIn, consolidate };
 })();
 // </inline consolidate.mjs>
 
@@ -1670,7 +1715,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.0";
+const VERSION = "2.23.4";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -1751,7 +1796,7 @@ async function note(expected, observed) {
 // runtime folder, so every lock, socket and small state file below stays per Soul. A legacy folder works as ever.
 const INVOKED = process.cwd();
 const userPath = (p) => resolvePath(INVOKED, p);   // a file the person named, wherever this run is working
-let HOME = null, SEAT = null, DELEGATE = null;
+let HOME = null, SEAT = null, DELEGATE = null, AT_WORLD = null;
 const load = () => (HOME ? (SEAT ? HOME.load(SEAT) : {}) : existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {});
 function save(patch) {
   const s = { ...load(), ...patch };
@@ -2064,14 +2109,33 @@ function briefNow() {
   try { const brief = memoryHere()?.brief({ bytes: HOME.config().briefBytes }); return brief ? { brief } : {}; }
   catch (e) { calm(`memory: ${e.message}`); return {}; }
 }
-// consolidate [--force]: the owner's model CLI under the owner's caps; with fake minds the stand-in, and with no CLI, no pass.
+// consolidate [--force]: the owner's model CLI under the owner's caps, once they've said yes; with fake minds the stand-in, and with no CLI, no pass.
 async function runConsolidate({ force = false } = {}) {
   needMemory();
-  const out = await soulConsolidate.consolidate(soulFolder(), { ...(process.env.BRAIN_MODE === "fake" ? {} : { ask: soulConsolidate.ownerMind() }), caps: soulConsolidate.settingsOf(HOME.config().consolidation), force });
+  const asked = HOME.config().consolidation;
+  if (soulConsolidate.answerOf(asked) !== true) return { skipped: "off", next: `Your owner's choice: ${CLI} consolidate on, once they've said yes.` };
+  const out = await soulConsolidate.consolidate(soulFolder(), { ...(process.env.BRAIN_MODE === "fake" ? {} : { ask: soulConsolidate.ownerMind() }), caps: soulConsolidate.settingsOf(asked), force });
   MEMORY?.memory.reopen();
   return out;
 }
-const consolidateCommand = async (...args) => runConsolidate({ force: args.includes("--force") });
+// consolidate on|off: the owner's answer, for the whole home. consolidate asked: the question has been put, so it isn't put again.
+const consolidateCommand = async (...args) => {
+  const [word] = args;
+  if (word !== undefined && !["on", "off", "asked", "--force"].includes(word)) throw new Error("usage: consolidate [on|off|asked|--force]");
+  if (word === undefined || word === "--force") return runConsolidate({ force: word === "--force" });
+  needMemory(); HOME.noteConsolidation(word === "asked" ? { asked: true } : { enabled: word === "on" });
+  return { consolidation: word, note: word === "on" ? `An idle serve looks on the owner's schedule. ${CLI} consolidate runs a pass now.` : word === "off" ? "No pass will run." : "Nothing runs until your owner answers, and the question won't come up again." };
+};
+/** For `status`: what the owner said, or the question, once there's something for a pass to do. Memory never fails the command it rides on. */
+function consolidationStatus() {
+  try {
+    const asked = HOME.config().consolidation, answer = soulConsolidate.answerOf(asked);
+    if (answer !== null) return { consolidation: { state: answer ? "on" : "off" } };
+    if (asked?.asked === true) return { consolidation: { state: "asked" } };
+    const offer = soulConsolidate.overBudget(joinPath(soulFolder(), "memory")).length ? soulConsolidate.offerOf(asked) : null;
+    return offer ? { consolidation: { state: "not asked", offer } } : {};
+  } catch (e) { calm(`memory: ${e.message}`); return {}; }
+}
 function needMemory() {
   const memory = memoryHere();
   if (memory) return memory;
@@ -2143,9 +2207,10 @@ const clean = (d) => {
 
 // ---------------------------------------------------------------- setup and pairing
 
-async function register(world) {
+async function register(world, { asked = true } = {}) {
   const prev = load();
   if (!world && !prev.world) throw new Error("usage: register <world-url>");
+  const named = asked && !!world;   // a url a person typed; a bare register reuses what is saved, which may have come from a file
   const w = (world ?? prev.world).replace(/\/+$/, "");
   if (!/^https?:\/\/.+\/w\/[a-z0-9-]+$/.test(w)) throw new Error("world must look like https://host/w/<world>");
   if (prev.world && prev.world !== w && prev.soul) throw new Error(`This folder already belongs to another world's Soul. Use a fresh folder, or move this one into a Souls home first: ${CLI} import`);
@@ -2153,21 +2218,21 @@ async function register(world) {
   const cfg = ok(await call("/v1/config", { as: "none" }), "config");
   if (cfg.accountAuthRequired) {
     save({ accountAuth: true, worldId: cfg.worldId });
-    noteWorld(w, cfg, true);
+    noteWorld(w, cfg, true, named);
     return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)` };
   }
   if (!cfg.devAuth) throw new Error("This world accepts neither account approvals nor self-made identities.");
   save({ accountAuth: false, identity: prev.identity ?? "agent-" + randomBytes(12).toString("hex") });
-  noteWorld(w, cfg, false);
+  noteWorld(w, cfg, false, named);
   return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"` };
 }
 
-function noteWorld(url, cfg, accountAuth) {
+function noteWorld(url, cfg, accountAuth, asked = true) {
   if (!HOME) return;
   const c = cfg.soulClient, key = HOME.ensureWorld(url, { name: soulHome.plainName(cfg.worldName) || undefined, worldId: cfg.worldId, accountAuth, ...(c ? { contract: c.contract, bundle: c.version, minClient: c.minVersion } : {}) });
   if (c && soulHome.newerThan(c.minVersion, VERSION)) throw new Error(`This world needs eden ${c.minVersion} or newer; this is ${VERSION}. Run: ${CLI} upgrade ${key}`);
   HOME.setCurrentWorld(key);
-  HOME.madeFor(url);
+  if (asked) HOME.madeFor(url);   // only a world a person named earns trust: a url out of an imported file never does
 }
 
 function forOption(argv) {
@@ -2204,6 +2269,7 @@ function publicApproval(a, world) {
     approvalId: a.id, status: a.status, name: a.name, soulId: a.soulId ?? null,
     approvalURL: `${world}/#approve/${a.id}`,
     ...(a.inWindow ? { delivery: "window" } : {}),
+    ...(a.mode === "repair" ? { reconnects: `${a.name} already exists: this brings it here, nothing new is made.` } : {}),
     ...(a.reason?.message ? { reason: a.reason.message } : {}),
     next: a.status === "pending" ? `Tell your human to approve it in their open Sim window (backup: the link). Then: ${CLI} approval wait` : undefined,
   };
@@ -2319,14 +2385,42 @@ async function adopt(...argv) {
   const { rest: [who], code } = forOption(argv);
   if (!who) throw new Error("usage: adopt <name|soulId> [--for <CODE>]");
   const forCode = code ? ["--for", code] : [];
+  const kept = keptSoul(who);
+  if (kept) await seatFor(kept);   // a Soul this home knows answers from its own world's seat, registered or not
   if (/^s_[A-Za-z0-9_-]+$/.test(who)) return pair(who, ...forCode);
-  const s = load(), kept = HOME.principals().find((p) => soulHome.norm(p.name) === soulHome.norm(who) && p.world === SEAT?.key);
   if (kept) return pair(kept.id, ...forCode);
-  if (!s.identity) throw new Error(`This world shows a Soul token its own Soul only, so adopt ${who} by the id on its Soul card: ${CLI} adopt <soulId> --for <CODE>`);
+  const s = load();
+  if (s.accountAuth) {
+    if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>`);
+    try { return await startApproval({ name: who, existing: true }, code); }
+    catch (e) { if (/HTTP 400/.test(e.message) && soulHome.newerThan("2.23.5", HOME.config().worlds[SEAT?.key]?.bundle)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
+  }
+  if (!s.identity) throw new Error(`Register its world first: ${CLI} register <world-url>`);
   const owned = ok(await call("/v1/me", { as: "dev" }), "adopt").souls ?? [];
   const soul = owned.find((x) => soulHome.norm(x.name) === soulHome.norm(who));
   if (!soul) throw new Error(`Your account has no Soul called ${who} in this world.`);
   return pair(soul.id, ...forCode);
+}
+
+/** The Soul `adopt <who>` means in this home: one of this seat's world first. Elsewhere only a Soul that needs adopting, so a
+ *  Soul held safely in another world doesn't answer for this one's; @world keeps it to that world. */
+function keptSoul(who) {
+  const same = HOME.principals().filter((p) => p.state !== "retired" && (p.id === who || soulHome.norm(p.name) === soulHome.norm(who)));
+  const byId = same.find((p) => p.id === who);
+  if (byId) return AT_WORLD && byId.world !== AT_WORLD ? null : byId;   // an id is one Soul in one world, wherever this seat is
+  const here = same.filter((p) => p.world === SEAT?.key);
+  if (here.length || AT_WORLD) return here[0] ?? null;
+  const loose = same.filter((p) => p.state === "unpaired" || !HOME.load(HOME.soul(p.id)).token);
+  // A window code belongs to one world, and only the person knows which: with a world in hand, ask rather than send it to another.
+  if (loose.length > 1 || (loose.length && load().world)) throw new Error(`${who} could mean ${[...loose.map((p) => `the one in ${p.world}: ${CLI} @${p.world} adopt ${p.id} --for <CODE>`), ...(load().world ? [`one in ${SEAT.key}: ${CLI} @${SEAT.key} adopt ${who} --for <CODE>`] : [])].join("; or ")}`);
+  return loose[0] ?? null;
+}
+/** Adopt speaks from the seat of the Soul's own world. An imported Soul's world may not be registered in this home yet. */
+async function seatFor(kept) {
+  const url = HOME.config().worlds[kept.world]?.url;
+  if (!url) return;
+  if (SEAT?.key !== kept.world) { SEAT = HOME.seat(kept.world); process.chdir(SEAT.dir); }
+  if (load().accountAuth === undefined) await register(url, { asked: false });
 }
 
 async function devPair(id) {
@@ -2364,9 +2458,14 @@ async function approval(action = "status") {
 }
 
 async function status() {
-  const s = load();
+  const s = load(), loose = !s.token && HOME ? HOME.principals().filter((p) => p.state === "unpaired") : [];
+  if (loose.length && SEAT?.kind !== "soul" && !s.pendingApproval) return { paired: false, souls: loose.map((p) => ({ id: p.id, name: p.name, world: p.world })), why: "These Souls are in this home without a token. Their memory is safe here.", next: `${CLI} adopt <name> --for <CODE>   (the code is on your person's open world page)` };
   if (!s.world) return { paired: false, next: `${CLI} register <world-url>` };
   if (!s.token && s.pendingCreate) return { paired: false, world: s.world, arriving: s.pendingCreate.name, next: `${ARRIVING}: ${CLI} create "${s.pendingCreate.name}" to keep waiting` };
+  if (!s.token && SEAT?.kind === "soul") {
+    const e = HOME.config().souls[SEAT.id], asked = HOME.seatState(e?.world).pendingApproval?.input, waiting = asked?.soulId === SEAT.id || (!!asked?.name && asked.name === e?.name);
+    return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
+  }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
   const me = ok(await call("/v1/agent/me"), "status");
   if (HOME && SEAT?.id && me.soul?.name) HOME.named(SEAT.id, me.soul.name);
@@ -2377,7 +2476,7 @@ async function status() {
     listening: inbox.connected === true, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
     lastReceipt: s.lastReceipt ?? null,
-    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {}),
+    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()), ...consolidationStatus() } : {}),
     note: inbox.connected ? "A listen is open: owner messages reach this folder." : `Nobody is listening. Start: ${CLI} listen (in the background).`,
   };
 }
@@ -2401,27 +2500,57 @@ async function observe() {
   return d;
 }
 
-/** Phrase and all-term matches precede the legacy partial-term fallback. */
+/** Phrase and all-term matches precede the legacy partial-term fallback, and each ranks a word in the offer's id or name
+ *  (the label before its `[id]`, `(` or first comma) above a word only in its description. */
 export function rankCapabilities(list, search) {
   const terms = [...new Set(search.toLowerCase().split(/[\s,|]+/).filter(Boolean))];
   const normalize = value => String(value ?? '').toLowerCase().replace(/[-_/]+/g, ' ').replace(/\s+/g, ' ');
   const phrase = normalize(search).trim();
+  const hits = hay => terms.filter(t => hay.includes(normalize(t))).length;
+  const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
   return list.map((c, i) => {
     const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const count = terms.filter(t => hay.includes(normalize(t))).length;
-    return {c, i, count, tier: phrase && hay.includes(phrase) ? 2 : terms.length && count === terms.length ? 1 : 0};
-  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.count-a.count || a.i-b.i).map(x => x.c);
+    const name = normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')), named = tierOf(name);
+    return {c, i, count: hits(hay), names: hits(name), tier: named ? named + 2 : tierOf(hay)};
+  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
+const LABEL_MAX = 80;
+export function shortLabel(id, label) {
+  const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
+  if (text.length <= LABEL_MAX) return text;
+  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
+  const space = cut.lastIndexOf(" "); // a name with no spaces is cut where it stands, not back to its first word
+  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut.slice(0, -1)).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.(]+$/, "") + tail;
+}
+
+/** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
+ *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
+export function refusalList({ code, did_you_mean, candidates }) {
+  const said = new Map((did_you_mean ?? []).map((d) => [d.id, d])), byId = new Map((candidates ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set([...said.keys(), ...byId.keys()])], choice = /\.(choose|ambiguous)$/.test(code ?? ""), keep = choice ? 5 : 3;
+  const list = ids.slice(0, keep).map((id) => {
+    const d = said.get(id), c = byId.get(id), params = Object.keys(c?.params ?? {}), off = d?.available === false || c?.available === false;
+    const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
+    return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
+  });
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
+}
+const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
+
 async function caps(...args) {
-  let search, verb, all = false, limit = 60;
+  let search, verb, all = false, limit, json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--search") search = args[++i];
     else if (args[i] === "--verb") verb = args[++i];
     else if (args[i] === "--all") all = true;
     else if (args[i] === "--limit") limit = Number(args[++i]);
+    else if (args[i] === "--json") json = true;
     else search = (search ? search + " " : "") + args[i];
   }
+  // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
+  limit ??= search && !all ? 12 : 60;
   // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
   const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
   let list = d.capabilities ?? [];
@@ -2432,8 +2561,9 @@ async function caps(...args) {
   }
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
+    ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
     ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
-    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
+    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
 
@@ -2572,13 +2702,28 @@ async function act(...argv) {
   if (implicit && r.status === 400 && /owner message/.test(r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); r = await call("/v1/edge/act", { body }); }
   const d = ok(r, "act");
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
-  if (!d.accepted) return { accepted: false, code: d.code, reason: d.reason, ...(d.did_you_mean?.length ? { did_you_mean: d.did_you_mean.slice(0, 8) } : {}), ...(d.alternatives?.length ? { alternatives: d.alternatives.slice(0, 3) } : {}), ...(d.candidates?.length ? { candidates: d.candidates.slice(0, 5) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  if (!d.accepted) {
+    if (json) return d;
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  }
   let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
+  if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   return json ? out : brief(out);
+}
+
+/** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
+ *  an act can end without closing (a later step remains), and one the world called `open` at the start can close at its end.
+ *  `replaced` writes no line, so a result found then is an earlier act's. Not closed, or not known: say nothing, as before.
+ *  One quick try: the act has already ended, and this read must not hold its answer back. */
+async function closedBy(receipt, message) {
+  if (!message || !["completed", "failed"].includes(receipt?.phase)) return false;
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(message)}`, { retry: false, timeoutMs: 5000 }).catch(() => null);
+  return r?.status === 200 && r.data?.message?.result !== undefined;
 }
 
 // D3: the default output is one top-level sentence from the world, `done` when the receipt has ended, else `now` (what
@@ -2607,7 +2752,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2635,16 +2780,21 @@ function waitOption(argv) {
 }
 
 async function resolve(...args) {
-  if (!args.length) throw new Error('usage: resolve "<what to do>" [params-json]');
-  const body = parseActionArgs(args);
-  return ok(await call("/v1/edge/resolve", { body }), "resolve").resolve;
+  const words = args.filter((a) => a !== "--json");
+  if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
+  const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
+  if (r.ok !== false || words.length !== args.length) return r;
+  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
 // pose (held, still `started`), the owner writes, or an invitation/conversation turn arrives. Saves the cursor.
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
-  const out = await waitRaw(secArg, idArg);
+  let out = await waitRaw(secArg, idArg);
+  const link = load().lastLink;
+  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -2697,10 +2847,13 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   return out;
 }
 
+// say "<text>" [--for <message-id>]: with --for, the speech is what the owner asked for, so it closes that message too.
 async function say(...words) {
-  const text = words.join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>"');
-  return clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
+  const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
+  if (!text) throw new Error('usage: say "<text>" [--for <message-id>]');
+  const said = clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
 }
 
 async function converse(op, arg, ...text) {
@@ -2816,28 +2969,60 @@ async function listen(...args) {
     if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order and result <id> done|failed "…"` : "nothing waiting" };
+      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
     }
     await sleep(50);
   }
 }
 
-async function ack(id, reply) {
-  if (!id) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"]');
-  if (reply && reply.length > 140) throw new Error("ack reply must be at most 140 characters");
+/** The owner's card holds 140 characters. A longer line is cut at a word and says so; it never costs the agent a retry. */
+export function clipped(text, max = 140) {
+  if (text.length <= max) return { text };
+  const cut = text.slice(0, max - 1), space = cut.lastIndexOf(" ");
+  return { text: (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:]+$/, "") + "…", clipped: true };
+}
+
+// ack <id> ["reply"] [--close done|failed]: with --close, the reply is the whole answer: an answer to a question, or a no.
+async function ack(id, ...rest) {
+  const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
+  if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
+  const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
+  // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
+  // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
+  const shut = close ? await closing(id, close, reply) : {};
+  if (shut.closed) return { ...said, closed: true };
+  if (shut.already) return { acked: id, ...shut };   // a closed message is acked already: nothing to send
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
-  save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
-  return { acked: id, ...(reply ? { reply } : {}), ...d };
+  if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
+  return { ...said, ...d, ...shut };
+}
+
+/** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
+ *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
+ *  closed or is about to: `closed` here means this command closed it. */
+async function closing(id, outcome, text) {
+  const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
+  if (link?.message === id && link.receipt) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+    // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
+    if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
+  }
+  const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+  if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+  if (read.data?.message?.result !== undefined) {
+    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
+    return { closed: false, already: read.data.message.outcome, why: "already closed: nothing more to do" };
+  }
+  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
-  const t = text.join(" ");
-  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened, up to 140 chars"');
-  if (t.length > 140) throw new Error("result text must be at most 140 characters");
+  const line = clipped(text.join(" ")), t = line.text;
+  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
-  return { reported: id, outcome, text: t, ...d };
+  return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
 }
 
 // ---------------------------------------------------------------- profile, body, travel
@@ -2936,10 +3121,10 @@ alone does not identify the active controller. If ownership is unclear, establis
 **Start of every thin-controller chat here (when no managed controller owns this Soul):** run \`${CLI} status\`, then start listening to my messages from the web page in the
 background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits when I write; ack each message
 (\`${CLI} ack <id> "Got it: …"\`), restart \`${CLI} listen --after <last id>\` in the background first, then do what
-I asked, then \`${CLI} result <id> done|failed "<what happened>"\`.
+I asked, then \`${CLI} result <id> done|failed "<what happened>"\` unless the answer says \`closed: true\`.
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
-from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`candidates\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
+from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
 --wait, then \`${CLI} wait 60\` as needed. \`${CLI} caps --search "<thing>"\` lists current offers.
 
 For “take a seat” with no requested duration, use a durable fixture's exact sit offer with \`'{"seconds":1}' --for none --wait --json\` if it supports seconds. Verify \`here\` posture is seated and its seat matches the receipt's chosen slot before reporting. The seat stays occupied after the timed action; keep listening, without standing or canceling. Preserve requested durations; this does not apply to temporary ground poses. Default sitting receipts can stay open for ten minutes while already seated.
@@ -3563,8 +3748,8 @@ async function serveForeground() {
   async function reflect() {
     let next = REFLECT_BUSY_MS;   // whatever goes wrong in a look, there is another
     try {
-      const everyHours = soulConsolidate.settingsOf(HOME.config().consolidation).everyHours, memory = joinPath(soulFolder(), "memory");
-      if (!everyHours) return;
+      const asked = HOME.config().consolidation, everyHours = soulConsolidate.settingsOf(asked).everyHours, memory = joinPath(soulFolder(), "memory");
+      if (!everyHours || soulConsolidate.answerOf(asked) !== true) return;
       const quiet = !st.plan && !Object.values(st.receipts).some((r) => !ENDED.has(r.phase)) && Date.now() - (lastEventAt ?? 0) > REFLECT_QUIET_MS * TIME_SCALE;
       // A pass runs beside the serve, so waiting is manners: a world that never goes quiet doesn't get to stop it for good.
       reflectWaiting = quiet ? null : reflectWaiting ?? Date.now();
@@ -3671,16 +3856,16 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 
 setup     register <world-url>            create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
-memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [--force]
+memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all]   map   view [--map|--alt-only|--out f]
+look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>"   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once]   ack <id> ["reply"]   result <id> done|failed "<text>"
+do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+          say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+owner     listen [--after id] [--once]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
@@ -3703,9 +3888,11 @@ async function defaultCommand(sel) {
   const id = needHome().setDefault(sel);
   return { default: HOME.principals().find((p) => p.id === id) };
 }
-async function doctorCommand() {
+async function doctorCommand(...argv) {
+  const { code } = forOption(argv);
+  const accountSouls = code ? async (url) => { const r = await worldOnce(`${url}/v1/agent/approval/souls`, { method: "POST", headers: { "content-type": "application/json" }, body: { for: code }, timeoutMs: 25_000 }); return r.status === 200 ? r.data?.souls ?? [] : codeOf(r.data) === "code-unknown" ? null : { note: `This world could not list the account's Souls just now (${codeOf(r.data) ?? `http-${r.status}`}). Try again in a minute.` }; } : null;
   const ask = async (url, bearer) => { const { status, data } = await worldOnce(url, { method: "GET", headers: { authorization: `Bearer ${bearer}` }, timeoutMs: 25_000 }); return { status, data }; };
-  const out = await needHome().doctor(ask, { alive: pidAlive });
+  const out = await needHome().doctor(ask, { alive: pidAlive, accountSouls, codeWorld: AT_WORLD ?? HOME.config().currentWorld });
   for (const [world, w] of Object.entries(HOME.config().worlds)) {
     const { status, data } = await worldOnce(`${w.url}/v1/config`, { method: "GET", headers: {}, timeoutMs: 25_000 }), c = status === 200 ? data?.soulClient : null;
     if (!c) continue;
@@ -3800,6 +3987,7 @@ export function enterHome(argv) {
   let line = argv, selector;
   const cfg = HOME.config();
   if (first && !commands[first] && soulHome.looksLikeSelector(cfg, first)) { selector = first; line = argv.slice(1); }
+  AT_WORLD = selector?.startsWith("@") ? selector.slice(1) : null;
   // A Soul named like a command: the command wins, but `say here` was meant for the Soul and must not be said aloud.
   if (first && commands[first] && commands[second] && soulHome.looksLikeSelector(cfg, first)) throw new Error(`${first} is a command and a Soul here. For the Soul use its address: ${HOME.principals().find((p) => soulHome.norm(p.name) === first)?.address ?? `${first}@<world>`}`);
   const cmd = line[0];

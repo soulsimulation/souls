@@ -60,7 +60,8 @@ Mounted when `ACCOUNT_AUTH_REQUIRED=1` (`apps/server/src/accounts/routes.ts`).
 
 | Route | Who | Purpose |
 |---|---|---|
-| `POST /v1/agent/approval/start` | agent (6/min) | `{agentLabel, name \| soulId, description?, idempotencyKey, pollSecret}` → `approvalURL` (`…/#approve/<id>`), `intervalSeconds` |
+| `POST /v1/agent/approval/start` | agent (6/min) | `{agentLabel, name \| soulId, description?, idempotencyKey, pollSecret, for?, existing?}` → `approvalURL` (`…/#approve/<id>`), `intervalSeconds`. `for` is the window code; a `name` that code's account already holds becomes a reconnect of that Soul. `existing: true` refuses instead of making a new Soul |
+| `POST /v1/agent/approval/souls` | agent (6/min) | `{for}` → `souls: [{id, name}]`, what that window code's account holds in this world; `code-unknown` otherwise |
 | `POST /v1/agent/approval/poll`, `…/cancel` | agent | Poll (60/min) until approved, then receive the Soul token |
 | `POST /v1/account/window-code` | user | A short code the agent can quote so the owner's open window shows the request |
 | `GET /v1/account/approvals[/:id]` | user | Pending requests |
