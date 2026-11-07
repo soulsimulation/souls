@@ -51,7 +51,7 @@ arrival a visitor can show its local identity, before its travel row lands.
 `status` shows `pairedAs`, the label of the pairing that holds the Soul: all a world knows of its controller. The managed
 runtime's lease stays local to its journal.
 
-`status` is what a new chat runs first, so it always answers, with exit 0, and gives the world one try of five seconds. With
+`status` is what a new chat runs first, so a paired Soul always gets JSON with exit 0, and the world gets one try of five seconds, straight past `serve`. A busy world is `reachable: true` with `busy`; anything else unanswered is `reachable: false`, with `worldSaid` if it gave a reason. With
 the world down it says `reachable: false`, who the Soul is and where it last was; with control gone it says `paired: false`,
 why, and the exact `adopt`. `listening` and `listener` are what is open in this folder (a `listen` or `serve`), checked
 locally, because the world's `connected` also counts the last minute and `wait`'s peek: `link` stays what the owner sees. A

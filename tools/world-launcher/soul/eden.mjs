@@ -1715,7 +1715,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.6";
+const VERSION = "2.23.5";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -1859,8 +1859,8 @@ export async function flushNow() {
   try { await setNowLine(text); } catch (e) { console.error("now not set: " + e.message); }
 }
 /** The link state the owner sees (connected / disconnected and why) and the public `now` line, as the world says. */
-async function selfLink() {
-  const r = await call("/v1/edge/self/link");
+async function selfLink(get = (path) => call(path)) {
+  const r = await get("/v1/edge/self/link");
   if (r.status === 200) return { link: r.data.link, now: r.data.now ?? null };
   if (r.status === 401 && r.data?.code === "control.revoked") { const why = r.data.reason; return { link: { state: "disconnected", reason: why === "replaced" ? "replaced" : why === "revoked" || why === "refused" ? "revoked" : "stopped-listening", since: r.data.revokedAt ? Date.parse(r.data.revokedAt) : null }, now: null }; }
   return { link: null, now: null };
@@ -2469,20 +2469,28 @@ async function status() {
     return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
   }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
-  // One quick try: status is how a Soul finds out what is wrong, so it answers even when the world doesn't.
-  const r = await call("/v1/agent/me", { retry: false, timeoutMs: STATUS_WAIT_MS });
-  const known = { id: s.soul, name: HOME?.config().souls[s.soul]?.name };
-  if (r.status === 0 || r.status === 502 || r.status === 503 || r.status === 504) return { soul: known, paired: true, world: s.world, client: VERSION, reachable: false, ...listenerNow(), ...whereIWas(), ...briefNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
-  if (r.status === 401 && codeOf(r.data) === "control.revoked") return { soul: known, paired: false, world: s.world, control: r.data.reason ?? "revoked", why: r.data.message ?? "This folder no longer controls the Soul.", ...whereIWas(), ...briefNow(), next: r.data.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+  // One quick try, straight to the world: status is how a Soul finds out what is wrong, and a serve busy with a long write
+  // mustn't stand in front of it. Whatever the world does, the Soul still says who it is.
+  const direct = (path) => worldOnce(s.world + path, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: STATUS_WAIT_MS, recoverRead: true }).catch(() => ({ status: 0, data: {} }));
+  const r = await direct("/v1/agent/me");
+  if (r.status < 200 || r.status >= 300) {
+    const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
+    const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
+    return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
+  }
   const me = ok(r, "status");
   if (HOME && SEAT?.id && me.soul?.name) HOME.named(SEAT.id, me.soul.name);
   const inbox = me.inbox ?? {}, last = inbox.latest, here = listenerNow();
-  const self = await selfLink();
+  // An older world only has `latest`, so a newer message hides an unfinished one there.
+  const unfinished = inbox.unfinished ?? (last?.state === "acknowledged" && !last.result && !last.outcome ? [{ id: last.id, text: last.text }] : []);
+  const self = await selfLink(direct);
   return {
     soul: me.soul, paired: true, world: s.world, reachable: true, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
     ...here, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
-    ...(last?.state === "acknowledged" && !last.result && !last.outcome ? { unfinished: [{ id: last.id, text: last.text }] } : {}),
+    ...(unfinished.length ? { unfinished } : {}),
     lastReceipt: s.lastReceipt ?? null,
     ...whereIWas(), ...(HOME && SEAT?.kind === "soul" ? consolidationStatus() : {}), ...briefNow(),
     note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
@@ -2490,8 +2498,8 @@ async function status() {
 }
 /** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
 function listenerNow() {
-  const l = listenLockHolder(), v = readServeLock(), serving = v?.pid && pidAlive(v.pid);
-  const listener = l ? { kind: "listen", pid: l.pid, since: l.start ?? null } : serving ? { kind: "serve", pid: v.pid, since: v.start ?? null } : null;
+  const l = listenLockHolder(), v = serveHolder(), own = l && isOwnListen(l) ? l : null;
+  const listener = own ? { kind: "listen", pid: own.pid, since: own.start ?? null } : v ? { kind: "serve", pid: v.pid, since: v.start ?? null } : null;
   return { listening: !!listener, ...(listener ? { listener } : {}) };
 }
 const whereIWas = () => (HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {});
@@ -2515,27 +2523,57 @@ async function observe() {
   return d;
 }
 
-/** Phrase and all-term matches precede the legacy partial-term fallback. */
+/** Phrase and all-term matches precede the legacy partial-term fallback, and each ranks a word in the offer's id or name
+ *  (the label before its `[id]`, `(` or first comma) above a word only in its description. */
 export function rankCapabilities(list, search) {
   const terms = [...new Set(search.toLowerCase().split(/[\s,|]+/).filter(Boolean))];
   const normalize = value => String(value ?? '').toLowerCase().replace(/[-_/]+/g, ' ').replace(/\s+/g, ' ');
   const phrase = normalize(search).trim();
+  const hits = hay => terms.filter(t => hay.includes(normalize(t))).length;
+  const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
   return list.map((c, i) => {
     const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const count = terms.filter(t => hay.includes(normalize(t))).length;
-    return {c, i, count, tier: phrase && hay.includes(phrase) ? 2 : terms.length && count === terms.length ? 1 : 0};
-  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.count-a.count || a.i-b.i).map(x => x.c);
+    const name = normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')), named = tierOf(name);
+    return {c, i, count: hits(hay), names: hits(name), tier: named ? named + 2 : tierOf(hay)};
+  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
+const LABEL_MAX = 80;
+export function shortLabel(id, label) {
+  const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
+  if (text.length <= LABEL_MAX) return text;
+  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
+  const space = cut.lastIndexOf(" "); // a name with no spaces is cut where it stands, not back to its first word
+  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut.slice(0, -1)).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.(]+$/, "") + tail;
+}
+
+/** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
+ *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
+export function refusalList({ code, did_you_mean, candidates }) {
+  const said = new Map((did_you_mean ?? []).map((d) => [d.id, d])), byId = new Map((candidates ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set([...said.keys(), ...byId.keys()])], choice = /\.(choose|ambiguous)$/.test(code ?? ""), keep = choice ? 5 : 3;
+  const list = ids.slice(0, keep).map((id) => {
+    const d = said.get(id), c = byId.get(id), params = Object.keys(c?.params ?? {}), off = d?.available === false || c?.available === false;
+    const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
+    return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
+  });
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
+}
+const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
+
 async function caps(...args) {
-  let search, verb, all = false, limit = 60;
+  let search, verb, all = false, limit, json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--search") search = args[++i];
     else if (args[i] === "--verb") verb = args[++i];
     else if (args[i] === "--all") all = true;
     else if (args[i] === "--limit") limit = Number(args[++i]);
+    else if (args[i] === "--json") json = true;
     else search = (search ? search + " " : "") + args[i];
   }
+  // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
+  limit ??= search && !all ? 12 : 60;
   // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
   const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
   let list = d.capabilities ?? [];
@@ -2546,8 +2584,9 @@ async function caps(...args) {
   }
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
+    ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
     ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
-    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
+    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
 
@@ -2686,13 +2725,28 @@ async function act(...argv) {
   if (implicit && r.status === 400 && /owner message/.test(r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); r = await call("/v1/edge/act", { body }); }
   const d = ok(r, "act");
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
-  if (!d.accepted) return { accepted: false, code: d.code, reason: d.reason, ...(d.did_you_mean?.length ? { did_you_mean: d.did_you_mean.slice(0, 8) } : {}), ...(d.alternatives?.length ? { alternatives: d.alternatives.slice(0, 3) } : {}), ...(d.candidates?.length ? { candidates: d.candidates.slice(0, 5) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  if (!d.accepted) {
+    if (json) return d;
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  }
   let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
+  if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   return json ? out : brief(out);
+}
+
+/** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
+ *  an act can end without closing (a later step remains), and one the world called `open` at the start can close at its end.
+ *  `replaced` writes no line, so a result found then is an earlier act's. Not closed, or not known: say nothing, as before.
+ *  One quick try: the act has already ended, and this read must not hold its answer back. */
+async function closedBy(receipt, message) {
+  if (!message || !["completed", "failed"].includes(receipt?.phase)) return false;
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(message)}`, { retry: false, timeoutMs: 5000 }).catch(() => null);
+  return r?.status === 200 && r.data?.message?.result !== undefined;
 }
 
 // D3: the default output is one top-level sentence from the world, `done` when the receipt has ended, else `now` (what
@@ -2721,7 +2775,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2749,16 +2803,21 @@ function waitOption(argv) {
 }
 
 async function resolve(...args) {
-  if (!args.length) throw new Error('usage: resolve "<what to do>" [params-json]');
-  const body = parseActionArgs(args);
-  return ok(await call("/v1/edge/resolve", { body }), "resolve").resolve;
+  const words = args.filter((a) => a !== "--json");
+  if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
+  const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
+  if (r.ok !== false || words.length !== args.length) return r;
+  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
 // pose (held, still `started`), the owner writes, or an invitation/conversation turn arrives. Saves the cursor.
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
-  const out = await waitRaw(secArg, idArg);
+  let out = await waitRaw(secArg, idArg);
+  const link = load().lastLink;
+  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -2811,10 +2870,13 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   return out;
 }
 
+// say "<text>" [--for <message-id>]: with --for, the speech is what the owner asked for, so it closes that message too.
 async function say(...words) {
-  const text = words.join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>"');
-  return clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
+  const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
+  if (!text) throw new Error('usage: say "<text>" [--for <message-id>]');
+  const said = clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
 }
 
 async function converse(op, arg, ...text) {
@@ -2862,6 +2924,17 @@ export function lockIsLive(holder) {
   try { const cmd = execFileSync("ps", ["-o", "command=", "-p", String(holder.pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); return /listen/.test(cmd); }
   catch { return true; }   // no ps (or it failed): trust the live pid
 }
+/** Whether a lock's process is this Soul's own listen in this folder. A reused pid or a stray lock names something else, which is never ours to signal. */
+export function isListenOf(folder, command, cwd) {
+  if (!/eden\.mjs\s+(?:\S+\s+)?listen(?:\s|$)/.test(String(command ?? ""))) return false;
+  return cwd == null || cwd === folder;
+}
+function isOwnListen(holder) {
+  const soul = load().soul;
+  if (holder.soul && soul && holder.soul !== soul) return false;
+  let command; try { command = quietly("ps", ["-o", "command=", "-p", String(holder.pid)]); } catch { return true; }   // no ps: trust the live pid, as lockIsLive does
+  return isListenOf(realpathSync(process.cwd()), command, cwdOf(holder.pid));
+}
 export function listenLockHolder() { const h = readLock(); return h && lockIsLive(h) ? h : null; }
 export function takeListenLock() {
   const start = now(), mine = { pid: process.pid, start, beatAt: start, soul: load().soul ?? null };
@@ -2883,7 +2956,7 @@ export function takeListenLock() {
         if (age < LISTEN_STALE_MS) return { ok: false, holder };
         // alive but silent for a minute: stop it (it is this folder's own listen, same user), then take the lock
         process.stderr.write(`listen: the listener pid ${holder.pid} has not renewed its lock for ${Number.isFinite(age) ? Math.round(age / 1000) + " s" : "ever"}; stopping it and taking over\n`);
-        try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
+        if (isOwnListen(holder)) try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
       }
       try { renameSync(LISTEN_LOCK, `${LISTEN_LOCK}.stale-${process.pid}`); unlinkSync(`${LISTEN_LOCK}.stale-${process.pid}`); } catch { /* another listen took it over first */ }
     }
@@ -2892,7 +2965,7 @@ export function takeListenLock() {
   return { ok: false, holder: holder ?? { pid: null } };
 }
 function alreadyListening(holder) {
-  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); you are fine, one listen per Soul is enough\n`);
+  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); one listen per Soul is enough. If this chat started it you are fine; \`status\` shows it as \`listener\`, and if it isn't yours: ${CLI} listen --take\n`);
   return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: `nothing to do if this chat started it: it prints owner messages when they arrive. If another chat or agent did, or it may be gone, take it over: ${CLI} listen --take` };
 }
 
@@ -2900,6 +2973,7 @@ function alreadyListening(holder) {
 async function stopListen() {
   const holder = listenLockHolder();
   if (!holder || holder.pid === process.pid) return;
+  if (!isOwnListen(holder)) { calm(`listen: the lock named pid ${holder.pid}, which is not this Soul's listen: that process is left alone`); try { unlinkSync(LISTEN_LOCK); } catch { /* gone */ } return; }
   try { process.kill(holder.pid, "SIGTERM"); } catch { return; }
   for (let i = 0; i < 40 && pidAlive(holder.pid); i++) await sleep(100);
   calm(`listen: took over from pid ${holder.pid}`);
@@ -2941,28 +3015,60 @@ async function listen(...args) {
     if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order and result <id> done|failed "…"` : "nothing waiting" };
+      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
     }
     await sleep(50);
   }
 }
 
-async function ack(id, reply) {
-  if (!id) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"]');
-  if (reply && reply.length > 140) throw new Error("ack reply must be at most 140 characters");
+/** The owner's card holds 140 characters. A longer line is cut at a word and says so; it never costs the agent a retry. */
+export function clipped(text, max = 140) {
+  if (text.length <= max) return { text };
+  const cut = text.slice(0, max - 1), space = cut.lastIndexOf(" ");
+  return { text: (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:]+$/, "") + "…", clipped: true };
+}
+
+// ack <id> ["reply"] [--close done|failed]: with --close, the reply is the whole answer: an answer to a question, or a no.
+async function ack(id, ...rest) {
+  const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
+  if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
+  const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
+  // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
+  // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
+  const shut = close ? await closing(id, close, reply) : {};
+  if (shut.closed) return { ...said, closed: true };
+  if (shut.already) return { acked: id, ...shut };   // a closed message is acked already: nothing to send
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
-  save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
-  return { acked: id, ...(reply ? { reply } : {}), ...d };
+  if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
+  return { ...said, ...d, ...shut };
+}
+
+/** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
+ *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
+ *  closed or is about to: `closed` here means this command closed it. */
+async function closing(id, outcome, text) {
+  const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
+  if (link?.message === id && link.receipt) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+    // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
+    if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
+  }
+  const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+  if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+  if (read.data?.message?.result !== undefined) {
+    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
+    return { closed: false, already: read.data.message.outcome, why: "already closed: nothing more to do" };
+  }
+  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
-  const t = text.join(" ");
-  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened, up to 140 chars"');
-  if (t.length > 140) throw new Error("result text must be at most 140 characters");
+  const line = clipped(text.join(" ")), t = line.text;
+  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
-  return { reported: id, outcome, text: t, ...d };
+  return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
 }
 
 // ---------------------------------------------------------------- profile, body, travel
@@ -3061,10 +3167,10 @@ alone does not identify the active controller. If ownership is unclear, establis
 **Start of every thin-controller chat here (when no managed controller owns this Soul):** run \`${CLI} status\`, then start listening to my messages from the web page in the
 background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits when I write; ack each message
 (\`${CLI} ack <id> "Got it: …"\`), restart \`${CLI} listen --after <last id>\` in the background first, then do what
-I asked, then \`${CLI} result <id> done|failed "<what happened>"\`.
+I asked, then \`${CLI} result <id> done|failed "<what happened>"\` unless the answer says \`closed: true\`.
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
-from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`candidates\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
+from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
 --wait, then \`${CLI} wait 60\` as needed. \`${CLI} caps --search "<thing>"\` lists current offers.
 
 For “take a seat” with no requested duration, use a durable fixture's exact sit offer with \`'{"seconds":1}' --for none --wait --json\` if it supports seconds. Verify \`here\` posture is seated and its seat matches the receipt's chosen slot before reporting. The seat stays occupied after the timed action; keep listening, without standing or canceling. Preserve requested durations; this does not apply to temporary ground poses. Default sitting receipts can stay open for ten minutes while already seated.
@@ -3405,7 +3511,7 @@ async function serveForeground() {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
         if (next !== code) log(`inbox: ${next}; next try in ${secs(ms)}`);
-        code = next; if (r.status === 0 || r.status >= 500) worldDown ??= { code: next, since: now() };
+        code = next; if (r.status === 0 || (r.status >= 500 && !isBusy(r.status, r.data))) worldDown ??= { code: next, since: now() };
         await pause(ms); continue;
       }
       attempt = 0; code = undefined; worldDown = null;
@@ -3628,7 +3734,7 @@ async function serveForeground() {
     if (m.op === "pending") { const out = takePending(st); persist(); return out; }
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
-      if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }); if (r.status > 0 && r.status < 500) worldDown = null; }
+      if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
       return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
@@ -3806,12 +3912,12 @@ home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for C
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all]   map   view [--map|--alt-only|--out f]
+look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>"   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once] [--take]   ack <id> ["reply"]   result <id> done|failed "<text>"
+do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+          say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)

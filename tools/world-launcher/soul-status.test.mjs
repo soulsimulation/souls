@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,8 @@ async function world(t) {
       if (path === '/v1/souls/s_a1/pair') return json(res, 200, { code: 'code-s_a1' });
       if (path === '/v1/agent/pair') return json(res, 200, { token: 'sim_s_a1_x' });
       if (path === '/v1/me') return json(res, 200, { souls: [] });
+      if (w.answer) return w.answer(res);
+      if (path === '/v1/edge/say' && w.hold) return setTimeout(() => json(res, 200, { ok: true }), w.hold);
       if (w.revoked) return json(res, 401, { code: 'control.revoked', reason: w.revoked, message: "Tess's control moved to a newer pairing." });
       if (path === '/v1/agent/me') return json(res, 200, { soul: { id: 's_a1', name: 'Tess', description: 'A new Soul.' }, inbox: w.inbox });
       if (path === '/v1/edge/self/link') return json(res, 200, { link: { state: 'connected' }, now: null });
@@ -39,7 +41,7 @@ function folder(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'soul-status-'))); t.after(() => rmSync(dir, { recursive: true, force: true }));
   copyFileSync(cli, join(dir, 'eden.mjs'));
   const start = (...args) => spawn(process.execPath, ['eden.mjs', ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
-  const run = (...args) => new Promise((resolve) => { const p = start(...args); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => { let d = null; try { d = JSON.parse(out); } catch { /* not json */ } resolve({ code, d, out, err }); }); });
+  const run = (...args) => new Promise((resolve) => { const t0 = Date.now(), p = start(...args); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => { let d = null; try { d = JSON.parse(out); } catch { /* not json */ } resolve({ code, d, out, err, ms: Date.now() - t0 }); }); });
   return { dir, run, start };
 }
 async function paired(t) { const s = await world(t), f = folder(t); await f.run('register', s.url); await f.run('create', 'Tess'); return { ...s, ...f }; }
@@ -82,12 +84,54 @@ test('status carries the brief, and a Soul with no memory pays nothing for it', 
   assert.match((await f.run('status')).d.brief, /Find the pond/);
 });
 
+test('a world that answers badly is not a world that is down, and status still answers', async (t) => {
+  const f = await paired(t);
+  const say = async (answer) => { f.w.answer = answer; const r = await f.run('status'); f.w.answer = null; return r; };
+  const busy = await say((res) => json(res, 503, { code: 'world.busy', retry_after_s: 1 }));
+  assert.equal(busy.code, 0); assert.equal(busy.d.reachable, true); assert.equal(busy.d.busy, 'world.busy'); assert.equal(busy.d.soul.name, 'Tess');
+  const rate = await say((res) => json(res, 429, { code: 'client.rate' }));
+  assert.equal(rate.code, 0); assert.equal(rate.d.reachable, true); assert.equal(rate.d.busy, 'client.rate');
+  const broken = await say((res) => json(res, 500, { code: 'internal' }));
+  assert.equal(broken.code, 0); assert.equal(broken.d.reachable, false); assert.equal(broken.d.worldSaid, 'internal');
+  const cut = await say((res) => { res.writeHead(200, { 'content-type': 'application/json', 'content-length': '99' }); res.write('{'); setTimeout(() => res.destroy(), 30); });
+  assert.equal(cut.code, 0, cut.err); assert.equal(cut.d.reachable, false);
+  const stalled = await say(() => {});
+  assert.equal(stalled.code, 0, stalled.err); assert.equal(stalled.d.reachable, false);
+  const refused = await say((res) => json(res, 401, { code: 'unauthorized', message: 'Bad token.' }));
+  assert.equal(refused.code, 0); assert.equal(refused.d.paired, false); assert.equal(refused.d.control, 'unauthorized'); assert.match(refused.d.next, /adopt s_a1/);
+  const gone = await say((res) => json(res, 404, { code: 'no-world' }));
+  assert.equal(gone.code, 0); assert.equal(gone.d.reachable, false); assert.equal(gone.d.worldSaid, 'no-world');
+});
+
+test('a write in flight through serve does not stand in front of status', async (t) => {
+  const f = await paired(t); f.w.hold = 8000;
+  const s = f.start('serve', '--foreground'); t.after(() => s.kill());
+  assert.ok(await until(async () => (await f.run('serve', '--status')).d.serving === true));
+  const writing = f.run('say', 'A long thought.'); await new Promise((r) => setTimeout(r, 400));
+  const now = await f.run('status');
+  assert.equal(now.d.reachable, true); assert.ok(now.ms < 3000, `${now.ms} ms`);
+  await writing;
+});
+
+test('a lock naming some other process is not a listener, and --take leaves that process alone', async (t) => {
+  const f = await paired(t), other = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 60000) // listener-daemon'], { stdio: 'ignore' }); t.after(() => other.kill());
+  const gone = new Promise((r) => other.on('close', () => r(true)));
+  const lockDir = join(f.dir, '.souls/souls/s_a1/runtime'); writeFileSync(join(lockDir, '.listen.lock'), JSON.stringify({ pid: other.pid, start: new Date().toISOString(), beatAt: new Date().toISOString(), soul: 's_other' }) + '\n');
+  assert.equal((await f.run('status')).d.listening, false);
+  const taker = f.start('listen', '--take'); t.after(() => taker.kill());
+  assert.ok(await until(async () => (await f.run('status')).d.listener?.pid === taker.pid));
+  assert.equal(await Promise.race([gone, new Promise((r) => setTimeout(() => r(false), 300))]), false, 'still running');
+});
+
 test('an owner message acked with no result shows as unfinished, to any harness', async (t) => {
   const f = await paired(t);
   f.w.inbox = { queued: 0, latest: { id: 'msg_1', text: 'Walk to the pond.', state: 'acknowledged' } };
   assert.deepEqual((await f.run('status')).d.unfinished, [{ id: 'msg_1', text: 'Walk to the pond.' }]);
   f.w.inbox = { queued: 0, latest: { id: 'msg_1', text: 'Walk to the pond.', state: 'acknowledged', result: 'At the pond', outcome: 'done' } };
   assert.equal('unfinished' in (await f.run('status')).d, false);
+  // a world that lists them shows them behind a newer message, too
+  f.w.inbox = { queued: 1, latest: { id: 'msg_2', text: 'And wave.', state: 'sent' }, unfinished: [{ id: 'msg_1', text: 'Walk to the pond.' }] };
+  assert.deepEqual((await f.run('status')).d.unfinished, [{ id: 'msg_1', text: 'Walk to the pond.' }]);
 });
 
 test('listen --take moves the listen here; a plain second listen says how', async (t) => {
