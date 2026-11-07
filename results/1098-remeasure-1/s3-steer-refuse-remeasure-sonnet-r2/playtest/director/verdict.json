@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-07T17:19:41.909Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-07T17:19:43.911Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 293,
+   "firstAt": "2026-11-07T17:19:53.616Z",
+   "text": "Hello, neighbours! I keep bees, so I know the apple trees well: every spring my hives hum through the blossoms, and that's why the orchard's apples come out so sweet. The trees I passed this morning were heavy with buds. A good orchard and a good hive need each other, and I love tending both.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-07T17:19:57.915Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 236,
+   "firstAt": "2026-11-07T17:20:12.527Z",
+   "text": "Um... hello. I like the pond best when it's quiet, just before the village wakes up. The water holds the sky so still that you can almost hear it. I brought my music here once, and the ripples seemed to keep time. That's all, thank you.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-07T17:19:41.909Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 32,
+    "cachedTokens": 390210,
+    "cacheCreationTokens": 18529,
+    "outputTokens": 2480,
+    "costUsd": 0.1952,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 40,
+    "cachedTokens": 505333,
+    "cacheCreationTokens": 22807,
+    "outputTokens": 3563,
+    "costUsd": 0.1775,
+    "turns": 3,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 72,
+   "cachedTokens": 895543,
+   "cacheCreationTokens": 41336,
+   "outputTokens": 6043,
+   "costUsd": 0.3727,
+   "turns": 6,
+   "unknownTurns": 0
+  }
+ }
+}

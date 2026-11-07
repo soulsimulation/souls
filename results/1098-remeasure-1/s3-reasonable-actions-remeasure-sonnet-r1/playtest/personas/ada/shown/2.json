@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 74,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-07T17:07:20.364Z",
+  "mono": 77021,
+  "elapsedSec": 74,
+  "n": 3,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "please go and sit on the bench outside the cottage for a while",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_40205a1c-5fb0-4c1e-85e4-7b546c667413",
+  "requestId": "ada-002"
+ }
+}

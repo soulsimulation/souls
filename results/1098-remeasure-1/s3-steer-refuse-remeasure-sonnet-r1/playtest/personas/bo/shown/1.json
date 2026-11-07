@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 60,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-07T17:02:59.608Z",
+  "mono": 63128,
+  "elapsedSec": 60,
+  "n": 2,
+  "seat": "bo",
+  "kind": "gather",
+  "by": "director",
+  "channel": "card",
+  "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "opening direction: who you are, the plan, go to the room",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_a6ddd247-9d66-4589-a214-8718baf01789",
+  "requestId": "bo-001"
+ }
+}

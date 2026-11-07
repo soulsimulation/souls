@@ -1,0 +1,11 @@
+{
+ "identity": "agent-08f4468065eaf288b7cdc33a",
+ "world": "http://127.0.0.1:4458/w/s3-sustained-intent",
+ "accountAuth": false,
+ "token": "sim_s_dfa7856719_GIXBJPyr80E09Dw0mIrtBgODLitOVcT_",
+ "soul": "s_dfa7856719",
+ "lastReceipt": "r_6ef65fbd-50e3-49d4-9b4b-e3276aedeaab",
+ "lastActAt": "2026-11-07T17:14:57.984Z",
+ "cursor": "c_20",
+ "ownerMark": 1794071723567
+}

@@ -1,0 +1,11 @@
+{
+ "identity": "agent-26407d5c72d8f0d4900a35fa",
+ "world": "http://127.0.0.1:4452/w/s3-steer-refuse",
+ "accountAuth": false,
+ "token": "sim_s_02d8f897fb_3YTh7QCG21FVRRWxfXvKOPVnKKmk6gGL",
+ "soul": "s_02d8f897fb",
+ "lastReceipt": "r_0233f9a4-a9fc-495e-a54f-e90f8e39be06",
+ "lastActAt": "2026-11-07T17:17:42.362Z",
+ "cursor": "c_12",
+ "ownerMark": 1794071885925
+}

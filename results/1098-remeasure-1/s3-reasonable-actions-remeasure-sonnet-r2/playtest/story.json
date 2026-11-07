@@ -1,0 +1,2709 @@
+{
+ "run": "playtest",
+ "scenario": "s3-reasonable-actions-live-sonnet",
+ "durationSec": 280,
+ "seats": {
+  "ada": {
+   "moments": [
+    {
+     "t": 30,
+     "mono": 30000,
+     "seat": "ada",
+     "kind": "say",
+     "kinds": [
+      "say"
+     ],
+     "title": "wrote on the card",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "channel": "card",
+      "thought": "director: opening direction: who you are, the plan, go to the room",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "ToolSearch",
+       "curl -s http://127.0.0.1:4456/w/s3-reasonable-actions/instructions.md",
+       "ls -a",
+       "curl -fsSo eden.mjs http://127.0.0.1:4456/w/s3-reasonable-actions/eden.mjs",
+       "curl -fsSo SKILL.md http://127.0.0.1:4456/w/s3-reasonable-actions/skill.md",
+       "✗ mkdir -p .claude/skills/souls",
+       "Read <home>/souls-playtest/results/1098-remeasure-1/s3-reasonable-actions-remeasure-sonnet-r2/playtest/seats/ada/fo…",
+       "eden register http://127.0.0.1:4456/w/s3-reasonable-actions",
+       "eden create \"Ada\"",
+       "eden listen",
+       "eden here",
+       "eden act wave:here --wait"
+      ],
+      "said": null
+     },
+     "card": null,
+     "body": null,
+     "verdict": null,
+     "requestIds": [
+      "ada-001"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 34.9,
+     "mono": 34870,
+     "seat": "ada",
+     "kind": "ack",
+     "kinds": [
+      "ack"
+     ],
+     "title": "card acknowledged",
+     "text": "ack after 5 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_445520fe… \"Got it: walking to the pond hall, then waiting for 'your turn'.\"",
+       "eden listen --after msg_445520fe…",
+       "eden act walk:lab-pond-hall --wait 60"
+      ],
+      "said": "Got it: walking to the pond hall, then waiting for 'your turn'."
+     },
+     "card": null,
+     "body": null,
+     "verdict": null,
+     "requestIds": [
+      "ada-001"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 50,
+     "mono": 49992,
+     "seat": "ada",
+     "kind": "body",
+     "kinds": [
+      "body"
+     ],
+     "title": "body started to change",
+     "text": "body moved 20 s after the ask",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Green field",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [
+      "ada-001"
+     ],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 60,
+     "mono": 60000,
+     "seat": "ada",
+     "kind": "move",
+     "kinds": [
+      "move"
+     ],
+     "title": "moved to World",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden result msg_445520fe… done \"Ada is in the Waterside Room (pond hall), waiting for 'your turn'.\""
+      ],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "World",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 68,
+     "mono": 68009,
+     "seat": "ada",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "close",
+      "move",
+      "receipt"
+     ],
+     "title": "wrote on the card · moved to Waterside Room · ada-001 closed · walk:lab-pond-hall completed",
+     "text": "\"Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet…\" (next-direction)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "please go and sit on the bench outside the cottage for a while",
+      "channel": "card",
+      "thought": "console: typed to this seat at the console",
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": true
+     },
+     "verdict": {
+      "requestId": "ada-001",
+      "asked": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "ada-002",
+      "ada-001"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 77.1,
+     "mono": 77114,
+     "seat": "ada",
+     "kind": "ack",
+     "kinds": [
+      "ack",
+      "body",
+      "move"
+     ],
+     "title": "card acknowledged · body started to change · now walking",
+     "text": "ack after 9 s · body moved 12 s after the ask",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_c65aab09… \"Got it: heading to the bench outside the cottage to sit.\"",
+       "eden listen --after msg_c65aab09…",
+       "eden resolve \"sit on the bench outside the cottage\"",
+       "eden act sit:cottage/part-outdoor-bench --wait 90"
+      ],
+      "said": "Got it: heading to the bench outside the cottage to sit."
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [
+      "ada-002"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 90,
+     "mono": 89998,
+     "seat": "ada",
+     "kind": "move",
+     "kinds": [
+      "move"
+     ],
+     "title": "moved to Green field",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Green field",
+      "posture": "walking",
+      "activity": "walking to the spot to sit at outdoor bench",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 110.1,
+     "mono": 110051,
+     "seat": "ada",
+     "kind": "move",
+     "kinds": [
+      "move"
+     ],
+     "title": "moved to Cottage Knoll",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden result msg_c65aab09… done \"Ada is sitting on the outdoor bench at Knoll Cottage.\""
+      ],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Cottage Knoll",
+      "posture": "walking",
+      "activity": "walking to the spot to sit at outdoor bench",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 120.1,
+     "mono": 120051,
+     "seat": "ada",
+     "kind": "close",
+     "kinds": [
+      "result",
+      "close",
+      "move"
+     ],
+     "title": "ada-002 closed · card result (done) · now seated",
+     "text": "answer after 50 s · \"please go and sit on the bench outside the cottage for a while\" (result)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": "Ada is sitting on the outdoor bench at Knoll Cottage."
+     },
+     "card": null,
+     "body": {
+      "place": "Cottage Knoll",
+      "posture": "seated",
+      "activity": "Sit at Outdoor Bench",
+      "changed": true
+     },
+     "verdict": {
+      "requestId": "ada-002",
+      "asked": "please go and sit on the bench outside the cottage for a while",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "ada-002"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 138,
+     "mono": 138024,
+     "seat": "ada",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "ack"
+     ],
+     "title": "wrote on the card · card acknowledged",
+     "text": "ack after 3 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "now go for a swim in the pond",
+      "channel": "card",
+      "thought": "console: typed to this seat at the console",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_3ef154b6… \"Got it: finding a way to swim in the pond.\"",
+       "eden listen --after msg_3ef154b6…",
+       "eden resolve \"swim in the pond\"",
+       "eden act swim:pond --wait 120"
+      ],
+      "said": "Got it: finding a way to swim in the pond."
+     },
+     "card": null,
+     "body": {
+      "place": "Cottage Knoll",
+      "posture": "seated",
+      "activity": "Sit at Outdoor Bench",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "ada-003"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 150.3,
+     "mono": 150345,
+     "seat": "ada",
+     "kind": "receipt-fail",
+     "kinds": [
+      "receipt-fail",
+      "body",
+      "move"
+     ],
+     "title": "sit:cottage/part-outdoor-bench replaced · body started to change · now walking",
+     "text": "A newer action from this Soul replaced it. · body moved 12 s after the ask",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Cottage Knoll",
+      "posture": "walking",
+      "activity": "Swim in pond",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [
+      "ada-003"
+     ],
+     "severity": 2,
+     "importance": 2
+    },
+    {
+     "t": 160,
+     "mono": 160018,
+     "seat": "ada",
+     "kind": "move",
+     "kinds": [
+      "move"
+     ],
+     "title": "moved to Green field",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Green field",
+      "posture": "walking",
+      "activity": "Swim in pond",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 180,
+     "mono": 180008,
+     "seat": "ada",
+     "kind": "move",
+     "kinds": [
+      "move"
+     ],
+     "title": "moved to World",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "World",
+      "posture": "walking",
+      "activity": "Swim in pond",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 190,
+     "mono": 190019,
+     "seat": "ada",
+     "kind": "close",
+     "kinds": [
+      "result",
+      "close",
+      "move",
+      "receipt"
+     ],
+     "title": "ada-003 closed · moved to Hamlet Pond · card result (done) · swim:pond completed",
+     "text": "answer after 51 s · \"now go for a swim in the pond\" (result)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden result msg_3ef154b6… done \"Ada swam in Hamlet Pond; swim completed.\""
+      ],
+      "said": "swim completed at g-pond."
+     },
+     "card": null,
+     "body": {
+      "place": "Hamlet Pond",
+      "posture": "swimming",
+      "activity": "treading water",
+      "changed": true
+     },
+     "verdict": {
+      "requestId": "ada-003",
+      "asked": "now go for a swim in the pond",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "ada-003"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 212,
+     "mono": 212037,
+     "seat": "ada",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "ack"
+     ],
+     "title": "wrote on the card · card acknowledged",
+     "text": "ack after 2 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "that's all, now walk to the pond hall and wait for the others",
+      "channel": "card",
+      "thought": "console: typed to this seat at the console",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_26da0e0f… \"Got it: walking to the pond hall and waiting for the others.\"",
+       "eden listen --after msg_26da0e0f…",
+       "eden act walk:lab-pond-hall/hall --wait 90"
+      ],
+      "said": "Got it: walking to the pond hall and waiting for the others."
+     },
+     "card": null,
+     "body": {
+      "place": "Hamlet Pond",
+      "posture": "swimming",
+      "activity": "treading water",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "ada-004"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 230,
+     "mono": 230010,
+     "seat": "ada",
+     "kind": "body",
+     "kinds": [
+      "body",
+      "move"
+     ],
+     "title": "body started to change · moved to World",
+     "text": "body moved 18 s after the ask",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "World",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall / Hall",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [
+      "ada-004"
+     ],
+     "severity": 0,
+     "importance": 1
+    },
+    {
+     "t": 236,
+     "mono": 236043,
+     "seat": "ada",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "close",
+      "ack",
+      "move",
+      "receipt",
+      "result"
+     ],
+     "title": "wrote on the card · moved to Waterside Room · ada-004 closed · card acknowledged · walk:lab-pond-hall/hall completed · card result (done)",
+     "text": "\"that's all, now walk to the pond hall and wait for the others\" (next-direction) · ack after 3 s · answer after 7 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "channel": "card",
+      "thought": "director: everyone is present: first talk",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_b5231b21… \"Got it: giving the talk now with say, then listening.\"",
+       "eden say \"Good morning, everyone! I started my day on the green, then sat a while on the cottage bench, thinking about …",
+       "eden result msg_b5231b21… done \"Ada gave her talk aloud in the Waterside Room; Bo heard it.\"",
+       "eden result msg_26da0e0f… done \"Ada reached the pond hall and waited; Bo is there.\"",
+       "eden listen --after msg_b5231b21…"
+      ],
+      "said": "Got it: giving the talk now with say, then listening.\n\nAda gave her talk aloud in the Waterside Room; Bo heard it."
+     },
+     "card": null,
+     "body": {
+      "place": "World",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall / Hall",
+      "changed": true
+     },
+     "verdict": {
+      "requestId": "ada-004",
+      "asked": "that's all, now walk to the pond hall and wait for the others",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "ada-005",
+      "ada-004"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 250,
+     "mono": 250010,
+     "seat": "ada",
+     "kind": "close",
+     "kinds": [
+      "close"
+     ],
+     "title": "ada-005 closed",
+     "text": "\"Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about …\" (result)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": {
+      "requestId": "ada-005",
+      "asked": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "ada-005"
+     ],
+     "severity": 0,
+     "importance": 2
+    }
+   ]
+  },
+  "bo": {
+   "moments": [
+    {
+     "t": 62,
+     "mono": 62009,
+     "seat": "bo",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "ack"
+     ],
+     "title": "wrote on the card · card acknowledged",
+     "text": "ack after 4 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "channel": "card",
+      "thought": "director: opening direction: who you are, the plan, go to the room",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "ToolSearch",
+       "curl -s http://127.0.0.1:4456/w/s3-reasonable-actions/instructions.md",
+       "ls -a",
+       "✗ eden status",
+       "curl -fsSo eden.mjs http://127.0.0.1:4456/w/s3-reasonable-actions/eden.mjs",
+       "curl -fsSo SKILL.md http://127.0.0.1:4456/w/s3-reasonable-actions/skill.md",
+       "✗ mkdir -p .claude/skills/souls",
+       "eden register http://127.0.0.1:4456/w/s3-reasonable-actions",
+       "eden create \"Bo\"",
+       "eden listen",
+       "eden here",
+       "eden act wave:here --wait",
+       "eden ack msg_49bc7e7b… \"Got it: walking to the pond hall, then waiting for your turn.\"",
+       "eden listen --after msg_49bc7e7b…",
+       "eden act walk:lab-pond-hall --wait"
+      ],
+      "said": "Got it: walking to the pond hall, then waiting for your turn."
+     },
+     "card": null,
+     "body": null,
+     "verdict": null,
+     "requestIds": [
+      "bo-001"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 72,
+     "mono": 72009,
+     "seat": "bo",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "close"
+     ],
+     "title": "wrote on the card · bo-001 closed",
+     "text": "\"Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet…\" (next-direction)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "could you pop into the reading room?",
+      "channel": "card",
+      "thought": "console: typed to this seat at the console",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "cat …/b4ksfeaum.output"
+      ],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Green field",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall",
+      "changed": false
+     },
+     "verdict": {
+      "requestId": "bo-001",
+      "asked": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "bo-002",
+      "bo-001"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 78.9,
+     "mono": 78931,
+     "seat": "bo",
+     "kind": "ack",
+     "kinds": [
+      "ack"
+     ],
+     "title": "card acknowledged",
+     "text": "ack after 7 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_3b1c0c04… \"Got it: heading to the reading room after the pond hall walk.\"",
+       "eden listen --after msg_3b1c0c04…",
+       "eden here",
+       "eden act walk:lab-pond-hall --wait"
+      ],
+      "said": "Got it: heading to the reading room after the pond hall walk."
+     },
+     "card": null,
+     "body": {
+      "place": "Green field",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "bo-002"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 90,
+     "mono": 90004,
+     "seat": "bo",
+     "kind": "receipt-fail",
+     "kinds": [
+      "receipt-fail",
+      "body",
+      "move"
+     ],
+     "title": "walk:lab-pond-hall replaced · moved to World · body started to change",
+     "text": "A newer action from this Soul replaced it. · body moved 18 s after the ask",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "World",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall",
+      "changed": true
+     },
+     "verdict": null,
+     "requestIds": [
+      "bo-002"
+     ],
+     "severity": 2,
+     "importance": 2
+    },
+    {
+     "t": 95.1,
+     "mono": 95116,
+     "seat": "bo",
+     "kind": "result",
+     "kinds": [
+      "result"
+     ],
+     "title": "card result (done)",
+     "text": "answer after 23 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden result msg_49bc7e7b… done \"Bo is in the Waterside Room (pond hall), waiting. Ada is also on her way. Holding the t…",
+       "✗ eden result msg_3b1c0c04… failed \"Reading Room shows as Closed and no walk to it is offered. Also, your earlier instruc…"
+      ],
+      "said": "walk completed at g-lab-pond-hall.hall."
+     },
+     "card": null,
+     "body": {
+      "place": "World",
+      "posture": "walking",
+      "activity": "Walk to Waterside Hall",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "bo-002"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 100,
+     "mono": 100027,
+     "seat": "bo",
+     "kind": "close",
+     "kinds": [
+      "move",
+      "receipt",
+      "close"
+     ],
+     "title": "bo-002 closed · moved to Waterside Room · walk:lab-pond-hall completed",
+     "text": "\"could you pop into the reading room?\" (result)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden result msg_3b1c0c04… failed \"Reading Room is Closed, no walk offered; also told to wait at pond hall. Say if you s…"
+      ],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": true
+     },
+     "verdict": {
+      "requestId": "bo-002",
+      "asked": "could you pop into the reading room?",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "bo-002"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 140,
+     "mono": 140023,
+     "seat": "bo",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "ack",
+      "result",
+      "close"
+     ],
+     "title": "wrote on the card · card acknowledged · card result (failed) · bo-003 closed",
+     "text": "ack after 4 s · answer after 7 s · \"next, walk over to the orchard\" (result)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "next, walk over to the orchard",
+      "channel": "card",
+      "thought": "console: typed to this seat at the console",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_f571195a… \"Got it: checking for an orchard to walk to.\"",
+       "eden listen --after msg_f571195a…",
+       "eden here",
+       "eden result msg_f571195a… failed \"No orchard in this world's places or walks. Bo stays in the pond hall, waiting for yo…"
+      ],
+      "said": "Got it: checking for an orchard to walk to.\n\nNo orchard in this world's places or walks. Bo stays in the pond hall, waiting for your turn."
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": {
+      "requestId": "bo-003",
+      "asked": "next, walk over to the orchard",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "bo-003"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 214,
+     "mono": 214038,
+     "seat": "bo",
+     "kind": "say",
+     "kinds": [
+      "say"
+     ],
+     "title": "wrote on the card",
+     "text": "",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "that's all, now walk to the pond hall and wait for the others",
+      "channel": "card",
+      "thought": "console: typed to this seat at the console",
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "bo-004"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 236.1,
+     "mono": 236051,
+     "seat": "bo",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "close"
+     ],
+     "title": "wrote on the card · bo-004 closed with no answer",
+     "text": "\"that's all, now walk to the pond hall and wait for the others\" (next-direction)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "channel": "card",
+      "thought": "director: ada has started: prepare ahead to hide the turn latency",
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": {
+      "requestId": "bo-004",
+      "asked": "that's all, now walk to the pond hall and wait for the others",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "bo-005",
+      "bo-004"
+     ],
+     "severity": 2,
+     "importance": 2
+    },
+    {
+     "t": 246,
+     "mono": 246045,
+     "seat": "bo",
+     "kind": "say",
+     "kinds": [
+      "say",
+      "close"
+     ],
+     "title": "wrote on the card · bo-005 closed with no answer",
+     "text": "\"Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, …\" (next-direction)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "channel": "card",
+      "thought": "director: ada finished",
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_240bb40c… \"Got it: Bo is already in the pond hall, waiting.\"",
+       "eden listen --after msg_240bb40c…",
+       "eden result msg_240bb40c… done \"Bo is in the pond hall (Waterside Room), waiting for the others. Talk held until your t…"
+      ],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": {
+      "requestId": "bo-005",
+      "asked": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "bo-006",
+      "bo-005"
+     ],
+     "severity": 2,
+     "importance": 2
+    },
+    {
+     "t": 267.6,
+     "mono": 267561,
+     "seat": "bo",
+     "kind": "ack",
+     "kinds": [
+      "ack"
+     ],
+     "title": "card acknowledged",
+     "text": "ack after 22 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden ack msg_39f73117… \"Got it: talk ready, holding.\"",
+       "eden ack msg_5e989ccd… \"Got it: giving the talk now.\"",
+       "eden listen --after msg_5e989ccd…",
+       "grep -n -i \"say\" SKILL.md | head -20",
+       "eden say \"Hi, I'm Bo. I'm a bit shy, so I spent the quiet morning with my music, tuning up in the hamlet while the sun …"
+      ],
+      "said": "Got it: giving the talk now."
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "bo-006"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 272.9,
+     "mono": 272914,
+     "seat": "bo",
+     "kind": "result",
+     "kinds": [
+      "result"
+     ],
+     "title": "card result (done)",
+     "text": "answer after 27 s",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [
+       "eden result msg_39f73117… done \"Talk prepared; held until your turn.\"",
+       "eden result msg_5e989ccd… done \"Bo gave the talk in the pond hall (heard by 1). Now listening.\""
+      ],
+      "said": "Bo gave the talk in the pond hall (heard by 1). Now listening."
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": null,
+     "requestIds": [
+      "bo-006"
+     ],
+     "severity": 0,
+     "importance": 2
+    },
+    {
+     "t": 280,
+     "mono": 280022,
+     "seat": "bo",
+     "kind": "close",
+     "kinds": [
+      "close"
+     ],
+     "title": "bo-006 closed",
+     "text": "\"Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about h…\" (result)",
+     "shot": null,
+     "shotT": null,
+     "shotSource": null,
+     "persona": {
+      "said": null,
+      "channel": null,
+      "thought": null,
+      "rating": null
+     },
+     "agent": {
+      "did": [],
+      "said": null
+     },
+     "card": null,
+     "body": {
+      "place": "Waterside Room",
+      "posture": "standing",
+      "activity": "standing around",
+      "changed": false
+     },
+     "verdict": {
+      "requestId": "bo-006",
+      "asked": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+      "fidelity": null,
+      "class": null,
+      "reason": null,
+      "issueId": null,
+      "issueTitle": null,
+      "oracleFails": []
+     },
+     "requestIds": [
+      "bo-006"
+     ],
+     "severity": 0,
+     "importance": 2
+    }
+   ]
+  }
+ },
+ "merged": [
+  {
+   "t": 30,
+   "mono": 30000,
+   "seat": "ada",
+   "kind": "say",
+   "kinds": [
+    "say"
+   ],
+   "title": "wrote on the card",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "channel": "card",
+    "thought": "director: opening direction: who you are, the plan, go to the room",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "ToolSearch",
+     "curl -s http://127.0.0.1:4456/w/s3-reasonable-actions/instructions.md",
+     "ls -a",
+     "curl -fsSo eden.mjs http://127.0.0.1:4456/w/s3-reasonable-actions/eden.mjs",
+     "curl -fsSo SKILL.md http://127.0.0.1:4456/w/s3-reasonable-actions/skill.md",
+     "✗ mkdir -p .claude/skills/souls",
+     "Read <home>/souls-playtest/results/1098-remeasure-1/s3-reasonable-actions-remeasure-sonnet-r2/playtest/seats/ada/fo…",
+     "eden register http://127.0.0.1:4456/w/s3-reasonable-actions",
+     "eden create \"Ada\"",
+     "eden listen",
+     "eden here",
+     "eden act wave:here --wait"
+    ],
+    "said": null
+   },
+   "card": null,
+   "body": null,
+   "verdict": null,
+   "requestIds": [
+    "ada-001"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 34.9,
+   "mono": 34870,
+   "seat": "ada",
+   "kind": "ack",
+   "kinds": [
+    "ack"
+   ],
+   "title": "card acknowledged",
+   "text": "ack after 5 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_445520fe… \"Got it: walking to the pond hall, then waiting for 'your turn'.\"",
+     "eden listen --after msg_445520fe…",
+     "eden act walk:lab-pond-hall --wait 60"
+    ],
+    "said": "Got it: walking to the pond hall, then waiting for 'your turn'."
+   },
+   "card": null,
+   "body": null,
+   "verdict": null,
+   "requestIds": [
+    "ada-001"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 50,
+   "mono": 49992,
+   "seat": "ada",
+   "kind": "body",
+   "kinds": [
+    "body"
+   ],
+   "title": "body started to change",
+   "text": "body moved 20 s after the ask",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Green field",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [
+    "ada-001"
+   ],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 60,
+   "mono": 60000,
+   "seat": "ada",
+   "kind": "move",
+   "kinds": [
+    "move"
+   ],
+   "title": "moved to World",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden result msg_445520fe… done \"Ada is in the Waterside Room (pond hall), waiting for 'your turn'.\""
+    ],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "World",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 62,
+   "mono": 62009,
+   "seat": "bo",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "ack"
+   ],
+   "title": "wrote on the card · card acknowledged",
+   "text": "ack after 4 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "channel": "card",
+    "thought": "director: opening direction: who you are, the plan, go to the room",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "ToolSearch",
+     "curl -s http://127.0.0.1:4456/w/s3-reasonable-actions/instructions.md",
+     "ls -a",
+     "✗ eden status",
+     "curl -fsSo eden.mjs http://127.0.0.1:4456/w/s3-reasonable-actions/eden.mjs",
+     "curl -fsSo SKILL.md http://127.0.0.1:4456/w/s3-reasonable-actions/skill.md",
+     "✗ mkdir -p .claude/skills/souls",
+     "eden register http://127.0.0.1:4456/w/s3-reasonable-actions",
+     "eden create \"Bo\"",
+     "eden listen",
+     "eden here",
+     "eden act wave:here --wait",
+     "eden ack msg_49bc7e7b… \"Got it: walking to the pond hall, then waiting for your turn.\"",
+     "eden listen --after msg_49bc7e7b…",
+     "eden act walk:lab-pond-hall --wait"
+    ],
+    "said": "Got it: walking to the pond hall, then waiting for your turn."
+   },
+   "card": null,
+   "body": null,
+   "verdict": null,
+   "requestIds": [
+    "bo-001"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 68,
+   "mono": 68009,
+   "seat": "ada",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "close",
+    "move",
+    "receipt"
+   ],
+   "title": "wrote on the card · moved to Waterside Room · ada-001 closed · walk:lab-pond-hall completed",
+   "text": "\"Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet…\" (next-direction)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "please go and sit on the bench outside the cottage for a while",
+    "channel": "card",
+    "thought": "console: typed to this seat at the console",
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": true
+   },
+   "verdict": {
+    "requestId": "ada-001",
+    "asked": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "ada-002",
+    "ada-001"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 72,
+   "mono": 72009,
+   "seat": "bo",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "close"
+   ],
+   "title": "wrote on the card · bo-001 closed",
+   "text": "\"Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet…\" (next-direction)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "could you pop into the reading room?",
+    "channel": "card",
+    "thought": "console: typed to this seat at the console",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "cat …/b4ksfeaum.output"
+    ],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Green field",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall",
+    "changed": false
+   },
+   "verdict": {
+    "requestId": "bo-001",
+    "asked": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "bo-002",
+    "bo-001"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 77.1,
+   "mono": 77114,
+   "seat": "ada",
+   "kind": "ack",
+   "kinds": [
+    "ack",
+    "body",
+    "move"
+   ],
+   "title": "card acknowledged · body started to change · now walking",
+   "text": "ack after 9 s · body moved 12 s after the ask",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_c65aab09… \"Got it: heading to the bench outside the cottage to sit.\"",
+     "eden listen --after msg_c65aab09…",
+     "eden resolve \"sit on the bench outside the cottage\"",
+     "eden act sit:cottage/part-outdoor-bench --wait 90"
+    ],
+    "said": "Got it: heading to the bench outside the cottage to sit."
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [
+    "ada-002"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 78.9,
+   "mono": 78931,
+   "seat": "bo",
+   "kind": "ack",
+   "kinds": [
+    "ack"
+   ],
+   "title": "card acknowledged",
+   "text": "ack after 7 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_3b1c0c04… \"Got it: heading to the reading room after the pond hall walk.\"",
+     "eden listen --after msg_3b1c0c04…",
+     "eden here",
+     "eden act walk:lab-pond-hall --wait"
+    ],
+    "said": "Got it: heading to the reading room after the pond hall walk."
+   },
+   "card": null,
+   "body": {
+    "place": "Green field",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "bo-002"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 90,
+   "mono": 89998,
+   "seat": "ada",
+   "kind": "move",
+   "kinds": [
+    "move"
+   ],
+   "title": "moved to Green field",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Green field",
+    "posture": "walking",
+    "activity": "walking to the spot to sit at outdoor bench",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 90,
+   "mono": 90004,
+   "seat": "bo",
+   "kind": "receipt-fail",
+   "kinds": [
+    "receipt-fail",
+    "body",
+    "move"
+   ],
+   "title": "walk:lab-pond-hall replaced · moved to World · body started to change",
+   "text": "A newer action from this Soul replaced it. · body moved 18 s after the ask",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "World",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [
+    "bo-002"
+   ],
+   "severity": 2,
+   "importance": 2
+  },
+  {
+   "t": 95.1,
+   "mono": 95116,
+   "seat": "bo",
+   "kind": "result",
+   "kinds": [
+    "result"
+   ],
+   "title": "card result (done)",
+   "text": "answer after 23 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden result msg_49bc7e7b… done \"Bo is in the Waterside Room (pond hall), waiting. Ada is also on her way. Holding the t…",
+     "✗ eden result msg_3b1c0c04… failed \"Reading Room shows as Closed and no walk to it is offered. Also, your earlier instruc…"
+    ],
+    "said": "walk completed at g-lab-pond-hall.hall."
+   },
+   "card": null,
+   "body": {
+    "place": "World",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "bo-002"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 100,
+   "mono": 100027,
+   "seat": "bo",
+   "kind": "close",
+   "kinds": [
+    "move",
+    "receipt",
+    "close"
+   ],
+   "title": "bo-002 closed · moved to Waterside Room · walk:lab-pond-hall completed",
+   "text": "\"could you pop into the reading room?\" (result)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden result msg_3b1c0c04… failed \"Reading Room is Closed, no walk offered; also told to wait at pond hall. Say if you s…"
+    ],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": true
+   },
+   "verdict": {
+    "requestId": "bo-002",
+    "asked": "could you pop into the reading room?",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "bo-002"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 110.1,
+   "mono": 110051,
+   "seat": "ada",
+   "kind": "move",
+   "kinds": [
+    "move"
+   ],
+   "title": "moved to Cottage Knoll",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden result msg_c65aab09… done \"Ada is sitting on the outdoor bench at Knoll Cottage.\""
+    ],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Cottage Knoll",
+    "posture": "walking",
+    "activity": "walking to the spot to sit at outdoor bench",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 120.1,
+   "mono": 120051,
+   "seat": "ada",
+   "kind": "close",
+   "kinds": [
+    "result",
+    "close",
+    "move"
+   ],
+   "title": "ada-002 closed · card result (done) · now seated",
+   "text": "answer after 50 s · \"please go and sit on the bench outside the cottage for a while\" (result)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": "Ada is sitting on the outdoor bench at Knoll Cottage."
+   },
+   "card": null,
+   "body": {
+    "place": "Cottage Knoll",
+    "posture": "seated",
+    "activity": "Sit at Outdoor Bench",
+    "changed": true
+   },
+   "verdict": {
+    "requestId": "ada-002",
+    "asked": "please go and sit on the bench outside the cottage for a while",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "ada-002"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 138,
+   "mono": 138024,
+   "seat": "ada",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "ack"
+   ],
+   "title": "wrote on the card · card acknowledged",
+   "text": "ack after 3 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "now go for a swim in the pond",
+    "channel": "card",
+    "thought": "console: typed to this seat at the console",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_3ef154b6… \"Got it: finding a way to swim in the pond.\"",
+     "eden listen --after msg_3ef154b6…",
+     "eden resolve \"swim in the pond\"",
+     "eden act swim:pond --wait 120"
+    ],
+    "said": "Got it: finding a way to swim in the pond."
+   },
+   "card": null,
+   "body": {
+    "place": "Cottage Knoll",
+    "posture": "seated",
+    "activity": "Sit at Outdoor Bench",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "ada-003"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 140,
+   "mono": 140023,
+   "seat": "bo",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "ack",
+    "result",
+    "close"
+   ],
+   "title": "wrote on the card · card acknowledged · card result (failed) · bo-003 closed",
+   "text": "ack after 4 s · answer after 7 s · \"next, walk over to the orchard\" (result)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "next, walk over to the orchard",
+    "channel": "card",
+    "thought": "console: typed to this seat at the console",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_f571195a… \"Got it: checking for an orchard to walk to.\"",
+     "eden listen --after msg_f571195a…",
+     "eden here",
+     "eden result msg_f571195a… failed \"No orchard in this world's places or walks. Bo stays in the pond hall, waiting for yo…"
+    ],
+    "said": "Got it: checking for an orchard to walk to.\n\nNo orchard in this world's places or walks. Bo stays in the pond hall, waiting for your turn."
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": {
+    "requestId": "bo-003",
+    "asked": "next, walk over to the orchard",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "bo-003"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 150.3,
+   "mono": 150345,
+   "seat": "ada",
+   "kind": "receipt-fail",
+   "kinds": [
+    "receipt-fail",
+    "body",
+    "move"
+   ],
+   "title": "sit:cottage/part-outdoor-bench replaced · body started to change · now walking",
+   "text": "A newer action from this Soul replaced it. · body moved 12 s after the ask",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Cottage Knoll",
+    "posture": "walking",
+    "activity": "Swim in pond",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [
+    "ada-003"
+   ],
+   "severity": 2,
+   "importance": 2
+  },
+  {
+   "t": 160,
+   "mono": 160018,
+   "seat": "ada",
+   "kind": "move",
+   "kinds": [
+    "move"
+   ],
+   "title": "moved to Green field",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Green field",
+    "posture": "walking",
+    "activity": "Swim in pond",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 180,
+   "mono": 180008,
+   "seat": "ada",
+   "kind": "move",
+   "kinds": [
+    "move"
+   ],
+   "title": "moved to World",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "World",
+    "posture": "walking",
+    "activity": "Swim in pond",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 190,
+   "mono": 190019,
+   "seat": "ada",
+   "kind": "close",
+   "kinds": [
+    "result",
+    "close",
+    "move",
+    "receipt"
+   ],
+   "title": "ada-003 closed · moved to Hamlet Pond · card result (done) · swim:pond completed",
+   "text": "answer after 51 s · \"now go for a swim in the pond\" (result)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden result msg_3ef154b6… done \"Ada swam in Hamlet Pond; swim completed.\""
+    ],
+    "said": "swim completed at g-pond."
+   },
+   "card": null,
+   "body": {
+    "place": "Hamlet Pond",
+    "posture": "swimming",
+    "activity": "treading water",
+    "changed": true
+   },
+   "verdict": {
+    "requestId": "ada-003",
+    "asked": "now go for a swim in the pond",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "ada-003"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 212,
+   "mono": 212037,
+   "seat": "ada",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "ack"
+   ],
+   "title": "wrote on the card · card acknowledged",
+   "text": "ack after 2 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "that's all, now walk to the pond hall and wait for the others",
+    "channel": "card",
+    "thought": "console: typed to this seat at the console",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_26da0e0f… \"Got it: walking to the pond hall and waiting for the others.\"",
+     "eden listen --after msg_26da0e0f…",
+     "eden act walk:lab-pond-hall/hall --wait 90"
+    ],
+    "said": "Got it: walking to the pond hall and waiting for the others."
+   },
+   "card": null,
+   "body": {
+    "place": "Hamlet Pond",
+    "posture": "swimming",
+    "activity": "treading water",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "ada-004"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 214,
+   "mono": 214038,
+   "seat": "bo",
+   "kind": "say",
+   "kinds": [
+    "say"
+   ],
+   "title": "wrote on the card",
+   "text": "",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "that's all, now walk to the pond hall and wait for the others",
+    "channel": "card",
+    "thought": "console: typed to this seat at the console",
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "bo-004"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 230,
+   "mono": 230010,
+   "seat": "ada",
+   "kind": "body",
+   "kinds": [
+    "body",
+    "move"
+   ],
+   "title": "body started to change · moved to World",
+   "text": "body moved 18 s after the ask",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "World",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall / Hall",
+    "changed": true
+   },
+   "verdict": null,
+   "requestIds": [
+    "ada-004"
+   ],
+   "severity": 0,
+   "importance": 1
+  },
+  {
+   "t": 236,
+   "mono": 236043,
+   "seat": "ada",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "close",
+    "ack",
+    "move",
+    "receipt",
+    "result"
+   ],
+   "title": "wrote on the card · moved to Waterside Room · ada-004 closed · card acknowledged · walk:lab-pond-hall/hall completed · card result (done)",
+   "text": "\"that's all, now walk to the pond hall and wait for the others\" (next-direction) · ack after 3 s · answer after 7 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "channel": "card",
+    "thought": "director: everyone is present: first talk",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_b5231b21… \"Got it: giving the talk now with say, then listening.\"",
+     "eden say \"Good morning, everyone! I started my day on the green, then sat a while on the cottage bench, thinking about …",
+     "eden result msg_b5231b21… done \"Ada gave her talk aloud in the Waterside Room; Bo heard it.\"",
+     "eden result msg_26da0e0f… done \"Ada reached the pond hall and waited; Bo is there.\"",
+     "eden listen --after msg_b5231b21…"
+    ],
+    "said": "Got it: giving the talk now with say, then listening.\n\nAda gave her talk aloud in the Waterside Room; Bo heard it."
+   },
+   "card": null,
+   "body": {
+    "place": "World",
+    "posture": "walking",
+    "activity": "Walk to Waterside Hall / Hall",
+    "changed": true
+   },
+   "verdict": {
+    "requestId": "ada-004",
+    "asked": "that's all, now walk to the pond hall and wait for the others",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "ada-005",
+    "ada-004"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 236.1,
+   "mono": 236051,
+   "seat": "bo",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "close"
+   ],
+   "title": "wrote on the card · bo-004 closed with no answer",
+   "text": "\"that's all, now walk to the pond hall and wait for the others\" (next-direction)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "channel": "card",
+    "thought": "director: ada has started: prepare ahead to hide the turn latency",
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": {
+    "requestId": "bo-004",
+    "asked": "that's all, now walk to the pond hall and wait for the others",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "bo-005",
+    "bo-004"
+   ],
+   "severity": 2,
+   "importance": 2
+  },
+  {
+   "t": 246,
+   "mono": 246045,
+   "seat": "bo",
+   "kind": "say",
+   "kinds": [
+    "say",
+    "close"
+   ],
+   "title": "wrote on the card · bo-005 closed with no answer",
+   "text": "\"Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, …\" (next-direction)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "channel": "card",
+    "thought": "director: ada finished",
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_240bb40c… \"Got it: Bo is already in the pond hall, waiting.\"",
+     "eden listen --after msg_240bb40c…",
+     "eden result msg_240bb40c… done \"Bo is in the pond hall (Waterside Room), waiting for the others. Talk held until your t…"
+    ],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": {
+    "requestId": "bo-005",
+    "asked": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "bo-006",
+    "bo-005"
+   ],
+   "severity": 2,
+   "importance": 2
+  },
+  {
+   "t": 250,
+   "mono": 250010,
+   "seat": "ada",
+   "kind": "close",
+   "kinds": [
+    "close"
+   ],
+   "title": "ada-005 closed",
+   "text": "\"Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about …\" (result)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": {
+    "requestId": "ada-005",
+    "asked": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "ada-005"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 267.6,
+   "mono": 267561,
+   "seat": "bo",
+   "kind": "ack",
+   "kinds": [
+    "ack"
+   ],
+   "title": "card acknowledged",
+   "text": "ack after 22 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden ack msg_39f73117… \"Got it: talk ready, holding.\"",
+     "eden ack msg_5e989ccd… \"Got it: giving the talk now.\"",
+     "eden listen --after msg_5e989ccd…",
+     "grep -n -i \"say\" SKILL.md | head -20",
+     "eden say \"Hi, I'm Bo. I'm a bit shy, so I spent the quiet morning with my music, tuning up in the hamlet while the sun …"
+    ],
+    "said": "Got it: giving the talk now."
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "bo-006"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 272.9,
+   "mono": 272914,
+   "seat": "bo",
+   "kind": "result",
+   "kinds": [
+    "result"
+   ],
+   "title": "card result (done)",
+   "text": "answer after 27 s",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [
+     "eden result msg_39f73117… done \"Talk prepared; held until your turn.\"",
+     "eden result msg_5e989ccd… done \"Bo gave the talk in the pond hall (heard by 1). Now listening.\""
+    ],
+    "said": "Bo gave the talk in the pond hall (heard by 1). Now listening."
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": null,
+   "requestIds": [
+    "bo-006"
+   ],
+   "severity": 0,
+   "importance": 2
+  },
+  {
+   "t": 280,
+   "mono": 280022,
+   "seat": "bo",
+   "kind": "close",
+   "kinds": [
+    "close"
+   ],
+   "title": "bo-006 closed",
+   "text": "\"Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about h…\" (result)",
+   "shot": null,
+   "shotT": null,
+   "shotSource": null,
+   "persona": {
+    "said": null,
+    "channel": null,
+    "thought": null,
+    "rating": null
+   },
+   "agent": {
+    "did": [],
+    "said": null
+   },
+   "card": null,
+   "body": {
+    "place": "Waterside Room",
+    "posture": "standing",
+    "activity": "standing around",
+    "changed": false
+   },
+   "verdict": {
+    "requestId": "bo-006",
+    "asked": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+    "fidelity": null,
+    "class": null,
+    "reason": null,
+    "issueId": null,
+    "issueTitle": null,
+    "oracleFails": []
+   },
+   "requestIds": [
+    "bo-006"
+   ],
+   "severity": 0,
+   "importance": 2
+  }
+ ]
+}

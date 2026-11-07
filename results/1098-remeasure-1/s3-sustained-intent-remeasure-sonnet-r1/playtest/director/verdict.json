@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-07T17:15:26.696Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-07T17:15:28.699Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 262,
+   "firstAt": "2026-11-07T17:15:35.763Z",
+   "text": "Good morning, everyone! I'm Ada, and I keep bees, so my errand began at the orchard, where the blossoms were humming already. Then I set off toward the cottage bench before being called to the pond hall. It was a lovely, busy morning, and the bees would approve.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-07T17:15:40.702Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 268,
+   "firstAt": "2026-11-07T17:15:53.171Z",
+   "text": "Um... hi. This morning I meant to practise my music alone on the green, but plans changed. I was sent to the pond hall instead, and then to the orchard, and then back here. I'm a bit shy about it, but I think the detour was nice: the walk gave me a tune to play later.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 1
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-07T17:15:26.696Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 22,
+    "cachedTokens": 245499,
+    "cacheCreationTokens": 14548,
+    "outputTokens": 1698,
+    "costUsd": 0.1948,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 54,
+    "cachedTokens": 773389,
+    "cacheCreationTokens": 28845,
+    "outputTokens": 5247,
+    "costUsd": 0.2453,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 76,
+   "cachedTokens": 1018888,
+   "cacheCreationTokens": 43393,
+   "outputTokens": 6945,
+   "costUsd": 0.4401,
+   "turns": 8,
+   "unknownTurns": 0
+  }
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "identity": "agent-9d95e1d3026a5257c3f317a6",
+ "world": "http://127.0.0.1:4456/w/s3-reasonable-actions",
+ "accountAuth": false,
+ "token": "sim_s_10ac98244c_vIBUq554N-odInCmKFi55xCkAOv9pRsG",
+ "soul": "s_10ac98244c",
+ "lastReceipt": "r_7778e3f1-06c3-4e81-920c-dc69fbd487b7",
+ "lastActAt": "2026-11-07T17:10:20.555Z",
+ "cursor": "c_21",
+ "ownerMark": 1794071480732
+}

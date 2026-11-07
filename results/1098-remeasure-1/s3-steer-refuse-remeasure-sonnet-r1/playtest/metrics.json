@@ -1,0 +1,184 @@
+{
+ "version": 2,
+ "scenario": "s3-steer-refuse-live-sonnet",
+ "requests": 8,
+ "basics": {
+  "requests": 8,
+  "walkRequests": 4,
+  "walksArrived": 0,
+  "walksArrivalKnown": 3,
+  "walkArrivalRate": 0,
+  "bodyMovedInBudget": 3,
+  "bodyMovedRate": 0.375,
+  "ackMedianSec": 6.45,
+  "firstBodyChangeMedianSec": 14,
+  "stuck": 0,
+  "insideSolid": 0,
+  "oscillations": 1,
+  "wrong": 0,
+  "hits": 0,
+  "basis": "walk requests by verb in the owner text; arrival from the arrival oracle (unknown excluded); body moved = first visible body change inside the request budget"
+ },
+ "speed": {
+  "ackSec": {
+   "n": 6,
+   "median": 6.45,
+   "p90": 12.8,
+   "max": 12.8,
+   "mean": 6.47
+  },
+  "firstBodyChangeSec": {
+   "n": 3,
+   "median": 14,
+   "p90": 16,
+   "max": 16,
+   "mean": 14
+  },
+  "resultSec": {
+   "n": 3,
+   "median": 16.3,
+   "p90": 28.4,
+   "max": 28.4,
+   "mean": 18.7
+  },
+  "chatQueuedSec": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "mean": null
+  },
+  "walkMps": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "mean": null
+  },
+  "wallVsBudget": {
+   "n": 8,
+   "median": 0.05333333333333333,
+   "p90": 0.4,
+   "max": 0.4,
+   "mean": 0.1
+  },
+  "basis": "seconds from the owner message (sentAt); ack = card ack only; resultSec = latest observed card result, including server progress, not overall journey completion (use journey physicalCompleteAt/completionClaimAt); chatQueuedSec = sentAt to the start of the seat turn that carried a chat message (Claude Code queues typed messages behind a running turn); walk m/s = sampled displacement during walk receipts"
+ },
+ "uptime": {
+  "listenOpenFraction": null,
+  "unackedAtCutoff": 2,
+  "serverErrors": 0,
+  "seatCrashes": 1,
+  "seatTimeouts": 1,
+  "healthzBefore": true,
+  "healthzAfter": true,
+  "tickRate": 20,
+  "basis": "presence from the rendered card; crashes = seat turns with non-zero exit"
+ },
+ "cost": {
+  "tokensTotal": {
+   "input": 70,
+   "cached": 863474,
+   "output": 6202
+  },
+  "tokensPerHour": {
+   "input": 840,
+   "output": 74424
+  },
+  "tokensPerRequest": {
+   "input": 5,
+   "output": 568,
+   "cached": 75587
+  },
+  "outputTokensPerRequest": {
+   "n": 8,
+   "median": 568,
+   "p90": 612,
+   "max": 612,
+   "mean": 437
+  },
+  "turnsPerRequest": {
+   "n": 8,
+   "median": 1,
+   "p90": 1,
+   "max": 1,
+   "mean": 1
+  },
+  "cardTurnsPerRequest": {
+   "n": 8,
+   "median": 1,
+   "p90": 1,
+   "max": 1,
+   "mean": 1
+  },
+  "cliCallsPerRequest": {
+   "n": 8,
+   "median": 4,
+   "p90": 4.5,
+   "max": 4.5,
+   "mean": 4
+  },
+  "ackChars": {
+   "n": 6,
+   "median": 60.5,
+   "p90": 82,
+   "max": 82,
+   "mean": 58.67
+  },
+  "resultChars": {
+   "n": 3,
+   "median": 65,
+   "p90": 85,
+   "max": 85,
+   "mean": 69.67
+  },
+  "acksOverBound": 0,
+  "ackBoundChars": 140,
+  "chatReplyChars": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "mean": null
+  },
+  "basis": "cost.jsonl per seat turn; a turn serves the requests whose window (sentAt..cutoffAt) it overlaps or that it carried (chatTurns); its tokens and CLI calls are split evenly over them; requests served by no turn count 0 turns and no tokens"
+ },
+ "journeys": {
+  "rows": [],
+  "basis": "ordered frozen geometry/posture predicates and exact receipt target IDs; unknown is never a pass",
+  "setup": [],
+  "infrastructureInvalid": []
+ },
+ "fidelity": {
+  "counts": {
+   "H": 0,
+   "P": 0,
+   "M": 0,
+   "W": 0,
+   "unresolved": 0
+  },
+  "wrong": 0,
+  "classes": {},
+  "hitRate": null,
+  "truthfulnessPassRate": 1,
+  "vocabularyMisses": 0,
+  "vetoed": 0,
+  "basis": "ledger.tsv (Reviewer, oracle-vetoed); P never counts as H"
+ },
+ "physical": {
+  "insideSolid": 0,
+  "noProgress": 0,
+  "stuckReceipts": 0,
+  "oscillations": 1,
+  "basis": "oracle fails per request"
+ },
+ "emergence": null,
+ "harness": {
+  "shotsTaken": 0,
+  "shotsPlanned": 30,
+  "lateSamples": 0,
+  "packsWithUnknowns": 8,
+  "reviewerCoordinatorDisagreements": null,
+  "reviewerLeaks": 0
+ }
+}

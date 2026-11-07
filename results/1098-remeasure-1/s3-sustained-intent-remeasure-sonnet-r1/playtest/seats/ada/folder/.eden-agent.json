@@ -1,0 +1,14 @@
+{
+ "identity": "agent-a8c482c57d060f06a842ddd3",
+ "world": "http://127.0.0.1:4458/w/s3-sustained-intent",
+ "accountAuth": false,
+ "token": "sim_s_980b442053_gz5Qlav2aIr1QpRcYBV-qlY55ANyx9gT",
+ "soul": "s_980b442053",
+ "lastReceipt": "r_8a2de2b8-c825-4e63-ba80-aa9c2ca309ae",
+ "lastActAt": "2026-11-07T17:14:55.978Z",
+ "cursor": "c_18",
+ "ownerMark": 1794071695981,
+ "lastAcked": "msg_8ac44925-cb7c-42cc-bf73-8b88fb4e974e",
+ "lastAckedAt": "2026-11-07T17:14:55.322Z",
+ "lastAckedActed": true
+}
