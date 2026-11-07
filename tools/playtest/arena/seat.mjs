@@ -12,7 +12,7 @@ import { now, sleep } from '../lib/clock.mjs';
 import * as claude from './adapters/claude-headless.mjs';
 import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
-import { worldBudgetFor } from './world-budget.mjs';
+import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
 
 export const ADAPTERS = { 'claude-headless': claude, 'codex-headless': codex, 'scripted-owner': scriptedOwner };
 export const LIVE_ADAPTERS = new Set(['claude-headless', 'codex-headless']);
@@ -55,6 +55,28 @@ export class Seat {
       wake: (seat.adapter ?? 'claude-headless') === 'codex-headless' ? seat.wake === true : seat.wake !== false };
   }
   save() { writeJson(join(this.dir, 'seat.json'), this.info); }
+  /** A new start for this Soul's owner: its resident client restarts, and the next turn opens a new chat. What the last chat
+   *  left unread goes with it, or a replay would stand in for memory. A seat with `home` moves into a Souls home first. */
+  async restart() {
+    await this.chain;   // a turn in flight would write its session back
+    const cli = async (...args) => {
+      const r = await run('node', [this.cli.file, ...args], { cwd: this.folder, maxWallMs: 20000 });
+      if (r.code !== 0) throw new Error(`seat ${this.seat.id}: ${args.join(' ')} exited ${r.code}: ${r.stderr.slice(0, 300)}`);
+      return JSON.parse(r.stdout);
+    };
+    const listening = !!this.listener;
+    this.stopListen();
+    try {
+      if ((await cli('serve', '--status')).serving) await cli('pending');
+      await cli('serve', '--stop');
+      let up = true;
+      for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
+      if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
+      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
+      this.info.sessionId = null; this.save();
+    } finally { if (listening) this.startListen(); }
+  }
   get sessionId() { return this.info.sessionId; }
   /** Number of completed turns (as recorded in turns.jsonl, so it survives a harness restart). */
   turnCount() { return readJsonl(join(this.dir, 'turns.jsonl')).length; }
@@ -119,24 +141,41 @@ export class Seat {
     const ended = now();
     // #1098: `claude -p --resume` reports total_cost_usd for the whole session so far, so this turn's cost is the difference
     // from the session's last total (a crashed turn can report zero: then its cost is unknown and the whole reservation counts).
+    // A turn killed at its wall limit writes no final result, and its stream can carry an early result line repeating the last
+    // total, which would read as a known $0. Its cost is unknown too. The CLI's next total for the same session holds every call
+    // the killed turn completed, token for token (two live kills on #1098), so the reservation stands until then and is taken back
+    // when that total arrives. The total leaves out a call in flight at the kill, which the provider may still bill, so the release
+    // keeps the priced last call. The limit: an in-flight call that cost more than that reads low by the difference, at most one
+    // observation plus one output ($0.073 at the defaults). A kill on a seat's last turn, or a new session, stays counted.
     const sessionCost = this.info.adapter === 'claude-headless' ? r.usage?.costUsd ?? null : null;
     let turnCost = r.usage?.costUsd ?? null;
-    if (sessionCost != null) {
+    if (r.timedOut) turnCost = null;
+    else if (sessionCost != null) {
       const sid = r.sessionId ?? this.info.sessionId, prev = this.info.sessionCostUsd?.[sid] ?? 0;
       turnCost = sessionCost >= prev ? sessionCost - prev : null;
       this.info.sessionCostUsd = { ...(this.info.sessionCostUsd ?? {}), [sid]: Math.max(prev, sessionCost) };
     }
     if (hold) {
-      this.budget.settle(hold, turnCost);
-      // the reservation assumed: no output past maxOutputTokens in a call; context growing by at most one observation plus one
-      // output between calls (from the session's last context, or from maxContextTokens on the first call); and the turn
-      // costing no more than it reserved. Anything past that ends the world's turns.
       const calls = [], seen = new Set();
       for (const e of r.stream ?? []) {
         if (e?.type !== 'assistant') continue;
         const u = e.message?.usage ?? {}, key = e.message?.id ?? JSON.stringify(u); if (seen.has(key)) continue; seen.add(key);
-        calls.push({ ctx: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), out: u.output_tokens ?? 0 });
+        calls.push({ ctx: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), out: u.output_tokens ?? 0, usd: callUsd(u) });
       }
+      this.budget.settle(hold, turnCost);
+      const sid = r.sessionId ?? this.info.sessionId, killed = this.info.unknownCost?.[sid] ?? null;
+      if (turnCost == null) {   // no call shown: the kill landed in the turn's first call, so keep what one call at this context can cost
+        const keepUsd = calls.at(-1)?.usd ?? hold.usd - hold.capUsd;
+        this.info.unknownCost = { ...(this.info.unknownCost ?? {}), [sid]: { usd: (killed?.usd ?? 0) + hold.usd, keepUsd: (killed?.keepUsd ?? 0) + keepUsd } }; this.save();
+      } else if (killed && sessionCost != null) {
+        this.budget.release(this.seat.id, killed.usd - killed.keepUsd, 'the session total now holds the turns whose cost was unknown', { keptUsd: killed.keepUsd });
+        const { [sid]: _, ...rest } = this.info.unknownCost; this.info.unknownCost = rest; this.save();
+      }
+      const drift = priceDriftOf((r.stream ?? []).filter((e) => e?.type === 'result').at(-1)?.modelUsage);
+      if (drift) this.budget.priceDrift(this.seat.id, drift);
+      // the reservation assumed: no output past maxOutputTokens in a call; context growing by at most one observation plus one
+      // output between calls (from the session's last context, or from maxContextTokens on the first call); and the turn
+      // costing no more than it reserved. Anything past that ends the world's turns.
       const step = this.budget.maxObservationTokens + this.budget.maxOutputTokens;
       let prev = ctxBefore, broke = null;
       for (const c of calls) {
@@ -145,7 +184,7 @@ export class Seat {
         else if (prev != null && c.ctx > prev + step) broke = `context grew ${c.ctx - prev} tokens between calls`;
         if (broke) break; prev = c.ctx + c.out;
       }
-      if (!broke && turnCost != null && turnCost > hold.usd) broke = `turn cost $${turnCost} past its reservation $${hold.usd}`;
+      if (!broke && turnCost != null && turnCost > hold.usd + (killed?.usd ?? 0)) broke = `turn cost $${turnCost} past its reservation $${hold.usd}`;
       if (broke) this.budget.exceeded(this.seat.id, broke);
       const last = calls.at(-1); if (last) { this.info.sessionContextTokens = last.ctx + last.out; this.save(); }
     }
