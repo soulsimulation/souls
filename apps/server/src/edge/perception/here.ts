@@ -191,7 +191,7 @@ export class Perception {
 function flagLines(ledger: EdgeLedger, P: Perception) {
   const all = (ledger as {namedFlagsV1?: () => {name: string; walk: string; at: V2}[]}).namedFlagsV1?.() ?? [];
   if (!P.pos || !all.length) return {};
-  const pos = P.pos, shown = all.filter(f => ledger.places.containing(f.at[0], f.at[1]).every(p => ledger.knowledge.knows(P.soul.soulId, p.id)));
+  const pos = P.pos, shown = all.filter(f => !ledger.knowledge.hidesPoint(P.soul.soulId, f.at));
   if (!shown.length) return {};
   const flags = shown.map(f => ({f, d: dist2(pos, f.at)})).sort((a, b) => a.d - b.d || a.f.walk.localeCompare(b.f.walk));
   // (a flag no route reaches from here is still there: its line keeps the name and drops the id, which `act` would refuse)

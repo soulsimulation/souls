@@ -69,6 +69,13 @@ export class PlaceKnowledge {
     const root = this.secretRoot(placeId); if (root === null) return true; if (!soulId) return false;
     return this.memory(soulId).has(root);
   }
+  /** #1281: does a point stand in a place this Soul doesn't know, on any floor? A flag gives no level, so a secret room upstairs
+   *  hides what stands under it too: better a flag unnamed than a secret one named. Free where nothing is secret. */
+  hidesPoint(soulId: string, at: V2): boolean {
+    if (!this.marked().size) return false;
+    for (const p of this.L.places.byId.values()) if (p.polygon.length && !this.knows(soulId, p.id) && inPoly(at[0], at[1], p.polygon)) return true;
+    return false;
+  }
   /** Mark (or unmark) a place secret. Returns false for an unknown place. */
   setSecret(placeId: string, secret: boolean): boolean {
     if (!this.L.places.byId.has(placeId)) return false;

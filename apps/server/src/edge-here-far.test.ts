@@ -82,6 +82,16 @@ test('#1281 H4: a flag in a secret place is not named until she knows the place'
   assert.ok(!JSON.stringify(here().flags).includes('hidden grove'), JSON.stringify(here().flags));
 });
 
+test('#1281 H4: a flag in a secret room upstairs is not named either', {timeout: 300000}, async t => {
+  const {w, here} = await world(t, new URL('../../../worlds/templates/eden-2026.json', import.meta.url));
+  const edge = w.edge as any, room = [...w.edge.places.byId.values()].find(p => (p.level ?? 0) >= 1 && !p.carrier && p.polygon.length)!; assert.ok(room, 'an upstairs room');
+  const at = room.polygon.reduce((s, q) => [s[0] + q[0] / room.polygon.length, s[1] + q[1] / room.polygon.length], [0, 0]) as [number, number];
+  const flags = edge.namedFlagsV1; edge.namedFlagsV1 = () => [{name: 'the hidden study', walk: 'walk:flag-study', at}]; t.after(() => {edge.namedFlagsV1 = flags;});
+  assert.ok((here().flags as string[]).some(l => l.startsWith('the hidden study')), 'a public room: named');
+  assert.equal(w.edge.knowledge.setSecret(room.id, true), true); await w.settle(3);
+  assert.equal(here().flags, undefined, JSON.stringify(here().flags));
+});
+
 test('#1281: what far and flags name leaves the room for what can be done here as it was', {timeout: 300000}, async t => {
   const {w, here} = await world(t, new URL('../../../worlds/templates/eden-2026.json', import.meta.url));
   const edge = w.edge as any, flags = edge.namedFlagsV1, resolve = edge.resolveIdV1;
