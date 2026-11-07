@@ -286,6 +286,15 @@ export function beamBays(w: WorldState, beamId: string, near = 3.5): BeamBay[] {
   return out.sort((x, y) => x.height - y.height || (x.column < y.column ? -1 : 1));
 }
 
+/** #1250: what a god's edit leaves, judged where it lands, on the whole group. A frame or beam whose `connected` claim the rule
+ *  no longer supports stands on the ground instead, as a god's joined upright does, so an edit is never a fault: it can change
+ *  what a frame it never touched is judged on. Runs in the fold, so replay does the same. Returns the ids it stood down. */
+export function settleFrames(rt: Runtime): string[] {
+  const ids = [...new Set(framesStand(rt).flatMap((d) => d.subjects ?? []))];
+  for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
+  return ids;
+}
+
 /** Every tick: an installed loose beam has both ends joined to standing frames, and an upright a crew let go into its beams
  *  (support `connected`, as the native release) stands in a frame that stands on its own. A god's joined upright stands on
  *  the ground by the god's authority (PC12) and is not this. */

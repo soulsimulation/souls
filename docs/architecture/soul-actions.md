@@ -241,8 +241,14 @@ context-size checks below), regression runs, and an uncut real-client recording 
     a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
     holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
     later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
-    should. Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before the model has
-    heard, and one with exactly one beam in.
+    should.
+  - **A god's edit is never a fault.** `framesStand` judges a whole group, so an edit can change what a frame it never
+    touched is judged on. The world-edit fold settles that where it lands (`settleFrames`): whatever the rule no longer
+    supports stands on the ground, in the same application as the edit and before any invariant looks, and replay does the
+    same. A frame that still stands keeps what it had. The god's reply names what changed (`frames.settled`). Nothing is
+    refused, so a god can extend a bay: a new upright with too few beams stands the group down until it has them.
+  - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
+    the model has heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
     someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
     person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no

@@ -60,7 +60,7 @@ import { disassemblyPlan, DISASSEMBLY_POLICY } from './disassembly.ts';
 import { MARS_2026_MAP, withMars2026Map } from './mars-2026-map.ts';
 import { disassemblyRegistry } from '../../../mars/viewer/engine/construction/disassembly.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { connectBeamV1, framesStand } from './beam-connect.ts';
+import { connectBeamV1, framesStand, settleFrames } from './beam-connect.ts';
 import { decksBear, installJoistV1, laySheetV1 } from './deck-install.ts';
 import { installFlightV1, installTreadV1, stairsBear } from './stair-install.ts';
 import { captureRenderScene, commonsSceneMetadataV1Schema, type RenderSceneCaptureV1, type RenderScene } from '@souls/engine-contract';
@@ -2034,12 +2034,17 @@ export class MarsEngine implements Engine {
    *  static scene (world.entityPhysicsV1, like nav/1) and entities. The planner re-bases once; idle bodies a new solid
    *  buries step out to the nearest clear spot (edits never bury a Soul); busy ones are named in `trapped`.
    *  Returns the hash it derived so the host can check replay agreement. */
+  /** #1250: the frames and beams edits have stood down since this was last asked, for the god's reply. Not state: a read of what the fold did. */
+  private settledV1:string[]=[];
+  takeSettledV1():string[]{const ids=[...new Set(this.settledV1)];this.settledV1=[];return ids;}
   applyWorldEditV1(raw:WorldEditV1):{hash:string;relocated:string[];trapped:string[];kept:string[]}{
     if(!raw||raw.contract!=='world-edit/1'||typeof raw.set!=='object'||!Array.isArray(raw.levels))throw Error('world-edit.bad-payload');
     if(this.renderPlatformMetadata)this.finishRecorder();
     const baseKey=this.rt.world.entityPhysicsV1?.baseKey;
     const navigationChanged=worldEditChangesNavigation(this.rt.world,raw);
     const {physics,kept}=applyWorldEdit(this.rt.world,raw);
+    // #1250: in the same application as the edit, before any invariant looks: a god's edit is never a fault
+    if(this.cfg.sharedCarryV1===true)this.settledV1.push(...settleFrames(this.rt));
     this.m.canonicalEntityOrder(this.rt.world);
     // entity-world fixtures are depicted by the viewer's entity layer (entity diffs), not by engine change events or takes
     const spatial=this.rt.services.spatial as Spatial;

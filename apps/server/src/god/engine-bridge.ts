@@ -87,6 +87,7 @@ type Part = NonNullable<WorldEditV1['set'][string]>;
 type EngineV1 = {
   world: { tick: number; entities: Record<string, any>; entityPhysicsV1?: EntityPhysicsV1 };
   applyWorldEditV1(p: WorldEditV1): { hash: string };
+  takeSettledV1?(): string[];
   bodyUsesV1(id: string): { body: string; how: 'occupied' | 'held' } | null;
   reachV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }): { ok: true; length: number; legs: number; levels: number[] } | { ok: false; code: string; message: string };
   standableNearV1(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null;
@@ -368,7 +369,7 @@ export class EngineBridge {
       prepare: (before, after, diff, _ops, o) => { if (o?.dry !== true) { try { this.arrivalShaped = shapedIds(before, diff); } catch { this.arrivalShaped = null; } this.navShaped = this.arrivalShaped && navDoorFlips(before, diff, this.arrivalShaped); this.navBefore = this.navSpots(before, [...diff.removes, ...(this.navShaped ?? diff.upserts.map(e => e.id))]); } return this.prepareWalkouts(before, after, diff, o?.dry === true); },
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
-      navNote: (diff, said) => this.navNoteFor(diff, said),
+      navNote: (diff, said) => [...this.navNoteFor(diff, said), ...this.framesNote(diff)],
     };
     // R8: residents near a visible map change hear of it once per request; a build near them, at start and at done.
     this.mapNotices = new MapNotices((soulId, text, place) => this.notices.notify(soulId, { text, tick: this.engine.world.tick, native: true, ...(place ? { place } : {}) }), () => this.god.now());
@@ -1254,6 +1255,14 @@ export class EngineBridge {
       try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); n++; } catch { /* clock not ready */ }
     }
     return n;
+  }
+  /** #1250: what an edit did to frames it may not have touched, said to the god who made it: the fold stands down a frame that no
+   *  longer stands on its own, and a beam seated in frames that don't stand. Nothing here decides that. */
+  private framesNote(diff: Diff): string[] {
+    if (!this.edge?.sharedCarry || !diff.upserts.some((e) => this.model.resolvedDef(e.def)?.components.connectors)) return [];
+    this.flush(); this.host.drainInputs();
+    const ids = this.engine.takeSettledV1?.() ?? [];
+    return ids.length ? [`frames.settled: ${ids.map((id) => this.model.pathOf(id)).join(', ')} no longer stand${ids.length === 1 ? 's' : ''} on what held ${ids.length === 1 ? 'it' : 'them'} up, so ${ids.length === 1 ? 'it stands' : 'they stand'} on the ground now.`] : [];
   }
   private navNoteFor(diff: Diff, said?: string[]): string[] {
     // buildsafe/1 already gave the god one line for these: not named twice

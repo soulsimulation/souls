@@ -560,6 +560,57 @@ test('R11: after a restart, a whole third frame and then one of its beams taken 
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
+test('#1250: a god joining a third upright to released frames, live: the clock runs, a reboot runs, and the god is told', {timeout: 900000}, async (t) => {
+  const {w, pj, frames, bays} = await released(t);
+  const r = ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the frame the batch never touched too');
+  assert.ok(r.warnings.some((x) => /frames\.settled/.test(x)), JSON.stringify(r.warnings));
+  assert.notEqual(see(w, w.souls.Ada, pj).state.checkpoint, 'frames'); assert.equal(glitches(w), 0);
+  await reboot(w);
+  assert.equal(w.host.clockFailure, undefined); assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a world that settled replays to the same state from its log alone', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  w.comms.close(); w.host.stop(); w.host.drainInputs(); w.host.saveSnapshot(true);
+  const live = {tick: w.host.engine.world.tick, hash: w.host.engine.stateHash()}, id = w.host.worldId;
+  w.db.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(id); w.db.close();
+  const db = new Db(w.path), h = new WorldHost(db, factory, seed, 1e9, worldId, w.opts); h.boot(); h.drainInputs(); mount(w, h, db);
+  assert.deepEqual({tick: h.engine.world.tick, hash: h.engine.stateHash()}, live, 'the fold settles the same way on replay');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']);
+  await w.tick(20); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a finished bay takes a third upright: the clock runs and the project says what the frames now are', {timeout: 900000}, async (t) => {
+  const {w, pj, frames, bays} = await released(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, b5 = w.god.model.get('beam5');
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: [w.ax + 30, w.az + 12], r: 0}]})); await w.tick(20);
+  await build(w, Ada, [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {project: pj});
+  assert.equal(see(w, Ada, pj).state.complete, true); assert.ok(b5);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  assert.equal(see(w, Ada, pj).state.complete, false); assert.equal(glitches(w), 0);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a whole third frame leaves a standing frame as it was, and taking a beam of it stands them down', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  const seats = [bays.find((b) => b.column === 'l' && b.height > 1), bays.find((b) => b.column === 'r' && b.height > 1), bays.filter((b) => b.column === 'l').at(-1), bays.filter((b) => b.column === 'r').at(-1)];
+  ok(w.god.act({ops: [1, 2, 3].map((i) => ({op: 'place', def: 'core/rack-beam@5', name: `extra${i}`, p: [w.ax + 30, w.az + 12 + i], r: 0}))})); await w.tick(10);
+  ok(w.god.act({ops: ['beam5', 'extra1', 'extra2', 'extra3'].flatMap((name, i) => thirdFrameOps(w, frames, frames[1], seats[i].seats[1], name).slice(i ? 1 : 0))})); await w.tick(30);
+  assert.equal(w.E()[frames[0]].support.kind, 'connected', 'the frame the batch never touched still stands, and keeps what it had');
+  ok(w.god.act({ops: [{op: 'remove', id: 'extra3'}]})); await w.tick(30);
+  assert.equal(w.E()[frames[0]].support.kind, 'ground'); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a beam joined between uprights lying flat leaves the clock running, live and after a reboot', {timeout: 240000}, async (t) => {
+  const w = await world(t, {names: ['Ada']}), x = w.ax + 11, z = w.az + 8, seat = 'front-l-5';
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-upright@2', name: 'fa', p: [x, z], r: 0}, {op: 'place', def: 'core/rack-upright@2', name: 'fb', p: [x + BEAM_L, z], r: 0}, {op: 'place', def: 'core/rack-beam@5', name: 'bm', p: [x + 8, z + 5], r: 0}]})); await w.tick(20);
+  const m = mid(seatAt(w, w.idOf('fa'), seat), seatAt(w, w.idOf('fb'), seat));
+  ok(w.god.act({ops: [{op: 'move', id: 'bm', in: {parent: 'world'}, p: [m[0], m[1] - 0.0508, m[2]], r: 0}, {op: 'connect', a: {id: 'bm', connector: 'end-l'}, b: {id: 'fa', connector: seat}}, {op: 'connect', a: {id: 'bm', connector: 'end-r'}, b: {id: 'fb', connector: seat}}]})); await w.tick(40);
+  assert.equal(w.E()[w.idOf('bm')].support.kind, 'ground'); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(glitches(w), 0);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); assert.equal(glitches(w), 0);
+});
+
 test('R12: with the flag off, nothing is offered and no project exists', {timeout: 120000}, async (t) => {
   const w = await world(t, {sharedCarry: false}), {Ada} = w.souls; await yard(w);
   assert.ok(!offers(w, Ada).some((c) => ['organize', 'volunteer'].includes(c.verb)));
