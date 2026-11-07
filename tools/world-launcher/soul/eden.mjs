@@ -218,8 +218,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().awaitingFirstWorld) updateConfig((c) => { if (c.awaitingFirstWorld) { delete c.awaitingFirstWorld; c.trustedOrigins ??= [originOf(url)]; } });
   }
   const setCurrentWorld = (key) => updateConfig((c) => { c.currentWorld = key; });
-  /** The owner's answer to the reflective pass, beside its caps. */
-  const answerConsolidation = (on) => updateConfig((c) => { c.consolidation = { ...(c.consolidation && typeof c.consolidation === "object" ? c.consolidation : {}), enabled: on }; });
+  /** The owner's answer to the reflective pass, or that they've been asked, beside its caps. */
+  const noteConsolidation = (patch) => updateConfig((c) => { c.consolidation = { ...(c.consolidation && typeof c.consolidation === "object" && !Array.isArray(c.consolidation) ? c.consolidation : {}), ...patch }; });
   const seat = (key) => { const dir = at("pending", key); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "seat", key, dir }; };
   // The id names a folder and it comes from a world or a file, so it must be one folder name here.
   const soul = (id) => { if (!SOUL_ID.test(id ?? "")) throw new Error(`"${String(id).slice(0, 40)}" is not a Soul id; nothing was kept for it.`); const dir = at("souls", id, "runtime"); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "soul", id, dir }; };
@@ -467,7 +467,7 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
-  return { root, config, answerConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
 return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
@@ -1112,10 +1112,12 @@ function settingsOf(config) {
 
 /** The owner's answer: a pass spends their money and sends journal text to a model, so nothing runs until they say yes. `null` is not asked yet. */
 const answerOf = (config) => (config?.enabled === true || config?.enabled === false ? config.enabled : null);
-/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. */
+/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. Each sentence is
+ *  checked against what a pass does: a cap of zero means no pass can run, so no question. */
 function offerOf(config) {
-  const { callsPerDay, tokensPerPass } = settingsOf(config);
-  return `This Soul's journal is past its budget. A reflective pass has a model read the oldest days and write a short summary into MEMORY.md, gather notes it wrote more than once, and propose lines for SOUL.md for you to apply or ignore. The Soul keeps what mattered and wakes with less to read, and the full log stays on this machine. Cost: your own claude CLI on your account, at most ${callsPerDay} passes a day, ${tokensPerPass} tokens and $${PASS_USD} each. What leaves this machine: those journal days, which include what worlds said, sent to that model, and nothing else. Yes: consolidate on. No: consolidate off.`;
+  const { callsPerDay, tokensPerPass, everyHours } = settingsOf(config);
+  if (!callsPerDay || !tokensPerPass) return null;
+  return `This Soul's journal has outgrown what it can look back on. A reflective pass has a model read a Soul's oldest journal days and write a short summary into MEMORY.md, so the Soul carries those days in its brief and its journal stops growing. The pages it read then go from the Soul's own search, replaced by that summary; the full log stays on this machine. Here, with no model, a pass also gathers notes written more than once and proposes lines for SOUL.md for you to apply or ignore. A yes covers every Soul in this home, now and later${everyHours ? "" : ", and only when a pass is asked for: idle passes are off in your settings"}. Cost: your own claude CLI on your account: for each Soul, up to ${callsPerDay} passes a day of about ${tokensPerPass} tokens, each with a $${PASS_USD} limit. What leaves this machine: each Soul's oldest journal days, which include what worlds said, sent to that model, and nothing else of the Soul's. Yes: consolidate on. No: consolidate off.`;
 }
 
 /** The stand-in a world with fake minds gets: the same plumbing, with no model. */
@@ -2083,17 +2085,23 @@ async function runConsolidate({ force = false } = {}) {
   MEMORY?.memory.reopen();
   return out;
 }
-// consolidate on|off: the owner's answer, for the whole home.
+// consolidate on|off: the owner's answer, for the whole home. consolidate asked: the question has been put, so it isn't put again.
 const consolidateCommand = async (...args) => {
-  if (args[0] !== "on" && args[0] !== "off") return runConsolidate({ force: args.includes("--force") });
-  needMemory(); HOME.answerConsolidation(args[0] === "on");
-  return { consolidation: args[0], note: args[0] === "on" ? `An idle serve looks on the owner's schedule. ${CLI} consolidate runs a pass now.` : "No pass will run." };
+  const [word] = args;
+  if (word !== undefined && !["on", "off", "asked", "--force"].includes(word)) throw new Error("usage: consolidate [on|off|asked|--force]");
+  if (word === undefined || word === "--force") return runConsolidate({ force: word === "--force" });
+  needMemory(); HOME.noteConsolidation(word === "asked" ? { asked: true } : { enabled: word === "on" });
+  return { consolidation: word, note: word === "on" ? `An idle serve looks on the owner's schedule. ${CLI} consolidate runs a pass now.` : word === "off" ? "No pass will run." : "Nothing runs until your owner answers, and the question won't come up again." };
 };
-/** For `status`: what the owner said, or the question, once there's something for a pass to do. */
+/** For `status`: what the owner said, or the question, once there's something for a pass to do. Memory never fails the command it rides on. */
 function consolidationStatus() {
-  const asked = HOME.config().consolidation, answer = soulConsolidate.answerOf(asked);
-  if (answer !== null) return { consolidation: { state: answer ? "on" : "off" } };
-  return soulConsolidate.overBudget(joinPath(soulFolder(), "memory")).length ? { consolidation: { state: "not asked", offer: soulConsolidate.offerOf(asked) } } : {};
+  try {
+    const asked = HOME.config().consolidation, answer = soulConsolidate.answerOf(asked);
+    if (answer !== null) return { consolidation: { state: answer ? "on" : "off" } };
+    if (asked?.asked === true) return { consolidation: { state: "asked" } };
+    const offer = soulConsolidate.overBudget(joinPath(soulFolder(), "memory")).length ? soulConsolidate.offerOf(asked) : null;
+    return offer ? { consolidation: { state: "not asked", offer } } : {};
+  } catch (e) { calm(`memory: ${e.message}`); return {}; }
 }
 function needMemory() {
   const memory = memoryHere();
@@ -3696,7 +3704,7 @@ setup     register <world-url>            create "<Name>" [--for CODE] [--new]  
           approval [status|wait|cancel]   status                          guide
 home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
-memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|--force]
+memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
 look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]

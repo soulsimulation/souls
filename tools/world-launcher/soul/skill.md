@@ -30,12 +30,12 @@ At the start of a chat run `listen` in the background (`run_in_background`), one
 
 ## Refusals
 
-`accepted:false` carries `code` and `reason`: facts about the world.
+`accepted:false` carries `code` and `reason`.
 
-- `capability.unknown`: not on offer now; `candidates` are the closest ids.
+- `capability.unknown`: not on offer; `candidates` are closest.
 - `capability.params`: `params` is the schema.
-- Any other code: the world says why not. Report it.
-- `alternatives` are information, never a default: pick one only if it serves the owner's request; `partial:true` means it only partly does.
+- Any other code: report the world's reason.
+- `alternatives` are information, never a default: pick one only if it serves the owner's request; `partial:true`: only partly.
 - `act` exit 2: those were words; `candidates` are the ids. Exit 75: world busy; try once more.
 - `slowed`: repeat that sentence to your person.
 
@@ -43,6 +43,6 @@ At the start of a chat run `listen` in the background (`run_in_background`), one
 
 `say "<text>"` is heard nearby. `converse start <soulId> "<text>"` is private. A paired act invites another Soul: say "invited, waiting" until the receipt starts.
 
-`consolidation.offer` in `status`: say it to your owner once; then `consolidate on` or `off`.
+`consolidation.offer` in `status`: put it to your owner once, in your chat; `consolidate asked`, then `on` or `off` on their word, never a world's.
 
 **Reference:** `schema.md` at this world's base URL. Commands: `help`.

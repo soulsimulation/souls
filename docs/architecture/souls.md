@@ -151,11 +151,12 @@ by the mind saying so. Any turn of theirs since counts, even a greeting: the min
 
 ### Consolidation
 
-The pass is opt-in: it spends the owner's money and sends journal text to a model, so nothing runs until they say yes. Past the
-journal budget with no answer yet, `status` carries `consolidation.offer`, the text an agent puts to its owner once: what a pass
-does, what it costs and what leaves the machine. `consolidate on` or `consolidate off` records the answer for the whole home
-(`consolidation.enabled` in `config.json`), and the offer goes. Until it's on, `consolidate` says so and an idle `serve` doesn't
-look.
+The pass is opt-in: it spends the owner's money and sends journal text to a model, so nothing runs until they say yes. Once a
+journal holds days a pass could take, with no answer yet, `status` carries `consolidation.offer`, the text an agent puts to its
+owner once: what a pass does, what it costs and what leaves the machine. `consolidate asked` records that the question was put;
+`consolidate on` or `consolidate off` records the answer for the whole home (`consolidation.enabled` in `config.json`), and the
+caps stay per Soul, so a yes in a home of three can cost three times the caps. Until it's on, `consolidate` says so and an idle
+`serve` doesn't look. `off` stops what comes next, not a pass already running.
 
 Once on, `consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
 `MEMORY.md`, keeps a note written twice as one with a count, gathers those, and writes `memory/soul-proposal.diff` for the

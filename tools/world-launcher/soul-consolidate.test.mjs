@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CAPS, consolidate, fakeMind, NoMind, nextPassIn, ownerMind, settingsOf } from './soul/consolidate.mjs';
+import { CAPS, answerOf, consolidate, fakeMind, NoMind, nextPassIn, offerOf, ownerMind, settingsOf } from './soul/consolidate.mjs';
 import { spawnSync } from 'node:child_process';
 import { openSoulMemory } from './soul/memory.mjs';
 
@@ -274,7 +274,7 @@ test('#1256: off until the owner says yes; the offer says what it costs and what
   const { run, soul, cfg } = await cliSite(t), offer = async () => JSON.parse(await run('status')).consolidation;
   const asked = await offer();
   assert.equal(asked.state, 'not asked');
-  for (const told of [/MEMORY\.md/, /your own claude CLI/, /at most 2 passes a day, 8000 tokens and \$0\.05 each/, /What leaves this machine: those journal days/, /consolidate on/, /consolidate off/]) assert.match(asked.offer, told);
+  for (const told of [/MEMORY\.md/, /your own claude CLI/, /for each Soul, up to 2 passes a day of about 8000 tokens, each with a \$0\.05 limit/, /A yes covers every Soul in this home/, /go from the Soul's own search/, /What leaves this machine: each Soul's oldest journal days/, /consolidate on/, /consolidate off/]) assert.match(asked.offer, told);
   assert.equal(JSON.parse(await run('consolidate')).skipped, 'off'); assert.equal(JSON.parse(await run('consolidate', '--force')).skipped, 'off', 'force is no yes');
   await run('serve'); await new Promise((r) => setTimeout(r, 500)); await run('serve', '--stop');
   assert.ok(!existsSync(join(soul, 'MEMORY.md')), 'no answer, no pass, on any path');
@@ -286,6 +286,25 @@ test('#1256: off until the owner says yes; the offer says what it costs and what
   assert.ok(JSON.parse(await run('consolidate')).consolidated.length > 0); assert.ok(existsSync(join(soul, 'MEMORY.md')));
   writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { callsPerDay: 1, enabled: true } }));
   await run('consolidate', 'off'); assert.equal(JSON.parse(readFileSync(cfg, 'utf8')).consolidation.callsPerDay, 1, 'an answer leaves the caps as they were');
+});
+
+test('#1256: the question is put once; a typo runs nothing; a damaged journal doesn\'t cost `status`', async (t) => {
+  const { run, soul, cfg } = await cliSite(t), state = async () => JSON.parse(await run('status')).consolidation;
+  assert.equal(JSON.parse(await run('consolidate', 'asked')).consolidation, 'asked');
+  assert.deepEqual(await state(), { state: 'asked' }, 'asked isn\'t answered: it stays off, and the offer is gone');
+  assert.equal(JSON.parse(await run('consolidate')).skipped, 'off');
+  await run('consolidate', 'on'); assert.equal(await run('consolidate', 'of'), '', 'a typo is no pass'); assert.ok(!existsSync(join(soul, 'MEMORY.md')));
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: {} }));
+  mkdirSync(join(soul, 'memory/journal/2026-10-09.md'));
+  const told = JSON.parse(await run('status')); assert.equal(told.paired, true); assert.equal('consolidation' in told, false);
+});
+
+test('#1256: the offer tells the caps in force, and a cap of zero is no question', () => {
+  assert.match(offerOf({ callsPerDay: 1, tokensPerPass: 4000 }), /up to 1 passes a day of about 4000 tokens/);
+  assert.match(offerOf({ everyHours: 0 }), /idle passes are off in your settings/);
+  for (const c of [{ callsPerDay: 0 }, { tokensPerPass: 0 }]) assert.equal(offerOf(c), null);
+  for (const v of [undefined, null, 'on', 1, { enabled: 'yes' }, { enabled: 1 }, []]) assert.equal(answerOf(v), null);
+  assert.equal(answerOf({ enabled: true }), true); assert.equal(answerOf({ enabled: false }), false);
 });
 
 test('#1256: under budget there is no question, and `status` reads as it did', async (t) => {
