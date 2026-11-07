@@ -18,7 +18,7 @@ export const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
 export const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
-export const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
+export const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "links", "pendingCreate"];
 const IMPORTED_RUNTIME = [".eden-serve.json"];
 const GOD_LEGACY = ".eden-god.json", GOD_KEPT = /^\.eden-god\.(cache|bakes|claim-c_[0-9a-f]{8})\.json$/;
 
