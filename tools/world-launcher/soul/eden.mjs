@@ -2693,7 +2693,7 @@ async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
   let out = await waitRaw(secArg, idArg);
   const link = load().lastLink;
-  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, closed: true };
+  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {

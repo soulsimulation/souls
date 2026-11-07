@@ -11,7 +11,7 @@ import {clipped} from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 
-async function world(t, {results = {}, saySays = 200, actAnswer} = {}) {
+async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt} = {}) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
@@ -19,6 +19,8 @@ async function world(t, {results = {}, saySays = 200, actAnswer} = {}) {
       seen.push([req.method, url, body]);
       if (url === '/v1/edge/say') return saySays === 200 ? send(200, {said: {id: 'sp_1', heardBy: 1}}) : send(saySays, {error: {code: 'say.refused', message: 'No.'}});
       if (url === '/v1/edge/act') return send(200, actAnswer(body));
+      if (url.startsWith('/v1/edge/receipts/')) return send(200, {receipt: waitReceipt});
+      if (url === '/v1/edge/wait') return send(200, {cursor: 'c_1', events: [{kind: 'receipt.updated', receipt: waitReceipt}]});
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
       if (m?.[2] === '/result' && results.refuse) return send(404, {error: {code: 'not-found', message: 'no such message'}});
       if (m?.[2] === '/result') {results[m[1]] = body; return send(200, {inbox: {}});}
@@ -73,6 +75,14 @@ test('act prints closed only when the world has closed the message', async t => 
   assert.equal(unlinked.seen.filter(([m, u]) => m === 'GET' && u.includes('/inbox/')).length, 0, 'no read for an unlinked act');
   const going = await world(t, {results: {msg_1: {text: 'x'}}, actAnswer: () => ({...ended(), receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}})});
   assert.equal((await going.cli('act', 'walk:a', '--for', 'msg_1')).json.closed, undefined, 'still going');
+});
+
+test('wait prints closed and the message it closed, for the linked receipt only', async t => {
+  const started = {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: 'msg_1'};
+  const w = await world(t, {results: {msg_1: {text: 'walked.'}}, actAnswer: () => started, waitReceipt: {id: 'r_1', capability: 'walk:a', phase: 'completed', done: 'walked.'}});
+  assert.equal((await w.cli('act', 'walk:a', '--for', 'msg_1')).json.closed, undefined, 'still going');
+  const done = await w.cli('wait', '1', 'r_1');
+  assert.equal(done.json.closed, true); assert.equal(done.json.for, 'msg_1');
 });
 
 test('text over 140 characters is clipped at a word and says so', async t => {
