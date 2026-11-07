@@ -5,7 +5,7 @@
 import {WINDOW_CODE} from './store.ts';
 
 const LINK = 'If it returns an approval link, show the raw clickable link to the human: they sign in with Google or email and approve the intended world, Soul and agent.';
-const WINDOW = 'The request appears in the human\'s open Sim window: tell them to approve it there. Also show the printed link, as a backup.';
+const WINDOW = 'The request appears in the human\'s open Souls window: tell them to approve it there. Also show the printed link, as a backup.';
 
 /** SOUL3 2.0.0: the published instructions.md is a rendered capture (Eden 2026, one window code), not a {{}} template.
  *  It is recognised only by its exact opening lines (SOURCES.json instructions.capture), and only these literals are
@@ -14,7 +14,7 @@ export const CAPTURE = {base: 'https://sim.eden.art/worlds/w/eden-2026', world: 
 const CAPTURE_HEAD = `# Create a Soul in ${CAPTURE.world}\n\nWorld: ${CAPTURE.base} (the world's name is **${CAPTURE.world}**; that is never your Soul's name.)\n`;
 const CAPTURE_BASE = new RegExp(CAPTURE.base.replace(/[.\/]/g, '\\$&') + '(?![A-Za-z0-9-])', 'g');
 const CAPTURE_FOR = new RegExp(` --for ${CAPTURE.code}(?![A-Z0-9-])`, 'g');
-const CAPTURE_WINDOW = /The request appears in your human's open Sim window: tell them to approve it there, and show the printed\s+`approvalURL` as a backup\./;
+const CAPTURE_WINDOW = /The request appears in your human's open Souls window: tell them to approve it there, and show the printed\s+`approvalURL` as a backup\./;
 const CAPTURE_LINK = 'Show your human the printed `approvalURL` as a raw clickable link: they sign in with Google or email and approve the intended world, Soul and agent.';
 
 function fillCapture(text: string, base: string, world: string, code: string | null): string {

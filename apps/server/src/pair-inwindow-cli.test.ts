@@ -56,7 +56,7 @@ test('pair-soul <id> from a fresh folder: owner window within one poll, real nam
   const t0 = Date.now(), pair = await cli(fresh, ['pair-soul', soulId]);
   assert.equal(pair.status, 0, pair.out + pair.error);
   const printed = JSON.parse(pair.out);
-  assert.equal(printed.delivery, 'window'); assert.equal(printed.name, 'Longrun Test'); assert.match(printed.next, /open Sim window/);
+  assert.equal(printed.delivery, 'window'); assert.equal(printed.name, 'Longrun Test'); assert.match(printed.next, /open Souls window/);
   const listed = (await call('/v1/account/approvals', 'gene')).data.approvals, ms = Date.now() - t0;
   assert.deepEqual(listed.map((a: any) => [a.id, a.name, a.soulId, a.mode]), [[printed.approvalId, 'Longrun Test', soulId, 'repair']]);
   assert.ok(ms < 3000, `in the owner's window list within one poll interval (${ms} ms)`);

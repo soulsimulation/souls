@@ -113,7 +113,7 @@ test('Soul card start prompt names pair-soul with the window code; without a cod
   const withCode = soulStartPrompt('http://localhost:5960/w/inbox', 's_abc', 'Ada', 'K7QX-M2PA');
   assert.match(withCode, /node eden\.mjs pair "s_abc" --for K7QX-M2PA/);
   assert.match(withCode, /Soul "Ada" \(ID "s_abc"\)/);
-  assert.match(withCode, /open Sim window/);
+  assert.match(withCode, /open Souls window/);
   assert.match(withCode, /start listening/);
   assert.doesNotMatch(withCode, /eden-agent|pair-soul|approval wait|auto mode/);
   assert.match(withCode, /Do not create another Soul/);

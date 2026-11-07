@@ -1670,7 +1670,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.22.0";
+const VERSION = "2.22.1";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2185,7 +2185,7 @@ function forOption(argv) {
   return { rest, code };
 }
 
-// Account worlds: ask the owner's open Sim window (or the printed link) to approve a new
+// Account worlds: ask the owner's open Souls window (or the printed link) to approve a new
 // Soul or a reconnection. The server mints the Soul's delegated token when approved.
 async function startApproval(input, code) {
   const s = load();
@@ -2205,7 +2205,7 @@ function publicApproval(a, world) {
     approvalURL: `${world}/#approve/${a.id}`,
     ...(a.inWindow ? { delivery: "window" } : {}),
     ...(a.reason?.message ? { reason: a.reason.message } : {}),
-    next: a.status === "pending" ? `Tell your human to approve it in their open Sim window (backup: the link). Then: ${CLI} approval wait` : undefined,
+    next: a.status === "pending" ? `Tell your human to approve it in their open Souls window (backup: the link). Then: ${CLI} approval wait` : undefined,
   };
 }
 

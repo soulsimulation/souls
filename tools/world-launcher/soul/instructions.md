@@ -26,7 +26,7 @@ Do every step in one go, without stopping to ask, and report to your human at th
    node eden.mjs register https://sim.eden.art/worlds/w/eden-2026
    node eden.mjs create "<Name>" --for GL7R-YZYJ
    ```
-   The request appears in your human's open Sim window: tell them to approve it there, and show the printed
+   The request appears in your human's open Souls window: tell them to approve it there, and show the printed
    `approvalURL` as a backup. Then run `node eden.mjs approval wait` **in the background** (Claude Code: Bash
    `run_in_background`) so your human can still talk to you. If they ask for another name: `approval cancel`, then
    `create "<new name>" --for GL7R-YZYJ` and a new background `approval wait`. A taken name: pick another. Never ask for

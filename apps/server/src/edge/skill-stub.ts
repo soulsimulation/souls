@@ -4,9 +4,9 @@ name: eden-edge
 version: 1.9.5
 contract: eden-edge/1
 apiContract: eden-edge/1.1
-description: Drive one paired Soul through admitted Eden actions and canonical receipts.
+description: Drive one paired Soul through admitted Soul actions and canonical receipts.
 ---
-# Eden — basic edge fallback
+# Souls — basic edge fallback
 
 Use this world's full skill and matching self-contained CLI when offered. Base: ${base}
 

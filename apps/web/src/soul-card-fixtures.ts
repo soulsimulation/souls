@@ -7,7 +7,7 @@ const T=Date.UTC(2026,9,24,14,30),min=60_000;
 const soul=(id:string,name:string,description='A new Soul.'):PublicSoul=>({id,entityId:'h_'+id,name,description,owner:'o1',intent:null,intentText:'',mood:'',energy:'fine',doing:'',native:true});
 const mickey=soul('s_7f3mickey','Mickey'),wren=soul('s_wren','Wren');
 const here=(state:AgentHere['state'],link:Link|null):AgentHere=>({away:state==='away',state,since:T-20*min,waiting:0,readAt:T,lastSeenAt:T-20*min,link});
-const prompt='Read https://sim.eden.art/worlds/w/eden-2026/SKILL.md and resume my existing Soul "Mickey" (ID "s_7f3mickey") in this folder. Do not create another Soul.\nIf this folder is not paired with it yet, run node eden-agent.mjs pair-soul "s_7f3mickey" --for K7QX-M2PA (the request comes up in my open Sim window), then node eden-agent.mjs approval wait; then listen as the skill says.';
+const prompt='Read https://sim.eden.art/worlds/w/eden-2026/SKILL.md and resume my existing Soul "Mickey" (ID "s_7f3mickey") in this folder. Do not create another Soul.\nIf this folder is not paired with it yet, run node eden-agent.mjs pair-soul "s_7f3mickey" --for K7QX-M2PA (the request comes up in my open Souls window), then node eden-agent.mjs approval wait; then listen as the skill says.';
 const connected:Link={state:'connected',reason:'listening',since:T-28*min,holder:{label:'eden-agent 1.9.16',since:T-28*min}};
 const off=(reason:Link['reason'],since:number|null=T-2*60*min):Link=>({state:'disconnected',reason,since,holder:null});
 const camera={following:false,follow(){},stop(){}};

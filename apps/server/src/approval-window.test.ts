@@ -115,7 +115,7 @@ test('Ask again on a link request (no code) addresses it to the person who asked
 test('instructions.md?for=<code> names the code in the command and points to the open window; no code keeps the link', () => {
   const text = 'World {{WORLD}} at {{BASE}}: `create-soul "<Name>"{{FOR}}`. {{APPROVE}}';
   const window = fillInstructions(text, 'https://sim.example.test/worlds/w/bench-hamlet', 'Bench Hamlet', 'K7QX-M2PA');
-  assert.match(window, /create-soul "<Name>" --for K7QX-M2PA`/); assert.match(window, /open Sim window/); assert.match(window, /Bench Hamlet at https:\/\/sim\.example\.test\/worlds\/w\/bench-hamlet/);
+  assert.match(window, /create-soul "<Name>" --for K7QX-M2PA`/); assert.match(window, /open Souls window/); assert.match(window, /Bench Hamlet at https:\/\/sim\.example\.test\/worlds\/w\/bench-hamlet/);
   for (const bad of [null, '', 'k7qx-m2pa', 'K7QX-M2PA`; rm -rf /', '<script>']) {
     const plain = fillInstructions(text, 'https://x.test/w/a', 'A', bad);
     assert.match(plain, /create-soul "<Name>"`/); assert.match(plain, /approval link/); assert.doesNotMatch(plain, /--for|rm -rf|script/);

@@ -101,7 +101,7 @@ export function soulStartPrompt(base: string, soulId: string, name: string | und
   const pair = `node eden.mjs pair ${JSON.stringify(soulId)}${code ? ` --for ${code}` : ''}`;
   // PROMPT-SHORT (Gene 2026-10-23 #16): two lines; the listen mechanics live in the skill (lane LISTEN-LEAK)
   return `Read ${base}/skill.md and resume my existing Soul ${name ? `${JSON.stringify(name)} (ID ${JSON.stringify(soulId)})` : JSON.stringify(soulId)} in this folder. Do not create another Soul.\n`
-    + `If this folder is not paired with it yet, run ${pair}${code ? ' (the request comes up in my open Sim window)' : ' (I approve it in my open Sim window or at the approval link)'}; then start listening as the skill says.`;
+    + `If this folder is not paired with it yet, run ${pair}${code ? ' (the request comes up in my open Souls window)' : ' (I approve it in my open Souls window or at the approval link)'}; then start listening as the skill says.`;
 }
 let codeOnce: Promise<string | null> | null = null;
 /** One window-code request per page (the server reuses a code while it has over an hour left); a failure is retried next mount. */

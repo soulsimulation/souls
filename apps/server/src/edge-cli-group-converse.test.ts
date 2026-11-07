@@ -16,7 +16,7 @@ void test('conversation start keeps the old single form and adds explicit unique
  assert.ok(metadata,'published skill has versioned wire-contract metadata');
  assert.equal(metadata[1],SKILL_VERSION,'served CLI and skill advertise the same release');
  assert.equal(metadata[2],'eden-edge/1');assert.equal(metadata[3],'eden-edge/1.1');
- assert.ok(skill.includes(`# Eden — skill ${SKILL_VERSION}\n`),'guide heading agrees with the served version');
+ assert.ok(skill.includes(`# Souls — skill ${SKILL_VERSION}\n`),'guide heading agrees with the served version');
  assert.match(skill,/wire contract remains `eden-edge\/1`/);
 });
 
