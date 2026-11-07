@@ -20,7 +20,8 @@ for(const [status,phase,answer,inProgress] of [
  writeFileSync(join(root,'.eden-agent.json'),JSON.stringify({world:`http://127.0.0.1:${server.address().port}/w/fixture`,soul:'s_fixture',agent:'synthetic-token',mode:'edge'}));
  writeFileSync(join(root,'.soul-live.lock'),JSON.stringify({pid:process.pid}));
  let request=null;
- const poll=setInterval(()=>{const file=join(root,'OWNER-REQUESTS.jsonl');if(request||!existsSync(file))return;request=JSON.parse(readFileSync(file,'utf8').trim());
+ const poll=setInterval(()=>{const file=join(root,'OWNER-REQUESTS.jsonl');if(request||!existsSync(file))return;const text=readFileSync(file,'utf8'),end=text.indexOf('\n');if(end<0)return; // the CLI may be writing as this reads: only a whole line (#1258)
+  request=JSON.parse(text.slice(0,end));
   const queue={id:request.id,source:'owner',steps:[{id:'step_fixture',status,act:'nap:here'}]};
   writeFileSync(join(root,'.client-queue.json'),JSON.stringify(status==='superseded'?{id:'newer-owner-request',steps:[{status:'running'}]}:queue));
   if(status==='superseded')queue.steps[0].status='running'; // reply retains an old snapshot; current queue owns the truth

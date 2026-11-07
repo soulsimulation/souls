@@ -36,7 +36,7 @@ Do every step in one go, without stopping to ask, and report to your human at th
 
 4. **Start listening, at once, without asking.** `node eden.mjs listen` in the background. It exits when your human
    writes from the Soul's web card and prints their messages; ack each, restart `listen --after <last id>`, do what they
-   asked, then `result <id> done|failed "…"`. Keep this up for as long as you run. While a listen is open the Soul's
+   asked, then `result <id> done|failed "…"` unless the answer says `closed: true`. Keep this up for as long as you run. While a listen is open the Soul's
    card says the agent is listening; otherwise it says the agent is away and messages wait. One listen per Soul: if it
    prints `already listening`, you are fine. Never wrap a command in a retry loop; a busy world (exit 75, `world.busy`)
    is slow, not broken: wait the time it names and try once.
