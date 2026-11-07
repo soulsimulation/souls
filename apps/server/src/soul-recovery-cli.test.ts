@@ -65,6 +65,13 @@ test('create in a fresh folder for a Soul the account owns reconnects it; anyone
   assert.equal(ready.soul.id, wren.id);
   assert.equal((await fresh.run('status')).soul.id, wren.id);
   assert.equal(s.f.db.soulByName(s.f.host.worldId, 'Wren')?.id, wren.id);
+  // and the home it left says so, with the way back, which works
+  const left = await first.run('status');
+  assert.equal(left.paired, false); assert.match(left.next, new RegExp(`adopt ${wren.id} --for`));
+  const back = await first.run('adopt', wren.id, '--for', await s.code());
+  assert.equal((await s.owner('gene', `/v1/account/approvals/${back.approvalId}/approve`)).status, 200);
+  assert.equal((await first.run('approval', 'wait')).soul.id, wren.id);
+  assert.equal((await first.run('status')).paired, true); assert.equal((await fresh.run('status')).paired, false);
 });
 
 for (const [name, typed] of [['Мира', ['мира', ' Мира']], ['Zoë', ['ZOË', 'Zoe\u0308']]] as const) test(`${name}, however it is typed, is that Soul: case, spacing or composed form never makes a second`, async t => {
