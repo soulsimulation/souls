@@ -15,7 +15,7 @@ import { computeMetrics, readLedger } from '../review/metrics.mjs';
 import { runOracles } from '../review/oracles.mjs';
 import { SCORER, closureOf, scoreRun, scorecardMeasures, renderScorecard } from './controllability.mjs';
 
-export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '2' }); // v2: the controllability scorecard (#1097)
+export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '3' }); // v2: the controllability scorecard (#1097); v3: questions read a close without `result` (#1269)
 export const SCHEMA = 'soul-run-evaluation/1';
 export const INDEX_SCHEMA = 'soul-run-index/1';
 const VERDICTS = ['pass', 'fail', 'unknown'];
@@ -127,7 +127,7 @@ export function joinRequests(sr) {
       const ci = d.cutoffs.findIndex((c) => c.requestId === del.requestId), cut = ci >= 0 ? d.cutoffs[ci] : null;
       const mine = sr.steps[seat] ?? [], mid = del.messageId;
       const ack = mid ? mine.find((s) => s.verb === 'ack' && s.args[0] === mid) : null;
-      const forOfReceipt = new Map(mine.filter((s) => s.verb === 'act' && s.out?.receipt?.id && s.out?.for).map((s) => [s.out.receipt.id, s.out.for]));
+      const forOfReceipt = receiptsFor(mine);
       const result = mid ? mine.find((s) => (s.verb === 'result' && s.args[0] === mid) || closureOf(s, forOfReceipt)?.id === mid) : null;
       // An act belongs to a request when the CLI says so (`for`); a refusal carries no `for`, so an act between this
       // request's ack and result calls in the same transcript belongs to it too.
@@ -243,12 +243,25 @@ export async function loadQuestion(file) {
   return { ...q, path, sha256: sha256(readFileSync(path)) };
 }
 
+const receiptsFor = (steps) => new Map(steps.filter((s) => s.verb === 'act' && s.out?.receipt?.id && s.out?.for).map((s) => [s.out.receipt.id, s.out.for]));
+/** The steps as a question reads them (#1269): a close made by the finishing command is followed by the `result` step it replaced,
+ *  so a question written for `result` reads it, with no new question version. The scorer places closes itself and gets the raw steps. */
+export function questionSteps(steps) {
+  const forOfReceipt = receiptsFor(steps), seen = new Set(steps.filter((s) => s.verb === 'result').map((s) => s.args[0]));
+  return steps.flatMap((s) => {
+    const c = closureOf(s, forOfReceipt); if (!c || seen.has(c.id)) return [s];
+    seen.add(c.id);
+    const text = s.verb === 'ack' ? s.args[1] : s.verb === 'say' ? s.args[0] : undefined;
+    return [s, { ...s, verb: 'result', args: [c.id, c.outcome, ...(text ? [text] : [])], out: { outcome: c.outcome }, viaClose: true }];
+  });
+}
+
 /** The read-only context a question scorer gets. */
 function questionContext(sr, requests, sources) {
-  const packs = sr.run?.evidence ?? [];
+  const packs = sr.run?.evidence ?? [], asRead = new Map();
   return {
     runId: sr.runId, status: sr.status, scenario: sr.scenario, setup: sr.setup, requests, seats: sr.seatIds,
-    steps: (seat) => sr.steps[seat] ?? [],
+    steps: (seat) => { if (!asRead.has(seat)) asRead.set(seat, questionSteps(sr.steps[seat] ?? [])); return asRead.get(seat); },
     hasTranscript: (seat) => (sr.steps[seat]?.length ?? 0) > 0,
     listens: (seat) => (sr.playtestDir ? readJsonl(join(sr.playtestDir, 'seats', seat, 'listen.jsonl')) : []),
     observer: { packs: packs.length, available: packs.length > 0, receipt: sr.receipt?.observer ?? null },

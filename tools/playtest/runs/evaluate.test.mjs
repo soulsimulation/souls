@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { evaluateRun, compareRunSet, cliArgs, joinRequests, loadSoulRun, answerQuestion, renderIndex, indexSources } from './evaluate.mjs';
+import { evaluateRun, compareRunSet, cliArgs, joinRequests, loadSoulRun, answerQuestion, questionSteps, renderIndex, indexSources } from './evaluate.mjs';
 import { validateSpec } from './spec.mjs';
 
 const Q = (f) => new URL(`./questions/${f}`, import.meta.url).pathname;
@@ -78,6 +78,19 @@ test('cliArgs reads the served CLI calls the transcript records', () => {
   assert.deepEqual(cliArgs('curl -fsSo eden.mjs http://x'), []);
 });
 
+test('a question reads a close without `result` as the result it replaced, just after the command that made it (#1269)', () => {
+  const step = (verb, args, out) => ({ verb, args, out, line: 1, file: 'f' });
+  const close = questionSteps([step('ack', ['msg_a', 'No, sorry', '--close', 'failed'], { closed: true }), step('say', ['Hi', '--for', 'msg_b'], { closed: true }),
+    step('act', ['walk:x'], { for: 'msg_c', receipt: { id: 'r', phase: 'started' } }), step('wait', ['60', 'r'], { closed: true, receipt: { id: 'r', phase: 'completed' } })]);
+  assert.deepEqual(close.map((s) => s.verb), ['ack', 'result', 'say', 'result', 'act', 'wait', 'result']);
+  assert.deepEqual(close.filter((s) => s.verb === 'result').map((s) => s.args), [['msg_a', 'failed', 'No, sorry'], ['msg_b', 'done', 'Hi'], ['msg_c', 'done']]);
+  assert.equal(close[1].file, 'f', 'it cites the closing step');
+  const plain = [step('act', ['walk:x'], { for: 'msg_c', receipt: { id: 'r', phase: 'completed' } }), step('result', ['msg_c', 'done', 'Here'], { outcome: 'done' })];
+  assert.deepEqual(questionSteps(plain), plain, 'a run with no close reads as before');
+  const both = [step('result', ['msg_c', 'done', 'Here'], {}), step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })];
+  assert.deepEqual(questionSteps(both), both, 'a result already there wins');
+});
+
 test('a completed run: separate measure families with units and denominators; observer-only measures are unavailable, not 0', async () => {
   const dir = makeRun();
   const realFetch = globalThis.fetch; globalThis.fetch = () => { throw new Error('evaluate must not use the network'); };
@@ -115,7 +128,7 @@ test('offline rescore writes a new version and leaves sources and earlier evalua
   const a = await evaluateRun(dir, { questions: [Q('redirect-honoured.mjs')] });
   const first = readFileSync(join(a.dir, 'evaluation.json'), 'utf8');
   const b = await evaluateRun(dir, { questions: [Q('redirect-honoured.mjs'), Q('walk-seen.mjs')] });
-  assert.deepEqual(readdirSync(join(dir, 'evaluations')), ['001-v2', '002-v2']);
+  assert.deepEqual(readdirSync(join(dir, 'evaluations')), ['001-v3', '002-v3']);
   assert.equal(readFileSync(join(a.dir, 'evaluation.json'), 'utf8'), first);
   assert.deepEqual(indexSources(dir), before, 'evaluations/ is excluded and no source changed');
   assert.equal(b.evaluation.questions.length, 2);
