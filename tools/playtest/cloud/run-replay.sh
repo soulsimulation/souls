@@ -130,7 +130,8 @@ OVERLAY_FACT="$(node -e 'try{const m=JSON.parse(require("fs").readFileSync(proce
 
 # --- a spec arm's results carry this machine's details: scrub and check them, and publish nothing if that fails (#1131)
 if [ -n "${PLAYTEST_SPECS:-}" ]; then
-  step publish-scrub node tools/playtest/cloud/publish-scrub.mjs "$OUT" || { say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7; }
+  # not a `step`: PLAYTEST_CLOUD_SKIP must not be able to turn this off
+  node tools/playtest/cloud/publish-scrub.mjs "$OUT" >>"$LOG" 2>&1 || { say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7; }
 fi
 
 # --- secret guard: refuse to publish token-shaped strings

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +25,20 @@ test('machine details are replaced, what can\'t pass the check goes, and only it
   assert.ok(!existsSync(join(d, 'run/lan.md')), 'a file that still fails the check goes');
   const listed = readFileSync(join(d, 'OMITTED-PRIVATE.txt'), 'utf8');
   assert.match(listed, /run\/lan\.md: private network address/); assert.ok(!listed.includes('192.168.1.20'), 'the value is never listed');
+});
+
+test('a link goes without touching what it points at, and a name that fails the check is withheld', (t) => {
+  const d = mkdtempSync(join(tmpdir(), 'publish-scrub-')), outside = mkdtempSync(join(tmpdir(), 'publish-scrub-out-'));
+  t.after(() => { rmSync(d, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+  const target = join(outside, 'kept.txt'), before = `planted ${homedir()}/a\n`;
+  writeFileSync(target, before);
+  mkdirSync(join(d, 'run')); symlinkSync(target, join(d, 'run/to-file')); symlinkSync(outside, join(d, 'run/to-folder'));
+  mkdirSync(join(d, 'run/192.168.1.20')); writeFileSync(join(d, 'run/192.168.1.20/box.txt'), 'nothing private in here\n');
+  const r = run(d); assert.equal(r.status, 0, r.stderr);
+  for (const f of ['run/to-file', 'run/to-folder', 'run/192.168.1.20/box.txt']) assert.throws(() => lstatSync(join(d, f)), f);
+  assert.equal(readFileSync(target, 'utf8'), before, 'the scrub never writes through a link');
+  const listed = readFileSync(join(d, 'OMITTED-PRIVATE.txt'), 'utf8');
+  assert.match(listed, /<name withheld>: private network address/); assert.ok(!listed.includes('192.168.1.20'), 'the name is never listed');
 });
 
 test('a run it can\'t read exits non-zero, so nothing is published', () => {
