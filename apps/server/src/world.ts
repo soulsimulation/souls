@@ -3,7 +3,7 @@ import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
 import {authoredBoundariesDeclarationV1Schema,type AuthoredBoundariesDeclarationV1} from '@souls/engine-contract';
-import {REWOUND,type EngineRefusalV1} from '@souls/engine-contract';
+import {ACTION_THREW,REWOUND,type EngineRefusalV1} from '@souls/engine-contract';
 import {edenLectureV1} from '@souls/engine-mars';
 import {renderPlatformRowsV1Schema,type RenderPlatformV1} from '@souls/engine-contract';
 import {officeStairGuardsDeclarationV1Schema,type OfficeStairGuardsDeclarationV1} from '@souls/engine-contract';
@@ -263,7 +263,7 @@ export class WorldHost {
       if(this.engine.world.tick<clock.tick)throw new Error('clock-frontier.snapshot-prefix-differs');
       checkedClock=true; // A later exact durable snapshot supersedes this prefix.
     }
-    let replayedRefusals=0,replayThrew=false;
+    let replayedRefusals=0,replayThrew=false,replayDiffered=false;
     const stepReplay=()=>{
       const before=this.engine.runtime.violations.length;
       let out:ReturnType<Engine['step']>;
@@ -281,9 +281,13 @@ export class WorldHost {
       if(this.seq!==clock.throughSeq||this.engine.world.tick>clock.tick)throw new Error('clock-frontier.prefix-differs');
       while(this.engine.world.tick<clock.tick)stepReplay();
       this.kernel.tick=this.engine.world.tick;sweep(this.kernel);
-      if(this.engine.rulesVersion!==clock.rulesVersion||this.engine.dt!==clock.dtSeconds
-        ||this.engine.stateHash()!==clock.engineHash||kernelHash(this.kernel)!==clock.kernelHash)
-        throw new Error('clock-frontier.replay-differs');
+      const sameRules=this.engine.rulesVersion===clock.rulesVersion&&this.engine.dt===clock.dtSeconds;
+      if(!sameRules||this.engine.stateHash()!==clock.engineHash||kernelHash(this.kernel)!==clock.kernelHash){
+        // #1150: a replay is a legal world even when it isn't the one that ran, say past a throw it didn't repeat. Refusing it
+        // would refuse every boot for good, so the replayed head stands and the difference is reported.
+        if(!sameRules||!this.repairRules)throw new Error('clock-frontier.replay-differs');
+        console.error(`[world] the replay differs from the live world at tick ${clock.tick}; going on from the replay`);replayDiffered=true;
+      }
       checkedClock=true;
     };
     let repaired = -1; for (let i=0;i<later.length;i++) if (later[i].kind === 'rules' && later[i].payload?.recovery) repaired=i;
@@ -304,6 +308,7 @@ export class WorldHost {
       this.seq = e.seq;
     }
     verifyClock();
+    if(replayDiffered)this.recordGlitch('recovery',new Error('clock-frontier.replay-differs'),{rule:'clock-frontier.replay-differs',tick:this.engine.world.tick,evidence:{}});
     if(this.repairRules)this.lastRewindTick=this.db.lastRewindTick(this.worldId,this.engine.world.tick-REWIND_COOLDOWN_TICKS)??-Infinity;
     this.factory.validateHistoryHead?.(this.engine,this.db.world(this.worldId)!.rules_version);
     if(this.extra.stationV1)this.stationPhysicalHeadV1();
@@ -1510,7 +1515,8 @@ export class WorldHost {
   /** The rules a rung 3 has already gone back for. Going back didn't answer them, and each rewind writes a whole world, so a rule
    *  that returns past the hold stays on the head. Live only: a restart allows one more. */
   private rewoundRules = new Set<string>();
-  private rewoundFor(error: unknown) { const keys = faultKeys(error); return keys.length > 0 && keys.every(k => this.rewoundRules.has(k.code)); }
+  private rewoundFor(error: unknown) { return this.ruleNames(error).every(rule => this.rewoundRules.has(rule)); }
+  private ruleNames(error: unknown): string[] { const keys = faultKeys(error); return keys.length ? keys.map(k => k.code) : [faultFacts(error).rule]; }
   /** When each rule's in-place fault was last reported: one that keeps firing is written once per cooldown. */
   private inPlaceAt = new Map<string, number>();
   /** What the step that just faulted finished, when it returned at all. */
@@ -1582,7 +1588,7 @@ export class WorldHost {
       this.seq = originalSeq;
       const e: LogEvent = {seq: ++this.seq, tick: untilTick, kind: 'rules', author: 'world:recovery', payload: {recovery: recipe}, at: Date.now()};
       if (!this.writeRepair(e)) return;
-      for (const k of faultKeys(error)) this.rewoundRules.add(k.code);
+      for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);
       this.resetAcc(); this.acc.log.push(e); this.ring = [];
       this.recordGlitch('rewind', error, {tick: untilTick, evidence: {seq: e.seq, kept: events.length, dropped: all.length - events.length, contained: recipe.lastRung!.contained, relocated: recipe.lastRung!.relocated, skipped: recipe.lastRung!.skipped}});
       if (this.durableClockV1) this.persistClockFrontier();
@@ -1617,6 +1623,7 @@ export class WorldHost {
     const stopped = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
     if (repeat && !stopped && !keys.length) { this.tellQuietly(false); return; }
     if (!repeat) this.inPlaceAt.set(rule, tick);
+    if (!keys.length) this.snapshotSoon ??= 'a step threw';   // the same: the next clean tick is what a boot should start from
     const inPlace = {...this.engine.containV1!(keys), stopped, reason: String(error).slice(0, 300)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};
     if (!this.writeRepair(e)) return;
@@ -1709,7 +1716,7 @@ export class WorldHost {
   /** #1150 rung 1: the engine already undid these moves. The log keeps each as evidence, in this tick; a replay recomputes
    *  them from state, so it reads these only to compare the count. */
   private noteRefusals(refusals: EngineRefusalV1[]) {
-    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); this.countRefusal(r); }
+    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); this.countRefusal(r); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }   // a replay needn't repeat the throw, so don't leave it one to repeat
     this.drainInputs();
   }
   private countRefusal(r: EngineRefusalV1) { this.recordGlitch('refusal', JSON.stringify([{ code: r.rule, subjects: r.bodies }]), { tick: r.tick, evidence: { programs: r.programs, poses: r.poses } }); }

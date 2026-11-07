@@ -143,13 +143,23 @@ started what it stopped. A body inside something is relocated once.
 `SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
 ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
-survived: a step or event that threw is reported and passed.
+survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
+a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
+`clock-frontier.replay-differs`. What ran since the last snapshot can be lost that way, so a snapshot follows any throw.
 
-**An action whose step or stop throws ends alone,** so one broken action never stops anyone else's tick (`engine.action-threw`,
-logged and counted as a refusal). Its whole tree ends, its Soul is told, and whatever it held is set down where it is. That is
-the one time a load is let go without its set-down: the action that would have done it is what broke. Going back doesn't answer
-a named rule twice: a rule a rung 3 has gone back for stays on the head after that, so a rule that returns past the hold writes
-a small row, not a whole world. A restart allows it one more.
+**An action whose step or stop throws ends alone** (`engine.action-threw`, logged and counted as a refusal). Its whole tree ends,
+its Soul is told, and whatever it held is set down where it is, on the bearer's level: the one time a load is let go without its
+set-down, because the action that would have done it is what broke. A part joined to others stays where it is and stands by
+itself, as a god's joined upright does, and the frames and beams of its group stand down with it (`settleFrames`), because laying
+it flat would keep the joints and the crew at the other end could never let go. What a part was doing to a rule after that is
+the ladder's like anything else.
+
+**A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
+that long, and is then abandoned the same way. So a stop that is refused (`support.release-premature`) or a set-down that can't
+finish doesn't hold a body for good. A stop a Soul asked for isn't bounded here.
+
+Going back doesn't answer a rule twice: a rule a rung 3 has gone back for stays on the head after that, a thrown step counting as
+one rule, so what returns past the hold writes a small row, not a whole world. A restart allows it one more.
 
 **A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get

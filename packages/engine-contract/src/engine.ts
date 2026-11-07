@@ -92,8 +92,8 @@ export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; pr
 export const RELOCATED = { code: 'world.relocated', message: 'The world changed where you stood, so you were moved to the nearest free spot. Nothing else changed.' };
 /** #1150 rung 3: what a Soul is told when the world went back. */
 export const STEP_FAILING = { code: 'world.step-failing', message: 'The world is failing to move anything right now, so nothing you try can happen yet. You can still speak.' };
-export const ACTION_THREW = { code: 'engine.action-threw', message: 'What you were doing broke, so it ended here and anything held was set down. Nothing else changed, and you can act again.' };
-export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again.' };
+export const ACTION_THREW = { code: 'engine.action-threw', message: 'What you were doing broke, so it ended here and anything held was let go. You can act again.' };
+export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again once your hands are free.' };
 
 /** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
 export type ContainedKeyV1 = { code: string; subjects: string[] };

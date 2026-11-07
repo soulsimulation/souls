@@ -18,6 +18,7 @@ import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {marsFactory, GREEN_FIELD_WORLD} from '../../packages/engine-mars/src/engine.ts';
 import {forgetMotion} from '../../mars/viewer/engine/runtime/invariants.ts';
 import {kernelHash} from '../../apps/server/src/fold.ts';
+import {clearanceAt} from '../../mars/viewer/engine/spatial/grid.ts';
 
 const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true}), today = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: false});
 function faulted(base, control) {
@@ -530,6 +531,32 @@ for (const [kind, knob] of [['before the tick moves', 'preThrow'], ['part way th
     const at = h.engine.world.tick + 2; c[knob] = (e) => e.world.tick === at; while (h.engine.world.tick <= at) { h.tickOnce(); await setImmediate(); }
     h.saveSnapshot(true); await jumpNext(w, h, w.souls.Ada.entityId); bootsAgree(w, path, h);
   });
+const throwOnce = async (t, w, h, Ada) => {
+  const def = h.engine.rt.registry.get('walk_to'), {step} = def; t.after(() => { def.step = step; });
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(10);
+  let once = true; def.step = (rt, exec, dt) => { if (once && exec.actor === Ada.entityId) { once = false; throw new RangeError('Maximum call stack size exceeded'); } return step(rt, exec, dt); };
+  await w.tick(1); def.step = step; assert.equal(once, false); return h.engine.world.tick;
+};
+test('C1 a throw the replay does not repeat, before any snapshot: a crash boot goes on from the replay, says so, and runs', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada} = w.souls; t.mock.method(h, 'snapshotDue', () => false);
+  await throwOnce(t, w, h, Ada); await w.tick(3);
+  const b = reboot(t, w, path); assert.equal(b.glitches.byRule['clock-frontier.replay-differs'].recovery, 1); assert.equal(b.paused, false); for (let i = 0; i < 20; i++) b.tickOnce();
+});
+test('C1 a snapshot follows a throw, so a boot starts past it', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada} = w.souls, at = await throwOnce(t, w, h, Ada);
+  for (let i = 0; i < 40 && !(w.f.db.latestSnapshot(h.worldId)?.tick >= at); i++) await w.tick(1);
+  assert.ok(w.f.db.latestSnapshot(h.worldId)?.tick >= at); await w.tick(3); const hash = h.engine.stateHash(), b = reboot(t, w, path); assert.equal(b.engine.stateHash(), hash); assert.equal(b.glitches.byRule['clock-frontier.replay-differs'], undefined);
+});
+test('C1 a repeated throw with nothing to write leaves the step check where a boot would', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, c = w.control; await w.tick(5); h.lastRewindTick = h.engine.world.tick;
+  const first = h.engine.world.tick + 2, second = first + 4; c.preThrow = (e) => e.world.tick === first || e.world.tick === second; while (h.engine.world.tick <= second) { h.tickOnce(); await setImmediate(); }
+  assert.equal(rows(w, "author='world:rewind'"), 1, 'the second wrote nothing'); h.saveSnapshot(true); await jumpNext(w, h, w.souls.Ada.entityId); bootsAgree(w, path, h);
+});
+test('a recorder that throws closing a take costs that take, not every tick after', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada} = w.souls; await w.tick(5); h.lastRewindTick = h.engine.world.tick;
+  const e = h.engine, sample = e.recorder.sample?.bind(e.recorder); e.recorder.finish = () => { e.recorder.finish = () => { throw new Error('TakeRecorder.finish() called twice'); }; throw new Error('fixture.recorder-bug'); }; assert.ok(sample !== null);
+  w.control.throwAt = e.world.tick + 2; await w.tick(300); assert.equal(h.stepFailing, null); ok(await act(w, Ada, {capability: 'walk:shed'}));
+});
 test('C3 a real motion.teleport every tick, with no plan to undo it, is contained, and Souls act', async (t) => {
   quiet(t); const w = await world(t), host = w.f.host, {Ada, Bo} = w.souls, id = Ada.entityId; let last = -1, dir = 1;
   w.control.every = (r) => { const e = r.world.entities[id]; if (!e) return []; e.human.activity = 'climb-wait'; if (r.tick !== last) { last = r.tick; e.pose.p = [e.pose.p[0] + dir * 0.3, e.pose.p[1], e.pose.p[2]]; dir = -dir; } return []; };
@@ -584,6 +611,11 @@ test('C5 a rule that comes back just past the hold goes back once, not every tim
   w.control.every = (r) => (r.tick >= a && (r.tick - a) % 1300 === 0 ? [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}] : []);
   await w.tick(4000); assert.equal(rows(w, "author='world:recovery'") - base, 1, 'one whole-world row'); assert.ok(rows(w, "author='world:rewind'") >= 2, 'the rest stay on the head'); assert.equal(h.paused, false);
 });
+test('C5 a step that throws just past the hold goes back once too', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, a = h.engine.world.tick + 5, base = rows(w, "author='world:recovery'");
+  w.control.preThrow = (e) => e.world.tick >= a && (e.world.tick - a) % 1300 === 0; await w.tick(4000);
+  assert.equal(rows(w, "author='world:recovery'") - base, 1); assert.equal(h.paused, false); assert.equal(h.stepFailing, null);
+});
 test('C5 a long stretch of thrown steps keeps what the runtime holds bounded', async (t) => {
   quiet(t); const w = await world(t), h = w.f.host, subjects = Array.from({length: 10}, (_, i) => `g-${i}`);
   w.control.every = () => subjects.map((s) => ({code: 'support.floating', message: 'forced', subjects: [s]})); w.control.midThrow = () => true;
@@ -597,6 +629,11 @@ test('C9 an action whose step throws ends alone: its Soul is told and acts again
   assert.equal(read(w, Ada, ada).code, 'engine.action-threw'); assert.equal(read(w, Bo, bo).phase, 'started', 'Bo walks on'); assert.equal(h.stepFailing, null); assert.equal(byRung(h).rewind, undefined);
   assert.equal(JSON.parse(w.f.db.db.prepare("SELECT payload FROM events WHERE author='world:refusal' ORDER BY seq DESC LIMIT 1").get().payload).refusal.why, 'fixture.action-bug');
   const hash = h.engine.stateHash(), r = reboot(t, w, path); assert.equal(r.engine.stateHash(), hash);
+});
+test('C9 a child action that throws ends its whole tree, and the parent does not start it again', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls, rt = h.engine.rt, [bx, , bz] = h.engine.world.entities[Bo.entityId].pose.p, parent = rt.submit('walk_to', {actor: Bo.entityId, x: bx + 20, z: bz, level: 0}, {preempt: false}); await w.tick(2);
+  assert.ok(rt.isActive(parent.id), JSON.stringify(parent)); const child = {id: 'fixture-child', parent: parent.id}; rt.records.set(child.id, child); const was = rt.isActive.bind(rt); t.mock.method(rt, 'isActive', (id) => id === child.id ? true : was(id));
+  h.engine.abandonV1(child.id, new Error('fixture.action-bug')); assert.equal(was(parent.id), false, 'the parent ended with it'); rt.records.delete(child.id); await w.tick(3); ok(await act(w, Ada, {capability: 'walk:shed'}));
 });
 test('C9 a stop already under way whose action throws for ever ends, and the world and a reboot run on', async (t) => {
   quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada, Bo} = w.souls;
@@ -632,6 +669,16 @@ test('while steps fail, an object act is refused as a walk is', async (t) => {
 test('a stop in place clears what a mind was waiting on, in a replay too', async (t) => {
   quiet(t); const w = await world(t), h = w.f.host, m = [...h.minds.values()][0]; m.pending = {card: 'c', program: 'p'};
   h.apply({seq: h.seq + 1, tick: h.engine.world.tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: {contained: [], stopped: 0}}, at: 0}, true); assert.equal(m.pending, null);
+});
+test('C4 a body wider than a person inside something is relocated by its own width', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls, e = () => h.engine.world.entities[Ada.entityId], [x, , z] = e().pose.p;
+  ok(w.god.act({ops: [{op: 'place', def: 'core/bench@1', name: 'bn', p: [x + 6, z + 6]}]})); await w.tick(5);
+  e().body = {...(e().body ?? {}), family: 'floater', radius: 0.35}; await w.tick(2);
+  const grid = h.engine.rt.services.spatial.levelAt(0, [x + 6, z + 6]); let spot = null;
+  for (let dx = -3; dx <= 3 && !spot; dx += 0.03) for (let dz = -3; dz <= 3 && !spot; dz += 0.03) { const c = clearanceAt(grid, [x + 6 + dx, z + 6 + dz]); if (c >= 0.285 && c <= 0.335) spot = [x + 6 + dx, z + 6 + dz]; }
+  assert.ok(spot, 'a spot clear for a person and not for her'); const bo = ok(await act(w, Bo, {capability: 'walk:yard'})); await w.tick(5);
+  const b = e(); b.pose.p = [spot[0], b.pose.p[1], spot[1]]; forgetMotion(h.engine.rt); await w.tick(3);
+  assert.ok(clearanceAt(grid, [e().pose.p[0], e().pose.p[2]]) >= 0.35, 'moved clear by her own radius'); assert.equal(read(w, Bo, bo).phase, 'started', 'and Bo never knew'); assert.equal(byRung(h).rewind, undefined);
 });
 test('C6 SIM_SOULS_REPAIR=0 turns repair off under shared building, and a shared world from before the ladder boots', async (t) => {
   quiet(t); const was = process.env.SIM_SOULS_REPAIR; t.after(() => { if (was === undefined) delete process.env.SIM_SOULS_REPAIR; else process.env.SIM_SOULS_REPAIR = was; });
