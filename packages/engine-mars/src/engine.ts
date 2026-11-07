@@ -18,7 +18,8 @@ import {newcomerResourcesPublicV1Schema,commonsNewcomerResourcesV1Schema,type Co
 import {existingGreenLandmarkV1} from './green-landmark.ts';
 import {existingGreenLandmarkTransitionV1Schema,type ExistingGreenLandmarkTransitionV1} from '@souls/engine-contract';
 import {fixtureSlots, isFree, seatApproach} from '../../../mars/viewer/engine/social/slots.ts';
-import {angleDelta} from '../../../mars/viewer/engine/core/math.ts';
+import {angleDelta,type OBB2} from '../../../mars/viewer/engine/core/math.ts';
+import {settleBeside} from '../../../mars/viewer/engine/runtime/static-step.ts';
 import {publishedWaitsFor} from '../../../mars/viewer/engine/runtime/waits.ts';
 import {inShoreDomain} from '../../../mars/viewer/engine/locomotion/connected-shore.ts';
 import {rerouteCarrier,setCarrierRoute,type CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
@@ -2248,6 +2249,8 @@ export class MarsEngine implements Engine {
   /** Floors (2026-10-26): where a body's feet rest at (x, z) on `level`: level 0 of a ground world is the nav's standing
    *  height (the terrain, or a floor plate / deck on it; the swim root in deep water); else the level's flat height. */
   standYAtV1(x:number,z:number,level=0):number|null{const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);if(level===0&&this.rt.world.groundV1&&spatial.ground)return r3(standOn(spatial.ground,x,z));const l=spatial.scene.levels.find(v=>v.id===level);return l?l.y:null;}
+  /** #1070: where this body must ease to so that `to` stays clear once `solids` stand (static-step.ts settleBeside). */
+  settleBesideV1(actor:string,to:[number,number],solids:readonly OBB2[],level=0):[number,number]|null|undefined{const a=this.rt.world.entities[actor];return a?settleBeside(this.rt,a,to,solids,level):undefined;}
   clearanceAtV1(x:number,z:number,level=0):number{const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);const clear=spatial.clearanceReader(level,[x,z]);return clear?clear([x,z]):0;}
   /** nav read (L1): clearanceAtV1 capped at `cap` — the same value below it, `cap` at or above it — answered off the paged
    *  windows without building fine nav tiles. For the many "is there standing room here (≥ t ≤ cap)?" reads. */
@@ -2708,7 +2711,7 @@ function checkedTable(t: EntityTable): EntityTable {
 }
 
 function centroid(poly: [number, number][]): [number, number] { let x = 0, z = 0; for (const p of poly) { x += p[0]; z += p[1]; } return [r3(x / poly.length), r3(z / poly.length)]; }
-function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
+function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY+'+'+SHARED_BAY_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
 /** PC13 (#692): a world whose engine has the shared raise (SIM_SHARED_CARRY) says so in its rules version: a journal that
  *  names raise_hold_v1 does not replay, nor a snapshot restore, where the verb is not registered. */
 export const SHARED_RAISE_POLICY = 'shared-raise/1';
@@ -2718,6 +2721,8 @@ export const SHARED_BEAM_POLICY = 'shared-beam/1';
 export const SHARED_DECK_POLICY = 'shared-deck/1';
 /** PC16 (#695): the same flag adds install_flight_v1, install_tread_v1 and the stair invariant: a journal that builds stairs needs them. */
 export const SHARED_STAIRS_POLICY = 'shared-stairs/1';
+/** PC17 (#696): the same flag adds the raise's named base and a shared carry's clear lift: a journal that uses either needs them. */
+export const SHARED_BAY_POLICY = 'shared-bay/1';
 
 /** The factory is made once the Mars engine has been loaded (an async import); after that everything is synchronous. */
 export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promise<EngineFactory> {
