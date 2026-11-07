@@ -159,9 +159,9 @@ in the same way, since nobody can finish it with them now. What a part does to a
 
 **A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
 that long, counted from the fault's tick, and is then abandoned the same way. So a stop that is refused
-(`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for gets the same
-deadline the next time the ladder fires, and that deadline is written in a stop-in-place row that tells nobody, so a replay has
-it. Until then it isn't bounded here.
+(`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for gets a minute
+the same way, from the stop's own tick, so a replay has it. A stop with no deadline yet, such as a refusal's, gets one the next
+time the ladder fires, written in a stop-in-place row that tells nobody.
 
 Going back doesn't answer a rule twice: a rule a rung 3 has gone back for stays on the head after that, a thrown step counting as
 one rule, so what returns past the hold writes a small row, not a whole world. A restart allows it one more.

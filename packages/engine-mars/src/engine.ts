@@ -60,7 +60,7 @@ import { disassemblyPlan, DISASSEMBLY_POLICY } from './disassembly.ts';
 import { MARS_2026_MAP, withMars2026Map } from './mars-2026-map.ts';
 import { disassemblyRegistry } from '../../../mars/viewer/engine/construction/disassembly.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { connectBeamV1, framesStand, settleFrames } from './beam-connect.ts';
+import { connectBeamV1, framesFell, framesStand, framesUp, settleFrames } from './beam-connect.ts';
 import { decksBear, installJoistV1, laySheetV1 } from './deck-install.ts';
 import { installFlightV1, installTreadV1, stairsBear } from './stair-install.ts';
 import { captureRenderScene, commonsSceneMetadataV1Schema, type RenderSceneCaptureV1, type RenderScene } from '@souls/engine-contract';
@@ -156,6 +156,8 @@ const CONTAINED_HOLD_TICKS = 1200;
 const CONTAINED_KEYS_PER_RULE = 8, ANY_SUBJECT = '*';
 /** #1150: twenty seconds for what the ladder stopped to finish its own cleanup. Past that it is abandoned, and bodies are free. */
 const LADDER_STOP_TICKS = 400;
+/** #1150, #1250: a minute for a stop a Soul asked for, so a crew waiting on a frame nobody can finish is free in the end. */
+const ASKED_STOP_TICKS = 1200;
 const containedByRule = (code: string) => `${code}|${ANY_SUBJECT}`;
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
 export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
@@ -540,8 +542,8 @@ export class MarsEngine implements Engine {
       placeOnGround(item, [x, level === 0 && this.rt.world.groundV1 && spatial.ground ? r3(standOn(spatial.ground, x, z)) : floor, z], item.pose.yaw ?? 0); acknowledgeRelocation(this.rt, item.id);
       poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
     }
-    if (joined.length) settleFrames(this.rt);
-    (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200) });
+    const settled = joined.length ? settleFrames(this.rt) : [];
+    (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200), ...(settled.length ? { settled } : {}) });
     // the crews holding the rest of that frame: nobody can finish it with them now, and their stop waits on a frame that won't stand
     const group = new Set(joined); for (const id of group) for (const c of ents[id]?.connections ?? []) group.add(c.to);
     for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a part of the same frame broke: ${id}`); }
@@ -1281,7 +1283,7 @@ export class MarsEngine implements Engine {
       this.rt.cancel(p.action, { code: 'program.stopped', message: 'stopped' });
       // PC08 (#687): a shared carry's stop keeps its programme (and so the crew's borrowed bodies) until the native
       // cleanup lands, as a physical runtime does: `advance` retries a refused cancel each tick
-      if((this.physical||opts?.untilSafe===true)&&this.rt.isActive(p.action)){p.stopping={code:'program.stopped',message:'Stopped after native movement reaches safe support.'};if(opts?.untilSafe===true)p.stopUntilSafe=true;return;}
+      if((this.physical||opts?.untilSafe===true)&&this.rt.isActive(p.action)){p.stopping={code:'program.stopped',message:'Stopped after native movement reaches safe support.'};if(opts?.untilSafe===true)p.stopUntilSafe=true;if(this.cfg.soulsRepairV1===true)p.stopByV1??=this.rt.tick+ASKED_STOP_TICKS;return;}
     }
     this.end(p, 'cancelled', { code: 'program.stopped', message: 'stopped' });
   }
@@ -2199,9 +2201,10 @@ export class MarsEngine implements Engine {
     if(this.renderPlatformMetadata)this.finishRecorder();
     const baseKey=this.rt.world.entityPhysicsV1?.baseKey;
     const navigationChanged=worldEditChangesNavigation(this.rt.world,raw);
+    const up=this.cfg?.sharedCarryV1===true?framesUp(this.rt.world):[];
     const {physics,kept}=applyWorldEdit(this.rt.world,raw);
     // #1250: in the same application as the edit, before any invariant looks, so extending a bay doesn't rewind the world
-    this.settledV1=this.cfg?.sharedCarryV1===true?settleFrames(this.rt):[];
+    this.settledV1=this.cfg?.sharedCarryV1===true?[...new Set([...settleFrames(this.rt),...framesFell(this.rt.world,up)])].sort():[];
     this.m.canonicalEntityOrder(this.rt.world);
     // entity-world fixtures are depicted by the viewer's entity layer (entity diffs), not by engine change events or takes
     const spatial=this.rt.services.spatial as Spatial;

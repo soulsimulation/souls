@@ -245,11 +245,15 @@ context-size checks below), regression runs, and an uncut real-client recording 
   - **Extending a bay doesn't rewind the world.** `framesStand` judges a whole group, so an edit can change what a frame it
     never touched is judged on. The world-edit fold settles that where it lands (`settleFrames`): whatever the rule no longer
     supports stands on the ground, in the same application as the edit and before any invariant looks, and replay does the
-    same. A frame that still stands keeps what it had. The log and the god's reply, on an undo or redo too, name what changed
+    same. A frame the edit didn't touch and that still stands keeps what it had; one it touched is re-derived to the ground, as
+    any god's joined upright is. The log and the god's reply, on an undo or redo too, name every frame that stopped standing
     (`frames.settled`). Nothing is refused, so a god can extend a bay: a new upright with too few beams stands the group down
     until it has them. This covers frames and beams at the edit only. A state that reaches the invariants any other way,
     a restored snapshot or a stair or deck a god's edit leaves unsupported, is the repair ladder's
     ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+  - **No crew waits for good.** A crew's stop is refused while the frame they hold can't stand, in case someone finishes it. It
+    gets a minute. Past that they let go, the part stands where it is as a god's joined upright does, and crews on the rest of
+    that frame are let go with them. That covers a frame nobody can finish now, such as after a god extends the group.
   - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
     the model has heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or

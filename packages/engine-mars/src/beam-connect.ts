@@ -296,6 +296,11 @@ export function settleFrames(rt: Runtime): string[] {
   return ids;
 }
 
+/** #1250: the uprights standing in their beams now, and which of those no longer stand after an edit: an edit re-derives a frame
+ *  it touches to the ground, so `settleFrames` never sees that one, and the god should hear of it all the same. */
+export const framesUp = (w: WorldState): string[] => Object.values(w.entities).filter((e) => isFrame(e) && e.phase === 'installed' && e.support?.kind === 'connected').map((e) => e!.id);
+export const framesFell = (w: WorldState, ids: string[]): string[] => ids.filter((id) => { const e = w.entities[id]; return !!e && e.support?.kind !== 'connected' && !frameStability(w, e).stable; });
+
 /** Every tick: an installed loose beam has both ends joined to standing frames, and an upright a crew let go into its beams
  *  (support `connected`, as the native release) stands in a frame that stands on its own. A god's joined upright stands on
  *  the ground by the god's authority (PC12) and is not this. */

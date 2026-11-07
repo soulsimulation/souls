@@ -86,7 +86,7 @@ export type EngineCheckpointCapture = {
 
 /** #1150 rung 1: moves this step did not apply, by rule. Present only on a step that refused one. The log keeps them as
  *  evidence; a replay recomputes them from world state and the rules, so nothing here is an input. */
-export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true; /** What threw, for `engine.action-threw`. */ why?: string };
+export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true; /** What threw, for `engine.action-threw`. */ why?: string; /** The frames that stood down with it. */ settled?: string[] };
 
 /** #1150 decision 1: the world landed on a body, so there is no pose to go back to. The one named exception to "never teleport". */
 export const RELOCATED = { code: 'world.relocated', message: 'The world changed where you stood, so you were moved to the nearest free spot. Nothing else changed.' };

@@ -564,10 +564,39 @@ test('#1250: a god joining a third upright to released frames, live: the clock r
   const {w, pj, frames, bays} = await released(t);
   const r = ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
   assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the frame the batch never touched too');
-  assert.ok(r.warnings.some((x) => /frames\.settled/.test(x)), JSON.stringify(r.warnings));
+  const line = r.warnings.find((x) => /frames\.settled/.test(x)) ?? ''; for (const id of frames) assert.ok(line.includes(w.god.model.pathOf(id) ?? id), `${id} in ${JSON.stringify(r.warnings)}`);
   assert.notEqual(see(w, w.souls.Ada, pj).state.checkpoint, 'frames'); assert.equal(glitches(w), 0);
   await reboot(w);
   assert.equal(w.host.clockFailure, undefined); assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+});
+
+test('#1250: removing a beam from released frames says both stopped standing, though the edit touched them', {timeout: 900000}, async (t) => {
+  const {w, frames} = await released(t), beam = Object.values(w.E()).find((e) => e.def?.includes('rack-beam') && e.phase === 'installed' && e.connections?.length).id;
+  const r = ok(w.god.act({ops: [{op: 'remove', id: beam}]})); await w.tick(30); assert.deepEqual(kinds(w, frames), ['ground', 'ground']);
+  const line = r.warnings.find((x) => /frames\.settled/.test(x)) ?? ''; for (const id of frames) assert.ok(line.includes(w.god.model.pathOf(id) ?? id), `${id} in ${JSON.stringify(r.warnings)}`);
+});
+
+test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free within a minute', {timeout: 900000}, async (t) => {
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
+  let frames;
+  await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {
+    const {bound} = w.bridge.projects.rows.get(id); frames = [bound['upright-a'], bound['upright-b']];
+    const rel = st.ready.filter((r) => r.offer?.startsWith('stop-carry:')), r = rel.find((x) => x.part === 'upright-b') ?? rel[0]; if (!r) return;
+    for (const s of Object.values(w.souls)) if ((await act(w, s, {capability: r.offer, params: r.params})).accepted !== false) break;
+    throw new Error('mid');
+  }}), /mid/);
+  await until(w, () => frames.some((f) => w.E()[f].support.kind === 'connected'), 200);
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: P(0, 2.9), r: 0}]})); await w.tick(30);
+  const rel = frames.find((f) => w.E()[f].support.kind === 'connected'), held = frames.find((f) => f !== rel), holders = Object.values(w.souls).filter((s) => w.E()[s.entityId].human.grip?.entity === held);
+  assert.equal(holders.length, 2, 'a crew still holds the other frame');
+  const bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5), bay = bays.filter((b) => b.a === rel || b.b === rel)[6] ?? bays.at(-1);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, rel, bay.a === rel ? bay.seats[0] : bay.seats[1], 'beam5')})); await w.tick(40);
+  const op = open(w, holders[0]).map((x) => x.shared?.op).find(Boolean), asked = w.host.engine.world.tick; ok(await act(w, holders[0], {capability: `stop-carry:${op}`}));
+  await w.tick(600); assert.ok(w.E()[holders[0].entityId].human.grip, 'it waits, in case someone finishes it');
+  await until(w, () => holders.every((s) => !w.E()[s.entityId].human.grip), 800); assert.ok(w.host.engine.world.tick - asked <= 1300, 'free by the deadline');
+  assert.ok(holders.every((s) => !w.E()[s.entityId].human.grip)); assert.equal(w.E()[held].support.kind, 'ground'); ok(await act(w, holders[0], {capability: 'wave:here'})); assert.equal(w.host.stepFailing, null);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined);
 });
 
 test('#1250: each edit says only what it settled, and a reboot says nothing stale', {timeout: 900000}, async (t) => {
@@ -694,4 +723,6 @@ test('R12: with the flag off, nothing is offered and no project exists', {timeou
   assert.equal(w.edge.projects, undefined);
   assert.equal(w.db.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name='edge_projects_v1'").get().n, 0);
   assert.equal(hereFrame(w.edge, Ada).projects, undefined);
+  let drained = 0; const {drainInputs} = w.host; w.host.drainInputs = function (...x) { drained++; return drainInputs.apply(this, x); };
+  assert.deepEqual(w.god.bodies.framesNote(), [], '#1250: nothing to say'); assert.equal(drained, 0, 'and a god reply drains nothing for it');
 });
