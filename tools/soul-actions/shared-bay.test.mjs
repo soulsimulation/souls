@@ -576,7 +576,8 @@ test('#1250: removing a beam from released frames says both stopped standing, th
   const line = r.warnings.find((x) => /frames\.settled/.test(x)) ?? ''; for (const id of frames) assert.ok(line.includes(w.god.model.pathOf(id) ?? id), `${id} in ${JSON.stringify(r.warnings)}`);
 });
 
-test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free once nothing changes for five minutes', {timeout: 900000}, async (t) => {
+/** A crew holds one frame of the pair while its released partner is extended by a god into a group with a third upright. */
+async function heldWhileExtended(t) {
   const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
   ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
   let frames;
@@ -592,11 +593,33 @@ test('#1250: a crew holding one frame while a god extends its released partner a
   assert.equal(holders.length, 2, 'a crew still holds the other frame');
   const bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5), bay = bays.filter((b) => b.a === rel || b.b === rel)[6] ?? bays.at(-1);
   ok(w.god.act({ops: thirdFrameOps(w, frames, rel, bay.a === rel ? bay.seats[0] : bay.seats[1], 'beam5')})); await w.tick(40);
+  return {w, held, holders};
+}
+test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free once nothing changes for five minutes', {timeout: 900000}, async (t) => {
+  const {w, held, holders} = await heldWhileExtended(t);
   const op = open(w, holders[0]).map((x) => x.shared?.op).find(Boolean), asked = w.host.engine.world.tick; ok(await act(w, holders[0], {capability: `stop-carry:${op}`}));
   await w.tick(5800); assert.ok(w.E()[holders[0].entityId].human.grip, 'it waits, in case someone finishes it');
   await until(w, () => holders.every((s) => !w.E()[s.entityId].human.grip), 400); assert.ok(w.host.engine.world.tick - asked <= 6100, 'free once nothing has changed for five minutes');
   assert.ok(holders.every((s) => !w.E()[s.entityId].human.grip)); assert.equal(w.E()[held].support.kind, 'ground'); ok(await act(w, holders[0], {capability: 'wave:here'})); assert.equal(w.host.stepFailing, null);
   await reboot(w); assert.equal(w.host.clockFailure, undefined);
+});
+
+// R7: the Soul-only route. A holder of a frame joined into the group goes away mid-hold, by a fade or by its owner retiring it;
+// nobody asked to stop. The clock runs throughout, the crew is free in the end, and a reboot boots.
+const HOUR = 3600e3;
+for (const how of ['fades', 'is retired']) test(`#1250 R7: a holder of a frame in a group with a third upright ${how} mid-hold: the clock runs and the crew is let go`, {timeout: 900000}, async (t) => {
+  const {w, held, holders} = await heldWhileExtended(t), [gone, stays] = holders, others = Object.values(w.souls).filter((s) => s !== gone);
+  if (how === 'fades') {w.clock.now += 13 * HOUR; for (const s of others) w.comms.fading.touch(s.soulId); w.comms.sweep(); assert.ok(w.edge.faded.has(gone.soulId), 'it faded');}
+  else await accept(w.host, w.f.souls.retire(w.db.soul(gone.soulId)));
+  const from = w.host.engine.world.tick;
+  await w.tick(200); assert.ok(w.E()[stays.entityId].human.grip, 'the frame is not let fall: the crew waits, in case someone finishes it');
+  await until(w, () => holders.every((s) => !w.E()[s.entityId]?.human.grip), 6_200);
+  assert.ok(holders.every((s) => !w.E()[s.entityId]?.human.grip), `let go once nothing has changed for five minutes, ${w.host.engine.world.tick - from} ticks`);
+  if (how === 'is retired') assert.equal(w.E()[gone.entityId], undefined, 'and the retired body leaves the world');
+  assert.equal(w.E()[held].support.kind, 'ground'); assert.deepEqual(framesStand({world: w.host.engine.world}), []);
+  assert.equal(w.host.clockFailure, undefined); assert.equal(w.host.stepFailing, null); assert.equal(w.host.paused, false);
+  ok(await act(w, stays, {capability: 'wave:here'}));
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); await w.tick(20); assert.equal(w.host.clockFailure, undefined);
 });
 
 test('#1250: each edit says only what it settled, and a reboot says nothing stale', {timeout: 900000}, async (t) => {

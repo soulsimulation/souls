@@ -1716,7 +1716,13 @@ export class MarsEngine implements Engine {
   }
   removeEntity(id: string) {
     if(this.cfg.safeCrewRemoval)for(const p of this.programs.values())if(p.build?.crew.includes(id))this.stop(p.id);
-    const pid = this.byActor.get(id); if (pid) this.stop(pid);
+    // #1250: under repair, a body leaving a crew (its Soul retired) is that crew's stop, kept until it lands or gives up: a
+    // cut would end the programme and leave its action holding the others, and this body, for good
+    const repair = this.cfg.soulsRepairV1 === true, records = (this.rt as any).records as Map<string, { parent?: string }>;
+    const rootOf = (a: string) => { let r = a; for (let up = records.get(r)?.parent; up; up = records.get(r)?.parent) r = up; return r; };
+    const crews = repair ? new Set(this.holders(id).map(rootOf)) : new Set<string>();
+    for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (p.action && p.actor !== id && crews.has(rootOf(p.action))) this.stop(p.id, { untilSafe: true });
+    const pid = this.byActor.get(id); if (pid) this.stop(pid, repair ? { untilSafe: true } : undefined);
     if (!this.tryRemove(id)&&(!this.cfg.safeCrewRemoval||!this.leaving.includes(id))) this.leaving.push(id); // finish owned obligations first
   }
 

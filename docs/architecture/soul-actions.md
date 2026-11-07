@@ -256,7 +256,8 @@ context-size checks below), regression runs, and an uncut real-client recording 
     for five minutes, or half an hour whatever changes, gives up (`world.stop-gave-up`): the crew lets go, the part stands
     where it is as a god's joined upright does, and crews on the rest of that frame are let go with them
     (`world.frame-let-go`). That answers a frame nobody can finish now, such as after a god extends its group, or a beam
-    removed from under a held upright. It is no glitch. The crew hears that the part stands where it was and its frame isn't
+    removed from under a held upright. A member who fades, or whose owner retires them, mid-hold is a stop the same way:
+    a retired body stays until the crew lets go, then leaves the world. It is no glitch. The crew hears that the part stands where it was and its frame isn't
     finished. Only joins seated count as progress: a beam on its way doesn't, so a slow build can still lose its waiting crew.
   - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
     the model has heard, and one with exactly one beam in.
