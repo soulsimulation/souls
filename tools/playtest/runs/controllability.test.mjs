@@ -351,6 +351,10 @@ test('a close made by the finishing command counts as a result, and one that can
   assert.deepEqual(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'failed' } })), { id: 'msg_c', outcome: 'failed' });
   assert.deepEqual(closureOf(step('wait', ['60', 'r'], { closed: true, receipt: { id: 'r', phase: 'completed' } }), new Map([['r', 'msg_d']])), { id: 'msg_d', outcome: 'done' });
   assert.equal(closureOf(step('wait', ['60'], { closed: true, receipt: { id: 'r9', phase: 'completed' } })), null, 'no act took this receipt');
+  assert.deepEqual(closureOf(step('wait', ['60'], { closed: true, for: 'msg_e', done: 'walk completed.' })), { id: 'msg_e', outcome: 'done' }, 'the brief output dropped the receipt');
+  assert.deepEqual(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_e', failed: 'route lost.' })), { id: 'msg_e', outcome: 'failed' });
+  assert.equal(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_e' })), null, 'no outcome to read');
+  assert.equal(closureOf(step('say', ['Hi', '--for', 'msg_b'], { closed: false, why: 'refused' })), null, 'the speech worked and the close did not');
   assert.equal(closureOf(step('act', ['walk:x'], { for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })), null, 'the world left it open');
   const card = scoreRun(loadSoulRun(run({ seats: { ada: {
     turns: [{ turn: 1, reason: 'wake' }, { turn: 2, reason: 'wake' }],

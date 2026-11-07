@@ -76,14 +76,16 @@ const WAIT_VERBS = new Set(['wait', 'listen']);
 const MSG = /^msg_/;
 
 const flag = (args, name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] ?? null : null; };
+const worldOutcome = (out) => (out.receipt?.phase ? (out.receipt.phase === 'completed' ? 'done' : 'failed') : out.failed ? 'failed' : typeof out.done === 'string' ? 'done' : null);
 /** A close the step itself made (#1269): `closed: true` in its answer, from a client that needs no `result`. `ack` names the message
  *  and `--close`, `say` names it with `--for`, and an `act` or `wait` the world closed names it through `for` or the act that took
- *  the receipt, and its outcome is the receipt's. Returns {id, outcome}, or null when the step closed nothing we can place. */
+ *  the receipt. Its outcome is the receipt's, or, when the brief output dropped the receipt for length, the answer's own `failed` or
+ *  `done` sentence. `closed: false` is no close. Returns {id, outcome}, or null when the step closed nothing we can place. */
 export function closureOf(s, forOfReceipt = new Map()) {
   if (s.out?.closed !== true) return null;
   const id = s.verb === 'ack' ? s.args[0] : s.verb === 'say' ? flag(s.args, '--for') : s.out.for ?? forOfReceipt.get(s.out.receipt?.id) ?? null;
   if (!MSG.test(id ?? '')) return null;
-  const outcome = s.verb === 'ack' ? flag(s.args, '--close') : s.verb === 'say' ? 'done' : s.out.receipt?.phase === 'completed' ? 'done' : 'failed';
+  const outcome = s.verb === 'ack' ? flag(s.args, '--close') : s.verb === 'say' ? 'done' : worldOutcome(s.out);
   return ['done', 'failed'].includes(outcome) ? { id, outcome } : null;
 }
 
