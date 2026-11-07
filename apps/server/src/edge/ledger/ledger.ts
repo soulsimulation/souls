@@ -2942,7 +2942,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const r = fix ? this.resolveOnDemand(soul, fix.text, caps, plans, false) : null;
       if (fix && r && r.v.kind !== 'unknown') {
         const read = fix.fixes.map(([a, b]) => `"${a}" as "${b}"`).join(', ');
-        return {...r, v: {kind: 'alias', cap: r.v.cap, ...(r.v.kind === 'alias' && r.v.params ? {params: r.v.params} : {}), note: `read ${read}: ${r.v.kind === 'alias' ? r.v.note : `${fix.text} is ${r.v.cap.id} (${r.v.cap.label}).`}`}};
+        return {...r, v: {kind: 'alias', cap: r.v.cap, ...(r.v.kind === 'alias' && r.v.params ? {params: r.v.params} : {}), ...(r.v.kind === 'alias' && r.v.oneSeat ? {oneSeat: true as const} : {}), note: `read ${read}: ${r.v.kind === 'alias' ? r.v.note : `${fix.text} is ${r.v.cap.id} (${r.v.cap.label}).`}`}};
       }
     }
     return {v, caps, plans};

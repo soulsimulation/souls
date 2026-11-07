@@ -16,6 +16,7 @@ test('#848: "outside"/"inside" name the right seat on hello-hamlet, and "outside
     const r = dry(words); assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.would.capability, 'sit:cottage/part-outdoor-bench');
     const acted = await act(words); assert.equal(acted.code, 'capability.choose', JSON.stringify(acted)); assert.deepEqual(named(acted), ['sit:cottage/part-outdoor-bench'], 'one seat, listed once');
   }
+  for (const words of ['sit on the audeince', 'sit on the outdor']) assert.equal((await act(words)).accepted, false, `${words}: a misspelt word takes no seat either`);
   assert.equal((await act('sit:cottage/part-outdoor-bench')).accepted, true);
   // A2: `inside` reads as `in`
   const inside = await act('sit on the audience bench inside the presentation hall'), inHall = await act('sit on the audience bench in the presentation hall');
