@@ -112,6 +112,8 @@ function countFocusMiss(mine: Map<string, unknown> | undefined, kept: {tick: num
   if (!readsHeld()) inc('focusMissReads');
 }
 const OPEN: EdgeReceipt['phase'][] = ['waiting', 'started'];
+/** #1272: acts that go on over time and do nothing new when asked again. Answers, stands and hand acts do something each time. */
+const REPEATABLE = new Set(['walk', 'jog', 'run', 'stroll', 'go-near', 'hang-out', 'wander', 'swim', 'sit', 'sit-ground', 'lie', 'nap', 'rest', 'read']);
 /** An object whose place is not known: ranked after everything placed (listed only at green, if the page has room). */
 const FAR: [number, number] = [1e9, 1e9];
 const WITH_PARAM = {type: 'array', items: 'Soul id or name', optional: true, description: 'Invite Souls near you; each joins only if they accept (shared walk / ride).'};
@@ -1587,8 +1589,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // PC05 (#684, PC02 §3): `shared.busy` (from insert) is the act's refusal: no receipt, nothing replaced, the owner's
     // message stays unacked; the agent decides what to do
     const again = this.repeatOf(soul, input);
-    if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}
-    try {const out = await this.actWork(soul, input); this.noteAct(soul.soulId, input, out); return out;}
+    if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); this.comms?.fading.touch?.(soul.soulId); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}
+    try {const out = await this.actWork(soul, input); this.noteAct(input, out); return out;}
     catch (e) {
       if (!(e instanceof EdgeError) || e.code !== 'shared.busy') throw e;
       const capability = typeof input.capability === 'string' ? input.capability : String(input.verb ?? '');
@@ -1596,32 +1598,34 @@ export class EdgeLedger implements EdgeLedgerHooks {
       return {accepted: false, code: e.code, reason: e.message, capability, ...(e.extra ?? {})};
     }
   }
-  /** #1272: a Soul's latest act, by what was sent for it. Ids and words that reached the same act are all kept. */
-  private lastAct = new Map<string, {receipt: string; keys: string[]}>();
+  /** #1272: what was sent for each act still worth matching, by receipt. An id and its alias can reach one act. */
+  private actKeys = new Map<string, string[]>();
   /** #1272: the clientRefs of repeats, whose own act never made a row: a retry of one finds the receipt it was answered with.
    *  Bounded, and lost on a restart, when such a retry acts again. */
   private repeatRefs = new Map<string, string>();
   private actKey(input: {capability?: unknown; params?: unknown}): string | null {
-    if (typeof input.capability !== 'string') return null;
+    const id = typeof input.capability === 'string' ? input.capability.trim() : '';
+    if (!REPEATABLE.has(id.split(':')[0]!)) return null;
     const params = input.params && typeof input.params === 'object' ? Object.entries(input.params).sort(([a], [b]) => a < b ? -1 : 1) : input.params ?? [];
-    return `${input.capability.trim()}\u0000${JSON.stringify(params)}`;
+    return `${id}\u0000${JSON.stringify(params)}`;
   }
   /** #1272: the receipt under way that this act repeats, or null. A repeat isn't a new intention, and replacing the act would
-   *  cut it short. Other params are a new act, and so is anything the world can't match to its first act. */
+   *  cut it short. Matched against what's open, so a look mid-walk or a retried old request changes nothing. */
   repeatOf(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}): EdgeReceipt | null {
-    const key = this.actKey(input), last = this.lastAct.get(soul.soulId); if (!key || !last?.keys.includes(key)) return null;
+    const key = this.actKey(input); if (!key || !this.actKeys.size) return null;
     if (typeof input.clientRef === 'string' && this.coreA.byClientRef(soul.soulId, input.clientRef)) return null;   // a retry: its own answer, as before
-    const r = this.receipt(soul.soulId, last.receipt); return r && OPEN.includes(r.phase) ? r : null;
+    return this.openReceipts(soul.soulId).find(r => this.actKeys.get(r.id)?.includes(key) && !(r as {shared?: unknown}).shared) ?? null;
   }
   private keepRepeatRef(soulId: string, ref: unknown, receipt: string) {
     if (typeof ref !== 'string' || !ref || ref.length > 100) return;
     this.repeatRefs.set(`${soulId}\u0000${ref}`, receipt);
     if (this.repeatRefs.size > 1000) this.repeatRefs.delete(this.repeatRefs.keys().next().value!);
   }
-  private noteAct(soulId: string, input: {capability?: unknown; params?: unknown}, out: {accepted: boolean; receipt?: EdgeReceipt}) {
+  private noteAct(input: {capability?: unknown; params?: unknown}, out: {accepted: boolean; receipt?: EdgeReceipt}) {
     const key = this.actKey(input); if (!key || !out.accepted || !out.receipt) return;
-    const last = this.lastAct.get(soulId);
-    this.lastAct.set(soulId, {receipt: out.receipt.id, keys: last?.receipt === out.receipt.id ? [...last.keys, key] : [key]});
+    const keys = this.actKeys.get(out.receipt.id) ?? []; if (keys.includes(key)) return;
+    this.actKeys.set(out.receipt.id, [...keys, key]);
+    if (this.actKeys.size > 2000) this.actKeys.delete(this.actKeys.keys().next().value!);
   }
   /** CTRL-1 (#1093): a strict client's act: null when it is an offered id with fitting params, else the refusal. */
   offerGate(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; verb?: unknown; target?: unknown; clientRef?: unknown}): OfferRefusal | null {

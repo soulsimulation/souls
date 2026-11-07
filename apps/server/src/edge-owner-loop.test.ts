@@ -35,6 +35,28 @@ const commonsWorld = (): OwnerLoopWorld => {
   };
 };
 
+test('#1272 R3, R5 over HTTP: a strict repeat with another message keeps one receipt, and both messages close with it', {timeout: 300000}, async t => {
+  const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
+  await invite(f, 'alice');
+  const a = await accept(f.host, f.souls.create('dev:alice', {name: 'Avery', description: 'Owner loop fixture'}));
+  const token = f.souls.pairExchange(f.souls.pairCode(a, 'http://127.0.0.1:5965').code, 'scripted').token;
+  const edge = new EdgeLedger(f.host, f.db);
+  const app = buildApp({cfg: {...config, port: 5965, worldPath: '/w/eden', publicUrl: 'http://127.0.0.1:5965/w/eden', accountAuthRequired: false, webDir: '/nonexistent-loop-fixture', marsWebDir: '/nonexistent-loop-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge, hub: {clients: new Map(), refreshMe() {}} as never});
+  const req = async (path: string, auth?: string, body?: unknown) => { const r = await app.request(path, {method: body === undefined ? 'GET' : 'POST', headers: {...(auth ? {authorization: `Bearer ${auth}`} : {}), 'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})}); return {status: r.status, data: await r.json() as any}; };
+  const box = `/v1/edge/owner/${a.id}/inbox`, take = async (text: string) => { assert.equal((await req(box, 'dev:alice', {text})).status, 200); const m = (await req('/v1/edge/inbox/listen?timeoutMs=0', token)).data.backlog.at(-1); assert.equal((await req(`/v1/edge/inbox/${m.id}/ack`, token, {reply: 'On it'})).status, 200); return m.id as string; };
+  const one = await take('walk over there'), two = await take('are you going?');
+  const walk = (await req('/v1/edge/capabilities', token)).data.capabilities.find((c: any) => c.verb === 'walk' && c.available && c.target?.kind === 'place');
+  assert.ok(walk, 'a walk is on offer');
+  const first = (await accept(f.host, req('/v1/edge/act', token, {capability: walk.id, strict: true, for: one, clientRef: 'first'}))).data; assert.equal(first.accepted, true, JSON.stringify(first));
+  for (let i = 0; i < 5; i++) { f.host.tickOnce(); await new Promise(r => setImmediate(r)); f.host.drainInputs(); }
+  const again = (await accept(f.host, req('/v1/edge/act', token, {capability: walk.id, strict: true, for: two, clientRef: 'second'}))).data;
+  assert.equal(again.accepted, true, JSON.stringify(again)); assert.equal(again.repeat, true); assert.equal(again.receipt.id, first.receipt.id);
+  for (let i = 0; i < 6000 && ['waiting', 'started'].includes(edge.receipt(a.id, first.receipt.id)!.phase); i++) { f.host.tickOnce(); await new Promise(r => setImmediate(r)); f.host.drainInputs(); }
+  assert.equal(edge.receipt(a.id, first.receipt.id)!.phase, 'completed');
+  const row = (id: string) => f.db.db.prepare('SELECT result_by FROM soul_inbox_queue_v1 WHERE id=?').get(id) as {result_by: string | null};
+  assert.equal(row(one).result_by, 'server'); assert.equal(row(two).result_by, 'server');
+});
+
 test('D3: act --for links the receipt to the owner message; the world writes the result; the agent overrides; wait is listening', {timeout: 300000}, async t => {
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
   await invite(f, 'alice');

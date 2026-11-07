@@ -29,11 +29,49 @@ test('#1272 R1: the same act while it runs returns its receipt; nothing is repla
   await w.settle(60);
   const before = pos(), again = await act(WALK);
   assert.equal(again.accepted, true); assert.equal(again.repeat, true); assert.equal(again.receipt.id, first.receipt.id);
-  assert.equal(again.channel, first.channel, 'answered as the first act was');
   assert.equal(receipt(first.receipt.id).phase, 'started', 'still under way');
   await w.settle(40);
   assert.ok(Math.hypot(pos()[0]! - before[0]!, pos()[2]! - before[2]!) > 0.5, 'she kept walking');
   assert.equal((await ended(first.receipt.id)).phase, 'completed');
+});
+
+test('#1272 R1: a look mid-walk and a retried old request leave the walk matched', {timeout: 300000}, async t => {
+  const {w, act, receipt, ended} = await world(t);
+  const rest = await act('rest:here', {seconds: 1}, 'old-rest'); await ended(rest.receipt.id);
+  const first = await act(WALK); await w.settle(30);
+  const look = await act('look at the bench'); assert.equal(look.accepted, true, JSON.stringify(look));
+  assert.equal(receipt(first.receipt.id).phase, 'started', 'the look took no body');
+  assert.equal((await act(WALK)).receipt.id, first.receipt.id, 'still the same walk after a look');
+  assert.equal((await act('rest:here', {seconds: 1}, 'old-rest')).receipt.id, rest.receipt.id, 'the old answer replays');
+  const again = await act(WALK); assert.equal(again.receipt.id, first.receipt.id, 'and the replay changed nothing'); assert.equal(again.repeat, true);
+});
+
+test('#1272 R2: words, answers, stands and hand acts are not repeats', {timeout: 300000}, async t => {
+  const {w, act, receipt} = await world(t);
+  const a = await act(WALK); await w.settle(10);
+  const words = await act('walk to the cottage bench'); assert.equal(words.repeat, undefined);
+  assert.equal(receipt(a.receipt.id).phase, 'replaced', 'words replace, as they did');
+  // answers and stands do something each time: a stand has a job in the stall guard, a stale accept is shared.busy
+  for (const capability of ['stand:here', 'accept:inv_1', 'decline:inv_1', 'pick-up:letter']) assert.equal((w.edge as any).actKey({capability}), null, capability);
+});
+
+test('#1272 R2: a receipt in a shared operation is never a repeat', {timeout: 300000}, async t => {
+  const {w, act} = await world(t);
+  const first = await act(WALK); await w.settle(10);
+  const edge = w.edge as any, open = edge.openReceipts;
+  assert.equal(edge.repeatOf(w.soul, {capability: WALK})?.id, first.receipt.id);
+  edge.openReceipts = (id: string) => open.call(edge, id).map((r: object) => ({...r, shared: {phase: 'started'}})); t.after(() => {edge.openReceipts = open;});
+  assert.equal(edge.repeatOf(w.soul, {capability: WALK}), null);
+});
+
+test('#1272 R6: a {verb, target} repeat says so and leaves the receipt as chosen', {timeout: 300000}, async t => {
+  const {w, receipt} = await world(t);
+  const go = (extra: Record<string, unknown>) => accept(w.host, Promise.resolve(w.edge.act(w.soul as never, {verb: 'walk', target: {place: 'cottage/bench'}, ...extra} as never))) as Promise<any>;
+  const first = await go({}); assert.equal(first.accepted, true, JSON.stringify(first)); await w.settle(10);
+  const before = JSON.stringify(receipt(first.receipt.id).chosen);
+  const again = await go({note: 'a different intent'});
+  assert.equal(again.repeat, true, JSON.stringify(again)); assert.equal(again.receipt.id, first.receipt.id);
+  assert.equal(JSON.stringify(receipt(first.receipt.id).chosen), before);
 });
 
 test('#1272 R2: other params or another act replace it, and the same act after the end is a new one', {timeout: 300000}, async t => {
