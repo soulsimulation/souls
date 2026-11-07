@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {coreAWorld} from '../test/core-a-fixture.ts';
 import {config} from './config.ts';
+import {PAST_MAX,keptRanges} from './edge/comms/converse.ts';
 
 test('traveller: here, around, inspect and the public record carry it; a visitor shows its home identity', {timeout: 300000}, async t => {
   const w = await coreAWorld(2); t.after(() => w.close());
@@ -85,4 +86,13 @@ test('durable reads: a receipt stays readable, and a removed object answers with
   assert.equal((await w.http(a, 'GET', '/v1/edge/objects/never-was')).status, 404);
   objects.create({id: 'old-calendar', kind: 'calendar-item', name: 'The new calendar', placeId: 'nowhere', params: {startsAtTick: 10000, durationTicks: 100}});
   assert.equal((await w.http(a, 'GET', '/v1/edge/objects/old-calendar')).body.object.name, 'The new calendar', 'restored: the tombstone is gone');
+});
+
+test('A2: a past member keeps its ranges whoever else comes and goes; a Soul\'s own are bounded', () => {
+  const range = (soulId: string, n: number) => ({soulId, fromTurn: n, toTurn: n + 1});
+  let past = [range('a', 0)];
+  for (let i = 1; i <= PAST_MAX + 50; i++) past = keptRanges(past, range('c', i));
+  assert.deepEqual(past.filter((r) => r.soulId === 'a'), [range('a', 0)], 'another Soul\'s departures take nothing from it');
+  const c = past.filter((r) => r.soulId === 'c');
+  assert.equal(c.length, PAST_MAX); assert.equal(c[0]!.fromTurn, 51, 'its own oldest go first'); assert.equal(c.at(-1)!.fromTurn, PAST_MAX + 50);
 });

@@ -25,6 +25,14 @@ type Body = {id: string; state: 'open' | 'closed'; createdBy: string; createdTic
 export type ConverseResult = {accepted: true; [k: string]: unknown} | {accepted: false; code: string; reason: string; conversation?: string};
 const refuse = (code: string, reason: string, conversation?: string): ConverseResult => ({accepted: false, code, reason, ...(conversation ? {conversation} : {})});
 
+/** A Soul's last memberships a past member can read, by Soul: each of a reader's ranges is a term of its turn query, and a store of
+ *  ranges shared by a conversation would let others' comings and goings take one Soul's read away. */
+export const PAST_MAX = 200;
+export function keptRanges<T extends {soulId: string}>(past: T[], range: T): T[] {
+  const all = [...past, range], mine = all.filter((r) => r.soulId === range.soulId);
+  return mine.length > PAST_MAX ? all.filter((r) => r !== mine[0]) : all;
+}
+
 export class Conversations {
   private core: CommsCore; private timeoutMs: number; private inviteTimeoutMs: number;
   constructor(core: CommsCore, timeoutMs: number, inviteTimeoutMs = timeoutMs) { this.core = core; this.timeoutMs = timeoutMs; this.inviteTimeoutMs = Math.min(inviteTimeoutMs, timeoutMs); }
@@ -181,8 +189,8 @@ export class Conversations {
   }
   private retain(b: Body, soulId: string) {
     const m = b.members.find(x => x.soulId === soulId); if (!m) return;
-    // One range per membership, so nothing said while away is read later; bounded, because each range is a term of the turn query.
-    if (b.turns > m.fromTurn) b.past = [...(b.past ?? []), {soulId, fromTurn: m.fromTurn, toTurn: b.turns}].slice(-200);
+    // One range per membership, so nothing said while away is read later.
+    if (b.turns > m.fromTurn) b.past = keptRanges(b.past ?? [], {soulId, fromTurn: m.fromTurn, toTurn: b.turns});
   }
   private leave(b: Body, soul: EdgeSoul): ConverseResult {
     if (b.members.some(m => m.soulId === soul.soulId)) {
