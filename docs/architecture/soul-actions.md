@@ -242,11 +242,14 @@ context-size checks below), regression runs, and an uncut real-client recording 
     holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
     later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
     should.
-  - **A god's edit is never a fault.** `framesStand` judges a whole group, so an edit can change what a frame it never
-    touched is judged on. The world-edit fold settles that where it lands (`settleFrames`): whatever the rule no longer
+  - **Extending a bay doesn't rewind the world.** `framesStand` judges a whole group, so an edit can change what a frame it
+    never touched is judged on. The world-edit fold settles that where it lands (`settleFrames`): whatever the rule no longer
     supports stands on the ground, in the same application as the edit and before any invariant looks, and replay does the
-    same. A frame that still stands keeps what it had. The god's reply names what changed (`frames.settled`). Nothing is
-    refused, so a god can extend a bay: a new upright with too few beams stands the group down until it has them.
+    same. A frame that still stands keeps what it had. The log and the god's reply, on an undo or redo too, name what changed
+    (`frames.settled`). Nothing is refused, so a god can extend a bay: a new upright with too few beams stands the group down
+    until it has them. This covers frames and beams at the edit only. A state that reaches the invariants any other way,
+    a restored snapshot or a stair or deck a god's edit leaves unsupported, is the repair ladder's
+    ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
   - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
     the model has heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or

@@ -346,7 +346,7 @@ export class EngineBridge {
     this.god.onBuild((e) => { if (!PERCEPTION_QUIET_BUILD.has(e.kind)) { const ids = this.layers.buildRetag(); if (ids.length) { this.perceive.noteRetag(ids); this.notePerceive([], false); } } });
     if (!R) this.host.listeners.push({
       afterTick: (tick, context) => { try { this.afterTickWork(tick, context?.startedAtMs); } catch (error) { this.failProjection(error); throw error; } },
-      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
+      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'world-edit') this.noteSettled(); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
@@ -369,7 +369,8 @@ export class EngineBridge {
       prepare: (before, after, diff, _ops, o) => { if (o?.dry !== true) { try { this.arrivalShaped = shapedIds(before, diff); } catch { this.arrivalShaped = null; } this.navShaped = this.arrivalShaped && navDoorFlips(before, diff, this.arrivalShaped); this.navBefore = this.navSpots(before, [...diff.removes, ...(this.navShaped ?? diff.upserts.map(e => e.id))]); } return this.prepareWalkouts(before, after, diff, o?.dry === true); },
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
-      navNote: (diff, said) => [...this.navNoteFor(diff, said), ...this.framesNote(diff)],
+      navNote: (diff, said) => this.navNoteFor(diff, said),
+      framesNote: () => this.framesNote(),
     };
     // R8: residents near a visible map change hear of it once per request; a build near them, at start and at done.
     this.mapNotices = new MapNotices((soulId, text, place) => this.notices.notify(soulId, { text, tick: this.engine.world.tick, native: true, ...(place ? { place } : {}) }), () => this.god.now());
@@ -1256,13 +1257,20 @@ export class EngineBridge {
     }
     return n;
   }
-  /** #1250: what an edit did to frames it may not have touched, said to the god who made it: the fold stands down a frame that no
-   *  longer stands on its own, and a beam seated in frames that don't stand. Nothing here decides that. */
-  private framesNote(diff: Diff): string[] {
-    if (!this.edge?.sharedCarry || !diff.upserts.some((e) => this.model.resolvedDef(e.def)?.components.connectors)) return [];
-    this.flush(); this.host.drainInputs();
-    const ids = this.engine.takeSettledV1?.() ?? [];
-    return ids.length ? [`frames.settled: ${ids.map((id) => this.model.pathOf(id)).join(', ')} no longer stand${ids.length === 1 ? 's' : ''} on what held ${ids.length === 1 ? 'it' : 'them'} up, so ${ids.length === 1 ? 'it stands' : 'they stand'} on the ground now.`] : [];
+  /** #1250: what each live edit did to frames it may not have touched: the fold stands down a frame that no longer stands on its
+   *  own, and a beam seated in frames that don't stand. Nothing here decides that. It is logged, whoever made the edit. */
+  private settled: string[] = [];
+  private noteSettled() {
+    const ids = this.engine.takeSettledV1?.() ?? []; if (!ids.length) return;
+    const named = (id: string) => { try { return this.model.pathOf(id) ?? id; } catch { return id; } };
+    const line = `frames.settled: ${ids.map(named).join(', ')} no longer stand${ids.length === 1 ? 's' : ''} on what held ${ids.length === 1 ? 'it' : 'them'} up, so ${ids.length === 1 ? 'it stands' : 'they stand'} on the ground now.`;
+    this.log(line); this.settled = [...this.settled, line].slice(-8);
+  }
+  /** Said to the god who made the edit, once it has landed. The edit is durable by now, so a clock that won't take it costs only the line. */
+  private framesNote(): string[] {
+    if (!this.edge?.sharedCarry) return [];
+    try { this.flush(); this.host.drainInputs(); } catch (error) { this.log(`frames.settled: could not read the edit back: ${String(error).slice(0, 200)}`); }
+    return this.settled.splice(0);
   }
   private navNoteFor(diff: Diff, said?: string[]): string[] {
     // buildsafe/1 already gave the god one line for these: not named twice

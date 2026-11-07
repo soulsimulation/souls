@@ -570,6 +570,30 @@ test('#1250: a god joining a third upright to released frames, live: the clock r
   assert.equal(w.host.clockFailure, undefined); assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
+test('#1250: each edit says only what it settled, and a reboot says nothing stale', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t), lines = (r) => r.warnings.filter((x) => /frames\.settled/.test(x));
+  const first = ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40); assert.equal(lines(first).length, 1);
+  const plain = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'clean', p: [w.ax + 20, w.az + 12]}]})); await w.tick(10); assert.deepEqual(lines(plain), [], 'nothing left over from the last edit');
+  await reboot(w);
+  const after = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'clean2', p: [w.ax + 22, w.az + 12]}]})); await w.tick(10); assert.deepEqual(lines(after), [], 'and nothing from the replay');
+  assert.equal(glitches(w), 0);
+});
+
+test('#1250: an undo and a redo say what they settled', {timeout: 900000}, async (t) => {
+  const {w, frames} = await released(t), take = w.host.engine.takeSettledV1.bind(w.host.engine); let say = [];
+  w.host.engine.takeSettledV1 = () => { const ids = [...say, ...take()]; say = []; return ids; };
+  ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'clean', p: [w.ax + 20, w.az + 12]}]})); await w.tick(5);
+  say = [frames[0]]; const undone = ok(w.god.undo()); assert.ok(undone.warnings.some((x) => /frames\.settled/.test(x)), JSON.stringify(undone.warnings)); await w.tick(5);
+  say = [frames[0]]; const redone = ok(w.god.redo()); assert.ok(redone.warnings.some((x) => /frames\.settled/.test(x)), JSON.stringify(redone.warnings));
+});
+
+test('#1250: a reply on a clock that has stopped still answers: the edit is durable, and the note is all it costs', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  t.mock.method(w.host, 'drainInputs', () => { throw new Error('fixture.clock-stopped'); });
+  const r = w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')});
+  assert.notEqual(r.accepted, false, JSON.stringify(r));
+});
+
 test('#1250: a world that settled replays to the same state from its log alone', {timeout: 900000}, async (t) => {
   const {w, frames, bays} = await released(t);
   ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
