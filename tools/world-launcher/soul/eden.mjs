@@ -2421,22 +2421,22 @@ const LABEL_MAX = 80;
 export function shortLabel(id, label) {
   const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
   if (text.length <= LABEL_MAX) return text;
-  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1).replace(/[\ud800-\udbff]$/, "");
+  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
   const space = cut.lastIndexOf(" "); // a name with no spaces is cut where it stands, not back to its first word
-  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.(]+$/, "") + tail;
+  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut.slice(0, -1)).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.(]+$/, "") + tail;
 }
 
 /** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
  *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
 export function refusalList({ code, did_you_mean, candidates }) {
   const said = new Map((did_you_mean ?? []).map((d) => [d.id, d])), byId = new Map((candidates ?? []).map((c) => [c.id, c]));
-  const ids = [...new Set([...said.keys(), ...byId.keys()])], keep = /\.(choose|ambiguous)$/.test(code ?? "") ? 5 : 3;
+  const ids = [...new Set([...said.keys(), ...byId.keys()])], choice = /\.(choose|ambiguous)$/.test(code ?? ""), keep = choice ? 5 : 3;
   const list = ids.slice(0, keep).map((id) => {
     const d = said.get(id), c = byId.get(id), params = Object.keys(c?.params ?? {}), off = d?.available === false || c?.available === false;
     const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
     return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
   });
-  return { ...(list.length ? { did_you_mean: list } : {}), ...(ids.length > keep ? { more: `--json shows all ${ids.length}` } : {}) };
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
 }
 const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
 

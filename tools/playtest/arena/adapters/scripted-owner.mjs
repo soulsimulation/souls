@@ -79,7 +79,7 @@ export function stepOutcome(r, { waited = false } = {}) {
   return { ok: true, phase, ongoing: true };
 }
 /** The offered id a `resolve` step read its words as, or '' when it read none. */
-const firstCandidate = (r) => { try { const d = JSON.parse(r.stdout); return (d.candidates ?? d.did_you_mean)?.[0]?.id ?? ''; } catch { return ''; } };
+export const firstCandidate = (r) => { try { const d = JSON.parse(r.stdout); return (d.candidates ?? d.did_you_mean)?.[0]?.id ?? ''; } catch { return ''; } };
 /** How much of one CLI output a tool result keeps (#371): all of it up to this many characters. It was 4000, which cut
  *  `around` (its route) and `map` (its flags) mid-JSON, so the scorer read output the Soul really got as a broken string. */
 export const OUTPUT_KEEP = 1024 * 1024;
