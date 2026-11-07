@@ -18,7 +18,7 @@ import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {inspectFrame} from '../../apps/server/src/edge/perception/inspect.ts';
 import {hereFrame} from '../../apps/server/src/edge/perception/here.ts';
-import {beamBays, worldPoint} from '../../packages/engine-mars/src/beam-connect.ts';
+import {beamBays, frameStability, framesStand, worldPoint} from '../../packages/engine-mars/src/beam-connect.ts';
 import {def} from '../../mars/viewer/engine/world/catalog.ts';
 
 const STEP_MS = 50, IN = 0.0254, T = 3 * IN, UP_L = 12 * 0.3048, BEAM_L = 9 * 0.3048, D = BEAM_L + 2 * T, H = D / 2 + UP_L / 2, SPAN = 24 * IN, R = Math.PI / 2;
@@ -435,12 +435,85 @@ test('R11: a frame that took another beam after its release keeps its support, l
   assert.equal(w.E()[frame].connections.length, joints + 1, 'it joined the frame'); assert.deepEqual(w.E()[frame].support, support, 'whose record stays as it was');
   const reading = () => {const st = see(w, Ada, pj).state; return [st.checkpoint, st.section, st.maneuvers.done];}, was = reading();
   assert.equal(was[0], 'frames');
-  // a touch of the frame re-derives it, as an edit nearby does
+  // a re-derive of the frame, by hand: nothing here edited it, and any edit that touches it derives it the same way
   w.bridge.pending.add(frame); w.bridge.flush(); await w.tick(5);
   assert.deepEqual(w.E()[frame].support, support); assert.deepEqual(reading(), was);
   await restart(w);
   assert.deepEqual(w.E()[frame].support, support); assert.deepEqual(reading(), was);
   assert.equal(glitches(w), 0);
+});
+
+// a god re-seats a recorded beam, in one batch, on the same two frames. `released` builds to the frames checkpoint with a fifth
+// beam by, whose free seats are the ones to go to.
+async function released(t) {
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
+  let pj = null;
+  await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {pj = id; if (st.checkpoint === 'frames') throw new Error('checkpoint');}}), /checkpoint/);
+  await until(w, () => Object.values(w.souls).every((s) => !open(w, s).length), 600);
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: P(0, 2.9), r: 0}]})); await w.tick(30);
+  const {bound} = w.bridge.projects.rows.get(pj), frames = [bound['upright-a'], bound['upright-b']], bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5);
+  assert.deepEqual(frames.map((f) => w.E()[f].support.kind), ['connected', 'connected']);
+  return {w, frames, bays};
+}
+const seatAt = (w, u, id) => worldPoint(w.E()[u], def(w.E()[u].def).sockets.find((q) => q.id === id).local);
+const mid = (a, b) => a.map((v, i) => (v + b[i]) / 2);
+/** The ops that take a beam of column `from` at its highest out of its seats and put it in `bay`. */
+function reseatOps(w, [fa, fb], from, bay) {
+  const m = w.god.model, seat = (f) => (f === bay.a ? bay.seats[0] : bay.seats[1]);
+  const beam = w.E()[fa].connections.find((c) => c.socket.includes(`-${from}-`)).to, e = m.entities.get(beam), ends = Object.entries(e.joins).filter(([, j]) => j.to === fa || j.to === fb);
+  const was = mid(...ends.map(([, j]) => seatAt(w, j.to, j.at))), now = mid(...ends.map(([, j]) => seatAt(w, j.to, seat(j.to))));
+  return {beam, off: ends.map(([c]) => ({op: 'disconnect', a: {id: beam, connector: c}})), move: {op: 'move', id: beam, in: {parent: 'world'}, p: e.p.map((v, i) => v + now[i] - was[i]), r: e.r}, on: ends.map(([c, j]) => ({op: 'connect', a: {id: beam, connector: c}, b: {id: j.to, connector: seat(j.to)}}))};
+}
+const reseat = (w, frames, from, bay) => {const o = reseatOps(w, frames, from, bay); return ok(w.god.act({ops: [...o.off, o.move, ...o.on]}));};
+const kinds = (w, frames) => frames.map((f) => w.E()[f].support.kind);
+const standsNow = (w, f) => frameStability(w.host.engine.world, w.E()[f]).stable;
+
+test('R11: a god re-seating a beam so the frames no longer stand drops them to the ground: the clock runs, live and across a restart', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  reseat(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)); await w.tick(30);
+  assert.equal(standsNow(w, frames[0]), false, 'it does not stand on its own');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.deepEqual(framesStand({world: w.host.engine.world}), []);
+  await w.tick(40); await restart(w);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.deepEqual(framesStand({world: w.host.engine.world}), []);
+  assert.equal(glitches(w), 0); assert.equal(w.host.clockFailure, undefined);
+});
+
+test('R11: a re-seat that leaves the frames standing ends the record too, and the world goes on', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  reseat(w, frames, 'l', bays.filter((b) => b.column === 'l').at(-1)); await w.tick(30);
+  assert.equal(standsNow(w, frames[0]), true, 'it would stand');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the record named other seats');
+  await restart(w);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+});
+
+test('R11: an undo of a re-seat puts the beam back and grants nothing', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t), seats = () => frames.map((f) => w.E()[f].connections.map((c) => `${c.socket} ${c.to}`).sort()), joints = seats();
+  reseat(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)); await w.tick(30);
+  ok(w.god.undo()); await w.tick(30);
+  assert.deepEqual(seats(), joints, 'in its old seats');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the record ended with the re-seat');
+  await restart(w);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+});
+
+// a god commit first settles the one before it (`prepareWalkouts`), so the second call of a tick derives on what the first did
+test('R11: two god calls in one tick, out and straight back, end the record and the world goes on', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  reseat(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)); ok(w.god.undo()); await w.tick(30);
+  assert.equal(standsNow(w, frames[0]), true, 'the same seats');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the first call ended it'); assert.equal(glitches(w), 0);
+});
+
+test('R11: two god calls in one tick, off and into seats that do not stand, drop the frames and the world goes on', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t), o = reseatOps(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)), lie = w.god.model.entities.get(o.beam);
+  ok(w.god.act({ops: [...o.off, {op: 'move', id: o.beam, in: {parent: 'world'}, p: [lie.p[0], 0, lie.p[2]], r: lie.r}]}));
+  ok(w.god.act({ops: [o.move, ...o.on]})); await w.tick(30);
+  assert.equal(standsNow(w, frames[0]), false);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+  await restart(w);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
 test('R11: a derive keeps a recorded support only while its joins stand, and grants none', {timeout: 240000}, async (t) => {

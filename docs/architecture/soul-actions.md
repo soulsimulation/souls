@@ -239,7 +239,9 @@ context-size checks below), regression runs, and an uncut real-client recording 
     A site with anything built on it does not move (`project.site-built`).
   - **Across a restart.** A frame a crew let go of is held up by its beams, as `raise_hold_v1` recorded, though none of its
     own connectors bears. The model doesn't hold that, so a derive, a boot's above all, keeps the engine's record as it is
-    while everything it names is still joined. It never makes a part connected: a god's joined upright stands on the ground.
+    while everything it names is still joined at the same seats. It never makes a part connected: a god's joined upright
+    stands on the ground, and so does a frame a god has re-seated a recorded beam on, even if it would stand: the crew's
+    record ended there, and an undo doesn't bring it back.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
     someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
     person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no
