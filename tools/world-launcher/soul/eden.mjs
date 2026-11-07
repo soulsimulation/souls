@@ -2514,7 +2514,7 @@ async function status() {
   const inbox = me.inbox ?? {};
   const self = await selfLink();
   return {
-    soul: me.soul, paired: true, world: s.world, client: VERSION,
+    soul: me.soul, paired: true, world: s.world, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
     listening: inbox.connected === true, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
     lastReceipt: s.lastReceipt ?? null,

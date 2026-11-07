@@ -24,7 +24,7 @@ async function mounted(t) {
       if (u.pathname === '/v1/edge/wait') return reply(200, {cursor: 'c_3', events: []});
       if (u.pathname === '/v1/edge/self/now') return reply(200, {ok: true, now: body.text === null ? null : {text: body.text, at: 7}});
       if (u.pathname === '/v1/edge/self/link') return reply(200, {soulId: 's_pip', link: {state: 'connected', reason: 'listening', since: 3}, now: {text: 'Rowing', at: 7}});
-      if (u.pathname === '/v1/agent/me') return reply(200, {soul: {id: 's_pip', name: 'Pip'}, inbox: {connected: true, queued: 0}});
+      if (u.pathname === '/v1/agent/me') return reply(200, {soul: {id: 's_pip', name: 'Pip'}, paired_as: 'the laptop', inbox: {connected: true, queued: 0}});
       reply(200, {});
     });
   });
