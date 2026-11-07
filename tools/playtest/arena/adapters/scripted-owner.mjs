@@ -15,6 +15,8 @@
 //              there is no next step to recover with. "{{prev.<path>}}" in an argument is replaced from the previous
 //              step's JSON output (a refusal's too), e.g. "{{prev.did_you_mean[0].id}}", reading own properties only; a
 //              placeholder that does not resolve fails its step without running it, and that skipped step leaves no JSON.
+//              A `resolve` step keeps its first candidate's id as "{resolved}" for the steps after it, as an agent reads an
+//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run.
 //   close      "done" (default): `result <id> done|failed` from the steps' outcome. "open": leave the request open (the
 //              activity continues in the world) until a later rule supersedes it or the run ends.
 //   supersede  text for `result <old> failed "<text>"` on every request still open when this rule fires (owner redirection)
@@ -125,6 +127,8 @@ export function waitWindowSec(args) {
   const i = args.indexOf('--wait'), n = /^\d+$/.test(args[i + 1] ?? '') ? Number(args[i + 1]) : 60;
   return Math.min(60, Math.max(1, n));
 }
+/** The offered id a `resolve` step read its words as, or '' when it read none. */
+const firstCandidate = (r) => { try { return JSON.parse(r.stdout).candidates?.[0]?.id ?? ''; } catch { return ''; } };
 /** How much of one CLI output a tool result keeps (#371): all of it up to this many characters. It was 4000, which cut
  *  `around` (its route) and `map` (its flags) mid-JSON, so the scorer read output the Soul really got as a broken string. */
 export const OUTPUT_KEEP = 1024 * 1024;
@@ -197,15 +201,15 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
       save();
     }
     if (id) await cli(['ack', id, clip(rule.ack ?? 'On it.')]);
-    let failed = null, prev = null;
+    let failed = null, prev = null, resolved = '';
     for (const [i, step] of rule.do.entries()) {
       const args = stepArgs(step), onRefused = stepOptions(step)?.onRefused ?? 'fail';
-      const bound = bindPrev(args.map((a) => (id ? a.replaceAll('{id}', id) : a)), prev);
-      let o;
+      const bound = bindPrev(args.map((a) => (id ? a.replaceAll('{id}', id) : a).replaceAll('{resolved}', resolved)), prev);
+      let o, r = null;
       if (bound.error) { o = { ok: false, why: bound.error }; prev = null; }
       else {
         const waited = args.includes('--wait'), until = Date.now() + waitWindowSec(args) * 1000;
-        let r = await cli(bound.args); prev = stepJson(r);
+        r = await cli(bound.args); prev = stepJson(r);
         // #832: woken by an owner message with the act still going: keep waiting on its receipt for the rest of the window.
         // A `wait` would return at once while that card is unacknowledged (the world's rule, so "stop" is never slept
         // through), so check the receipt instead, every POLL_MS, until it ends or the window does.
@@ -220,7 +224,12 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
         }
         o = stepOutcome(r, { waited });
       }
-      if (o.ok) continue;
+      if (o.ok) {
+        if (args[0] !== 'resolve') continue;
+        resolved = firstCandidate(r);
+        if (resolved) continue;
+        failed = `resolve: nothing on offer reads as "${clip(args[1])}"`; break;
+      }
       if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] ${args[0]} refused, continuing: ${o.why}`); continue; }
       failed = `${args[0]}: ${o.why}`; break;
     }

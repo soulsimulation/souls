@@ -6,12 +6,16 @@
 # the single `ci-ok` check. The full Modal gate still qualifies releases (release.yml); CI is the per-PR check.
 # CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (qualify, smoke) only for a ready PR
 # labelled merge:ready or ci:run; otherwise it runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs
-# were selected. Adding either label requests the run (ci-request.yml dispatches this workflow with `pr`), as does
-# `gh workflow run ci.yml --ref <branch> -f pr=<n>`. A requested run is scoped by the PR's paths, not full scope.
+# were selected. Adding either label starts a fresh pull_request run with the window open: the merge queue reads required
+# checks from that event, so a green dispatch never clears a deferred ci-ok. It queues behind a run in progress, cancels
+# nothing, and does no heavy work if that run passes at the same head. Any other label does nothing: its run gets a group of
+# its own, so it cancels nothing, and every job skips with no runner. A skipped required check reads as a pass, so ci-ok is
+# named differently in that run and can never replace a real result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still
+# runs a PR's path-scoped CI by hand, but its checks don't count for the queue.
 name: ci
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   merge_group:
   push:
     branches: [main]
@@ -24,13 +28,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' }}
 env:
   # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
   SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
 jobs:
   scope:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -52,10 +57,11 @@ jobs:
       # heavy work is done (never re-run a passing check on the same tree).
       - id: green
         name: Already green at this head
-        if: github.event_name == 'workflow_dispatch' && inputs.pr != ''
+        if: github.event.action == 'labeled' || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
       - id: scope
         name: Pick jobs from changed paths
         env:
@@ -70,6 +76,7 @@ jobs:
 
   # Fast, dependency-free checks of the repo's own tooling; always runs.
   repo:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -102,7 +109,8 @@ jobs:
     if: needs.scope.outputs.any == 'true'
     # The qualify jobs (no browser) run on the repository variable CI_HEAVY_RUNNER when it is set, else ubuntu-latest.
     # Its value is one runner label (`souls-ci`) or a JSON array of labels (`["self-hosted","souls-ci"]`).
-    runs-on: ${{ vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
+    # `native` stays on ubuntu-latest: its camera perf budget is wall time, and a shared host under load misses it (#1162).
+    runs-on: ${{ matrix.kind != 'native' && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
     strategy:
@@ -138,12 +146,15 @@ jobs:
         env:
           CHECK_KIND: ${{ matrix.kind }}
           SERVER_SHARD: ${{ matrix.shard }}
+          GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
           case "$CHECK_KIND" in
             types-web)
               pnpm typecheck
               pnpm --filter @souls/web build
+              # V3-bundle's comparison, on the build above, so growth is seen on the PR that causes it (#1117)
+              node tools/test-harness/bundle-budget/budget.mjs --check
               # The Mars viewer's static site holds the people's character set (/modular); without it no world
               # draws people (issue #395). Build it as the first run does, then fail if the set is missing.
               pnpm build:viewer
@@ -158,6 +169,10 @@ jobs:
             web)
               # V4-web: every apps/web unit test, TSX included
               bash tools/test-harness/web-suite.sh
+              ;;
+            docs-reference)
+              # #898: the generator of the reference pages (docs/site actions, api, mcp) runs, and writes all the server answers
+              node --test --test-concurrency=1 tools/docs/generate.test.mjs
               ;;
             launcher)
               # V3-launcher-unit; launcher.test.mjs takes its ports from LAUNCHER_TEST_PORT_BASE (default 6200)
@@ -174,8 +189,15 @@ jobs:
               # #1061: not a gate step; picked by ci-scope.mjs from its own paths
               node --test --test-concurrency=4 tools/soul-actions/*.test.mjs
               ;;
+            soul-tools)
+              # #1111: not a gate step; picked by ci-scope.mjs from its own paths
+              node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
+              ;;
             server)
-              node --input-type=module <<'NODE'
+              # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay
+              # corpus included; both always run, either failing fails the job.
+              server=0
+              node --input-type=module <<'NODE' || server=$?
           import { spawnSync } from 'node:child_process';
           import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';
           const all = serverTestFiles(), shard = Number(process.env.SERVER_SHARD);
@@ -186,6 +208,9 @@ jobs:
           const a = run(parallel, SERVER_TEST_CONCURRENCY), b = run(serial, 1);
           process.exit(a || b);
           NODE
+              god=0
+              if [ "$GOD_SKILL" = true ]; then node --test --test-concurrency=1 tools/god-skill/*.test.mjs tools/god-skill/lib/*.test.mjs tools/god-skill/scripts/*.test.mjs tools/god-skill/e2e/*.test.mjs || god=$?; fi
+              exit $(( server || god ))
               ;;
             *) echo "unknown check kind: $CHECK_KIND"; exit 1 ;;
           esac
@@ -241,9 +266,11 @@ jobs:
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
   # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
   ci-ok:
+    # Skipped on another label's event, under another name: a skipped `ci-ok` would read as a pass over a deferred one.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready') && 'ci-ok' || 'other-label' }}
     runs-on: ubuntu-latest
     needs: [scope, repo, qualify, smoke]
-    if: always()
+    if: always() && (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready')
     steps:
       - name: Full CI deferred
         if: needs.scope.outputs.deferred == 'true'
