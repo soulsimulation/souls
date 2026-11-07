@@ -94,6 +94,9 @@ export const RELOCATED = { code: 'world.relocated', message: 'The world changed 
 export const STEP_FAILING = { code: 'world.step-failing', message: 'The world is failing to move anything right now, so nothing you try can happen yet. You can still speak.' };
 export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again.' };
 
+/** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
+export type ContainedKeyV1 = { code: string; subjects: string[] };
+
 export interface Engine {
   readonly rulesVersion: string;
   readonly dt: number;
@@ -122,9 +125,8 @@ export interface Engine {
   /** #1150 rung 3, for an engine that declares rules. None of these steps the world, so no rule can fire during them. */
   stopAllV1?(why: { code: string; message: string }): number;
   setClockV1?(tick: number): void;
-  containV1?(): { contained: { code: string; subjects: string[] }[]; relocated: string[] };
-  /** #1150: a rule is firing that isn't contained. */
-  uncontainedV1?(): boolean;
+  /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
+  containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };
   /** Stop a running program (the actor is left idle where it is). */
   /** `untilSafe` (PC08, a shared carry's stop): the programme stays until its native cleanup has finished, retrying a
    *  refused cancel each tick the action moves (not while it is held up), as a physical runtime does; without it,

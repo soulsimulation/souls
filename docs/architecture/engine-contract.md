@@ -88,8 +88,8 @@ A door's gap turns solid only at the close's contact, so the plan reads that gap
 
 ## Refusal
 
-With the `souls-repair/1` rules (`soulsRepairV1`, off unless `SIM_SOULS_REPAIR=1`; new worlds only for now: a world whose history lacks it
-refuses to boot under the flag), a move that
+With the `souls-repair/1` rules (`soulsRepairV1`: on with `SIM_SOULS_REPAIR=1` or with `SIM_SHARED_CARRY=1`, and `SIM_SOULS_REPAIR=0`
+turns it off under either; new worlds only for now: a world whose history lacks it refuses to boot with it on), a move that
 would break a rule is not applied ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
 
 - `Engine.step` leaves no refusable violation standing. The bodies that moved go back to their pose before the tick, and
@@ -122,13 +122,27 @@ would break a rule is not applied ([#1150](https://github.com/soulsimulation/sou
    arrivals and sleep stops), and set the clock to the fault's tick. This takes no engine step,
    so no rule can fire. It's logged as a recovery recipe with `lastRung`. Open receipts end `world.rewound`.
    With no baseline, or within a minute of the last one, it stays on the head, and rung 2 isn't tried: stop, contain, logged
-   as `lastRungInPlace`, whenever it stopped something and otherwise once per fault per minute. A replay makes the same
-   stops from that event. An event that won't re-apply costs only itself, and the recipe lists it.
+   as `lastRungInPlace`, whenever it stopped something or the fault named something off the list, and otherwise once per
+   rule per minute. A replay makes the same stops from that event. An event that won't re-apply costs only itself, and
+   the recipe lists it. A Soul is told `world.rewound` only when something of its world ended: a stop in place that
+   stopped nothing tells nobody.
 
-**`containedV1`** is part of world state, absent when empty: what still breaks a rule after rung 3. An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again; a new subject is a new entry. A rule firing outside the list always reaches it, even while steps are failing, at most once a second, so a rule that could be contained can't fault for good. `SIM_SHARED_CARRY` brings the ladder with it: only an explicit `soulsRepairV1: false` turns it off. Each entry is counted
-once, doesn't fault again, and leaves when it stops firing. A body inside something is relocated once. Under these rules an
-invariant that throws is a named `engine.thrown` violation, so it is contained like any other. A replay survives what the
-live tick survived: a step or event that threw is reported and passed.
+**`containedV1`** is part of world state, absent when empty: what rung 3 could not repair. It holds what the fault itself
+named, and the row or recipe carries those keys, so a replay applies them and nothing reads the invariants outside a step:
+a read there would move the step check's memory where a replay's doesn't, and the boot would differ. A rule the step check
+can only see across ticks, like `motion.teleport`, is contained the same way.
+
+An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
+once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
+of it. Anything else on the list only absorbs what has no plan: a body that moves into forbidden geometry under a held key
+is refused by rung 1 as it would be with nothing held. The list keeps eight subjects of a rule; past that the rule goes on
+whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that names someone new each tick writes a few rows
+and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
+started what it stopped. A body inside something is relocated once.
+
+`SIM_SHARED_CARRY` brings the ladder with it, and `SIM_SOULS_REPAIR=0` is the way back. Under these rules an invariant that
+throws is a named `engine.thrown` violation, so it is contained like any other. A replay survives what the live tick
+survived: a step or event that threw is reported and passed.
 
 **A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get

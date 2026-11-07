@@ -11,9 +11,16 @@ const RULE = /^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+$/;
 export const THROWN_RULE = 'engine.thrown';
 
 /** The rule and bodies a fault names. A tick's violations arrive as a JSON list, see WorldHost.tickOnce. */
+function namedViolations(fault: unknown): {code?: unknown; subjects?: unknown}[] {
+  try { const v = JSON.parse(fault instanceof Error ? fault.message : String(fault)); if (Array.isArray(v)) return v; } catch { /* a thrown error */ }
+  return [];
+}
+/** Each violation a fault names, for containing, whatever its name looks like. A thrown error names none. */
+export function faultKeys(fault: unknown): {code: string; subjects: string[]}[] {
+  return namedViolations(fault).flatMap(v => typeof v?.code === 'string' && v.code ? [{code: v.code, subjects: Array.isArray(v.subjects) ? v.subjects.filter((s): s is string => typeof s === 'string') : []}] : []);
+}
 export function faultFacts(fault: unknown): {rule: string; rules: string[]; bodies: string[]} {
-  let list: {code?: unknown; subjects?: unknown}[] = [];
-  try { const v = JSON.parse(fault instanceof Error ? fault.message : String(fault)); if (Array.isArray(v)) list = v; } catch { /* a thrown error */ }
+  const list = namedViolations(fault);
   const rules = [...new Set(list.map(v => v?.code).filter((c): c is string => typeof c === 'string' && RULE.test(c)))];
   const bodies = [...new Set(list.flatMap(v => Array.isArray(v?.subjects) ? v.subjects.filter((s): s is string => typeof s === 'string') : []))].sort();
   return {rule: rules[0] ?? THROWN_RULE, rules, bodies};

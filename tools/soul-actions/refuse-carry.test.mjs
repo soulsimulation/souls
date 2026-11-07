@@ -19,7 +19,7 @@ import {marsFactory, GREEN_FIELD_WORLD} from '../../packages/engine-mars/src/eng
 import {forgetMotion} from '../../mars/viewer/engine/runtime/invariants.ts';
 import {carriedPose, carrierSpots} from '../../mars/viewer/engine/carry/formation.ts';
 
-const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true}), today = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true});
+const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true}), today = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: false});
 
 /** A trigger reintroduced: the bad step lands at a fixed tick in every runtime this factory makes, so it is there in each
  *  replay too, as a bug in the engine would be. Once per runtime, or the refusal's own second pass would take the step again. */

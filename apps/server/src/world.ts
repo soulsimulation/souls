@@ -45,7 +45,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
-import { countGlitch, faultFacts, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
+import { countGlitch, faultFacts, faultKeys, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
 
@@ -76,14 +76,12 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
      *  the nearest free standing point, instead of where the rewind left it (its arrival point). Absent in older recipes. */
     poses?: Record<string, RecoveryPose> };
   /** #1150 rung 3: `events` are re-applied to the baseline without stepping, every programme stops and the clock moves to
-   *  `untilTick`. What still breaks a rule is contained. */
+   *  `untilTick`. `contained` is what the fault named: the recipe says it, so a replay never has to find it again. */
   lastRung?: { contained?: {code:string;subjects:string[]}[]; relocated?: string[]; skipped?: number[] } };
 /** #1150: a minute of world time. A fault within it of a rung 3 doesn't rewind again. */
 const REWIND_COOLDOWN_TICKS = 1200;
 /** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
 const STEP_FAILING_WINDOW_TICKS = 200, STEP_FAILING_FAULTS = 100;
-/** #1150: at most one stop in place a second for a rule that isn't contained yet, so a rule can't grow the log every tick. */
-const LOOSE_RULE_TICKS = 20;
 /** What rung 3 leaves out: decisions, and the facts that only mean something for a programme a decision started. */
 const DROPPED_ON_REWIND = new Set(['decision', 'play', 'edge-stop', 'intent-admission-v2', 'intent-arrival-v1', 'intent-sleep-stop-v1']);
 export type RecoveryPose = { p: [number, number, number]; yaw: number; level: number };
@@ -1509,7 +1507,7 @@ export class WorldHost {
   private get repairRules(): boolean { return this.engine.rulesVersion.includes('+souls-repair/'); }
   /** The tick of the last rung 3. A fault soon after stays on the head, so a fault that keeps firing can't rewind every tick. */
   private lastRewindTick = -Infinity;
-  /** When each in-place fault was last reported: one that keeps firing is written once per cooldown. */
+  /** When each rule's in-place fault was last reported: one that keeps firing is written once per cooldown. */
   private inPlaceAt = new Map<string, number>();
   /** What the step that just faulted finished, when it returned at all. */
   private faultedPrograms: ProgramEvent[] | null = null;
@@ -1573,7 +1571,7 @@ export class WorldHost {
   private lastRung(error: unknown, baseline: SnapshotBody, all: LogEvent[], untilTick: number, originalSeq: number) {   // both from before rung 2's replays moved them
     const kept = all.filter(e => !DROPPED_ON_REWIND.has(e.kind) && e.author !== 'world:refusal' && !e.payload?.recovery);
     for (const events of [kept, []]) {
-      const recipe: RecoveryRecipe = { baseline: structuredClone(baseline), events, untilTick, faults: {...this.extra.cardFaults as Record<string, number>}, excluded: [], reason: String(error).slice(0, 800), lastRung: {} };
+      const recipe: RecoveryRecipe = { baseline: structuredClone(baseline), events, untilTick, faults: {...this.extra.cardFaults as Record<string, number>}, excluded: [], reason: String(error).slice(0, 800), lastRung: {contained: faultKeys(error)} };
       try { this.restoreRecovery(recipe); }
       catch (failure) { console.error(`[world] last rung: ${events.length} kept events would not re-apply:`, String(failure).slice(0, 300)); continue; }
       this.seq = originalSeq;
@@ -1597,31 +1595,27 @@ export class WorldHost {
     if (skipped.length) recipe.lastRung!.skipped = skipped;
     this.lastRewindTick = recipe.untilTick;
     this.engine.setClockV1!(recipe.untilTick);
-    Object.assign(recipe.lastRung!, this.engine.containV1!());
+    Object.assign(recipe.lastRung!, this.engine.containV1!(recipe.lastRung!.contained ?? []));
     this.extra.cardFaults = {...recipe.faults};
     for (const m of this.minds.values()) { m.pending = null; m.nextEvalTick = this.engine.world.tick + 1; m.evalTrigger = 'activity-failed'; m.lastFingerprint = ''; }
     this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.kernelDirty = true;
   }
-  /** #1150 rung 3 with no restore: stop what runs, contain what fires. Only a list and some stops, so it can't fail. A replay
-   *  makes the same stops from the event, so a stop is never left unwritten; a fault that only repeats is written once per
-   *  cooldown. The fold does this on a replay; live it runs here, so the event can carry what it found. */
-  private looseAt = -Infinity;
+  /** #1150 rung 3 with no restore: stop what runs, contain what the fault named. Only a list and some stops, so it can't fail.
+   *  The event carries both, so a replay makes the same stops and the same list and reads nothing. Anything the step faulted on
+   *  is off the list, so a named fault always gets here, even while steps are failing, and the list's cap per rule bounds those
+   *  rows. Each stop row answers a decision that started what it stopped. A fault that only repeats is written once per cooldown. */
   private containInPlace(error: unknown) {
-    const tick = this.engine.world.tick, facts = faultFacts(error), key = `${facts.rule}|${facts.bodies.join()}`, seen = this.inPlaceAt.get(key);
+    const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
     const stopped = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
-    // a repeat with nothing stopped has nothing to write, unless a rule is firing outside the list: that is what this rung is for,
-    // and it would otherwise fault every tick for good. A rule whose subjects never settle is contained at most once a second.
-    const loose = repeat && !stopped && tick - this.looseAt >= LOOSE_RULE_TICKS && !!this.engine.uncontainedV1?.();
-    if (repeat && !stopped && !loose) { this.tellQuietly(false); return; }
-    if (loose) this.looseAt = tick;
-    if (!repeat) this.inPlaceAt.set(key, tick);
-    const inPlace = {...this.engine.containV1!(), reason: String(error).slice(0, 800)};
+    if (repeat && !stopped && !keys.length) { this.tellQuietly(false); return; }
+    if (!repeat) this.inPlaceAt.set(rule, tick);
+    const inPlace = {...this.engine.containV1!(keys), stopped, reason: String(error).slice(0, 300)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
-    if (!repeat) this.recordGlitch('rewind', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
+    if (!repeat || keys.length) this.recordGlitch('rewind', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
     for (const m of this.minds.values()) { m.pending = null; this.acc.dirty.add(m.soulId); }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a stop in place:', String(failure).slice(0, 200)); }
     this.tellQuietly(true);

@@ -59,7 +59,8 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
 - `SIM_SOULS_REPAIR=1` is read per process and isn't a live switch: on a running server it stops every existing world
   booting, because a world without `souls-repair/` refuses that build until the boot repair lands
-  ([#1150](https://github.com/soulsimulation/souls/issues/1150)). Keep it off outside a test world.
+  ([#1150](https://github.com/soulsimulation/souls/issues/1150)). Keep it off outside a test world. `SIM_SHARED_CARRY=1` brings
+  repair with it, so a shared world made before that needs `SIM_SOULS_REPAIR=0` to boot; `0` turns repair off under either flag.
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
