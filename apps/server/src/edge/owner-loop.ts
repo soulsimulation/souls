@@ -195,8 +195,8 @@ export class OwnerLoop {
     // only into a message with no result: a replacing act linked to it may have closed it already, with its real outcome
     if (l.gone !== undefined) {
       if (tick - l.gone < GONE_TICKS) return;
-      this.forget(id);
       for (const one of [l, ...(l.also ?? [])]) if (!this.serving(one.scope, one.message) && !this.running(one.scope, one.message)) this.inbox.serverResult(one.scope, one.message, `${r.capability} was replaced by a newer act before it finished.`, 'failed', true);
+      this.forget(id);
       return;
     }
     if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full); else this.forget(id); return;}
@@ -205,7 +205,7 @@ export class OwnerLoop {
     if (l.late || tick - r.acceptedTick < limit) return;
     const held = this.world?.holding?.(soul, id) ?? false;
     l.late = true; this.keep(id, l);
-    for (const one of [l, ...(l.also ?? [])]) if (one.timed || !held) this.inbox.serverResult(one.scope, one.message, `${r.capability} hadn't finished after ${Math.round(limit / 1200)} minutes, so it isn't done.`, 'failed', true);
+    for (const one of [l, ...(l.also ?? [])]) if (one.timed || !held) this.inbox.serverResult(one.scope, one.message, `${r.capability} hadn't finished after ${limit < 2400 ? `${Math.round(limit / 20)} seconds` : `${Math.round(limit / 1200)} minutes`}, so it isn't done.`, 'failed', true);
   }
   private keep(id: string, l: Link) {this.links.set(id, l); try {this.store?.save(id, l.scope.scope.slice(5), JSON.stringify(l));} catch {/* kept in memory */}}
   private forget(id: string) {this.links.delete(id); try {this.store?.drop(id);} catch {/* the sweep drops it again */}}
