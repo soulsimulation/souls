@@ -26,7 +26,8 @@ import {messageSteps, type MessageStep, type StepTarget} from './ledger/vocabula
 
 export type OwnerLoopInbox = {
   hasMessage(s: {scope: string; owner: string}, id: string): boolean;
-  serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed'): boolean;
+  /** `open`: write only into a message with no result yet (#1295: the world's own replaced and overlong lines). */
+  serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed', open?: boolean): boolean;
   messageText?(s: {scope: string; owner: string}, id: string): string | null;
   serverProgress?(s: {scope: string; owner: string}, id: string, text: string): boolean;
   /** #1295: set by the loop; the inbox refuses a close while it answers a receipt. */
@@ -41,6 +42,8 @@ export type OwnerLoopWorld = {
   posOf(id: string): [number, number] | null;
   /** #1295: whether this open act is an open-ended hold its body has reached, or a follow (the ledger's `holding`). */
   holding?(soulId: string, receiptId: string): boolean;
+  /** #1295: a light read of a receipt for the sweep and the guard (no body or outcome facts); else `read` is used. */
+  brief?(soulId: string, receiptId: string): {id: string; capability: string; phase: string; acceptedTick: number; endedTick: number | null} | null;
 };
 /** #1295: where links are kept across a restart (`ownerLinkStore`); without one they live in memory only. */
 export type OwnerLinkStore = {load(): [string, string][]; save(receipt: string, soulId: string, link: string): void; drop(receipt: string): void};
@@ -61,7 +64,7 @@ type Link = {scope: {scope: string; owner: string}; message: string; steps?: Mes
   /** #1295: the act asked for its own duration (`seconds`), so a held pose is still running; `gone`: the tick the receipt was
    *  replaced (the world closes its messages GONE_TICKS later unless another act serves them); `late`: past HOLD_TICKS, the
    *  world has said it hadn't finished. */
-  timed?: true; gone?: number; late?: true};
+  timed?: number; gone?: number; late?: true};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
@@ -127,12 +130,12 @@ export class OwnerLoop {
   }
   /** Link an accepted act's receipt to its owner message; a receipt already terminal closes the message now. Implicit
    *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open.
-   *  `timed`: the act asked for its own duration (#1295: a held pose still runs until it ends). */
-  link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, timed = false): {open: boolean} {
+   *  `seconds`: the duration the act asked for (#1295: a held pose still runs until it ends, and the hold limit allows it). */
+  link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, seconds?: number): {open: boolean} {
     const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
     const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
     const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
-    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(timed ? {timed: true} : {})};
+    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {})};
     const prior = this.links.get(receipt.id);
     if (prior) {l.also = [...(prior.message === message ? [] : [{...prior, also: undefined, late: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)]; if (prior.late) l.late = true;}
     this.keep(receipt.id, l);
@@ -147,11 +150,14 @@ export class OwnerLoop {
     for (const [id, l] of [...this.links]) {
       if (id === except || l.gone !== undefined) continue;
       const mine = [l, ...(l.also ?? [])].find(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner); if (!mine) continue;
-      const soul = l.scope.scope.slice(5), r = this.read(soul, id);
-      if (!r) {this.forget(id); continue;}
-      if (!OPEN.includes(r.phase)) continue;
-      if (!mine.timed && this.world?.holding?.(soul, id)) continue;
-      return r;
+      const soul = l.scope.scope.slice(5);
+      try {
+        const r = this.peek(soul, id);
+        if (!r) {this.forget(id); continue;}
+        if (!OPEN.includes(r.phase)) continue;
+        if (!mine.timed && this.world?.holding?.(soul, id)) continue;
+        return r as EdgeReceipt;
+      } catch {/* a link that can't be read holds nothing */}
     }
     return null;
   }
@@ -159,6 +165,7 @@ export class OwnerLoop {
   private serving(s: {scope: string; owner: string}, message: string) {
     return [...this.links.values()].some(l => l.gone === undefined && [l, ...(l.also ?? [])].some(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner));
   }
+  private peek(soulId: string, id: string) {return this.world?.brief ? this.world.brief(soulId, id) : this.read(soulId, id);}
   private ended(r: EdgeReceipt) {
     const l = this.links.get(r.id); if (!l || OPEN.includes(r.phase)) return;
     const full = this.read(r.soulId, r.id) ?? r, line = resultLine(full);
@@ -179,20 +186,26 @@ export class OwnerLoop {
   sweep(tick: number) {
     if (tick % SWEEP_TICKS) return;
     for (const [id, l] of [...this.links]) {
-      const soul = l.scope.scope.slice(5), r = this.read(soul, id);
-      if (!r) {this.forget(id); continue;}
-      if (l.gone !== undefined) {
-        if (tick - l.gone < GONE_TICKS) continue;
-        this.forget(id);
-        for (const one of [l, ...(l.also ?? [])]) if (!this.serving(one.scope, one.message) && !this.running(one.scope, one.message)) this.inbox.serverResult(one.scope, one.message, `${r.capability} was replaced by a newer act before it finished.`, 'failed');
-        continue;
-      }
-      if (!OPEN.includes(r.phase)) {this.ended(r); continue;}
-      if (l.late || tick - r.acceptedTick < this.holdTicks) continue;
-      const held = this.world?.holding?.(soul, id) ?? false;
-      l.late = true; this.keep(id, l);
-      for (const one of [l, ...(l.also ?? [])]) if (one.timed || !held) this.inbox.serverResult(one.scope, one.message, `${r.capability} hadn't finished after ${Math.round(this.holdTicks / 1200)} minutes, so it isn't done.`, 'failed');
+      try {this.sweepOne(tick, id, l);} catch {/* one link's fault never stops the others; it is looked at again next time */}
     }
+  }
+  private sweepOne(tick: number, id: string, l: Link) {
+    const soul = l.scope.scope.slice(5), r = this.peek(soul, id);
+    if (!r) {this.forget(id); return;}
+    // only into a message with no result: a replacing act linked to it may have closed it already, with its real outcome
+    if (l.gone !== undefined) {
+      if (tick - l.gone < GONE_TICKS) return;
+      this.forget(id);
+      for (const one of [l, ...(l.also ?? [])]) if (!this.serving(one.scope, one.message) && !this.running(one.scope, one.message)) this.inbox.serverResult(one.scope, one.message, `${r.capability} was replaced by a newer act before it finished.`, 'failed', true);
+      return;
+    }
+    if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full); else this.forget(id); return;}
+    // a timed act gets the time it asked for, and a minute more, before it counts as overlong
+    const limit = Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0));
+    if (l.late || tick - r.acceptedTick < limit) return;
+    const held = this.world?.holding?.(soul, id) ?? false;
+    l.late = true; this.keep(id, l);
+    for (const one of [l, ...(l.also ?? [])]) if (one.timed || !held) this.inbox.serverResult(one.scope, one.message, `${r.capability} hadn't finished after ${Math.round(limit / 1200)} minutes, so it isn't done.`, 'failed', true);
   }
   private keep(id: string, l: Link) {this.links.set(id, l); try {this.store?.save(id, l.scope.scope.slice(5), JSON.stringify(l));} catch {/* kept in memory */}}
   private forget(id: string) {this.links.delete(id); try {this.store?.drop(id);} catch {/* the sweep drops it again */}}

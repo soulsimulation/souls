@@ -2727,11 +2727,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private ambientAt = new Map<string, number>();
   onReceipt(l: (r: EdgeReceipt) => void) {this.receiptListeners.push(l);}
   private tickListeners: ((tick: number) => void)[] = [];
+  /** #1295: a light read of a receipt (no body or outcome facts), for the owner loop's sweep and close guard. */
+  receiptBrief(soulId: string, id: string): {id: string; capability: string; phase: string; acceptedTick: number; endedTick: number | null} | null {
+    const r = this.rows('receipt_id=? AND soul_id=?', id, soulId)[0]; return r ? {id: r.receipt_id, capability: r.capability, phase: r.phase, acceptedTick: r.accepted_tick, endedTick: r.ended_tick} : null;
+  }
   /** #1295: told after each world tick (the owner loop's sweep). */
   onTick(l: (tick: number) => void) {this.tickListeners.push(l);}
   /** #1295: whether this open act has done what it was asked and only holds now: a sit, sit-ground, lie or nap whose body
    *  holds that pose under the act's own programme (started at least a second ago, so a body still seated from an earlier
-   *  sit doesn't count), or a follow, which goes on until stopped. Such an act doesn't keep its owner message open. */
+   *  sit doesn't count), or a follow, which walks with its Soul until stopped or its time is up. Such an act doesn't keep
+   *  its owner message open. */
   holding(soulId: string, id: string): boolean {
     const r = this.rows("receipt_id=? AND soul_id=? AND phase='started'", id, soulId)[0], m = this.host.minds.get(soulId); if (!r || !m) return false;
     const verb = r.capability.split(':')[0]!; if (verb === 'follow') return true;
@@ -3051,14 +3056,14 @@ export class EdgeLedger implements EdgeLedgerHooks {
 }
 
 /** Receipt detail (Core-A): channel (body | attention | none), chosen (what an intent picked), endedAt (terminal). */
-/** #1295: the postures that hold an open-ended act's pose (the CLI's HELD_POSE). */
-const HELD_POSES: Record<string, string[]> = {sit: ['seated'], 'sit-ground': ['seated'], lie: ['lying', 'sleeping'], nap: ['lying', 'sleeping']};
 function detailOf(r: Row): {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown} {
   if (!r.detail) return {};
   try {const d = JSON.parse(r.detail) as {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown}; return {...(d.channel ? {channel: d.channel} : {}), ...(d.chosen ? {chosen: d.chosen} : {}), ...(d.endedAt ? {endedAt: d.endedAt} : {}), ...(d.alternatives ? {alternatives: d.alternatives} : {}), ...(d.meal ? {meal: d.meal} : {}), ...(d.approach ? {approach: d.approach} : {})};}
   catch {return {};}
 }
 
+/** #1295: the postures that hold an open-ended act's pose (the CLI's HELD_POSE). */
+const HELD_POSES: Record<string, string[]> = {sit: ['seated'], 'sit-ground': ['seated'], lie: ['lying', 'sleeping'], nap: ['lying', 'sleeping']};
 const mix = (s: string, n: number) => {let h = 2166136261 ^ n; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return (h >>> 0);};
 function ambientChoice(ledger: EdgeLedger, soul: EdgeSoul, me: {pose: {p: number[]}}, tick: number): {id: string; label: string; steps: Program['steps']} | null {
   const {caps, plans} = ledger.ambientPlans(soul), world = ledger.host.engine.world as NativeWorld;

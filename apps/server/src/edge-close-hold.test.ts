@@ -79,13 +79,29 @@ test('#1295 A4: a linked walk replaced by another act linked to the same message
 });
 
 test('#1295 A4: with nothing serving it, the world closes a replaced walk\'s message failed, saying so', {timeout: 300000}, async t => {
-  const {w, take, act, phase, row} = await world(t);
+  const {w, take, act, phase, until, row} = await world(t);
   const m = await take('walk to the knoll');
   const a = await act(FAR, {for: m}); await w.settle(10);
   await act('rest:here', {params: {seconds: 30}});
   assert.equal(phase(a.receipt.id), 'replaced'); assert.equal(row(m).result, null, 'the replacing act gets its chance first');
   await w.settle(80);
   assert.equal(row(m).outcome, 'failed'); assert.equal(row(m).result_by, 'server'); assert.match(row(m).result!, /replaced/);
+  // a world line written first is replaced by the real outcome of an act linked to the message later
+  const again = await act(WALK, {for: m});
+  await until(() => phase(again.receipt.id) === 'completed');
+  assert.equal(row(m).outcome, 'done'); assert.equal(row(m).result_by, 'server');
+});
+
+test('#1295 A4 (review): a short act linked to the message that replaces its walk keeps its real close past the window', {timeout: 300000}, async t => {
+  const {w, take, act, phase, until, row} = await world(t);
+  const m = await take('walk to the knoll, or just stand there');
+  const walk = await act(FAR, {for: m}); await w.settle(10);
+  const stand = await act('stand:here', {for: m});
+  assert.equal(phase(walk.receipt.id), 'replaced');
+  await until(() => phase(stand.receipt.id) === 'completed', 400);
+  assert.equal(row(m).outcome, 'done', 'the stand closed it');
+  await w.settle(120);
+  assert.equal(row(m).outcome, 'done', 'the replaced walk does not write over it'); assert.doesNotMatch(row(m).result!, /replaced/);
 });
 
 test('#1295 A5: an open-ended sit holds nothing once seated; a timed one runs until it ends', {timeout: 300000}, async t => {
