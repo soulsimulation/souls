@@ -17,7 +17,8 @@ import {kernelHash} from '@souls/kernel';
 import {testPort} from '../test/test-port.ts';
 const TEST_PORT=await testPort();
 const legacy=await marsFactory(GREEN_FIELD_WORLD);
-async function until(predicate:()=>boolean|Promise<boolean>){for(let i=0;i<150;i++){if(await predicate())return;await new Promise(r=>setTimeout(r,20));}throw Error('owned local condition did not settle');}
+// 30 s: on a shared CI host a child can take longer than 3 s to boot or close, and a real hang still fails here (#1264)
+async function until(predicate:()=>boolean|Promise<boolean>){for(let i=0;i<1500;i++){if(await predicate())return;await new Promise(r=>setTimeout(r,20));}throw Error('owned local condition did not settle');}
 
 test('explicit installer refuses missing flags before writes, preserves old native/owner history and selects a compatible postfact code reader',async t=>{
   const dir=mkdtempSync(join(tmpdir(),'eden-bootstrap-')),path=join(dir,'sim.db');t.after(()=>rmSync(dir,{recursive:true,force:true}));
