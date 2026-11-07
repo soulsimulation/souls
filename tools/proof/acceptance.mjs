@@ -114,20 +114,25 @@ export const isVideo = u => VIDEO.test(u) && !IMAGE.test(u);
 export const isImage = u => IMAGE.test(u);
 const isProofJson = u => /proof[^/]*\.json(\?|#|$)/i.test(u);
 
+/** Earlier names of a repository (#1183): GitHub redirects them, and open PRs and their proof still carry them. Keyed by
+ *  the current name, so every other repository's check stays exact. */
+export const PREVIOUS_REPOS = { 'soulsimulation/souls': ['genekogan/souls'] };
+
 /**
  * Where a proof.json or clip link may live (#765): this repository's proofs releases (`releases/download/proofs/` or
  * `proofs-<n>/`), GitHub user attachments, and the proof CDN (SIM_PROOF_PUBLIC_URL) when one is configured. A canonical
  * https URL only: no userinfo, port, query or fragment. `repo` null (a local check with no repository known) accepts
- * any repository's proofs releases; proof-check always passes its repository. Returns null when allowed, else why not.
+ * any repository's proofs releases; proof-check always passes its repository, and its PREVIOUS_REPOS names count as
+ * this repository. Returns null when allowed, else why not.
  */
 export function proofHostProblem(value, { repo = null, cdn = process.env.SIM_PROOF_PUBLIC_URL || null } = {}) {
   let u;
   try { u = new URL(value); } catch { return 'not a URL'; }
   if (u.protocol !== 'https:') return 'not https';
   if (u.username || u.password || u.port || u.search || u.hash) return 'userinfo, a port, a query or a fragment is not allowed';
-  const repoRe = repo ? repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '[\\w.-]+/[\\w.-]+';
+  const repoRe = repo ? [repo, ...(PREVIOUS_REPOS[repo] ?? [])].map(r => r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') : '[\\w.-]+/[\\w.-]+';
   if (u.origin === 'https://github.com') {
-    if (new RegExp(`^/${repoRe}/releases/download/proofs(?:-\\d+)?/[A-Za-z0-9._-]+$`).test(u.pathname)) return null;
+    if (new RegExp(`^/(?:${repoRe})/releases/download/proofs(?:-\\d+)?/[A-Za-z0-9._-]+$`).test(u.pathname)) return null;
     if (/^\/user-attachments\/(?:assets|files)\/[A-Za-z0-9-]+(?:\/[A-Za-z0-9._-]+)?$/.test(u.pathname)) return null;
     return `not this repository's proofs release${repo ? ` (${repo})` : ''} or a GitHub attachment`;
   }
@@ -367,6 +372,17 @@ export function clipPreviews(videos = [], images = [], proof = null) {
   });
 }
 
+/** A note cut to the table's width, never mid-link: `https://gi` reads as a local host (#1055). checkPr has already scanned the whole note. */
+function clipNote(note, max = 120) {
+  const s = note || '';
+  if (s.length <= max) return s;
+  const start = s.slice(0, max).search(/\S*$/);
+  const word = s.slice(start).match(/^\S*/)[0];
+  return start + word.length > max && word.includes('://') ? s.slice(0, start).trimEnd() : s.slice(0, max);
+}
+
+const cell = s => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
 /** The bot comment (updated in place by proof-check.yml). */
 export function renderComment(result, { required = [], files = [], raisedByLabel = null, note = null } = {}) {
   const mark = ok => ok === true ? 'ok' : ok === false ? '**missing**' : '-';
@@ -379,7 +395,7 @@ export function renderComment(result, { required = [], files = [], raisedByLabel
   for (const r of result.rows) out.push(`| ${r.name} | ${mark(r.ok)} | ${String(r.detail).replace(/\|/g, '\\|')} |`);
   if (result.checklist.length) {
     out.push('', '<details><summary>Acceptance criteria</summary>', '', '| | Criterion | Status | Evidence |', '|---|---|---|---|');
-    for (const c of result.checklist) out.push(`| ${c.checked ? '[x]' : '[ ]'} | ${label(c).replace(/\|/g, '\\|')} | ${c.status} | ${(c.note || '').slice(0, 120).replace(/\|/g, '\\|')} |`);
+    for (const c of result.checklist) out.push(`| ${c.checked ? '[x]' : '[ ]'} | ${cell(label(c))} | ${c.status} | ${cell(clipNote(c.note))} |`);
     out.push('', '</details>');
   }
   const { videos, images, proofJson } = result.links;

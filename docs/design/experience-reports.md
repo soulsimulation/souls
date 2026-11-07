@@ -1,20 +1,27 @@
 # Experience reports and episode diagnosis
 
-Future design for [#590](https://github.com/genekogan/souls/issues/590), with correlation/contract qualification in
-[#592](https://github.com/genekogan/souls/issues/592). No new collection is enabled by this document.
+Future design for [#590](https://github.com/soulsimulation/souls/issues/590), with correlation/contract qualification in
+[#592](https://github.com/soulsimulation/souls/issues/592). No new collection is enabled by this document.
 The goal is to inspect an actual game episode, understand an undesirable experience and turn a supported diagnosis
 into a reproducible improvement—even when no exception occurred.
 
+**Built so far (first slice, local only).** An owner creates `.eden-report-on` in a Soul's folder (in a Souls home, its `souls/<id>/runtime/`, beside the record) to turn reports on, then
+runs `node eden.mjs guide` to add the one guide line, and deletes the file to turn them off. While on, `eden.mjs` records
+its own requests as `soul-trace/1` records in `.eden-report.jsonl`, which `tools/soul-trace/readout.mjs` reads, and offers
+one optional command, `note "<expected>" "<observed>"`. Nothing leaves the machine. While off, the client has no such
+command, help line, guide line, file or answer field. A running `serve` reads the switch when it starts. Everything below
+beyond that is still design.
+
 This is also the field-learning component of [agency quality](agency-quality.md) and
-[tranche #623](https://github.com/genekogan/souls/issues/623). The shared correlation/timing contract remains
-#592; [#624](https://github.com/genekogan/souls/issues/624) adds a localhost episode inspector and
-[#625](https://github.com/genekogan/souls/issues/625) defines evaluation validity. Local capture and remote
+[tranche #623](https://github.com/soulsimulation/souls/issues/623). The shared correlation/timing contract remains
+#592; [#624](https://github.com/soulsimulation/souls/issues/624) adds a localhost episode inspector and
+[#625](https://github.com/soulsimulation/souls/issues/625) defines evaluation validity. Local capture and remote
 sharing are independent opt-ins, both disabled by default. Develop one useful local episode before expanding
 upload/aggregation. No feature or data collection is enabled by this planning expansion.
 The combined controllability agenda starts with a minimal trace/readout, then a bounded local inspector before
 the planned core-control pass. Elaborate viewer/reporting expansion does not block that pass. Each small release
 can use existing health evidence and deliberately opted-in local episodes, with a bounded observation window
-and honest missing feedback. Physical collaboration under [#560](https://github.com/genekogan/souls/issues/560)
+and honest missing feedback. Physical collaboration under [#560](https://github.com/soulsimulation/souls/issues/560)
 uses the same record, inspector and export path. Participation in a shared action does not authorize collection
 or export of another owner's private trace, prompts or media; cross-participant joins retain consent and gaps.
 
@@ -27,7 +34,7 @@ sources to qualify. Some diagnose a different request path or current state rath
 coverage and retention before relying on them. The existing CLI `report` answers the owner and is not a remote
 experience-report upload service.
 
-Keep this distinct from [operational alerting #461](https://github.com/genekogan/souls/issues/461) and
+Keep this distinct from [operational alerting #461](https://github.com/soulsimulation/souls/issues/461) and
 [project visibility](project-visibility.md). A healthy server can still deliver a bad experience.
 
 ## A small first journey
