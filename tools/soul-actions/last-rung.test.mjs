@@ -716,7 +716,7 @@ test('R after a rung 3 the god side reads the engine that runs: a Soul puts down
   quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls, was = h.engine, [x, , z] = was.world.entities[Ada.entityId].pose.p;
   ok(w.god.act({ops: [{op: 'place', def: 'core/bowl@2', name: 'bowl', p: [x + 1, z]}]})); await w.tick(30); const id = w.god.model.get('bowl').id;
   fall(w, Bo); await w.tick(6); assert.notEqual(h.engine, was, 'the engine was replaced'); assert.equal(byRung(h).rewind, 1);
-  for (const part of [w.bridge.perceive, w.bridge.nav, w.bridge.activitySpots]) assert.equal(part.h.engine, h.engine);
+  for (const part of [w.bridge.perceive, w.bridge.nav, w.bridge.activitySpots]) assert.ok(part.h.engine === h.engine);   // assert.equal would format two whole engines
   const up = ok(await act(w, Ada, {capability: `pick-up:${id}`})); await w.tick(200); assert.equal(read(w, Ada, up).phase, 'completed');
   const down = ok(await act(w, Ada, {capability: `put-down:${id}`})); await w.tick(200); assert.equal(read(w, Ada, down).phase, 'completed');
   await w.tick(40); assert.doesNotThrow(() => w.bridge.contextReady());
@@ -746,6 +746,7 @@ for (const age of [50, 600]) test(`R a stop's twenty seconds start at the rewind
   def.step = (rt, exec) => { if (![...rt.live.values()].find(x => x.exec === exec)?.cancelling) return {status: 'running'}; if (!began.has(exec)) began.set(exec, rt.tick); left = rt.tick - began.get(exec); return left >= 30 ? {status: 'completed', outputs: {}} : {status: 'running'}; };
   await w.tick(2); h.saveSnapshot(true); await w.tick(age); const id = h.engine.programOf(Ada.entityId);
   fall(w, Bo); await w.tick(3); assert.equal(byRung(h).rewind, 1); const p = h.engine.programs.get(id); assert.ok(p?.stopByV1 >= h.engine.world.tick + 390, `by ${p?.stopByV1} at ${h.engine.world.tick}`);
+  assert.equal(replayFromGenesis(w.factory, seed, w.f.db.events(h.worldId), h.engine.world.tick, {includeHeadEvents: true}).engine.programs.get(id)?.stopByV1, p.stopByV1, 'a replay counts from the same tick');
   const n = rows(w, "author='world:refusal'"); await w.tick(45);
   assert.equal(left, 30, 'its own cleanup ran'); assert.equal(h.engine.programOf(Ada.entityId), null); assert.equal(rows(w, "author='world:refusal'"), n, 'nothing abandoned');
   const again = replayFromGenesis(w.factory, seed, w.f.db.events(h.worldId), h.engine.world.tick, {includeHeadEvents: true}).engine; assert.equal(again.stateHash(), h.engine.stateHash()); assert.deepEqual(again.world.containedV1, h.engine.world.containedV1);
@@ -803,4 +804,9 @@ test('C4 a motion rule never stands: a body moved under a firing key is refused 
 });
 test('R an engine put back with no recovery row, as a refused atomic decision does, leaves context readable', async (t) => {
   quiet(t); const w = await world(t), h = w.f.host; await w.tick(30); const body = h.captureBody(); h.restoreBody(body); await w.tick(40); assert.doesNotThrow(() => w.bridge.contextReady());
+});
+test('R a steady throw asks for a snapshot once per cooldown: rare, and never silent', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host; let taken = 0; const {commitHead} = h; h.commitHead = function (...a) { taken++; return commitHead.apply(this, a); };
+  w.control.midThrow = () => true; for (let i = 0; i < 2600; i++) h.tickOnce(); await setImmediate();
+  assert.ok(taken >= 3 && taken <= 6, `${taken} snapshots`);
 });
