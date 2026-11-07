@@ -1670,7 +1670,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.0";
+const VERSION = "2.23.3";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2401,27 +2401,54 @@ async function observe() {
   return d;
 }
 
-/** Phrase and all-term matches precede the legacy partial-term fallback. */
+/** Phrase and all-term matches precede the legacy partial-term fallback, and each ranks a word in the offer's id or name
+ *  (the label before its `[id]`, `(` or first comma) above a word only in its description. */
 export function rankCapabilities(list, search) {
   const terms = [...new Set(search.toLowerCase().split(/[\s,|]+/).filter(Boolean))];
   const normalize = value => String(value ?? '').toLowerCase().replace(/[-_/]+/g, ' ').replace(/\s+/g, ' ');
   const phrase = normalize(search).trim();
+  const hits = hay => terms.filter(t => hay.includes(normalize(t))).length;
+  const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
   return list.map((c, i) => {
     const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const count = terms.filter(t => hay.includes(normalize(t))).length;
-    return {c, i, count, tier: phrase && hay.includes(phrase) ? 2 : terms.length && count === terms.length ? 1 : 0};
+    const named = tierOf(normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')));
+    return {c, i, count: hits(hay), tier: named ? named + 2 : tierOf(hay)};
   }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
+const LABEL_MAX = 80;
+export function shortLabel(id, label) {
+  const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
+  if (text.length <= LABEL_MAX) return text;
+  const far = / ?\(?(\d+ m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
+  return cut.slice(0, cut.lastIndexOf(" ")).replace(/[\s,;:.(]+$/, "") + tail;
+}
+
+/** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
+ *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
+export function refusalList({ code, did_you_mean, candidates }) {
+  const said = did_you_mean ?? [], byId = new Map((candidates ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set([...said.map((d) => d.id), ...byId.keys()])].slice(0, /\.(choose|ambiguous)$/.test(code ?? "") ? 5 : 3);
+  return ids.map((id) => {
+    const c = byId.get(id), params = Object.keys(c?.params ?? {});
+    return { id, label: shortLabel(id, said.find((d) => d.id === id)?.label ?? c?.label), ...(params.length ? { params } : {}), ...(c?.available === false ? { available: false } : {}), ...(c?.blocked ? { blocked: c.blocked } : {}) };
+  });
+}
+const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
+
 async function caps(...args) {
-  let search, verb, all = false, limit = 60;
+  let search, verb, all = false, limit, json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--search") search = args[++i];
     else if (args[i] === "--verb") verb = args[++i];
     else if (args[i] === "--all") all = true;
     else if (args[i] === "--limit") limit = Number(args[++i]);
+    else if (args[i] === "--json") json = true;
     else search = (search ? search + " " : "") + args[i];
   }
+  // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
+  limit ??= search && !all ? 12 : 60;
   // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
   const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
   let list = d.capabilities ?? [];
@@ -2432,8 +2459,9 @@ async function caps(...args) {
   }
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
+    ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
     ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
-    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
+    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
 
@@ -2572,7 +2600,11 @@ async function act(...argv) {
   if (implicit && r.status === 400 && /owner message/.test(r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); r = await call("/v1/edge/act", { body }); }
   const d = ok(r, "act");
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
-  if (!d.accepted) return { accepted: false, code: d.code, reason: d.reason, ...(d.did_you_mean?.length ? { did_you_mean: d.did_you_mean.slice(0, 8) } : {}), ...(d.alternatives?.length ? { alternatives: d.alternatives.slice(0, 3) } : {}), ...(d.candidates?.length ? { candidates: d.candidates.slice(0, 5) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  if (!d.accepted) {
+    if (json) return d;
+    const list = refusalList(d);
+    return { accepted: false, code: d.code, reason: d.reason, ...(list.length ? { did_you_mean: list } : {}), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  }
   let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
@@ -2635,9 +2667,12 @@ function waitOption(argv) {
 }
 
 async function resolve(...args) {
-  if (!args.length) throw new Error('usage: resolve "<what to do>" [params-json]');
-  const body = parseActionArgs(args);
-  return ok(await call("/v1/edge/resolve", { body }), "resolve").resolve;
+  const words = args.filter((a) => a !== "--json");
+  if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
+  const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
+  if (r.ok !== false || words.length !== args.length) return r;
+  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r, list = refusalList(r);
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...(list.length ? { did_you_mean: list } : {}) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
@@ -2939,7 +2974,7 @@ background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits wh
 I asked, then \`${CLI} result <id> done|failed "<what happened>"\`.
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
-from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`candidates\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
+from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
 --wait, then \`${CLI} wait 60\` as needed. \`${CLI} caps --search "<thing>"\` lists current offers.
 
 For “take a seat” with no requested duration, use a durable fixture's exact sit offer with \`'{"seconds":1}' --for none --wait --json\` if it supports seconds. Verify \`here\` posture is seated and its seat matches the receipt's chosen slot before reporting. The seat stays occupied after the timed action; keep listening, without standing or canceling. Preserve requested durations; this does not apply to temporary ground poses. Default sitting receipts can stay open for ten minutes while already seated.
@@ -3675,10 +3710,10 @@ home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all]   map   view [--map|--alt-only|--out f]
+look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
           say "<text>"   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
 owner     listen [--after id] [--once]   ack <id> ["reply"]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
