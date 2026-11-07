@@ -2179,6 +2179,7 @@ const clean = (d) => {
 async function register(world, { asked = true } = {}) {
   const prev = load();
   if (!world && !prev.world) throw new Error("usage: register <world-url>");
+  const named = asked && !!world;   // a url a person typed; a bare register reuses what is saved, which may have come from a file
   const w = (world ?? prev.world).replace(/\/+$/, "");
   if (!/^https?:\/\/.+\/w\/[a-z0-9-]+$/.test(w)) throw new Error("world must look like https://host/w/<world>");
   if (prev.world && prev.world !== w && prev.soul) throw new Error(`This folder already belongs to another world's Soul. Use a fresh folder, or move this one into a Souls home first: ${CLI} import`);
@@ -2186,12 +2187,12 @@ async function register(world, { asked = true } = {}) {
   const cfg = ok(await call("/v1/config", { as: "none" }), "config");
   if (cfg.accountAuthRequired) {
     save({ accountAuth: true, worldId: cfg.worldId });
-    noteWorld(w, cfg, true, asked);
+    noteWorld(w, cfg, true, named);
     return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)` };
   }
   if (!cfg.devAuth) throw new Error("This world accepts neither account approvals nor self-made identities.");
   save({ accountAuth: false, identity: prev.identity ?? "agent-" + randomBytes(12).toString("hex") });
-  noteWorld(w, cfg, false, asked);
+  noteWorld(w, cfg, false, named);
   return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"` };
 }
 
@@ -2361,7 +2362,7 @@ async function adopt(...argv) {
   if (s.accountAuth) {
     if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>`);
     try { return await startApproval({ name: who, existing: true }, code); }
-    catch (e) { if (/HTTP 400/.test(e.message)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
+    catch (e) { if (/HTTP 400/.test(e.message) && soulHome.newerThan("2.23.5", HOME.config().worlds[SEAT?.key]?.bundle)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
   }
   if (!s.identity) throw new Error(`Register its world first: ${CLI} register <world-url>`);
   const owned = ok(await call("/v1/me", { as: "dev" }), "adopt").souls ?? [];
@@ -2374,10 +2375,13 @@ async function adopt(...argv) {
  *  Soul held safely in another world doesn't answer for this one's; @world keeps it to that world. */
 function keptSoul(who) {
   const same = HOME.principals().filter((p) => p.state !== "retired" && (p.id === who || soulHome.norm(p.name) === soulHome.norm(who)));
+  const byId = same.find((p) => p.id === who);
+  if (byId) return AT_WORLD && byId.world !== AT_WORLD ? null : byId;   // an id is one Soul in one world, wherever this seat is
   const here = same.filter((p) => p.world === SEAT?.key);
   if (here.length || AT_WORLD) return here[0] ?? null;
   const loose = same.filter((p) => p.state === "unpaired" || !HOME.load(HOME.soul(p.id)).token);
-  if (loose.length > 1) throw new Error(`Several Souls here could be ${who}: ${loose.map((p) => `@${p.world} adopt ${p.id}`).join(", ")}. Say which.`);
+  // A window code belongs to one world, and only the person knows which: with a world in hand, ask rather than send it to another.
+  if (loose.length > 1 || (loose.length && load().world)) throw new Error(`${who} could mean ${[...loose.map((p) => `the one in ${p.world}: ${CLI} @${p.world} adopt ${p.id} --for <CODE>`), ...(load().world ? [`one in ${SEAT.key}: ${CLI} @${SEAT.key} adopt ${who} --for <CODE>`] : [])].join("; or ")}`);
   return loose[0] ?? null;
 }
 /** Adopt speaks from the seat of the Soul's own world. An imported Soul's world may not be registered in this home yet. */
@@ -2428,7 +2432,7 @@ async function status() {
   if (!s.world) return { paired: false, next: `${CLI} register <world-url>` };
   if (!s.token && s.pendingCreate) return { paired: false, world: s.world, arriving: s.pendingCreate.name, next: `${ARRIVING}: ${CLI} create "${s.pendingCreate.name}" to keep waiting` };
   if (!s.token && SEAT?.kind === "soul") {
-    const e = HOME.config().souls[SEAT.id], waiting = HOME.seatState(e?.world).pendingApproval?.input?.soulId === SEAT.id;
+    const e = HOME.config().souls[SEAT.id], asked = HOME.seatState(e?.world).pendingApproval?.input, waiting = asked?.soulId === SEAT.id || (!!asked?.name && asked.name === e?.name);
     return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
   }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
