@@ -194,7 +194,8 @@ function flagLines(ledger: EdgeLedger, P: Perception) {
   const pos = P.pos, shown = all.filter(f => ledger.places.containing(f.at[0], f.at[1]).every(p => ledger.knowledge.knows(P.soul.soulId, p.id)));
   if (!shown.length) return {};
   const flags = shown.map(f => ({f, d: dist2(pos, f.at)})).sort((a, b) => a.d - b.d || a.f.walk.localeCompare(b.f.walk));
-  return {flags: flags.slice(0, LIMITS.flags).map(({f, d}) => `${f.name} · ${compassPoint(compassOf(f.at[0] - pos[0], f.at[1] - pos[1]))} ${Math.round(d)}m · ${f.walk}`),
+  // (a flag no route reaches from here is still there: its line keeps the name and drops the id, which `act` would refuse)
+  return {flags: flags.slice(0, LIMITS.flags).map(({f, d}) => `${f.name} · ${compassPoint(compassOf(f.at[0] - pos[0], f.at[1] - pos[1]))} ${Math.round(d)}m${ledger.routeProblem(P.soul, f.walk) ? '' : ` · ${f.walk}`}`),
     ...(flags.length > LIMITS.flags ? {flagsMore: flags.length - LIMITS.flags} : {})};
 }
 /** Floors (2026-10-26): the raised floors near the body in plain words — the one it stands on, or how far one is, the

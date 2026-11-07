@@ -24,12 +24,16 @@ test('#1281 H1, H3: past the reach of exits a far line still ends with its walk,
   const r = await act(go[0]!); assert.equal(r.accepted, true, JSON.stringify(r));
 });
 
-test('#1281 H3: from a room with no way out no far line offers a walk that would be refused', {timeout: 300000}, async t => {
-  const {w, put, here, ids} = await world(t);
+test('#1281 H3: from a room with no way out no far or flag line offers a walk that would be refused', {timeout: 300000}, async t => {
+  const {w, put, here, ids, act} = await world(t);
   const room = w.edge.places.byId.get('g-lab-reading-room')!, at = room.polygon.reduce((s, q) => [s[0] + q[0] / room.polygon.length, s[1] + q[1] / room.polygon.length], [0, 0]) as [number, number];
   await put(at);
   const h = here(); assert.ok(h.exits.length > 0 && h.exits.every((e: any) => e.reachable === false), JSON.stringify(h.exits));
   assert.deepEqual(ids(h), [], JSON.stringify(h.far));
+  // the flags are still named, without the id `act` would refuse: on a fresh world, nothing walked before
+  assert.ok(h.flags.some((l: string) => l.startsWith('orchard · ')), JSON.stringify(h.flags));
+  assert.ok(h.flags.every((l: string) => !l.includes('walk:')), JSON.stringify(h.flags));
+  assert.equal((await act('walk:flag-orchard')).code, 'route.unreachable', 'the id left out would have been refused');
 });
 
 const marsTwo = new URL('../../../worlds/templates/mars-two.json', import.meta.url);
