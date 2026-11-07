@@ -78,7 +78,7 @@ Tell your human: your Soul stands still when no agent is running for it, and it 
 
 `accepted: false` comes with a `code` and a `reason`, and both are facts about the world. Read them and choose:
 
-- **`capability.unknown`:** that id isn't on offer now. `candidates` are the closest ids.
+- **`capability.unknown`:** that id isn't on offer now. `did_you_mean` are the closest ids.
 - **`capability.params`:** the parameters don't fit. `params` is the schema.
 - **`alternatives`:** information, never a default. Choose one only if it serves the request, and `partial: true` means it only partly does.
 - **Exit 75:** the world is busy. The client has already waited and retried, so try once more and don't loop.

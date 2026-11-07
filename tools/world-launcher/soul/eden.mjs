@@ -2411,9 +2411,9 @@ export function rankCapabilities(list, search) {
   const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
   return list.map((c, i) => {
     const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const named = tierOf(normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')));
-    return {c, i, count: hits(hay), tier: named ? named + 2 : tierOf(hay)};
-  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.count-a.count || a.i-b.i).map(x => x.c);
+    const name = normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')), named = tierOf(name);
+    return {c, i, count: hits(hay), names: hits(name), tier: named ? named + 2 : tierOf(hay)};
+  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
 /** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
@@ -2421,19 +2421,22 @@ const LABEL_MAX = 80;
 export function shortLabel(id, label) {
   const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
   if (text.length <= LABEL_MAX) return text;
-  const far = / ?\(?(\d+ m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
-  return cut.slice(0, cut.lastIndexOf(" ")).replace(/[\s,;:.(]+$/, "") + tail;
+  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1).replace(/[\ud800-\udbff]$/, "");
+  const space = cut.lastIndexOf(" "); // a name with no spaces is cut where it stands, not back to its first word
+  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.(]+$/, "") + tail;
 }
 
 /** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
  *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
 export function refusalList({ code, did_you_mean, candidates }) {
-  const said = did_you_mean ?? [], byId = new Map((candidates ?? []).map((c) => [c.id, c]));
-  const ids = [...new Set([...said.map((d) => d.id), ...byId.keys()])].slice(0, /\.(choose|ambiguous)$/.test(code ?? "") ? 5 : 3);
-  return ids.map((id) => {
-    const c = byId.get(id), params = Object.keys(c?.params ?? {});
-    return { id, label: shortLabel(id, said.find((d) => d.id === id)?.label ?? c?.label), ...(params.length ? { params } : {}), ...(c?.available === false ? { available: false } : {}), ...(c?.blocked ? { blocked: c.blocked } : {}) };
+  const said = new Map((did_you_mean ?? []).map((d) => [d.id, d])), byId = new Map((candidates ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set([...said.keys(), ...byId.keys()])], keep = /\.(choose|ambiguous)$/.test(code ?? "") ? 5 : 3;
+  const list = ids.slice(0, keep).map((id) => {
+    const d = said.get(id), c = byId.get(id), params = Object.keys(c?.params ?? {}), off = d?.available === false || c?.available === false;
+    const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
+    return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
   });
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(ids.length > keep ? { more: `--json shows all ${ids.length}` } : {}) };
 }
 const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
 
@@ -2602,8 +2605,7 @@ async function act(...argv) {
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   if (!d.accepted) {
     if (json) return d;
-    const list = refusalList(d);
-    return { accepted: false, code: d.code, reason: d.reason, ...(list.length ? { did_you_mean: list } : {}), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -2671,8 +2673,8 @@ async function resolve(...args) {
   if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
   const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
   if (r.ok !== false || words.length !== args.length) return r;
-  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r, list = refusalList(r);
-  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...(list.length ? { did_you_mean: list } : {}) };
+  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
