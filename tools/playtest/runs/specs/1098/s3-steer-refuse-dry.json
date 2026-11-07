@@ -14,7 +14,7 @@
  "evaluation": {
   "questions": [
    "../../questions/steer-honoured.mjs",
-   "../../questions/refusal-recovered.mjs",
+   "../../questions/refusal-recovered-v3.mjs",
    "../../questions/scene-finished.mjs"
   ]
  }

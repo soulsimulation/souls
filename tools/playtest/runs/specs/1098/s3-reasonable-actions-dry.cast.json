@@ -56,8 +56,12 @@
       "ack": "Going to sit on the cottage bench",
       "do": [
        [
+        "resolve",
+        "sit on the bench outside the cottage"
+       ],
+       [
         "act",
-        "sit on the bench outside the cottage",
+        "{resolved}",
         "--wait",
         "55"
        ]
@@ -69,8 +73,12 @@
       "ack": "Off for a swim",
       "do": [
        [
+        "resolve",
+        "go for a swim in the pond"
+       ],
+       [
         "act",
-        "go for a swim in the pond",
+        "{resolved}",
         "--wait",
         "55"
        ]
@@ -83,8 +91,12 @@
       "close": "open",
       "do": [
        [
-        "act",
+        "resolve",
         "walk to the pond hall"
+       ],
+       [
+        "act",
+        "{resolved}"
        ]
       ]
      },
@@ -128,7 +140,7 @@
       "ack": "Trying the reading room",
       "do": [
        [
-        "act",
+        "resolve",
         "go into the reading room",
         {
          "onRefused": "continue"
@@ -148,8 +160,12 @@
       "ack": "Walking to the orchard",
       "do": [
        [
+        "resolve",
+        "walk over to the orchard"
+       ],
+       [
         "act",
-        "walk over to the orchard",
+        "{resolved}",
         "--wait",
         "55"
        ]
@@ -161,8 +177,12 @@
       "ack": "Going to the presenter's chair",
       "do": [
        [
+        "resolve",
+        "sit in the presenter's chair"
+       ],
+       [
         "act",
-        "sit in the presenter's chair",
+        "{resolved}",
         "--wait",
         "55"
        ]
@@ -175,8 +195,12 @@
       "close": "open",
       "do": [
        [
-        "act",
+        "resolve",
         "walk to the pond hall"
+       ],
+       [
+        "act",
+        "{resolved}"
        ]
       ]
      },

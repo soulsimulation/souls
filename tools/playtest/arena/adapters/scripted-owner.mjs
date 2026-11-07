@@ -229,6 +229,7 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
         if (args[0] !== 'resolve') continue;
         resolved = firstCandidate(r);
         if (resolved) continue;
+        if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] resolve found nothing, continuing: ${clip(args[1])}`); continue; }
         failed = `resolve: nothing on offer reads as "${clip(args[1])}"`; break;
       }
       if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] ${args[0]} refused, continuing: ${o.why}`); continue; }

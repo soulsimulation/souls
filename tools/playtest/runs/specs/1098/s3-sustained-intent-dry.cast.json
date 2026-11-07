@@ -56,14 +56,22 @@
       "ack": "Orchard first, then the cottage bench",
       "do": [
        [
+        "resolve",
+        "walk over to the orchard"
+       ],
+       [
         "act",
-        "walk over to the orchard",
+        "{resolved}",
         "--wait",
         "55"
        ],
        [
+        "resolve",
+        "sit on the cottage bench"
+       ],
+       [
         "act",
-        "sit on the cottage bench",
+        "{resolved}",
         "--wait",
         "55"
        ]
@@ -104,8 +112,12 @@
       "close": "open",
       "do": [
        [
-        "act",
+        "resolve",
         "walk to the pond hall"
+       ],
+       [
+        "act",
+        "{resolved}"
        ]
       ]
      },
@@ -164,8 +176,12 @@
       "close": "open",
       "do": [
        [
-        "act",
+        "resolve",
         "walk over to the orchard"
+       ],
+       [
+        "act",
+        "{resolved}"
        ]
       ]
      },
@@ -197,8 +213,12 @@
       "close": "open",
       "do": [
        [
-        "act",
+        "resolve",
         "walk to the pond hall"
+       ],
+       [
+        "act",
+        "{resolved}"
        ]
       ]
      },

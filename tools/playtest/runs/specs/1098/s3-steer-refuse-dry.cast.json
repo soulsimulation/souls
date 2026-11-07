@@ -51,19 +51,27 @@
       "supersede": "Changed: going by the orchard first",
       "do": [
        [
+        "resolve",
+        "walk to the orchard"
+       ],
+       [
         "act",
-        "walk to the orchard",
+        "{resolved}",
         "--wait",
         "60"
        ],
        [
-        "act",
+        "resolve",
         "walk to the pond hall",
-        "--wait",
-        "60",
         {
          "onRefused": "continue"
         }
+       ],
+       [
+        "act",
+        "{resolved}",
+        "--wait",
+        "60"
        ],
        [
         "wait",
@@ -78,8 +86,12 @@
       "close": "open",
       "do": [
        [
-        "act",
+        "resolve",
         "walk to the pond hall"
+       ],
+       [
+        "act",
+        "{resolved}"
        ]
       ]
      },
@@ -117,7 +129,7 @@
       "ack": "Trying to fly up there",
       "do": [
        [
-        "act",
+        "resolve",
         "fly up to the pond hall",
         {
          "onRefused": "continue"
@@ -137,8 +149,12 @@
       "ack": "Walking to the pond hall",
       "do": [
        [
+        "resolve",
+        "walk to the pond hall"
+       ],
+       [
         "act",
-        "walk to the pond hall",
+        "{resolved}",
         "--wait",
         "100"
        ]

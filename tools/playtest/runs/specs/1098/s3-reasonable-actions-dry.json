@@ -13,8 +13,8 @@
  },
  "evaluation": {
   "questions": [
-   "../../questions/reasonable-carried-out.mjs",
-   "../../questions/refusal-helps.mjs"
+   "../../questions/reasonable-carried-out-v3.mjs",
+   "../../questions/refusal-helps-v3.mjs"
   ]
  }
 }
