@@ -77,9 +77,8 @@ const open = (w, s) => w.edge.openReceipts(s.soulId);
 
 const walk = async (w, s, place) => ok(await act(w, s, {capability: offers(w, s).find((c) => c.verb === 'walk' && c.id === `walk:${place}`)?.id ?? `walk:${place}`}));
 /** Organize, then have every pair take the next ready maneuver `inspect` names, partners answering by their standing agreement. */
-async function build(w, host, pairs, {yaw = 0, max = +(process.env.BAY_MAX ?? 9000), each} = {}) {
-  const o = ok(await act(w, host, {capability: `organize:${PROC}`, params: {at: 'site', yaw, with: Object.values(w.souls).filter((s) => s !== host).map((s) => s.name).join(', ')}}));
-  const pj = o.result.project, souls = Object.values(w.souls);
+async function build(w, host, pairs, {yaw = 0, max = +(process.env.BAY_MAX ?? 9000), each, project} = {}) {
+  const pj = project ?? ok(await act(w, host, {capability: `organize:${PROC}`, params: {at: 'site', yaw, with: Object.values(w.souls).filter((s) => s !== host).map((s) => s.name).join(', ')}})).result.project, souls = Object.values(w.souls);
   let section = null;
   const claimed = new Map(), t0 = w.now(), holds = new Map();
   const seconds = () => ((w.now() - t0) / 1000).toFixed(1);
@@ -393,6 +392,50 @@ test('R5: a crew waits with a named hold for someone at its lift, and stops dead
   assert.ok(named.has('carry.path-occupied'), `the hold is named: ${[...named]}`);
   assert.equal(w.edge.together.invite(p.receipt.shared.invite).shared.op.result, 'arrived');
   assert.equal(w.host.clockFailure, undefined, 'the world goes on');
+});
+
+test('R11: a restart past the frames checkpoint reads the same, the crew finishes the bay, and another restart reads it finished', {timeout: 900000}, async (t) => {
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]]; await yard(w);
+  let pj = null;
+  await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {pj = id; if (st.checkpoint === 'frames') throw new Error('checkpoint');}}), /checkpoint/);
+  await until(w, () => Object.values(w.souls).every((s) => !open(w, s).length), 600);
+  const before = see(w, Ada, pj).state, frame = w.bridge.projects.rows.get(pj).bound['upright-a'], support = structuredClone(w.E()[frame].support);
+  assert.equal(support.kind, 'connected'); assert.equal(before.checkpoint, 'frames');
+  await restart(w);
+  const after = see(w, Ada, pj).state;
+  assert.deepEqual(w.E()[frame].support, support, 'it is held up by what it was');
+  assert.deepEqual([after.maneuvers.done, after.checkpoint, after.section, after.joints], [before.maneuvers.done, 'frames', before.section, before.joints]);
+  await build(w, Ada, crew, {project: pj});
+  assert.equal(glitches(w), 0);
+  await restart(w);
+  const end = see(w, Ada, pj).state; assert.equal(end.complete, true); assert.equal(end.joints.made, 29); assert.equal(end.checkpoint, 'deck-stairs');
+});
+
+// what a boot's derive does to a part's support: it keeps what the engine recorded, and only that
+const claim = (w, id, to) => Object.assign(w.E()[id], {phase: 'installed', support: {kind: 'connected', to}});
+const derived = (w, e) => w.bridge.derive(e, {}, w.bridge.physics?.assets ?? {});
+test('R11: a boot keeps a recorded support only for the joins behind it, and grants none', {timeout: 240000}, async (t) => {
+  const w = await world(t); await yard(w);
+  const id = w.idOf('fa'), e = w.god.model.get('fa'), beam = w.idOf('beam1'), other = w.idOf('beam2'), was = structuredClone(w.E()[id]);
+  const joined = (...to) => ({...e, joins: Object.fromEntries(to.map((x, i) => [`socket-${i}`, {to: x, at: 'seat'}]))});
+  assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'a loose part with no record');
+  claim(w, id, [beam]);
+  assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'a record with no join behind it grants nothing');
+  assert.deepEqual(derived(w, joined(other)).fixture.support, {kind: 'ground'}, 'nor one naming something else');
+  assert.deepEqual(derived(w, joined(beam, other)).fixture.support, {kind: 'ground'}, 'nor one that names only some of its joins');
+  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'connected', to: [beam]}, 'a record of exactly what it is joined to is kept');
+  Object.assign(w.E()[id], {support: {kind: 'ground'}});
+  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'a god\'s joined upright stands on the ground, as before');
+  Object.assign(w.E()[id], was);
+});
+
+test('R11: with the flag off, a boot does not read what the engine recorded', {timeout: 240000}, async (t) => {
+  const w = await world(t, {sharedCarry: false}); await yard(w);
+  const id = w.idOf('fa'), e = w.god.model.get('fa'), was = structuredClone(w.E()[id]), beam = w.idOf('beam1');
+  const joined = {...e, joins: {'socket-0': {to: beam, at: 'seat'}}}, clean = [JSON.stringify(derived(w, e)), JSON.stringify(derived(w, joined))];
+  claim(w, id, [beam]);
+  assert.deepEqual([JSON.stringify(derived(w, e)), JSON.stringify(derived(w, joined))], clean, 'the same bytes');
+  Object.assign(w.E()[id], was);
 });
 
 test('R12: with the flag off, nothing is offered and no project exists', {timeout: 120000}, async (t) => {
