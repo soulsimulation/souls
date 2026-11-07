@@ -237,11 +237,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
     of another def revision is material: the revision bumps, every agreement lapses, each volunteer is told what changed,
     and a `volunteer` for the old revision is refused `project.revision-changed`, naming it. A like-for-like swap is not.
     A site with anything built on it does not move (`project.site-built`).
-  - **Across a restart.** A frame a crew let go of is held up by its beams, as `raise_hold_v1` recorded, though none of its
-    own connectors bears. The model doesn't hold that, so a derive, a boot's above all, keeps the engine's record as it is
-    while everything it names is still joined at the same seats. It never makes a part connected: a god's joined upright
-    stands on the ground, and so does a frame a god has re-seated a recorded beam on, even if it would stand: the crew's
-    record ended there, and an undo doesn't bring it back.
+  - **Across a restart.** The model can't say a frame stands on its beams, so a boot, or any re-derive of a frame, stands
+    a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
+    holds it, it is installed, and it stands on its own by the beams it has. So a restart changes no reading, and every later
+    step already asks that same question.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
     someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
     person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no

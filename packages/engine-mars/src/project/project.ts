@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Entity, WorldState } from '../../../../mars/viewer/engine/world/types.ts';
 import { def } from '../../../../mars/viewer/engine/world/catalog.ts';
 import { angleDelta, hypot, rot2, wrapAngle, type Vec2 } from '../../../../mars/viewer/engine/core/math.ts';
-import { beamBays, frameSupported, frameStability, heldUp, standing, worldPoint } from '../beam-connect.ts';
+import { beamBays, frameStability, heldUp, standing, worldPoint } from '../beam-connect.ts';
 import { joistBays, JOIST_SEAT, ofKind, sheetBays, socketsOf } from '../deck-install.ts';
 import { flightBays, treadTarget } from '../stair-install.ts';
 import blueprintData from './rack-bay.blueprint.json' with { type: 'json' };
@@ -125,6 +125,9 @@ function stands(b: Blueprint, w: WorldState, site: Site, bound: Bound, part: str
   const e = entityOf(w, bound, part), at = standAt(b, site, part);
   return !!e && !!at && standing(e) && planDistance(e, at) <= IN_PLACE;
 }
+/** Let go of and standing on its own, read from the frame itself. Not from `support`: the model can't say a frame stands on its
+ *  beams, so a boot or any re-derive stands it back on the ground, and it hasn't fallen. */
+const letGo = (w: WorldState, e: Entity) => e.phase === 'installed' && e.support?.kind !== 'held' && !e.reservedBy && frameStability(w, e).stable;
 function onSpot(e: Entity, s: { x: number; z: number; yaw: number }): boolean {
   if (e.support?.kind !== 'ground' || planDistance(e, [s.x, s.z]) > ON_SPOT) return false;
   const d = Math.abs(angleDelta(e.pose.yaw ?? 0, s.yaw));
@@ -138,7 +141,7 @@ export function maneuverDone(b: Blueprint, w: WorldState, site: Site, bound: Bou
     // a load under way is not there yet; held by anything later (a raise, a seating) it has been
     case 'carry': return !carrying.has(e.id) && (e.phase === 'installed' || e.support?.kind === 'held' || standing(e) || (!!m.spot && onSpot(e, spotAt(site, m.spot))));
     case 'raise-hold': return stands(b, w, site, bound, m.part);
-    case 'release': return stands(b, w, site, bound, m.part) && e.phase === 'installed' && e.support?.kind === 'connected' && !e.reservedBy;
+    case 'release': return stands(b, w, site, bound, m.part) && letGo(w, e);
     default: return inPlace(b, w, site, bound, m.part);
   }
 }
@@ -192,7 +195,7 @@ export function progressOf(b: Blueprint, p: Procedure, w: WorldState, site: Site
   const floor = !floorOf || (!!floorE && (physicsOf(w, floorE.id)?.surfaces?.length ?? 0) > 0);
   const stairs = !stairsOf || (!!stairsE && (physicsOf(w, stairsE.id)?.links ?? []).some((l) => l.kind === 'stairs' && l.usable));
   const joints = jointsMade(b, w, bound), frames = Object.keys(b.parts).filter((k) => b.parts[k]!.stand);
-  const framesStand = frames.every((k) => { const e = entityOf(w, bound, k); return !!e && e.phase === 'installed' && e.support?.kind === 'connected' && frameSupported(w, e); });
+  const framesStand = frames.every((k) => { const e = entityOf(w, bound, k); return !!e && letGo(w, e); });
   const nobodyHolds = Object.values(bound).every((id) => { const e = w.entities[id]; return !e || (e.support?.kind !== 'held' && !e.reservedBy); });
   const doneCount = maneuvers.filter((m) => m.state === 'done').length;
   return {

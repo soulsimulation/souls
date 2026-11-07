@@ -401,11 +401,12 @@ test('R11: a restart past the frames checkpoint reads the same, the crew finishe
   let pj = null;
   await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {pj = id; if (st.checkpoint === 'frames') throw new Error('checkpoint');}}), /checkpoint/);
   await until(w, () => Object.values(w.souls).every((s) => !open(w, s).length), 600);
-  const before = see(w, Ada, pj).state, frame = w.bridge.projects.rows.get(pj).bound['upright-a'], support = structuredClone(w.E()[frame].support);
-  assert.equal(support.kind, 'connected'); assert.equal(before.checkpoint, 'frames');
+  const before = see(w, Ada, pj).state, frame = w.bridge.projects.rows.get(pj).bound['upright-a'];
+  assert.equal(w.E()[frame].support.kind, 'connected'); assert.equal(before.checkpoint, 'frames');
   await restart(w);
   const after = see(w, Ada, pj).state;
-  assert.deepEqual(w.E()[frame].support, support, 'it is held up by what it was');
+  assert.equal(w.E()[frame].support.kind, 'ground', 'a boot keeps nothing: the model has no word for it');
+  assert.equal(frameStability(w.host.engine.world, w.E()[frame]).stable, true, 'and it stands on its beams all the same');
   assert.deepEqual([after.maneuvers.done, after.checkpoint, after.section, after.joints], [before.maneuvers.done, 'frames', before.section, before.joints]);
   await build(w, Ada, crew, {project: pj});
   assert.equal(glitches(w), 0);
@@ -413,16 +414,13 @@ test('R11: a restart past the frames checkpoint reads the same, the crew finishe
   const end = see(w, Ada, pj).state; assert.equal(end.complete, true); assert.equal(end.joints.made, 29); assert.equal(end.checkpoint, 'deck-stairs');
 });
 
-// what a derive does to a part's support: it keeps what the engine recorded, and only that
-const claim = (w, id, to) => Object.assign(w.E()[id], {phase: 'installed', support: {kind: 'connected', to}});
-const derived = (w, e) => w.bridge.derive(e, {}, w.bridge.physics?.assets ?? {});
-test('R11: a frame that took another beam after its release keeps its support, live and across a restart', {timeout: 900000}, async (t) => {
+test('R11: a frame that took another beam after its release reads the same, re-derived and across a restart', {timeout: 900000}, async (t) => {
   const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
   ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
   let pj = null;
   await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {pj = id; if (st.checkpoint === 'frames') throw new Error('checkpoint');}}), /checkpoint/);
   await until(w, () => Object.values(w.souls).every((s) => !open(w, s).length), 600);
-  const frame = w.bridge.projects.rows.get(pj).bound['upright-a'], extra = w.idOf('beam5'), support = structuredClone(w.E()[frame].support), joints = w.E()[frame].connections.length;
+  const frame = w.bridge.projects.rows.get(pj).bound['upright-a'], extra = w.idOf('beam5'), joints = w.E()[frame].connections.length;
   // a fifth beam, by the ordinary offer: it lies under a free pair of seats
   ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: P(0, 2.9), r: 0}]})); await w.tick(30);
   const bay = beamBays(w.host.engine.world, extra, 3.5)[0]; assert.ok(bay, 'a free pair of seats is offered');
@@ -432,14 +430,14 @@ test('R11: a frame that took another beam after its release keeps its support, l
   const r = ok(await act(w, Ada, {capability: `connect-beam-with:${extra}`, params: {column: bay.column, height: bay.height, with: 'Bo'}}));
   ok(await act(w, Bo, {capability: `accept:${r.receipt.shared.invite}`, params: {revision: r.receipt.shared.revision ?? 1}}));
   await until(w, () => w.E()[extra].phase === 'installed' && !open(w, Ada).length, 3000); await w.tick(60);
-  assert.equal(w.E()[frame].connections.length, joints + 1, 'it joined the frame'); assert.deepEqual(w.E()[frame].support, support, 'whose record stays as it was');
+  assert.equal(w.E()[frame].connections.length, joints + 1, 'it joined the frame');
   const reading = () => {const st = see(w, Ada, pj).state; return [st.checkpoint, st.section, st.maneuvers.done];}, was = reading();
   assert.equal(was[0], 'frames');
   // a re-derive of the frame, by hand: nothing here edited it, and any edit that touches it derives it the same way
   w.bridge.pending.add(frame); w.bridge.flush(); await w.tick(5);
-  assert.deepEqual(w.E()[frame].support, support); assert.deepEqual(reading(), was);
+  assert.deepEqual(reading(), was);
   await restart(w);
-  assert.deepEqual(w.E()[frame].support, support); assert.deepEqual(reading(), was);
+  assert.deepEqual(reading(), was);
   assert.equal(glitches(w), 0);
 });
 
@@ -454,7 +452,7 @@ async function released(t) {
   ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: P(0, 2.9), r: 0}]})); await w.tick(30);
   const {bound} = w.bridge.projects.rows.get(pj), frames = [bound['upright-a'], bound['upright-b']], bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5);
   assert.deepEqual(frames.map((f) => w.E()[f].support.kind), ['connected', 'connected']);
-  return {w, frames, bays};
+  return {w, pj, frames, bays};
 }
 const seatAt = (w, u, id) => worldPoint(w.E()[u], def(w.E()[u].def).sockets.find((q) => q.id === id).local);
 const mid = (a, b) => a.map((v, i) => (v + b[i]) / 2);
@@ -470,40 +468,41 @@ const kinds = (w, frames) => frames.map((f) => w.E()[f].support.kind);
 const standsNow = (w, f) => frameStability(w.host.engine.world, w.E()[f]).stable;
 
 test('R11: a god re-seating a beam so the frames no longer stand drops them to the ground: the clock runs, live and across a restart', {timeout: 900000}, async (t) => {
-  const {w, frames, bays} = await released(t);
+  const {w, pj, frames, bays} = await released(t);
   reseat(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)); await w.tick(30);
   assert.equal(standsNow(w, frames[0]), false, 'it does not stand on its own');
+  assert.notEqual(see(w, w.souls.Ada, pj).state.checkpoint, 'frames', 'and the project says so');
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.deepEqual(framesStand({world: w.host.engine.world}), []);
   await w.tick(40); await restart(w);
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.deepEqual(framesStand({world: w.host.engine.world}), []);
   assert.equal(glitches(w), 0); assert.equal(w.host.clockFailure, undefined);
 });
 
-test('R11: a re-seat that leaves the frames standing ends the record too, and the world goes on', {timeout: 900000}, async (t) => {
+test('R11: a re-seat that leaves the frames standing reads as standing, and the world goes on', {timeout: 900000}, async (t) => {
   const {w, frames, bays} = await released(t);
   reseat(w, frames, 'l', bays.filter((b) => b.column === 'l').at(-1)); await w.tick(30);
   assert.equal(standsNow(w, frames[0]), true, 'it would stand');
-  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the record named other seats');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'a re-derive keeps nothing');
   await restart(w);
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
-test('R11: an undo of a re-seat puts the beam back and grants nothing', {timeout: 900000}, async (t) => {
+test('R11: an undo of a re-seat puts the beam back and the world goes on', {timeout: 900000}, async (t) => {
   const {w, frames, bays} = await released(t), seats = () => frames.map((f) => w.E()[f].connections.map((c) => `${c.socket} ${c.to}`).sort()), joints = seats();
   reseat(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)); await w.tick(30);
   ok(w.god.undo()); await w.tick(30);
   assert.deepEqual(seats(), joints, 'in its old seats');
-  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the record ended with the re-seat');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'nothing brings a support back');
   await restart(w);
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
 // a god commit first settles the one before it (`prepareWalkouts`), so the second call of a tick derives on what the first did
-test('R11: two god calls in one tick, out and straight back, end the record and the world goes on', {timeout: 900000}, async (t) => {
+test('R11: two god calls in one tick, out and straight back: the world goes on', {timeout: 900000}, async (t) => {
   const {w, frames, bays} = await released(t);
   reseat(w, frames, 'l', bays.filter((b) => b.column === 'r').at(-1)); ok(w.god.undo()); await w.tick(30);
   assert.equal(standsNow(w, frames[0]), true, 'the same seats');
-  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the first call ended it'); assert.equal(glitches(w), 0);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
 test('R11: two god calls in one tick, off and into seats that do not stand, drop the frames and the world goes on', {timeout: 900000}, async (t) => {
@@ -516,35 +515,46 @@ test('R11: two god calls in one tick, off and into seats that do not stand, drop
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
-test('R11: a derive keeps a recorded support only while its joins stand, and grants none', {timeout: 240000}, async (t) => {
-  const w = await world(t); await yard(w);
-  const id = w.idOf('fa'), e = w.god.model.get('fa'), beam = w.idOf('beam1'), other = w.idOf('beam2'), was = structuredClone(w.E()[id]);
-  const joined = (...to) => ({...e, joins: Object.fromEntries(to.map((x, i) => [`socket-${i}`, {to: x, at: 'seat'}]))});
-  assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'a loose part with no record');
-  claim(w, id, [beam]);
-  assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'a record with no join behind it grants nothing');
-  assert.deepEqual(derived(w, joined(other)).fixture.support, {kind: 'ground'}, 'nor one naming something else');
-  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'connected', to: [beam]}, 'a record of what it is joined to is kept');
-  assert.deepEqual(derived(w, joined(beam, other)).fixture.support, {kind: 'connected', to: [beam]}, 'as it is, when a beam seated later has joined it too');
-  claim(w, id, [beam, other]);
-  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'a record naming a beam that has gone is not');
-  claim(w, id, []);
-  assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'nor an empty one');
-  claim(w, id, [beam]); w.E()[id].phase = 'staged';
-  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'nor one on a part that is not installed');
-  w.E()[id].phase = 'installed';
-  Object.assign(w.E()[id], {support: {kind: 'ground'}});
-  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'a god\'s joined upright stands on the ground, as before');
-  Object.assign(w.E()[id], was);
+// a beam from a free seat of frame `f` on to a new upright a beam's length past it: a third frame in the group, which fails the
+// rule until it has its own beams. A released frame the edit doesn't touch is judged on it too.
+function thirdFrameOps(w, frames, f, seat, beam) {
+  const m = w.god.model, fe = m.entities.get(f), other = frames.find((x) => x !== f), like = m.entities.get(w.E()[f].connections[0].to), ends = Object.entries(like.joins).filter(([, j]) => frames.includes(j.to));
+  const was = mid(...ends.map(([, j]) => seatAt(w, j.to, j.at))), q = seatAt(w, f, seat), L = 2 * 1.3716, end = (id) => ends.find(([, j]) => j.to === id);
+  const fIsLow = seatAt(w, f, end(f)[1].at)[0] < seatAt(w, other, end(other)[1].at)[0], [near, far] = fIsLow ? [end(f)[0], end(other)[0]] : [end(other)[0], end(f)[0]];
+  return [{op: 'place', tmp: '$h', name: 'h', def: 'core/rack-upright@2', p: [fe.p[0] + L, fe.p[1], fe.p[2]], r: fe.r, anchor: 'center'},
+    {op: 'move', id: beam, in: {parent: 'world'}, p: like.p.map((v, i) => v + [q[0] + L / 2, q[1], q[2]][i] - was[i]), r: like.r},
+    {op: 'connect', a: {id: beam, connector: near}, b: {id: f, connector: seat}}, {op: 'connect', a: {id: beam, connector: far}, b: {id: '$h', connector: seat}}];
+}
+const reboot = async (w) => {w.comms.close(); w.host.stop(); w.db.close(); const db = new Db(w.path), h = new WorldHost(db, factory, seed, 1e9, worldId, w.opts); h.boot(); h.drainInputs(); mount(w, h, db); await w.tick(40);};
+
+test('R11: after a restart, a god joining a third upright to the frames leaves the clock running, and a crash-style reboot too', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  await restart(w);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+  await reboot(w);
+  assert.equal(w.host.clockFailure, undefined); assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
-test('R11: with the flag off, a derive does not read what the engine recorded', {timeout: 240000}, async (t) => {
-  const w = await world(t, {sharedCarry: false}); await yard(w);
-  const id = w.idOf('fa'), e = w.god.model.get('fa'), was = structuredClone(w.E()[id]), beam = w.idOf('beam1');
-  const joined = {...e, joins: {'socket-0': {to: beam, at: 'seat'}}}, clean = [JSON.stringify(derived(w, e)), JSON.stringify(derived(w, joined))];
-  claim(w, id, [beam]);
-  assert.deepEqual([JSON.stringify(derived(w, e)), JSON.stringify(derived(w, joined))], clean, 'the same bytes');
-  Object.assign(w.E()[id], was);
+test('R11: a fifth beam on the frames and then a third upright leave the clock running', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t), bay = bays.at(-1), like = w.god.model.entities.get(w.E()[frames[0]].connections[0].to), ends = Object.entries(like.joins).filter(([, j]) => frames.includes(j.to));
+  const was = mid(...ends.map(([, j]) => seatAt(w, j.to, j.at))), now = mid(seatAt(w, bay.a, bay.seats[0]), seatAt(w, bay.b, bay.seats[1]));
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', in: {parent: 'world'}, p: like.p.map((v, i) => v + now[i] - was[i]), r: like.r}, ...ends.map(([c, j]) => ({op: 'connect', a: {id: 'beam5', connector: c}, b: {id: j.to, connector: j.to === bay.a ? bay.seats[0] : bay.seats[1]}}))]}));
+  await w.tick(30);
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam6', p: [w.ax + 30, w.az + 12], r: 0}]})); await w.tick(10);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam6')})); await w.tick(40);
+  assert.equal(glitches(w), 0);
+});
+
+test('R11: after a restart, a whole third frame and then one of its beams taken leave the clock running', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  await restart(w);
+  const seats = [bays.find((b) => b.column === 'l' && b.height > 1), bays.find((b) => b.column === 'r' && b.height > 1), bays.filter((b) => b.column === 'l').at(-1), bays.filter((b) => b.column === 'r').at(-1)];
+  ok(w.god.act({ops: [1, 2, 3].map((i) => ({op: 'place', def: 'core/rack-beam@5', name: `extra${i}`, p: [w.ax + 30, w.az + 12 + i], r: 0}))})); await w.tick(10);
+  const ops = ['beam5', 'extra1', 'extra2', 'extra3'].flatMap((name, i) => thirdFrameOps(w, frames, frames[1], seats[i].seats[1], name).slice(i ? 1 : 0));
+  ok(w.god.act({ops})); await w.tick(30);
+  ok(w.god.act({ops: [{op: 'remove', id: 'extra3'}]})); await w.tick(30);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
 test('R12: with the flag off, nothing is offered and no project exists', {timeout: 120000}, async (t) => {
