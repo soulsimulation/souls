@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # A live arm of Soul Runs specs, one run at a time (#1098). Called by run-replay.sh when PLAYTEST_SPECS is set.
 #   run-specs.sh <server-root> <out-dir> <repeats> <spec.json>...
-# Order: every spec, then every spec again (1, 3, 4, 1, 3, 4). Before each run it waits for the 5-minute load to drop under 8.
+# Order: every spec, then every spec again (1, 3, 4, 1, 3, 4). Before each run it waits for the 5-minute load to drop under 8 (PLAYTEST_LOAD_MAX).
 # Stops: SIGINT to a run whose world reaches $1; no further run once the arm reaches $4; the arm stops if the first card isn't
 # predeclared. A world's own cap is its cast's rails.worldBudgetUsd. Everything lands in <out-dir>/arm.log.
 set -uo pipefail
 SERVER="$1"; OUT="$2"; REPEATS="$3"; shift 3
-WORLD_MAX="${PLAYTEST_WORLD_MAX_USD:-1}"; ARM_MAX="${PLAYTEST_ARM_MAX_USD:-4}"
+WORLD_MAX="${PLAYTEST_WORLD_MAX_USD:-1}"; ARM_MAX="${PLAYTEST_ARM_MAX_USD:-4}"; LOAD_MAX="${PLAYTEST_LOAD_MAX:-8}"
 L="$OUT/arm.log"; arm=0; first=1
 note() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$L" >&2; }
 over() { node -e 'process.exit(Number(process.argv[1])>=Number(process.argv[2])?0:1)' "$1" "$2"; }
@@ -17,9 +17,9 @@ for ((rep = 1; rep <= REPEATS; rep++)); do
     name="$(basename "$spec" .json)-r$rep"; run="$OUT/$name"
     [ -e "$run" ] && { note "exists, skipped: $name"; arm=$(node -e 'console.log((Number(process.argv[1])+Number(process.argv[2])).toFixed(4))' "$arm" "$(node tools/playtest/runs/spend.mjs "$run")"); first=0; continue; }
     if over "$arm" "$ARM_MAX"; then note "arm at \$$arm, past \$$ARM_MAX: no further run"; exit 6; fi
-    until node -e 'process.exit(Number(process.argv[1])<8?0:1)' "$(load5)"; do sleep 15; done
+    until node -e 'process.exit(Number(process.argv[1])<Number(process.argv[2])?0:1)' "$(load5)" "$LOAD_MAX"; do sleep 15; done
     note "start $name load $(load5)"
-    node tools/playtest/runs/run.mjs start "$spec" --server-root "$SERVER" --out "$run" > "$OUT/$name.log" 2>&1 &
+    node tools/playtest/runs/run.mjs start "$spec" --server-root "$SERVER" --out "$run" ${PLAYTEST_RUN_FLAGS:-} > "$OUT/$name.log" 2>&1 &
     pid=$!; hit=0
     while kill -0 "$pid" 2>/dev/null; do
       c="$(node tools/playtest/runs/spend.mjs "$run" 2>/dev/null || echo 0)"
