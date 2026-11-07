@@ -208,6 +208,48 @@ context-size checks below), regression runs, and an uncut real-client recording 
   - **Invariant.** `stairsBear` is checked at every tick end: an installed flight's hook is joined to an installed beam
     and an installed tread to an installed flight, both ways (`stair.unsupported`).
   - **Rules version.** `+shared-stairs/1`, after PC15's suffix.
+- **Projects: a bay from a blueprint (PC17, [#696](https://github.com/soulsimulation/souls/issues/696); off unless `SIM_SHARED_CARRY=1`).**
+  Three things, kept apart. A **blueprint** (`rack-bay@1`, `packages/engine-mars/src/project/rack-bay.blueprint.json`) is
+  the target graph: parts by key, the defs each may be, where each goes in the site's own frame, what it rests on. A
+  **procedure** (`rack-bay-build@1`) is 32 finite maneuvers over those keys in three sections (`stock`, `frames`,
+  `deck-stairs`), each ending at a checkpoint where nobody holds anything. Neither schema can name a Soul, an entity or
+  a world. A **project** (`edge_projects_v1`, `apps/server/src/god/projects.ts`) is one site: where it is, which real
+  thing is each part, its revision and who has agreed to what. It stores no progress.
+  - **Organize.** `organize:rack-bay-build@1 {at, yaw, with}` is on the menu of a Soul within 25 m of loose stock, and
+    binds each part to the nearest loose thing of a def it may be. It moves nobody; `with` names who is told. Refusals,
+    before anyone is asked: `project.stock-short` (counted per def), `project.site-blocked`, `project.unknown-place`.
+  - **Progress** is read from the world on every read (`progressOf`): real parts, joints, support, floors and links. A
+    god's joint advances it, a removal takes it back, editing the row does nothing. Complete means all 29 joints
+    reciprocal, both frames standing on their own, a floor on the sheet and a usable stairs link.
+  - **Discovery.** `inspect <project>` gives blueprint, procedure, revision, section, counts, each ready maneuver's exact
+    offer and params, what is missing and who has agreed, within the 4 KB budget. `here` adds one line under `projects`,
+    only within 30 m of the site or to a Soul who agreed, was told or organized it. Anyone else gains nothing.
+  - **Offers it adds to.** `carry-with:<part> {to: "project:<id>"}` lays a part on its spot. `raise-with:<upright>
+    {project}` stands a frame where the blueprint says, whichever way round it came to lie (`raise_hold_v1` `baseV1`).
+    Everything else is the ordinary offer.
+  - **Volunteer.** `volunteer:<project> {revision, section, maneuvers, expires}` is bounded advance consent: one section,
+    one revision, a stated number of maneuvers and an expiry. While it holds, an invitation to that Soul for a ready
+    maneuver of that section, with that part and as the plan calls for it, is accepted through the ordinary `accept`, on
+    the Soul's own receipt, and the Soul is told. Anything else stays an ordinary invitation: a load off the plan, a
+    maneuver not ready, another section, consent spent, expired or left. A Soul with an open receipt, or too far off, is
+    not started and its invitation stays open. `leave-project:<project>` ends it at once. It holds no body.
+  - **Revise.** `revise-project:<project> {at, yaw, part, entity}` is the organizer's. Moving the site or binding a part
+    of another def revision is material: the revision bumps, every agreement lapses, each volunteer is told what changed,
+    and a `volunteer` for the old revision is refused `project.revision-changed`, naming it. A like-for-like swap is not.
+    A site with anything built on it does not move (`project.site-built`).
+  - **Across a restart.** The model can't say a frame stands on its beams, so a boot, or any re-derive of a frame, stands
+    a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
+    holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
+    later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
+    should. Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before the model has
+    heard, and one with exactly one beam in.
+  - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
+    someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
+    person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no
+    route allows it, because a lift the other way round swings the load half a turn. A crew that sets a flight steps
+    clear of it before letting go, waiting by name for whoever stands behind it, and a stop in those moments lowers it. Two crews can still hold each other up; that is a named wait, never a halted world, and
+    any member can stop. The procedure's dependencies keep neighbouring work apart so that is rare.
+  - **Rules version.** `+shared-bay/1`, after PC16's suffix.
 - **Shared proposals (PC04, [#683](https://github.com/soulsimulation/souls/issues/683); off unless `SIM_SHARED_CARRY=1`).**
   A `shared-carry` load is also offered `carry-with:<id>`, which takes `to` (a place) and `with` (who: names or ids,
   comma-separated or in words, "Bo and Cy" or "Bo, Cy and Dee"; a Soul whose whole name is the phrase, nearby, stays one
@@ -540,14 +582,17 @@ Other known limits:
 - Picking up something at the back of a counter bends the body deeply.
 - At a hand-over the model's record of who holds the item lags the engine by a few samples.
 - The `here` frame lists at most two things of a kind (three seats); more appear only as a count under `more`.
-- Some defs are over the library's geometry budgets: triangles for the fountain, curtained window, drawer chests,
-  watering can, kettle, mug and bell pull, and draw calls for the newest door and locker revisions. They are getting
-  lighter revisions family by family (#494). The drum kit, mic stand and jukebox already have one (`@2`, in budget);
-  their `@1` keeps its bytes and its recorded hold, because published revisions are immutable.
+- Lighter revisions within the library's triangle budgets (#494): drum kit, mic stand, jukebox, garden fountain and
+  curtained window `@2`; watering can, drawer chest, bell pull, kettle and mug `@3`. The older revision keeps its bytes
+  and its recorded hold, because published revisions are immutable. The mug `@3` shows its tea level in fifths. The
+  lockable door (`@3`) draws five parts because its lock's thumb-turn, bolt and key move on their own, and the newest
+  lockers revision is over its draw budget too; those, and construction-view draw overruns, stay pinned (see #494).
 - Portable lights were rebuilt as carry-and-set-down (entry 29); the earlier version is retired. Mixed-outfit seams
   (entry 11) remain parked.
 
 ## Tests
+
+To add an action: [adding a Soul action](adding-an-action.md).
 
 Each family has a deterministic native test that runs a real server and engine in-process, with no ports and no models:
 

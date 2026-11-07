@@ -102,7 +102,8 @@ jobs:
     if: needs.scope.outputs.any == 'true'
     # The qualify jobs (no browser) run on the repository variable CI_HEAVY_RUNNER when it is set, else ubuntu-latest.
     # Its value is one runner label (`souls-ci`) or a JSON array of labels (`["self-hosted","souls-ci"]`).
-    runs-on: ${{ vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
+    # `native` stays on ubuntu-latest: its camera perf budget is wall time, and a shared host under load misses it (#1162).
+    runs-on: ${{ matrix.kind != 'native' && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
     strategy:
@@ -138,12 +139,15 @@ jobs:
         env:
           CHECK_KIND: ${{ matrix.kind }}
           SERVER_SHARD: ${{ matrix.shard }}
+          GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
           case "$CHECK_KIND" in
             types-web)
               pnpm typecheck
               pnpm --filter @souls/web build
+              # V3-bundle's comparison, on the build above, so growth is seen on the PR that causes it (#1117)
+              node tools/test-harness/bundle-budget/budget.mjs --check
               # The Mars viewer's static site holds the people's character set (/modular); without it no world
               # draws people (issue #395). Build it as the first run does, then fail if the set is missing.
               pnpm build:viewer
@@ -158,6 +162,10 @@ jobs:
             web)
               # V4-web: every apps/web unit test, TSX included
               bash tools/test-harness/web-suite.sh
+              ;;
+            docs-reference)
+              # #898: the generator of the reference pages (docs/site actions, api, mcp) runs, and writes all the server answers
+              node --test --test-concurrency=1 tools/docs/generate.test.mjs
               ;;
             launcher)
               # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts)
@@ -174,8 +182,15 @@ jobs:
               # #1061: not a gate step; picked by ci-scope.mjs from its own paths
               node --test --test-concurrency=4 tools/soul-actions/*.test.mjs
               ;;
+            soul-tools)
+              # #1111: not a gate step; picked by ci-scope.mjs from its own paths
+              node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
+              ;;
             server)
-              node --input-type=module <<'NODE'
+              # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay
+              # corpus included; both always run, either failing fails the job.
+              server=0
+              node --input-type=module <<'NODE' || server=$?
           import { spawnSync } from 'node:child_process';
           import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';
           const all = serverTestFiles(), shard = Number(process.env.SERVER_SHARD);
@@ -186,6 +201,9 @@ jobs:
           const a = run(parallel, SERVER_TEST_CONCURRENCY), b = run(serial, 1);
           process.exit(a || b);
           NODE
+              god=0
+              if [ "$GOD_SKILL" = true ]; then node --test --test-concurrency=1 tools/god-skill/*.test.mjs tools/god-skill/lib/*.test.mjs tools/god-skill/scripts/*.test.mjs tools/god-skill/e2e/*.test.mjs || god=$?; fi
+              exit $(( server || god ))
               ;;
             *) echo "unknown check kind: $CHECK_KIND"; exit 1 ;;
           esac
