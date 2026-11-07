@@ -64,6 +64,7 @@ async function world(t) {
       w.bodies.push(b);
       if (b.clientRef && w.byRef.has(b.clientRef)) return json(200, w.byRef.get(b.clientRef));   // a retry returns the first result
       if (w.refuse[cap]) return json(200, { accepted: false, code: w.refuse[cap], reason: `${cap} refused`, alternatives: [{ id: 'walk:pond', label: 'Walk to the pond' }] });
+      if (w.repeats === cap) return json(200, { accepted: true, repeat: true, receipt: { id: `r_${w.acts}`, capability: cap, phase: 'started' }, ...(b.for ? { for: b.for } : {}) });
       w.acts++; w.keys.push(req.headers['idempotency-key']);
       // As the real route answers (swept on hello-hamlet): a body act names no channel at all, a look says attention, and a prayer's receipt says none.
       const out = /^(look|turn):/.test(cap) ? { accepted: true, channel: 'attention', receipt: { id: `r_${w.acts}`, capability: cap, phase: 'completed', channel: 'attention' } }
@@ -83,6 +84,8 @@ async function world(t) {
       if (id.includes('taken')) return json(200, { resolve: { ok: false, code: 'seat.taken', reason: 'someone is there' } });
       return json(200, { resolve: { ok: true, would: { capability: id, available: true }, candidates: [{ id, params: w.offers[id] }] } });
     }
+    if (p === '/v1/edge/say') return json(200, { said: { id: 'sp_1', heardBy: 0 } });
+    if (/^\/v1\/edge\/inbox\/msg_[^/]+$/.test(p) && req.method === 'GET') return json(200, { message: { id: decodeURIComponent(p.split('/').at(-1)), ...(w.results.some((r) => r.id === decodeURIComponent(p.split('/').at(-1))) ? { result: 'x', outcome: 'done' } : {}) } });
     if (/\/result$/.test(p) && w.resultDown) return json(500, { error: { code: 'down', message: 'down' } });
     if (/\/result$/.test(p)) { const m = w.inbox.find((x) => x.id === decodeURIComponent(p.split('/').at(-2))); if (m) m.acked = true; w.results.push({ id: m?.id, ...JSON.parse(body) }); return json(200, { inbox: {} }); }
     if (/\/ack$|\/result$/.test(p)) { const m = w.inbox.find((x) => x.id === decodeURIComponent(p.split('/').at(-2))); if (m) m.acked = true; return json(200, { inbox: {} }); }
@@ -465,6 +468,62 @@ test('plan A1: serve runs the steps in order with no CLI call between them, link
   assert.equal(p.planEnded[0].state, 'done');
   assert.equal(p.plan, undefined);
   assert.equal((await w.cli('pending')).json.planEnded, undefined, 'reported once');
+});
+
+test('plan #1289: a repeat of the step under way leaves the plan running, and its message open', async (t) => {
+  for (const flags of [['--for', 'none'], ['--for', 'msg_1']]) {
+    const w = await world(t);
+    await w.cli('serve');
+    w.owner('msg_1', 'Mill, bench, pond');
+    await w.cli('plan', steps3, '--for', 'msg_1');
+    assert.ok(await until(() => w.acts === 1));
+    w.repeats = 'walk:mill';
+    assert.equal((await w.cli('act', 'walk:mill', ...flags)).json.repeat, true);
+    assert.equal((await w.cli('plan', '--status')).json.plan?.state, 'running', flags.join(' '));
+    w.repeats = null; ended(w, 'r_1');
+    assert.ok(await until(() => w.acts === 2), 'step 2 still runs');
+    ended(w, 'r_2'); assert.ok(await until(() => w.acts === 3)); ended(w, 'r_3');
+    assert.ok(await until(() => w.results.length === 1), 'the plan closes the message itself');
+  }
+});
+
+test('plan #1289: a repeat of the step under way for the plan\'s own message goes to the world without that message', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  w.repeats = 'walk:mill';
+  await w.cli('act', 'walk:mill', '--for', 'msg_1');
+  assert.equal(w.bodies.at(-1).capability, 'walk:mill'); assert.equal(w.bodies.at(-1).for, undefined, 'linked, the world would close it when the step ends');
+  assert.equal((await w.cli('plan', '--status')).json.plan?.state, 'running');
+});
+
+test('plan #1289: a plan on disk still guards its message when serve is gone', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  await w.cli('serve', '--stop');
+  assert.ok(await until(async () => !(await w.cli('serve', '--status')).json?.serving));
+  const said = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(said.json.closed, false, said.err); assert.match(said.json.why, /plan is still going/);
+  assert.deepEqual(w.results, []);
+});
+
+test('plan #1289: nothing closes a message while its plan runs', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  const said = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(said.json.closed, false, said.err); assert.match(said.json.why, /plan is still going/);
+  assert.equal((await w.cli('ack', 'msg_1', 'Nearly', '--close', 'done')).json.closed, false);
+  assert.deepEqual(w.results, []);
+  const other = await w.cli('say', 'Hello', '--for', 'msg_2');
+  assert.equal(other.json.closed, true, 'another message is not the plan\'s');
 });
 
 test('plan: a held sit has done its work, and the next step goes on', async (t) => {

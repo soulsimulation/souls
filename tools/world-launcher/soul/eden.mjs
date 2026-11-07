@@ -38,7 +38,7 @@ const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
 const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
-const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
+const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "links", "pendingCreate"];
 const IMPORTED_RUNTIME = [".eden-serve.json"];
 const GOD_LEGACY = ".eden-god.json", GOD_KEPT = /^\.eden-god\.(cache|bakes|claim-c_[0-9a-f]{8})\.json$/;
 
@@ -1715,7 +1715,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.5";
+const VERSION = "2.23.6";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2729,14 +2729,30 @@ async function act(...argv) {
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
-  if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
+  // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
+  // still going while a later step of it has ended (#1289)
+  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for }], d.receipt.id) });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
+  forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+/** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
+export function keepLinks(links, open, max = 64) {
+  const out = [...links];
+  for (let i = 0; out.length > max && i < out.length;) if (out[i].receipt !== open) out.splice(i, 1); else i++;
+  return out;
+}
+
+/** A receipt that has ended guards nothing, so its links make room: the list must never lose one that may still be open. */
+function forgetLinks(receipt) {
+  const links = load().links ?? [];
+  if (TERMINAL.has(receipt?.phase) && links.some((l) => l.receipt === receipt.id)) save({ links: links.filter((l) => l.receipt !== receipt.id) });
 }
 
 /** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
@@ -2775,7 +2791,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2816,8 +2832,9 @@ async function resolve(...args) {
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
   let out = await waitRaw(secArg, idArg);
-  const link = load().lastLink;
-  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
+  const link = (load().links ?? []).findLast((l) => l.receipt === out.receipt?.id);
+  if (link?.receipt && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
+  forgetLinks(out.receipt);
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -3033,10 +3050,10 @@ async function ack(id, ...rest) {
   if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
-  // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
-  const shut = close ? await closing(id, close, reply) : {};
+  // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
+  const seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
   if (shut.closed) return { ...said, closed: true };
-  if (shut.already) return { acked: id, ...shut };   // a closed message is acked already: nothing to send
+  if (seen.acked || shut.already) return { acked: id, ...shut };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
   return { ...said, ...d, ...shut };
@@ -3045,26 +3062,42 @@ async function ack(id, ...rest) {
 /** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
  *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
  *  closed or is about to: `closed` here means this command closed it. */
-async function closing(id, outcome, text) {
-  const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
-  if (link?.message === id && link.receipt) {
-    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+const ACT_RUNNING = "its act is still going: the world closes it with that act's outcome when it ends; nothing to send";
+async function closing(id, outcome, text, seen = {}) {
+  const quick = { retry: false, timeoutMs: 5000 }, read = () => call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+  // why this command won't close: the message can't be read, or it has a result, which an agent's would replace
+  const stop = (m) => {
+    if (m?.status !== 200) return { closed: false, why: `${m?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+    if (m.data?.message?.result === undefined) return null;
+    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
+    return { closed: false, already: m.data.message.outcome, why: "already closed: nothing more to do" };
+  };
+  const first = await read(), early = stop(first);
+  seen.acked = first?.data?.message?.state === "acknowledged";
+  if (early) return early;
+  // a serve that is gone or hung still has its plan on disk, and the next serve resumes it
+  const asked = await askServe({ op: "planStatus" }), plan = asked && !asked.lost ? asked.plan : loadServeState().plan;
+  if (plan?.for === id && !PLAN_OVER.has(plan.state)) return { closed: false, why: "its plan is still going: if `closed` doesn't follow, `result` once it has ended" };
+  const mine = [...new Set((load().links ?? []).filter((l) => l.message === id).map((l) => l.receipt))].reverse();
+  for (const receipt of mine) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(receipt)}`, quick).catch(() => null);
     // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
     if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
   }
-  const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
-  if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
-  if (read.data?.message?.result !== undefined) {
-    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
-    return { closed: false, already: read.data.message.outcome, why: "already closed: nothing more to do" };
+  if (mine.length) {
+    const late = stop(await read());   // an act may have ended between the reads, and then the world's close stands
+    if (late) return late;
   }
-  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
+  try { const r = await result(id, outcome, text); return r.reported === false ? { closed: false, why: r.why } : { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
   const line = clipped(text.join(" ")), t = line.text;
   if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
-  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } });
+  // #1295: the world refuses a close while the message's own act runs, and closes it with that act's outcome: a true answer, not a failure
+  if (r.status === 409 && (r.data?.error?.code ?? r.data?.code) === "message.act-running") return { reported: false, closed: false, why: ACT_RUNNING };
+  const d = clean(ok(r, "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
   return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
@@ -3746,14 +3779,20 @@ async function serveForeground() {
       if (known?.full && ENDED.has(known.phase)) return { status: 200, data: { receipt: known.full } };
       // An act for the plan's own message serves it, so the plan won't close it. Noted before the request: on a real world the step's
       // replaced comes down the stream before this act's answer comes back.
+      // A repeat of the step under way, for the plan's own message, goes without its `for`: linked, the world would close the
+      // message when that step ends, with later steps still to run (#1289). The plan closes it.
+      const step = st.plan && !PLAN_OVER.has(st.plan.state) ? st.plan.steps?.[st.plan.at] : null;
+      if (path === "/v1/edge/act" && m.method === "POST" && step && m.body?.for && m.body.for === st.plan.for && step.id === m.body.capability && JSON.stringify(step.params ?? {}) === JSON.stringify(m.body.params ?? {})) {
+        const { for: _for, forDefault: _default, ...body } = m.body; m = { ...m, body };
+      }
       const planActFor = path === "/v1/edge/act" && m.method === "POST" && st.plan && m.body?.for && m.body.for === st.plan.for ? st.plan : null;
       if (planActFor) planActFor.servedByAct = (planActFor.servedByAct ?? 0) + 1;
       const r = await forward(m);
-      if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id) planActFor.resultSent = true; }
+      if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id && !r.data.repeat) planActFor.resultSent = true; }
       // A newer body act replaces the plan; talk and attention don't. A body act's answer names no channel: the receipt says what
       // isn't one (attention for a look, none for a prayer or a mark). Swept on a real world: every other accepted act replaced a
-      // running walk, a wave and a stand included. (The plan's own acts don't come through here.)
-      if (path === "/v1/edge/act" && m.method === "POST" && st.plan && !PLAN_OVER.has(st.plan.state) && r.data?.accepted && r.data.receipt?.id && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel)) {
+      // running walk, a wave and a stand included, except a repeat of the act under way, which goes on (#1289). (The plan's own acts don't come through here.)
+      if (path === "/v1/edge/act" && m.method === "POST" && st.plan && !PLAN_OVER.has(st.plan.state) && r.data?.accepted && r.data.receipt?.id && !r.data.repeat && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel)) {
         const p = st.plan;
         if (p.for && p.for === m.body?.for) p.resultSent = true;
         planOver(p, "replaced", Date.now()); persist(); tick();
