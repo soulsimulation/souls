@@ -577,7 +577,7 @@ test('#1250: removing a beam from released frames says both stopped standing, th
 });
 
 /** A crew holds one frame of the pair while its released partner is extended by a god into a group with a third upright. */
-async function heldWhileExtended(t) {
+async function heldWhileExtended(t, {extend = true} = {}) {
   const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
   ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
   let frames;
@@ -592,8 +592,8 @@ async function heldWhileExtended(t) {
   const rel = frames.find((f) => w.E()[f].support.kind === 'connected'), held = frames.find((f) => f !== rel), holders = Object.values(w.souls).filter((s) => w.E()[s.entityId].human.grip?.entity === held);
   assert.equal(holders.length, 2, 'a crew still holds the other frame');
   const bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5), bay = bays.filter((b) => b.a === rel || b.b === rel)[6] ?? bays.at(-1);
-  ok(w.god.act({ops: thirdFrameOps(w, frames, rel, bay.a === rel ? bay.seats[0] : bay.seats[1], 'beam5')})); await w.tick(40);
-  return {w, held, holders};
+  if (extend) {ok(w.god.act({ops: thirdFrameOps(w, frames, rel, bay.a === rel ? bay.seats[0] : bay.seats[1], 'beam5')})); await w.tick(40);}
+  return {w, held, holders, rel, frames};
 }
 test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free once nothing changes for five minutes', {timeout: 900000}, async (t) => {
   const {w, held, holders} = await heldWhileExtended(t);
@@ -749,4 +749,24 @@ test('R12: with the flag off, nothing is offered and no project exists', {timeou
   assert.equal(hereFrame(w.edge, Ada).projects, undefined);
   let drained = 0; const {drainInputs} = w.host; w.host.drainInputs = function (...x) { drained++; return drainInputs.apply(this, x); };
   assert.deepEqual(w.god.bodies.framesNote(), [], '#1250: nothing to say'); assert.equal(drained, 0, 'and a god reply drains nothing for it');
+});
+
+// #1250, burial: a god edit walks a holder of a joined frame out. The walkout lets go of what it holds; a frame joined to
+// others is left standing where it was, as a god's joined upright is, so the engine and the god's model agree and the
+// crew can finish the bay. Laid flat, it kept its joints: the engine's frame lay on the ground while the model had it standing.
+test('#1250: a god edit that walks out a holder of a joined frame leaves it standing where it was, in the engine and the model, and the crew finish the bay', {timeout: 900000}, async (t) => {
+  const {w, held, holders} = await heldWhileExtended(t, {extend: false}), E = w.E, {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, pj = [...w.bridge.projects.rows.keys()][0];
+  const was = structuredClone(E()[held].pose), p = E()[holders[0].entityId].pose.p;
+  const r = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'in-the-way', p: [p[0], p[2]]}]})); await w.tick(60);
+  assert.ok(r.warnings.some((x) => x.startsWith('body.walked-out:') && /let go of the \w+, which stands where it was/.test(x) && !/set down/.test(x)), JSON.stringify(r.warnings));
+  assert.ok(holders.every((s) => !E()[s.entityId].human.grip), 'the crew let go');
+  const now = E()[held].pose, m = w.god.model.entities.get(held);
+  assert.deepEqual([now.p, now.yaw, now.roll], [was.p, was.yaw, was.roll], 'the frame stands where it was in the engine');
+  assert.ok(Math.abs(m.p[1] - now.p[1]) < 0.01 && Math.abs(m.r[2] - now.roll) < 0.01, `and the model has it so: ${JSON.stringify(m.p)} ${JSON.stringify(m.r)}`);
+  assert.equal(E()[held].support.kind, 'ground'); assert.ok(E()[held].connections.length > 0, 'keeping its joints');
+  assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(glitches(w), 0); assert.equal(w.host.stepFailing, null);
+  ok(w.god.act({ops: [{op: 'remove', id: 'in-the-way'}]})); await w.tick(20);
+  await build(w, Ada, [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {project: pj});
+  assert.equal(see(w, Ada, pj).state.complete, true); assert.equal(glitches(w), 0);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined);
 });

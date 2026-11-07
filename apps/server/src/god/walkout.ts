@@ -246,8 +246,10 @@ export function exitFor(c: ExitCtx, ownLevel = 0): Exit | null {
 }
 
 /** The sentence a resident reads: what the god is doing, what the resident did, where it went. */
-export function walkoutReason(o: { verb: string; subject: string; how: ResidentMove['how'] | 'stuck'; outside: boolean; seated?: boolean; asleep?: boolean; lying?: boolean; setDown?: string[]; site?: boolean }): string {
-  const did = [o.asleep ? 'you woke' : o.seated ? 'you stood up' : o.lying ? 'you got up' : '', o.setDown?.length ? `you set down ${o.setDown.length === 1 ? `the ${o.setDown[0]}` : `the ${o.setDown.slice(0, -1).join(', the ')} and the ${o.setDown.at(-1)}`}` : ''].filter(Boolean);
+export function walkoutReason(o: { verb: string; subject: string; how: ResidentMove['how'] | 'stuck'; outside: boolean; seated?: boolean; asleep?: boolean; lying?: boolean; setDown?: string[]; letGo?: string[]; site?: boolean }): string {
+  const the = (xs: string[]) => xs.length === 1 ? `the ${xs[0]}` : `the ${xs.slice(0, -1).join(', the ')} and the ${xs.at(-1)}`;
+  // #1250: a part joined to others is let go of where it stands, not set down
+  const did = [o.asleep ? 'you woke' : o.seated ? 'you stood up' : o.lying ? 'you got up' : '', o.setDown?.length ? `you set down ${the(o.setDown)}` : '', o.letGo?.length ? `you let go of ${the(o.letGo)}, which stands where it was` : ''].filter(Boolean);
   const where = o.site ? 'off the site' : o.outside ? 'outside' : 'aside';
   const head = o.site ? `The god started building ${o.subject} here` : `The god is ${o.verb} ${o.subject}`;
   if (o.how === 'stopped') return `The god is ${o.verb} ${o.subject} you were heading for; you stopped.`;
@@ -329,8 +331,9 @@ export function planWalkouts(engine: WalkoutEngine, before: WorldModel, after: W
     const exitY = exit.level > 0 ? levelY(exit.level) : after.terrain.sample(exit.to[0], exit.to[1]);
     const dropAt: [number, number, number] = feetInside ? [exit.to[0], round(exitY), exit.to[1]]
       : [round(p[0]), round(level > 0 ? levelY(level) : after.terrain.sample(p[0], p[1])), round(p[1])];
-    const setDown = [...carried].map(id => before.entities.has(id) ? thingName(before, id) : String(engine.world.entities[id]?.label ?? 'thing').toLowerCase());
-    const reason = walkoutReason({ verb, subject: said, how: exit.how, outside: outside && exit.level === 0, seated, asleep, lying, setDown, site: !!closure });
+    const named = (id: string) => before.entities.has(id) ? thingName(before, id) : String(engine.world.entities[id]?.label ?? 'thing').toLowerCase(), joined = (id: string) => !!(engine.world.entities[id] as { connections?: unknown[] } | undefined)?.connections?.length;
+    const setDown = [...carried].filter(id => !joined(id)).map(named), letGo = [...carried].filter(joined).map(named);
+    const reason = walkoutReason({ verb, subject: said, how: exit.how, outside: outside && exit.level === 0, seated, asleep, lying, setDown, letGo, site: !!closure });
     moved.push({ soulId: m.soulId, body: m.entityId, name: m.name, how: exit.how, from: [round(p[0]), round(p[1])], to: exit.to, ...(exit.level ? { level: exit.level } : {}), reason, released: [...released].sort(), ...(carried.size ? { dropAt } : {}), ...(place ? { place } : {}) });
   }
   return { moved, stuck };

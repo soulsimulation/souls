@@ -1503,7 +1503,9 @@ export class MarsEngine implements Engine {
     if(this.rt.services.socialReturns)this.rt.services.socialReturns=this.rt.services.socialReturns.filter((ret:any)=>ret.actor!==id&&!affected.has(ret.source)&&!affected.has(ret.directive));
     // Finish the seat's ordinary rise before admitting a native route from that standing point.
     const land=()=>{
-      for(const itemId of drop){const item=this.ents[itemId];placeOnGround(item,setDown,yaw);delete item.reservedBy;acknowledgeRelocation(this.rt,itemId);}
+      // a part joined to others (shared building) stays where it is and stands by itself, as a god's joined upright does: laid
+      // flat it would keep its joints, the engine's frame lying while the god's model has it standing (#1250 burial)
+      for(const itemId of drop){const item=this.ents[itemId];delete item.reservedBy;if(this.cfg.sharedCarryV1===true&&item.connections?.length){item.support={kind:'ground'};item.phase='installed';continue;}placeOnGround(item,setDown,yaw);acknowledgeRelocation(this.rt,itemId);}
       e.pose.p=[r3(to[0]),toLevel===0&&field?r3(standOn(spatial.ground!,...to)):r3(spatial.base.levels.find(l=>l.id===toLevel)?.y??0),r3(to[1])];e.human.level=toLevel;
     };
     let walked=false;
