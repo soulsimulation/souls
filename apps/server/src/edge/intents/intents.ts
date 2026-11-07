@@ -285,7 +285,7 @@ export class Intents {
 
   // ------------------------------------------------------------------ acting
   /** act {verb, target}: resolve now (the step starts now) and act on the concrete choice; the receipt says what it chose. */
-  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string} | Refused> {
+  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string; repeat?: true} | Refused> {
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
     if (clientRef) {const old = this.L.coreA.byClientRef(soul.soulId, clientRef); if (old) return {accepted: true, receipt: old, chosen: (old as {chosen?: Chosen}).chosen ?? {}, channel: (old as {channel?: string}).channel ?? 'body'};}
     await this.L.coreA.reclaim(soul);
@@ -295,6 +295,8 @@ export class Intents {
     if (r.kind === 'capability') {
       const out = await this.L.act(soul, {capability: r.capability, params: {...extra, ...(r.params ?? {})}, ...(clientRef ? {clientRef} : {})});
       if (!out.accepted) return {...out, ...(r.chosen.seat ? {} : {})} as Refused;
+      // #1272: the act under way answered: it stays as it was chosen
+      if (out.repeat) return {accepted: true, receipt: out.receipt, chosen: (out.receipt.chosen as Chosen) ?? {}, channel: out.receipt.channel ?? 'body', repeat: true};
       const chosen={...r.chosen,...(out.receipt.chosen as Chosen??{})};
       const receipt = this.L.coreA.setDetail(out.receipt.id, {chosen, intent: intentOf(input)}) ?? out.receipt;
       return {accepted: true, receipt, chosen, channel: (receipt as {channel?: string}).channel ?? 'body', ...(out.resolved ? {resolved: out.resolved} : {})};
