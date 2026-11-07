@@ -1,7 +1,7 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {EDGE_OUTCOME_CONTRACT,edgeOutcomeV1Schema,type EdgeOutcomeV1} from '@souls/protocol';
-import type {EdgeReceipt} from '../contract.ts';
+import {SEAT_KEPT, type EdgeReceipt} from '../contract.ts';
 import {EDEN_LIBRARY_CATALOGUE,EDEN_CONTENT_VERSION} from '../content/eden-library-catalogue.ts';
 import {EDEN_PLACE_LORE} from '../content/eden-place-lore.ts';
 import {tx} from '../comms/store.ts';
@@ -43,7 +43,7 @@ export class ActionOutcomes{
   const context=JSON.parse(row.body) as OutcomeContext;
   return tx(this.db,()=>{
    // F4 (#375): a walk that reached a flag says so ("at the orchard flag"), not the open ground it stands on ("at world")
-   const kind=context.capability.split(':')[0],completed=receipt.phase==='completed',flag=completed?/^walk:flag-(.+)$/.exec(context.capability)?.[1]:undefined,at=flag?`the ${flag.replace(/^flag-|-flag$/g,'').replace(/-/g,' ')} flag`:snapshot.place,out:EdgeOutcomeV1={contract:EDGE_OUTCOME_CONTRACT,kind,summary:clip(`${kind} ${receipt.phase}${at?` at ${at}`:''}${receipt.code?` (${receipt.code})`:''}.`,160),learned:[],produced:[],changed:[],met:[],detail:{phase:receipt.phase,sourceTick:snapshot.tick},untrusted:false};
+   const kind=context.capability.split(':')[0],completed=receipt.phase==='completed',flag=completed?/^walk:flag-(.+)$/.exec(context.capability)?.[1]:undefined,at=flag?`the ${flag.replace(/^flag-|-flag$/g,'').replace(/-/g,' ')} flag`:snapshot.place,out:EdgeOutcomeV1={contract:EDGE_OUTCOME_CONTRACT,kind,summary:clip(`${kind} ${receipt.phase}${at?` at ${at}`:''}${receipt.code===SEAT_KEPT?', still seated':receipt.code?` (${receipt.code})`:''}.`,160),learned:[],produced:[],changed:[],met:[],detail:{phase:receipt.phase,sourceTick:snapshot.tick},untrusted:false};
    if(completed&&kind==='read'&&!effects.detail?.sign)this.readPassage(context,out);
    if(completed&&kind==='use-computer'){
     const query=context.params.query??'',terms=query.toLowerCase(),wanted=terms.includes('letter')?['letters']:terms.includes('project')||terms.includes('help')?['projects']:terms.includes('who')||terms.includes('people')||terms.includes('directory')?['directory']:terms.includes('schedule')||terms.includes('today')||terms.includes("what's on")?['schedule']:terms.includes('lost')||terms.includes('found')?['lost-found']:terms.includes('notice')?['notices']:terms.includes('digest')?['digest']:snapshot.sections.map(s=>s.section);
