@@ -9,17 +9,17 @@ test('#848: "outside"/"inside" name the right seat on hello-hamlet, and "outside
   const w = await bootEden(() => {}, new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url)); t.after(w.close);
   const act = async (words: string) => await accept(w.host, w.edge.act(w.soul, {capability: words})) as any;
   const named = (r: any) => (r.did_you_mean ?? []).map((d: any) => d.id);
-  // A1: the S3 demonstration 3 request names the cottage's outdoor bench; it is the only seat so named, so (#849) it is taken
-  // and the answer says which seat was chosen
-  const taken = (r: any) => r.accepted ? r.receipt?.capability : named(r);
-  const outside = await act('sit on the bench outside the cottage');
-  assert.equal(taken(outside), 'sit:cottage/part-outdoor-bench', JSON.stringify(outside));
-  assert.equal(outside.resolved?.to, 'sit:cottage/part-outdoor-bench'); assert.match(outside.resolved?.note ?? '', /^The only seat these words name is Outdoor Bench .*; it is the seat chosen\.$/);
-  // #849 A1: "by the cottage" names the same one seat
-  assert.equal(taken(await act('sit on the bench by the cottage')), 'sit:cottage/part-outdoor-bench');
+  // A1: the S3 demonstration 3 request names the cottage's outdoor bench. #849: resolve says so, once; an act on the words still
+  // asks for the id, and the id sits her there
+  const dry = (words: string) => w.edge.intents.dryRun(w.soul, {capability: words}) as any;
+  for (const words of ['sit on the bench outside the cottage', 'sit on the bench by the cottage']) {
+    const r = dry(words); assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.would.capability, 'sit:cottage/part-outdoor-bench');
+    const acted = await act(words); assert.equal(acted.code, 'capability.choose', JSON.stringify(acted)); assert.deepEqual(named(acted), ['sit:cottage/part-outdoor-bench'], 'one seat, listed once');
+  }
+  assert.equal((await act('sit:cottage/part-outdoor-bench')).accepted, true);
   // A2: `inside` reads as `in`
   const inside = await act('sit on the audience bench inside the presentation hall'), inHall = await act('sit on the audience bench in the presentation hall');
-  assert.equal(taken(inside), 'sit:lab-presentation-hall/part-audience', JSON.stringify(inside)); assert.equal(taken(inside), taken(inHall));
+  assert.deepEqual(named(inside), ['sit:lab-presentation-hall/part-audience'], JSON.stringify(inside)); assert.deepEqual(named(inside), named(inHall));
   // A3: the hall has no outdoor seat, so "outside the presentation hall" names none; an unknown seat names none
   for (const words of ['sit on the bench outside the presentation hall', 'sit on the hammock outside the cottage']) {
     const r = await act(words); assert.equal(r.accepted, false, words); assert.deepEqual(named(r), [], `${words}: ${JSON.stringify(r)}`);

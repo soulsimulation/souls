@@ -1691,6 +1691,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     let v: VocabResult;
     // (srv-act-words: focused words were resolved already, on these offers, by wordsFocused)
     ({v, caps, plans} = bound.pre && !social && text === asked ? bound.pre : this.resolveOnDemand(soul, text, caps, plans));
+    // #849: `resolve` names the one seat; an act on words still asks for its id, so nothing is taken on a reading of the words
+    if (v.kind === 'alias' && v.oneSeat) v = {kind: 'unknown', code: 'capability.choose', reason: 'Choose a bound seat by its exact sit capability ID. No seat has been selected.', didYouMean: [{id: v.cap.id, label: v.cap.label}]};
     if (words) {plans = new Map(plans); v = this.exactWords(soul, words, text, v, plans);}
     // PC04 (#683): answering a shared proposal that has closed is refused as gone, not unknown
     if (v.kind === 'unknown' && /^(?:accept|decline):inv_/.test(asked)) {
@@ -2849,7 +2851,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // #849: the one seat the words name was taken: bind it by its exact id (offered on demand when the listing leaves it out)
       if(discovery.kind==='alias'){const r=this.resolveOnDemand(soul,discovery.cap.id,caps,plans,typos);if(r.v.kind==='unknown')return r;
         if(r.v.cap.id!==discovery.cap.id)return {v:{kind:'unknown',code:'capability.choose',reason:'Choose a bound seat by its exact sit capability ID. No seat has been selected.',didYouMean:[{id:discovery.cap.id,label:discovery.cap.label}]},caps,plans};
-        return {...r,v:{kind:'alias',cap:r.v.cap,note:discovery.note}};}
+        return {...r,v:{kind:'alias',cap:r.v.cap,note:discovery.note,oneSeat:true}};}
       return {v:discovery,caps,plans};}}
     // RESOLVE: a building's floor ("go upstairs", "go inside the cottage and go upstairs", "the top floor of the tower")
     const fl = exact || !this.floorOnDemand ? null : floorWords(text);

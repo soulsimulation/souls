@@ -39,8 +39,9 @@ function choice(kind:string,requested:string,candidates:Candidate[],reason:strin
 }
 
 /** Return options. Never guess a fixture, invent an action, or reinterpret an interaction as travel. #849: a sit request
- * whose words name exactly one bound seat by its own title or alias (not only its place) takes it when it is available,
- * and is refused with its own reason when it is not; `take: false` (a purpose question, "where can I sit ...") only lists. */
+ * whose words name exactly one bound seat by its own title or alias (not only its place) answers with that seat when it is
+ * available, and with its own reason when it is not. A dry run says so; an act still takes only an id (`oneSeat`, in the
+ * ledger). `take: false` (a purpose question, "where can I sit ...") only lists. */
 export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:EdgeCapability[],plans:Parameters<EdgeLedger['resolveOnDemand']>[3],take=true):VocabResult|null{
  if(text.includes(':'))return null;
  const all=[...L.places.byId.values()],known=all.filter(p=>L.knowledge.knows(soul.soulId,p.id));
@@ -93,9 +94,11 @@ export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:Ed
  // #849: one seat, named by a word of its own (title or alias), as typed (a #848 relation word read as `outdoor` is not
  // the seat's name: "sit outside the cottage" names a place), that its place names do not share: taken when available (the ledger binds
  // it by its exact id and the act answer's `resolved` names it), refused with its own reason when not; never a one-entry choice
- if(take&&seats.length===1&&raw.some(w=>seats[0].own.has(w)&&!seats[0].scope.has(w))){
+ // (a word like "seat" or "bench" names this one only where its place has no other seat: "the seat in Chiba" is a question)
+ const alone=()=>(seats[0].p.parts??[]).filter(x=>x.sit&&knownPart(L,soul,seats[0].p,x)).length===1;
+ if(take&&seats.length===1&&raw.some(w=>seats[0].own.has(w)&&!seats[0].scope.has(w)&&(!GENERIC_SEAT.has(w)||alone()))){
   const c=candidates[0];
-  if(c.available)return {kind:'alias',cap:{id:c.capability,verb:'sit',label:c.name,available:true} as EdgeCapability,note:`The only seat these words name is ${c.name} (${c.capability}); it is the seat chosen.`};
+  if(c.available)return {kind:'alias',cap:{id:c.capability,verb:'sit',label:c.name,available:true} as EdgeCapability,note:`The only seat these words name is ${c.name} (${c.capability}); send that id to sit there.`,oneSeat:true};
   return {kind:'unknown',code:c.code??'capability.unavailable',reason:`The only seat these words name, ${c.name} (${c.capability}), cannot be taken now: ${c.reason??'it is not offered.'} No other seat was chosen.`,didYouMean:[{id:c.capability,label:c.name,...c}],discovery:{kind:'interaction',requested:'sit',candidates}};
  }
  // F5 (#376): no part matches, but bound seats hold every word in their own name ("presenter box" names presenter-timber-box):
