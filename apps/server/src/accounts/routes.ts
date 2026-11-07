@@ -7,6 +7,7 @@ import type {WorldAccounts} from './service.ts';
 
 const startSchema=z.object({agentLabel:z.string().min(1).max(120),name:z.string().min(2).max(32).optional(),description:z.string().max(1200).optional(),idempotencyKey:z.string().min(16).max(256),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/),soulId:z.string().regex(/^s_[a-zA-Z0-9_-]+$/).optional(),for:z.string().max(16).optional(),existing:z.literal(true).optional()}).strict();
 const codeSchema=z.object({for:z.string().max(16)}).strict();
+const UNKNOWN_CODE='That window code is unknown or has expired. Ask your person for the one on their open page.';
 const pollSchema=z.object({approvalId:z.string().regex(/^ap_[a-f0-9]{32}$/),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/)}).strict();
 export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Auth;baseOf:(c:Context)=>string;limit:(c:Context,key:string,max:number,ms:number)=>void}){
  const {accounts,auth}=deps;
@@ -19,20 +20,21 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
  const shown=(a:ApprovalDTO)=>({...a,photo:a.soulId?accounts.host.profilePhoto(a.soulId)?.url??null:null});
  app.post('/v1/agent/approval/start',c=>wrap(c,async()=>{deps.limit(c,'account-start',6,60000);const p=parse(startSchema,await json(c)),{soulId:named,for:forCode,name:asked,existing,...input}=p;
   // #1274: a name this window's account already holds is that Soul, asked for again from a new folder: reconnect it. A
-  // second Soul would strand the first. Only that account's code gets here, so anyone else still sees name-taken.
-  const taken=!named&&asked?accounts.host.db.soulByName(accounts.host.worldId,asked):undefined;
-  const soulId=named??(taken&&accounts.store.codeHolds(forCode,taken.id)?taken.id:undefined);
-  if(existing&&!soulId)throw new ApiError(404,'soul-not-found',`The account behind this code holds no Soul called ${asked} in this world.`);
+  // second Soul would strand the first. Only that account's code gets here, so anyone else still sees name-taken. A retry
+  // stays the request it was: the key decides, not what the name means by now.
+  const retry=accounts.store.retryOf(input.idempotencyKey),taken=!named&&asked&&!retry?accounts.host.db.soulByName(accounts.host.worldId,asked):undefined;
+  const soulId=named??retry?.repairSoulId??(taken&&accounts.store.codeHolds(forCode,taken.id)?taken.id:undefined);
   // Lane PAIR-INWINDOW (Gene's review #2): a reconnect names its Soul by ID only. The request carries the Soul's REAL current
   // name (the card's title; the agent's guess is ignored), so a pressed Approve never fails on a name.
   const soul=soulId?accounts.host.db.soul(soulId):undefined;
   if(soulId&&(!soul||soul.world_id!==accounts.host.worldId||soul.retired_at!==null))throw new ApiError(404,'soul-not-found',`No Soul ${soulId} lives in this world. Check the ID on the Soul's card (Copy start prompt).`);
   if(!soulId&&!asked)throw new ApiError(400,'invalid','A new Soul needs a name.');
+  if(existing&&!soulId){if(accounts.store.codeSouls(forCode)===null)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);throw new ApiError(404,'soul-not-found',`The account behind this code holds no Soul called ${asked} in this world.`);}
   const approval=soulId?accounts.store.startRepairRequest(soulId,{...input,name:soul!.name,forCode}):accounts.store.start({...input,name:asked!,forCode});
   // delivery 'window': the person's open, signed-in world page shows the request (lane PUX); the link stays as a backup
   return {approval,world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${approval.id}`,delivery:approval.inWindow?'window':'link',intervalSeconds:3};}));
  // #1274: what a person gets back with a new folder: the Souls their open window's account holds here, ids and names only.
- app.post('/v1/agent/approval/souls',c=>wrap(c,async()=>{deps.limit(c,'account-souls',6,60000);const p=parse(codeSchema,await json(c)),ids=accounts.store.codeSouls(p.for);if(!ids)throw new ApiError(404,'code-unknown','That window code is unknown or has expired. Ask your person for the one on their open page.');
+ app.post('/v1/agent/approval/souls',c=>wrap(c,async()=>{deps.limit(c,'account-souls',6,60000);const p=parse(codeSchema,await json(c)),ids=accounts.store.codeSouls(p.for);if(!ids)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);
   return {souls:ids.flatMap(id=>{const s=accounts.host.db.soul(id);return s&&s.world_id===accounts.host.worldId&&s.retired_at===null?[{id:s.id,name:s.name}]:[];})};}));
  app.post('/v1/agent/approval/poll',c=>wrap(c,async()=>{deps.limit(c,'account-poll',60,60000);const p=parse(pollSchema,await json(c));return {...accounts.poll(p.approvalId,p.pollSecret),world:world(c)};}));
  app.post('/v1/agent/approval/cancel',c=>wrap(c,async()=>{const p=parse(pollSchema,await json(c));return {approval:accounts.store.cancel(null,p.approvalId,p.pollSecret),world:world(c)};}));

@@ -295,6 +295,11 @@ export class AccountStore {
     const row = this.db.db.prepare('SELECT account_id FROM account_window_codes_v1 WHERE world_id=? AND code=? AND expires_at>?').get(this.worldId, code, this.time()) as { account_id: string } | undefined;
     return row?.account_id ?? null;
   }
+  /** #1274: the request this idempotency key already made, if any. A retry goes back to begin() as what it was. */
+  retryOf(idempotencyKey: string): { repairSoulId: string | undefined } | null {
+    const row = this.db.db.prepare('SELECT repair_soul_id FROM account_approvals_v1 WHERE world_id=? AND idempotency_hash=?').get(this.worldId, sha(idempotencyKey)) as { repair_soul_id: string | null } | undefined;
+    return row ? { repairSoulId: row.repair_soul_id ?? undefined } : null;
+  }
   /** #1274: whether a live window code's account holds this Soul. It conveys no control: approve() still checks membership. */
   codeHolds(code: unknown, soulId: string): boolean { const account = this.codeAccount(code); return account !== null && this.member(soulId)?.account_id === account; }
   /** #1274: the Soul ids a live window code's account holds in this world, or null for a code that is not live. */

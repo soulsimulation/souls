@@ -33,9 +33,9 @@ const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
 const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval"]);
-/** Work on the home itself, as no one in particular. */
 /** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
 const LOCAL_READS = new Set(["status", "memory"]);
+/** Work on the home itself, as no one in particular. */
 const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
 const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
@@ -67,12 +67,16 @@ function writeJson(file, value, mode = 0o600) {
 }
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, "utf8")); }
-  catch (e) { if (e.code === "ENOENT") return fallback; throw new Error(`${basename(file)} cannot be read: ${e.message}.${UNREADABLE[basename(file)] ?? ""}`); }
+  catch (e) {
+    if (e.code === "ENOENT") return fallback;
+    // A parser quotes what it choked on: the credentials file's bytes never reach a message.
+    throw new Error(`${basename(file)} cannot be read${basename(file) === CREDENTIALS ? "" : `: ${e.message}`}.${UNREADABLE[basename(file)] ?? ""}`);
+  }
 }
 /** What a person can do about a home file that no longer parses. Nothing here rewrites it: it may still be mendable by hand. */
 const UNREADABLE = {
   "credentials.json": " It holds every token, so restore it from a backup if you have one. If not, move it aside: memory is safe, list still shows your Souls, and adopt <id> --for <CODE> gets each one back.",
-  "config.json": " Restore it from a backup if you have one. If not, move it aside and run doctor: it finds your Souls in souls/ again.",
+  "config.json": " Restore it from a backup if you have one. If not, move it aside: the next command finds your Souls in souls/ again.",
 };
 
 /** What a home never commits: tokens, and a Soul's memory, which holds private conversations. A home made before a line was added gets it. */
@@ -419,9 +423,9 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
 
   /** The account against the home, world by world. `ask(url, bearer)` answers {status, data}. Prints no token. */
-  async function doctor(ask, { alive, accountSouls = null }) {
+  async function doctor(ask, { alive, accountSouls = null, codeWorld = null }) {
     rediscover();
-    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], orphanCredentials: [], locksCleared: [] };
+    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], unpaired: [], orphanCredentials: [], locksCleared: [] };
     const retire = (id) => {
       updateConfig((c) => { c.souls[id].state = "retired"; c.souls[id].retiredAt = new Date().toISOString(); });
       out.retired.push({ id, name: config().souls[id].name });
@@ -458,11 +462,13 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (r.status === 401 && r.data?.code === "control.revoked" && r.data?.reason === "retired") retire(id);
         else out.controlLost.push({ id, name: cfg.souls[id].name, why: r.data?.reason ?? r.data?.code ?? `http-${r.status}` });
       }
-      const held = reachable && accountSouls ? await accountSouls(w.url) : null;
+      // A window code belongs to one world: it goes to that world and no other.
+      const asked = reachable && accountSouls && key === codeWorld, held = asked ? await accountSouls(w.url) : null;
       for (const s of held ?? []) if (config().souls[s.id]?.state !== "active") out.adoptable.push({ id: s.id, name: plainName(s.name) || s.id, world: key });
-      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: "This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: doctor --for <CODE>." } : {}) });
+      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: asked ? "That window code is unknown here or has expired. Ask your person for the one on this world's open page." : `This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: @${key} doctor --for <CODE>.` } : {}) });
     }
     const after = config();
+    for (const [id, e] of Object.entries(after.souls)) if (e.state === "unpaired") out.unpaired.push({ id, name: e.name, world: e.world, next: `adopt ${id} --for <CODE>` });
     for (const [id, worlds] of Object.entries(creds.souls)) if (!after.souls[id]) for (const world of Object.keys(worlds)) out.orphanCredentials.push({ principal: id, world });
     for (const world of Object.keys(creds.worlds)) if (!after.worlds[world]) out.orphanCredentials.push({ principal: "account", world });
     for (const world of Object.keys(creds.gods)) if (!after.gods[world]) out.orphanCredentials.push({ principal: "god", world });
@@ -475,7 +481,7 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
       }
     }
     if (existsSync(at(CREDENTIALS)) && (statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
-    out.healthy = !out.retired.length && !out.controlLost.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
+    out.healthy = !out.retired.length && !out.controlLost.length && !out.unpaired.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
     return out;
   }
 
@@ -491,6 +497,7 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
+  if (!existsSync(at("config.json"))) rediscover();
   return { root, config, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
 return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
@@ -1777,7 +1784,7 @@ async function note(expected, observed) {
 // runtime folder, so every lock, socket and small state file below stays per Soul. A legacy folder works as ever.
 const INVOKED = process.cwd();
 const userPath = (p) => resolvePath(INVOKED, p);   // a file the person named, wherever this run is working
-let HOME = null, SEAT = null, DELEGATE = null;
+let HOME = null, SEAT = null, DELEGATE = null, AT_WORLD = null;
 const load = () => (HOME ? (SEAT ? HOME.load(SEAT) : {}) : existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {});
 function save(patch) {
   const s = { ...load(), ...patch };
@@ -2169,7 +2176,7 @@ const clean = (d) => {
 
 // ---------------------------------------------------------------- setup and pairing
 
-async function register(world) {
+async function register(world, { asked = true } = {}) {
   const prev = load();
   if (!world && !prev.world) throw new Error("usage: register <world-url>");
   const w = (world ?? prev.world).replace(/\/+$/, "");
@@ -2179,21 +2186,21 @@ async function register(world) {
   const cfg = ok(await call("/v1/config", { as: "none" }), "config");
   if (cfg.accountAuthRequired) {
     save({ accountAuth: true, worldId: cfg.worldId });
-    noteWorld(w, cfg, true);
+    noteWorld(w, cfg, true, asked);
     return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)` };
   }
   if (!cfg.devAuth) throw new Error("This world accepts neither account approvals nor self-made identities.");
   save({ accountAuth: false, identity: prev.identity ?? "agent-" + randomBytes(12).toString("hex") });
-  noteWorld(w, cfg, false);
+  noteWorld(w, cfg, false, asked);
   return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"` };
 }
 
-function noteWorld(url, cfg, accountAuth) {
+function noteWorld(url, cfg, accountAuth, asked = true) {
   if (!HOME) return;
   const c = cfg.soulClient, key = HOME.ensureWorld(url, { name: soulHome.plainName(cfg.worldName) || undefined, worldId: cfg.worldId, accountAuth, ...(c ? { contract: c.contract, bundle: c.version, minClient: c.minVersion } : {}) });
   if (c && soulHome.newerThan(c.minVersion, VERSION)) throw new Error(`This world needs eden ${c.minVersion} or newer; this is ${VERSION}. Run: ${CLI} upgrade ${key}`);
   HOME.setCurrentWorld(key);
-  HOME.madeFor(url);
+  if (asked) HOME.madeFor(url);   // only a world a person named earns trust: a url out of an imported file never does
 }
 
 function forOption(argv) {
@@ -2346,14 +2353,15 @@ async function adopt(...argv) {
   const { rest: [who], code } = forOption(argv);
   if (!who) throw new Error("usage: adopt <name|soulId> [--for <CODE>]");
   const forCode = code ? ["--for", code] : [];
-  const kept = HOME.principals().find((p) => p.id === who || soulHome.norm(p.name) === soulHome.norm(who));
-  if (kept) await seatFor(kept);   // a Soul this home knows answers from any world's seat, registered or not
+  const kept = keptSoul(who);
+  if (kept) await seatFor(kept);   // a Soul this home knows answers from its own world's seat, registered or not
   if (/^s_[A-Za-z0-9_-]+$/.test(who)) return pair(who, ...forCode);
   if (kept) return pair(kept.id, ...forCode);
   const s = load();
   if (s.accountAuth) {
     if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>`);
-    return startApproval({ name: who, existing: true }, code);
+    try { return await startApproval({ name: who, existing: true }, code); }
+    catch (e) { if (/HTTP 400/.test(e.message)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
   }
   if (!s.identity) throw new Error(`Register its world first: ${CLI} register <world-url>`);
   const owned = ok(await call("/v1/me", { as: "dev" }), "adopt").souls ?? [];
@@ -2362,12 +2370,22 @@ async function adopt(...argv) {
   return pair(soul.id, ...forCode);
 }
 
+/** The Soul `adopt <who>` means in this home: one of this seat's world first. Elsewhere only a Soul that needs adopting, so a
+ *  Soul held safely in another world doesn't answer for this one's; @world keeps it to that world. */
+function keptSoul(who) {
+  const same = HOME.principals().filter((p) => p.state !== "retired" && (p.id === who || soulHome.norm(p.name) === soulHome.norm(who)));
+  const here = same.filter((p) => p.world === SEAT?.key);
+  if (here.length || AT_WORLD) return here[0] ?? null;
+  const loose = same.filter((p) => p.state === "unpaired" || !HOME.load(HOME.soul(p.id)).token);
+  if (loose.length > 1) throw new Error(`Several Souls here could be ${who}: ${loose.map((p) => `@${p.world} adopt ${p.id}`).join(", ")}. Say which.`);
+  return loose[0] ?? null;
+}
 /** Adopt speaks from the seat of the Soul's own world. An imported Soul's world may not be registered in this home yet. */
 async function seatFor(kept) {
   const url = HOME.config().worlds[kept.world]?.url;
   if (!url) return;
   if (SEAT?.key !== kept.world) { SEAT = HOME.seat(kept.world); process.chdir(SEAT.dir); }
-  if (!load().world) await register(url);
+  if (load().accountAuth === undefined) await register(url, { asked: false });
 }
 
 async function devPair(id) {
@@ -2405,10 +2423,14 @@ async function approval(action = "status") {
 }
 
 async function status() {
-  const s = load();
+  const s = load(), loose = !s.token && HOME ? HOME.principals().filter((p) => p.state === "unpaired") : [];
+  if (loose.length && SEAT?.kind !== "soul" && !s.pendingApproval) return { paired: false, souls: loose.map((p) => ({ id: p.id, name: p.name, world: p.world })), why: "These Souls are in this home without a token. Their memory is safe here.", next: `${CLI} adopt <name> --for <CODE>   (the code is on your person's open world page)` };
   if (!s.world) return { paired: false, next: `${CLI} register <world-url>` };
   if (!s.token && s.pendingCreate) return { paired: false, world: s.world, arriving: s.pendingCreate.name, next: `${ARRIVING}: ${CLI} create "${s.pendingCreate.name}" to keep waiting` };
-  if (!s.token && !s.pendingApproval && SEAT?.kind === "soul") { const name = HOME.config().souls[SEAT.id]?.name; return { soul: { id: SEAT.id, name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` }; }
+  if (!s.token && SEAT?.kind === "soul") {
+    const e = HOME.config().souls[SEAT.id], waiting = HOME.seatState(e?.world).pendingApproval?.input?.soulId === SEAT.id;
+    return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
+  }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
   const me = ok(await call("/v1/agent/me"), "status");
   if (HOME && SEAT?.id && me.soul?.name) HOME.named(SEAT.id, me.soul.name);
@@ -3713,7 +3735,7 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 
 setup     register <world-url>            create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
@@ -3749,7 +3771,7 @@ async function doctorCommand(...argv) {
   const { code } = forOption(argv);
   const accountSouls = code ? async (url) => { const r = await worldOnce(`${url}/v1/agent/approval/souls`, { method: "POST", headers: { "content-type": "application/json" }, body: { for: code }, timeoutMs: 25_000 }); return r.status === 200 ? r.data?.souls ?? [] : null; } : null;
   const ask = async (url, bearer) => { const { status, data } = await worldOnce(url, { method: "GET", headers: { authorization: `Bearer ${bearer}` }, timeoutMs: 25_000 }); return { status, data }; };
-  const out = await needHome().doctor(ask, { alive: pidAlive, accountSouls });
+  const out = await needHome().doctor(ask, { alive: pidAlive, accountSouls, codeWorld: AT_WORLD ?? HOME.config().currentWorld });
   for (const [world, w] of Object.entries(HOME.config().worlds)) {
     const { status, data } = await worldOnce(`${w.url}/v1/config`, { method: "GET", headers: {}, timeoutMs: 25_000 }), c = status === 200 ? data?.soulClient : null;
     if (!c) continue;
@@ -3844,6 +3866,7 @@ export function enterHome(argv) {
   let line = argv, selector;
   const cfg = HOME.config();
   if (first && !commands[first] && soulHome.looksLikeSelector(cfg, first)) { selector = first; line = argv.slice(1); }
+  AT_WORLD = selector?.startsWith("@") ? selector.slice(1) : null;
   // A Soul named like a command: the command wins, but `say here` was meant for the Soul and must not be said aloud.
   if (first && commands[first] && commands[second] && soulHome.looksLikeSelector(cfg, first)) throw new Error(`${first} is a command and a Soul here. For the Soul use its address: ${HOME.principals().find((p) => soulHome.norm(p.name) === first)?.address ?? `${first}@<world>`}`);
   const cmd = line[0];

@@ -27,8 +27,8 @@ async function site(t: { after: (f: () => unknown) => void }) {
     return { identity, user: f.db.user(identity.id)! };
   };
   const app = buildApp({ cfg: f.souls.cfg, db: f.db, host: f.host, souls: f.souls, brain: f.brain, auth: f.auth, hub: { clients: new Map(), refreshMe() {} } as unknown as Hub });
-  const listener = getRequestListener(app.fetch);
-  const server = createServer((req, res) => { req.url = req.url!.replace(/^\/w\/test/, '') || '/'; listener(req, res); });
+  const listener = getRequestListener(app.fetch), me: { seen?: string[] } = {};
+  const server = createServer((req, res) => { if (req.url!.endsWith('/approval/souls')) me.seen?.push(req.url!); req.url = req.url!.replace(/^\/w\/test/, '') || '/'; listener(req, res); });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
   const root = mkdtempSync(join(tmpdir(), 'cli-recovery-'));
   t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(root, { recursive: true, force: true }); f.host.stop(); f.db.close(); });
@@ -48,7 +48,7 @@ async function site(t: { after: (f: () => unknown) => void }) {
     assert.equal((await owner(person, `/v1/account/approvals/${asked.approvalId}/approve`)).status, 200);
     return (await h.run('approval', 'wait')).soul as { id: string; name: string };
   };
-  return { f, world, owner, code, folder, make };
+  return Object.assign(me, { f, world, owner, code, folder, make });
 }
 
 test('create in a fresh folder for a Soul the account owns reconnects it; anyone else still sees name-taken', async t => {
@@ -91,6 +91,33 @@ test('doctor --for lists what the account holds and this home lacks; without a c
   assert.ok(!JSON.stringify(listed).includes(ivo.id) || listed.adoptable.every((a: { id: string }) => a.id !== ivo.id));
   const wrong = await fresh.run('doctor', '--for', 'ZZZZ-ZZZZ');
   assert.deepEqual(wrong.adoptable, [], 'a code that means nothing lists nothing');
+  assert.match(wrong.worlds[0].note, /unknown here or has expired/);
+});
+
+test('a retried create stays the request it was, before and after its approval', async t => {
+  const s = await site(t), first = s.folder('one');
+  await first.run('register', s.world);
+  const code = await s.code(), asked = await first.run('create', 'Wren', '--for', code);
+  assert.equal((await s.owner('gene', `/v1/account/approvals/${asked.approvalId}/approve`)).status, 200);
+  const again = await first.run('create', 'Wren', '--for', code);
+  assert.equal(again.approvalId, asked.approvalId, 'approved and not yet collected: the same request');
+  const wren = (await first.run('approval', 'wait')).soul;
+  const fresh = s.folder('two'); await fresh.run('register', s.world);
+  const reconnect = await fresh.run('create', 'Wren', '--for', code), twice = await fresh.run('create', 'Wren', '--for', code);
+  assert.equal(twice.approvalId, reconnect.approvalId); assert.equal(twice.soulId, wren.id);
+});
+
+test('adopt keeps to the world it is in, and a window code goes only to its own world', async t => {
+  const a = await site(t), b = await site(t), h = a.folder('one'), wrenA = await a.make(h, 'Wren');
+  const wrenB = await b.make(b.folder('there'), 'Wren');
+  await h.run('register', b.world);
+  const code = await b.code();
+  const asked = await h.run('adopt', 'Wren', '--for', code);
+  assert.equal(asked.soulId, wrenB.id, "the world this home is in, not the Wren it holds safely elsewhere"); assert.notEqual(wrenA.id, wrenB.id);
+  assert.equal((await h.run('wren@test', 'status')).soul.id, wrenA.id, 'that Wren is untouched');
+  const seen: string[] = []; a.seen = seen;
+  await h.run('doctor', '--for', code);
+  assert.deepEqual(seen, [], "the other world never saw this world's code");
 });
 
 test('a home that lost its tokens names the Soul and adopt, and keeps its memory; a corrupt file says what to do', async t => {
@@ -116,15 +143,14 @@ test('a home that lost its tokens names the Soul and adopt, and keeps its memory
   assert.ok((await h.run('memory', 'bees')).matches.length, 'the same memory, paired again');
 });
 
-test('a config.json moved aside is rebuilt by doctor from the Souls on disk', async t => {
+test('a config.json moved aside comes back from the Souls on disk', async t => {
   const s = await site(t), h = s.folder('one'), wren = await s.make(h, 'Wren');
   await h.run('remember', '--self', 'I keep bees by the mill.');
   const cfg = join(h.dir, '.souls/config.json');
   writeFileSync(cfg, '{oops');
   const corrupt = await h.raw('status');
-  assert.notEqual(corrupt.code, 0); assert.match(corrupt.err, /run doctor/);
+  assert.notEqual(corrupt.code, 0); assert.match(corrupt.err, /move it aside/);
   renameSync(cfg, `${cfg}.broken`);
-  await h.run('doctor');
   const st = await h.run('status');
   assert.equal(st.soul.id, wren.id); assert.equal(st.paired, true, 'its token was still here');
 });
@@ -140,6 +166,8 @@ test('an imported Soul knows itself, reads its memory and is adopted by name wit
   const st = await two.run('status');
   assert.equal(st.soul.name, 'Wren'); assert.equal(st.paired, false); assert.match(st.next, /adopt/);
   assert.ok((await two.run('memory', 'bees')).matches.length, 'memory on disk, no token');
+  const doctor = await two.run('doctor');
+  assert.deepEqual(doctor.unpaired.map((u: { id: string }) => u.id), [wren.id]); assert.equal(doctor.healthy, false);
   const asked = await two.run('adopt', 'wren', '--for', await s.code());
   assert.equal(asked.soulId, wren.id);
   assert.equal((await s.owner('gene', `/v1/account/approvals/${asked.approvalId}/approve`)).status, 200);
@@ -147,4 +175,6 @@ test('an imported Soul knows itself, reads its memory and is adopted by name wit
   assert.equal((await two.run('status')).paired, true);
   assert.ok((await two.run('memory', 'bees')).matches.length, 'the imported memory stays');
   assert.equal((await two.run('list')).souls[0].state, 'active');
+  const home = JSON.parse(readFileSync(join(two.dir, '.souls/config.json'), 'utf8'));
+  assert.deepEqual(home.trustedOrigins ?? [], [], 'a url out of an imported file earns no trust');
 });

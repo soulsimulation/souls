@@ -95,15 +95,15 @@ to the list, so a Soul moved in with `import` starts with no trusted site. `upgr
 
 Reconciling needs the account's list, which `/v1/me` gives a dev identity. A delegated Soul token sees only its own Soul,
 so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one.
-A window code stands in for the account there: `doctor --for <CODE>` lists the Souls that account holds in the world
-(ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name, and `create <name> --for <CODE>` for a name
+A window code stands in for the account there: `doctor --for <CODE>` (`@<world> doctor --for <CODE>` for another world: a code goes
+only to its own world) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name, and `create <name> --for <CODE>` for a name
 the account already holds reconnects that Soul instead of making a second one. The code conveys no control: approval
 still does. Without a code, a taken name stays `name-taken` and reveals nothing.
 
 A home can lose a file and keep its Souls. Without `credentials.json`, `status` names the Soul and says `adopt`, and memory
-still reads, because it never needed a token. A `config.json` moved aside comes back with `doctor`, which finds the Souls
-in `souls/` (god seats are not rebuilt this way). A Soul brought in by `import` starts unpaired: `status` and `memory` work,
-and `adopt` registers its world if the home hasn't. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
+still reads, because it never needed a token. A `config.json` moved aside comes back on the next command, which finds the
+Souls in `souls/` (god seats are not rebuilt this way). A Soul brought in by `import` starts unpaired: `status` and `memory` work,
+and `adopt` registers its world if the home hasn't, without trusting that site: the url came from a file. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
 under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/upload.mjs`, which read that file directly.
 
 `eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run

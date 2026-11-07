@@ -13,9 +13,9 @@ const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
 export const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval"]);
-/** Work on the home itself, as no one in particular. */
 /** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
 export const LOCAL_READS = new Set(["status", "memory"]);
+/** Work on the home itself, as no one in particular. */
 export const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
 export const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
@@ -47,12 +47,16 @@ function writeJson(file, value, mode = 0o600) {
 }
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, "utf8")); }
-  catch (e) { if (e.code === "ENOENT") return fallback; throw new Error(`${basename(file)} cannot be read: ${e.message}.${UNREADABLE[basename(file)] ?? ""}`); }
+  catch (e) {
+    if (e.code === "ENOENT") return fallback;
+    // A parser quotes what it choked on: the credentials file's bytes never reach a message.
+    throw new Error(`${basename(file)} cannot be read${basename(file) === CREDENTIALS ? "" : `: ${e.message}`}.${UNREADABLE[basename(file)] ?? ""}`);
+  }
 }
 /** What a person can do about a home file that no longer parses. Nothing here rewrites it: it may still be mendable by hand. */
 const UNREADABLE = {
   "credentials.json": " It holds every token, so restore it from a backup if you have one. If not, move it aside: memory is safe, list still shows your Souls, and adopt <id> --for <CODE> gets each one back.",
-  "config.json": " Restore it from a backup if you have one. If not, move it aside and run doctor: it finds your Souls in souls/ again.",
+  "config.json": " Restore it from a backup if you have one. If not, move it aside: the next command finds your Souls in souls/ again.",
 };
 
 /** What a home never commits: tokens, and a Soul's memory, which holds private conversations. A home made before a line was added gets it. */
@@ -399,9 +403,9 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   }
 
   /** The account against the home, world by world. `ask(url, bearer)` answers {status, data}. Prints no token. */
-  async function doctor(ask, { alive, accountSouls = null }) {
+  async function doctor(ask, { alive, accountSouls = null, codeWorld = null }) {
     rediscover();
-    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], orphanCredentials: [], locksCleared: [] };
+    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], unpaired: [], orphanCredentials: [], locksCleared: [] };
     const retire = (id) => {
       updateConfig((c) => { c.souls[id].state = "retired"; c.souls[id].retiredAt = new Date().toISOString(); });
       out.retired.push({ id, name: config().souls[id].name });
@@ -438,11 +442,13 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
         if (r.status === 401 && r.data?.code === "control.revoked" && r.data?.reason === "retired") retire(id);
         else out.controlLost.push({ id, name: cfg.souls[id].name, why: r.data?.reason ?? r.data?.code ?? `http-${r.status}` });
       }
-      const held = reachable && accountSouls ? await accountSouls(w.url) : null;
+      // A window code belongs to one world: it goes to that world and no other.
+      const asked = reachable && accountSouls && key === codeWorld, held = asked ? await accountSouls(w.url) : null;
       for (const s of held ?? []) if (config().souls[s.id]?.state !== "active") out.adoptable.push({ id: s.id, name: plainName(s.name) || s.id, world: key });
-      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: "This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: doctor --for <CODE>." } : {}) });
+      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: asked ? "That window code is unknown here or has expired. Ask your person for the one on this world's open page." : `This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: @${key} doctor --for <CODE>.` } : {}) });
     }
     const after = config();
+    for (const [id, e] of Object.entries(after.souls)) if (e.state === "unpaired") out.unpaired.push({ id, name: e.name, world: e.world, next: `adopt ${id} --for <CODE>` });
     for (const [id, worlds] of Object.entries(creds.souls)) if (!after.souls[id]) for (const world of Object.keys(worlds)) out.orphanCredentials.push({ principal: id, world });
     for (const world of Object.keys(creds.worlds)) if (!after.worlds[world]) out.orphanCredentials.push({ principal: "account", world });
     for (const world of Object.keys(creds.gods)) if (!after.gods[world]) out.orphanCredentials.push({ principal: "god", world });
@@ -455,7 +461,7 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
       }
     }
     if (existsSync(at(CREDENTIALS)) && (statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
-    out.healthy = !out.retired.length && !out.controlLost.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
+    out.healthy = !out.retired.length && !out.controlLost.length && !out.unpaired.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
     return out;
   }
 
@@ -471,5 +477,6 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
+  if (!existsSync(at("config.json"))) rediscover();
   return { root, config, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
