@@ -1778,7 +1778,9 @@ async function starterSource(starter,{origin,world=origin,info,seed,fetchImpl}){
   source:'the shared Pip rolling robot (repository source, MIT); rightsConfirmed is left false: set it only after your human confirms the variant is yours to upload'};
 }
 
-/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report. */
+/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report.
+ *  validate.mjs is the world's own code: a caller that must not run it (eden.mjs, where a Souls home holds other worlds'
+ *  tokens) passes a runValidate that doesn't. */
 async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaultValidate,cli='node eden-agent.mjs',base=process.cwd()}){
  const opts=parseKitArgs(args),dir=resolve(base,opts.dir),state=load();
  if(!state.world)throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
@@ -3003,8 +3005,9 @@ async function body(cmd, ...args) {
   if (!cmd) { const d = clean(ok(await call("/v1/edge/body"), "body")); delete d.lookChoices; delete d.presets; return d; }
   if (cmd === "presets") return ok(await call("/v1/edge/body"), "body").presets?.map((p) => p.id);
   if (cmd === "set") {
+    if (args.length !== 1) throw new Error("usage: body set <preset|assetId|ref>");
     if (!/^body_[a-f0-9]{64}$/.test(args[0])) return clean(ok(await call("/v1/edge/body", { method: "PUT", body: { preset: args[0] } }), "body set"));
-    // An owner upload in this world first; otherwise the owner's or a published definition by reference, from another world (#717).
+    // An owner upload in this world first; otherwise the owner's or a published definition by reference, from a world of this site (#717).
     const own = await call("/v1/edge/body", { method: "PUT", body: { assetId: args[0] } });
     return clean(ok(own.status === 403 && codeOf(own.data) === "body.not-owned" ? await call("/v1/edge/body", { method: "PUT", body: { ref: args[0] } }) : own, "body set"));
   }
@@ -3025,7 +3028,8 @@ async function body(cmd, ...args) {
     if (args.length !== 1 || !/^body_[a-f0-9]{64}$/.test(args[0])) throw new Error(`usage: body ${cmd} <ref>`);
     return clean(ok(await call("/v1/edge/body/library/" + args[0] + "/public", { method: cmd === "publish" ? "PUT" : "DELETE" }), "body " + cmd));
   }
-  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, cli: CLI, base: INVOKED });
+  // The kit's validate.mjs is this world's code, and a Souls home holds other worlds' tokens, so it is never run from here (as upgrade).
+  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, cli: CLI, base: INVOKED, runValidate: () => ({ skipped: "validate.mjs comes from this world and runs with your rights: read it, and run it only if you trust this world" }) });
   if (cmd === "upload") return bodyUpload(args);
   if (cmd === "look") {
     if (!args.length) { const d = ok(await call("/v1/edge/body"), "body"); return { look: d.look, choices: d.lookChoices }; }
@@ -3056,7 +3060,7 @@ async function bodyUpload([path, ...args]) {
     else if (flag === "--type" || flag === "--license") { const value = args.shift(); if (!value || value.startsWith("--")) throw new Error(flag + " needs a value"); opts[flag.slice(2)] = value; }
     else throw new Error("Unknown body upload argument: " + flag);
   }
-  if (!["humanoid", "ceramic", "floater"].includes(opts.type) || !["CC0", "owned"].includes(opts.license) || !opts.rightsConfirmed) throw new Error("Upload requires --manifest, or --type humanoid|ceramic|floater --license CC0|owned --rights-confirmed");
+  if (!["humanoid", "ceramic", "floater"].includes(opts.type) || !["CC0", "owned"].includes(opts.license) || !opts.rightsConfirmed) throw new Error("Upload needs a type (humanoid, ceramic or floater), a license (CC0 or owned) and confirmed rights: a --manifest with rightsConfirmed true, or --type, --license and --rights-confirmed");
   const bytes = readFileSync(userPath(path));
   if (bytes.length > 4 * 1024 * 1024) throw new Error("Use a GLB file no larger than 4 MiB");
   if (opts.type === "humanoid") opts.rig = "quaternius/1";

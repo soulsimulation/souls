@@ -3,14 +3,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
-import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const ID = 'body_' + 'a'.repeat(64);
-const VALIDATE = `console.log(JSON.stringify({valid:true,admitted:{assetId:'${ID}',triangles:80,bytes:9}}));`;
+const VALIDATE = `import {writeFileSync} from 'node:fs'; writeFileSync('ran-the-worlds-code', '');`;
 
 async function world(t) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'soul-cli-body-'));
@@ -77,7 +77,7 @@ test('body upload: a manifest or the flags, the token only to this world, refusa
   assert.match(up.raw.toString(), /Kit sculpture 1/); assert.match(up.raw.toString(), /glTF-bytes/);
   assert.equal((await w.cli('body', 'upload', 'b.glb', '--type', 'ceramic', '--license', 'owned', '--rights-confirmed')).json.assetId, ID);
   const n = w.seen.length;
-  assert.match((await w.cli('body', 'upload', 'b.glb', '--type', 'ceramic')).err, /Upload requires --manifest/);
+  assert.match((await w.cli('body', 'upload', 'b.glb', '--type', 'ceramic')).err, /Upload needs a type/);
   assert.match((await w.cli('body', 'upload')).err, /needs a GLB path/);
   assert.match((await w.cli('body', 'upload', 'b.glb', '--nope')).err, /Unknown body upload argument/);
   writeFileSync(glb, Buffer.alloc(4 * 1024 * 1024 + 1));
@@ -89,11 +89,22 @@ test('body upload: a manifest or the flags, the token only to this world, refusa
 
 test('body kit: the world\'s files and a starter, relative to where it ran, no credential, and it names this CLI', async t => {
   const w = await world(t), r = await w.cli('body', 'kit', 'my-body', '--starter', 'rigid');
-  assert.equal(r.code, 0, r.err); assert.equal(r.json.validation.valid, true);
+  assert.equal(r.code, 0, r.err); assert.match(r.json.validation.skipped, /comes from this world/);
   const kit = join(w.dir, 'my-body');
+  assert.ok(!existsSync(join(kit, 'ran-the-worlds-code')), 'the world\'s validate.mjs is copied, never run');
   for (const f of ['body.glb', 'manifest.json', 'kit.json', 'contract.json', 'validate.mjs']) assert.ok(existsSync(join(kit, f)), f);
   assert.ok(!readFileSync(join(kit, 'kit.json'), 'utf8').includes('sim_fixture_secret_token'));
   assert.ok(w.seen.filter(s => s.path.includes('/body-authoring/')).every(s => !s.auth), 'the kit files are public: no token sent');
   assert.match(r.json.next.join('\n'), /node eden\.mjs body upload/); assert.doesNotMatch(JSON.stringify(r.json), /eden-agent\.mjs/);
   assert.match((await w.cli('body', 'kit', 'my-body')).err, /already has/);
+});
+
+test('in a Souls home, files are found from where the command ran', async t => {
+  const w = await world(t), sub = join(w.dir, 'sub'); mkdirSync(sub);
+  assert.equal((await w.cli('import')).code, 0);
+  const inSub = (...args) => new Promise(done => execFile(process.execPath, [CLI, ...args], {cwd: sub}, (e, out, err) => { let json = null; try { json = JSON.parse(out); } catch { /* text */ } done({code: e?.code ?? 0, json, err}); }));
+  const k = await inSub('body', 'kit', 'here'); assert.equal(k.code, 0, k.err);
+  assert.ok(existsSync(join(sub, 'here', 'body.glb')), 'the kit lands where it was asked for, not in the home');
+  const u = await inSub('body', 'upload', 'here/body.glb', '--manifest', 'here/manifest.json'); assert.equal(u.json?.assetId, ID, u.err);
+  assert.equal(w.seen.at(-1).auth, 'Bearer sim_fixture_secret_token', 'the home supplies the token');
 });

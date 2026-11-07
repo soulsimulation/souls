@@ -101,7 +101,9 @@ export async function starterSource(starter,{origin,world=origin,info,seed,fetch
   source:'the shared Pip rolling robot (repository source, MIT); rightsConfirmed is left false: set it only after your human confirms the variant is yours to upload'};
 }
 
-/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report. */
+/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report.
+ *  validate.mjs is the world's own code: a caller that must not run it (eden.mjs, where a Souls home holds other worlds'
+ *  tokens) passes a runValidate that doesn't. */
 export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaultValidate,cli='node eden-agent.mjs',base=process.cwd()}){
  const opts=parseKitArgs(args),dir=resolve(base,opts.dir),state=load();
  if(!state.world)throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
