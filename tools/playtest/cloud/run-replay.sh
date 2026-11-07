@@ -4,6 +4,7 @@
 #   PLAYTEST_SCENARIO=tools/playtest/scenarios/<x>.json … runs that one scenario instead of the frozen set.
 #   PLAYTEST_DIRECT=tools/playtest/scenarios/casts/<x>.json … runs that cast as a headless swarm-directed session
 #   (`playtest.mjs direct --headless`; the cast's console script plays the console) instead of the frozen set.
+#   PLAYTEST_SPECS="<spec.json> …" runs a live arm of Soul Runs specs, one at a time, with its spend stops (run-specs.sh).
 # Run from a clone of the playtest branch (lane/playtest-20261024). Idempotent: rerunning resumes every step
 # (worktree, install, web build stamp, asset overlay, replay-set receipts, PNG compression, commit). See README.md.
 # Layout beside the clone: ../server (fix branch worktree), ../mars-web (overlay), ../results/<out-name>, ../results-branch.
@@ -88,6 +89,12 @@ elif [ -n "${PLAYTEST_SCENARIO:-}" ]; then
   for i in $(seq 1 "$REPEATS"); do
     step "run-$(basename "$PLAYTEST_SCENARIO" .json)-r$i" node tools/playtest/playtest.mjs run "$PLAYTEST_SCENARIO" --server-root "$SERVER" --out "$OUT/$(basename "$PLAYTEST_SCENARIO" .json)-r$i" || RS_RC=$?
   done
+elif [ -n "${PLAYTEST_SPECS:-}" ]; then
+  # a live arm of Soul Runs specs (PLAYTEST_SPECS="a.json b.json", all of them per repeat): tools/playtest/cloud/run-specs.sh (#1098)
+  read -r -a SPECS <<< "$PLAYTEST_SPECS"
+  step run-specs bash tools/playtest/cloud/run-specs.sh "$SERVER" "$OUT" "$REPEATS" "${SPECS[@]}" || RS_RC=$?
+  # seat transcripts carry this machine's paths: keep them out of the results branch
+  step scrub-paths bash -c 'grep -rIlF -e "$1" -e "$2" "$3" 2>/dev/null | while read -r f; do sed -i.bak -e "s#$1#<home>#g" -e "s#$2#<host>#g" "$f" && rm -f "$f.bak"; done' _ "$HOME" "$(hostname)" "$OUT" || true
 elif [ -n "${PLAYTEST_DIRECT:-}" ]; then
   # one directed session per repeat (PLAYTEST_DIRECT=<cast.json>, -r1, -r2 …): verdict in <run>/director/VERDICT.md
   for i in $(seq 1 "$REPEATS"); do
