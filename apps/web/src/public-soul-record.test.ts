@@ -23,6 +23,6 @@ test('#1234: no place, no receipts, a `now` with no words: read, not refused', (
 });
 test('A2: a line says what happened, on the clock it has', () => {
  assert.equal(storyLine({kind:'produced',worldDay:3,time:'09:15',place:'Main Hall',title:'Dawn'}),'Day 3 09:15: Made Dawn at Main Hall');
- assert.equal(storyLine({kind:'travel',real:'2026-11-07T10:00:00.000Z',world:'Elsewhere'}),'2026-11-07: Travelled to Elsewhere');
+ assert.equal(storyLine({kind:'travel',real:'2026-11-07T10:00:00.000Z',world:'Elsewhere',place:'Main Hall'}),'2026-11-07: Travelled to Elsewhere from Main Hall');
  assert.equal(storyLine({kind:'arrival'}),'Arrived');
 });

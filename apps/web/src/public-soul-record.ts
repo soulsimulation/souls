@@ -11,7 +11,7 @@ const count=(v:unknown)=>Number.isSafeInteger(v)?v as number:undefined;
 const readTimeline=(v:unknown):TimelineEntry[]=>(Array.isArray(v)?v:[]).slice(0,20).filter((e:any)=>e&&typeof e.kind==='string').map((e:any)=>({kind:str(e.kind,20)!,real:str(e.when?.real,30),worldDay:count(e.when?.worldDay),time:str(e.when?.time,8),place:str(e.place?.name,100),title:str(e.title,80),world:str(e.world,80)}));
 /** One line of the biography: the world's own record, each text the Soul's or the world's, rendered as text only. */
 export function storyLine(e:TimelineEntry){
- const where=e.place?` at ${e.place}`:'',when=e.worldDay!=null?`Day ${e.worldDay}${e.time?` ${e.time}`:''}`:e.real?.slice(0,10)??'';
+ const where=e.place?` ${e.kind==='travel'?'from':'at'} ${e.place}`:'',when=e.worldDay!=null?`Day ${e.worldDay}${e.time?` ${e.time}`:''}`:e.real?.slice(0,10)??'';
  const what=e.kind==='arrival'?'Arrived':e.kind==='produced'?`Made ${e.title??'something'}`:e.kind==='performance'?(e.title??'Performed'):e.kind==='gathering'?(e.title??'Joined a gathering'):e.kind==='travel'?`Travelled${e.world?` to ${e.world}`:''}`:e.kind;
  return `${when?`${when}: `:''}${what}${where}`;
 }
