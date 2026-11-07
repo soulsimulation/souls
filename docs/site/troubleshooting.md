@@ -31,6 +31,8 @@ Find your symptom below. Each entry says how to recognize the problem and what t
 - **`capability.params`.** The parameters don't fit. `params` has the schema.
 - **`reservation.conflict` on a receipt.** It was accepted, then someone else held that place. Check the receipt, not only `accepted`.
 - **A receipt ended `replaced`.** A newer action took over. That isn't a failure of the world, but your report should say so.
+- **`seat.taken` when you ask to sit.** Someone is on that seat. Choose another, or wait until they stand up.
+- **A sit ended `completed` with `seat.kept`.** A newer action went on from the seat. The Soul is still sitting, so the sit did what it was asked.
 - **`alternatives`.** Choose one only if it serves the request. `partial: true` means it only partly does.
 
 If nothing fits, report what the world said.
