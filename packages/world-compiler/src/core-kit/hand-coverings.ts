@@ -80,14 +80,14 @@ const openSign = {
   actions: [{ ...actions('sign')[0], label: 'Turn the sign to Open' }, { ...actions('sign')[1], label: 'Turn the sign to Closed' }],
 } as unknown as DefInput;
 
-// #427 (W041): a garden parasol, the same contact at a crank on its pole. Open, its canopy shades a Soul under it (tag `shade`,
-// the disc of its size box); closed, the cloth folds down along the pole (role canopy, opening-motion.ts). Only the base and
-// the pole are solid: the canopy is well above a head, so she walks under it either way.
+// #427 (W041): a garden parasol, the same contact at a crank on its pole. Open, its canopy shades a Soul under it
+// (components.shade); closed, the cloth folds down along the pole (role canopy, opening-motion.ts). Only the base and the pole
+// are solid and the canopy is well above a head, so she walks under it either way; the size box is the base, what she stands clear of.
 const parasolPalette = { base: '#5d5a54', pole: '#8a6f4d', cloth: '#d9c9a3', trim: '#a4553f', valve: '#3f3a34' };
 const parasol = {
   schema: 'def/1', name: 'core-parasol', version: 1, form: 'point',
-  description: 'A freestanding garden parasol on a weighted base (2.6 m across, 2.6 m tall). A Soul opens and folds it by hand at the crank on its pole; open, it shades whoever stands under it.',
-  tags: ['garden', 'shade', 'hand-operated', 'local-fixture'],
+  description: 'A freestanding garden parasol on a weighted base (2.6 m across, 2.6 m tall). A Soul opens and closes it by hand at the crank on its pole; open, it shades whoever stands under it.',
+  tags: ['garden', 'hand-operated', 'local-fixture'],
   make: { kind: 'gen', gen: 'kit/2', args: { v: 2, round: 0.006, shapes: [
     { kind: 'cyl', at: [0, 0.04, 0], r: 0.26, h: 0.08, segments: 12, tint: 'base', collide: true },
     { kind: 'cyl', at: [0, 1.3, 0], r: 0.022, h: 2.5, segments: 8, tint: 'pole', collide: true },
@@ -95,11 +95,12 @@ const parasol = {
     { kind: 'sphere', at: [0, 2.58, 0], r: 0.03, tint: 'pole' },
     // folded, as a plain build draws it; the viewer spreads it to 1.3 m across about its top (foldCanopy, opening-motion.ts)
     { kind: 'cone', at: [0, 2.0, 0], r: 0.11, h: 1.1, segments: 8, tint: 'cloth', role: 'canopy', pivot: [0, 2.55, 0] },
-    { kind: 'cone', at: [0, 2.352, 0], r: 0.038, h: 0.396, segments: 8, tint: 'trim', role: 'canopy', pivot: [0, 2.55, 0] }] } },
+    { kind: 'cone', at: [0, 2.352, 0], r: 0.046, h: 0.396, segments: 8, tint: 'trim', role: 'canopy', pivot: [0, 2.55, 0] }] } },
   params: Object.fromEntries(Object.entries(parasolPalette).map(([k, v]) => [k, { type: 'color', default: v, doc: `${k} colour${k === 'valve' ? ' (the crank; the hand goes here)' : ''}` }])),
   palette: parasolPalette,
   state: { open: { type: 'bool', default: true } },
-  size: { box: [2.6, 2.61, 2.6] },
+  components: { shade: { radius: 1.3 } },
+  size: { box: [0.52, 2.61, 0.52] },
   actions: actions('parasol'),
 } as unknown as DefInput;
 

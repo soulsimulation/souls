@@ -101,6 +101,9 @@ export const componentsSchema = z.object({
   //  W7: `variant` pins one voicing of the kind; `also` adds up to 3 more sounds to the same thing.
   sound: soundSchema.optional(),
   /** Text on a sign or board (state `text` overrides). */
+  /** #427: while its `open` state is true this thing shades the ground within `radius` metres (def frame, scale 1) of its centre:
+   *  a parasol. Its canopy overhangs, so this is not its size box, which stays the footprint a body stands clear of. */
+  shade: z.object({ radius: num.positive() }).optional(),
   sign: z.object({ lines: z.array(z.string().max(80)).max(6).default([]) }).optional(),
   body: z.object({
     media: z.array(z.enum(['walk', 'swim', 'fly', 'float'])).min(1),

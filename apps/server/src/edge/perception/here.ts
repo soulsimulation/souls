@@ -332,7 +332,7 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
     const k = kindOf(t), n = taken.get(k) ?? 0; if (n < (k === 'seat' ? LIMITS.seats : 2) && picked.length < LIMITS.objects) {picked.push(t); taken.set(k, n + 1);} else more[k] = (more[k] ?? 0) + 1;
   }
   // #427: under an open parasol outdoors, unless it is night (a world without a clock has none); `all` is nearest first
-  const shade = P.enclosure === null && (!c || lightOf(c.hour, c.minute) !== 'night') ? all.find(t => t.kind === 'object' && t.distance <= (ledger.contactActuator?.shade(t.id) ?? 0)) : undefined;
+  const shade = P.enclosure === null && (!c || lightOf(c.hour, c.minute) !== 'night') ? all.find(t => {const r = t.kind === 'object' ? ledger.contactActuator?.shade(t.id, soul) ?? 0 : 0; return r > 0 && t.distance <= r && P.sees(t.at, t.id);}) : undefined;
   // Only six selected objects, at most 4 m away and in sight. No stored-state dump.
   const objects = picked.map(t => {
     // M01: the few facts first; enclosure and sightline (entity-world walls) only for a thing that has some.
