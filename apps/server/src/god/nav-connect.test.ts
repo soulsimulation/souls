@@ -209,15 +209,21 @@ test('#1287: a Soul mid-walk when walls close round it is passed over, then step
   await w.settle(30); assert.equal(asked.length, 1, 'asked once, not every tick');
 });
 
-test('#1287: labels stale when the walk ends do not lose the Soul: it waits for them, then steps out', async t => {
+test('#1287: labels gone stale when the walk ends do not lose the Soul: they are warmed, then it steps out', async t => {
   const { w, s, at, asked, steps, ended, open } = await walker(t, 'el');
+  const x = at[0] - 24, z = at[1] - 14;
+  const yard: any = w.god.act({ ops: [
+    { op: 'place', def: 'core/garden-wall@1', name: 'y-walls', shape: { path: [[x - 0.6, z], [x - 4, z], [x - 4, z + 6], [x + 4, z + 6], [x + 4, z], [x + 0.6, z]] } },
+    { op: 'place', def: 'core/door@2', name: 'y-door', p: [x, z], r: Math.PI }] });
+  assert.equal(yard.accepted, true, JSON.stringify(yard.failures)); await w.settle(5);
+  const door = w.god.model.get('y-door')!; asked.length = 0;   // the yard's own pass asked about an idle Soul
   const walk: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:crate' })); assert.equal(walk.accepted, true, JSON.stringify(walk)); await w.settle(3);
-  assert.equal((w.god.act({ ops: ring(at, 9, 'e') }) as any).accepted, true);
-  // a door moved by a hand changes the world with no god edit's nav pass, so a poll can read stale: three polls here do
-  const warm = w.E.navWarmV1.bind(w.E); let stale = 3; w.E.navWarmV1 = (ms: number) => (ms === 0 && stale > 0 ? (stale--, false) : warm(ms));
-  await ended(); await w.settle(60);
-  assert.equal(stale < 3, true, 'it polled first'); assert.equal(asked.length, 1, 'and asked only once the labels were good');
-  assert.equal(steps().length, 1, 'stepped out all the same'); assert.equal(open(), true);
+  assert.equal((w.god.act({ ops: ring(at, 9, 'e') }) as any).accepted, true); await w.settle(2);
+  // a door worked by hand changes the world with no god edit's nav pass: nothing else would warm the labels
+  assert.equal((w.god.engineAct([{ op: 'set', id: door.id, state: { open: !door.state?.open } } as any], 'worked by hand', () => {}) as any).accepted, true); await w.settle(3);
+  assert.equal(w.E.navWarmV1(0), false, 'the labels are stale'); assert.ok(w.host.engine.programOf(s.entityId), 'while it still walks');
+  await ended(); await w.settle(40);
+  assert.equal(asked.length, 1, 'asked once the labels were good'); assert.equal(steps().length, 1, 'stepped out all the same'); assert.equal(open(), true);
 });
 
 test('#1287: a walker on open ground at a far edit is not queued, so its arrival is not judged again', async t => {
