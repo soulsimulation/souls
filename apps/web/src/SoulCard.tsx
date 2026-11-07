@@ -2,7 +2,7 @@ import {SoulAvatar} from './MySouls.tsx';
 import {useEffect,useRef,useState} from 'react';
 import type {PublicSoul} from '@souls/protocol';
 import type {Api} from './useSouls.ts';
-import {PUBLIC_SOUL_PATH,readPublicRecord,type PublicRecord} from './public-soul-record.ts';
+import {PUBLIC_SOUL_PATH,readPublicRecord,storyLine,type PublicRecord,type TimelineEntry} from './public-soul-record.ts';
 import {publicSoulLink} from './soul-link.ts';
 import {apiPath,worldPath} from './world-path.ts';
 import {BASE} from './base-path.ts';
@@ -42,7 +42,7 @@ export function SoulCard(props:SoulCardProps){
  const body=newest(readBody(x.body),r?.body??null,props.bodyEvent??null)??fadeBody(r);
  const now=newest(readNow(x.now),r?.now??null);
  const place=placeOf(r?.self?.placePath);
- return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera}/>;
+ return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline}/>;
 }
 function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&{body:Body|null;now:Now|null;place:string|null}){
  const {inbox,send}=useSoulInbox(api,soul.id),here=useAgentPresence(soul.id),code=useWindowCode();
@@ -53,11 +53,13 @@ function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&
 }
 
 export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|null;now:Now|null;place:string|null;camera?:Camera;
+ /** visitor only: the public biography, newest first (CTX-8) */
+ story?:TimelineEntry[];
  /** owner only: the one state (null = not known yet), presence, inbox, the start prompt, Disconnect */
  link?:Link|null;here?:AgentHere|null;inbox?:AgentInbox|null;send?(text:string):Promise<unknown>;prompt?:string;signedIn?:boolean;disconnect?():Promise<boolean>;
  /** fixtures and shots: a fixed clock, the link details (and Pair another session) open from the start */
  clock?:number;open?:{details?:boolean;pair?:boolean}};
-export function SoulCardView({soul,view,body,now,place,camera,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,clock,open}:SoulCardViewProps){
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,clock,open}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -95,6 +97,7 @@ export function SoulCardView({soul,view,body,now,place,camera,link=null,here=nul
   {now&&<p className={'soul-now'+(sleeping?' soul-now-dim':'')} data-now="1"><q>{now.text}</q>{now.at>0&&<span className="soul-dim" title={clockTitle(now.at)}> · {ageText(now.at,t)}</span>}</p>}
   {waiting&&<WaitingNote name={soul.name} place={place} since={link!.since} prompt={prompt} clock={t}/>}
   {disconnected&&!waiting&&<ReconnectBox name={soul.name} link={link!} prompt={prompt} clock={t}/>}
+  {!owner&&story&&story.length>0&&<SoulStory story={story}/>}
   <div className="soul-card-thread" data-soul-thread={soul.id}/>
   {connected&&send&&<SoulMessageBox inbox={inbox} send={send}/>}
   {followShown&&<div className="soul-actions">
@@ -103,6 +106,10 @@ export function SoulCardView({soul,view,body,now,place,camera,link=null,here=nul
  </article>;
 }
 
+/** What the world's record shows of this Soul. Its texts are the Soul's or the world's: rendered as text only. */
+function SoulStory({story}:{story:TimelineEntry[]}){
+ return <details className="soul-story" data-soul-story="1" open><summary>Its story so far</summary><ol>{story.map((e,i)=><li key={`${e.real}-${i}`}>{storyLine(e)}</li>)}</ol></details>;
+}
 function Head({soul,title,share,copied}:{soul:PublicSoul;title:React.RefObject<HTMLHeadingElement|null>;share():void;copied:string}){
  return <>
   <div className="soul-card-portrait"><SoulAvatar soul={soul}/></div>
