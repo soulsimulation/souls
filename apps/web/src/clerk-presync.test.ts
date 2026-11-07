@@ -11,7 +11,7 @@ function visit(href: string, { config = sat as unknown, cookie = '', stored = nu
   const u = new URL(href), store = new Map<string, string>(stored ? [['soul.clerk-presync', stored]] : []); let went: string | null = null;
   vm.runInNewContext(code, { window: { __simConfig: config }, document: { cookie }, Date: { now: () => now },
     sessionStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) },
-    location: { href, pathname: u.pathname, search: u.search, replace: (to: string) => { went = to; } }, encodeURIComponent });
+    location: { href, origin: u.origin, pathname: u.pathname, search: u.search, replace: (to: string) => { went = to; } }, encodeURIComponent });
   return went;
 }
 
@@ -30,4 +30,12 @@ test('it never syncs twice, and leaves everything else alone', () => {
   assert.equal(visit('https://soul.game/w/eden/', { config: { authProvider: 'clerk' } }), null, 'the primary domain itself');
   assert.equal(visit('https://soul.game/w/eden/', { config: { authProvider: 'dev' } }), null, 'a dev world');
   assert.equal(visit('https://soul.game/w/eden/', { config: { ...sat, clerkSatellite: { domain: 'evil.example/x?' } } }), null, 'a strange domain');
+});
+
+test('only on the satellite\'s own origin: a preview host or local dev never leaves for the sync', () => {
+  assert.notEqual(visit('https://soul.game/w/eden/'), null, 'the satellite itself');
+  assert.equal(visit('https://preview-123.soul.game/w/eden/'), null, 'a preview host');
+  assert.equal(visit('http://127.0.0.1:4710/w/eden/'), null, 'local dev');
+  assert.equal(visit('http://soul.game/w/eden/'), null, 'not https');
+
 });
