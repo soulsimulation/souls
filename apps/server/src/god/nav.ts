@@ -851,8 +851,10 @@ export class GodNav {
     if (t.semanticPart?.seat) {
       const target=t.semanticPart.seat, sid=`sit:${t.ref}`;
       // This invokes the engine's actual slot reservation/approach; the semantic name cannot create a seat.
-      caps.push({id:sid,verb:'sit',label:`Sit at ${t.name} [${t.ref}]`,...(t.aliases?.length?{aliases:t.aliases}:{}),target:{id:target.entity,kind:'object'},available:true,params:{seconds:{type:'integer',min:1,max:600,default:600}}});
-      plans.set(sid,{label:`Sit at ${t.name}`,steps:[...stand,...down,go,{verb:'mars:sit',params:{slot:`${target.entity}#${target.slot}`}},{verb:'rest',params:{seconds:600}}],seconds:true});
+      // #485: an offer is executable when it's shown. A seat someone else holds would only fail after admission.
+      const taken=this.E.seatOccupantsV1?.(target.entity).some((o)=>o.slot===target.slot&&o.body!==soul.entityId)??false;
+      caps.push({id:sid,verb:'sit',label:`Sit at ${t.name} [${t.ref}]`,...(t.aliases?.length?{aliases:t.aliases}:{}),target:{id:target.entity,kind:'object'},available:!taken,...(taken?{blocked:{code:'seat.taken',reason:`Someone is sitting at ${t.name}; choose another seat, or wait until they stand up.`}}:{}),params:{seconds:{type:'integer',min:1,max:600,default:600}}});
+      if(!taken)plans.set(sid,{label:`Sit at ${t.name}`,steps:[...stand,...down,go,{verb:'mars:sit',params:{slot:`${target.entity}#${target.slot}`}},{verb:'rest',params:{seconds:600}}],seconds:true});
     }
     if (place&&!onlyWalk) this.placeCapabilities(t, place, here, d, [...stand, ...down, go], myLevel, caps, plans);
   }
