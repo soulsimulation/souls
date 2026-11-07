@@ -151,8 +151,8 @@ a throw it didn't repeat, isn't refused under these rules: it is a legal world, 
 its Soul is told, and whatever it held is set down where it is, on the bearer's level: the one time a load is let go without its
 set-down, because the action that would have done it is what broke. A part joined to others stays where it is and stands by
 itself, as a god's joined upright does, and the frames and beams of its group stand down with it (`settleFrames`), because laying
-it flat would keep the joints and the crew at the other end could never let go. What a part was doing to a rule after that is
-the ladder's like anything else.
+it flat would keep the joints and the crew at the other end could never let go. Crews holding the rest of that frame are let go
+in the same way, since nobody can finish it with them now. What a part does to a rule after that is the ladder's like anything else.
 
 **A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
 that long, and is then abandoned the same way. So a stop that is refused (`support.release-premature`) or a set-down that can't

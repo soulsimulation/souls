@@ -517,20 +517,23 @@ export class MarsEngine implements Engine {
       const l = rt.live.get(id); if (!l) { rt.forceCancel?.(id, ACTION_THREW); continue; }
       try { internal.forceFinish(l, 'failed', ACTION_THREW); } catch { rt.live.delete(id); for (const [k, list] of internal.owners) { const kept = list.filter((o: { action: string }) => o.action !== id); if (kept.length) internal.owners.set(k, kept); else internal.owners.delete(k); } }
     }
-    const poses: EngineRefusalV1['poses'] = {}, spatial = this.rt.services.spatial as Spatial; let joined = false;
+    const poses: EngineRefusalV1['poses'] = {}, spatial = this.rt.services.spatial as Spatial, joined: string[] = [];
     for (const id of bodies) {
       const h = ents[id].human, item = ents[h.grip?.entity], level: number = h.level ?? 0; delete h.grip; delete h.task; h.activity = 'idle';
       if (!item || !['held', 'in-hand'].includes(item.support?.kind)) continue;
       delete item.reservedBy;
       // a part joined to others stays where it is and stands by itself, as a god's joined upright does: laying it down would
       // leave the joints it keeps, and the crew on the other end of them could never let go
-      if (item.connections?.length) { item.support = { kind: 'ground' }; item.phase = 'installed'; joined = true; continue; }
+      if (item.connections?.length) { item.support = { kind: 'ground' }; item.phase = 'installed'; joined.push(item.id); continue; }
       const [x, , z] = item.pose.p, floor = spatial.base?.levels.find((l: { id: number }) => l.id === level)?.y ?? 0;
       placeOnGround(item, [x, level === 0 && this.rt.world.groundV1 && spatial.ground ? r3(standOn(spatial.ground, x, z)) : floor, z], item.pose.yaw ?? 0); acknowledgeRelocation(this.rt, item.id);
       poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
     }
-    if (joined) settleFrames(this.rt);
+    if (joined.length) settleFrames(this.rt);
     (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200) });
+    // the crews holding the rest of that frame: nobody can finish it with them now, and their stop waits on a frame that won't stand
+    const group = new Set(joined); for (const id of group) for (const c of ents[id]?.connections ?? []) group.add(c.to);
+    for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a part of the same frame broke: ${id}`); }
   }
   /** Is this violation on the list, by name or by its rule? */
   private coveredV1(): (v: { code: string; subjects?: string[] }) => boolean {

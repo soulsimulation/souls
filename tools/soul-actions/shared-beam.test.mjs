@@ -230,14 +230,14 @@ for (const mode of ['a rung 3', 'a stop in place'])
     await w.tick(60); for (const [s, r] of walks) assert.ok(['started', 'completed'].includes(read(w, s, r).phase), JSON.stringify(read(w, s, r)));
     await w.tick(10); await restart(w, false); await w.tick(320); await freed(w, [Bo, Cy], ids);
   });
-test('#1150 a raise whose action throws while its upright is joined: that crew is let go, the upright stands, and the other crew can still finish', {timeout: 600000}, async (t) => {
+test('#1150 a raise whose action throws while its upright is joined: both crews are let go at once, and the frame stands', {timeout: 600000}, async (t) => {
   t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {});
-  const w = await world(t), {Ada, Bo, Cy} = w.souls, fa = w.idOf('fa'), ids = [fa, w.idOf('beam1')];
+  const w = await world(t), {Ada, Bo, Cy, Dee} = w.souls, fa = w.idOf('fa'), ids = [fa, w.idOf('fb'), w.idOf('beam1')];
   await frames(w); await seat(w, 'beam1', 'l', 0.76); await w.tick(10); w.host.saveSnapshot(true); await w.tick(5);
   const def = w.host.engine.rt.registry.get('raise_hold_v1'), {step} = def; t.after(() => { def.step = step; }); def.step = (rt, ex, dt) => { if (ex.p.item === fa) throw new Error('fixture.action-bug'); return step(rt, ex, dt); };
-  await w.tick(50); await freed(w, [Ada, Bo], ids); assert.equal(w.E()[fa].support.kind, 'ground'); assert.equal(w.host.engine.programOf(Cy.entityId) !== null || !!w.E()[Cy.entityId].human.grip, true, 'the other crew holds on');
-  const o = offer(w, w.souls.Eve, `connect-beam-with:${w.idOf('beam2')}`); assert.equal(o?.available, true, JSON.stringify(o));
-  await restart(w, false); await freed(w, [Ada, Bo], ids);
+  await w.tick(10); await freed(w, [Ada, Bo, Cy, Dee], ids); assert.equal(w.E()[fa].support.kind, 'ground');
+  const r = ok(await act(w, Cy, {capability: 'walk:field'})); await w.tick(20); assert.ok(['started', 'completed'].includes(read(w, Cy, r).phase), JSON.stringify(read(w, Cy, r)));
+  await restart(w, false); await w.tick(5); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(w.host.stepFailing, null);
 });
 
 test('R8: with the flag off nothing is offered', {timeout: 300000}, async (t) => {
