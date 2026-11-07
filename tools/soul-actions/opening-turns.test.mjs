@@ -28,7 +28,8 @@ const once = async (ref, r) => {
   if (!god.act({ops: [{op: 'place', def: ref, name: 'thing', p: [ax + 1, az + 3], r}]}).accepted) return [];
   await tick(45);
   const out = [], moved = [];
-  for (const action of ['open', 'close']) {
+  // a third leg, so a thing that starts open (a blind) is opened too
+  for (const action of ['open', 'close', 'open']) {
    const capability = `object:${god.model.get('thing').id}:${action}`;
    const a = await (await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability, strict: true})}))).json();
    if (!a.accepted) {out.push(a.code); continue;}

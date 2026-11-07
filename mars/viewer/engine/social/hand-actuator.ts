@@ -370,7 +370,7 @@ export const handActuator:ActionDef<HandActuatorParams,true,Exec>={
   if(ex.p.stroke){const goal=strokeRoot(ex.p.at,ex.p.stroke,ex.root[1]);if(hypot(goal[0]-ex.root[0],goal[2]-ex.root[2])>.5){clear(rt,ex);return {status:'failed',diagnostic:issue('not-at-board','Walk up to the board before writing on it.',[ex.p.target])};}
    const k=smooth(Math.min(1,ex.t/HAND_REACH_SECONDS));point.root=ex.strokeHeld?[...a.pose.p]:[ex.root[0]+(goal[0]-ex.root[0])*k,ex.root[1],ex.root[2]+(goal[2]-ex.root[2])*k];}
   if((ex.p.opening||ex.p.slide)&&ex.t<handReachSeconds(ex.p)){const k=smooth(ex.t/handReachSeconds(ex.p));point.root=[ex.root[0]+(point.root[0]-ex.root[0])*k,ex.root[1]+(point.root[1]-ex.root[1])*k,ex.root[2]+(point.root[2]-ex.root[2])*k];}
-  if(ex.p.opening?.settle){const k=smooth(ex.t/(handReachSeconds(ex.motion)+handSwingSeconds(ex.motion))),[sx,sz]=ex.p.opening.settle;point.root=[point.root[0]+sx*k,point.root[1],point.root[2]+sz*k];}
+  if(ex.p.opening?.settle){const k=smooth((ex.motion.abortedAt??ex.t)/(handReachSeconds(ex.motion)+handSwingSeconds(ex.motion))),[sx,sz]=ex.p.opening.settle;point.root=[point.root[0]+sx*k,point.root[1],point.root[2]+sz*k];}
   if(ex.shift)point.root=[point.root[0]+ex.shift[0],point.root[1],point.root[2]+ex.shift[1]];
   const bad=blocked(rt,ex,point.root,f.angle);if(bad){clear(rt,ex);return {status:'failed',diagnostic:bad};}
   // #1063: a stroke's step stops for good where the next one would overlap by the invariant's measure, and the hand works from there

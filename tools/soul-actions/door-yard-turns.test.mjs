@@ -13,7 +13,7 @@ import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 // side. Every leg completes or fails by name; nothing recovers a fault, breaks an invariant or jumps. Each turn is a fresh world.
 const defs = (process.env.YARD_DEFS ?? 'core/door@3,core/door@2').split(',');
 const turns = (process.env.YARD_TURNS ?? '0,0.4,0.571,0.785,1.2,1.571,1.9,2.356,2.9,3.7,4.712,5.5,5.712').split(',').map(Number);
-const once = async (ref, r) => {
+const once = async (ref, r, stubs = [], tight = false) => {
  const f = fixture(':memory:', factory, {durableClockV1: true}); f.brain.quiesce();
  const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false}), app = new Hono(); let soul;
  const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: edge, soul: () => soul});
@@ -31,8 +31,11 @@ const once = async (ref, r) => {
    {op: 'place', def: ref, name: 'door', p: o, r: r + Math.PI},
    {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: at(1.5, 4), r},
    {op: 'place', def: 'core/floor-lamp@1', name: 'outside-lamp', p: at(0, -4)},
+   ...stubs.map(([x0, z0, x1, z1], i) => ({op: 'place', def: 'core/garden-wall@1', name: `stub-${i}`, shape: {path: [at(x0, z0), at(x1, z1)]}})),
   ]});
   assert.equal(placed.accepted, true, JSON.stringify(placed)); await tick(45);
+  // a walk's close that finds no room: no wall in a yard has been found to do this to a walk, so the plan says it outright
+  if (tight) {const plan = edge.contactActuator.plan.bind(edge.contactActuator); edge.contactActuator.plan = (...a) => {const p = plan(...a); return a[2] === 'close' && p ? {...p, noRoom: true} : p;};}
   const moved = [], out = [];
   const leg = async (capability, name) => {
    const a = await (await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability})}))).json();
@@ -40,15 +43,19 @@ const once = async (ref, r) => {
    let was = [...body().pose.p], rc;
    for (let n = 0; n < 2400; n++) {
     rc = edge.receipt(soul.soulId, a.receipt.id); if (['completed', 'failed', 'cancelled', 'replaced'].includes(rc?.phase)) break;
-    await tick(1); moved.push(Math.hypot(body().pose.p[0] - was[0], body().pose.p[2] - was[2])); was = [...body().pose.p];
+    await tick(1); if (body().human?.handActuator?.opening?.settle) out.settled = true; moved.push(Math.hypot(body().pose.p[0] - was[0], body().pose.p[2] - was[2])); was = [...body().pose.p];
    }
    out.push([name, rc?.code ?? rc?.phase]); await tick(10);
   };
-  const id = god.model.get('door').id;
-  await leg('walk:inside-bench', 'in'); await leg('walk:outside-lamp', 'out');
-  for (const side of ['outside', 'inside']) {
-   await leg(side === 'inside' ? 'walk:inside-bench' : 'walk:outside-lamp', `to-${side}`);
-   await leg(`object:${id}:open`, `open-${side}`); await leg(`object:${id}:close`, `close-${side}`);
+  const id = god.model.get('door').id, inside = () => (body().pose.p[0] - o[0]) * s + (body().pose.p[2] - o[1]) * c > 0, shut = () => god.model.get('door').state?.open === false;
+  const through = async (name, wantInside) => {await leg(wantInside ? 'walk:inside-bench' : 'walk:outside-lamp', name); if (out.at(-1)[1] === 'completed') {assert.equal(inside(), wantInside, `${ref} r=${r} ${name}: the far side`); assert.ok(shut(), `${ref} r=${r} ${name}: shut behind her`);}};
+  await through('in', true); await through('out', false);
+  // by hand from each side: the hand opens it, she crosses the open doorway, and it is shut from there
+  for (const wantInside of [true, false]) {
+   await leg(`object:${id}:open`, 'open');
+   await leg(wantInside ? 'walk:inside-bench' : 'walk:outside-lamp', 'cross');
+   await leg(`object:${id}:close`, wantInside ? 'close-inside' : 'close-outside');
+   if (out.at(-1)[1] === 'completed') {assert.ok(shut(), `${ref} r=${r}: shut by hand`); assert.equal(inside(), wantInside, `${ref} r=${r}: on the side she shut it from`);}
   }
   assert.deepEqual(f.host.engine.runtime.violations, [], `${ref} r=${r}`);
   assert.equal(f.host.glitches.total, 0, `${ref} r=${r}: ${JSON.stringify(f.host.glitches.byRule)}`);
@@ -66,7 +73,25 @@ test('a door in a yard at every turn: walked through and shut from both sides', 
     assert.notEqual(code, 'engine.fault-recovered', `${ref} r=${r} ${name}`);
     assert.ok(code === 'completed' || /^(contact|object|hand_actuator_v1|walk|place|capability)\.[a-z-]+$/.test(code ?? ''), `${ref} r=${r} ${name}: ${code}`);
    }
-   assert.equal(legs.filter(([n, c]) => ['in', 'out'].includes(n) && c !== 'completed').length, 0, `${ref} r=${r}: ${JSON.stringify(legs)}`);
+   assert.equal(legs.filter(([, c]) => c !== 'completed').length, 0, `${ref} r=${r}: ${JSON.stringify(legs)}`);
   }
  });
+});
+
+test('a wall just behind where a close would end: refused by name', {timeout: 120000}, async () => {
+ const stubs = JSON.parse(process.env.YARD_STUBS ?? '[[-1.5,-0.75,1.5,-0.75]]'), legs = await once('core/door@3', 0.571, stubs);
+ if (process.env.YARD_LOG) console.log('STUB', JSON.stringify(legs));
+ assert.deepEqual(legs.filter(([n]) => n === 'close-outside'), [['close-outside', 'contact.no-room']]);
+});
+
+test('a walk whose close would have no room is refused by name, and the door is not opened', {timeout: 120000}, async () => {
+ const legs = await once('core/door@3', 0.571, [], true);
+ if (process.env.YARD_LOG) console.log('TIGHT', JSON.stringify(legs));
+ assert.deepEqual(legs[0], ['in', 'contact.no-room']);
+});
+
+test('a close that ends clear carries nothing new, one that would not eases clear', {timeout: 120000}, async () => {
+ // at 4.712 a close ends at exactly the limit, which is legal
+ assert.equal((await once('core/door@3', 4.712)).settled, undefined);
+ assert.equal((await once('core/door@3', 0.571)).settled, true);
 });

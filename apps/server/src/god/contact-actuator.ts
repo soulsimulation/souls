@@ -27,7 +27,7 @@ type Refusal={code:string;reason:string};
 export const isContactActuator = (def:StoredDef, action:{name:string}) => contactStateKey(def,action.name)!==null;
 const fail=(code:string,reason:string)=>({ok:false as const,code,reason});
 export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:number)=>number;clearance?:(x:number,z:number,level?:number)=>number;
- /** #1070: how far this body must ease from `to` to stay clear of the thing's gap once it is shut; undefined when it's clear, null when no place is */ settle?:(actor:string,target:string,to:[number,number])=>[number,number]|null|undefined;
+ /** #1070: how far this body must ease from `to` to stay clear of the thing's gap once it is shut; undefined when it's clear, null when no place is */ settle?:(actor:string,target:string,to:[number,number],level:number)=>[number,number]|null|undefined;
  model:()=>WorldModel;body:(id:string)=>{pose:{p:number[]};human?:{hands?:{left?:number[];right?:number[]};handActuator?:import('../../../../mars/viewer/engine/social/hand-actuator.ts').HandActuatorMotion}}|undefined;access:(id:string,soul:EdgeSoul)=>{code:string;reason:string}|null;
  /** entry 32: the thing's owner (a name) and whether it is this Soul; null when nobody owns it */ owner?:(id:string,soul:EdgeSoul)=>{name:string;mine:boolean}|null;
  /** entry 32: a knock on the leaf landed (the first rap): tell those who hear it */ knock?:(soul:EdgeSoul,id:string)=>void;
@@ -108,7 +108,7 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
     if(def.tags.includes('wall-window')&&(wp.y+params.opening.handleY-me[1]>1.65||wp.y+params.opening.handleY-me[1]<.35))return null;
     root=actuatorPoint(params.opening,params.opening.from).root;
     // #1070: the gap turns solid at the contact, so a close that would end too near it eases clear on the way. Most end clear and change nothing.
-    if(params.opening.from!==0&&params.opening.to===0&&!params.op){const end=actuatorPoint(params.opening,0).root,settle=d.settle?.(soul.entityId,target,[end[0],end[2]]);if(settle===null)noRoom=true;else if(settle)params.opening.settle=settle;}
+    if(params.opening.from!==0&&params.opening.to===0&&!params.op){const end=actuatorPoint(params.opening,0).root,settle=d.settle?.(soul.entityId,target,[end[0],end[2]],d.levelAt?.(end[0],end[2],end[1])??0);if(settle===null)noRoom=true;else if(settle)params.opening.settle=settle;}
    }else if(def.components.bell&&def.tags.includes('hand-rung')){
     const [x,y,z]=def.components.bell.gripAt,stretch=(key:string)=>Number(e.params?.[key]??def.params[key]?.default??1),sx=wp.s*stretch('sx'),sy=wp.s*stretch('sy'),sz=wp.s*stretch('sz'),c=Math.cos(wp.yaw),s=Math.sin(wp.yaw);
     at[0]=wp.x+x*sx*c+z*sz*s;at[1]=wp.y+y*sy;at[2]=wp.z-x*sx*s+z*sz*c;params.tug={length:.45*sy,angle:def.components.bell.pullAngle,yaw:wp.yaw,seconds:.6};
