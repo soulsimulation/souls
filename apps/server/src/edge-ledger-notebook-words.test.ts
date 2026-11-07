@@ -104,6 +104,9 @@ test('notebook words resolve only where a notebook is offered', () => {
   const said = (input: string, caps: any[]) => (resolveCapability(input, { caps, target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any).reason;
   assert.match(said('cross out my note at the sheet', [pin, unpin]), /goes by "sheet"/, 'the refusal names the absent thing, not "at"');
   assert.match(said('cross out my first line in the notebook', [nbPin, nbUnpin]), /goes by "first"/);
+  // review of e47427577: "and" asks for a second thing, so half of it is not done; capitals and leading punctuation read as the plain word
+  for (const w of ['cross out my note and sign the sheet', 'cross out my note and my name']) assert.equal(resolve(w, [pin, unpin, sign, unsign]), 'capability.unknown', w);
+  for (const w of ['Cross out my note at the Board', 'cross out my note, at the board', 'cross out "my note" at the board']) assert.equal(resolve(w, [pin, unpin]), unpin.id, w);
   // a thing's own name keeps its plain words
   const found = mk('e_aaaa0005', 'unpin', 'Take down your note from the notice board (lost-and-found)', ''), aid = mk('e_cccc0006', 'unpin', 'Cross out your line in the notebook (first-aid-log)', '');
   for (const w of ['cross out my note on the lost-and-found', 'cross out my note on the lost and found']) assert.equal(resolve(w, [found]), found.id, w);
