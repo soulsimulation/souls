@@ -21,9 +21,9 @@ test('A1: public things made, performances and gatherings are kept; a private re
  assert.deepEqual(entryOf(receipt('r','paint:easel'),made('public') as never),{kind:'produced',title:'Dawn',object:'o_1'});
  for(const cap of ['write:desk','craft:bench','post-letter:box'])assert.equal(entryOf(receipt('r',cap),made('private','My secret diary') as never),null,cap);
  assert.equal(entryOf(receipt('r','paint:easel'),made('participants') as never),null);
- for(const [cap,title] of [['play-piano:hall','Play the piano'],['play-music:drums','Play music'],['lecture:podium','Give a talk or a lesson'],['tell-story:circle','Tell a story to the circle']] as const)assert.deepEqual(entryOf(receipt('r',cap),undefined),{kind:'performance',title},cap);
- assert.deepEqual(entryOf(receipt('r','social-dance:band'),undefined),{kind:'performance',title:'Dance on the bandstand'},'danced alone it still completes');
- assert.deepEqual(entryOf(receipt('r','book-club:table'),undefined),{kind:'gathering',title:'Book club: read and talk it over together'});
+ for(const [cap,title] of [['play-piano:hall','Played the piano'],['play-music:drums','Played music'],['lecture:podium','Gave a talk'],['tell-story:circle','Told a story']] as const)assert.deepEqual(entryOf(receipt('r',cap),undefined),{kind:'performance',title},cap);
+ assert.deepEqual(entryOf(receipt('r','social-dance:band'),undefined),{kind:'performance',title:'Danced'},'danced alone it still completes');
+ assert.deepEqual(entryOf(receipt('r','book-club:table'),undefined),{kind:'gathering',title:'Joined a book club'});
  assert.equal(entryOf(receipt('r','attend:hall'),undefined),null,'a seat in the room proves no gathering');
  for(const cap of ['walk:hall','read:sign','hug:s_b','accept:inv_1','gather:field','dance:here','play:piano'])assert.equal(entryOf(receipt('r',cap),{met:[{soulId:'s_b',name:'B'}]} as never),null,cap);
  assert.equal(entryOf(receipt('r','play-piano:hall',{},'failed'),undefined),null,'only what happened');
@@ -34,7 +34,7 @@ test('A1: newest first, the clock of that moment, a place by name, at most N, un
  for(let i=0;i<30;i++)t.note(receipt(`r_${String(i).padStart(2,'0')}`,'play-piano:x',{},'completed',i*50),Date.parse('2026-11-07T10:00:00.000Z')+i*1000,clock);
  const v=view(t);
  assert.equal(v.length,TIMELINE_MAX); assert.equal(v[0]!.when.tick,29*50);
- assert.deepEqual(v[0],{kind:'performance',when:{real:'2026-11-07T10:00:29.000Z',tick:1450,worldDay:15,time:'09:00'},place:{id:'hall',name:'Main Hall'},title:'Play the piano'});
+ assert.deepEqual(v[0],{kind:'performance',when:{real:'2026-11-07T10:00:29.000Z',tick:1450,worldDay:15,time:'09:00'},place:{id:'hall',name:'Main Hall'},title:'Played the piano'});
  const long=new SoulTimeline(new DatabaseSync(':memory:'),'w');
  for(let i=0;i<30;i++)long.note(receipt(`r_${i}`,'paint:x',made('public','\u6f22'.repeat(120))),1000+i,clock);
  assert.ok(Buffer.byteLength(JSON.stringify(timelineView(long.rows('s_a',20),[],{placeName:()=>'\u6f22'.repeat(120)})))<8192,'the profile\'s budget, in any script');
@@ -105,7 +105,7 @@ test('A1 A3 A4: the route: a private title never shows, a rebuild finds the rest
  const r=await f.get(path),text=await r.clone().text(),body=await r.json() as {timeline:TimelineEntry[]};
  assert.equal(r.status,200);assert.doesNotMatch(text,/My secret diary/);
  assert.deepEqual(body.timeline.map((e)=>e.kind).sort(),['arrival','performance','produced']);
- assert.ok(body.timeline.some((e)=>e.kind==='produced'&&e.title==='Dawn'));assert.ok(body.timeline.some((e)=>e.title==='Play the piano'));
+ assert.ok(body.timeline.some((e)=>e.kind==='produced'&&e.title==='Dawn'));assert.ok(body.timeline.some((e)=>e.title==='Played the piano'));
  const etag=r.headers.get('etag')!;assert.match(etag,/^"/);assert.equal(r.headers.get('cache-control'),'no-cache');
  assert.equal((await f.get(path,{'if-none-match':etag})).status,304);
  assert.equal((await f.get(path,{'if-none-match':'"other"'})).status,200);

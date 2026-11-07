@@ -117,6 +117,9 @@ test('#1141: the read cache keeps whole answers and answers a matching tag itsel
   const plain = await api(A); assert.equal(plain.status, 200); assert.equal(await plain.text(), '{"soul":"s_tagged"}', 'the next caller reads the whole answer');
   const hit = await asked('W/"t1"'); assert.equal(hit.status, 304, 'a weak form matches'); assert.equal(hit.headers.get('etag'), '"t1"'); assert.ok(hit.headers.get('x-sim-cache'));
   const stale = await asked('"old"'); assert.equal(stale.status, 200); assert.equal(await stale.text(), '{"soul":"s_tagged"}', 'a tag that does not match reads it all');
+  // callers sharing one flight, the first of them with a tag: the others still read the whole answer
+  const flight = await Promise.all([api(`${A}2`, { headers: { 'if-none-match': '"t1"' } }), api(`${A}2`), api(`${A}2`)]);
+  assert.deepEqual(await Promise.all(flight.map(async (r) => [r.status, (await r.text()).length > 0])), [[304, false], [200, true], [200, true]]);
   assert.equal(await (await api('/w/genes-valley/conditional')).text(), '0', 'the world never saw a tag');
 });
 test('the launcher notes looks, agents and previews; previews need a god token', async () => {

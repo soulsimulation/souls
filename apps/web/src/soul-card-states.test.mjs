@@ -144,7 +144,7 @@ test('Explore rows: Awake / Zombie / Asleep + truncated now, awake first',()=>{
 test.after(async()=>rm(dir,{recursive:true,force:true}));
 test('#1141 A2: a visitor reads the Soul\'s story, newest first, its words as text; a Soul with none shows no heading',()=>{
  const html=card('visitor-story'),t=text(html);assert.match(html,/data-soul-story="1"/);assert.match(t,/Its story so far/);
- assert.ok(t.indexOf('Day 5 18:30: Book club at the hall')<t.indexOf('Day 3 09:15: Made Dawn'),'newest first');
+ assert.ok(t.indexOf('Day 5 18:30: Joined a book club at the hall')<t.indexOf('Day 3 09:15: Made Dawn'),'newest first');
  assert.match(t,/2026-10-20: Arrived/,'a row with no world clock shows the real one');assert.doesNotMatch(html,/<b>song/,'a title is text');
  assert.doesNotMatch(card('visitor-awake'),/data-soul-story/);assert.doesNotMatch(render(h(SoulCardView,{...F['visitor-awake'],story:[]})),/data-soul-story/);
 });

@@ -828,7 +828,7 @@ export async function openLauncher(cfg = {}) {
     let r;
     try {
       r = await c3.get(key, ttlMs, () => new Promise((yes, no) => {
-        // The cached answer is shared, so it's always the whole one: a world's 304 to one caller would be every caller's empty page.
+        // One flight serves every caller waiting on it, so it always asks for the whole answer: a world's 304 to one would be the others' empty page.
         const { 'if-none-match': _inm, ...asked } = hopless(req.headers);
         const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...asked, 'x-forwarded-for': xff } }, (u) => {
           const chunks = []; u.on('data', (c) => chunks.push(c)); u.on('error', no);

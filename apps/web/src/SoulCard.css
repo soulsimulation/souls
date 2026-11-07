@@ -66,6 +66,8 @@
 /* phone bottom sheet: 44 px touch targets */
 @media (max-width:700px),(pointer:coarse){
  .human-world .soul-card .soul-pill,.human-world .soul-card .soul-follow,.human-world .soul-card .soul-link{min-height:44px}
+ .soul-story summary{min-height:44px;line-height:44px}
+ .soul-story ol{max-height:4.6em}
  .human-world .soul-card .soul-link{padding:0 8px;margin:0 -8px}
  .human-world .soul-card .soul-card-head .soul-share{width:44px;height:44px}
 }

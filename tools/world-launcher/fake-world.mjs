@@ -31,7 +31,7 @@ const server = createServer((req, res) => {
   // dev sign-in stand-in: "Bearer dev:<name>" is the account dev:<name>
   if (path === '/v1/me') { const id = /^Bearer (dev:[a-z0-9_-]+)$/i.exec(req.headers.authorization ?? '')?.[1]; return id ? res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ me: { userId: id } })) : res.writeHead(401, { 'content-type': 'application/json' }).end('{"ok":false}'); }
   // #1141: a public read that revalidates. It answers 304 to any tag, as no caller should ever make it: the launcher's cache keeps whole answers.
-  if (path === '/v1/edge/public/souls/s_tagged') { if (req.headers['if-none-match']) { conditional++; return res.writeHead(304, { etag: '"t1"' }).end(); } return res.writeHead(200, { 'content-type': 'application/json', etag: '"t1"', 'cache-control': 'no-cache' }).end('{"soul":"s_tagged"}'); }
+  if (path.startsWith('/v1/edge/public/souls/s_tagged')) { if (req.headers['if-none-match']) { conditional++; return res.writeHead(304, { etag: '"t1"' }).end(); } return res.writeHead(200, { 'content-type': 'application/json', etag: '"t1"', 'cache-control': 'no-cache' }).end('{"soul":"s_tagged"}'); }
   if (path === '/conditional') return res.end(String(conditional));
   if (path === '/sse') { res.writeHead(200, { 'content-type': 'text/event-stream' }); let n = 0; const t = setInterval(() => { res.write(`data: ${n++}\n\n`); if (n > 3) { clearInterval(t); res.end(); } }, 100); return; }
   if (path === '/echo' && req.method === 'POST') { res.writeHead(200, { 'x-echo': '1', 'x-host': req.headers.host ?? '', 'x-xff': req.headers['x-forwarded-for'] ?? '' }); req.pipe(res); return; }

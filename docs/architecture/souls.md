@@ -150,8 +150,8 @@ canonical facts: never speech, owner messages or a private record, and a thing i
 public may not know is left out, id and name. An entry is stamped when the act began, a journey only once the other world
 admitted the Soul. Rows are written as things happen, and one index read serves them. A world that lost the table rebuilds each
 Soul's rows from its last 500 completed receipts on the first read; those rows, and an older arrival or journey, show the real
-clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. The web profile
-shows it, and `inspect <soul>` its first five.
+clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
+the Soul's card, and `inspect <soul>` shows its first five.
 
 ## The edge API
 

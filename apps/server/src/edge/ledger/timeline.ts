@@ -5,7 +5,6 @@
 import type {DatabaseSync} from 'node:sqlite';
 import type {EdgeOutcomeV1} from '@souls/protocol';
 import type {EdgeReceipt} from '../contract.ts';
-import {SPOT_ACTIVITIES} from './activities.ts';
 
 /** The most entries a public record carries, newest first. Every text is cut to 80 bytes before JSON escapes it, so the timeline stays around 10 KB at the very worst. */
 export const TIMELINE_MAX = 20;
@@ -14,10 +13,10 @@ export const TIMELINE_PAGE = 5;
 /** Receipts one rebuild reads per Soul, newest first. */
 export const REBUILD_MAX = 500;
 const TEXT_MAX = 80;
-/** Acts a Soul does in front of others (activities.ts). */
-const PERFORMING = new Set(['play-piano', 'play-music', 'sing', 'lecture', 'tell-story', 'social-dance']);
+/** Acts a Soul does in front of others (activities.ts), as a story says them: a spot's label is an offer, this is what happened. */
+const PERFORMING: Record<string, string> = {'play-piano': 'Played the piano', 'play-music': 'Played music', sing: 'Sang', lecture: 'Gave a talk', 'tell-story': 'Told a story', 'social-dance': 'Danced'};
 /** Acts that can only complete with others there: every spot of theirs has `together` with `alone: 'fail'`. */
-const GATHERING = new Set(['book-club', 'cook-together', 'yoga-class', 'hear-story']);
+const GATHERING: Record<string, string> = {'book-club': 'Joined a book club', 'cook-together': 'Cooked with others', 'yoga-class': 'Joined a yoga class', 'hear-story': 'Heard a story'};
 export type TimelineKind = 'arrival' | 'produced' | 'performance' | 'gathering' | 'travel';
 export type WorldClock = {worldDay: number; time: string} | null;
 export type TimelineEntry = {kind: TimelineKind; when: {real: string; tick: number | null; worldDay: number | null; time: string | null}; place: {id: string | null; name: string | null}; title?: string; world?: string};
@@ -28,10 +27,10 @@ const clip = (v: unknown) => Buffer.from(String(v ?? '')).subarray(0, TEXT_MAX).
 /** The entry a finished receipt makes, if any. Pure: the same receipt and outcome always give the same answer. */
 export function entryOf(r: Pick<EdgeReceipt, 'capability' | 'phase'>, outcome: Pick<EdgeOutcomeV1, 'produced'> | undefined): {kind: TimelineKind; title: string; object?: string} | null {
   if (r.phase !== 'completed') return null;
-  const made = outcome?.produced?.find((p) => p.visibility === 'public'), verb = r.capability.split(':')[0]!, label = SPOT_ACTIVITIES[verb]?.label ?? verb;
+  const made = outcome?.produced?.find((p) => p.visibility === 'public'), verb = r.capability.split(':')[0]!;
   if (made) return {kind: 'produced', title: clip(made.title), object: made.id};
-  if (GATHERING.has(verb)) return {kind: 'gathering', title: clip(label)};
-  if (PERFORMING.has(verb)) return {kind: 'performance', title: clip(label)};
+  if (GATHERING[verb]) return {kind: 'gathering', title: GATHERING[verb]};
+  if (PERFORMING[verb]) return {kind: 'performance', title: PERFORMING[verb]};
   return null;
 }
 
