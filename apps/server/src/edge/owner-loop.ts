@@ -30,7 +30,9 @@ export type OwnerLoopWorld = {
   posOf(id: string): [number, number] | null;
 };
 /** `steps`: the message's steps when the link is implicit and its words name some (else the act closes it, as before). */
-type Link = {scope: {scope: string; owner: string}; message: string; steps?: MessageStep[]; act?: string[]};
+type Link = {scope: {scope: string; owner: string}; message: string; steps?: MessageStep[]; act?: string[];
+  /** #1272: other messages on this receipt: a repeated act returns the one under way, and each message still closes with it. */
+  also?: Link[]};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
@@ -90,6 +92,8 @@ export class OwnerLoop {
     const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
     const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
     const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {})};
+    const prior = this.links.get(receipt.id);
+    if (prior) l.also = [...(prior.message === message ? [] : [{...prior, also: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)];
     this.links.set(receipt.id, l);
     if (this.links.size > MAX_LINKS) this.links.delete(this.links.keys().next().value!);
     const open = !!l.steps && !this.serves(l, l.steps.length - 1, receipt, false);
@@ -101,6 +105,9 @@ export class OwnerLoop {
     this.links.delete(r.id);
     const full = this.read(r.soulId, r.id) ?? r, line = resultLine(full); if (!line) return;
     const seen = {...r, ...(full.endedAt !== undefined ? {endedAt: full.endedAt} : {})};
+    for (const one of [l, ...(l.also ?? [])]) this.report(one, seen, line);
+  }
+  private report(l: Link, seen: EdgeReceipt, line: NonNullable<ReturnType<typeof resultLine>>) {
     if (!l.steps || this.serves(l, l.steps.length - 1, seen, true)) { this.reached.delete(l.message); this.inbox.serverResult(l.scope, l.message, line.text, line.outcome); return; }
     // not the last step (or not its target): the owner sees what happened and what is still to come; the message stays open
     const last = l.steps.length - 1, at = l.steps.findIndex((_, i) => i >= (this.reached.get(l.message) ?? 0) && i < last && this.serves(l, i, seen, true));
