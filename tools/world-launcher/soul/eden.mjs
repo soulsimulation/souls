@@ -218,6 +218,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().awaitingFirstWorld) updateConfig((c) => { if (c.awaitingFirstWorld) { delete c.awaitingFirstWorld; c.trustedOrigins ??= [originOf(url)]; } });
   }
   const setCurrentWorld = (key) => updateConfig((c) => { c.currentWorld = key; });
+  /** The owner's answer to the reflective pass, or that they've been asked, beside its caps. */
+  const noteConsolidation = (patch) => updateConfig((c) => { c.consolidation = { ...(c.consolidation && typeof c.consolidation === "object" && !Array.isArray(c.consolidation) ? c.consolidation : {}), ...patch }; });
   const seat = (key) => { const dir = at("pending", key); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "seat", key, dir }; };
   // The id names a folder and it comes from a world or a file, so it must be one folder name here.
   const soul = (id) => { if (!SOUL_ID.test(id ?? "")) throw new Error(`"${String(id).slice(0, 40)}" is not a Soul id; nothing was kept for it.`); const dir = at("souls", id, "runtime"); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "soul", id, dir }; };
@@ -465,7 +467,7 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
-  return { root, config, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
 return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
@@ -1108,6 +1110,16 @@ function settingsOf(config) {
   return { callsPerDay: whole(c.callsPerDay, CAPS.callsPerDay, 100), tokensPerPass: whole(c.tokensPerPass, CAPS.tokensPerPass, 1_000_000), everyHours: whole(c.everyHours, CAPS.everyHours, EVERY_HOURS_MAX) };
 }
 
+/** The owner's answer: a pass spends their money and sends journal text to a model, so nothing runs until they say yes. `null` is not asked yet. */
+const answerOf = (config) => (config?.enabled === true || config?.enabled === false ? config.enabled : null);
+/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. Each sentence is
+ *  checked against what a pass does: a cap of zero means no pass can run, so no question. */
+function offerOf(config) {
+  const { callsPerDay, tokensPerPass, everyHours } = settingsOf(config);
+  if (!callsPerDay || !tokensPerPass) return null;
+  return `This Soul's journal has outgrown what it can look back on. A reflective pass has a model read a Soul's oldest journal days and write a short summary into MEMORY.md, so the Soul carries those days in its brief and its journal stops growing. The pages it read then go from the Soul's own search, replaced by that summary; the full log stays on this machine. Here, with no model, a pass also gathers notes written more than once and proposes lines for SOUL.md for you to apply or ignore. A yes covers every Soul in this home, now and later${everyHours ? "" : ", and only when a pass is asked for: idle passes are off in your settings"}. Cost: your own claude CLI on your account: for each Soul, up to ${callsPerDay} passes a day of about ${tokensPerPass} tokens, each with a $${PASS_USD} limit. What leaves this machine: each Soul's oldest journal days, which include what worlds said, sent to that model, and nothing else of the Soul's. Yes: consolidate on. No: consolidate off.`;
+}
+
 /** The stand-in a world with fake minds gets: the same plumbing, with no model. */
 function fakeMind(prompt) {
   const lines = prompt.split("\n").filter((l) => l.startsWith("- ")).map(clean);
@@ -1281,7 +1293,7 @@ function writeMemoryMd(soulDir, { lines, taken, notes }) {
   writeFileSync(tmp, `${owner}${MARK}\n\n${body}\n`, { mode: 0o600 });
   renameSync(tmp, file);
 }
-return { CAPS, JOURNAL_BYTES, SUMMARY, settingsOf, fakeMind, ownerMind, overBudget, nextPassIn, consolidate };
+return { CAPS, JOURNAL_BYTES, SUMMARY, settingsOf, answerOf, offerOf, fakeMind, ownerMind, overBudget, nextPassIn, consolidate };
 })();
 // </inline consolidate.mjs>
 
@@ -1670,7 +1682,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.0";
+const VERSION = "2.23.2";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2064,14 +2076,33 @@ function briefNow() {
   try { const brief = memoryHere()?.brief({ bytes: HOME.config().briefBytes }); return brief ? { brief } : {}; }
   catch (e) { calm(`memory: ${e.message}`); return {}; }
 }
-// consolidate [--force]: the owner's model CLI under the owner's caps; with fake minds the stand-in, and with no CLI, no pass.
+// consolidate [--force]: the owner's model CLI under the owner's caps, once they've said yes; with fake minds the stand-in, and with no CLI, no pass.
 async function runConsolidate({ force = false } = {}) {
   needMemory();
-  const out = await soulConsolidate.consolidate(soulFolder(), { ...(process.env.BRAIN_MODE === "fake" ? {} : { ask: soulConsolidate.ownerMind() }), caps: soulConsolidate.settingsOf(HOME.config().consolidation), force });
+  const asked = HOME.config().consolidation;
+  if (soulConsolidate.answerOf(asked) !== true) return { skipped: "off", next: `Your owner's choice: ${CLI} consolidate on, once they've said yes.` };
+  const out = await soulConsolidate.consolidate(soulFolder(), { ...(process.env.BRAIN_MODE === "fake" ? {} : { ask: soulConsolidate.ownerMind() }), caps: soulConsolidate.settingsOf(asked), force });
   MEMORY?.memory.reopen();
   return out;
 }
-const consolidateCommand = async (...args) => runConsolidate({ force: args.includes("--force") });
+// consolidate on|off: the owner's answer, for the whole home. consolidate asked: the question has been put, so it isn't put again.
+const consolidateCommand = async (...args) => {
+  const [word] = args;
+  if (word !== undefined && !["on", "off", "asked", "--force"].includes(word)) throw new Error("usage: consolidate [on|off|asked|--force]");
+  if (word === undefined || word === "--force") return runConsolidate({ force: word === "--force" });
+  needMemory(); HOME.noteConsolidation(word === "asked" ? { asked: true } : { enabled: word === "on" });
+  return { consolidation: word, note: word === "on" ? `An idle serve looks on the owner's schedule. ${CLI} consolidate runs a pass now.` : word === "off" ? "No pass will run." : "Nothing runs until your owner answers, and the question won't come up again." };
+};
+/** For `status`: what the owner said, or the question, once there's something for a pass to do. Memory never fails the command it rides on. */
+function consolidationStatus() {
+  try {
+    const asked = HOME.config().consolidation, answer = soulConsolidate.answerOf(asked);
+    if (answer !== null) return { consolidation: { state: answer ? "on" : "off" } };
+    if (asked?.asked === true) return { consolidation: { state: "asked" } };
+    const offer = soulConsolidate.overBudget(joinPath(soulFolder(), "memory")).length ? soulConsolidate.offerOf(asked) : null;
+    return offer ? { consolidation: { state: "not asked", offer } } : {};
+  } catch (e) { calm(`memory: ${e.message}`); return {}; }
+}
 function needMemory() {
   const memory = memoryHere();
   if (memory) return memory;
@@ -2377,7 +2408,7 @@ async function status() {
     listening: inbox.connected === true, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
     lastReceipt: s.lastReceipt ?? null,
-    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {}),
+    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()), ...consolidationStatus() } : {}),
     note: inbox.connected ? "A listen is open: owner messages reach this folder." : `Nobody is listening. Start: ${CLI} listen (in the background).`,
   };
 }
@@ -2401,27 +2432,57 @@ async function observe() {
   return d;
 }
 
-/** Phrase and all-term matches precede the legacy partial-term fallback. */
+/** Phrase and all-term matches precede the legacy partial-term fallback, and each ranks a word in the offer's id or name
+ *  (the label before its `[id]`, `(` or first comma) above a word only in its description. */
 export function rankCapabilities(list, search) {
   const terms = [...new Set(search.toLowerCase().split(/[\s,|]+/).filter(Boolean))];
   const normalize = value => String(value ?? '').toLowerCase().replace(/[-_/]+/g, ' ').replace(/\s+/g, ' ');
   const phrase = normalize(search).trim();
+  const hits = hay => terms.filter(t => hay.includes(normalize(t))).length;
+  const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
   return list.map((c, i) => {
     const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const count = terms.filter(t => hay.includes(normalize(t))).length;
-    return {c, i, count, tier: phrase && hay.includes(phrase) ? 2 : terms.length && count === terms.length ? 1 : 0};
-  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.count-a.count || a.i-b.i).map(x => x.c);
+    const name = normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')), named = tierOf(name);
+    return {c, i, count: hits(hay), names: hits(name), tier: named ? named + 2 : tierOf(hay)};
+  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
+const LABEL_MAX = 80;
+export function shortLabel(id, label) {
+  const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
+  if (text.length <= LABEL_MAX) return text;
+  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
+  const space = cut.lastIndexOf(" "); // a name with no spaces is cut where it stands, not back to its first word
+  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut.slice(0, -1)).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.(]+$/, "") + tail;
+}
+
+/** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
+ *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
+export function refusalList({ code, did_you_mean, candidates }) {
+  const said = new Map((did_you_mean ?? []).map((d) => [d.id, d])), byId = new Map((candidates ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set([...said.keys(), ...byId.keys()])], choice = /\.(choose|ambiguous)$/.test(code ?? ""), keep = choice ? 5 : 3;
+  const list = ids.slice(0, keep).map((id) => {
+    const d = said.get(id), c = byId.get(id), params = Object.keys(c?.params ?? {}), off = d?.available === false || c?.available === false;
+    const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
+    return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
+  });
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
+}
+const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
+
 async function caps(...args) {
-  let search, verb, all = false, limit = 60;
+  let search, verb, all = false, limit, json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--search") search = args[++i];
     else if (args[i] === "--verb") verb = args[++i];
     else if (args[i] === "--all") all = true;
     else if (args[i] === "--limit") limit = Number(args[++i]);
+    else if (args[i] === "--json") json = true;
     else search = (search ? search + " " : "") + args[i];
   }
+  // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
+  limit ??= search && !all ? 12 : 60;
   // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
   const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
   let list = d.capabilities ?? [];
@@ -2432,8 +2493,9 @@ async function caps(...args) {
   }
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
+    ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
     ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
-    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
+    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
 
@@ -2572,7 +2634,10 @@ async function act(...argv) {
   if (implicit && r.status === 400 && /owner message/.test(r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); r = await call("/v1/edge/act", { body }); }
   const d = ok(r, "act");
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
-  if (!d.accepted) return { accepted: false, code: d.code, reason: d.reason, ...(d.did_you_mean?.length ? { did_you_mean: d.did_you_mean.slice(0, 8) } : {}), ...(d.alternatives?.length ? { alternatives: d.alternatives.slice(0, 3) } : {}), ...(d.candidates?.length ? { candidates: d.candidates.slice(0, 5) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  if (!d.accepted) {
+    if (json) return d;
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  }
   let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
@@ -2635,9 +2700,12 @@ function waitOption(argv) {
 }
 
 async function resolve(...args) {
-  if (!args.length) throw new Error('usage: resolve "<what to do>" [params-json]');
-  const body = parseActionArgs(args);
-  return ok(await call("/v1/edge/resolve", { body }), "resolve").resolve;
+  const words = args.filter((a) => a !== "--json");
+  if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
+  const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
+  if (r.ok !== false || words.length !== args.length) return r;
+  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
@@ -2939,7 +3007,7 @@ background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits wh
 I asked, then \`${CLI} result <id> done|failed "<what happened>"\`.
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
-from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`candidates\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
+from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
 --wait, then \`${CLI} wait 60\` as needed. \`${CLI} caps --search "<thing>"\` lists current offers.
 
 For “take a seat” with no requested duration, use a durable fixture's exact sit offer with \`'{"seconds":1}' --for none --wait --json\` if it supports seconds. Verify \`here\` posture is seated and its seat matches the receipt's chosen slot before reporting. The seat stays occupied after the timed action; keep listening, without standing or canceling. Preserve requested durations; this does not apply to temporary ground poses. Default sitting receipts can stay open for ten minutes while already seated.
@@ -3563,8 +3631,8 @@ async function serveForeground() {
   async function reflect() {
     let next = REFLECT_BUSY_MS;   // whatever goes wrong in a look, there is another
     try {
-      const everyHours = soulConsolidate.settingsOf(HOME.config().consolidation).everyHours, memory = joinPath(soulFolder(), "memory");
-      if (!everyHours) return;
+      const asked = HOME.config().consolidation, everyHours = soulConsolidate.settingsOf(asked).everyHours, memory = joinPath(soulFolder(), "memory");
+      if (!everyHours || soulConsolidate.answerOf(asked) !== true) return;
       const quiet = !st.plan && !Object.values(st.receipts).some((r) => !ENDED.has(r.phase)) && Date.now() - (lastEventAt ?? 0) > REFLECT_QUIET_MS * TIME_SCALE;
       // A pass runs beside the serve, so waiting is manners: a world that never goes quiet doesn't get to stop it for good.
       reflectWaiting = quiet ? null : reflectWaiting ?? Date.now();
@@ -3673,12 +3741,12 @@ setup     register <world-url>            create "<Name>" [--for CODE] [--new]  
           approval [status|wait|cancel]   status                          guide
 home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
-memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [--force]
+memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all]   map   view [--map|--alt-only|--out f]
+look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
           say "<text>"   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
 owner     listen [--after id] [--once]   ack <id> ["reply"]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)

@@ -156,6 +156,37 @@ test('in a Souls home the switch lives beside the record, in the Soul\'s runtime
   } finally { await w.close(); rmSync(home, { recursive: true, force: true }); }
 });
 
+test('in a Souls home `serve` reads the switch in the Soul\'s runtime folder, and records there', { timeout: 60_000 }, async () => {
+  const w = await world({ actPhase: 'started' }), home = folder(w.url, false);
+  try {
+    const imported = await run(home, 'import'); assert.equal(imported.code, 0, imported.err);
+    const souls = join(home, '.souls', 'souls'), [id] = readdirSync(souls), runtime = join(souls, id, 'runtime');
+    const until = async (ok) => { for (let i = 0; i < 40 && !ok(); i++) await new Promise((r) => setTimeout(r, 100)); };
+    // a switch in the folder the person stands in is not this Soul's switch: the plan runs inside serve, and serve records nothing
+    writeFileSync(join(home, '.eden-report-on'), '');
+    assert.equal((await run(home, 'serve')).code, 0);
+    assert.equal((await run(home, 'plan', '["walk:yes"]')).code, 0);
+    await until(() => w.seen.some((s) => s.url.includes('/v1/edge/act')));
+    assert.ok(w.seen.some((s) => s.url.includes('/v1/edge/act')), 'off: the plan acted');
+    assert.equal((await run(home, 'serve', '--stop')).code, 0);
+    assert.ok(!existsSync(join(runtime, '.eden-report.jsonl')) && !existsSync(join(home, '.eden-report.jsonl')), 'off: serve recorded nothing anywhere');
+    rmSync(join(home, '.eden-report-on'));
+    // the switch in the runtime folder turns it on for the serve started from the home
+    writeFileSync(join(runtime, '.eden-report-on'), '');
+    const acted = w.seen.filter((s) => s.url.includes('/v1/edge/act')).length;
+    assert.equal((await run(home, 'serve')).code, 0);
+    assert.equal((await run(home, 'plan', '["walk:yes"]')).code, 0);
+    const log = join(runtime, '.eden-report.jsonl'), lines = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+    await until(() => lines().some((r) => r.route === '/v1/edge/act'));
+    assert.equal((await run(home, 'serve', '--stop')).code, 0);
+    await until(() => lines().filter((r) => r.kind === 'proc.start').length === lines().filter((r) => r.kind === 'proc.end').length);
+    assert.ok(w.seen.filter((s) => s.url.includes('/v1/edge/act')).length > acted, 'on: the plan acted');
+    assert.ok(lines().some((r) => r.route === '/v1/edge/act'), 'on: the step inside serve is recorded beside the switch');
+    assert.ok(lines().some((r) => r.kind === 'proc.start' && r.command === 'serve'), 'on: serve itself is in the record');
+    assert.ok(!existsSync(join(home, '.eden-report.jsonl')), 'and nowhere else');
+  } finally { w.close(); rmSync(home, { recursive: true, force: true }); }
+});
+
 test('the copied whitelist answers as the trace tap does', () => {
   for (const u of ['https://x.test/w/slug/v1/edge/receipts/r_1?after=c_9&timeout=5', 'https://x.test/v1/edge/inspect/a%20b%20c', 'https://x.test/mcp']) assert.equal(reportRoute(u), routeOf(u), u);
   for (const d of [null, [], { accepted: true, code: 'a.b', receipt: { id: 'r', phase: 'started', capability: 'walk:x', soulId: 's', acceptedTick: 1, startedTick: 2, endedTick: 3, code: 'c', text: 'no' } },
