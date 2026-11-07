@@ -286,6 +286,7 @@ function repairWords(input: string, text: string, ctx: VocabContext): VocabResul
 }
 
 export function resolveCapability(input: string, ctx: VocabContext): VocabResult {
+  const sign = signWords(input, ctx); if (sign) return sign;
   const r = resolveWords(input, ctx);
   // R2 stroll (longrun 2026-10-16: nobody moved for 70 minutes): a stroll named for the place the Soul is already in, whose
   // own loop is closed right now (a construction site covers one of its stops), is a wander right where it stands; never a
@@ -294,6 +295,14 @@ export function resolveCapability(input: string, ctx: VocabContext): VocabResult
   const wander = ctx.caps.find(c => c.id === 'wander:here' && c.available); if (!wander) return r;
   const name = ctx.places.find(p => p.id === r.cap.target!.id)?.name ?? r.cap.target.id;
   return {kind: 'alias', cap: wander, note: `${input}: you are in ${name} already and its loop (${r.cap.id}) is closed right now (${(r.cap.blocked?.reason ?? 'unavailable').replace(/[.\s]+$/, '')}); wandering around where you are instead (${wander.id}).`};
+}
+// #427: an Open / Closed sign goes by what it will say: "turn the sign to closed", "flip the sign". Only where one is offered.
+export function signWords(input: string, ctx: Pick<VocabContext, 'caps'>): VocabResult | null {
+  const caps = ctx.caps.filter(c => c.verb === 'object' && /^Turn the sign to /.test(c.label)); if (!caps.length) return null;
+  const m = /^(?:turn|flip|set|change|switch)\s+(?:(?:the|my|our|this)\s+)?(?:\S+\s+)?sign(?:\s+(?:round|around|over))?(?:\s+(?:to|to\s+say)\s+(open|closed))?$/.exec(input.toLowerCase().replace(/^(?:please\s+)+/, '').replace(/[.!?\s]+$/, '').trim());
+  if (!m) return null;
+  const said = m[1] ? {open: 'open', closed: 'close'}[m[1]] : null, cap = caps.find(c => said ? c.action === said : c.available) ?? null;
+  return cap ? {kind: 'alias', cap, note: `${input} is ${cap.id}.`} : null;
 }
 // VEHICLE-STEER (Gene 2026-10-23, #12): a seated rider's words to its ride. Only when a steer is offered to this Soul now
 // (it is aboard); otherwise the words fall through ("fly the balloon" from the ground is still the join).

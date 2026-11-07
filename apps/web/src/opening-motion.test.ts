@@ -20,3 +20,5 @@ for(const [name,roles,axis] of [['curtained-window',['role:curtain-l','role:curt
  const back=draw(true),rev=beginOpeningMotion(back,closed,1550)!;assert.equal(s(back,roles[0]),mid,'reversal begins at the current draw');
  assert.equal(stepOpeningMotion(rev,2650),false);assert.ok(s(back,roles[0])<0.25);assert.equal(stepOpeningMotion(tween,2100),false);assert.equal(s(closed,roles[0]),1);
 });
+// #427: an Open / Closed sign's board turns half a circle in 0.7 s from the contact.
+test('a flip board turns half a circle and eases from where it stands',()=>{const part=(y:number)=>{const root=new THREE.Group(),b=new THREE.Group();b.name='board';b.userData.role='flip';b.rotation.y=y;root.add(b);return {root,b};};const was=part(0),now=part(Math.PI),m=beginOpeningMotion(now.root,was.root,0);assert.ok(m);assert.equal(now.b.rotation.y,0,'starts from where it stood');assert.equal(stepOpeningMotion(m!,350),true);assert.ok(Math.abs(now.b.rotation.y-Math.PI/2)<1e-9);assert.equal(stepOpeningMotion(m!,700),false);assert.equal(now.b.rotation.y,Math.PI);});
