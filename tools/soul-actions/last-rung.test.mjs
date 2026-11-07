@@ -200,7 +200,7 @@ test('L5 a thrown step contained on the head still boots: the replay survives wh
   const dir = mkdtempSync(join(tmpdir(), 'last-rung-')), path = join(dir, 'world.db'), w = await world(t, repair, path); let db2, h2;
   t.after(() => { try { h2?.stop(); db2?.close(); } catch { /* the first failure is the one that matters */ } rmSync(dir, {recursive: true, force: true}); });
   await w.tick(5); w.f.host.lastRewindTick = w.f.host.engine.world.tick; w.control.throwAt = w.f.host.engine.world.tick + 2; await w.tick(10);
-  assert.equal(byRung(w.f.host).rewind, 1);
+  assert.equal(byRung(w.f.host).contained, 1); assert.equal(byRung(w.f.host).rewind, undefined, 'nothing stopped, so nobody lost anything');
   const hash = w.f.host.engine.stateHash(), tick = w.f.host.engine.world.tick; w.comms.close(); w.f.host.stop(); w.f.db.close();
   db2 = new Db(path); h2 = new WorldHost(db2, w.factory, seed, 1e9, worldId, {durableClockV1: true}); h2.boot();
   assert.equal(h2.engine.world.tick, tick); assert.equal(h2.engine.stateHash(), hash);
@@ -507,6 +507,29 @@ test('C1 a throw before the tick moves, a jump, then a restart: every boot reach
     assert.equal(b.engine.world.tick, tick, `boot ${boot}`); assert.equal(b.engine.stateHash(), hash, `boot ${boot}`); b.stop(); db.close();
   }
 });
+// The step check's memory after a step that didn't finish: a boot from that head remembers the head, so a live world must too.
+const bootsAgree = (w, path, h) => {
+  const hash = h.engine.stateHash(), tick = h.engine.world.tick; w.comms.close(); h.stop(); w.f.db.close();
+  for (let boot = 0; boot < 2; boot++) { const db = new Db(path), b = new WorldHost(db, w.factory, seed, 1e9, worldId, {durableClockV1: true}); b.boot(); assert.equal(b.engine.world.tick, tick, `boot ${boot}`); assert.equal(b.engine.stateHash(), hash, `boot ${boot}`); b.stop(); db.close(); }
+};
+const jumpNext = async (w, h, id) => {
+  const at = h.engine.world.tick + 1, jumped = new WeakSet();
+  w.control.every = (r) => { const e = r.world.entities[id]; if (r.tick === at && !jumped.has(r)) { jumped.add(r); e.pose.p = [e.pose.p[0] - 1, e.pose.p[1], e.pose.p[2]]; } return []; };
+  w.edge.act(w.souls.Ada, {capability: 'walk:shed'}); h.drainInputs(); for (let i = 0; i < 8; i++) { await setImmediate(); h.drainInputs(); }
+  for (let i = 0; i < 30; i++) { h.tickOnce(); await setImmediate(); }
+};
+test('C1 a jump on the first step after a rung 3 is refused live, and every boot agrees', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, c = w.control; await w.tick(5);
+  c.at = h.engine.world.tick + 3; c.fault = violate('support.floating', ['g-standing']); while (h.engine.world.tick < c.at) { h.tickOnce(); await setImmediate(); }
+  assert.equal(byRung(h).rewind, 1); const before = rows(w, "author='world:refusal'");
+  await jumpNext(w, h, w.souls.Ada.entityId); assert.equal(rows(w, "author='world:refusal'") - before, 1, 'rung 1 saw it'); bootsAgree(w, path, h);
+});
+for (const [kind, knob] of [['before the tick moves', 'preThrow'], ['part way through a tick', 'midThrow']])
+  test(`C1 a jump on the first step after a throw ${kind}, with a snapshot on that head: every boot agrees`, async (t) => {
+    quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, c = w.control; await w.tick(5); h.lastRewindTick = h.engine.world.tick;
+    const at = h.engine.world.tick + 2; c[knob] = (e) => e.world.tick === at; while (h.engine.world.tick <= at) { h.tickOnce(); await setImmediate(); }
+    h.saveSnapshot(true); await jumpNext(w, h, w.souls.Ada.entityId); bootsAgree(w, path, h);
+  });
 test('C3 a real motion.teleport every tick, with no plan to undo it, is contained, and Souls act', async (t) => {
   quiet(t); const w = await world(t), host = w.f.host, {Ada, Bo} = w.souls, id = Ada.entityId; let last = -1, dir = 1;
   w.control.every = (r) => { const e = r.world.entities[id]; if (!e) return []; e.human.activity = 'climb-wait'; if (r.tick !== last) { last = r.tick; e.pose.p = [e.pose.p[0] + dir * 0.3, e.pose.p[1], e.pose.p[2]]; dir = -dir; } return []; };
@@ -536,7 +559,9 @@ test('C4 a body still inside something can walk out of it, and a rule that flick
   assert.equal(h.engine.world.containedV1?.length, 1); const before = rows(w, "author='world:refusal'"), [x, , z] = h.engine.world.entities[id].pose.p;
   const walk = ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(40);
   assert.equal(rows(w, "author='world:refusal'"), before, 'no refusal'); assert.equal(read(w, Ada, walk).phase, 'started'); const [nx, , nz] = h.engine.world.entities[id].pose.p; assert.ok(Math.hypot(nx - x, nz - z) > 1, 'she is walking');
-  const pid = h.engine.programOf(id); if (pid) h.engine.stop(pid); await w.tick(5); steady = false; const stops = rows(w, "author='world:rewind'"); await w.tick(60); assert.equal(rows(w, "author='world:rewind'"), stops, 'held, not faulted');
+  const pid = h.engine.programOf(id); if (pid) h.engine.stop(pid); await w.tick(5); steady = false; const stops = rows(w, "author='world:rewind'"), back = rows(w, "author='world:recovery'"); await w.tick(3000);
+  assert.equal(rows(w, "author='world:rewind'"), stops, 'held, not faulted, past two holds'); assert.equal(rows(w, "author='world:recovery'"), back);
+  const again = ok(await act(w, Ada, {capability: 'walk:yard'})); await w.tick(30); assert.notEqual(read(w, Ada, again).code, 'world.relocated', 'it never says she was moved');
 });
 for (const [what, every] of [['every tick', 1], ['every third tick', 3]])
   test(`C5 a rule that names someone new ${what} writes a few rows and stops, and Souls act`, async (t) => {
@@ -553,6 +578,60 @@ test('C5 a fault naming many bodies at once keeps a few, and a restart agrees', 
   w.control.every = (r) => (r.tick >= at ? Array.from({length: 40}, (_, i) => ({code: 'support.floating', message: 'forced', subjects: [`g-${i}`]})) : []);
   await w.tick(60); const list = host.engine.world.containedV1; assert.ok(list.length <= 9, String(list.length)); assert.equal(host.stepFailing, null);
   const hash = host.engine.stateHash(), h = reboot(t, w, path); assert.deepEqual(h.engine.world.containedV1, list); assert.equal(h.engine.stateHash(), hash);
+});
+test('C5 a rule that comes back just past the hold goes back once, not every time', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, a = h.engine.world.tick + 5, base = rows(w, "author='world:recovery'");
+  w.control.every = (r) => (r.tick >= a && (r.tick - a) % 1300 === 0 ? [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}] : []);
+  await w.tick(4000); assert.equal(rows(w, "author='world:recovery'") - base, 1, 'one whole-world row'); assert.ok(rows(w, "author='world:rewind'") >= 2, 'the rest stay on the head'); assert.equal(h.paused, false);
+});
+test('C5 a long stretch of thrown steps keeps what the runtime holds bounded', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, subjects = Array.from({length: 10}, (_, i) => `g-${i}`);
+  w.control.every = () => subjects.map((s) => ({code: 'support.floating', message: 'forced', subjects: [s]})); w.control.midThrow = () => true;
+  await w.tick(2500); assert.ok(h.engine.rt.violations.length <= 1100, String(h.engine.rt.violations.length)); assert.ok(h.engine.rt.events.length <= 21000, String(h.engine.rt.events.length));
+});
+// What a step can throw from an action, with the fixture's walk standing in for any verb. The rest of the world goes on.
+const brokenAction = (t, h, when) => { const def = h.engine.rt.registry.get('walk_to'), {step} = def; t.after(() => { def.step = step; }); def.step = (rt, exec, dt) => { if (when(rt, exec)) throw new Error('fixture.action-bug'); return step(rt, exec, dt); }; return def; };
+test('C9 an action whose step throws ends alone: its Soul is told and acts again, and nobody else stops', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada, Bo} = w.souls, bo = ok(await act(w, Bo, {capability: 'walk:yard'})), ada = ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
+  const from = h.engine.world.tick + 2; brokenAction(t, h, (rt, exec) => exec.actor === Ada.entityId && rt.tick >= from); await w.tick(5);
+  assert.equal(read(w, Ada, ada).code, 'engine.action-threw'); assert.equal(read(w, Bo, bo).phase, 'started', 'Bo walks on'); assert.equal(h.stepFailing, null); assert.equal(byRung(h).rewind, undefined);
+  assert.equal(JSON.parse(w.f.db.db.prepare("SELECT payload FROM events WHERE author='world:refusal' ORDER BY seq DESC LIMIT 1").get().payload).refusal.why, 'fixture.action-bug');
+  const hash = h.engine.stateHash(), r = reboot(t, w, path); assert.equal(r.engine.stateHash(), hash);
+});
+test('C9 a stop already under way whose action throws for ever ends, and the world and a reboot run on', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada, Bo} = w.souls;
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(10);
+  const def = brokenAction(t, h, (rt, exec) => [...rt.live.values()].find((l) => l.exec === exec)?.cancelling), {cancel} = def; t.after(() => { def.cancel = cancel; }); def.cancel = () => ({ok: true, deferred: true});
+  w.control.fault = violate('support.floating', ['g-standing']); w.control.at = h.engine.world.tick + 3; await w.tick(400);
+  assert.equal(h.engine.programOf(Ada.entityId), null); assert.equal(h.stepFailing, null); ok(await act(w, Bo, {capability: 'walk:yard'})); ok(await act(w, Ada, {capability: 'walk:yard'}));
+  const hash = h.engine.stateHash(), r = reboot(t, w, path); assert.equal(r.stepFailing, null); assert.equal(r.engine.stateHash(), hash);
+});
+test('C9 a stop whose retried cancel throws ends too', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada} = w.souls; ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(10);
+  const def = h.engine.rt.registry.get('walk_to'), {cancel} = def; t.after(() => { def.cancel = cancel; }); let asked = 0;
+  def.cancel = () => { if (asked++ === 0) return {ok: false, diagnostic: {code: 'fixture.not-yet', message: 'not yet'}}; throw new Error('fixture.cancel-bug'); };
+  h.engine.stop(h.engine.programOf(Ada.entityId)); await w.tick(30); assert.equal(h.stepFailing, null); assert.equal(h.engine.programOf(Ada.entityId), null); ok(await act(w, Ada, {capability: 'walk:yard'}));
+});
+test('C2 a stop in place finds two bodies in one spot: it moves one clear, says so, and a restart agrees', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada, Bo} = w.souls, E = h.engine.world.entities; h.lastRewindTick = h.engine.world.tick;
+  const at = h.engine.world.tick + 2, moved = new WeakSet(); w.control.every = (r) => { if (r.tick === at && !moved.has(r)) { moved.add(r); const e = r.world.entities, [x, y, z] = e[Ada.entityId].pose.p; e[Bo.entityId].pose.p = [x + 0.1, y, z]; } return []; }; await w.tick(5);
+  const row = JSON.parse(w.f.db.db.prepare("SELECT payload FROM events WHERE author='world:rewind' ORDER BY seq DESC LIMIT 1").get().payload).lastRungInPlace;
+  assert.ok(row.relocated.length >= 1, JSON.stringify(row)); assert.ok(Math.hypot(E[Ada.entityId].pose.p[0] - E[Bo.entityId].pose.p[0], E[Ada.entityId].pose.p[2] - E[Bo.entityId].pose.p[2]) > 0.5, 'apart');
+  assert.ok(row.relocated.some((id) => w.comms.streams.read((id === Ada.entityId ? Ada : Bo).soulId, 0).events.some((e) => e.kind === 'world.relocated')), 'told');
+  const hash = h.engine.stateHash(), b = reboot(t, w, path); assert.equal(b.engine.stateHash(), hash);
+});
+test('an event that throws live throws in the replay too, and the boot goes past it', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host; h.lastRewindTick = h.engine.world.tick;
+  void h.enqueue('rules', 'test', {nativeSleepSnapshotPolicy: {}, extra: 1}).catch(() => {}); await w.tick(5); assert.equal(h.paused, false);
+  const hash = h.engine.stateHash(), b = reboot(t, w, path); assert.equal(b.engine.stateHash(), hash);
+});
+test('while steps fail, an object act is refused as a walk is', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host; w.control.throwEvery = true; await w.tick(160); assert.ok(h.stepFailing);
+  assert.equal((await w.edge.performBodies(w.souls.Bo, 'use', 'use', [])).code, 'world.step-failing');
+});
+test('a stop in place clears what a mind was waiting on, in a replay too', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, m = [...h.minds.values()][0]; m.pending = {card: 'c', program: 'p'};
+  h.apply({seq: h.seq + 1, tick: h.engine.world.tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: {contained: [], stopped: 0}}, at: 0}, true); assert.equal(m.pending, null);
 });
 test('C6 SIM_SOULS_REPAIR=0 turns repair off under shared building, and a shared world from before the ladder boots', async (t) => {
   quiet(t); const was = process.env.SIM_SOULS_REPAIR; t.after(() => { if (was === undefined) delete process.env.SIM_SOULS_REPAIR; else process.env.SIM_SOULS_REPAIR = was; });

@@ -1465,7 +1465,7 @@ export class WorldHost {
     catch (failure) { this.failCheckpoint(failure); return; }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
-    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS)) return this.containInPlace(error);
+    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
     const untilTick=this.engine.world.tick, originalSeq=this.seq, all=this.db.events(this.worldId,baseline.seq);
     const pending=[...this.minds.values()].filter(m=>m.pending).map(m=>m.pending!.card);
@@ -1507,6 +1507,10 @@ export class WorldHost {
   private get repairRules(): boolean { return this.engine.rulesVersion.includes('+souls-repair/'); }
   /** The tick of the last rung 3. A fault soon after stays on the head, so a fault that keeps firing can't rewind every tick. */
   private lastRewindTick = -Infinity;
+  /** The rules a rung 3 has already gone back for. Going back didn't answer them, and each rewind writes a whole world, so a rule
+   *  that returns past the hold stays on the head. Live only: a restart allows one more. */
+  private rewoundRules = new Set<string>();
+  private rewoundFor(error: unknown) { const keys = faultKeys(error); return keys.length > 0 && keys.every(k => this.rewoundRules.has(k.code)); }
   /** When each rule's in-place fault was last reported: one that keeps firing is written once per cooldown. */
   private inPlaceAt = new Map<string, number>();
   /** What the step that just faulted finished, when it returned at all. */
@@ -1539,7 +1543,8 @@ export class WorldHost {
     const tick = this.engine.world.tick;
     try { return this.engine.step(); }
     catch (error) {
-      if (this.repairRules && this.engine.world.tick === tick) { try { this.engine.setClockV1!(tick + 1); } catch { this.engine.world.tick = tick + 1; } }
+      // always, even if the tick did move: this is also where the step check's memory and the bounds the step skipped are put right
+      if (this.repairRules) { const to = Math.max(this.engine.world.tick, tick + 1); try { this.engine.setClockV1!(to); } catch { this.engine.world.tick = to; } }
       throw error;
     }
   }
@@ -1577,6 +1582,7 @@ export class WorldHost {
       this.seq = originalSeq;
       const e: LogEvent = {seq: ++this.seq, tick: untilTick, kind: 'rules', author: 'world:recovery', payload: {recovery: recipe}, at: Date.now()};
       if (!this.writeRepair(e)) return;
+      for (const k of faultKeys(error)) this.rewoundRules.add(k.code);
       this.resetAcc(); this.acc.log.push(e); this.ring = [];
       this.recordGlitch('rewind', error, {tick: untilTick, evidence: {seq: e.seq, kept: events.length, dropped: all.length - events.length, contained: recipe.lastRung!.contained, relocated: recipe.lastRung!.relocated, skipped: recipe.lastRung!.skipped}});
       if (this.durableClockV1) this.persistClockFrontier();
@@ -1615,7 +1621,7 @@ export class WorldHost {
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
-    if (!repeat || keys.length) this.recordGlitch('rewind', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
+    if (!repeat || keys.length) this.recordGlitch(stopped ? 'rewind' : 'contained', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
     for (const m of this.minds.values()) { m.pending = null; this.acc.dirty.add(m.soulId); }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a stop in place:', String(failure).slice(0, 200)); }
     this.tellQuietly(true);

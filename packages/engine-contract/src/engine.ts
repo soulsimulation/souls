@@ -86,12 +86,13 @@ export type EngineCheckpointCapture = {
 
 /** #1150 rung 1: moves this step did not apply, by rule. Present only on a step that refused one. The log keeps them as
  *  evidence; a replay recomputes them from world state and the rules, so nothing here is an input. */
-export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true };
+export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true; /** What threw, for `engine.action-threw`. */ why?: string };
 
 /** #1150 decision 1: the world landed on a body, so there is no pose to go back to. The one named exception to "never teleport". */
 export const RELOCATED = { code: 'world.relocated', message: 'The world changed where you stood, so you were moved to the nearest free spot. Nothing else changed.' };
 /** #1150 rung 3: what a Soul is told when the world went back. */
 export const STEP_FAILING = { code: 'world.step-failing', message: 'The world is failing to move anything right now, so nothing you try can happen yet. You can still speak.' };
+export const ACTION_THREW = { code: 'engine.action-threw', message: 'What you were doing broke, so it ended here and anything held was set down. Nothing else changed, and you can act again.' };
 export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again.' };
 
 /** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */

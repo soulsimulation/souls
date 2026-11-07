@@ -2,7 +2,7 @@ import {LIE_CLEARANCE} from '../../../mars/viewer/engine/social/pose.ts';
 import {regionArrivalMask} from './region-arrival.ts';
 import { createHash } from 'node:crypto';
 import { capturePhysicalHashInput, capturedPhysicalHashSteps, physicalHashNeedsLegacyCapture } from './checkpoint-hash.ts';
-import { RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
+import { ACTION_THREW, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
 import {bodyProfile} from '../../../mars/viewer/engine/bodies/navigation.ts';
 import {immutableAuthoredBoundaryFact} from '../../../mars/viewer/engine/spatial/edits.ts';
 import {keepStaticGridsForBoot,withStaticGridReadCache,type BootGridStore} from '../../../mars/viewer/engine/spatial/grid.ts';
@@ -356,6 +356,7 @@ export class MarsEngine implements Engine {
     const table: EntityTable = reuse ? checkedTable(cached!) : listTable(this.ents);
     this.tableCacheV1 = null;
     if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardedInvariantV1);
+    if (this.cfg.soulsRepairV1 === true) this.rt.actionThrewV1 ??= (action: string, error: unknown) => this.abandonV1(action, error);
     const refusable = this.cfg.soulsRepairV1 === true ? this.refusalCopyV1(table) : null, seen = this.rt.violations.length;
     this.m.stepCarriers(this.rt, table);   // carrier/1: rides move their seated riders first (no carriers: no effect)
     this.m.stepHandHolds(this.rt);         // entry 35: hands let go finish, a broken pair lets go (no holds: no effect)
@@ -455,7 +456,7 @@ export class MarsEngine implements Engine {
   /** #1150 decision 1: nobody moved, so the world moved onto them. Bodies that can stand elsewhere go to the nearest free spot. */
   private relocationPlanV1<V extends { code: string; subjects?: string[] }>(v: V, copy: Map<string, RefusalCopy>) {
     const ents = this.ents, ids = [...new Set(v.subjects ?? [])].filter(id => ents[id]?.human).sort();
-    if (!ids.length || ids.some(id => { const h = ents[id].human; return h.riding || h.carrier || h.on || h.sleepPose || h.grip || this.refusalProgramV1(id)?.build; })) return null;
+    if (ids.every(id => this.standsClearV1(id)) || ids.some(id => { const h = ents[id].human; return h.riding || h.carrier || h.on || h.sleepPose || h.grip || this.refusalProgramV1(id)?.build; })) return null;
     const programs = new Map<string, Prog>(), actions = new Set<string>();
     for (const id of ids) { const p = this.refusalProgramV1(id); if (p) programs.set(p.id, p); else for (const h of this.holders(id)) actions.add(h); }
     return { violation: v, rule: v.code, undo: [] as string[], relocate: ids as string[] | undefined, programs, actions, holding: [] as string[] };
@@ -465,11 +466,17 @@ export class MarsEngine implements Engine {
     for (const h of [...plan.actions].sort()) this.rt.cancel(h, relocationDiag);
     const poses: EngineRefusalV1['poses'] = {};
     for (const id of plan.relocate!) {
-      const e = this.ents[id], [x, , z] = e.pose.p;
-      if (!this.tryRelocateV1(id) || (e.pose.p[0] === x && e.pose.p[2] === z)) { stuck.push(plan.violation); return; }   // already standing free: moving it can't answer this rule, and it costs no row
+      const e = this.ents[id];
+      if (!this.tryRelocateV1(id)) { stuck.push(plan.violation); return; }
       poses[id] = { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: e.human.level };
     }
     done.set(`relocated|${plan.relocate!.join()}`, { tick, rule: plan.rule, bodies: plan.relocate!, programs: [...plan.programs.keys()].sort(), poses, relocated: true });
+  }
+  /** Nothing solid at this body's feet, so moving it can't answer a rule about where it stands. */
+  private standsClearV1(id: string): boolean {
+    const e = this.ents[id], spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
+    const grid = spatial.levelAt(e.human.level ?? 0, [e.pose.p[0], e.pose.p[2]]);
+    return !!grid && clearanceAt(grid, [e.pose.p[0], e.pose.p[2]]) >= HUMAN_RADIUS;
   }
   private tryRelocateV1(id: string): boolean { const e = this.ents[id]; try { return this.restoreHumanPoseV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: e.human.level }); } catch { return false; } }
   /** Contained entries don't fault again, and leave the list once they have been quiet for a hold. A key that fired last tick
@@ -481,10 +488,35 @@ export class MarsEngine implements Engine {
     for (const v of fresh) {
       const own = entries.get(key(v)), entry = own ?? entries.get(containedByRule(v.code)), standing = own?.until === tick - 1 + CONTAINED_HOLD_TICKS;
       const plan = entry && !standing ? this.refusalPlanV1(v, copy, tick) : null;
-      if (!entry || plan) rt.violations.push(v as any); else firing.add(key(entry));
+      if (entry && (!plan || plan.relocate)) firing.add(key(entry));   // a relocation that can't answer it is still this break firing
+      if (!entry || plan) rt.violations.push(v as any);
     }
     const left = list.flatMap(c => firing.has(key(c)) ? [{ ...c, until: tick + CONTAINED_HOLD_TICKS }] : tick < (c.until ?? 0) ? [c] : []);
     if (left.length) this.world.containedV1 = left; else delete this.world.containedV1;
+  }
+  /** #1150: `rt.cancel`, and under the repair rules a cancel that throws abandons the action, so a stop can't throw for ever. */
+  private cancelOrAbandonV1(action: string, why: Diag) {
+    try { this.rt.cancel(action, why); } catch (error) { if (this.cfg.soulsRepairV1 !== true) throw error; this.abandonV1(action, error); }
+  }
+  /** #1150: an action that threw can't finish its own cleanup, and it must not stop everyone else's tick or hold a body for good.
+   *  Its whole tree ends here, and whatever it held is set down where it is: the one time a load is let go without a set-down,
+   *  because the action that would set it down is what broke. Everything here follows from the world and the throw, so a replay
+   *  of the same throw does the same. The Soul's programme ends on its next advance, as for any action that failed. */
+  private abandonV1(action: string, error: unknown) {
+    const rt = this.rt as any, records = rt.records as Map<string, { id: string; parent?: string }>, ents = this.ents;
+    let root = action; for (let up = records.get(root)?.parent; up; up = records.get(root)?.parent) root = up;
+    const tree = new Set([root]); for (let grew = true; grew;) { grew = false; for (const r of records.values()) if (r.parent && tree.has(r.parent) && !tree.has(r.id) && rt.isActive(r.id)) { tree.add(r.id); grew = true; } }
+    const bodies = (listEntities(ents) as any[]).filter(e => e.human?.grip && this.holders(e.id).some(h => tree.has(h))).map(e => e.id as string).sort();
+    const depth = (id: string) => { let n = 0; for (let r = records.get(id); r?.parent; r = records.get(r.parent)) n++; return n; }, internal = rt.internals();
+    for (const id of [...tree].sort((a, b) => depth(b) - depth(a) || (a < b ? -1 : 1))) { const l = rt.live.get(id); if (!l) continue; try { internal.forceFinish(l, 'failed', ACTION_THREW); } catch { rt.live.delete(id); } }
+    const poses: EngineRefusalV1['poses'] = {};
+    for (const id of bodies) {
+      const h = ents[id].human, item = ents[h.grip?.entity]; delete h.grip; delete h.task; h.activity = 'idle';
+      if (!item || !['held', 'in-hand'].includes(item.support?.kind)) continue;
+      const [x, , z] = item.pose.p, ground = (this.rt.services.spatial as Spatial).ground; placeOnGround(item, [x, this.rt.world.groundV1 && ground ? r3(standOn(ground, x, z)) : 0, z], item.pose.yaw ?? 0); delete item.reservedBy; acknowledgeRelocation(this.rt, item.id);
+      poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
+    }
+    (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200) });
   }
   /** Is this violation on the list, by name or by its rule? */
   private coveredV1(): (v: { code: string; subjects?: string[] }) => boolean {
@@ -494,7 +526,7 @@ export class MarsEngine implements Engine {
   /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
   stopAllV1(why: { code: string; message: string }): number {
     let stopped = 0;   // what this call changed, so a host knows if a replay has to make the same stops
-    const cancel = (id: string) => { try { this.rt.cancel(id, why); } catch { const l = this.rt.live.get(id); try { if (l) (this.rt as any).finish(l, 'cancelled', why); } catch { this.rt.live.delete(id); } } };
+    const cancel = (id: string) => this.cancelOrAbandonV1(id, why);
     for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (p.stopping && p.action && this.rt.isActive(p.action)) continue;   // already on its way down: its own reason and cleanup stand
       if (p.action && this.rt.isActive(p.action)) cancel(p.action);
@@ -505,7 +537,14 @@ export class MarsEngine implements Engine {
     return stopped;
   }
   /** #1150 rung 3: the clock moves to the fault's tick without stepping the world, so ticks stay monotonic for the log. */
-  setClockV1(tick: number) { this.finishRecorder(); this.world.tick = tick; this.renderBaseKey = ''; this.startRecorder(); this.tableCacheV1 = null; }
+  setClockV1(tick: number) {
+    this.finishRecorder(); this.world.tick = tick; this.renderBaseKey = ''; this.startRecorder(); this.tableCacheV1 = null;
+    // as a boot from this head would: the step check remembers these poses, or its first tick would differ from a boot's
+    rememberPosesAfterRestore(this.rt);
+    // a step that threw never reached its own bounds, and a stretch of them must not grow these for ever
+    const rt = this.rt as any; if (rt.violations.length > 1000) rt.violations.splice(0, rt.violations.length - 1000);
+    if (rt.events.length > 20000) { rt.events.splice(0, rt.events.length - 1000); this.cursor = rt.events.length; }
+  }
   /** #1150 rung 3: `keys` are what the fault itself named, and a replay passes the kept ones back, so this reads no invariant and
    *  no replay can differ: a read here would move the step check's memory where a replay's wouldn't. A body in the wrong is
    *  relocated once. A key gets a place on the list until its rule has too many, and then the rule goes on instead. */
@@ -520,6 +559,7 @@ export class MarsEngine implements Engine {
     // only a body inside something: a floating load's bearer has nowhere better to stand
     for (const id of [...new Set([...kept.values()].filter(c => c.code.startsWith('collision.')).flatMap(c => c.subjects))].sort()) { const e = this.ents[id]; if (!e?.human) continue; const [x, , z] = e.pose.p; if (this.tryRelocateV1(id) && (e.pose.p[0] !== x || e.pose.p[2] !== z)) relocated.push(id); }
     if (list.size) this.world.containedV1 = [...list.values()].sort((a, b) => (containedKey(a) < containedKey(b) ? -1 : 1)); else delete this.world.containedV1;
+    rememberPosesAfterRestore(this.rt);   // a stop can move a load and this a body: the next tick starts from here, as a boot from this head would
     return { contained: [...kept.values()], relocated };
   }
   /** #1150 rung 1: every new violation this step is undone and its programmes stopped, or none is. What the invariants
@@ -574,7 +614,7 @@ export class MarsEngine implements Engine {
     if(p.stopping){
       // PC08: while an `untilSafe` stop's action is held up it stands still, so a retry would refuse again and only hide
       // the hold-up's own diagnostic (who is in the way); it is retried once the action moves again
-      if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.rt.cancel(p.action,p.stopping);return;}
+      if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.cancelOrAbandonV1(p.action,p.stopping);return;}
       return this.end(p,p.refusalsV1&&!p.build?'failed':'cancelled',p.stopping);   // an unfinished build's failure throws
     }
     for (let guard = 0; guard < 12; guard++) {

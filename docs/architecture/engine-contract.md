@@ -140,16 +140,24 @@ whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that n
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
 started what it stopped. A body inside something is relocated once.
 
-`SIM_SHARED_CARRY` brings the ladder with it, and `SIM_SOULS_REPAIR=0` is the way back. Under these rules an invariant that
-throws is a named `engine.thrown` violation, so it is contained like any other. A replay survives what the live tick
+`SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
+ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
+throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed.
+
+**An action whose step or stop throws ends alone,** so one broken action never stops anyone else's tick (`engine.action-threw`,
+logged and counted as a refusal). Its whole tree ends, its Soul is told, and whatever it held is set down where it is. That is
+the one time a load is let go without its set-down: the action that would have done it is what broke. Going back doesn't answer
+a named rule twice: a rule a rung 3 has gone back for stays on the head after that, so a rule that returns past the hold writes
+a small row, not a whole world. A restart allows it one more.
 
 **A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get
 anywhere, so acts are refused with `world.step-failing`, nothing rewinds, the launcher alerts as for a halt, and a due
 snapshot is taken at once on a faulted tick. That snapshot is marked: it serves a boot, never a rewind, and one that won't
-capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below a quarter of that, and a clean snapshot follows at once. A stop already
-under way keeps its own reason and cleanup, so one that itself keeps failing holds this state until an operator acts.
+capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below a quarter of that, and a clean snapshot follows at once. What still reaches it is a throw outside
+any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
+placed clears it, and a rung 3 keeps god edits, so it survives a restart until then.
 
 **What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.

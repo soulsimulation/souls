@@ -174,6 +174,15 @@ async function twoCrews(t, base) {
   for (let n = 0; n < 900 && !laid; n++) await w.tick(1);
   assert.ok(laid); return {w, r, adm};
 }
+test('#1150 a shared carry whose action throws sets the load down where it is: the world runs on and both bearers walk', async (t) => {
+  t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {});
+  const w = await world(t, repair), host = w.f.host, {Ada, Bo, Eve} = w.souls, bystander = ok(await act(w, Eve, {capability: 'walk:pen'}));
+  await carrying(w); const rt = host.engine.rt, def = rt.registry.get('carry'), {step} = def; t.after(() => { def.step = step; });
+  def.step = () => { throw new Error('fixture.action-bug'); }; await w.tick(5); def.step = step;
+  const beam = w.E[w.beam]; assert.equal(beam.support?.kind, 'ground'); assert.equal(beam.phase, 'staged'); assert.ok(!w.E[Ada.entityId].human.grip && !w.E[Bo.entityId].human.grip, 'nobody is left holding it');
+  assert.equal(host.paused, false); assert.equal(host.stepFailing, null); assert.ok(['started', 'completed'].includes(read(w, Eve, bystander).phase), 'Eve is not touched'); await w.tick(30);
+  ok(await act(w, Ada, {capability: 'walk:yard'})); ok(await act(w, Bo, {capability: 'walk:shed'})); await w.tick(10); assert.deepEqual(host.engine.runtime.violations, []);
+});
 test('A1 two crews: a carrier walks into a stopped load by its own step. Today a rewind; refused, one refusal, and its crew backs off and sets down', async (t) => {
   t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {});
   const old = await twoCrews(t, today); await old.w.tick(160);
