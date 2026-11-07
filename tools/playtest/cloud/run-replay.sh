@@ -93,8 +93,6 @@ elif [ -n "${PLAYTEST_SPECS:-}" ]; then
   # a live arm of Soul Runs specs (PLAYTEST_SPECS="a.json b.json", all of them per repeat): tools/playtest/cloud/run-specs.sh (#1098)
   read -r -a SPECS <<< "$PLAYTEST_SPECS"
   step run-specs bash tools/playtest/cloud/run-specs.sh "$SERVER" "$OUT" "$REPEATS" "${SPECS[@]}" || RS_RC=$?
-  # seat transcripts carry this machine's paths: keep them out of the results branch
-  step scrub-paths bash -c 'grep -rIlF -e "$1" -e "$2" "$3" 2>/dev/null | while read -r f; do sed -i.bak -e "s#$1#<home>#g" -e "s#$2#<host>#g" "$f" && rm -f "$f.bak"; done' _ "$HOME" "$(hostname)" "$OUT" || true
 elif [ -n "${PLAYTEST_DIRECT:-}" ]; then
   # one directed session per repeat (PLAYTEST_DIRECT=<cast.json>, -r1, -r2 …): verdict in <run>/director/VERDICT.md
   for i in $(seq 1 "$REPEATS"); do
@@ -129,6 +127,11 @@ OVERLAY_FACT="$(node -e 'try{const m=JSON.parse(require("fs").readFileSync(proce
   echo "| step | seconds | exit |"; echo "|---|---:|---:|"
   awk '{printf "| %s | %s | %s |\n", $1, $2, $3}' "$TIMES"
 } > "$OUT/CLOUD.md"
+
+# --- a spec arm's results carry this machine's details: scrub and check them, and publish nothing if that fails (#1131)
+if [ -n "${PLAYTEST_SPECS:-}" ]; then
+  step publish-scrub node tools/playtest/cloud/publish-scrub.mjs "$OUT" || { say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7; }
+fi
 
 # --- secret guard: refuse to publish token-shaped strings
 if grep -rIlE 'sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gho_[A-Za-z0-9]{30,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
