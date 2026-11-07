@@ -112,24 +112,23 @@ therefore **windowed**:
   The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
   skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
   tools-only PRs select no heavy jobs and are never deferred.
-- **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci-request.yml` then dispatches `ci.yml`
-  for it, unless the head's newest CI run already passed. By hand: `gh workflow run ci.yml --ref <branch> -f pr=<n>`.
-  A requested run is scoped by the PR's paths against main, not full scope. It queues behind a CI run already going
-  for the same PR, and does no heavy work if that run passes at the same head. Once a PR is in the window, its later
-  pushes run in full as usual.
-- **A branch cut before the window (#914)** carries an old `ci.yml` with no `pr` input, and a dispatch runs the
-  branch's own copy, so GitHub would refuse the request. `ci-request.yml` checks the head's `ci.yml` first. When the
-  input is missing, it dispatches nothing and posts one comment on the PR: merge main forward (merge or rebase main
-  into the branch and push), and that push runs CI in the window. The merge train's strict path also rebases a
-  `merge:ready` PR. Dispatching main's `ci.yml` instead would not help: its checks would attach to main's commit, not
-  the PR head.
+- **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
+  a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
+  doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
+  does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
+  the window, its later pushes run in full as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
+- **Any other label does nothing.** Its run sits in a concurrency group of its own, so it can't cancel a running CI, and
+  every job skips without taking a runner. A skipped required check reads as a pass, so in that run the `ci-ok` job carries
+  another name and can't replace a real result. The merge train ignores a run with every job skipped.
+- **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
+  own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
   which the merge train reads. A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
-`merge:ready` straight from a deferred head still works: the request replaces the deferred run, and the train reads
+`merge:ready` straight from a deferred head still works: the labeled run replaces the deferred one, and the train reads
 the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.

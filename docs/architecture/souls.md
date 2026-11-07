@@ -51,6 +51,14 @@ arrival a visitor can show its local identity, before its travel row lands.
 `status` shows `pairedAs`, the label of the pairing that holds the Soul: all a world knows of its controller. The managed
 runtime's lease stays local to its journal.
 
+`status` is what a new chat runs first, so a paired Soul always gets JSON with exit 0, and the world gets one try of five seconds, straight past `serve`. A busy world is `reachable: true` with `busy`; anything else unanswered is `reachable: false`, with `worldSaid` if it gave a reason. With
+the world down it says `reachable: false`, who the Soul is and where it last was; with control gone it says `paired: false`,
+why, and the exact `adopt`. `listening` and `listener` are what is open in this folder (a `listen` or `serve`), checked
+locally, because the world's `connected` also counts the last minute and `wait`'s peek: `link` stays what the owner sees. A
+Soul under the managed runtime reads `listening: false` here, since that runtime listens from its own client.
+`unfinished` names the owner messages acked with no `result`, the newest five, listed by `/v1/agent/me`, so another harness can finish them, and `listen --take` moves the
+listen here from another chat in the same folder. The world keeps messages until they are acked, so nothing is lost by that.
+
 ## The Souls home
 
 The shipping CLI (`tools/world-launcher/soul/eden.mjs`) keeps every Soul a person pairs in one `.souls/` folder, found
@@ -94,8 +102,16 @@ before this client trusts nothing until a person says so. Reading a world, a tra
 to the list, so a Soul moved in with `import` starts with no trusted site. `upgrade` follows no redirect.
 
 Reconciling needs the account's list, which `/v1/me` gives a dev identity. A delegated Soul token sees only its own Soul,
-so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one, and
-`adopt` takes an id. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
+so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one.
+A window code stands in for the account there: `doctor --for <CODE>` (`@<world> doctor --for <CODE>` for another world: a code goes
+only to the world named, or the home's current one) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name (an imported Soul's world comes from its file, so import only your own export), and `create <name> --for <CODE>` for a name
+the account already holds reconnects that Soul instead of making a second one. The code conveys no control: approval
+still does. Without a code, a taken name stays `name-taken` and reveals nothing.
+
+A home can lose a file and keep its Souls. Without `credentials.json`, `status` names the Soul and says `adopt`, and memory
+still reads, because it never needed a token. A `config.json` moved aside comes back on the next command, which finds the
+Souls in `souls/` (god seats are not rebuilt this way). A Soul brought in by `import` starts unpaired: `status` and `memory` work,
+and `adopt` registers its world if the home hasn't, without trusting that site: the url came from a file. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
 under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/upload.mjs`, which read that file directly.
 
 `eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run
@@ -151,7 +167,14 @@ by the mind saying so. Any turn of theirs since counts, even a greeting: the min
 
 ### Consolidation
 
-`consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
+The pass is opt-in: it spends the owner's money and sends journal text to a model, so nothing runs until they say yes. Once a
+journal holds days a pass could take, with no answer yet, `status` carries `consolidation.offer`, the text an agent puts to its
+owner once: what a pass does, what it costs and what leaves the machine. `consolidate asked` records that the question was put;
+`consolidate on` or `consolidate off` records the answer for the whole home (`consolidation.enabled` in `config.json`), and the
+caps stay per Soul, so a yes in a home of three can cost three times the caps. Until it's on, `consolidate` says so and an idle
+`serve` doesn't look. `off` stops what comes next, not a pass already running.
+
+Once on, `consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
 `MEMORY.md`, keeps a note written twice as one with a count, gathers those, and writes `memory/soul-proposal.diff` for the
 owner. It never writes `SOUL.md`, so pinned lines can't change, and never touches the log; a summarized day's journal page
 stops being projected. A day too big for one pass is read as far as fits. `memory` searches `MEMORY.md`, and the brief's
@@ -171,7 +194,7 @@ back for, on its own, twice, is passed over at no cost, so it can't hold up the 
 
 ### The pre-turn brief
 
-With memory, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
+With memory, `status`, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
 episode and the pinned lines of `SOUL.md` (under `## Pinned`), else the `remember --self` lines. `brief.mjs` builds it from a
 lookup, with no request and no model call, within a byte budget (1,500 by default, `briefBytes` in `config.json`, 0 for none).
 It doesn't grow with the log, and a Soul with no memory has none. The CLI builds it from this folder's memory, and a `brief` in
@@ -204,11 +227,11 @@ response returns the original receipt.
 |---|---|
 | `GET /v1/edge/boot` | Fresh session: clocks, the Soul (`me`), `here` with local offers, and the static manifest; never cached |
 | `GET /v1/edge/boot/static[?page=]`, `GET /v1/edge/boot/places` | Public, ETag-cached world knowledge: destinations, rules, verbs (paged within a 10 KB budget), and the full authored map |
-| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters |
+| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters. A `far` line ends with the walk to that place when one would go and `exits` doesn't already give it; `flags` lists the nearest four named flags, each with its walk when a route reaches it, leaving out any in a place the Soul doesn't know |
 | `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
 | `GET /v1/edge/map` | Public map: the places, and the named god flags as `flags: [{name, walk, at}]` |
 | `POST /v1/edge/resolve` | Dry run of an action: the resolved target and capability, no event |
-| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now) |
+| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272) |
 | `GET /v1/edge/receipts/:id` | A receipt: accepted, started, completed, failed or replaced, with the reason |
 | `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership) |
 | `GET /v1/edge/objects`, `POST /v1/edge/objects/:id/act` | Things the Soul can read, write or use |
