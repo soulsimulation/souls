@@ -31,6 +31,16 @@ export function settingsOf(config) {
   return { callsPerDay: whole(c.callsPerDay, CAPS.callsPerDay, 100), tokensPerPass: whole(c.tokensPerPass, CAPS.tokensPerPass, 1_000_000), everyHours: whole(c.everyHours, CAPS.everyHours, EVERY_HOURS_MAX) };
 }
 
+/** The owner's answer: a pass spends their money and sends journal text to a model, so nothing runs until they say yes. `null` is not asked yet. */
+export const answerOf = (config) => (config?.enabled === true || config?.enabled === false ? config.enabled : null);
+/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. Each sentence is
+ *  checked against what a pass does: a cap of zero means no pass can run, so no question. */
+export function offerOf(config) {
+  const { callsPerDay, tokensPerPass, everyHours } = settingsOf(config);
+  if (!callsPerDay || !tokensPerPass) return null;
+  return `This Soul's journal has outgrown what it can look back on. A reflective pass has a model read a Soul's oldest journal days and write a short summary into MEMORY.md, so the Soul carries those days in its brief and its journal stops growing. The pages it read then go from the Soul's own search, replaced by that summary; the full log stays on this machine. Here, with no model, a pass also gathers notes written more than once and proposes lines for SOUL.md for you to apply or ignore. A yes covers every Soul in this home, now and later${everyHours ? "" : ", and only when a pass is asked for: idle passes are off in your settings"}. Cost: your own claude CLI on your account: for each Soul, up to ${callsPerDay} passes a day of about ${tokensPerPass} tokens, each with a $${PASS_USD} limit. What leaves this machine: each Soul's oldest journal days, which include what worlds said, sent to that model, and nothing else of the Soul's. Yes: consolidate on. No: consolidate off.`;
+}
+
 /** The stand-in a world with fake minds gets: the same plumbing, with no model. */
 export function fakeMind(prompt) {
   const lines = prompt.split("\n").filter((l) => l.startsWith("- ")).map(clean);
