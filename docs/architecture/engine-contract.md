@@ -125,7 +125,7 @@ would break a rule is not applied ([#1150](https://github.com/soulsimulation/sou
    as `lastRungInPlace`, whenever it stopped something and otherwise once per fault per minute. A replay makes the same
    stops from that event. An event that won't re-apply costs only itself, and the recipe lists it.
 
-**`containedV1`** is part of world state, absent when empty: what still breaks a rule after rung 3. Each entry is counted
+**`containedV1`** is part of world state, absent when empty: what still breaks a rule after rung 3. An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again; a new subject is a new entry. A rule firing outside the list always reaches it, even while steps are failing, at most once a second, so a rule that could be contained can't fault for good. `SIM_SHARED_CARRY` brings the ladder with it: only an explicit `soulsRepairV1: false` turns it off. Each entry is counted
 once, doesn't fault again, and leaves when it stops firing. A body inside something is relocated once. Under these rules an
 invariant that throws is a named `engine.thrown` violation, so it is contained like any other. A replay survives what the
 live tick survived: a step or event that threw is reported and passed.
