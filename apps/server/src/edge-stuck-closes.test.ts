@@ -63,7 +63,7 @@ test('#1288 W3, W6: a swim offer held up by a Soul treading in its place ends sw
   for (let i = 0; i < 4000 && open(bob, b.receipt.id); i++) await tick(1);
   const a = await go(ann); assert.equal(a.accepted, true, JSON.stringify(a));
   let held: any = null;
-  for (let i = 0; i < 4000 && open(ann, a.receipt.id); i++) {if (i === 300) held = await go(ann); await tick(1);}
+  for (let i = 0; i < 4000 && open(ann, a.receipt.id); i++) {if (i === 300) {held = await go(ann); (edge as any).swimsOpen = null;} await tick(1);}   // (null: as after a restart, rebuilt from the open receipts)
   assert.equal(held?.repeat, true, 'while it waits, a repeat answers with it'); assert.equal(held?.receipt.id, a.receipt.id);
   const end = edge.receipt(ann.soulId, a.receipt.id)!, body = (w.host.engine.world.entities as any)[ann.entityId];
   assert.equal(end.phase, 'failed', JSON.stringify(end)); assert.equal(end.code, 'swim.stuck');
