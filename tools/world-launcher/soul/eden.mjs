@@ -1715,7 +1715,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.4";
+const VERSION = "2.23.5";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -1859,8 +1859,8 @@ export async function flushNow() {
   try { await setNowLine(text); } catch (e) { console.error("now not set: " + e.message); }
 }
 /** The link state the owner sees (connected / disconnected and why) and the public `now` line, as the world says. */
-async function selfLink() {
-  const r = await call("/v1/edge/self/link");
+async function selfLink(get = (path) => call(path)) {
+  const r = await get("/v1/edge/self/link");
   if (r.status === 200) return { link: r.data.link, now: r.data.now ?? null };
   if (r.status === 401 && r.data?.code === "control.revoked") { const why = r.data.reason; return { link: { state: "disconnected", reason: why === "replaced" ? "replaced" : why === "revoked" || why === "refused" ? "revoked" : "stopped-listening", since: r.data.revokedAt ? Date.parse(r.data.revokedAt) : null }, now: null }; }
   return { link: null, now: null };
@@ -2192,7 +2192,7 @@ function ok(r, what) {
   if (r.status === 401) {
     throw new Error(
       `${what}: this folder no longer controls the Soul (${code}: ${msg}). ` +
-      `Control moves when the owner pairs the Soul from another folder. To take it back: ${CLI} pair <soulId> --for <CODE>`
+      `Control moves when the owner pairs the Soul from another folder. To take it back: ${CLI} pair ${load().soul ?? "<soulId>"} --for <CODE>`
     );
   }
   throw new Error(`${what}: HTTP ${r.status} ${code}: ${msg}`);
@@ -2457,6 +2457,8 @@ async function approval(action = "status") {
   }
 }
 
+/** How long `status` gives the world. A person is waiting on it, and a busy world still answers well inside this. */
+const STATUS_WAIT_MS = 5_000;
 async function status() {
   const s = load(), loose = !s.token && HOME ? HOME.principals().filter((p) => p.state === "unpaired") : [];
   if (loose.length && SEAT?.kind !== "soul" && !s.pendingApproval) return { paired: false, souls: loose.map((p) => ({ id: p.id, name: p.name, world: p.world })), why: "These Souls are in this home without a token. Their memory is safe here.", next: `${CLI} adopt <name> --for <CODE>   (the code is on your person's open world page)` };
@@ -2467,19 +2469,40 @@ async function status() {
     return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
   }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
-  const me = ok(await call("/v1/agent/me"), "status");
+  // One quick try, straight to the world: status is how a Soul finds out what is wrong, and a serve busy with a long write
+  // mustn't stand in front of it. Whatever the world does, the Soul still says who it is.
+  const direct = (path) => worldOnce(s.world + path, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: STATUS_WAIT_MS, recoverRead: true }).then((r) => { if (r.status === 429 || r.status === 503) noteRefusal(path, r, "none", r.retryAfterMs); else if (r.status >= 200 && r.status < 500) clearSlowed(path); return r; }, () => ({ status: 0, data: {} }));
+  const r = await direct("/v1/agent/me");
+  if (r.status < 200 || r.status >= 300) {
+    const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
+    const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
+    return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
+  }
+  const me = ok(r, "status");
   if (HOME && SEAT?.id && me.soul?.name) HOME.named(SEAT.id, me.soul.name);
-  const inbox = me.inbox ?? {};
-  const self = await selfLink();
+  const inbox = me.inbox ?? {}, last = inbox.latest, here = listenerNow();
+  // An older world only has `latest`, so a newer message hides an unfinished one there.
+  const unfinished = inbox.unfinished ?? (last?.state === "acknowledged" && !last.result && !last.outcome ? [{ id: last.id, text: last.text }] : []);
+  const self = await selfLink(direct);
   return {
-    soul: me.soul, paired: true, world: s.world, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
-    listening: inbox.connected === true, link: self.link, now: self.now,
+    soul: me.soul, paired: true, world: s.world, reachable: true, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
+    ...here, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
+    ...(unfinished.length ? { unfinished } : {}),
     lastReceipt: s.lastReceipt ?? null,
-    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()), ...consolidationStatus() } : {}),
-    note: inbox.connected ? "A listen is open: owner messages reach this folder." : `Nobody is listening. Start: ${CLI} listen (in the background).`,
+    ...whereIWas(), ...(HOME && SEAT?.kind === "soul" ? consolidationStatus() : {}), ...briefNow(),
+    note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
   };
 }
+/** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
+function listenerNow() {
+  const l = listenLockHolder(), v = serveHolder(), own = l && isOwnListen(l) ? l : null;
+  const listener = own ? { kind: "listen", pid: own.pid, since: own.start ?? null } : v ? { kind: "serve", pid: v.pid, since: v.start ?? null } : null;
+  return { listening: !!listener, ...(listener ? { listener } : {}) };
+}
+const whereIWas = () => (HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {});
 
 // ---------------------------------------------------------------- reading the world
 
@@ -2901,6 +2924,16 @@ export function lockIsLive(holder) {
   try { const cmd = execFileSync("ps", ["-o", "command=", "-p", String(holder.pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); return /listen/.test(cmd); }
   catch { return true; }   // no ps (or it failed): trust the live pid
 }
+/** Whether a lock's process is this Soul's own listen in this folder. A reused pid or a stray lock names something else, which is never ours to signal. */
+export function isListenOf(folder, command, cwd) {
+  if (!/eden\.mjs\s(?:.*\s)?listen(?:\s|$)/.test(String(command ?? ""))) return false;
+  return cwd == null || cwd === folder;
+}
+function isOwnListen(holder) {
+  // The folder decides, not the Soul id in the lock: travel changes that id under a listen that is still this Soul's.
+  let command; try { command = quietly("ps", ["-o", "command=", "-p", String(holder.pid)]); } catch { return true; }   // no ps: trust the live pid, as lockIsLive does
+  return isListenOf(realpathSync(process.cwd()), command, cwdOf(holder.pid));
+}
 export function listenLockHolder() { const h = readLock(); return h && lockIsLive(h) ? h : null; }
 export function takeListenLock() {
   const start = now(), mine = { pid: process.pid, start, beatAt: start, soul: load().soul ?? null };
@@ -2922,7 +2955,7 @@ export function takeListenLock() {
         if (age < LISTEN_STALE_MS) return { ok: false, holder };
         // alive but silent for a minute: stop it (it is this folder's own listen, same user), then take the lock
         process.stderr.write(`listen: the listener pid ${holder.pid} has not renewed its lock for ${Number.isFinite(age) ? Math.round(age / 1000) + " s" : "ever"}; stopping it and taking over\n`);
-        try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
+        if (isOwnListen(holder)) try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
       }
       try { renameSync(LISTEN_LOCK, `${LISTEN_LOCK}.stale-${process.pid}`); unlinkSync(`${LISTEN_LOCK}.stale-${process.pid}`); } catch { /* another listen took it over first */ }
     }
@@ -2931,21 +2964,33 @@ export function takeListenLock() {
   return { ok: false, holder: holder ?? { pid: null } };
 }
 function alreadyListening(holder) {
-  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); you are fine, one listen per Soul is enough\n`);
-  return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: "nothing to do: the open listen prints owner messages when they arrive" };
+  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); one listen per Soul is enough. If this chat started it you are fine; \`status\` shows it as \`listener\`, and if it isn't yours: ${CLI} listen --take\n`);
+  return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: `nothing to do if this chat started it: it prints owner messages when they arrive. If another chat or agent did, or it may be gone, take it over: ${CLI} listen --take` };
 }
 
-// listen [--after <id>] [--once]: hold one long-poll open (this is also the Soul's "agent is
+/** --take: this folder's other listen ends, so a new chat or agent is the one that hears the owner. It holds no message: the world keeps them until acked. */
+async function stopListen() {
+  const holder = listenLockHolder();
+  if (!holder || holder.pid === process.pid) return;
+  if (!isOwnListen(holder)) { calm(`listen: the lock named pid ${holder.pid}, which is not this Soul's listen: that process is left alone`); try { unlinkSync(LISTEN_LOCK); } catch { /* gone */ } return; }
+  try { process.kill(holder.pid, "SIGTERM"); } catch { return; }
+  for (let i = 0; i < 40 && pidAlive(holder.pid); i++) await sleep(100);
+  calm(`listen: took over from pid ${holder.pid}`);
+}
+
+// listen [--after <id>] [--once] [--take]: hold one long-poll open (this is also the Soul's "agent is
 // listening" presence) and exit as soon as the owner has written, printing every waiting message.
 async function listen(...args) {
-  let after, once = false;
+  let after, once = false, take = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--after") after = args[++i];
     else if (args[i] === "--once") once = true;
-    else throw new Error("usage: listen [--after <message-id>] [--once]");
+    else if (args[i] === "--take") take = true;
+    else throw new Error("usage: listen [--after <message-id>] [--once] [--take]");
   }
-  // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone.
+  // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone, unless it says --take.
   if (!once) {
+    if (take) await stopListen();
     const lock = takeListenLock();
     if (!lock.ok) return alreadyListening(lock.holder);
   }
@@ -3450,7 +3495,7 @@ async function serveForeground() {
   st.folder = folderKey(s);
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
 
@@ -3465,9 +3510,10 @@ async function serveForeground() {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
         if (next !== code) log(`inbox: ${next}; next try in ${secs(ms)}`);
-        code = next; await pause(ms); continue;
+        code = next; if (r.status === 0 || (r.status >= 500 && !isBusy(r.status, r.data))) worldDown ??= { code: next, since: now() };
+        await pause(ms); continue;
       }
-      attempt = 0; code = undefined;
+      attempt = 0; code = undefined; worldDown = null;
       if (r.status >= 200 && r.status < 300) {
         const got = messagesOf(r.data);
         if (!recovered) { recovered = true; if (Array.isArray(r.data?.backlog)) { reconcileMessages(st, got); persist(); } }
@@ -3685,7 +3731,11 @@ async function serveForeground() {
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
     if (m.op === "pending") { const out = takePending(st); persist(); return out; }
-    if (m.op === "status") return { serving: true, pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    if (m.op === "status") {
+      // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
+      if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "http") {
       const path = routeOf(m.url);
@@ -3724,7 +3774,8 @@ async function serveForeground() {
     });
   });
   const shutdown = (code) => {
-    stopping = true; persist();
+    stopping = true;
+    try { persist(); } catch { /* its folder is gone: the signal still stops it, or nothing could */ }
     try { unlinkSync(SERVE_SOCK); } catch { /* gone */ }
     try { if (readServeLock()?.pid === process.pid) unlinkSync(SERVE_LOCK); } catch { /* gone */ }
     process.exit(code);
@@ -3865,7 +3916,7 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
           say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
+owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)

@@ -51,6 +51,14 @@ arrival a visitor can show its local identity, before its travel row lands.
 `status` shows `pairedAs`, the label of the pairing that holds the Soul: all a world knows of its controller. The managed
 runtime's lease stays local to its journal.
 
+`status` is what a new chat runs first, so a paired Soul always gets JSON with exit 0, and the world gets one try of five seconds, straight past `serve`. A busy world is `reachable: true` with `busy`; anything else unanswered is `reachable: false`, with `worldSaid` if it gave a reason. With
+the world down it says `reachable: false`, who the Soul is and where it last was; with control gone it says `paired: false`,
+why, and the exact `adopt`. `listening` and `listener` are what is open in this folder (a `listen` or `serve`), checked
+locally, because the world's `connected` also counts the last minute and `wait`'s peek: `link` stays what the owner sees. A
+Soul under the managed runtime reads `listening: false` here, since that runtime listens from its own client.
+`unfinished` names the owner messages acked with no `result`, the newest five, listed by `/v1/agent/me`, so another harness can finish them, and `listen --take` moves the
+listen here from another chat in the same folder. The world keeps messages until they are acked, so nothing is lost by that.
+
 ## The Souls home
 
 The shipping CLI (`tools/world-launcher/soul/eden.mjs`) keeps every Soul a person pairs in one `.souls/` folder, found
@@ -186,7 +194,7 @@ back for, on its own, twice, is passed over at no cost, so it can't hold up the 
 
 ### The pre-turn brief
 
-With memory, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
+With memory, `status`, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
 episode and the pinned lines of `SOUL.md` (under `## Pinned`), else the `remember --self` lines. `brief.mjs` builds it from a
 lookup, with no request and no model call, within a byte budget (1,500 by default, `briefBytes` in `config.json`, 0 for none).
 It doesn't grow with the log, and a Soul with no memory has none. The CLI builds it from this folder's memory, and a `brief` in

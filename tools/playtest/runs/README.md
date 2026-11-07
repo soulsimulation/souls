@@ -240,6 +240,8 @@ displacement (`observedFirstBodyChangeSec` is, with an observer). Under a script
 cannot move between arms; a `scripted-owner` seat's "turns" are scripted steps at no model cost, so M2 and M3 describe the
 script there.
 
+**Closing without `result`** (#1269, scorer version 4): a client can close a message in the command that finishes it, and its answer says `closed: true`. `ack <id> … --close done|failed` and `say … --for <id>` name the message themselves. An `act` or `wait` the world closed names it through `for` or the act that took the receipt, and the outcome is the receipt's. A `closed: true` that can't be placed counts as nothing. A run with none of these scores as version 3 did. A question reads such a close as the `result` step it replaced, right after the command that made it (`questionSteps`, evaluator version 3), so question files and their hashes don't change.
+
 **Predeclared:** `controllability.mjs` holds the definitions and the refusal table. Its sha256 goes into every run's effective
 spec (`scorer`). The card says `predeclared: true` only when that hash still matches at evaluation; otherwise it scores
 anyway and says why not.

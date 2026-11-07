@@ -1745,6 +1745,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     let v: VocabResult;
     // (srv-act-words: focused words were resolved already, on these offers, by wordsFocused)
     ({v, caps, plans} = bound.pre && !social && text === asked ? bound.pre : this.resolveOnDemand(soul, text, caps, plans));
+    // #849: `resolve` names the one seat; an act on words still asks for its id, so nothing is taken on a reading of the words
+    if (v.kind === 'alias' && v.oneSeat) v = {kind: 'unknown', code: 'capability.choose', reason: 'Choose a bound seat by its exact sit capability ID. No seat has been selected.', didYouMean: [{id: v.cap.id, label: v.cap.label}]};
     if (words) {plans = new Map(plans); v = this.exactWords(soul, words, text, v, plans);}
     // PC04 (#683): answering a shared proposal that has closed is refused as gone, not unknown
     if (v.kind === 'unknown' && /^(?:accept|decline):inv_/.test(asked)) {
@@ -2904,7 +2906,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
   resolveOnDemand(soul: EdgeSoul, text: string, caps: EdgeCapability[], plans: Plans, typos = true): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} {
     const exact = caps.find(c => c.id === text);
     if(exact && this.secretOffer(soul,exact))return {v:{kind:'unknown',code:'capability.unknown',reason:'That action is not known here.',didYouMean:[]},caps,plans};
-    if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery)return {v:discovery,caps,plans};}
+    if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery){
+      // #849: the one seat the words name was taken: bind it by its exact id (offered on demand when the listing leaves it out)
+      if(discovery.kind==='alias'){const r=this.resolveOnDemand(soul,discovery.cap.id,caps,plans,typos);if(r.v.kind==='unknown')return r;
+        if(r.v.cap.id!==discovery.cap.id)return {v:{kind:'unknown',code:'capability.choose',reason:'Choose a bound seat by its exact sit capability ID. No seat has been selected.',didYouMean:[{id:discovery.cap.id,label:discovery.cap.label}]},caps,plans};
+        return {...r,v:{kind:'alias',cap:r.v.cap,note:discovery.note,oneSeat:true}};}
+      return {v:discovery,caps,plans};}}
     // RESOLVE: a building's floor ("go upstairs", "go inside the cottage and go upstairs", "the top floor of the tower")
     const fl = exact || !this.floorOnDemand ? null : floorWords(text);
     if (fl) {
@@ -2994,7 +3001,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const r = fix ? this.resolveOnDemand(soul, fix.text, caps, plans, false) : null;
       if (fix && r && r.v.kind !== 'unknown') {
         const read = fix.fixes.map(([a, b]) => `"${a}" as "${b}"`).join(', ');
-        return {...r, v: {kind: 'alias', cap: r.v.cap, ...(r.v.kind === 'alias' && r.v.params ? {params: r.v.params} : {}), note: `read ${read}: ${r.v.kind === 'alias' ? r.v.note : `${fix.text} is ${r.v.cap.id} (${r.v.cap.label}).`}`}};
+        return {...r, v: {kind: 'alias', cap: r.v.cap, ...(r.v.kind === 'alias' && r.v.params ? {params: r.v.params} : {}), ...(r.v.kind === 'alias' && r.v.oneSeat ? {oneSeat: true as const} : {}), note: `read ${read}: ${r.v.kind === 'alias' ? r.v.note : `${fix.text} is ${r.v.cap.id} (${r.v.cap.label}).`}`}};
       }
     }
     return {v, caps, plans};
