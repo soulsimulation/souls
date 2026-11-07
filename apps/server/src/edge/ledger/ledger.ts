@@ -1583,10 +1583,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
     ], undefined, {}, refuse);
   }
 
-  async act(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
+  async act(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
     // PC05 (#684, PC02 §3): `shared.busy` (from insert) is the act's refusal: no receipt, nothing replaced, the owner's
     // message stays unacked; the agent decides what to do
-    try {return await this.actWork(soul, input);}
+    const again = this.repeatOf(soul, input);
+    if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}
+    try {const out = await this.actWork(soul, input); this.noteAct(soul.soulId, input, out); return out;}
     catch (e) {
       if (!(e instanceof EdgeError) || e.code !== 'shared.busy') throw e;
       const capability = typeof input.capability === 'string' ? input.capability : String(input.verb ?? '');
@@ -1594,13 +1596,40 @@ export class EdgeLedger implements EdgeLedgerHooks {
       return {accepted: false, code: e.code, reason: e.message, capability, ...(e.extra ?? {})};
     }
   }
+  /** #1272: a Soul's latest act, by what was sent for it. Ids and words that reached the same act are all kept. */
+  private lastAct = new Map<string, {receipt: string; keys: string[]}>();
+  /** #1272: the clientRefs of repeats, whose own act never made a row: a retry of one finds the receipt it was answered with.
+   *  Bounded, and lost on a restart, when such a retry acts again. */
+  private repeatRefs = new Map<string, string>();
+  private actKey(input: {capability?: unknown; params?: unknown}): string | null {
+    if (typeof input.capability !== 'string') return null;
+    const params = input.params && typeof input.params === 'object' ? Object.entries(input.params).sort(([a], [b]) => a < b ? -1 : 1) : input.params ?? [];
+    return `${input.capability.trim()}\u0000${JSON.stringify(params)}`;
+  }
+  /** #1272: the receipt under way that this act repeats, or null. A repeat isn't a new intention, and replacing the act would
+   *  cut it short. Other params are a new act, and so is anything the world can't match to its first act. */
+  repeatOf(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}): EdgeReceipt | null {
+    const key = this.actKey(input), last = this.lastAct.get(soul.soulId); if (!key || !last?.keys.includes(key)) return null;
+    if (typeof input.clientRef === 'string' && this.coreA.byClientRef(soul.soulId, input.clientRef)) return null;   // a retry: its own answer, as before
+    const r = this.receipt(soul.soulId, last.receipt); return r && OPEN.includes(r.phase) ? r : null;
+  }
+  private keepRepeatRef(soulId: string, ref: unknown, receipt: string) {
+    if (typeof ref !== 'string' || !ref || ref.length > 100) return;
+    this.repeatRefs.set(`${soulId}\u0000${ref}`, receipt);
+    if (this.repeatRefs.size > 1000) this.repeatRefs.delete(this.repeatRefs.keys().next().value!);
+  }
+  private noteAct(soulId: string, input: {capability?: unknown; params?: unknown}, out: {accepted: boolean; receipt?: EdgeReceipt}) {
+    const key = this.actKey(input); if (!key || !out.accepted || !out.receipt) return;
+    const last = this.lastAct.get(soulId);
+    this.lastAct.set(soulId, {receipt: out.receipt.id, keys: last?.receipt === out.receipt.id ? [...last.keys, key] : [key]});
+  }
   /** CTRL-1 (#1093): a strict client's act: null when it is an offered id with fitting params, else the refusal. */
   offerGate(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; verb?: unknown; target?: unknown; clientRef?: unknown}): OfferRefusal | null {
     const no = offerCheck(this, soul, input); if (!no) return null;
     this.recordRefusal(soul.soulId, 'act', no.capability, no.code, no.reason);
     return no.code === 'capability.unknown' ? this.withAlternatives(soul, no.capability, no, this.wordsMenu(soul).caps) : no;
   }
-  private async actWork(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
+  private async actWork(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
     // PC08 (#687, PC02 §3): a member's safe stop of a running shared operation never touches the member's own receipt
     if (this.sharedCarry && typeof input.capability === 'string' && input.capability.startsWith('stop-carry:')) return this.stopShared(soul, input.capability, typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined);
     // intents/1 (Core-A): {verb, target} is resolved now and acted on as the concrete choice it reports
@@ -1643,7 +1672,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (!via) {const w = this.wordsMenu(soul); return w.exact ? {caps: w.caps, plans: w.plans} : {caps: w.caps, plans: w.plans, words: w};}
     return this.binds(soul);
   }
-  private async actOnce(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}, exactWalk: ExactWalkBindings | null = null): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
+  private async actOnce(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}, exactWalk: ExactWalkBindings | null = null): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
     const asked = typeof input.capability === 'string' ? input.capability : '';
     if (!asked || asked.length > 200) throw new EdgeError(400, 'invalid', 'body must be {capability, params?, clientRef?}');
     let capability = asked;
@@ -2963,7 +2992,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       isAncestor: (ancestor: string, id: string) => {for (let p = self.places.byId.get(id), n = 0; p?.parent && n < 20; p = self.places.byId.get(p.parent), n++) if (p.parent === ancestor) return true; return false;},
       targetPoint: (s: EdgeSoul, c: EdgeCapability) => self.vocabulary(s, [c]).target(c).at,
       detail: (id: string): Record<string, unknown> | null => {const r = self.rows('receipt_id=?', id)[0]; try {return r?.detail ? JSON.parse(r.detail) : null;} catch {return null;}},
-      byClientRef: (soulId: string, ref: string) => {const r = self.rows('soul_id=? AND client_ref=?', soulId, ref)[0]; return r ? self.view(r) : null;},
+      byClientRef: (soulId: string, ref: string) => {const r = self.rows('soul_id=? AND client_ref=?', soulId, ref)[0]; if (r) return self.view(r); const kept = self.repeatRefs.get(`${soulId}\u0000${ref}`); return kept ? self.receipt(soulId, kept) : null;},
       setDetail: (id: string, patch: Record<string, unknown>) => {const r = self.rows('receipt_id=?', id)[0]; if (!r) return null; self.setDetail(id, patch); return self.view(self.rows('receipt_id=?', id)[0]);},
       /** A completed receipt that never touches the body's act (attention, settings). */
       insertDone: (s: EdgeSoul, capability: string, clientRef: string | undefined, detail: Record<string, unknown>) => {

@@ -33,7 +33,7 @@ generated: false
 
 - **Offer.** An action the world offers a Soul right now, with an id such as `walk:library` and any parameters it takes. An offer you can see isn't yet an action.
 - **Action.** An offered id you sent with `act`. A new action replaces what the body was doing.
-- **Receipt.** The world's record of one action. It is accepted or refused with a reason, then moves from `waiting` to `started`, and ends `completed`, `failed` or `replaced`. Acceptance isn't arrival: read how the receipt ended.
+- **Receipt.** The world's record of one action. It is accepted or refused with a reason, then moves from `waiting` to `started`, and ends `completed`, `failed` or `replaced`. Sending the same act again while it runs doesn't restart it: the answer is the same receipt, with `repeat: true`. Acceptance isn't arrival: read how the receipt ended.
 - **Refusal.** An answer of `accepted: false` with a `code` and a `reason`. It is a fact about the world, not an error in your agent. See [Troubleshooting](/docs/troubleshooting).
 - **Busy.** A world that is slow, not broken. The client waits the time the world names and tries again; after that, try once more yourself. See [Limits](/docs/limits).
 - **Idempotent retry.** A repeated `act` or `say` carries the same key, so one command never acts twice.
