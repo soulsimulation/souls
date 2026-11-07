@@ -1,5 +1,6 @@
 // CTRL-2 (#1094): one recursive read for any id: what it is, its state, what is in it, and the offers on it with their
 // schemas. Nothing here knows a kind of object: facts come from the same source `here` reads, offers from the menu.
+import {TIMELINE_PAGE} from '../ledger/timeline.ts';
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import {EdgeError, type EdgeCapability, type EdgeSoul} from '../contract.ts';
 import {offerParams, type ParamSchema} from '../intents/offer-schema.ts';
@@ -7,7 +8,7 @@ import {offerParams, type ParamSchema} from '../intents/offer-schema.ts';
 type Child = {id: string; kind: string; name: string};
 type Member = {soulId: string; name: string; role: string; slot: number | null; accepted: boolean; answer?: string; ready?: boolean; why?: string};
 type Offer = {id: string; verb: string; label: string; available: boolean; why?: string; params?: ParamSchema};
-export type Inspected = {id: string; kind: string; name: string; state?: Record<string, unknown>; parts?: Child[]; contents?: Child[]; members?: Member[]; offers: Offer[]; more?: {parts?: number; contents?: number; offers?: number}};
+export type Inspected = {id: string; kind: string; name: string; state?: Record<string, unknown>; parts?: Child[]; contents?: Child[]; members?: Member[]; offers: Offer[]; more?: {parts?: number; contents?: number; offers?: number; members?: number}};
 
 export const INSPECT_BYTES = 4096;
 /** What a place lists before the byte budget: the nearest; `more` still counts the rest. */
@@ -40,8 +41,8 @@ function identify(L: EdgeLedger, soul: EdgeSoul, id: string, caps: EdgeCapabilit
   const mind = L.host.minds.get(id);
   if (mind) {
     // public facts only: not its receipts, its events or where it is, which may be a place this Soul has not found
-    const seen = L.publicSoul(id) as {soul?: {description?: string | null}; now?: unknown; self?: {activity?: string; doing?: unknown} | null};
-    return {id, kind: 'soul', name: mind.name, state: {...(seen.soul?.description ? {description: seen.soul.description, untrusted: true} : {}), ...(seen.now ? {now: seen.now} : {}), ...(seen.self ? {activity: seen.self.activity} : {})}};
+    const seen = L.publicSoul(id) as {soul?: {description?: string | null}; now?: unknown; self?: {activity?: string; doing?: unknown} | null; timeline?: unknown[]};
+    return {id, kind: 'soul', name: mind.name, state: {...(seen.soul?.description ? {description: seen.soul.description, untrusted: true} : {}), ...(seen.now ? {now: seen.now} : {}), ...(seen.timeline?.length ? {timeline: seen.timeline.slice(0, TIMELINE_PAGE)} : {}), ...(seen.self ? {activity: seen.self.activity} : {})}};
   }
   if (L.concealedThing?.(id)) return null;
   const item = L.together.publicItems().find(i => i.id === id);
@@ -70,22 +71,22 @@ function identify(L: EdgeLedger, soul: EdgeSoul, id: string, caps: EdgeCapabilit
 
 /** `GET /v1/edge/inspect/:id`: at most INSPECT_BYTES unless `all`, with `more` counting what was left out. */
 export function inspectFrame(L: EdgeLedger, soul: EdgeSoul, id: string, opts: {all?: boolean} = {}): Inspected {
-  const caps = L.coreA.binds(soul).caps, shared = L.together.sharedView(id, soul.soulId);
+  const caps = L.coreA.binds(soul).caps, shared = L.together.sharedView(id, soul.soulId), project = L.projects?.view(id, soul) ?? null;
   // a shared operation's offers name its invitation or operation; the host's amend is the carry-with on its load
   const offersOn = shared
     ? caps.filter(c => {const tail = c.id.slice(c.id.indexOf(':') + 1); return tail === shared.id || tail === shared.op || (c.verb === 'carry-with' && tail === shared.load);})
     : caps.filter(c => on(c, id));
-  const {cutOff = 0, ...who} = shared ? {id: shared.id, kind: 'shared', name: shared.name, state: shared.state, members: shared.members} : identify(L, soul, id, caps) ?? (() => {throw unknown(id);})();
+  const {cutOff = 0, ...who}: Omit<Inspected, 'offers' | 'more'> & {cutOff?: number} = project ?? (shared ? {id: shared.id, kind: 'shared', name: shared.name, state: shared.state, members: shared.members} : null) ?? identify(L, soul, id, caps) ?? (() => {throw unknown(id);})();
   const out: Inspected = {...who, offers: offersOn.map(offerOf)};
   if (opts.all) return out;
   const more: NonNullable<Inspected['more']> = {};
-  const cut = (key: 'offers' | 'contents' | 'parts') => {
+  const cut = (key: 'offers' | 'contents' | 'parts' | 'members') => {
     const list = out[key] as unknown[] | undefined; if (!list) return;
     let n = 0;
     while (list.length > 1 && Buffer.byteLength(JSON.stringify(out)) > INSPECT_BYTES - MORE_BYTES) {list.pop(); n++;}
     if (n) more[key] = n;
   };
-  cut('contents'); cut('parts'); cut('offers');
+  cut('contents'); cut('parts'); cut('offers'); cut('members');
   if (cutOff) more.contents = (more.contents ?? 0) + cutOff;
   return Object.keys(more).length ? {...out, more} : out;
 }
