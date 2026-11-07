@@ -47,6 +47,14 @@ const QCOLS = 'n,id,text,sent_at,delivered_at,acknowledged_at,reply,outcome,touc
 
 export class AgentInbox {
   readonly db: Db; readonly worldId: string; readonly now: () => number;
+  /** #1295: set by the owner loop: the act linked to a Soul's message that is running now, or null. A close then is
+   *  refused and writes nothing; the world closes the message with that act's outcome when it ends. */
+  closeHold: ((s: InboxScope, id: string) => {receipt: string; capability: string} | null) | null = null;
+  private held(s: InboxScope, id: string) {
+    let h: {receipt: string; capability: string} | null | undefined = null;
+    try {h = this.god(s) ? null : this.closeHold?.(s, id);} catch {/* a guard that can't answer holds nothing */}
+    if (h) throw new ApiError(409, 'message.act-running', `not closed: ${h.capability} is still going (receipt ${h.receipt}); the world closes this message with that act's outcome when it ends, so there is nothing to send`, {receipt: h.receipt, capability: h.capability});
+  }
   /** Set by the routes: where a ticket's touched entities are now (null when none is left in the world). */
   focusOf: (ids: string[]) => TicketFocus | null = () => null;
   private waiters = new Map<string, Set<() => void>>();
@@ -215,6 +223,7 @@ export class AgentInbox {
       return {...this.view(s), latest: this.message(r)};
     }
     if (!r) throw new ApiError(404, 'not-found', 'no such message (it may be too old)');
+    if (outcome !== undefined) this.held(s, id);
     // The god's command must be received first. A Soul's id reaches only its agent (listen, or the private notice on any
     // answer), so acknowledging it also marks it received: listen is the one consumer, nothing else delivers.
     if (r.delivered_at === null && this.god(s)) throw new ApiError(409, 'not-delivered', 'receive the message before acknowledging it');
@@ -237,16 +246,18 @@ export class AgentInbox {
       if (r.result === text.trim() && r.outcome === outcome) return {...this.view(s), latest: this.message(r)};
       throw new ApiError(409, 'finished', 'this message already has its result');
     }
+    this.held(s, id);
     if (r.acknowledged_at === null) { this.acknowledge(s, id, undefined); r = this.get(s, 'AND id=?', id)!; }
     this.set(s, 'result=?,result_at=?,outcome=?,result_by=NULL', r.n, text.trim(), this.now(), outcome);
     return {...this.view(s), latest: this.message(this.get(s, 'AND n=?', r.n)!)};
   }
   /** D3 (playtest 2026-10-25: 39% of card messages got a result before the cutoff): the world's result for a message an
    *  act was linked to (`act --for <id>`), written when that act ends. Never over the agent's own result; a later linked
-   *  act's end replaces the world's earlier line. False when nothing was written. */
-  serverResult(s: InboxScope, id: string, text: string, outcome: 'done' | 'failed'): boolean {
+   *  act's end replaces the world's earlier line. `open` (#1295): only into a message with no result yet. False when
+   *  nothing was written. */
+  serverResult(s: InboxScope, id: string, text: string, outcome: 'done' | 'failed', open = false): boolean {
     if (this.god(s)) return false;
-    const r = this.get(s, 'AND id=?', id); if (!r || (r.result_at !== null && r.result_by !== 'server')) return false;
+    const r = this.get(s, 'AND id=?', id); if (!r || (r.result_at !== null && (open || r.result_by !== 'server'))) return false;
     const line = text.replace(/\s+/g, ' ').trim(); if (!line) return false;
     this.set(s, "delivered_at=COALESCE(delivered_at,?),acknowledged_at=COALESCE(acknowledged_at,?),result=?,result_at=?,outcome=?,result_by='server'", r.n, this.now(), this.now(), line.length > 140 ? line.slice(0, 139) + '…' : line, this.now(), outcome);
     return true;
