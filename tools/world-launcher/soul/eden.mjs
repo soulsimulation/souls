@@ -2918,11 +2918,14 @@ export function clipped(text, max = 140) {
 async function ack(id, ...rest) {
   const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
   if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
-  const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ")) : {}, reply = line.text;
-  // with --close the text is the result: the owner's card shows a reply and a result, so sending both shows it twice
-  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply && !close ? { reply } : {} }), "ack"));
-  save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
-  return { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}), ...d, ...(close ? await closing(id, close, reply) : {}) };
+  const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
+  // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
+  // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
+  const shut = close ? await closing(id, close, reply) : {};
+  if (shut.closed) return { ...said, closed: true };
+  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
+  if (!shut.already) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
+  return { ...said, ...d, ...shut };
 }
 
 /** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
@@ -2932,11 +2935,15 @@ async function closing(id, outcome, text) {
   const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
   if (link?.message === id && link.receipt) {
     const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
-    if (going?.status === 200 && !TERMINAL.has(going.data?.receipt?.phase)) return { closed: false, why: "its act is still going: the world closes it when the act ends" };
+    // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
+    if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
   }
   const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
   if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
-  if (read.data?.message?.result !== undefined) return { closed: false, why: `already closed, ${read.data.message.outcome}: nothing more to do` };
+  if (read.data?.message?.result !== undefined) {
+    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
+    return { closed: false, already: read.data.message.outcome, why: "already closed: nothing more to do" };
+  }
   try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
