@@ -293,6 +293,7 @@ function repairWords(input: string, text: string, ctx: VocabContext): VocabResul
 }
 
 export function resolveCapability(input: string, ctx: VocabContext): VocabResult {
+  const sign = signWords(input, ctx); if (sign) return sign;
   const r = resolveWords(input, ctx);
   // R2 stroll (longrun 2026-10-16: nobody moved for 70 minutes): a stroll named for the place the Soul is already in, whose
   // own loop is closed right now (a construction site covers one of its stops), is a wander right where it stands; never a
@@ -301,6 +302,20 @@ export function resolveCapability(input: string, ctx: VocabContext): VocabResult
   const wander = ctx.caps.find(c => c.id === 'wander:here' && c.available); if (!wander) return r;
   const name = ctx.places.find(p => p.id === r.cap.target!.id)?.name ?? r.cap.target.id;
   return {kind: 'alias', cap: wander, note: `${input}: you are in ${name} already and its loop (${r.cap.id}) is closed right now (${(r.cap.blocked?.reason ?? 'unavailable').replace(/[.\s]+$/, '')}); wandering around where you are instead (${wander.id}).`};
+}
+// #427: an Open / Closed sign goes by what it will say: "turn the sign to closed", "flip the cafe sign". Only where one is offered,
+// and only with "the sign" or the sign's own name: "turn on sign", "turn to sign" and "turn the sign" keep their meanings.
+const SIGN_WORDS = /^(?:(?:turn|set|change)\s+(?:the|my|our|this)\s+(?:([a-z0-9-]+)\s+)?sign\s+to\s+(?:say\s+)?(open|closed)|flip\s+(?:the|my|our|this)\s+(?:([a-z0-9-]+)\s+)?sign(?:\s+(?:round|around|over))?)$/;
+export function signWords(input: string, ctx: Pick<VocabContext, 'caps'>): VocabResult | null {
+  const offers = ctx.caps.filter(c => c.verb === 'object' && /^Turn the sign to /.test(c.label)); if (!offers.length) return null;
+  const t = input.toLowerCase().replace(/^(?:please\s+)+/, '').replace(/[.!?\s]+$/, '').replace(/[,\s]+please$/, '').trim();
+  const exact = offers.find(c => c.label.toLowerCase() === t); if (exact) return {kind: 'alias', cap: exact, note: `${input} is ${exact.id}.`};
+  const m = SIGN_WORDS.exec(t); if (!m) return null;
+  const name = m[1] ?? m[3], said = m[2] ? {open: 'open', closed: 'close'}[m[2]] : null, nameOf = (c: EdgeCapability) => /\(([^()]*)\)$/.exec(c.label)?.[1]?.toLowerCase();
+  const named = offers.filter(c => !name || nameOf(c) === name || nameOf(c) === `${name}-sign`); if (!named.length) return null;
+  const fit = named.filter(c => said ? c.action === said : c.available), can = fit.filter(c => c.available), pick = can.length ? can : fit.length ? fit : named;
+  if (new Set(named.map(c => c.target?.id)).size > 1 && can.length !== 1) return {kind: 'unknown', code: 'place.ambiguous', reason: 'More than one sign is here: name the one you mean.', didYouMean: []};
+  return {kind: 'alias', cap: pick[0], note: `${input} is ${pick[0].id}.`};
 }
 // VEHICLE-STEER (Gene 2026-10-23, #12): a seated rider's words to its ride. Only when a steer is offered to this Soul now
 // (it is aboard); otherwise the words fall through ("fly the balloon" from the ground is still the join).
