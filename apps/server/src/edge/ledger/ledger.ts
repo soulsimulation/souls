@@ -2680,7 +2680,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** Where a new Soul first stood. A Soul that has been here a while gets no arrival from a restart: it keeps the one in its record. */
   private firstSeen(soulId: string, place: string, tick: number) {const made = (this.db.soul(soulId) as {created_at?: number} | undefined)?.created_at; if (made !== undefined && Date.now() - made < ARRIVAL_FRESH_MS) this.timeline.arrived(soulId, tick, made, this.worldClock(tick), place);}
   /** A Soul about to leave for another world: read now, while the world still knows where it stands, and written only if it goes. */
-  noteTravel(soulId: string, at: number, world: string) {const tick = this.host.engine.world.tick, clock = this.worldClock(tick), place = this.host.minds.has(soulId) ? (this.placePathOf(soulId).find((p) => p.kind !== 'occupier')?.id ?? null) : null; return () => this.timeline.travelled(soulId, tick, at, clock, place, world);}
+  noteTravel(soulId: string, at: number, world: string) {const tick = this.mw.world.tick, clock = this.worldClock(tick), place = this.host.minds.has(soulId) ? (this.placePathOf(soulId).find((p) => p.kind !== 'occupier')?.id ?? null) : null; return () => this.timeline.travelled(soulId, tick, at, clock, place, world);}
   /** A Soul's public biography, newest first. A bounded read of one index, whatever the log holds. */
   publicTimeline(soulId: string, row: {created_at: number}, limit = TIMELINE_MAX): TimelineEntry[] {
     this.timeline.ensure(soulId, () => (this.db.db.prepare("SELECT * FROM edge_receipts_v1 WHERE world_id=? AND soul_id=? AND phase='completed' ORDER BY accepted_tick DESC LIMIT ?").all(this.host.worldId, soulId, REBUILD_MAX) as Row[]).map((r) => ({receipt: this.view(r), at: r.created_at})));
