@@ -39,10 +39,10 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    const open=d.contact.plan(soul,id,'open',{},{open:false}),o=open?.params.opening;if(!open||!o)continue;
    const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)],far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
    const close=d.contact.plan(soul,id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)continue;
-   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${e.name??id}, and there is nowhere to stand clear of it once it is shut. It was not opened.`};continue;}
    // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
    const end=actuatorPoint(c,0).root;if(!eng.walkFromReachesV1(soul.entityId,[end[0],end[2]],steps))continue;
    const name=e.name??id,denied=d.access(id,soul);
+   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened.`};continue;}
    if(denied){refusal??={refuse:true,code:denied.code,reason:`The way to ${what} goes through ${name}: ${denied.reason.replace(/[.\s]+$/,'')}. It was not opened.`};continue;}
    // Entry 32, the safe way out: from inside (the back), a lockable door's thumb-turn opens for anyone, and its owner's
    // key opens it from outside. The walk turns it first and the latch locks it again as it is shut behind (a guest cannot

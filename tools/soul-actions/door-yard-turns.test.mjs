@@ -13,7 +13,7 @@ import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 // side. Every leg completes or fails by name; nothing recovers a fault, breaks an invariant or jumps. Each turn is a fresh world.
 const defs = (process.env.YARD_DEFS ?? 'core/door@3,core/door@2').split(',');
 const turns = (process.env.YARD_TURNS ?? '0,0.4,0.571,0.785,1.2,1.571,1.9,2.356,2.9,3.7,4.712,5.5,5.712').split(',').map(Number);
-const once = async (ref, r, stubs = [], tight = false) => {
+const once = async (ref, r, stubs = [], {tight = false, more = null, only = null} = {}) => {
  const f = fixture(':memory:', factory, {durableClockV1: true}); f.brain.quiesce();
  const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false}), app = new Hono(); let soul;
  const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: edge, soul: () => soul});
@@ -32,9 +32,10 @@ const once = async (ref, r, stubs = [], tight = false) => {
    {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: at(1.5, 4), r},
    {op: 'place', def: 'core/floor-lamp@1', name: 'outside-lamp', p: at(0, -4)},
    ...stubs.map(([x0, z0, x1, z1], i) => ({op: 'place', def: 'core/garden-wall@1', name: `stub-${i}`, shape: {path: [at(x0, z0), at(x1, z1)]}})),
+   ...(more?.(ax, az) ?? []),
   ]});
   assert.equal(placed.accepted, true, JSON.stringify(placed)); await tick(45);
-  // a walk's close that finds no room: no wall in a yard has been found to do this to a walk, so the plan says it outright
+  // every close says it has no room, so the walk's own refusal can be read without building the wall for it
   if (tight) {const plan = edge.contactActuator.plan.bind(edge.contactActuator); edge.contactActuator.plan = (...a) => {const p = plan(...a); return a[2] === 'close' && p ? {...p, noRoom: true} : p;};}
   const moved = [], out = [];
   const leg = async (capability, name) => {
@@ -47,6 +48,7 @@ const once = async (ref, r, stubs = [], tight = false) => {
    }
    out.push([name, rc?.code ?? rc?.phase]); await tick(10);
   };
+  if (only) {await leg(only, only); return out;}
   const id = god.model.get('door').id, inside = () => (body().pose.p[0] - o[0]) * s + (body().pose.p[2] - o[1]) * c > 0, shut = () => god.model.get('door').state?.open === false;
   const through = async (name, wantInside) => {await leg(wantInside ? 'walk:inside-bench' : 'walk:outside-lamp', name); if (out.at(-1)[1] === 'completed') {assert.equal(inside(), wantInside, `${ref} r=${r} ${name}: the far side`); assert.ok(shut(), `${ref} r=${r} ${name}: shut behind her`);}};
   await through('in', true); await through('out', false);
@@ -84,8 +86,8 @@ test('a wall just behind where a close would end: refused by name', {timeout: 12
  assert.deepEqual(legs.filter(([n]) => n === 'close-outside'), [['close-outside', 'contact.no-room']]);
 });
 
-test('a walk whose close would have no room is refused by name, and the door is not opened', {timeout: 120000}, async () => {
- const legs = await once('core/door@3', 0.571, [], true);
+test('a walk whose close would have no room is refused by name', {timeout: 120000}, async () => {
+ const legs = await once('core/door@3', 0.571, [], {tight: true});
  if (process.env.YARD_LOG) console.log('TIGHT', JSON.stringify(legs));
  assert.deepEqual(legs[0], ['in', 'contact.no-room']);
 });
@@ -94,4 +96,19 @@ test('a close that ends clear carries nothing new, one that would not eases clea
  // at 4.712 a close ends at exactly the limit, which is legal
  assert.equal((await once('core/door@3', 4.712)).settled, undefined);
  assert.equal((await once('core/door@3', 0.571)).settled, true);
+});
+
+test('a close whose end is too near a standing wall, not only the gap, eases clear or is refused', {timeout: 120000}, async () => {
+ const legs = await once('core/door@3', 4.712, [[-0.73, 0.38, -0.17, 0.9]]);
+ for (const [name, code] of legs) assert.notEqual(code, 'engine.fault-recovered', name);
+});
+
+test('a door beside the way, with no room to shut it, does not answer for the walk', {timeout: 120000}, async () => {
+ // the store's locked door is the way; this yard's door borders the search and has a wall behind it
+ const more = (ax, az) => {const at = (x, z) => [ax + 14 + x, az + 3 + z]; return [
+  {op: 'place', def: 'core/garden-wall@1', name: 'store-walls', shape: {path: [at(-.6, 0), at(-4, 0), at(-4, 6), at(4, 6), at(4, 0), at(.6, 0)]}},
+  {op: 'place', def: 'core/door@3', name: 'store-door', p: at(0, 0), r: Math.PI, state: {locked: true}},
+  {op: 'place', def: 'core/bench@1', name: 'store-bench', p: at(-2.5, 1.5)}];};
+ const legs = await once('core/door@3', 0.571, [[0, 0.8, 1.2, 0.8]], {more, only: 'walk:store-bench'});
+ assert.deepEqual(legs, [['walk:store-bench', 'door.locked']]);
 });
