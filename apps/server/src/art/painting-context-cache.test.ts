@@ -20,7 +20,7 @@ test('painting commit invalidates actual context pixels before terminal receipt 
   assert.equal(god.act({ops:[{op:'place',def:coreRef('easel',2),name:'canvas',p:[0,0]}]}).accepted,true);
   const target=god.model.get('canvas')!.id,app=new Hono(),captured:string[]=[];
   app.onError((error,c)=>error instanceof ApiError?c.json({code:error.code},error.status as 400):c.json({error:String(error)},500));
-  const context=mountContextViews(app,{god,edge:{beforeMap(){},places:{byId:new Map(),containing:()=>[]},knowledge:{knows:()=>true}} as never,
+  const context=mountContextViews(app,{god,edge:{beforeMap(){},places:{byId:new Map(),containing:()=>[]}} as never,
     contextReady:()=>true,waitForContext:async()=>{},levelAt:()=>0,worldUrl:'http://127.0.0.1:5980',soul:()=>null,limit(){},
     renderer:async input=>{
       const payload=input.payload as {snapshot:{entities:{id:string;state?:{media?:string}}[]}};

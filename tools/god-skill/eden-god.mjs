@@ -883,7 +883,7 @@ var pidAlive = (pid) => {
   }
 };
 async function startWire(world, { file = godFile(WIRE) } = {}) {
-  const origin = new URL(world).origin, secret2 = randomBytes(18).toString("base64url");
+  const origin = new URL(world).origin, secret = randomBytes(18).toString("base64url");
   let used = 0, closed = false, mode = origin.startsWith("https:") ? "h2" : "h1", session = null;
   const agent = new (origin.startsWith("https:") ? https : http).Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 3e4 });
   const h2 = () => {
@@ -923,7 +923,7 @@ async function startWire(world, { file = godFile(WIRE) } = {}) {
     } else res.destroy();
   };
   const server = createServer((req, res) => {
-    if (req.headers["x-eden-god-wire"] !== secret2) {
+    if (req.headers["x-eden-god-wire"] !== secret) {
       res.writeHead(403, { "x-eden-god-wire-error": "unsent" });
       return res.end();
     }
@@ -995,7 +995,7 @@ async function startWire(world, { file = godFile(WIRE) } = {}) {
   });
   server.unref();
   const port = server.address().port;
-  atomicWrite(file, JSON.stringify({ world, port, pid: process.pid, secret: secret2, at: Date.now() }));
+  atomicWrite(file, JSON.stringify({ world, port, pid: process.pid, secret, at: Date.now() }));
   if (mode === "h2") try {
     h2();
   } catch {
@@ -3810,20 +3810,6 @@ warnings: ${r.warnings.join("; ")}` : ""}`;
 }
 var ENV_FLAGS = { time: "speed pause resume", weather: "kind intensity clouds wind rain fog minutes", strike: "at", land: LAND_FLAGS };
 var ENV_BOOLS = ["pause", "resume", "preview", "force"];
-
-// lib/secret.mjs
-var SECRET_HELP = "secret:  secret (list) \xB7 secret <place> [off] \u2014 a secret place is on no Soul's map until that Soul has been inside or found it by looking around";
-async function secret(place2, onOff) {
-  if (!place2) return ok(await call("/v1/god/places/secret"), "secret");
-  if (onOff !== void 0 && !["on", "off"].includes(onOff)) throw new Error("secret <place> [on|off]");
-  const tries = [place2, .../^g-/.test(place2) ? [] : [`g-${place2.toLowerCase().replace(/\//g, ".").replace(/[^a-z0-9._-]+/g, "-")}`]];
-  let last;
-  for (const p of tries) {
-    last = await call("/v1/god/places/secret", { method: "POST", body: { place: p, secret: onOff !== "off" } });
-    if (last.status !== 404) break;
-  }
-  return ok(last, "secret");
-}
 
 // lib/layers.mjs
 var RELS = ["friend", "neighbour", "family", "works-at", "lives-at", "member-of"];
@@ -7025,7 +7011,6 @@ var COMMANDS = {
   "zone-suggest": (r) => zoneSuggest(r[0]),
   relate: (r, f) => relate(r[0], r[1], r[2], f),
   layers: (r, f) => layers(f),
-  secret: (r) => secret(r[0], r[1]),
   amendments: (r, f) => amendments(f),
   decide: (r, f) => decide(r[0], r[1], f),
   governance: (r, f) => governance(f),
@@ -7064,7 +7049,6 @@ ${LAND_HELP}
 find:   catalog [--category c] [--has slot:sit|actuator:door|comp:light] [--page n] (every def, one line each) \xB7 find <words> [--category c] [--has \u2026] \xB7 recommend <what you want> \xB7 taxonomy (categories, counts, param conventions, actuators)
 parts:  parts [words] [--json] (parts kept by finished builds, checks and pinned place sha:<hash> --at \u2026 hints; also shown at build start)
 ${LAYERS_HELP}
-${SECRET_HELP}
 ${godFeature("constitution") ? GOV_HELP + "\n" : ""}learn:  examples [name] \xB7 defs <name|core/x@1> (one def in full) \xB7 sky (palettes) \xB7 a row named stall = the set "stall"`;
 var NO_WARM = /* @__PURE__ */ new Set(["help", "register", "mint", "pair", "doctor", "look", "look-shot", "look-keeper"]);
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("eden-god.mjs")) {

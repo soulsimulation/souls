@@ -15,10 +15,9 @@ export const BOOT_API_CONTRACT='eden-edge/1.1';
 // caller. Param schemas remain available at /v1/edge/schema, never guessed.
 export function buildLedgerBoot(L:EdgeLedger,verbs:readonly string[]){
  const w=L.host.engine.world;
- const open=(id:string)=>!L.knowledge?.isSecret(id);// knowledge/1: secret places stay out of the shared catalogue
- return buildBootStatic({worldId:L.host.worldId,places:[...L.places.byId.values()].filter(p=>open(p.id)),
+ return buildBootStatic({worldId:L.host.worldId,places:[...L.places.byId.values()],
   nativePlaces:Object.entries(w.regions??{}).map(([id,r])=>({id,level:(r as {placeLevel?:number}).placeLevel??r.level??0,polygon:r.polygon})),
-  nativeAliases:nativeAliasesOf(L).filter(a=>open(a.place)),aliases:Object.fromEntries(Object.entries(bootAliases(L)).filter(([id])=>open(id))),
+  nativeAliases:nativeAliasesOf(L),aliases:bootAliases(L),
   rules:{earshotMetres:EARSHOT_RADIUS,perceptionMetres:SIGHT_RADIUS,secondsCaps:{rest:600,wander:300,follow:3600,swim:1800}},
   verbs:[...new Set(verbs)].map(id=>({id,summary:`${id.replace(/-/g,' ')}: use a current offer or intent; parameters at /v1/edge/schema.`})),byteBudget:2*1024*1024});
 }

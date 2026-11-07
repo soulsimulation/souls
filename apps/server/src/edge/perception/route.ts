@@ -1,11 +1,10 @@
 // perception (lane AWARE, 2026-10-23) — `GET /v1/edge/around?to=<words>`: how to get to a named place, or where a named Soul
 // is, said the way a person would: "int-bakery: 140 m north-east (~2 min walk), past eden-dome". Perception only: it reads
-// the public map, the Soul's own knowledge (a secret place it has not found is no answer) and public body positions; it
+// the public map and public body positions; it
 // never moves anyone. A Soul elsewhere is placed by its building or outdoor place, never by the room it is in.
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import type {EdgeCapability, EdgeSoul} from '../contract.ts';
 import {exploreDiscovery} from '../intents/semantic-discovery.ts';
-import {knownPart} from '../intents/resolved-parts.ts';
 import {tokens} from '../ledger/vocabulary.ts';
 import type {MeaningPart} from '../../god/meaning.ts';
 import type {NamedFlagV1} from '../../god/ground-host.ts';
@@ -24,11 +23,11 @@ const plainName = (name: string) => !/^(e_[0-9a-f]{6,}|trees-|land-|place-|path-
 type Place = {id: string; name: string; kind?: string; parent: string | null; polygon: V2[]; level?: number; carrier?: unknown; description?: string; aliases?: readonly string[]; semanticKind?:string;parts?:MeaningPart[]};
 
 export function routeFrame(ledger: EdgeLedger, soul: EdgeSoul, query: string) {
-  const P = new Perception(ledger, soul), pos = P.pos, K = ledger.knowledge, q = norm(query).slice(0, 80);
+  const P = new Perception(ledger, soul), pos = P.pos, q = norm(query).slice(0, 80);
   if (!pos || !q) return {query, found: false, reason: !q ? 'Say where: around?to=<place or Soul name>.' : 'You have no body in the world right now.'};
   const level = ledger.placeLevel(P.w.entities[soul.entityId]?.human?.level as number | undefined);
   const known = ([...ledger.places.byId.values()] as unknown as Place[])
-    .filter(p => p.parent !== null && !p.carrier && p.kind !== 'sleeping-mat' && !/(^|-)mat-\d+$/.test(p.id) && K.knows(soul.soulId, p.id));
+    .filter(p => p.parent !== null && !p.carrier && p.kind !== 'sleeping-mat' && !/(^|-)mat-\d+$/.test(p.id));
   const placeAt = (p: Place) => centroid(p.polygon) as V2;
   const leg = (to: V2, inside: boolean) => {const m = inside ? 0 : Math.round(dist2(pos, to)); return {m, dir: compassWord(compassOf(to[0] - pos[0], to[1] - pos[1])), eta: '~' + durationWord(walkSeconds(m * 1.25)) + ' walk'};};
   const path = ledger.placePathOf(soul.soulId).filter(p => p.kind !== 'occupier'), currentPlace = path[0];
@@ -38,7 +37,7 @@ export function routeFrame(ledger: EdgeLedger, soul: EdgeSoul, query: string) {
     const len = dist2(pos, to); if (len < 12) return null;
     const dx = (to[0] - pos[0]) / len, dz = (to[1] - pos[1]) / len; let best: {p: Place; s: number; how: 'past' | 'near'} | null = null;
     for (const p of known) {
-      if (skip.has(p.id) || mine.has(p.id) || !LANDMARK_KINDS.has(p.kind ?? '') || !plainName(p.name) || K.isSecret(p.id) || Math.abs((p.level ?? 0) - level) > 1) continue;
+      if (skip.has(p.id) || mine.has(p.id) || !LANDMARK_KINDS.has(p.kind ?? '') || !plainName(p.name) || Math.abs((p.level ?? 0) - level) > 1) continue;
       const c = placeAt(p), t = (c[0] - pos[0]) * dx + (c[1] - pos[1]) * dz, off = Math.abs((c[0] - pos[0]) * dz - (c[1] - pos[1]) * dx);
       const s = t > len * 0.15 && t < len * 0.85 && off < Math.max(15, len * 0.15) ? off + (p.kind === 'landmark' ? 0 : 8) : dist2(c, to) < 45 ? 1000 + dist2(c, to) : Infinity;
       if (s < (best?.s ?? Infinity)) best = {p, s, how: s < 1000 ? 'past' : 'near'};
@@ -48,7 +47,7 @@ export function routeFrame(ledger: EdgeLedger, soul: EdgeSoul, query: string) {
   // Names/aliases are authored vocabulary; shared aliases return a bounded choice rather than a silent nearest.
   const ask=tokens(query),matches=(names:string[])=>{const exact=names.some(n=>tokens(n).join(' ')===ask.join(' '));const all=names.flatMap(tokens);return exact?0:ask.length&&ask.every(w=>all.includes(w))?1:9;};
   const scored=known.map(p=>{const tier=matches([p.name,p.id,...(p.aliases??[]),...(p.semanticKind?[p.semanticKind]:[])]),at=placeAt(p);return{p,at,exact:tier===0,tier:tier+(p.name.includes('/')?0.5:0),d:inPoly(pos[0],pos[1],p.polygon)?0:dist2(pos,at)};}).filter(x=>x.tier<9).sort((a,b)=>a.tier-b.tier||a.d-b.d);
-  const parts=known.flatMap(p=>(p.parts??[]).filter(part=>knownPart(ledger,soul,ledger.places.byId.get(p.id)!,part)).map(part=>{const named=matches([part.title,...(part.aliases??[])]);return{p,part,exact:named===0,tier:named<9?named:matches([part.title,...(part.aliases??[]),p.name,...(p.aliases??[])])+0.5};})).filter(x=>x.tier<9).sort((a,b)=>a.tier-b.tier);
+  const parts=known.flatMap(p=>(p.parts??[]).map(part=>{const named=matches([part.title,...(part.aliases??[])]);return{p,part,exact:named===0,tier:named<9?named:matches([part.title,...(part.aliases??[]),p.name,...(p.aliases??[])])+0.5};})).filter(x=>x.tier<9).sort((a,b)=>a.tier-b.tier);
   // F4 (#375): a named god flag ("orchard", "the orchard flag") answers like a place; flags are public markers. An exact
   // flag name beats a partial place match; a place that matches as well as a flag keeps the answer.
   const noFlag=(w:string)=>w!=='flag'&&w!=='flags',flagAsk=ask.filter(noFlag),flagTier=(n:string[])=>n.join(' ')===flagAsk.join(' ')?0:flagAsk.every(w=>n.includes(w))?1:9;
@@ -62,8 +61,8 @@ export function routeFrame(ledger: EdgeLedger, soul: EdgeSoul, query: string) {
   // a Soul by name: where it is (its building or outdoor place, never the room)
   if (soulHit) {
     const b = P.w.entities[soulHit.entityId]; if (!b) return {query, found: false, reason: `${soulHit.name} is not in the world right now.`};
-    const at: V2 = [b.pose.p[0], b.pose.p[2]], where = ledger.placePathOf(soulHit.soulId).find(p => p.kind !== 'occupier' && p.kind !== 'room' && plainName(p.name) && !K.isSecret(p.id))
-      ?? ledger.placePathOf(soulHit.soulId).find(p => p.kind !== 'occupier' && !K.isSecret(p.id));
+    const at: V2 = [b.pose.p[0], b.pose.p[2]], where = ledger.placePathOf(soulHit.soulId).find(p => p.kind !== 'occupier' && p.kind !== 'room' && plainName(p.name))
+      ?? ledger.placePathOf(soulHit.soulId).find(p => p.kind !== 'occupier');
     const l = leg(at, false), lm = landmark(at, new Set(where ? [where.id] : []));
     return {query, found: true, soul: {id: soulHit.soulId, name: soulHit.name}, at: where?.name ?? 'out in the open', ...l, ...(lm ? {[lm.how]: lm.name} : {}),
       say: `${soulHit.name} is at ${where?.name ?? 'an open spot'}, ${l.m} m ${l.dir} of you (${l.eta})${lm ? `, ${lm.how} ${lm.name}` : ''}.`};

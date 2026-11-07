@@ -9,9 +9,9 @@ function setup(){
   {id:'music',ref:'music',name:'Music Hall',parent:'world',semanticKind:'music hall',description:'An indoor hall for music and performances.',salience:3},
   {id:'stage',ref:'stage',name:'Outdoor Stage',parent:'world',semanticKind:'stage',description:'Live music and performance gatherings.'},
   {id:'library',ref:'library',name:'Library',parent:'world',description:'A quiet room to read books.'},
- ];const unavailable=new Set<string>(),secret=new Set<string>();
- const L={places:{byId:new Map(places.map(p=>[p.id,p]))},knowledge:{knows:(_:string,id:string)=>!secret.has(id)},resolveOnDemand:(_:unknown,id:string)=>({v:{kind:'exact',cap:{id,available:!unavailable.has(id),...(unavailable.has(id)?{blocked:{reason:'No reachable floor.'}}:{})}}})} as any;
- const run=(s:string)=>semanticDiscovery(L,{soulId:'s'} as any,s,[],new Map()) as any;return{run,L,places,secret,unavailable};
+ ];const unavailable=new Set<string>();
+ const L={places:{byId:new Map(places.map(p=>[p.id,p]))},resolveOnDemand:(_:unknown,id:string)=>({v:{kind:'exact',cap:{id,available:!unavailable.has(id),...(unavailable.has(id)?{blocked:{reason:'No reachable floor.'}}:{})}}})} as any;
+ const run=(s:string)=>semanticDiscovery(L,{soulId:'s'} as any,s,[],new Map()) as any;return{run,L,places,unavailable};
 }
 test('named interaction matrix preserves action and hard place/part constraints',()=>{
  const {run}=setup();
@@ -21,11 +21,10 @@ test('named interaction matrix preserves action and hard place/part constraints'
  assert.equal(run('sit down'),null);assert.equal(run('sit:chiba/part-podium'),null);
 });
 test('ambiguous seats are choices; private and unavailable anchors never become available',()=>{
- const {run,L,secret,unavailable}=setup();const chiba=L.places.byId.get('chiba');
+ const {run,L,unavailable}=setup();const chiba=L.places.byId.get('chiba');
  chiba.parts.push({id:'second',title:'Podium Desk Seat',sit:'sit:chiba/part-second',target:{entity:'second',ref:'second',slot:'seat'}});
  assert.equal(run('sit at the Chiba podium desk').didYouMean.length,2);
  unavailable.add('sit:chiba/part-podium');assert.equal(run('sit at the Chiba podium desk').didYouMean.find((c:any)=>c.id==='sit:chiba/part-podium').available,false);
- secret.add('chiba');const hidden=run('sit at the Chiba podium desk');assert.ok(!hidden||hidden.didYouMean.length===0);
 });
 test('purpose-location phrasing returns place choices and evidence, not instrument actions or invented events',()=>{
  const {run}=setup();for(const text of ['somewhere to hear live music','find a place for live music','where can I hear live music']){
@@ -42,12 +41,11 @@ test('ordinary exact fixture identities, generic nearest seats and unrelated que
 });
 
 test('explore reuses purpose retrieval; bare queries require every term and preserve named scope',()=>{
- const {L,secret}=setup(),run=(q:string)=>exploreDiscovery(L,{soulId:'s'} as any,q,[],new Map()) as any;
+ const {L}=setup(),run=(q:string)=>exploreDiscovery(L,{soulId:'s'} as any,q,[],new Map()) as any;
  const live=run('live music');assert.deepEqual(live.didYouMean.map((c:any)=>c.id),['walk:stage']);assert.equal(live.discovery.candidates[0].unverified.length,0);
  assert.ok(run('somewhere to hear live music').didYouMean.length);
  for(const q of ['library missing','live music missing','teleportation','walk:missing'])assert.equal(run(q),null,q);
  assert.equal(run('live music in missing district'),null);
- secret.add('stage');assert.equal(run('live music'),null,'private purpose must not leak through fallback');
 });
 
 test('supported untargeted activity commands remain activities before venue discovery',()=>{

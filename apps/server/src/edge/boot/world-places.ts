@@ -13,17 +13,16 @@ const ALIASES:Readonly<Record<string,readonly string[]>>={
 };
 export function bootAliases(L:EdgeLedger){return Object.fromEntries(Object.entries(ALIASES).filter(([id])=>L.places.byId.has(id)));}
 export function nativeAliasesOf(L:EdgeLedger){return (L.worldProfile as typeof L.worldProfile&{nativePlaceAliases?:readonly {place:string;nativeRegion:string}[]})?.nativePlaceAliases??[];}
-/** With `soulId`, secret places that Soul does not know are left out (knowledge/1): a name never confirms one exists. */
-export function knownBootPlaces(L:EdgeLedger,soulId?:string):KnownBootPlace[]{
+export function knownBootPlaces(L:EdgeLedger):KnownBootPlace[]{
  const regions=L.host.engine.world.regions,aliases=new Map(nativeAliasesOf(L).map(a=>[a.place,a.nativeRegion])),names=bootAliases(L);
- return [...L.places.byId.values()].filter(p=>soulId===undefined||(L.knowledge?.knows(soulId,p.id)??true)).map(p=>{const id=aliases.get(p.id)??p.id,r=regions[id] as (typeof regions)[string]&{placeLevel?:number}|undefined,admitted=!!r&&(r.placeLevel??r.level??0)===p.level,god=!r&&!p.carrier&&!!L.placeWalkable?.(p.id);
+ return [...L.places.byId.values()].map(p=>{const id=aliases.get(p.id)??p.id,r=regions[id] as (typeof regions)[string]&{placeLevel?:number}|undefined,admitted=!!r&&(r.placeLevel??r.level??0)===p.level,god=!r&&!p.carrier&&!!L.placeWalkable?.(p.id);
   return {id:p.id,name:p.name,aliases:[...new Set([...(names[p.id]??[]),...(p.aliases??[])])],level:p.level,nativeRegion:admitted?id:null,access:p.carrier?'dynamic-carrier':admitted||god?'admitted':p.level!==0?'unsupported-floor':'scenery'};
  });
 }
 export function destinationOffers(caps:readonly EdgeCapability[],verb:string):DestinationCapability[]{return caps.filter(c=>c.verb===verb&&c.target?.kind==='place').map(c=>({id:c.id,placeId:c.target!.id,available:c.available,blocked:c.blocked}));}
 export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,verb='walk'){
  const caps=L.coreA.binds(soul).caps,offers=destinationOffers(caps,verb);
- const places=knownBootPlaces(L,soul.soulId);
+ const places=knownBootPlaces(L);
  let resolved=resolveBootPlace(input,places,offers);
  // F6 (SOULSIM-H): a known place the listing leaves out for distance only (a far building's room: rooms are listed within
  // 80 m) gets its one walk on demand, as words do: the capability it names is then acted as offered (see explicitPlaceCapability)
@@ -36,11 +35,11 @@ export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,ver
 }
 /** Identity only: for a room/waypoint whose separate native seat/route check
  * follows. It grants no action or geometric admission. */
-export function lookupPlaceIdentity(L:EdgeLedger,input:unknown,soulId?:string){const places=knownBootPlaces(L,soulId).map(p=>({...p,access:'admitted' as const}));return resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})));}
+export function lookupPlaceIdentity(L:EdgeLedger,input:unknown,soulId?:string){const places=knownBootPlaces(L).map(p=>({...p,access:'admitted' as const}));return resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})));}
 /** Legacy go-to-object names remain distinct from authored place names. Exact
  * offered labels win over aliases, but same-stage ambiguity never picks nearest. */
 export function offeredWalkObject(L:EdgeLedger,soul:EdgeSoul,input:string){
- const q=normalizedPlaceName(input),caps=L.coreA.binds(soul).caps.filter(c=>c.verb==='walk'&&c.target?.kind==='object'),places=knownBootPlaces(L,soul.soulId);
+ const q=normalizedPlaceName(input),caps=L.coreA.binds(soul).caps.filter(c=>c.verb==='walk'&&c.target?.kind==='object'),places=knownBootPlaces(L);
  const exact=caps.filter(c=>normalizedPlaceName(c.label)===q),objects=exact.length?exact:caps.filter(c=>q==='the '+normalizedPlaceName(c.label));
  if(!objects.length)return null;
  const namePlaces=places.filter(p=>normalizedPlaceName(p.name)===q),aliasPlaces=places.filter(p=>p.aliases.some(a=>normalizedPlaceName(a)===q));
@@ -63,7 +62,7 @@ export function explicitPlaceCapability(L:EdgeLedger,soul:EdgeSoul,asked:string,
  // on-demand binding must reach the same normal admission path as a listed offer.
  if(verb==='walk'&&target.includes('/')&&L.onDemandId?.(soul,asked))return null;
  if(verb==='walk'){const object=offeredWalkObject(L,soul,target);if(object)return object.ok?null:object;}
- const q=normalizedPlaceName(target),named=knownBootPlaces(L,soul.soulId).some(p=>p.id===target||normalizedPlaceName(p.name)===q||p.aliases.some(a=>normalizedPlaceName(a)===q));
+ const q=normalizedPlaceName(target),named=knownBootPlaces(L).some(p=>p.id===target||normalizedPlaceName(p.name)===q||p.aliases.some(a=>normalizedPlaceName(a)===q));
  // Preserve strict/1 unknown-ID diagnostics without blocking declared idlike aliases.
  if(!named){const strict=strictCheck(L,soul,asked,caps());if(strict)return L.onDemandId?.(soul,asked)?null:{ok:false as const,...strict};}
  if(!named&&verb!=='walk'&&verb!=='stroll'&&verb!=='gather'&&verb!=='hang-out')return null;

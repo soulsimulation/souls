@@ -14,7 +14,7 @@ import type {EdgeReceipt} from './edge/contract.ts';
 
 const receipt=(id:string,capability:string,outcome:object={},phase='completed',tick=10)=>({id,soulId:'s_a',capability,phase,acceptedTick:tick,endedTick:tick+5,endedAt:{place:'hall'},outcome} as unknown as EdgeReceipt);
 const clock=(tick:number)=>({worldDay:1+Math.floor(tick/100),time:'09:00'});
-const view=(t:SoulTimeline,limit=TIMELINE_MAX,extra:TimelineEntry[]=[],secret=false)=>timelineView(t.rows('s_a',limit),extra,{limit,placeName:(id)=>id==='hall'&&!secret?'Main Hall':null});
+const view=(t:SoulTimeline,limit=TIMELINE_MAX,extra:TimelineEntry[]=[])=>timelineView(t.rows('s_a',limit),extra,{limit,placeName:(id)=>id==='hall'?'Main Hall':null});
 const made=(visibility:string,title='Dawn')=>({produced:[{id:'o_1',kind:'page',title,where:'hall',visibility}]});
 
 test('A1: public things made, performances and gatherings are kept; a private record, a walk, a hug and a failure are not', () => {
@@ -46,10 +46,9 @@ test('A1: a clock is the one of its moment: a later change of the world\'s origi
  assert.deepEqual([view(t)[0]!.when.worldDay,view(t)[0]!.when.time],[3,'07:30']);
 });
 
-test('A1: a secret place loses its id as well as its name; arrival and travel have clocks and places', () => {
+test('A1: arrival and travel have clocks and places', () => {
  const t=new SoulTimeline(new DatabaseSync(':memory:'),'w');
  t.note(receipt('r_1','sing:mic'),2000,clock);
- assert.deepEqual(view(t,20,[],true)[0]!.place,{id:null,name:null});
  t.arrived('s_a',5,1000,clock(5),'hall'); t.travelled('s_a',50,3000,clock(50),'hall','Mars');
  const v=view(t); assert.deepEqual(v.map((e)=>e.kind),['travel','performance','arrival']);
  assert.equal(v[0]!.world,'Mars'); for(const e of v){assert.equal(e.when.worldDay,1);assert.equal(e.place.name,'Main Hall');}

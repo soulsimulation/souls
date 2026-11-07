@@ -3,7 +3,6 @@ import type {EdgeCapability,EdgeSoul} from '../contract.ts';
 import type {Place} from '../ledger/places.ts';
 import type {MeaningPart} from '../../god/meaning.ts';
 import {parseCapability,tokens,type VocabResult} from '../ledger/vocabulary.ts';
-import {knownPart} from './resolved-parts.ts';
 
 type Candidate={capability:string;name:string;place:string;target?:MeaningPart['target'];available:boolean;reason?:string;what?:string;matched?:string[];unverified?:string[]};
 const names=(p:Place)=>[p.name,...(p.aliases??[]),...(p.ref?[p.ref]:[])];
@@ -22,7 +21,7 @@ function contexts(L:EdgeLedger,p:Place,soul:EdgeSoul):string[]{
  const out=names(p),seen=new Set([p.id]);
  for(let id=p.semanticParent??p.parent,n=0;id&&n<12;n++){
   const a=L.places.byId.get(id);if(!a||seen.has(id))break;seen.add(id);
-  if(a.parent!==null&&L.knowledge.knows(soul.soulId,a.id))out.push(...names(a));id=a.semanticParent??a.parent;
+  if(a.parent!==null)out.push(...names(a));id=a.semanticParent??a.parent;
  }return out;
 }
 function candidate(L:EdgeLedger,soul:EdgeSoul,capability:string,p:Place,name:string,target:MeaningPart['target'],caps:EdgeCapability[],plans:Parameters<EdgeLedger['resolveOnDemand']>[3]):Candidate{
@@ -37,7 +36,7 @@ function choice(kind:string,requested:string,candidates:Candidate[],reason:strin
 /** Return options only. Never choose a fixture, invent an action, or reinterpret an interaction as travel. */
 export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:EdgeCapability[],plans:Parameters<EdgeLedger['resolveOnDemand']>[3]):VocabResult|null{
  if(text.includes(':'))return null;
- const all=[...L.places.byId.values()],known=all.filter(p=>L.knowledge.knows(soul.soulId,p.id));
+ const all=[...L.places.byId.values()],known=all;
  const purpose=PURPOSE.exec(text.trim());
  if(purpose){
   // Preserve established untargeted activity commands (read a book, take a nap).
@@ -68,10 +67,10 @@ export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:Ed
  // word in a semantic part must not intercept a fully named ordinary object.
  const identity=q.join(' ');
  if(caps.some(c=>c.verb==='sit'&&c.target?.kind==='object'&&seatNames(c).some(n=>tokens(n).join(' ')===identity)))return null;
- const entries=known.flatMap(p=>(p.parts??[]).filter(part=>knownPart(L,soul,p,part)).map(part=>({p,part,scope:words(contexts(L,p,soul)),own:words([part.title,...(part.aliases??[])])})))
+ const entries=known.flatMap(p=>(p.parts??[]).map(part=>({p,part,scope:words(contexts(L,p,soul)),own:words([part.title,...(part.aliases??[])])})))
   .filter(x=>covers(q,new Set([...x.scope,...x.own])));
  // Do not relax an explicit target to a nearby fixture if a named part/place is missing or unsupported.
- const relevant=entries.length||known.some(p=>p.parts?.length&&q.some(w=>words([...contexts(L,p,soul),...p.parts!.filter(part=>knownPart(L,soul,p,part)).flatMap(x=>[x.title,...(x.aliases??[])])]).has(w)));
+ const relevant=entries.length||known.some(p=>p.parts?.length&&q.some(w=>words([...contexts(L,p,soul),...p.parts!.flatMap(x=>[x.title,...(x.aliases??[])])]).has(w)));
  if(!relevant)return null;
  const ranked=entries.sort((a,b)=>q.filter(w=>b.own.has(w)).length-q.filter(w=>a.own.has(w)).length||a.p.id.localeCompare(b.p.id)||a.part.id.localeCompare(b.part.id));
  const candidates=ranked.filter(x=>x.part.sit).slice(0,8).map(({p,part})=>({...candidate(L,soul,part.sit!,p,`${part.title} — ${p.name}`,part.target,caps,plans),...(part.what?{what:part.what}:{})}));

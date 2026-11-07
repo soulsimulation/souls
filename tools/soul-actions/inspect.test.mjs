@@ -87,23 +87,6 @@ test('inspect drills place -> object -> item, and here groups its offers', {time
  assert.ok(!stump.body.inspect.contents?.some((c) => c.id === id('bowl')), 'a hiding place does not list what is in it');
  assert.equal((await inspect(id('bowl'))).status, 404, 'and the thing in it is unknown');
 
- // A1: a secret place, and what stands in it, stay unknown until found
- assert.equal(god.act({ops: [
-  {op: 'place', def: 'core/zone@1', name: 'grotto', shape: {area: [[ax + 20, az - 3], [ax + 26, az - 3], [ax + 26, az + 3], [ax + 20, az + 3]]}},
-  {op: 'place', def: 'core/table@1', name: 'altar', p: [ax + 23, az]},
- ]}).accepted, true); await tick(40);
- const grotto = [...edge.places.byId.values()].find((p) => p.name.toLowerCase() === 'grotto');
- assert.ok(grotto, 'the zone is a place'); assert.equal((await inspect(grotto.id)).status, 200, 'not secret yet');
- assert.equal((await inspect(id('altar'))).status, 200);
- assert.equal(edge.knowledge.setSecret(grotto.id, true), true);
- for (const hidden of [grotto.id, id('altar')]) {
-  const r = await inspect(hidden); assert.equal(r.status, 404, hidden); assert.equal(r.body.error.code, 'capability.unknown');
- }
- const parent = await inspect(grotto.parent);
- assert.ok(!parent.body.inspect.parts?.some((c) => c.id === grotto.id) && !parent.body.inspect.contents?.some((c) => c.id === id('altar')), 'its parent does not give it away');
- edge.knowledge.find(soul.soulId, grotto.id, f.host.engine.world.tick);
- assert.equal((await inspect(grotto.id)).status, 200, 'found, it is known'); assert.equal((await inspect(id('altar'))).status, 200);
-
  const me = await inspect(soul.soulId); assert.equal(me.body.inspect.kind, 'soul');
  for (const k of ['receipts', 'events', 'self', 'placePath']) assert.ok(!(k in me.body.inspect.state), `a Soul's ${k} is not a public fact`);
  const none = await inspect('no-such-thing-at-all'); assert.equal(none.status, 404); assert.equal(none.body.error.code, 'capability.unknown');

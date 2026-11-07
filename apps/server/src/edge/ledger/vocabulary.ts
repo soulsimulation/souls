@@ -23,9 +23,6 @@ export type VocabContext = {
   target(cap: EdgeCapability): VocabTarget;
   /** Every known place (including ones with no capability yet), and the root's id/name tokens to ignore. */
   places: VocabPlace[];
-  /** knowledge/1: the names (as tokens, space-joined) of places withheld from this Soul (secret, not yet known). Words that
-   *  name one name nothing: never swapped for another place by synonym or description (a name never confirms one). */
-  withheld?: string[];
   root: string[];
   me: [number, number] | null;
   /** #435: whether this world thing is in this Soul's hand (a bare "eat it" means the food in her hand). */
@@ -683,7 +680,7 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
       if(exact.length)return exact;
       const named=new Set(ctx.places.filter(p=>norm(p.name)===want).map(p=>p.id));
       const titles=matches.filter(c=>c.target?.kind==='place'&&named.has(c.target.id));
-      const preferred=placeMatchTier(tokens(want),ctx.places,ctx.withheld).found;
+      const preferred=placeMatchTier(tokens(want),ctx.places).found;
       const placeAliases=matches.filter(c=>c.target?.kind==='place'&&preferred.some(p=>p.id===c.target!.id));
       return titles.length?titles:placeAliases.length?placeAliases:preferred.length?[]:matches;
     };
@@ -734,7 +731,7 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
       // An exact known place whose offer is omitted for distance still names that
       // place. Let 3b request its on-demand admission instead of accepting an object
       // tagged with its alias (a library book is not the distant library).
-      const placeIdentity=PLACE_VERBS.has(verb)?placeMatchTier(words,ctx.places,ctx.withheld):null;
+      const placeIdentity=PLACE_VERBS.has(verb)?placeMatchTier(words,ctx.places):null;
       if(SPOT_PLACE_VERBS.has(verb)&&placeIdentity?.found.length)break;
       if(placeIdentity?.tier===0&&placeIdentity.found.length&&!pool.some(c=>norm(c.id.slice(c.id.indexOf(':')+1))===s||norm(c.target?.id??'')===s)
         && !pool.some(c=>c.target?.kind==='place'&&placeIdentity.found.some(p=>p.id===c.target!.id)))break;
@@ -750,8 +747,8 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
       // on demand when far, not as the nearest offer whose name has the word (the library annex next to the quad)
       // ... and a place verb's words that only an offer's "by <neighbours>" names ("go to the south lawn": the quad lawn "by
       // land-campus-south-gate") go to the place whose own name has them (the south lawn, offered on demand when far)
-      const byPlace3 = (SPOT_PLACE_VERBS.has(verb) && named3.some(c => c.target?.kind === 'place') && placeMatch(words, ctx.places, ctx.withheld).length > 0)
-        || (PLACE_VERBS.has(verb) && [0, 1].includes(placeMatchTier(words, ctx.places, ctx.withheld).tier));
+      const byPlace3 = (SPOT_PLACE_VERBS.has(verb) && named3.some(c => c.target?.kind === 'place') && placeMatch(words, ctx.places).length > 0)
+        || (PLACE_VERBS.has(verb) && [0, 1].includes(placeMatchTier(words, ctx.places).tier));
       // Full public labels now include purpose prose. A field mentioning its
       // pavilion must not beat the pavilion's own name, even when it encloses it.
       // Keep all named qualifiers rather than trying a weaker root-stripped pass.
@@ -781,7 +778,7 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     // place that contains it. A named place that cannot be reached is refused honestly (place.unreachable), never swapped
     // for an unrelated place; the nearest places you can reach are offered in did_you_mean.
     if (PLACE_VERBS.has(verb)) for (const words of passes) {
-      const m = placeMatchTier(words, ctx.places, ctx.withheld);
+      const m = placeMatchTier(words, ctx.places);
       if (!m.found.length) continue;
       // ROUTE-RECHECK ("read a book in the library" read in the campus library annex): for a spot verb, the place called just
       // these words (the Library) comes before one whose name says more (the library annex); nearest among equals
@@ -829,7 +826,7 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   if (!pool.length) return unknown(`No "${verb}" capability is offered to this Soul right now. Things you can do: ${ctx.caps.filter(c => c.id.endsWith(':here')).map(c => c.id).slice(0, 12).join(', ')} (and walk:<place>, stroll:<place>, read:<place>); read capabilities again.`, ctx.caps.filter(c => c.id.endsWith(':here')));
   const left = tokens(rest).filter(t => !FILLER.has(t) && !ctx.root.includes(t));
   // knowledge/1: words that name a place this Soul does not know seek nothing (the secret grove is no thing to walk to either)
-  return {...unknown(`Nothing offered matches "${input}"; read capabilities again.`), ...(PLACE_VERBS.has(verb) && left.length && !ctx.withheld?.includes(left.join(' ')) ? {seek: left} : {})};
+  return {...unknown(`Nothing offered matches "${input}"; read capabilities again.`), ...(PLACE_VERBS.has(verb) && left.length ? {seek: left} : {})};
 }
 
 // srv-act-words: the places by id, once per places listing (vocabPlaces keeps the listing; isAncestor is asked for every
@@ -895,10 +892,10 @@ function elsewhereReason(verb: string, ctx: VocabContext, here: string, none?: s
   const where = e.place && !e.label.endsWith(` in ${e.place}`) ? ` in ${e.place}` : '', go = e.placeId ? ` (walk:${e.placeId})` : '';
   return `${here.replace(/[.\s]+$/, '')}. The nearest is ${e.label}${where}, about ${Math.round(e.distance)} m away: walk there first${go}, then ask again.`;
 }
-export function placeMatch(words: string[], places: VocabPlace[], withheld: readonly string[] = []): VocabPlace[] {return placeMatchTier(words, places, withheld).found;}
+export function placeMatch(words: string[], places: VocabPlace[]): VocabPlace[] {return placeMatchTier(words, places).found;}
 /** placeMatch, and which tier matched: 0 own name exactly, 1 own name/id words, 2 everyday synonyms, 3 description words. */
 /** L3 (b): what placeMatchTier reads of a place, derived once per VocabPlace object (vocabularyOf keeps them while the
- *  places, their aliases and what this Soul knows do not change). VocabPlaces are never written after they are built. */
+ *  places and their aliases do not change). VocabPlaces are never written after they are built. */
 type PlaceWords = {ids: string[]; name: string; aliases: string[]; nameT: string[]; kindT: string[]; descT: string[]; numberNames: string[][]};
 const PLACE_WORDS = new WeakMap<VocabPlace, PlaceWords>();
 function placeWords(p: VocabPlace): PlaceWords {
@@ -909,7 +906,7 @@ function placeWords(p: VocabPlace): PlaceWords {
     descT: tokens(p.description ?? ''), numberNames: [tokens(p.name), tokens(p.id)]};
   PLACE_WORDS.set(p, w); return w;
 }
-export function placeMatchTier(words: string[], places: VocabPlace[], withheld: readonly string[] = []): {found: VocabPlace[]; tier: number} {
+export function placeMatchTier(words: string[], places: VocabPlace[]): {found: VocabPlace[]; tier: number} {
   if (!words.length) return {found: [], tier: -1};
   const q=words.join(' ');
   const W = placeWords;
@@ -922,8 +919,6 @@ export function placeMatchTier(words: string[], places: VocabPlace[], withheld: 
     places.filter(p => words.every(w => hitAll(w, W(p).nameT, W(p).kindT)) && noConflict(p)),
     places.filter(p => words.every(w => hitAll(w, W(p).nameT, W(p).descT)) && noConflict(p)),
   ];
-  // knowledge/1: a withheld place's own name is not an everyday word for some other place (the grove is not the orchard)
-  if (!tiers[0].length && !tiers[1].length && withheld.includes(words.join(' '))) return {found: [], tier: -1};
   const tier = tiers.findIndex(t => t.length), found = tiers[tier] ?? [];
   if (found.length < 2) return {tier, found: [...found]};
   // (the parent chain within `places`, as places.find walked it: the first place with each id)

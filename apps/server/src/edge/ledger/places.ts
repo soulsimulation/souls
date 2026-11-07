@@ -12,9 +12,7 @@ export type Place = {id: string; name: string; kind: string; parent: string | nu
   /** Public semantic hierarchy is independent of physical membership and access. */
   ref?: string; worldAbout?: WorldAbout; aliases?: readonly string[]; genericAliases?: readonly string[]; semanticParent?: string | null; semanticKind?: string; semanticRole?: 'district' | 'quarter' | 'landmark' | 'part' | 'minor'; salience?: number; parts?: MeaningPart[];
   /** carrier/1: a place that moves with a native carrier entity (a balloon basket). Membership is by carriage, never geometry; `polygon` is in the entity's own frame. */
-  carrier?: {entity: string; frame?: 'local'};
-  /** knowledge/1: the world's creator keeps this place (and everything inside it) off maps and listings until a Soul has been there or found it. */
-  secret?: boolean};
+  carrier?: {entity: string; frame?: 'local'};};
 export type PlaceData = {contract: 'place-data/1'; world: string; places: Place[]};
 const REF = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 
@@ -57,7 +55,6 @@ export function validatePlaceData(raw: unknown, world?: NativeWorld): string[] {
     if (typeof p.enclosed !== 'boolean') errs.push(`${p.id}: enclosed must be boolean`);
     if (p.capacity !== null && !(Number.isInteger(p.capacity) && p.capacity >= 1)) errs.push(`${p.id}: capacity`);
     if (p.description !== undefined && (typeof p.description !== 'string' || p.description.length > 4000)) errs.push(`${p.id}: description`);
-    if (p.secret !== undefined && typeof p.secret !== 'boolean') errs.push(`${p.id}: secret must be boolean`);
   }
   const roots = d.places.filter(p => p.parent === null);
   if (roots.length !== 1) errs.push(`exactly one root required (found ${roots.length})`);

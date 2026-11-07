@@ -15,7 +15,7 @@ All five reads funnel into one function. `here`, `around`, `observe`, `capabilit
 |---|---|---|---|
 | `capabilities` | 57 | `capabilities()` 760 | — |
 | `here` | 65 → `hereFrame` (`edge/perception/here.ts` 211) | `seats()` 69 (`coreA.binds`), `exits` 252 (`ledger.capabilities`), `doHere` 279 | `routeProblem()` per exit (`ledger.ts` 588 → `engine.canPerform`), `engine.programOf/programAction` + `runtime.records` (here.ts 217–220, 61, 138), `takenSeats` over `runtime.records` (61) |
-| `around` | 67 → `aroundFrame` (`perception/around.ts` 17) | `walks` 32 | **writes**: `K.find()` persists found secret places and calls `invalidateBodies()` (around.ts 24–25) |
+| `around` | 67 → `aroundFrame` (`perception/around.ts` 17) | `walks` 32 | none |
 | `observe` | 56 → `ledger.observe` 1695 | `doHere` 1720, `include=capabilities` 1737 | `programOf/programAction` 1697 |
 | `resolve` | 68 → `intents.dryRun` (`edge/intents/intents.ts` 346) | vocabulary over `binds()` caps; `resolveOnDemand` 1761 re-runs the activity listing under `readPassV1` (1805–1811) | — |
 

@@ -21,26 +21,24 @@ const offerOf = (c: EdgeCapability): Offer => {const params = offerParams(c); re
 
 const partName = (c?: EdgeCapability) => c?.label.match(/\bat ([^[]+?) \[/)?.[1] ?? c?.label.match(/^Walk to ([^[]+?) \[/)?.[1];
 
-/** The thing's identity and children, or null. Only what this Soul may know: a secret place is unknown until found. */
+/** The thing's identity and children, or null. */
 function identify(L: EdgeLedger, soul: EdgeSoul, id: string, caps: EdgeCapability[]): (Omit<Inspected, 'offers' | 'more'> & {cutOff?: number}) | null {
   const world = L.host.engine.world as {entities: Record<string, {tags?: string[]; human?: unknown; pose?: {p: number[]}; def?: string; support?: {kind?: string; on?: string; by?: string}; name?: string}>};
   const child = (cid: string, e: {name?: string}): Child => {const item = L.together.publicItems().find(i => i.id === cid); return {id: cid, kind: item ? 'item' : 'object', name: item?.name ?? L.thingName?.(cid) ?? e.name ?? cid};};
   const place = L.places.byId.get(id);
   if (place) {
-    if (!L.knowledge.knows(soul.soulId, id)) return null;
-    const parts = [...L.places.byId.values()].filter(p => p.parent === id && L.knowledge.knows(soul.soulId, p.id)).map(p => ({id: p.id, kind: p.kind, name: p.name}));
-    // what stands in it, nearest first: bodies and things resting on another thing are not its own (they are that thing's),
-    // and what stands inside a secret place this Soul has not found gives that place away
+    const parts = [...L.places.byId.values()].filter(p => p.parent === id).map(p => ({id: p.id, kind: p.kind, name: p.name}));
+    // what stands in it, nearest first: bodies and things resting on another thing are not its own (they are that thing's)
     const me = world.entities[soul.entityId]?.pose?.p, away = (p: number[]) => me ? Math.hypot(p[0]! - me[0]!, p[2]! - me[2]!) : 0;
     const standing = Object.entries(world.entities)
-      .filter(([cid, e]) => e.pose && e.def && !e.human && !e.support?.on && e.support?.kind !== 'in-hand' && !L.concealedThing?.(cid) && (() => {const at = L.places.containing(e.pose!.p[0]!, e.pose!.p[2]!, 0); return at.some(p => p.id === id) && at.every(p => L.knowledge.knows(soul.soulId, p.id));})())
+      .filter(([cid, e]) => e.pose && e.def && !e.human && !e.support?.on && e.support?.kind !== 'in-hand' && !L.concealedThing?.(cid) && L.places.containing(e.pose!.p[0]!, e.pose!.p[2]!, 0).some(p => p.id === id))
       .sort(([, a], [, b]) => away(a.pose!.p) - away(b.pose!.p));
     const contents = standing.slice(0, PLACE_CONTENTS).map(([cid, e]) => child(cid, e));
     return {id, kind: 'place', name: place.name, ...(parts.length ? {parts} : {}), ...(contents.length ? {contents} : {}), ...(standing.length > PLACE_CONTENTS ? {cutOff: standing.length - PLACE_CONTENTS} : {})};
   }
   const mind = L.host.minds.get(id);
   if (mind) {
-    // public facts only: not its receipts, its events or where it is, which may be a place this Soul has not found
+    // public facts only: not its receipts, its events or where it is
     const seen = L.publicSoul(id) as {soul?: {description?: string | null}; now?: unknown; self?: {activity?: string; doing?: unknown} | null; timeline?: unknown[]};
     return {id, kind: 'soul', name: mind.name, state: {...(seen.soul?.description ? {description: seen.soul.description, untrusted: true} : {}), ...(seen.now ? {now: seen.now} : {}), ...(seen.timeline?.length ? {timeline: seen.timeline.slice(0, TIMELINE_PAGE)} : {}), ...(seen.self ? {activity: seen.self.activity} : {})}};
   }
@@ -48,10 +46,6 @@ function identify(L: EdgeLedger, soul: EdgeSoul, id: string, caps: EdgeCapabilit
   const item = L.together.publicItems().find(i => i.id === id);
   const object = L.comms?.objects.all().find(o => o.id === id);
   const entity = world.entities[id];
-  // a thing inside a secret place this Soul has not found is as unknown as the place, whether or not it has a body here
-  const pos = entity?.pose?.p, within = pos ? L.places.containing(pos[0]!, pos[2]!, 0) : [];
-  const partOf = id.includes('/') ? L.places.byId.get(id.slice(0, id.indexOf('/'))) : undefined;
-  if (within.some(p => !L.knowledge.knows(soul.soulId, p.id)) || (partOf && !L.knowledge.knows(soul.soulId, partOf.id))) return null;
   if (!item && !object && !entity && !caps.some(c => on(c, id))) return null;
   const facts = L.contactActuator?.facts(id, soul) ?? null;
   // a part's offers target its parent entity, so its own name is the one its offer label gives ("Sit at Audience Bench [ref]")

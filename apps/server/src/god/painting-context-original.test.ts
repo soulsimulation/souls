@@ -61,9 +61,9 @@ test('real painting originals repaint, reauthorize and moderate without render j
   const dir = mkdtempSync(join(tmpdir(), 'painting-original-route-')), artDir = join(dir, 'art'), db = new Db(':memory:');
   const god = new GodMode(db, { worldId: 'painting-original-test', ownerId: 'dev:owner', tick: () => 1, emit() {}, assetDir: dir });
   assert.equal(god.act({ ops: [{ op: 'place', def: 'core/easel@2', name: 'canvas', p: [0, 0] }] }).accepted, true);
-  const target = god.model.get('canvas')!.id, app = new Hono(); let renders = 0, secret = false, knows = false;
+  const target = god.model.get('canvas')!.id, app = new Hono(); let renders = 0;
   app.onError((error, c) => error instanceof ApiError ? c.json({ code: error.code }, error.status as 400) : c.json({ error: String(error) }, 500));
-  const edge = { beforeMap() {}, places: { byId: new Map([['secret', { id: 'secret', ref: 'canvas', level: 0, parent: 'world', polygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]] }]]), containing: () => [] }, knowledge: { knows: (soul: string | null) => !secret || !!soul && knows } };
+  const edge = { beforeMap() {}, places: { byId: new Map([['secret', { id: 'secret', ref: 'canvas', level: 0, parent: 'world', polygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]] }]]), containing: () => [] } };
   const views = mountContextViews(app, { god, edge: edge as never, artOriginals: { dir: artDir, basePath }, contextReady: () => true, waitForContext: async () => {}, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: c => c.req.header('authorization') ?? null, limit() {}, renderer: async () => { renders++; return { png: new Uint8Array([1]) }; } });
   const painting = createPaintingService({ model: () => god.model, dir: artDir, basePath, worldId: god.opts.worldId, commit: (ops, note, done, durable) => god.engineAct(ops, note, done, durable) });
   const actor = { soulId: 's_ana', entityId: 'h_ana', name: 'Ana', owner: 'dev:ana' };
@@ -80,11 +80,6 @@ test('real painting originals repaint, reauthorize and moderate without render j
     const nextMedia = paint('r_two', '#abcdef'), second = await metadata(); assert.notEqual(nextMedia, firstMedia);
     assert.equal((await app.request(first.original.url)).status, 404, 'previous original URL rechecks current canvas version');
     const secondResponse = await app.request(second.original.url); assert.equal(secondResponse.status, 200); assert.equal(sha(Buffer.from(await secondResponse.arrayBuffer())), second.original.version);
-    secret = true;
-    assert.equal((await app.request(second.original.url)).status, 404, 'anonymous unknown secret');
-    assert.equal((await app.request(second.original.url, { headers: { authorization: 'soul' } })).status, 404, 'Soul without knowledge');
-    knows = true; assert.equal((await app.request(second.original.url, { headers: { authorization: 'soul' } })).status, 200, 'known secret');
-    knows = false; assert.equal((await app.request(second.original.url, { headers: { authorization: 'soul' } })).status, 404, 'knowledge rechecked per request'); secret = false;
     const asset = god.assets.put(rasterizePainting(picture));
     assert.equal(god.act({ ops: [{ op: 'place', def: 'core/picture-frame@1', name: 'asset-frame', p: [6, 0], state: { media: `/assets/${asset.sha}.png` } }] }).accepted, true);
     const legacy = await metadata(god.model.get('asset-frame')!.id); assert.equal(legacy.original.sha, asset.sha); assert.equal(legacy.original.ext, 'png'); assert.equal(legacy.original.storage, undefined);

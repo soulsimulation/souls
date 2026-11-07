@@ -102,8 +102,6 @@ export class Projects {
     const dest = resolvePlaceForVerb(this.p.edge, soul, raw); if (!dest.ok) return {code: 'project.unknown-place', reason: dest.reason};
     const place = this.p.edge.places.byId.get(dest.chosen.place);
     if (!place?.polygon?.length || place.level !== 0) return {code: 'project.unknown-place', reason: 'Choose a place on level-zero ground.'};
-    // a project is named to whoever sees it, so a place the world keeps secret can't be one's site
-    if (this.p.edge.knowledge.isSecret(place.id)) return {code: 'project.unknown-place', reason: 'Choose a place everyone here can know of.'};
     return {place: place.id, name: place.name, origin: centroid(place.polygon as [number, number][])};
   }
   private organize(soul: EdgeSoul, key: string, params: Record<string, unknown>): Refusal | Prepared {

@@ -40,7 +40,7 @@ test('meaning-only revisions reuse detached geometry while authored camera chang
     const original = god.publicSnapshot.bind(god);
     god.publicSnapshot = () => { snapshots++; return original(); };
     const app = new Hono(), ref = god.model.get('seat')!.id;
-    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() }, knowledge: { knows: () => true } } as never,
+    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() } } as never,
         contextReady: () => true, waitForContext: async () => {}, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() {},
         renderer: async () => { renders++; return { png: new Uint8Array([1]) }; } });
     const request = () => app.request('/v1/world/context/views', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refs: [ref] }) });
@@ -67,7 +67,7 @@ test('metadata, scene and submitted camera share a frontier across engine-only m
     const { god, db } = fixture();
     const app = new Hono(), ref = god.model.get('seat')!.id;
     let payload: any, revision: number | undefined;
-    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() }, knowledge: { knows: () => true } } as never,
+    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() } } as never,
         contextReady: () => true, waitForContext: async () => {}, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() {},
         renderer: async input => { payload = input.payload; revision = input.revision; return { png: new Uint8Array([1]) }; } });
     try {
@@ -134,11 +134,11 @@ test('meaning and authored cameras retain exact refs through rename/move/repurpo
 });
 test('shared retrieval reauthorizes metadata, cached pixels, originals and sheets; edits invalidate', async () => {
     const { db, god, act } = fixture();
-    let renders = 0, secret = false, knows = false;
+    let renders = 0;
     const app = new Hono();
     app.onError((e, c) => e instanceof ApiError ? c.json({ code: e.code }, e.status as 400) : c.json({ error: String(e) }, 500));
-    const seat = god.model.get('seat')!, place = { id: 'secret', ref: 'seat', level: 0, parent: 'world', polygon: [[-1, -1], [1, -1], [1, 1], [-1, 1]] };
-    const edge = { beforeMap() { }, places: { byId: new Map([['secret', place]]), containing: () => [] }, knowledge: { knows: (s: string | null) => !secret || !!s && knows } };
+    const seat = god.model.get('seat')!, place = { id: 'seat-place', ref: 'seat', level: 0, parent: 'world', polygon: [[-1, -1], [1, -1], [1, 1], [-1, 1]] };
+    const edge = { beforeMap() { }, places: { byId: new Map([['seat-place', place]]), containing: () => [] } };
     const png = encodeContextPng(1, 1, new Uint8Array([255, 0, 0, 255]));
     const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', levelAt: () => 0, soul: c => c.req.header('authorization') ?? null, limit() { }, renderer: async () => { renders++; return { png }; } });
     const request = (refs: string[], auth?: string) => app.request('/v1/world/context/views', { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify({ refs, sheet: true }) });
@@ -154,17 +154,6 @@ test('shared retrieval reauthorizes metadata, cached pixels, originals and sheet
         assert.equal(renders, 1);
         assert.equal((await app.request(ready.views[0].url)).status, 200);
         assert.equal((await app.request(ready.sheet.url)).status, 200);
-        secret = true;
-        assert.equal((await app.request('/v1/world/context')).status, 200);
-        assert.equal((await (await app.request('/v1/world/context')).json()).targets.some((t: any) => t.ref === seat.id), false);
-        assert.equal((await request([seat.id])).status, 404);
-        assert.equal((await app.request(ready.views[0].url)).status, 404);
-        assert.equal((await app.request(ready.sheet.url)).status, 404);
-        knows = true;
-        assert.equal((await app.request(ready.views[0].url, { headers: { authorization: 'soul' } })).status, 200);
-        knows = false;
-        assert.equal((await app.request(ready.views[0].url, { headers: { authorization: 'soul' } })).status, 404);
-        secret = false;
         act([{ op: 'move', id: seat.id, p: [3, 3] }]);
         assert.equal((await app.request(ready.views[0].url)).status, 404);
         await service.cache.settled();
@@ -227,7 +216,7 @@ test('target listing is bounded and complete across revision-guarded pages', asy
         god.model.insert({ ...structuredClone(first), id: ('e_' + String(i).padStart(6, '0')), name: 'listing-' + i, about: { title: 'Listed ' + i } });
     const app = new Hono();
     app.onError((e, c) => e instanceof ApiError ? c.json({ code: e.code }, e.status as 400) : c.json({ error: String(e) }, 500));
-    const edge = { beforeMap() { }, places: { byId: new Map(), containing: () => [] }, knowledge: { knows: () => true } };
+    const edge = { beforeMap() { }, places: { byId: new Map(), containing: () => [] } };
     const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', levelAt: () => 0, soul: () => null, limit() { }, renderer: async () => ({ reason: 'not requested' }) });
     try {
         const page = await (await app.request('/v1/world/context')).json();
@@ -262,7 +251,7 @@ test('listing refuses a moderation change while final target metadata is materia
     act([{ op: 'place', def: 'core/picture-frame@1', name: 'art', state: { media: `/assets/${asset.sha}.png` } }]);
     const ref = god.model.get('art')!.id, app = new Hono();
     app.onError((error, c) => error instanceof ApiError ? c.json({ code: error.code }, error.status as 400) : c.json({ error: String(error) }, 500));
-    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() }, knowledge: { knows: () => true } } as never,
+    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() } } as never,
         contextReady: () => true, waitForContext: async () => {}, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() {} });
     const moderation = moderationFor(db.db, god.opts.worldId), isHidden = moderation.isHidden.bind(moderation);
     try {
@@ -299,81 +288,10 @@ test('floor-attached subjects require a real room polygon and matching vertical 
         db.close();
     }
 });
-test('an upper room stays secret while its public building framing midpoint stays public', async () => {
-    const { db, god, act } = fixture();
-    act([{ op: 'define', def: { schema: 'def/1', name: 'private-room-host', size: { box: [10, 8, 10] }, make: { kind: 'none' }, slots: [{ id: 'upper', kind: 'room', p: [0, 4, 0], height: 3, polygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]], accepts: {} }] } }, { op: 'place', def: 'private-room-host@1', name: 'house', p: [0, 0] }]);
-    const entity = god.model.get('house')!, ref = entity.id + '/slot/upper';
-    let knows = true;
-    const edge = { beforeMap() { }, places: { byId: new Map([['private', { id: 'private', ref: 'house/upper', level: 1, parent: 'world', polygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]] }]]), containing: (_x: number, _z: number, level: number) => level === 1 ? [{id:'private',ref:'house/upper',level:1}] : [] }, knowledge: { knows: () => knows } };
-    const app = new Hono();
-    app.onError((e, c) => e instanceof ApiError ? c.json({ code: e.code }, e.status as 400) : c.json({ error: String(e) }, 500));
-    const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', levelAt: (_x, _z, y) => y >= 4 ? 1 : 0, soul: () => null, limit() { }, renderer: async () => ({ png: encodeContextPng(1, 1, new Uint8Array([255, 0, 0, 255])) }) });
-    const request = () => app.request('/v1/world/context/views', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refs: [ref] }) });
-    try {
-        assert.equal((await request()).status, 200);
-        await service.cache.settled();
-        const ready = await (await request()).json();
-        knows = false;
-        assert.equal((await app.request('/v1/world/context?ref='+entity.id)).status,200);
-        assert.equal((await(await app.request('/v1/world/context?ref='+entity.id)).json()).targets.length,1,'public exterior must not inherit an upper room secret through its camera midpoint');
-        assert.equal((await request()).status, 404);
-        assert.equal((await app.request(ready.views[0].url)).status, 404);
-        assert.equal((await (await app.request('/v1/world/context')).json()).targets.some((t: any) => t.ref === ref), false);
-    }
-    finally {
-        await service.close();
-        db.close();
-    }
-});
-test('point, region and entity parts use actual target level and membership, not owner centroid', async () => {
-    const { db, god, act } = fixture();
-    act([{ op: 'move', id: 'seat', p: [3, 4, 0] }, { op: 'set', id: 'plaza', about: { title: 'Public author', parts: [
-                    { id: 'upper-point', title: 'Upper point', anchor: { kind: 'local', point: [3, 5, 0], stand: [3, 4, 0], level: 1 } },
-                    { id: 'look-up', title: 'Upper point from ground', anchor: { kind: 'local', point: [3, 5, 0], stand: [0, 0, 0], level: 0 } },
-                    { id: 'upper-region', title: 'Upper region', anchor: { kind: 'local', point: [-5, 5, 0], stand: [-5, 4, 0], level: 1, region: [[2, -1], [4, -1], [4, 1], [2, 1]] } },
-                    { id: 'lower-point', title: 'Ground point', anchor: { kind: 'local', point: [3, 0, 0], stand: [3, 0, 0], level: 0 } },
-                    { id: 'bound-seat', title: 'Upper seat', anchor: { kind: 'entity', ref: 'seat' } },
-                ] } }]);
-    const secret = { id: 'private', ref: 'elsewhere/upper', level: 1, polygon: [[2, -1], [4, -1], [4, 1], [2, 1]] as [
-            number,
-            number
-        ][] };
-    let knows = true;
-    const edge = { beforeMap() { }, places: { byId: new Map([['private', secret]]), containing: (x: number, z: number, level: number) => level === 1 && x > 2 && x < 4 && z > -1 && z < 1 ? [secret] : [] }, knowledge: { knows: () => knows } };
-    const app = new Hono();
-    app.onError((e, c) => e instanceof ApiError ? c.json({ code: e.code }, e.status as 400) : c.json({ error: String(e) }, 500));
-    const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', levelAt: (_x, _z, y) => y >= 4 ? 1 : 0, soul: () => null, limit() { }, renderer: async () => ({ png: encodeContextPng(1, 1, new Uint8Array([255, 0, 0, 255])) }) });
-    const owner = god.model.get('plaza')!.id;
-    const request = (id: string) => app.request('/v1/world/context/views', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refs: [owner + '/part/' + id], sheet: true }) });
-    try {
-        const urls: string[] = [];
-        for (const part of ['upper-point', 'upper-region', 'bound-seat', 'look-up']) {
-            await request(part);
-            await service.cache.settled();
-            await request(part);
-            await service.cache.settled();
-            const ready = await (await request(part)).json();
-            assert.equal(ready.views[0].status, 'ready', JSON.stringify(ready.views[0]));
-            assert.equal(ready.sheet.status, 'ready', JSON.stringify(ready.sheet));
-            urls.push(ready.views[0].url, ready.sheet.url);
-        }
-        knows = false;
-        for (const part of ['upper-point', 'upper-region', 'bound-seat', 'look-up'])
-            assert.equal((await request(part)).status, 404, part);
-        for (const url of urls)
-            assert.equal((await app.request(url)).status, 404, url);
-        assert.equal((await request('lower-point')).status, 200, 'same x/z on a different floor remains public');
-        assert.equal((await (await app.request('/v1/world/context')).json()).targets.some((t: any) => t.ref === owner), true, 'public owner is not hidden merely because its part names a secret room');
-    }
-    finally {
-        await service.close();
-        db.close();
-    }
-});
 test('missing authoritative floor resolver returns unavailable, including cached retrieval', async () => {
     const { db, god } = fixture(), app = new Hono();
     app.onError((e, c) => e instanceof ApiError ? c.json({ code: e.code }, e.status as 400) : c.json({ error: String(e) }, 500));
-    const edge = { beforeMap() { }, places: { byId: new Map(), containing: () => [] }, knowledge: { knows: () => true } };
+    const edge = { beforeMap() { }, places: { byId: new Map(), containing: () => [] } };
     const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() { }, renderer: async () => { throw Error('must not render'); } });
     try {
         assert.equal((await app.request('/v1/world/context')).status, 503);
@@ -394,7 +312,7 @@ test('metadata pages, exact refs and search never materialize a render snapshot'
     let snapshots = 0, renders = 0;
     const original = god.publicSnapshot.bind(god);
     god.publicSnapshot = () => { snapshots++; return original(); };
-    const edge = { beforeMap() {}, places: { byId: new Map(), containing: () => [] }, knowledge: { knows: () => true } };
+    const edge = { beforeMap() {}, places: { byId: new Map(), containing: () => [] } };
     const app = new Hono();
     const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', levelAt: () => 0, soul: () => null, limit() {}, renderer: async () => { renders++; return { png: encodeContextPng(1, 1, new Uint8Array([1, 2, 3, 255])) }; } });
     try {
@@ -417,7 +335,7 @@ test('semantic discovery preserves rooms, parts, art and places; explicit search
     god.model.insert({ ...structuredClone(seat), id: 'e_art', name: 'art-image', about: undefined, state: { media: '/assets/' + 'a'.repeat(64) + '.png' } });
     act([{ op: 'set', id: seat.id, about: { title: 'Café seat' } }, { op: 'set', id: 'plaza', about: { title: 'Plaza', parts: [{ id: 'bound', title: 'Bound incidental', anchor: { kind: 'entity', ref: 'incidental' } }] } }, { op: 'define', def: { schema: 'def/1', name: 'room-host', size: { box: [4, 3, 4] }, make: { kind: 'none' }, slots: [{ id: 'room', kind: 'room', p: [0, 0, 0], height: 3, polygon: [[-2, -2], [2, -2], [2, 2], [-2, 2]], accepts: {} }] } }, { op: 'place', def: 'room-host@1', name: 'plain-room-host', p: [30, 0] }]);
     const room = god.model.get('plain-room-host')!;
-    const edge = { beforeMap() {}, places: { byId: new Map([['semantic', { id: 'semantic', ref: 'semantic-place', parent: 'world', level: 0, polygon: [[-1, -1], [1, -1], [1, 1], [-1, 1]] }]]) }, knowledge: { knows: () => true } };
+    const edge = { beforeMap() {}, places: { byId: new Map([['semantic', { id: 'semantic', ref: 'semantic-place', parent: 'world', level: 0, polygon: [[-1, -1], [1, -1], [1, 1], [-1, 1]] }]]) } };
     const app = new Hono();
     const service = mountContextViews(app, { contextReady: () => true, waitForContext: async () => {}, god, edge: edge as never, worldUrl: 'http://127.0.0.1:5980', levelAt: () => 0, soul: () => null, limit() {}, renderer: async () => ({ reason: 'not requested' }) });
     try {
@@ -467,7 +385,7 @@ test('context waits for maintained publication, rechecks edits/access, and never
     const app = new Hono();
     app.onError((error, c) => error instanceof ApiError ? c.json({ code: error.code }, error.status as 400) : c.json({ error: String(error) }, 500));
     let ready = false, waits = 0;
-    const edge = { beforeMap() { throw Error('context must not force perception'); }, places: { byId: new Map() }, knowledge: { knows: () => true } };
+    const edge = { beforeMap() { throw Error('context must not force perception'); }, places: { byId: new Map() } };
     const service = mountContextViews(app, { god, edge: edge as never, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() {}, contextReady: () => ready, waitForContext: async () => {
         waits++;
         act([{ op: 'set', id: 'seat', about: { title: 'New committed title' } }]);

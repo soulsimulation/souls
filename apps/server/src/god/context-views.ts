@@ -13,9 +13,6 @@ import { renderContextSheet } from './context-sheet-job.ts';
 import { hostRenderSlot } from './host-render-slot.ts';
 import { renderLook } from './look-renderer.ts';
 import { lookSchema } from './look.ts';
-import { supportY } from './nav.ts';
-import { contextRegionsOverlap } from './context-view-access.ts';
-import { PlaceIndex, type Place } from '../edge/ledger/places.ts';
 import { checkArtOriginals, readArtOriginal, type ArtOriginals } from './context-original-art.ts';
 export const CONTEXT_PRESENTATION = { source: 'architectural-context', lighting: 'fixed clear late morning (2026-06-21 10:30)', doors: 'definition default', omitted: ['Souls', 'carried and carryable items', 'live wildlife', 'live simulation clock'], live: false } as const;
 const live = new Map<ContextViewCache, () => Promise<void>>();
@@ -250,52 +247,7 @@ export function mountContextViews(app: Hono, d: Deps) {
     });
     if (d.levelAt)
         cache.refresh();
-    type AccessFacts = {
-        unknown: Place[];
-        unknownRefs: Set<string>;
-        placesByRef: Map<string, Place>;
-        containing: ReturnType<PlaceIndex['locator']>;
-    };
-    const canKnow = (target: ContextTarget, facts: AccessFacts) => {
-        const owner = god.model.entities.get(target.ref.split('/')[0]);
-        if (!owner)
-            return false;
-        if (!facts.unknown.length)
-            return true;
-        const roomRef = target.slot ? god.model.pathOf(target.entity) + '/' + target.slot : null;
-        const room = roomRef ? facts.placesByRef.get(roomRef) : undefined;
-        if (roomRef && facts.unknownRefs.has(roomRef))
-            return false;
-        // Names/listings follow knowledge/1. Public neighbouring geometry stays public.
-        for (const id of new Set([target.entity, owner.id])) {
-            const entity = god.model.entities.get(id);
-            if (!entity)
-                return false;
-            const pose = god.model.worldPose(entity), path = god.model.pathOf(id);
-            let ancestor = '';
-            for (const segment of path.split('/')) {
-                ancestor = ancestor ? ancestor + '/' + segment : segment;
-                if (facts.unknownRefs.has(ancestor))
-                    return false;
-            }
-            if (facts.containing(pose.x, pose.z, d.levelAt!(pose.x, pose.z, supportY(god.model, entity))))
-                return false;
-        }
-        const [x, y, z] = target.point, bound = god.model.entities.get(target.entity)!;
-        const level = room?.level ?? target.level ?? d.levelAt!(x, z, supportY(god.model, bound));
-        // A building's framing midpoint is not a separately named point. Only an
-        // explicitly bound point/slot adds physical point membership to support access.
-        const levels = new Set([level, ...(target.stand || target.slot ? [d.levelAt!(x, z, y)] : [])]);
-        for (const atLevel of levels)
-            if (facts.containing(x, z, atLevel))
-                return false;
-        // Bound regions can straddle a hidden room even when their owner is outside it.
-        if (target.part && target.region)
-            for (const place of facts.unknown)
-                if (levels.has(place.level) && contextRegionsOverlap(target.region, place.polygon))
-                    return false;
-        return true;
-    };
+    const canKnow = (target: ContextTarget) => !!god.model.entities.get(target.ref.split('/')[0]);
     const requestAccess = new WeakMap<Context, (ref: string, prepared?: boolean) => ContextTarget | null>();
     const access = (c: Context) => {
         const cached = requestAccess.get(c);
@@ -304,19 +256,10 @@ export function mountContextViews(app: Hono, d: Deps) {
         if (!d.levelAt)
             throw new ApiError(503, 'context.unavailable', 'Authoritative world floor membership is unavailable');
         if (!d.contextReady?.()) throw new ApiError(503, 'context.pending', 'World meaning is catching up; retry shortly');
-        const soul = d.soul(c), places = [...edge.places.byId.values()];
-        // Evaluate actual knowledge once per request; no per-target whole-place scan.
-        const unknown = contextStage('access.unknown', () => places.filter(place => !edge.knowledge.knows(soul, place.id)));
-        const index = new PlaceIndex({ contract: 'place-data/1', world: god.opts.worldId, places: unknown });
-        const facts: AccessFacts = {
-            unknown,
-            unknownRefs: new Set(unknown.flatMap(place => place.ref ? [place.ref] : [])),
-            placesByRef: new Map(places.flatMap(place => place.ref ? [[place.ref, place] as const] : [])),
-            containing: index.locator(),
-        };
+        d.soul(c);
         const known = (ref: string, prepared = false) => {
             const target = prepared ? resolvePreparedTarget(ref) : resolveTarget(ref);
-            return target && canKnow(target, facts) ? target : null;
+            return target && canKnow(target) ? target : null;
         };
         requestAccess.set(c, known);
         return known;

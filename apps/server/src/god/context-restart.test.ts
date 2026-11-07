@@ -62,7 +62,7 @@ async function child(role: string, directory: string) {
         const app = new Hono();
         app.use('*', async (_c, next) => { requests++; await next(); });
         service = mountContextViews(app, {
-            god, edge: { places: { byId: new Map() }, knowledge: { knows: () => true } } as never,
+            god, edge: { places: { byId: new Map() } } as never,
             worldUrl: 'http://127.0.0.1:1', levelAt: () => 0,
             contextReady: () => true, waitForContext: async () => {}, soul: () => null, limit() {},
             renderer: async (input, signal) => {

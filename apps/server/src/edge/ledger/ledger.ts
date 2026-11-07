@@ -1,7 +1,6 @@
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
-import {holdsSecret,withoutSecrets,withoutSecretsBut} from '../perception/public-scrub.ts';
 import {StallGuard} from './stall-guard.ts';
 import {randomUUID} from 'node:crypto';
 import {hasDeclaredProfile} from '../../../../../mars/viewer/engine/bodies/action-profile.ts';
@@ -58,7 +57,6 @@ import type {PaintingIntent, PaintingService} from '../../art/painting-completio
 import {humanoidDims} from '../../../../../mars/viewer/engine/bodies/humanoid.ts';
 import {Together, PAIRED, listed, togetherMayOffer, type Prepared, type TogetherPlan} from './together.ts';
 import {semanticDiscovery, PURPOSE} from '../intents/semantic-discovery.ts';
-import {knownPart} from '../intents/resolved-parts.ts';
 import {Intents,walkWithDestinationWords,walkWithFallback, attentionWords, offeredAttention, type IntentInput} from '../intents/intents.ts';
 import {classWords} from '../intents/class-words.ts';
 import {offerCheck, strictCheck, type OfferRefusal} from '../intents/strict.ts';
@@ -1031,10 +1029,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const dest = WALK_DEST.exec(low.trim().replace(/\s+/g, ' '));
     let keep: MenuFocus['walkKeep'] | undefined;
     if (dest) {
-      const vp = this.vocabPlaces(soul), {places, withheld} = vp;
+      const vp = this.vocabPlaces(), {places} = vp;
       // (whether the words name a place, kept per places listing: a miss scans every place's words, ~1 ms on Eden 2026)
       let named = NAMES_PLACE.get(vp); if (!named) NAMES_PLACE.set(vp, named = new Map());
-      let hit = named.get(dest[1]); if (hit === undefined) {hit = placeMatch(tokens(dest[1]), places, withheld).length > 0; if (named.size >= 512) named.clear(); named.set(dest[1], hit);}
+      let hit = named.get(dest[1]); if (hit === undefined) {hit = placeMatch(tokens(dest[1]), places).length > 0; if (named.size >= 512) named.clear(); named.set(dest[1], hit);}
       if (!hit) {menuStats.words.focusSkipped++; return null;}
       // (D) ... and builds only the walks those words could choose (vocabulary walkKeepV1), not every walk's route goal
       const test = walkKeepV1(dest[1], places, this.vocabularyOf(soul, []).target);
@@ -1098,7 +1096,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  may be made on demand (a far part's walk). */
   resolveIdV1(soul: EdgeSoul, id: string): VocabResult {
     const one = this.bindOne(soul, id);
-    if (one) return this.secretOffer(soul, one.cap) ? {kind: 'unknown', code: 'capability.unknown', reason: 'That action is not known here.', didYouMean: []} : {kind: 'exact', cap: one.cap};
+    if (one) return {kind: 'exact', cap: one.cap};
     const w = this.wordsMenu(soul); return this.exactWords(soul, w, id, this.resolveOnDemand(soul, id, [...w.caps], new Map(w.plans)).v);
   }
   private wordsOracle(soul: EdgeSoul, menu: {exact: boolean}, text: string, v: VocabResult) {
@@ -1196,8 +1194,6 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (ride && !stepping) {const seated = this.rideStandRefusal(soul.entityId, caps), i = seated ? caps.findIndex(c => c.id === 'stand:here') : -1; if (i >= 0) caps[i] = {...caps[i]!, available: false, blocked: seated!};}
     shapeRigidCapabilities(me, caps, plans as never, {seconds: {type: 'integer', min: 1, max: 600, default: 60}});
     if(me?.body?.motion?.dance||hasDeclaredProfile(me?.body))for(const c of caps){if(!['dance:here','rest:here','nap:here','lie:here'].includes(c.id))continue;const p=plans.get(c.id);if(p){const issue=this.mw.feasibility.canPerform({actor:soul.entityId,label:p.label,steps:p.steps});if(issue){c.available=false;c.blocked={code:issue.code,reason:issue.message};}}}
-    // knowledge/1: an offer that leads to (or names) a secret place this Soul has not been to or found is not offered
-    if (this.knowledge.marked().size) for (let i = caps.length - 1; i >= 0; i--) {if (this.secretOffer(soul,caps[i]!)) {plans.delete(caps[i]!.id); caps.splice(i, 1);}}
     return {caps, plans};
   }
   /** The menu before the tail (see binds): cached. */
@@ -1766,7 +1762,6 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if(!dest.ok)return {...refuse(dest.code,dest.reason),did_you_mean:dest.did_you_mean};
       const place=this.places.byId.get(dest.chosen.place);
       if(!place||place.level!==0)return refuse('carry.ground-only','Choose a place on level-zero ground.');
-      if(this.secretOffer(soul,{id:'walk:'+place.id,verb:'walk',label:place.name,available:true,target:{id:place.id,kind:'place'}}))return refuse('place.unknown','That destination is not known.');
       // PC04 (#683): a shared proposal records the resolved place (never a client-sent one)
       if(cap.verb==='carry-with')params={...params,toPlace:{id:place.id,name:place.name}};
       const at=centroid(place.polygon);
@@ -2318,7 +2313,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
       if (!r.ok) {
         // name a few real choices: the near-misses, else the known places nearest the ride
-        const near = r.did_you_mean.length ? r.did_you_mean.map(d => this.places.byId.get(d.placeId)?.name ?? d.label) : knownBootPlaces(this, soulId).filter(k => k.access === 'admitted' || k.access === 'scenery').map(k => this.places.byId.get(k.id)).filter(pl => pl?.polygon?.length && !pl.carrier)
+        const near = r.did_you_mean.length ? r.did_you_mean.map(d => this.places.byId.get(d.placeId)?.name ?? d.label) : knownBootPlaces(this).filter(k => k.access === 'admitted' || k.access === 'scenery').map(k => this.places.byId.get(k.id)).filter(pl => pl?.polygon?.length && !pl.carrier)
           .map(pl => {const [x, z] = centroid(pl!.polygon!); return {name: pl!.name, d: Math.hypot(x - c.pose.p[0], z - c.pose.p[2])};}).sort((a, b) => a.d - b.d).slice(0, 5).map(x => x.name);
         return {ok: false, code: 'steer.unknown-place', reason: `"${String(spec.to).slice(0, 60)}" is not a place you know; name a place (or give a direction and distance)${near.length ? `. Places you know: ${[...new Set(near)].slice(0, 5).join(', ')}` : ''}.`, did_you_mean: r.did_you_mean.slice(0, 5)};
       }
@@ -2436,7 +2431,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // the place its words end on ("fly up to the field": the field) by its own name or id words (tier <= 1), the last few
     // words only, longest first
     let named: string[] | undefined, place: Place | undefined;
-    for (let i = Math.max(1, w.length - 4); i < w.length && !named; i++) {const m = placeMatchTier(w.slice(i), ctx.places, ctx.withheld); if (m.tier >= 0 && m.tier <= 1 && m.found.length) {named = w.slice(i); place = this.places.byId.get(m.found[0]!.id);}}
+    for (let i = Math.max(1, w.length - 4); i < w.length && !named; i++) {const m = placeMatchTier(w.slice(i), ctx.places); if (m.tier >= 0 && m.tier <= 1 && m.found.length) {named = w.slice(i); place = this.places.byId.get(m.found[0]!.id);}}
     const menu = (wanted: string) => caps.some(c => c.verb === wanted && c.id !== asked) ? caps : this.wordsMenu(soul).caps;
     // a place no walk reaches may say itself what to do instead ("the outdoor cottage bench is another place to pause"): an
     // offer whose own title or alias its description names comes first, under whatever verb, since walking there was only the
@@ -2502,7 +2497,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       else if (t) (t.kind === 'place' ? out.places : t.kind === 'soul' ? out.souls : out.things).push(t.id);
       else if (r.kind === 'unknown' && r.place) out.places.push(r.place);
       // every place these words name by its own name counts too ("the pavilion": any pavilion, not only the one the walk picked)
-      const named = placeMatchTier(rest, ctx.places, ctx.withheld); if (named.tier >= 0 && named.tier <= 1) for (const p of named.found) if (!out.places.includes(p.id)) out.places.push(p.id);
+      const named = placeMatchTier(rest, ctx.places); if (named.tier >= 0 && named.tier <= 1) for (const p of named.found) if (!out.places.includes(p.id)) out.places.push(p.id);
       if (!out.places.length && !out.things.length) return null;   // words that name nothing the world knows, even beside a Soul's name
     }
     return souls.length || out.places.length || out.things.length ? out : null;
@@ -2526,26 +2521,23 @@ export class EdgeLedger implements EdgeLedgerHooks {
     return Object.assign(this.vocabularyOf(soul, caps), {here: this.placePathOf(soul.soulId).filter(p => p.kind !== 'occupier').map(p => p.id)});
   }
   /** L3 (b): the places a Soul's words can name (VocabPlace objects, never written after they are built, so the vocabulary's
-   *  per-place word cache holds), kept while the places, the god's world, the static world and what this Soul knows of
-   *  secret places do not change (with no secret place, one listing serves every Soul). */
-  private vocabPlaces(soul: EdgeSoul): {root: string[]; known: Place[]; withheld: string[]; places: VocabContext['places']} {
-    const marked = this.knowledge.marked().size, knowSig = marked ? `${soul.soulId}:${this.knowledge.version}:${this.knowledge.memory(soul.soulId).size}` : '*';
-    const key = `${this.staticVersion()}|${this.menuInputs()}|${knowSig}`, hit = this.vocabPlaceMemo.get(knowSig);
+   *  per-place word cache holds), kept while the places, the god's world and the static world do not change. One listing
+   *  serves every Soul. */
+  private vocabPlaces(): {root: string[]; known: Place[]; places: VocabContext['places']} {
+    const key = `${this.staticVersion()}|${this.menuInputs()}`, hit = this.vocabPlaceMemo;
     if (hit && hit.key === key) return hit.value;
     const w = this.mw.world as NativeWorld, all = [...this.places.byId.values()], rootPlace = all.find(p => p.parent === null);
     const aliases = bootAliases(this);
-    // knowledge/1: a secret place this Soul does not know is no name to resolve (nor a "contains it" fallback naming it)
-    const known: Place[] = [], withheld: string[] = [];
-    for (const p of all) if (p.parent !== null) {if (this.knowledge.knows(soul.soulId, p.id)) known.push(p); else withheld.push(tokens(p.name).join(' '), tokens(p.id).join(' '));}
+    const known = all.filter((p) => p.parent !== null);
     const places = known.map(p => ({id: p.id, ref:p.ref, name: p.name, aliases: [...new Set([...(aliases[p.id] ?? []),...(p.aliases??[])])], genericAliases:p.genericAliases, center: centroid(p.polygon), polygon:p.polygon, level:p.level, parent: p.semanticParent === undefined ? p.parent : p.semanticParent, kind: p.kind, description: p.description, walkable: !!(w.regions as Record<string, unknown>)[p.id] || !!this.placeWalkable?.(p.id)}));
-    const value = {root: rootPlace ? [...tokens(rootPlace.id), ...tokens(rootPlace.name)] : [], known, withheld, places};
-    this.vocabPlaceMemo.set(knowSig, {key, value}); if (this.vocabPlaceMemo.size > 64) this.vocabPlaceMemo.delete(this.vocabPlaceMemo.keys().next().value!);
+    const value = {root: rootPlace ? [...tokens(rootPlace.id), ...tokens(rootPlace.name)] : [], known, places};
+    this.vocabPlaceMemo = {key, value};
     return value;
   }
-  private vocabPlaceMemo = new Map<string, {key: string; value: {root: string[]; known: Place[]; withheld: string[]; places: VocabContext['places']}}>();
+  private vocabPlaceMemo: {key: string; value: {root: string[]; known: Place[]; places: VocabContext['places']}} | null = null;
   private vocabularyOf(soul: EdgeSoul, caps: EdgeCapability[]): VocabContext {
     const w = this.mw.world as NativeWorld, me = this.body(soul.entityId);
-    const {root, known, withheld, places} = this.vocabPlaces(soul);
+    const {root, known, places} = this.vocabPlaces();
     // (L3 c: an object offer's place from what the providers built; every object's row is read only for one they did not)
     let objects: Map<string, {placeId: string}> | null = null;
     const objectPlace = (id: string) => this.objectPlaces.get(id) ?? (objects ??= new Map((this.comms?.objects.all() ?? []).map(o => [o.id, o]))).get(id)?.placeId;
@@ -2577,7 +2569,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (!set) {set = new Set(); for (const s of this.spots.spots) if (s.place && (s.activity === verb || s.also?.includes(verb))) for (let p: string | undefined = s.place, n = 0; p && n < 20; p = this.places.byId.get(p)?.parent ?? undefined, n++) set.add(p); spotPlaces.set(verb, set);}
       return set.has(placeId);
     };
-    return {caps, me: here, ...(me ? {yaw:me.pose.yaw, holds: (id: string) => {const su = (w.entities as Record<string, {support?: {kind: string; by?: string}}>)[id]?.support; return su?.kind === 'in-hand' && su.by === me.id;}} : {}), root, elsewhere, hasSpot, withheld: [...withheld], places: [...places],
+    return {caps, me: here, ...(me ? {yaw:me.pose.yaw, holds: (id: string) => {const su = (w.entities as Record<string, {support?: {kind: string; by?: string}}>)[id]?.support; return su?.kind === 'in-hand' && su.by === me.id;}} : {}), root, elsewhere, hasSpot, places: [...places],
       target: c => {
         const t = c.target; if (!t) return {names: [], around: [], at: null};
         if (t.kind === 'spot') {
@@ -2695,9 +2687,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     this.timeline.ensure(soulId, () => (this.db.db.prepare("SELECT * FROM edge_receipts_v1 WHERE world_id=? AND soul_id=? AND phase='completed' ORDER BY accepted_tick DESC LIMIT ?").all(this.host.worldId, soulId, REBUILD_MAX) as Row[]).map((r) => ({receipt: this.view(r), at: r.created_at})));
     const at = (ms: number) => ({real: new Date(ms).toISOString(), tick: null, worldDay: null, time: null});
     const extra: TimelineEntry[] = [{kind: 'arrival', when: at(row.created_at), place: {id: null, name: null}}, ...(this.travelLogOf?.(soulId) ?? []).filter((e) => Number.isFinite(e.at) && Math.abs(e.at) <= MAX_DATE_MS).slice(-TIMELINE_MAX).map((e): TimelineEntry => ({kind: 'travel', when: at(e.at), place: {id: null, name: null}, ...(e.to ? {world: String(e.to).slice(0, 80)} : {})}))];
-    return withoutSecretsBut(timelineView(this.timeline.rows(soulId, limit), extra, {limit, placeName: (id) => (this.knowledge.isSecret(id) ? null : this.places.byId.get(id)?.name ?? null), gone: (id) => this.comms?.objects.isRemoved?.(id) ?? false}), 'title', this.knowledge.publicMatcher());
+    return timelineView(this.timeline.rows(soulId, limit), extra, {limit, placeName: (id) => this.places.byId.get(id)?.name ?? null, gone: (id) => this.comms?.objects.isRemoved?.(id) ?? false});
   }
-  /** G430 public per-Soul page: no owner data, conversation turns or tokens, and nothing of a secret place. Its own public speech is on it. */
+  /** G430 public per-Soul page: no owner data, conversation turns or tokens. Its own public speech is on it. */
   publicSoul(soulId: string) {
     const row = this.db.soul(soulId) as {id: string; name?: string; description?: string; world_id: string; created_at: number; retired_at: number | null} | undefined;
     if (!row || row.world_id !== this.host.worldId || row.retired_at !== null) throw new EdgeError(404, 'not-found', 'no such Soul');
@@ -2708,20 +2700,14 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (has('edge_comms_stream')) for (const e of this.db.db.prepare("SELECT tick,at,kind,body FROM edge_comms_stream WHERE world_id=? AND soul_id=? AND kind IN ('arrival','departure','world') ORDER BY seq DESC LIMIT 30").all(this.host.worldId, soulId) as {tick: number; at: number; kind: string; body: string}[]) events.push({tick: e.tick, at: e.at, kind: e.kind, ...JSON.parse(e.body)});
     if (has('edge_comms_speech')) for (const e of this.db.db.prepare('SELECT tick,at,channel,text FROM edge_comms_speech WHERE world_id=? AND soul_id=? ORDER BY tick DESC LIMIT 30').all(this.host.worldId, soulId) as {tick: number; at: number; channel: string; text: string}[]) events.push({tick: e.tick, at: e.at, kind: 'speech', channel: JSON.parse(e.channel), text: e.text, untrusted: true});
     events.sort((a, b) => b.tick - a.tick);
-    // Anyone can read this, with no token (#1234). What the world says of the Soul passes the secret places. What the Soul said itself,
-    // its name, description, `now`, speech and the titles of what it made, is its own to say: scrubbing it would also let any owner test a guessed name.
-    const secrets = this.knowledge.publicMatcher(), plain = (r: object) => {if (!secrets) return r; const {chosen: _c, ...rest} = r as {chosen?: unknown}; return rest;}, inSecret = !!secrets && !!m && this.placePathOf(soulId).some((p) => this.knowledge.isSecret(p.id));
-    const hiddenAt = (r: EdgeReceipt) => {const at = (r.endedAt as {pos?: number[]} | null)?.pos; return !!secrets && !!at && this.places.containing(at[0]!, at[1]!, 0).some((p) => this.knowledge.isSecret(p.id));};
-    const open = (r: EdgeReceipt) => r.phase === 'waiting' || r.phase === 'started';
-    const told = (e: (typeof events)[number]) => (e.kind === 'speech' ? {...e, text: undefined} : e), seen = secrets ? events.filter((e) => !holdsSecret(told(e), secrets)) : events;
-    return {soul: {soulId, name: row.name ?? m?.name ?? soulId, description: row.description ?? null, untrusted: true}, now: this.host.nowOf(soulId), events: seen.slice(0, 30), timeline: this.publicTimeline(soulId, row), ...withoutSecrets({fade: this.comms?.fading.status(soulId) ?? null, body: this.bodyRule?.view(soulId) ?? null, lastAcceptedAt: last.at,
-      self: m ? {placePath: this.placePathOf(soulId), state: stateOf(this.host, m.entityId), activity: String(this.body(m.entityId)?.human?.activity ?? 'idle'), bodyState: this.bodyOf(soulId), doing: this.host.doingOfV1(m)} : null, receipts: receipts.filter((r) => !hiddenAt(r as EdgeReceipt) && !(inSecret && open(r as EdgeReceipt))).map(plain)}, secrets)};
+    return {soul: {soulId, name: row.name ?? m?.name ?? soulId, description: row.description ?? null, untrusted: true}, now: this.host.nowOf(soulId), events: events.slice(0, 30), timeline: this.publicTimeline(soulId, row), fade: this.comms?.fading.status(soulId) ?? null, body: this.bodyRule?.view(soulId) ?? null, lastAcceptedAt: last.at,
+      self: m ? {placePath: this.placePathOf(soulId), state: stateOf(this.host, m.entityId), activity: String(this.body(m.entityId)?.human?.activity ?? 'idle'), bodyState: this.bodyOf(soulId), doing: this.host.doingOfV1(m)} : null, receipts};
   }
-  map() {this.beforeMap?.(); const regions = (this.mw.world as NativeWorld).regions ?? {}; return [...this.places.byId.values()].filter(p => !this.knowledge.isSecret(p.id)).map(p => ({id: p.id, name: p.name, ...(p.ref ? {ref:p.ref} : {}), kind: p.kind, enclosed: p.enclosed, capacity: p.capacity, parent: p.parent, walkable: p.id in regions || !!this.placeWalkable?.(p.id), center: (p.carrier ? (() => {const e = (this.mw.world as NativeWorld).entities[p.carrier!.entity]; return e ? [e.pose.p[0], e.pose.p[2]] : [0, 0];})() : centroid(p.polygon)).map(v => Math.round(v * 10) / 10), ...(p.carrier ? {carrier: p.carrier.entity} : {}), starting: p.starting, ...(p.description ? {description: p.description} : {}), ...(p.worldAbout ? {worldAbout:p.worldAbout} : {}), ...(p.aliases?.length ? {aliases:p.aliases} : {}), ...(p.semanticParent !== undefined ? {semanticParent:p.semanticParent} : {}), ...(p.semanticKind ? {semanticKind:p.semanticKind} : {}), ...(p.semanticRole ? {semanticRole:p.semanticRole} : {}), ...(p.salience !== undefined ? {salience:p.salience} : {}), ...(p.parts?.length ? {parts:p.parts} : {}), schedule: (p.schedule ?? []).map(s => ({id: s.id, cron: s.cron, durationMinutes: s.durationMinutes ?? null, ticketed: !!s.ticketed, label: s.label ?? null}))}));}
+  map() {this.beforeMap?.(); const regions = (this.mw.world as NativeWorld).regions ?? {}; return [...this.places.byId.values()].map(p => ({id: p.id, name: p.name, ...(p.ref ? {ref:p.ref} : {}), kind: p.kind, enclosed: p.enclosed, capacity: p.capacity, parent: p.parent, walkable: p.id in regions || !!this.placeWalkable?.(p.id), center: (p.carrier ? (() => {const e = (this.mw.world as NativeWorld).entities[p.carrier!.entity]; return e ? [e.pose.p[0], e.pose.p[2]] : [0, 0];})() : centroid(p.polygon)).map(v => Math.round(v * 10) / 10), ...(p.carrier ? {carrier: p.carrier.entity} : {}), starting: p.starting, ...(p.description ? {description: p.description} : {}), ...(p.worldAbout ? {worldAbout:p.worldAbout} : {}), ...(p.aliases?.length ? {aliases:p.aliases} : {}), ...(p.semanticParent !== undefined ? {semanticParent:p.semanticParent} : {}), ...(p.semanticKind ? {semanticKind:p.semanticKind} : {}), ...(p.semanticRole ? {semanticRole:p.semanticRole} : {}), ...(p.salience !== undefined ? {salience:p.salience} : {}), ...(p.parts?.length ? {parts:p.parts} : {}), schedule: (p.schedule ?? []).map(s => ({id: s.id, cron: s.cron, durationMinutes: s.durationMinutes ?? null, ticketed: !!s.ticketed, label: s.label ?? null}))}));}
 
   /** srv-act-words (E): the ids of map()'s walkable places, in its order, without building its rows (a body act's terminal
    *  snapshot reads only these; map() built every place's row, ~2.5 ms on Eden 2026). Same beforeMap sync as map(). */
-  walkablePlaceIdsV1(): string[] {this.beforeMap?.(); const regions = (this.mw.world as NativeWorld).regions ?? {}, out: string[] = []; for (const p of this.places.byId.values()) if (!this.knowledge.isSecret(p.id) && (p.id in regions || !!this.placeWalkable?.(p.id))) out.push(p.id); return out;}
+  walkablePlaceIdsV1(): string[] {this.beforeMap?.(); const regions = (this.mw.world as NativeWorld).regions ?? {}, out: string[] = []; for (const p of this.places.byId.values()) if (p.id in regions || !!this.placeWalkable?.(p.id)) out.push(p.id); return out;}
 
   /** PM-R055: happening (with walk capability) and a few inviting places elsewhere. Counts only, never identities;
    *  project titles are listed objects (untrusted), marks are counted. Deterministic for a given world state. */
@@ -2827,7 +2813,6 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  and a Soul that resolves first (as the skill says) told its human it could not go. */
   resolveOnDemand(soul: EdgeSoul, text: string, caps: EdgeCapability[], plans: Plans, typos = true): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} {
     const exact = caps.find(c => c.id === text);
-    if(exact && this.secretOffer(soul,exact))return {v:{kind:'unknown',code:'capability.unknown',reason:'That action is not known here.',didYouMean:[]},caps,plans};
     if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery)return {v:discovery,caps,plans};}
     // RESOLVE: a building's floor ("go upstairs", "go inside the cottage and go upstairs", "the top floor of the tower")
     const fl = exact || !this.floorOnDemand ? null : floorWords(text);
@@ -2837,7 +2822,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const more = [...(near?.caps ?? caps)], morePlans = new Map(near?.plans ?? plans), f = this.floorOnDemand!(soul, {ask: fl.ask, prefer, floor: fl.floor}, more, morePlans);
       if (f && 'code' in f) return {v: {kind: 'unknown', code: f.code, reason: `${text}: ${f.reason}`, didYouMean: []}, caps, plans};
       const cap = f ? more.find(c => c.id === f.id) : undefined;
-      if (f && cap && !this.secretOffer(soul, cap)) return {v: {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label})${f.note}.`}, caps: more, plans: morePlans};
+      if (f && cap) return {v: {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label})${f.note}.`}, caps: more, plans: morePlans};
     }
     // SOULSIM-E: an id-shaped walk/run/jog (`walk:land-botanic-koi-pond`, as resolve answers) to a place the listing
     // leaves out gets the same on-demand offer as its words; the words reach it through the vocabulary, the id may not
@@ -2850,22 +2835,21 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const sub = (id: string) => id.startsWith(placeId + '.') || this.places.byId.get(id)?.parent === placeId;
       const added = offer(placeId) || [...this.places.byId.keys()].some(id => sub(id) && offer(id));
       const cap = added ? more.find(c => c.id === text.trim()) ?? more.find(c => c.verb === verb && c.target?.kind === 'place' && (c.target.id === placeId || sub(c.target.id))) : undefined;
-      if (cap && !this.secretOffer(soul, cap)) return {v: cap.id === text.trim() ? {kind: 'exact', cap} : {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label}).`}, caps: more, plans: morePlans};
+      if (cap) return {v: cap.id === text.trim() ? {kind: 'exact', cap} : {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label}).`}, caps: more, plans: morePlans};
     }
     // Re-offer an exact named walk, or an explicitly selected real semantic seat.
     // The normal GodNav plan, route checks and launch admission remain authoritative.
     const byRef = exact || !this.walkRefOnDemand ? null : /^(?:walk|sit):([^\s:]+)$/.exec(text.trim());
-    if (byRef && (!text.trim().startsWith('sit:') || [...this.places.byId.values()].some(p => p.parts?.some(part => part.sit === text.trim() && knownPart(this,soul,p,part))))) {
+    if (byRef && (!text.trim().startsWith('sit:') || [...this.places.byId.values()].some(p => p.parts?.some(part => part.sit === text.trim())))) {
       const more = [...caps], morePlans = new Map(plans), cap = this.walkRefOnDemand!(soul, byRef[1]!, more, morePlans) ? more.find(c => c.id === text.trim()) : undefined;
-      if (cap && !this.secretOffer(soul, cap)) return {v: {kind: 'exact', cap}, caps: more, plans: morePlans};
+      if (cap) return {v: {kind: 'exact', cap}, caps: more, plans: morePlans};
     }
     let v: VocabResult = exact ? {kind: 'exact', cap: exact} : resolveCapability(text, this.vocabulary(soul, caps));
     // RESOLVE (SOULSIM-E "go to the horse" ended at the west lawn's centre, ~10 m from the horse): words that named only a place
     // whose description lists them name a thing: the nearest one so named, next to it
     if (v.kind !== 'exact' && v.seek?.length && this.thingOnDemand) {
       const more = [...caps], morePlans = new Map(plans), got = this.thingOnDemand(soul, v.seek, more, morePlans), cap = got ? more.find(c => c.id === got.id) : undefined;
-      // knowledge/1: never a secret place this Soul does not know, under its thing name
-      if (got && cap && !this.secretOffer(soul, cap)) return {v: {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label}): the nearest ${v.seek.join(' ')} you can stand next to${got.count > 1 ? ` (of ${got.count} in this world)` : ''}.`}, caps: more, plans: morePlans};
+      if (got && cap) return {v: {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label}): the nearest ${v.seek.join(' ')} you can stand next to${got.count > 1 ? ` (of ${got.count} in this world)` : ''}.`}, caps: more, plans: morePlans};
     }
     // ROUTE-RECHECK ("read a book in the library" from the park was place.unreachable: the listing keeps only the nearest
     // reading places): the places the words name get their read:<place> for this act, then the words resolve again
@@ -2922,13 +2906,6 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
     }
     return {v, caps, plans};
-  }
-  /** knowledge/1 (as the listing filters its offers): an on-demand offer that leads to a secret place this Soul has not been
-   *  to or found (or into one: knows() reads the secret ancestor), is not offered either. */
-  private secretOffer(soul: EdgeSoul, cap: EdgeCapability): boolean {
-    if(!this.knowledge.marked().size)return false;
-    if(cap.target?.kind==='place'&&!this.knowledge.knows(soul.soulId,cap.target.id))return true;
-    return [...this.places.byId.values()].some(p=>p.parts?.some(part=>(part.walk===cap.id||part.sit===cap.id)&&!knownPart(this,soul,p,part)));
   }
   /** SOULSIM-E: true when `asked` is an id the listing leaves out that resolveOnDemand offers (a far place's walk/run). Act
    *  and resolve let such an id through their place and strict/1 checks, which read the listing only. */

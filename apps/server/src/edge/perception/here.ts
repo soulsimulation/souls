@@ -161,8 +161,7 @@ export class Perception {
       if (e && e.kind !== 'human') {const at: V2 = [e.pose.p[0], e.pose.p[2]]; if (this.dist(at) <= 60 && this.sameEnclosure(at) && this.sees(at)) return {kind: 'fixture', id: e.id, name: e.label ?? e.def ?? e.id, at, entityId: e.id, distance: this.dist(at)};}
     }
     if (opts.places !== false) {
-      const known = (x: {id: string} | undefined) => !!x && (this.L.knowledge?.knows(this.soul.soulId, x.id) ?? true);   // knowledge/1: secret places stay unnamed until known
-      const byId = this.L.places.byId.get(q), p = known(byId) ? byId : [...this.L.places.byId.values()].find(x => x.parent !== null && (named(x.name)||(x.aliases??[]).some(named)) && known(x));
+      const p = this.L.places.byId.get(q) ?? [...this.L.places.byId.values()].find(x => x.parent !== null && (named(x.name)||(x.aliases??[]).some(named)));
       if (p) {const at = p.carrier ? (() => {const e = this.w.entities[p.carrier!.entity]; return e ? [e.pose.p[0], e.pose.p[2]] as V2 : centroid(p.polygon);})() : centroid(p.polygon); return {kind: 'place', id: p.id, name: p.name, at, distance: this.dist(at)};}
     }
     return null;
@@ -359,7 +358,7 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
       // RT: an exit the body cannot walk from here says so (no eta), instead of an eta for a walk that is refused
       const problem = ledger.routeProblem(soul, x.c.id, P.menu().plans);   // (the exit's plan from this frame's menu)
       return problem ? {...base, reachable: false, why: problem.code} : {...base, eta: '~' + durationWord(walkSeconds(x.d * 1.25))};}) : [];
-  const where=whereLine([...ledger.places.byId.values()].filter(p=>ledger.knowledge.knows(soul.soulId,p.id)),ledger.placePathOf(soul.soulId).map(p=>p.id),P.pos);
+  const where=whereLine([...ledger.places.byId.values()],ledger.placePathOf(soul.soulId).map(p=>p.id),P.pos);
   const frame = {
     ...(c ? {now: worldNow(c)} : {}), tick, ...(c ? {clock: `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}`, day: WEEKDAYS[new Date(c.datetime).getUTCDay()], light: lightOf(c.hour, c.minute)} : {}),
     ...(weather ? {weather: (() => {const l = P.pos ? ledger.lightningNear?.(P.pos[0], P.pos[1]) : null; return l ? {...weather, lightning: l} : weather;})()} : {}),
