@@ -298,6 +298,8 @@ export function settleFrames(rt: Runtime): string[] {
 
 /** #1250: the uprights standing in their beams now, and which of those no longer stand after an edit: an edit re-derives a frame
  *  it touches to the ground, so `settleFrames` never sees that one, and the god should hear of it all the same. */
+/** #1250: what has changed about the frame `u` is part of: its frames and their joins. A stop waiting on it can tell progress. */
+export const frameProgress = (w: WorldState, u: Entity): string => frameGroup(w, u).map((g) => `${g.id}:${g.connections?.length ?? 0}`).join();
 export const framesUp = (w: WorldState): string[] => Object.values(w.entities).filter((e) => isFrame(e) && e.phase === 'installed' && e.support?.kind === 'connected').map((e) => e!.id);
 export const framesFell = (w: WorldState, ids: string[]): string[] => ids.filter((id) => { const e = w.entities[id]; return !!e && e.support?.kind !== 'connected' && !frameStability(w, e).stable; });
 

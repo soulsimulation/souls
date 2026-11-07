@@ -2,7 +2,7 @@ import {LIE_CLEARANCE} from '../../../mars/viewer/engine/social/pose.ts';
 import {regionArrivalMask} from './region-arrival.ts';
 import { createHash } from 'node:crypto';
 import { capturePhysicalHashInput, capturedPhysicalHashSteps, physicalHashNeedsLegacyCapture } from './checkpoint-hash.ts';
-import { ACTION_THREW, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
+import { ACTION_THREW, STOP_GAVE_UP, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
 import {bodyProfile} from '../../../mars/viewer/engine/bodies/navigation.ts';
 import {immutableAuthoredBoundaryFact} from '../../../mars/viewer/engine/spatial/edits.ts';
 import {keepStaticGridsForBoot,withStaticGridReadCache,type BootGridStore} from '../../../mars/viewer/engine/spatial/grid.ts';
@@ -60,7 +60,7 @@ import { disassemblyPlan, DISASSEMBLY_POLICY } from './disassembly.ts';
 import { MARS_2026_MAP, withMars2026Map } from './mars-2026-map.ts';
 import { disassemblyRegistry } from '../../../mars/viewer/engine/construction/disassembly.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { connectBeamV1, framesFell, framesStand, framesUp, settleFrames } from './beam-connect.ts';
+import { connectBeamV1, frameProgress, framesFell, framesStand, framesUp, isFrame, settleFrames } from './beam-connect.ts';
 import { decksBear, installJoistV1, laySheetV1 } from './deck-install.ts';
 import { installFlightV1, installTreadV1, stairsBear } from './stair-install.ts';
 import { captureRenderScene, commonsSceneMetadataV1Schema, type RenderSceneCaptureV1, type RenderScene } from '@souls/engine-contract';
@@ -138,6 +138,8 @@ type Prog = {
   stopping?: Diag;
   /** #1150: the tick a ladder's stop gives up waiting. A stop that was refused, or a set-down that can't finish, must not hold a body for good. */
   stopByV1?: number;
+  /** #1250: a stop a Soul asked for, and since when nothing it waits on has changed. */
+  stopQuietV1?: { key: string; since: number };
   /** PC08: stopped with `untilSafe` (a shared carry): a held-up action keeps its own hold-up diagnostic, not a retry's. */
   stopUntilSafe?: true;
   /** #1150: the ticks the world refused this programme's moves; it then ends `failed`, not `cancelled`. */
@@ -156,8 +158,9 @@ const CONTAINED_HOLD_TICKS = 1200;
 const CONTAINED_KEYS_PER_RULE = 8, ANY_SUBJECT = '*';
 /** #1150: twenty seconds for what the ladder stopped to finish its own cleanup. Past that it is abandoned, and bodies are free. */
 const LADDER_STOP_TICKS = 400;
-/** #1150, #1250: a minute for a stop a Soul asked for, so a crew waiting on a frame nobody can finish is free in the end. */
-const ASKED_STOP_TICKS = 1200;
+/** #1150, #1250: five minutes in which nothing a stop waits on moves or joins. A stop a Soul asked for that waits on a frame
+ *  nobody can finish frees the crew then; one waiting on a build that goes on keeps waiting. */
+const ASKED_STOP_QUIET_TICKS = 6000;
 const containedByRule = (code: string) => `${code}|${ANY_SUBJECT}`;
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
 export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
@@ -520,15 +523,21 @@ export class MarsEngine implements Engine {
    *  Its whole tree ends here, and whatever it held is set down where it is: the one time a load is let go without a set-down,
    *  because the action that would set it down is what broke. Everything here follows from the world and the throw, so a replay
    *  of the same throw does the same. The Soul's programme ends on its next advance, as for any action that failed. */
-  private abandonV1(action: string, error: unknown) {
+  /** #1250: where the stop's body and what it holds are, and the joins of any frame held: a change is progress. */
+  private stopProgressV1(p: Prog): string {
+    const ents = this.ents, r2 = (v: number) => Math.round(v * 100), at = (e: any) => `${e.id}@${e.pose.p.map(r2).join(',')}`, me = ents[p.actor];
+    const held = (listEntities(ents) as any[]).filter((e) => ['held', 'in-hand'].includes(e.support?.kind) && [e.support.by].flat().includes(p.actor)).sort((a, b) => (a.id < b.id ? -1 : 1));
+    return [me ? at(me) : '', ...held.map((e) => `${at(e)}${isFrame(e) ? `/${frameProgress(this.rt.world, e)}` : ''}`)].join('|');
+  }
+  private abandonV1(action: string, error: unknown, why: Diag = ACTION_THREW) {
     const rt = this.rt as any, records = rt.records as Map<string, { id: string; parent?: string }>, ents = this.ents;
     let root = action; for (let up = records.get(root)?.parent; up; up = records.get(root)?.parent) root = up;
     const tree = new Set([root]); for (let grew = true; grew;) { grew = false; for (const r of records.values()) if (r.parent && tree.has(r.parent) && !tree.has(r.id) && rt.isActive(r.id)) { tree.add(r.id); grew = true; } }
     const bodies = (listEntities(ents) as any[]).filter(e => e.human?.grip && this.holders(e.id).some(h => tree.has(h))).map(e => e.id as string).sort();
     const depth = (id: string) => { let n = 0; for (let r = records.get(id); r?.parent; r = records.get(r.parent)) n++; return n; }, internal = rt.internals();
     for (const id of [...tree].sort((a, b) => depth(b) - depth(a) || (a < b ? -1 : 1))) {
-      const l = rt.live.get(id); if (!l) { rt.forceCancel?.(id, ACTION_THREW); continue; }
-      try { internal.forceFinish(l, 'failed', ACTION_THREW); } catch { rt.live.delete(id); for (const [k, list] of internal.owners) { const kept = list.filter((o: { action: string }) => o.action !== id); if (kept.length) internal.owners.set(k, kept); else internal.owners.delete(k); } }
+      const l = rt.live.get(id); if (!l) { rt.forceCancel?.(id, why); continue; }
+      try { internal.forceFinish(l, 'failed', why); } catch { rt.live.delete(id); for (const [k, list] of internal.owners) { const kept = list.filter((o: { action: string }) => o.action !== id); if (kept.length) internal.owners.set(k, kept); else internal.owners.delete(k); } }
     }
     const poses: EngineRefusalV1['poses'] = {}, spatial = this.rt.services.spatial as Spatial, joined: string[] = [];
     for (const id of bodies) {
@@ -543,10 +552,10 @@ export class MarsEngine implements Engine {
       poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
     }
     const settled = joined.length ? settleFrames(this.rt) : [];
-    (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200), ...(settled.length ? { settled } : {}) });
+    (this.out.refusals ??= []).push({ tick: rt.tick, rule: why.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200), ...(settled.length ? { settled } : {}) });
     // the crews holding the rest of that frame: nobody can finish it with them now, and their stop waits on a frame that won't stand
     const group = new Set(joined); for (const id of group) for (const c of ents[id]?.connections ?? []) group.add(c.to);
-    for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a part of the same frame broke: ${id}`); }
+    for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a part of the same frame broke: ${id}`, why); }
   }
   /** Is this violation on the list, by name or by its rule? */
   private coveredV1(): (v: { code: string; subjects?: string[] }) => boolean {
@@ -649,7 +658,8 @@ export class MarsEngine implements Engine {
     if(p.stopping){
       // PC08: while an `untilSafe` stop's action is held up it stands still, so a retry would refuse again and only hide
       // the hold-up's own diagnostic (who is in the way); it is retried once the action moves again
-      if(p.stopByV1!==undefined&&this.rt.tick>=p.stopByV1&&p.action&&this.rt.isActive(p.action))this.abandonV1(p.action,`the stop did not finish: ${p.stopping.code}`);
+      if(p.stopByV1!==undefined&&this.rt.tick>=p.stopByV1&&p.action&&this.rt.isActive(p.action))this.abandonV1(p.action,`the stop did not finish: ${p.stopping.code}`,STOP_GAVE_UP);
+      if(p.stopQuietV1&&p.action&&this.rt.isActive(p.action)){const key=this.stopProgressV1(p);if(key!==p.stopQuietV1.key)p.stopQuietV1={key,since:tick};else if(tick-p.stopQuietV1.since>=ASKED_STOP_QUIET_TICKS)this.abandonV1(p.action,`nothing moved for ${ASKED_STOP_QUIET_TICKS} ticks: ${p.stopping.code}`,STOP_GAVE_UP);}
       if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.cancelOrAbandonV1(p.action,p.stopping);return;}
       return this.end(p,p.refusalsV1&&!p.build?'failed':'cancelled',p.stopping);   // an unfinished build's failure throws
     }
@@ -1283,7 +1293,7 @@ export class MarsEngine implements Engine {
       this.rt.cancel(p.action, { code: 'program.stopped', message: 'stopped' });
       // PC08 (#687): a shared carry's stop keeps its programme (and so the crew's borrowed bodies) until the native
       // cleanup lands, as a physical runtime does: `advance` retries a refused cancel each tick
-      if((this.physical||opts?.untilSafe===true)&&this.rt.isActive(p.action)){p.stopping={code:'program.stopped',message:'Stopped after native movement reaches safe support.'};if(opts?.untilSafe===true)p.stopUntilSafe=true;if(this.cfg.soulsRepairV1===true)p.stopByV1??=this.rt.tick+ASKED_STOP_TICKS;return;}
+      if((this.physical||opts?.untilSafe===true)&&this.rt.isActive(p.action)){p.stopping={code:'program.stopped',message:'Stopped after native movement reaches safe support.'};if(opts?.untilSafe===true)p.stopUntilSafe=true;if(this.cfg.soulsRepairV1===true)p.stopQuietV1??={key:this.stopProgressV1(p),since:this.rt.tick};return;}
     }
     this.end(p, 'cancelled', { code: 'program.stopped', message: 'stopped' });
   }

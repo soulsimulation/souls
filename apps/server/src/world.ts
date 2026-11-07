@@ -3,7 +3,7 @@ import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
 import {authoredBoundariesDeclarationV1Schema,type AuthoredBoundariesDeclarationV1} from '@souls/engine-contract';
-import {ACTION_THREW,REWOUND,type EngineRefusalV1} from '@souls/engine-contract';
+import {ACTION_THREW,REWOUND,STOP_GAVE_UP,type EngineRefusalV1} from '@souls/engine-contract';
 import {edenLectureV1} from '@souls/engine-mars';
 import {renderPlatformRowsV1Schema,type RenderPlatformV1} from '@souls/engine-contract';
 import {officeStairGuardsDeclarationV1Schema,type OfficeStairGuardsDeclarationV1} from '@souls/engine-contract';
@@ -1725,7 +1725,7 @@ export class WorldHost {
   /** #1150 rung 1: the engine already undid these moves. The log keeps each as evidence, in this tick; a replay recomputes
    *  them from state, so it reads these only to compare the count. */
   private noteRefusals(refusals: EngineRefusalV1[]) {
-    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); this.countRefusal(r); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }   // a replay needn't repeat the throw, so don't leave it one to repeat
+    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); if (r.rule !== STOP_GAVE_UP.code) this.countRefusal(r); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }   // a replay needn't repeat the throw, so don't leave it one to repeat
     this.drainInputs();
   }
   private countRefusal(r: EngineRefusalV1) { this.recordGlitch('refusal', JSON.stringify([{ code: r.rule, subjects: r.bodies }]), { tick: r.tick, evidence: { programs: r.programs, poses: r.poses } }); }

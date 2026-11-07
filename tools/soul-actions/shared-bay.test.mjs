@@ -576,7 +576,7 @@ test('#1250: removing a beam from released frames says both stopped standing, th
   const line = r.warnings.find((x) => /frames\.settled/.test(x)) ?? ''; for (const id of frames) assert.ok(line.includes(w.god.model.pathOf(id) ?? id), `${id} in ${JSON.stringify(r.warnings)}`);
 });
 
-test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free within a minute', {timeout: 900000}, async (t) => {
+test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free once nothing changes for five minutes', {timeout: 900000}, async (t) => {
   const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
   ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
   let frames;
@@ -593,8 +593,8 @@ test('#1250: a crew holding one frame while a god extends its released partner a
   const bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5), bay = bays.filter((b) => b.a === rel || b.b === rel)[6] ?? bays.at(-1);
   ok(w.god.act({ops: thirdFrameOps(w, frames, rel, bay.a === rel ? bay.seats[0] : bay.seats[1], 'beam5')})); await w.tick(40);
   const op = open(w, holders[0]).map((x) => x.shared?.op).find(Boolean), asked = w.host.engine.world.tick; ok(await act(w, holders[0], {capability: `stop-carry:${op}`}));
-  await w.tick(600); assert.ok(w.E()[holders[0].entityId].human.grip, 'it waits, in case someone finishes it');
-  await until(w, () => holders.every((s) => !w.E()[s.entityId].human.grip), 800); assert.ok(w.host.engine.world.tick - asked <= 1300, 'free by the deadline');
+  await w.tick(5800); assert.ok(w.E()[holders[0].entityId].human.grip, 'it waits, in case someone finishes it');
+  await until(w, () => holders.every((s) => !w.E()[s.entityId].human.grip), 400); assert.ok(w.host.engine.world.tick - asked <= 6100, 'free once nothing has changed for five minutes');
   assert.ok(holders.every((s) => !w.E()[s.entityId].human.grip)); assert.equal(w.E()[held].support.kind, 'ground'); ok(await act(w, holders[0], {capability: 'wave:here'})); assert.equal(w.host.stepFailing, null);
   await reboot(w); assert.equal(w.host.clockFailure, undefined);
 });

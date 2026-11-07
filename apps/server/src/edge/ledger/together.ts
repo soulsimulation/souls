@@ -1214,7 +1214,7 @@ export class Together {
   /** PC14 (#693): a raised upright joined by beams is never lowered; its crew lets go once its frame stands on its own. */
   private holdStopLabel(inv: Invite): string {
     const s = inv.shared!, x = this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined;
-    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
+    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding, unless nothing on the frame changes for five minutes)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
   }
   /** Who stopped the operation, in words: a member's own stop, or (PC09) a member who went away. */
   stopWords(st: {name: string; away?: true}): string {return st.away ? `${st.name} went away (their mind left the world)` : `${st.name} asked to stop`;}
@@ -1265,7 +1265,7 @@ export class Together {
     if (raises(s)) {
       const before = !st.phase || st.phase === 'approach' || st.phase === 'grip';
       const joined = !!(this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined)?.connections?.length;
-      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, and it is never lowered`
+      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, or if nothing on the frame changes for five minutes, and it is never lowered`
         : joined ? `beams join ${load} into a frame that stands on its own, so ${crew} let go and it stands there`
         : st.unsafe !== undefined ? `${load} cannot come down yet (${st.unsafe}), so ${crew} keep holding it and lower it as soon as it is clear` : before ? `${load} has not been lifted, so ${crew} let go of it where it lies` : `${crew} lower ${load} back where it lay, along the way it came up`;
       return `${this.stopWords(st)} (${op.id}): ${how}. Your hands and walking stay committed until ${joined ? 'it stands on its own' : 'it is down'}; you can still talk and look around.`;
@@ -1297,8 +1297,8 @@ export class Together {
   private sharedStopped(inv: Invite) {
     const s = inv.shared!, op = s.op!, st = op.stop!, x = this.w.entities[s.load.entity], crew = listed(this.sharedMembers(inv).map(m => m.name));
     if (raises(s)) {
-      const installed = (x as {phase?: string} | undefined)?.phase === 'installed';
-      const where = installed ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
+      const installed = (x as {phase?: string} | undefined)?.phase === 'installed', alone = (x as {support?: {kind: string}} | undefined)?.support?.kind === 'connected';
+      const where = installed ? alone ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : `${s.load.name} stands where it was, though its frame isn't finished; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
       this.sharedEnd(inv, 'stopped', 'shared.stopped', `${st.away ? `Stopped because ${st.name} went away` : `Stopped at ${st.name}'s request`} (${op.id}): ${where}. ${crew} have let go and are free again; nothing is resumed on its own.`);
       return;
     }

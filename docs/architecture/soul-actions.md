@@ -251,9 +251,11 @@ context-size checks below), regression runs, and an uncut real-client recording 
     until it has them. This covers frames and beams at the edit only. A state that reaches the invariants any other way,
     a restored snapshot or a stair or deck a god's edit leaves unsupported, is the repair ladder's
     ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
-  - **No crew waits for good.** A crew's stop is refused while the frame they hold can't stand, in case someone finishes it. It
-    gets a minute. Past that they let go, the part stands where it is as a god's joined upright does, and crews on the rest of
-    that frame are let go with them. That covers a frame nobody can finish now, such as after a god extends the group.
+  - **No crew waits for good.** A crew's stop waits while the frame they hold can't stand, in case someone finishes it, and as
+    long as the build goes on. Under the repair rules, a stop a Soul asked for whose body, load and frame joins don't change
+    for five minutes gives up (`world.stop-gave-up`): the crew lets go, the part stands where it is as a god's joined upright
+    does, and crews on the rest of that frame are let go with them. That answers a frame nobody can finish now, such as after
+    a god extends its group, or a beam removed from under a held upright. It is no glitch and the crew is told it.
   - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
     the model has heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
