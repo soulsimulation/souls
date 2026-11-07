@@ -36,14 +36,23 @@ test('#485: a named seat someone holds is not offered as free, and refuses at on
   assert.equal(offer(w, bo)?.available, true, 'free again once she stands');
 });
 
+test('#485: a sit still on its way to the seat is replaced as before, seat claim or not', {timeout: 300000}, async t => {
+  const w = await bootEden(() => {}, hamlet); t.after(w.close);
+  const act = (capability: string, params?: unknown) => accept(w.host, Promise.resolve(w.edge.act(w.soul as never, {capability, ...(params ? {params} : {})} as never))) as Promise<any>;
+  const sit = await act(BENCH); assert.equal(sit.accepted, true); await w.settle(4);
+  const read = await act('read:here', {seconds: 20}); assert.equal(read.accepted, true, JSON.stringify(read)); await w.settle(4);
+  const r = w.edge.receipt(w.soul.soulId, sit.receipt.id)!;
+  assert.equal(r.phase, 'replaced', JSON.stringify(r)); assert.equal(r.code ?? null, null);
+});
+
 test('#485: a read on a seat leaves the sit done, not cut short; getting up to go elsewhere still replaces', {timeout: 300000}, async t => {
   const {w, act, sit} = await seated(t);
   const read = await act(w.soul, 'read:here', {seconds: 30}); assert.equal(read.accepted, true, JSON.stringify(read));
   await w.settle(10);
-  const done = w.edge.receipt(w.soul.soulId, sit.receipt.id);
-  assert.equal(done.phase, 'completed', JSON.stringify(done)); assert.match(done.reason, /Still seated/);
+  const done = w.edge.receipt(w.soul.soulId, sit.receipt.id)!;
+  assert.equal(done.phase, 'completed', JSON.stringify(done)); assert.equal(done.code, 'seat.kept'); assert.match(done.reason ?? '', /Still seated/);
   assert.ok((w.host.engine as any).nativeSeatHoldsV1(w.soul.entityId).length > 0, 'and she is still on the seat');
   const sit2 = await act(w.soul, 'stand:here'); assert.equal(sit2.accepted, true);
   await w.settle(10);
-  assert.equal(w.edge.receipt(w.soul.soulId, read.receipt.id).phase, 'replaced', 'a read that was cut off still says so');
+  assert.equal(w.edge.receipt(w.soul.soulId, read.receipt.id)!.phase, 'replaced', 'a read that was cut off still says so');
 });

@@ -288,7 +288,7 @@ export class Plans {
     if (!s.state.receipt) { if ((s.do === undefined && s.say === undefined || s.state.completedOnce) && s.for === undefined && !s.until) return this.stepDone(p, 'done'); return; }
     const r = this.actor.receipt(p.soulId, s.state.receipt); if (!r) return;
     const holdsOn = s.for !== undefined || !!s.until;
-    if (r.phase === 'completed') {
+    if (r.phase === 'completed' && r.code !== 'seat.kept') {
       s.state.completedOnce = true;
       if (!holdsOn) return this.stepDone(p, 'completed');
       // `for`: keep a posture or activity up when the body's own activity ended early (a 30-min lie in a 90-min step)
@@ -308,7 +308,7 @@ export class Plans {
       if (s.state.completedOnce) { s.state.noReissue = true; this.save(p); return; }   // the step's own act happened; a later keep-up failed
       return this.stepFailed(p, r.code ?? 'action.failed', r.reason ?? 'The act failed.');
     }
-    if (r.phase === 'replaced') {
+    if (r.phase === 'replaced' || r.code === 'seat.kept') {
       // The Soul's own direct act took the body: pause and say so (PATCH resume / skip / replace, or let it be).
       p.state = 'paused'; p.reason = 'interrupted: your own act replaced this step'; this.save(p);
       this.emit(p, 'plan.paused', `Plan paused at step ${p.current + 1}/${p.steps.length} (${labelOf(s)}): your own act replaced it. PATCH op resume, skip, replace or cancel.`, {status: 'paused', reason: p.reason});
