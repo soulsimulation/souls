@@ -239,8 +239,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
     A site with anything built on it does not move (`project.site-built`).
   - **Across a restart.** The model can't say a frame stands on its beams, so a boot, or any re-derive of a frame, stands
     a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
-    holds it, it is installed, and it stands on its own by the beams it has. So a restart changes no reading, and every later
-    step already asks that same question.
+    holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
+    later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
+    should. Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before the model has
+    heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
     someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
     person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no

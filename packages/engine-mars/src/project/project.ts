@@ -180,8 +180,8 @@ export function progressOf(b: Blueprint, p: Procedure, w: WorldState, site: Site
     const waitsFor = m.after.filter((a) => !done.get(a));
     // a part in someone's hands: the operation on it runs (a release is the end of the hold, so that is its own question)
     if (m.template !== 'release' && e && (running.has(e.id) || e.reservedBy || e.support?.kind === 'held')) return { ...base, state: 'running' as const };
+    if (m.template === 'release' && e && (heldUp(w, e) || e.phase === 'installed') && !frameStability(w, e).stable) return { ...base, state: 'waiting' as const, waitsFor: waitsFor.length ? waitsFor : frameStability(w, e).missing };
     if (m.template === 'release' && e && !heldUp(w, e)) return { ...base, state: 'waiting' as const, waitsFor: [...waitsFor, 'the frame to be raised'] };
-    if (m.template === 'release' && e && !frameStability(w, e).stable) return { ...base, state: 'waiting' as const, waitsFor: waitsFor.length ? waitsFor : frameStability(w, e).missing };
     return waitsFor.length || !e ? { ...base, state: 'waiting' as const, waitsFor: e ? waitsFor : [`${m.part} (gone)`] } : { ...base, state: 'ready' as const };
   });
   // a section is open until every maneuver of it is done; its dependencies keep the next one waiting only where it matters

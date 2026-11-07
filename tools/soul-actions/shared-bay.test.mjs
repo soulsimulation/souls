@@ -435,7 +435,7 @@ test('R11: a frame that took another beam after its release reads the same, re-d
   assert.equal(was[0], 'frames');
   // a re-derive of the frame, by hand: nothing here edited it, and any edit that touches it derives it the same way
   w.bridge.pending.add(frame); w.bridge.flush(); await w.tick(5);
-  assert.deepEqual(reading(), was);
+  assert.equal(w.E()[frame].support.kind, 'ground'); assert.deepEqual(reading(), was);
   await restart(w);
   assert.deepEqual(reading(), was);
   assert.equal(glitches(w), 0);
@@ -528,10 +528,13 @@ function thirdFrameOps(w, frames, f, seat, beam) {
 const reboot = async (w) => {w.comms.close(); w.host.stop(); w.db.close(); const db = new Db(w.path), h = new WorldHost(db, factory, seed, 1e9, worldId, w.opts); h.boot(); h.drainInputs(); mount(w, h, db); await w.tick(40);};
 
 test('R11: after a restart, a god joining a third upright to the frames leaves the clock running, and a crash-style reboot too', {timeout: 900000}, async (t) => {
-  const {w, frames, bays} = await released(t);
+  const {w, pj, frames, bays} = await released(t);
   await restart(w);
+  assert.equal(see(w, w.souls.Ada, pj).state.checkpoint, 'frames');
   ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+  // every beam of the bay is where it was: only the rule says a frame in a group with a bare upright doesn't stand
+  assert.notEqual(see(w, w.souls.Ada, pj).state.checkpoint, 'frames', 'a release is undone by what the frames now are');
   await reboot(w);
   assert.equal(w.host.clockFailure, undefined); assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
