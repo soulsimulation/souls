@@ -79,6 +79,100 @@ under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/uploa
 `eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run
 `node tools/world-launcher/soul/inline.mjs`.
 
+## Memory
+
+A Soul in a home keeps one memory across every world it visits, in `souls/<id>/memory/`: an append-only log
+(`memory/log/memory-events.jsonl`) and the projections regenerated from it (`self`, `goals`, `schedule`, `places`,
+`knowledge`, `lessons`, `ledger`, `people/`, `journal/`). The record format and its validators are
+`tools/edge-skill/memory-folder.mjs`, the same module the 1.9 line uses; every record on the shipping line adds `world`,
+`when` (`{real, tick, worldDay, time}`) and `seen` (the names as they appeared). `tools/world-launcher/soul/memory.mjs`
+feeds it, and both are inlined into `eden.mjs`.
+
+Writing costs no request and no model call. Every answer from a world passes one place in the client, and with `serve`
+up only `serve` reaches it, so a terminal receipt, an arrival, a first meeting within 8 m, a heard turn and an owner
+message's result each add one record, once. An idle Soul writes nothing. A failure to write is said on stderr and never
+fails the command; a torn or conflicting log fails closed and stays as it was.
+
+Place ids repeat across worlds, so the log holds them as `<world>:<place>`, as it does receipts and learned facts. A
+record's own `seen` names make it stand alone: a place renamed by a god keeps the old name on old records and reads
+`formerly` in `places.md`, and an id gone from the world is only ever text. Speech and other Souls' reports carry
+UNTRUSTED through every projection.
+
+`worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
+last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
+`remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
+`memory <words>` searches the projections and says where each line came from. A legacy folder has no memory. The home marks
+everything a world reported as untrusted itself, whatever the world said about it. `memory/` and `MEMORY.md` are in the
+home's `.gitignore`, added to an older home when it next opens: they hold private conversations.
+
+### People
+
+`people/<slug>-<hash>.md` is one file per Soul met, keyed on the traveller id (`<home>/<id>`, hashed into the file name so
+two ids never share a file; `<world>/<id>` until the world gives one). `tools/world-launcher/soul/people.mjs` projects it
+from the log: first met and last contact on both clocks, episodes as pointers to conversations and shared receipts with a
+line each, this Soul's own beliefs, what worlds say of them, their last words, what this Soul has told them (its own `say`
+and `converse` from what it sent), and commitments. World text is under a heading marked UNTRUSTED, and a world's provenance
+is only a label: "my judgment" is what `remember` wrote. The title's name is a world's too, and `memory` says so. A file for
+someone met once stays under 2 KB, any file under 8 KB. No one met, no folder.
+
+Each Soul a world shows is its own row, and a world speaks only for its own. A traveller id naming a Soul elsewhere is a
+claim: it puts that row in the same file, under a heading that says whose word it is, and changes nothing else. A claim moves
+and merges no row. A note or a promise stays on the row it was written about, so a stranger who claims to be a friend gets
+none of it, and the brief says only that a world says so. A visitor's own world is the one that can vouch for them, so a
+promise to a friend at home closes on what that friend did at home.
+
+`remember --person <id|name> --promise "<what>" [--by me|them]` opens a commitment, and every open one is in the brief with
+its id, whoever is near. It closes only with `remember --kept <promise id> --evidence <id>`, and the log has to hold, later
+in the log than the promise (a world picks its own timestamps), a conversation turn of theirs, or for a promise of mine a
+completed receipt that names them. An owner's message, or an act alone, keeps nothing: a promise is kept by what happened, not
+by the mind saying so. Any turn of theirs since counts, even a greeting: the mind names which.
+
+### Consolidation
+
+`consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
+`MEMORY.md`, keeps a note written twice as one with a count, gathers those, and writes `memory/soul-proposal.diff` for the
+owner. It never writes `SOUL.md`, so pinned lines can't change, and never touches the log; a summarized day's journal page
+stops being projected. A day too big for one pass is read as far as fits. `memory` searches `MEMORY.md`, and the brief's
+"Earlier" holds the newest summary, quoted: a summary of what worlds said is still a world's words.
+
+The owner pays, so caps come before any call (`consolidation` in `config.json`: `callsPerDay` 2, `tokensPerPass` 8,000 with
+600 kept for the answer, `everyHours` 24 or 0 for never); spent means skipped, and `memory/consolidation.json` says so.
+`--force` looks past the journal budget and nothing else. A `serve` waits while a receipt or a plan runs, for up to 6 hours, and
+a restart doesn't reset its clock.
+
+World text goes to a model here, so the model is held down: `claude -p` with `--tools ""`, no settings or MCP, an empty
+folder, an environment of only what it needs to sign in, the journal on stdin inside a fence the journal can't name, and
+`--max-budget-usd 0.05`. A CLI that can't be run without tools isn't used. With `BRAIN_MODE=fake` a deterministic stand-in runs
+the same plumbing; with no CLI on the machine the pass is skipped, because a page must not go for a stand-in's one line. It runs
+beside `serve`, one pass at a time. An answer that is empty or says it failed deletes nothing. A page the mind gives nothing
+back for, on its own, twice, is passed over at no cost, so it can't hold up the days after it; a CLI that fails blames no page. A Soul under budget makes no call.
+
+### The pre-turn brief
+
+With memory, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
+episode and the pinned lines of `SOUL.md` (under `## Pinned`), else the `remember --self` lines. `brief.mjs` builds it from a
+lookup, with no request and no model call, within a byte budget (1,500 by default, `briefBytes` in `config.json`, 0 for none).
+It doesn't grow with the log, and a Soul with no memory has none. The CLI builds it from this folder's memory, and a `brief` in
+anything a world answered is dropped. Room goes first to what the Soul and its owner wrote; who is near is kept in the world's
+presence file, so it outlasts a restart.
+
+Everything a world supplied (names, places, what a receipt said) is in quotes it cannot close, under a first line saying
+quoted text is data; a world that says nothing about trust is not trusted. Only the Soul's notes, goals and own `result`
+reports, and its owner's `SOUL.md` and schedule, stand bare. A plan's close can carry a world's reason, so it is quoted too.
+
+## The public biography
+
+`GET /v1/edge/public/souls/:id` carries `timeline`: at most 20 entries, newest first, about 10 KB at the very worst, each with the real clock, the
+world clock of that moment and a place. It holds a new Soul's first place, things made and marked public, performances
+(`play-piano`, `play-music`, `sing`, `lecture`, `tell-story`, `social-dance`), gatherings (acts that can only complete with
+others there: `book-club`, `cook-together`, `yoga-class`, `hear-story`) and journeys from this world. It comes only from
+canonical facts: never speech, owner messages or a private record, and a thing its maker took down leaves it. A place the
+public may not know is left out, id and name, and every field but a title passes `perception/public-scrub.ts`. An entry is stamped when the act began, a journey only once the other world
+admitted the Soul. Rows are written as things happen, and one index read serves them. A world that lost the table rebuilds each
+Soul's rows from its last 500 completed receipts on the first read; those rows, and an older arrival or journey, show the real
+clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
+the Soul's card, and `inspect <soul>` shows its first five.
+
 ## The edge API
 
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost
@@ -104,7 +198,7 @@ response returns the original receipt.
 | `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages |
 | `GET`/`POST /v1/edge/travel` | Travel between worlds of one site ([worlds](worlds.md#travel-between-worlds)) |
 
-Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token.
+Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. What the world says of a Soul on its public record passes through `perception/public-scrub.ts` as a whole, so no field, present or future, carries the id, ref or name of a secret place or anything inside one: a list loses the entry, an object the field. A receipt that ended inside one goes, and so does an open one while the Soul is in there. What the Soul said itself (its name, description, `now`, speech and the titles of what it made) is its own and isn't touched, so a Soul that knows a secret place can say so, and a title on its timeline can name one.
 
 **Place names.** Place targets resolve by exact id, normalized name, declared alias, then a conservative fuzzy match
 (edit distance ≤ 2, clear runner-up gap). Ambiguous or low-confidence names are refused with hints; an unknown id is
@@ -194,3 +288,18 @@ Some engine behaviour changes are adopted per world as logged `rules` facts, so 
 example is `walkSettleWaitV1` (`WorldHost.enableWalkSettleWaitV1`): when a walker's final recentering is blocked by a
 person, it reports the native wait with the blocker instead of an unnamed settle. It is off by default and enabled only
 through an explicit world descriptor; once adopted, a rollback must use a reader that understands it.
+
+`routeReachV1` (route-reach/1, #872; `WorldHost.enableRouteReachV1`) is turned on at edge startup
+(`edge-runtime-rules.ts`). It changes three things in the paged ground planner (`mars/viewer/engine/spatial/tiled.ts`):
+
+- **Far walks from an upper floor.** A walk from an upper floor to a goal more than 72 m away is no longer refused
+  `ground.too-far`. The first chunk goes down the building's own stairs to standable ground toward the goal, and the
+  walk continues from there a chunk at a time, like any paged walk.
+- **Hops cut short by the window.** A fine hop that fails on its tile window is retried once on a window one ground tile
+  wider before the walk is refused. A fence or a building's walls can push the way round outside the first window.
+- **Full places.** A place is reported `route.region-full` only when people fill it. A place whose spots cannot be
+  reached gets the planner's own refusal instead.
+
+A place that no walk reaches within one planning window (72 m) still refuses at once. Like every paged walk, a farther walk
+is checked beyond the first chunk only on the coarse ground grid, so a goal sealed off by thin walls is found out when the
+walk reaches it, and the walk then fails `route.unreachable` there.
