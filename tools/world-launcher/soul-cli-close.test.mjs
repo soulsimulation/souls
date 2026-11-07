@@ -24,6 +24,7 @@ async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, re
       if (url === '/v1/edge/wait') return send(200, {cursor: 'c_1', events: [{kind: 'receipt.updated', receipt: waitReceipt}]});
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
       if (m?.[2] === '/result' && results.refuse) return send(404, {error: {code: 'not-found', message: 'no such message'}});
+      if (m?.[2] === '/result' && results.running) return send(409, {error: {code: 'message.act-running', message: 'not closed: walk:a is still going'}});
       if (m?.[2] === '/result') {results[m[1]] = body; return send(200, {inbox: {}});}
       if (m?.[2] === '/ack') {acked.add(m[1]); return send(200, {inbox: {}});}
       if (m && reads !== 200) return send(reads, {error: {code: reads === 503 ? 'world.busy' : 'broken', message: 'the inbox broke'}});
@@ -146,6 +147,14 @@ test('wait names the newest message on the receipt (#1289)', async t => {
   const w = await world(t, {results: {msg_1: {text: 'walked.'}, msg_2: {text: 'walked.'}}, actAnswer: (b) => started(b.for), waitReceipt: {...started().receipt, phase: 'completed', done: 'walked.'}});
   await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'walk:a', '--for', 'msg_2');
   const done = await w.cli('wait', '1', 'r_1'); assert.equal(done.json.closed, true); assert.equal(done.json.for, 'msg_2');
+});
+
+test('a world that refuses a close while the act runs (#1295) gets a true answer, exit 0 (#1289)', async t => {
+  const w = await world(t, {results: {running: true}});
+  const r = await w.cli('result', 'msg_1', 'done', 'Walked there.');
+  assert.equal(r.code, 0); assert.equal(r.json.reported, false); assert.equal(r.json.closed, false); assert.match(r.json.why, /still going.*nothing to send/);
+  const s = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(s.code, 0); assert.equal(s.json.closed, false); assert.match(s.json.why, /nothing to send/); assert.doesNotMatch(s.json.why, /Close it with result/);
 });
 
 test('act says when the world answered with the act under way (#1289)', async t => {

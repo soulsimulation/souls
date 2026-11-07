@@ -3054,6 +3054,7 @@ async function ack(id, ...rest) {
 /** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
  *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
  *  closed or is about to: `closed` here means this command closed it. */
+const ACT_RUNNING = "its act is still going: the world closes it with that act's outcome when it ends; nothing to send";
 async function closing(id, outcome, text, seen = {}) {
   const quick = { retry: false, timeoutMs: 5000 }, read = () => call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
   // why this command won't close: the message can't be read, or it has a result, which an agent's would replace
@@ -3076,13 +3077,16 @@ async function closing(id, outcome, text, seen = {}) {
     const late = stop(await read());   // the act may have ended between the reads, and then the world's close stands
     if (late) return late;
   }
-  try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
+  try { const r = await result(id, outcome, text); return r.reported === false ? { closed: false, why: r.why } : { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
   const line = clipped(text.join(" ")), t = line.text;
   if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
-  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } });
+  // #1295: the world refuses a close while the message's own act runs, and closes it with that act's outcome: a true answer, not a failure
+  if (r.status === 409 && (r.data?.error?.code ?? r.data?.code) === "message.act-running") return { reported: false, closed: false, why: ACT_RUNNING };
+  const d = clean(ok(r, "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
   return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
