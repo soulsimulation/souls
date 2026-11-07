@@ -29,6 +29,7 @@ export const CARD_FIXTURES:Record<string,SoulCardViewProps>={
  'approved-waiting-asleep':owner(off('approved-waiting',T-30*min),{body:{state:'asleep',doing:null,since:T-10*min},now:null,place:'the commons'}),
  'pairing':owner({state:'pairing',reason:'pending-approval',since:T-10_000,holder:null,approvalId:'ap_0123456789abcdef0123456789abcdef'}),
  'visitor-awake':{soul:mickey,view:'visitor',camera,clock:T,body:{state:'awake',doing:null,since:T-28*min},now:{text:'Heading to the pond to see if the koi are up.',at:T-3*min},place:'the pond'},
+ 'visitor-story':{soul:mickey,view:'visitor',camera,clock:T,body:{state:'awake',doing:null,since:T-28*min},now:null,place:'the pond',story:[{kind:'gathering',worldDay:5,time:'18:30',place:'the hall',title:'Joined a book club'},{kind:'produced',worldDay:3,time:'09:15',place:'the hall',title:'Dawn <b>song</b>'},{kind:'arrival',real:'2026-10-20T08:00:00.000Z'}]},
  'visitor-idle':{soul:mickey,view:'visitor',camera,clock:T,body:{state:'idle',doing:'sitting',since:T-12*min},now:{text:'Watching the koi.',at:T-12*min},place:'the pond'},
  'visitor-zombie':{soul:wren,view:'visitor',camera,clock:T,body:{state:'zombie',doing:null,since:T-8*min},now:{text:'Danced for ten minutes. Hello, field.',at:T-60*min},place:'the commons'},
  'visitor-asleep':{soul:wren,view:'visitor',camera,clock:T,body:{state:'asleep',doing:null,since:T-20*60*min},now:{text:'Danced for ten minutes. Hello, field.',at:T-21*60*min},place:'the commons'},
