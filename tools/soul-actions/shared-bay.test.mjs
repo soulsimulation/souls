@@ -607,8 +607,9 @@ test('#1250: a crew holding one frame while a god extends its released partner a
 // R7: the Soul-only route. A holder of a frame joined into the group goes away mid-hold, by a fade or by its owner retiring it;
 // nobody asked to stop. The clock runs throughout, the crew is free in the end, and a reboot boots.
 const HOUR = 3600e3;
-for (const how of ['fades', 'is retired']) test(`#1250 R7: a holder of a frame in a group with a third upright ${how} mid-hold: the clock runs and the crew is let go`, {timeout: 900000}, async (t) => {
-  const {w, held, holders} = await heldWhileExtended(t), [gone, stays] = holders, others = Object.values(w.souls).filter((s) => s !== gone);
+for (const [how, which] of [['fades', 0], ['is retired', 0], ['is retired', 1]]) test(`#1250 R7: a holder of a frame in a group with a third upright ${how} mid-hold (${which ? 'a borrowed member' : 'the one whose programme it is'}): the clock runs and the crew is let go`, {timeout: 900000}, async (t) => {
+  const {w, held, holders} = await heldWhileExtended(t), owner = holders.findIndex((s) => w.host.engine.programOf(s.entityId)); assert.ok(owner >= 0, "one holder runs the programme");
+  const gone = holders[which ? 1 - owner : owner], stays = holders.find((s) => s !== gone), others = Object.values(w.souls).filter((s) => s !== gone);
   if (how === 'fades') {w.clock.now += 13 * HOUR; for (const s of others) w.comms.fading.touch(s.soulId); w.comms.sweep(); assert.ok(w.edge.faded.has(gone.soulId), 'it faded');}
   else await accept(w.host, w.f.souls.retire(w.db.soul(gone.soulId)));
   const from = w.host.engine.world.tick;

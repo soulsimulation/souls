@@ -1720,7 +1720,9 @@ export class MarsEngine implements Engine {
     // cut would end the programme and leave its action holding the others, and this body, for good
     const repair = this.cfg.soulsRepairV1 === true, records = (this.rt as any).records as Map<string, { parent?: string }>;
     const rootOf = (a: string) => { let r = a; for (let up = records.get(r)?.parent; up; up = records.get(r)?.parent) r = up; return r; };
-    const crews = repair ? new Set(this.holders(id).map(rootOf)) : new Set<string>();
+    // what lets go (a conversation, a meal) is let go first, as `tryRemove` would; only an action that refuses still holds it
+    if (repair) for (const h of this.holders(id)) this.rt.cancel(h, { code: 'actor.removed', message: 'actor removed' });
+    const crews = repair ? new Set(this.holders(id).filter((h) => this.rt.isActive(h)).map(rootOf)) : new Set<string>();
     for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (p.action && p.actor !== id && crews.has(rootOf(p.action))) this.stop(p.id, { untilSafe: true });
     const pid = this.byActor.get(id); if (pid) this.stop(pid, repair ? { untilSafe: true } : undefined);
     if (!this.tryRemove(id)&&(!this.cfg.safeCrewRemoval||!this.leaving.includes(id))) this.leaving.push(id); // finish owned obligations first
