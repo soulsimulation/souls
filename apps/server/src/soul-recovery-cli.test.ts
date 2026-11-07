@@ -118,6 +118,13 @@ test('adopt keeps to the world it is in, and a window code goes only to its own 
   const seen: string[] = []; a.seen = seen;
   await h.run('doctor', '--for', code);
   assert.deepEqual(seen, [], "the other world never saw this world's code");
+  // The home's Wren loses control. An id still goes to its own world; a bare name asks which, and sends the code nowhere.
+  rmSync(join(h.dir, '.souls/credentials.json'));
+  const byId = await h.run('adopt', wrenA.id, '--for', await a.code());
+  assert.equal(byId.soulId, wrenA.id, 'by id, from a seat in the other world');
+  await h.run('register', b.world);
+  const which = await h.raw('adopt', 'Wren', '--for', await b.code());
+  assert.notEqual(which.code, 0); assert.match(which.err, /@test adopt/);
 });
 
 test('a home that lost its tokens names the Soul and adopt, and keeps its memory; a corrupt file says what to do', async t => {
@@ -177,4 +184,6 @@ test('an imported Soul knows itself, reads its memory and is adopted by name wit
   assert.equal((await two.run('list')).souls[0].state, 'active');
   const home = JSON.parse(readFileSync(join(two.dir, '.souls/config.json'), 'utf8'));
   assert.deepEqual(home.trustedOrigins ?? [], [], 'a url out of an imported file earns no trust');
+  await two.run('register');
+  assert.deepEqual(JSON.parse(readFileSync(join(two.dir, '.souls/config.json'), 'utf8')).trustedOrigins ?? [], [], 'nor does a bare register of the url it left behind');
 });
