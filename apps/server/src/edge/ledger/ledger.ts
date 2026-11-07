@@ -1985,6 +1985,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // nav-connect/1 (lane NAV): no walk from where it stands, because it stands cut off from the walkable world (an edit
     // closed a pocket round it, a floor lost its stairs): it steps to the nearest open ground of the main area first (a
     // logged edge-relocate, at most once a minute each), then starts. A destination no walk reaches still refuses.
+    let steppedOut: string | undefined;
     if (issue?.code === 'route.unreachable' && (this.navRescuedAt.get(soul.soulId) ?? -1e9) <= this.host.engine.world.tick - 1200) {
       const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => {to: [number, number]; code: string; level: number; seated?: true} | null};
       const r = engine.navRescueV1 ? engine.navRescueV1(soul.entityId, 100) : null;
@@ -1992,6 +1993,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
         this.navRescuedAt.set(soul.soulId, this.host.engine.world.tick);
         // A seated Soul rises first (a god walk-out: a plain relocate refuses a body its seat holds).
         await this.host.enqueue('edge-relocate', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, to: r.to, why: `nav-connect/1: ${r.seated ? 'sat' : 'stood'} cut off (${r.code}${r.level ? `, floor ${r.level}` : ''}), no walk out: ${r.seated ? 'stood up and ' : ''}stepped to the nearest open ground`, policy: 'nav-connect/1', ...(r.seated ? {godWalkout: true, released: [], level: 0} : {})});
+        const now = this.body(soul.entityId);
+        if (now && Math.hypot(now.pose.p[0] - r.to[0], now.pose.p[2] - r.to[1]) < 0.5) steppedOut = 'Moved to open ground first: no walk led out from where you stood.';
         issue = this.host.engine.canPerform({actor: soul.entityId, label, steps});
       }
     }
@@ -2042,7 +2045,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
     }
     // The verifier probe reports the engine's own diagnostic (what blocks the seat, how much room it needs) to the builder.
-    if (issue && !WAIT_CODES.has(issue.code)) return {...refuse(issue.code, issue.code.startsWith('carrier.') || isVerificationProbe(soul.soulId) ? issue.message : humanBlockedExplanationV1(issue.code, label) + unfinishedWay(issue)), ...resolved};
+    if (issue && !WAIT_CODES.has(issue.code)) return {...refuse(issue.code, (issue.code.startsWith('carrier.') || isVerificationProbe(soul.soulId) ? issue.message : humanBlockedExplanationV1(issue.code, label) + unfinishedWay(issue)) + (steppedOut ? ` ${steppedOut}` : '')), ...resolved};
+    if (steppedOut) note = note ? `${steppedOut} ${note}` : steppedOut;
     const remember = (id: string) => {
       if (note) this.update(id, {reason: note});
       if (approach) this.setDetail(id, {approach});
