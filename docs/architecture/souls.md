@@ -56,7 +56,7 @@ the world down it says `reachable: false`, who the Soul is and where it last was
 why, and the exact `adopt`. `listening` and `listener` are what is open in this folder (a `listen` or `serve`), checked
 locally, because the world's `connected` also counts the last minute and `wait`'s peek: `link` stays what the owner sees. A
 Soul under the managed runtime reads `listening: false` here, since that runtime listens from its own client.
-`unfinished` names an owner message acked with no `result`, so another harness can finish it, and `listen --take` moves the
+`unfinished` names the owner messages acked with no `result`, the newest five, listed by `/v1/agent/me`, so another harness can finish them, and `listen --take` moves the
 listen here from another chat in the same folder. The world keeps messages until they are acked, so nothing is lost by that.
 
 ## The Souls home
