@@ -9,8 +9,10 @@ import { openLauncher } from './launcher.mjs';
 import { projectRecords } from './owner-overview-data.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
+import { testPort } from '../../apps/server/test/test-port.ts';
+const P0 = await testPort(3);
 
-const PORT = 19883, RANGE = [19884, 19885], ORIGIN = `http://127.0.0.1:${PORT}`;
+const PORT = P0, RANGE = [P0 + 1, P0 + 2], ORIGIN = `http://127.0.0.1:${PORT}`;
 const dir = mkdtempSync(join(tmpdir(), 'owner-overview-auth-'));
 const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
 const preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
@@ -27,7 +29,7 @@ before(async () => {
     `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${preload}`, ''].join('\n'));
   delete process.env.CATALOG_GENE_OWNER_ID;
   mkdirSync(join(dir, 'data'), { recursive: true });
-  writeFileSync(join(dir, 'data', 'owner-overview.json'), JSON.stringify(projectRecords({ issues: [{ number: 556, title: 'PRIVATE STATUS SENTINEL', url: 'https://github.com/genekogan/souls/issues/556', state: 'OPEN', updatedAt: new Date().toISOString(), assignees: [], comments: [], labels: [] }], observedAt: new Date().toISOString() })));
+  writeFileSync(join(dir, 'data', 'owner-overview.json'), JSON.stringify(projectRecords({ issues: [{ number: 556, title: 'PRIVATE STATUS SENTINEL', url: 'https://github.com/soulsimulation/souls/issues/556', state: 'OPEN', updatedAt: new Date().toISOString(), assignees: [], comments: [], labels: [] }], observedAt: new Date().toISOString() })));
   L = await openLauncher({ port: PORT, range: RANGE, dataDir: join(dir, 'data'), templatesDir, authEnvFile: envFile, publicOrigin: ORIGIN, eager: 0, log: () => {} });
 });
 after(async () => { await L?.close(); delete process.env.SIM_SITE_OWNERS; rmSync(dir, { recursive: true, force: true }); });

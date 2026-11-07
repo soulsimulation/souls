@@ -4,8 +4,8 @@
 // pattern Souls use, keeps undo/redo, routes prayers, and publishes diffs to
 // viewers (hub) and to gods (SSE).
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { TILE_M, tileOf } from '@sim/ground';
-import { WorldModel, correctKitDefines, type PlanOptions, creationInputFailure, definitionRefs, coreLibrary, libraryRef, applyBatch, padResettle, plan, batchSchema, hashOf, type Batch, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type UsesHook, type ResidentMove } from '@sim/world-compiler';
+import { TILE_M, tileOf } from '@souls/ground';
+import { WorldModel, correctKitDefines, type PlanOptions, creationInputFailure, definitionRefs, coreLibrary, libraryRef, applyBatch, padResettle, plan, batchSchema, hashOf, type Batch, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type UsesHook, type ResidentMove } from '@souls/world-compiler';
 import { hashToken } from '../auth.ts';
 import type { Db } from '../db.ts';
 import { ApiError } from '../souls.ts';
@@ -59,7 +59,7 @@ export type GodOptions = {
   /** Content-addressed asset files (default $ASSET_DIR or <DATA_DIR>/../assets), shared by every world on the box. */
   assetDir?: string;
   /** The shared def library (default: the process's core library; null = none, for tests of a bare world). */
-  library?: import('@sim/world-compiler').DefLibrary | null;
+  library?: import('@souls/world-compiler').DefLibrary | null;
   /** Y4b co-builder tokens (`cobuilder:<account>:…`). Gene 2026-10-16: one god per world; the code stays for later but is off
    *  unless the world runs with SIM_COBUILDERS=1. Off: such tokens (and their helpers) are not god tokens at all. */
   cobuilders?: boolean;
@@ -118,6 +118,8 @@ export class GodMode {
   private eventSeq = 0;
 
   readonly db: Db; readonly opts: GodOptions;
+  /** PC17 (#696): settles what the engine has done and the model hasn't heard yet, so a batch can't undo it (the engine bridge's). */
+  beforeBatch?: () => void;
   // Existing diff-only embedders remain source compatible; new consumers can explicitly accept both feeds.
   constructor(db: Db, opts: Omit<GodOptions, 'emit'> & { emit: (m: WorldDiffMessage) => void });
   constructor(db: Db, opts: GodOptions);
@@ -377,6 +379,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   }
   /** Only server-owned genesis import can request trusted library adoption; request JSON cannot enable it. */
   private commitBatch(batch: unknown, note?: string, trusted = false): Result {
+    this.beforeBatch?.();
     this.builds.sweep();
     const inputFailure = creationInputFailure(batch); if (inputFailure) return { accepted: false, failures: [inputFailure] };
     const kit = correctKitDefines(batch); batch = kit.batch; // harvest fix kitlenient: the corrected ops are the ones stored

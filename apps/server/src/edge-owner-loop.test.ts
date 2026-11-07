@@ -16,6 +16,8 @@ import {AgentInbox} from './inbox.ts';
 import {OwnerLoop, type OwnerLoopWorld} from './edge/owner-loop.ts';
 import {messageSteps} from './edge/ledger/vocabulary.ts';
 import type {EdgeReceipt} from './edge/contract.ts';
+import {testPort} from '../test/test-port.ts';
+const TEST_PORT=await testPort();
 
 // D3d: a small commons as the ledger would report it: the balloon and a bench 40 m apart on g-commons, the pavilion's room
 const commonsWorld = (): OwnerLoopWorld => {
@@ -39,9 +41,9 @@ test('D3: act --for links the receipt to the owner message; the world writes the
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
   await invite(f, 'alice');
   const a = await accept(f.host, f.souls.create('dev:alice', {name: 'Avery', description: 'Owner loop fixture'}));
-  const token = f.souls.pairExchange(f.souls.pairCode(a, 'http://127.0.0.1:5964').code, 'scripted').token;
+  const token = f.souls.pairExchange(f.souls.pairCode(a, `http://127.0.0.1:${TEST_PORT}`).code, 'scripted').token;
   const edge = new EdgeLedger(f.host, f.db);
-  const app = buildApp({cfg: {...config, port: 5964, worldPath: '/w/eden', publicUrl: 'http://127.0.0.1:5964/w/eden', accountAuthRequired: false, webDir: '/nonexistent-loop-fixture', marsWebDir: '/nonexistent-loop-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge, hub: {clients: new Map(), refreshMe() {}} as never});
+  const app = buildApp({cfg: {...config, port: TEST_PORT, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT}/w/eden`, accountAuthRequired: false, webDir: '/nonexistent-loop-fixture', marsWebDir: '/nonexistent-loop-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge, hub: {clients: new Map(), refreshMe() {}} as never});
   const req = async (path: string, auth?: string, body?: unknown, method?: string) => {
     const r = await app.request(path, {method: method ?? (body === undefined ? 'GET' : 'POST'), headers: {...(auth ? {authorization: `Bearer ${auth}`} : {}), 'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
     return {status: r.status, data: await r.json() as any};
@@ -100,7 +102,7 @@ test('D3: act --for links the receipt to the owner message; the world writes the
 // put the wave on the message and its end closed the card Done. A default (implicit) link now closes only with an act of
 // the message's last step; any other act's end writes a progress line and the card stays open. Explicit links unchanged.
 test('D3c rook-003: a default-linked wave, then a sit, keep "rest, then come back to the balloon" open; the walk back closes it', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-d3c-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-d3c-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const db = new Db(join(dir, 'fixture.db')); t.after(() => db.close());
   const inbox = new AgentInbox(db, 'w1'), soul = {soulId: 's_rook', entityId: 'h_rook', name: 'Rook', owner: 'mira'}, scope = {scope: 'soul:s_rook', owner: 'mira'};
   let emit: (r: EdgeReceipt) => void = () => {};
@@ -166,7 +168,7 @@ test('D3c rook-003: a default-linked wave, then a sit, keep "rest, then come bac
 // reach (the receipt's own target, a place inside the named one, or where the body ended); an unresolved target is
 // never closed by default (the agent's result closes it). One-step messages keep D3c's verb rule.
 test('D3d: a default-linked last step closes only at its target; an unresolved target stays open until the agent says', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-d3d-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-d3d-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const db = new Db(join(dir, 'fixture.db')); t.after(() => db.close());
   const inbox = new AgentInbox(db, 'w1'), soul = {soulId: 's_rook', entityId: 'h_rook', name: 'Rook', owner: 'mira'}, scope = {scope: 'soul:s_rook', owner: 'mira'};
   let emit: (r: EdgeReceipt) => void = () => {};

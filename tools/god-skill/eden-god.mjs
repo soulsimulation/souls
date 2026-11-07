@@ -169,8 +169,8 @@ function acquireLock(path, { label = "eden-god", ttlMs = LOCK_TTL_MS, reentrant 
 }
 
 // lib/doctor.mjs
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync4, unlinkSync as unlinkSync2, statSync as statSync2 } from "node:fs";
-import { resolve as resolve2 } from "node:path";
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync6, unlinkSync as unlinkSync3, statSync as statSync3 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
 
 // lib/chrome-lease.mjs
 var CHROME_SLOTS = 3;
@@ -208,7 +208,7 @@ async function chromeLease(label = "unknown", { waitMs = 11e4, staleMs = LOCK_TT
 }
 
 // lib/state.mjs
-import { existsSync, readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync, unlinkSync } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -224,11 +224,11 @@ async function fetchWithRetry(url, options, runtime = {}, budget = { waited: 0, 
   runtime = { ...retryDefaults, ...runtime };
   const send = runtime.fetch ?? fetch, clock = runtime.now ?? Date.now, random = runtime.random ?? Math.random;
   const { timeoutMs, deadlineAt, signal, ...init } = options ?? {};
-  const wait = runtime.sleep ?? ((ms) => new Promise((resolve6, reject) => {
+  const wait = runtime.sleep ?? ((ms) => new Promise((resolve10, reject) => {
     if (signal?.aborted) return reject(signal.reason);
     const done = () => {
       signal?.removeEventListener("abort", stop);
-      resolve6();
+      resolve10();
     };
     const timer = setTimeout(done, ms);
     function stop() {
@@ -290,7 +290,590 @@ import http from "node:http";
 import https from "node:https";
 import http2 from "node:http2";
 import { randomBytes } from "node:crypto";
-import { readFileSync as readFileSync2, rmSync as rmSync2 } from "node:fs";
+import { readFileSync as readFileSync4, rmSync as rmSync3 } from "node:fs";
+
+// lib/seat.mjs
+import { readFileSync as readFileSync3, realpathSync as realpathSync2 } from "node:fs";
+import { homedir } from "node:os";
+import { join as join2, resolve as resolve3 } from "node:path";
+
+// ../world-launcher/soul/home.mjs
+import { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync as mkdirSync2, openSync, readdirSync, readFileSync as readFileSync2, realpathSync, renameSync, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, dirname, join, resolve as resolve2 } from "node:path";
+var HOME_NAME = ".souls";
+var LEGACY_STATE = ".eden-agent.json";
+var STATE_FILE = "state.json";
+var CREDENTIALS = "credentials.json";
+var RUNTIME_LOCKS = [".listen.lock", ".eden-serve.lock"];
+var SERVE_SOCKET = ".eden-serve.sock";
+var SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
+var IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
+var IMPORTED_RUNTIME = [".eden-serve.json"];
+var GOD_LEGACY = ".eden-god.json";
+var GOD_KEPT = /^\.eden-god\.(cache|bakes|claim-c_[0-9a-f]{8})\.json$/;
+var real = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve2(p);
+  }
+};
+var isHome = (root) => existsSync(join(root, "config.json"));
+function findHome({ cwd, env: env2 = {}, homedir: homedir2 }) {
+  if (env2.SOULS_HOME) {
+    const root = resolve2(cwd, env2.SOULS_HOME);
+    return { kind: isHome(root) ? "home" : "none", root };
+  }
+  const start = real(cwd), stop = homedir2 ? real(homedir2) : null;
+  if (!isHome(join(start, HOME_NAME)) && existsSync(join(start, LEGACY_STATE))) return { kind: "legacy", root: join(start, HOME_NAME) };
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (isHome(join(dir, HOME_NAME))) return { kind: "home", root: join(dir, HOME_NAME) };
+    if (dir === stop || dirname(dir) === dir) return { kind: "none", root: join(start, HOME_NAME) };
+  }
+}
+function writeJson(file, value, mode = 384) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync2(tmp, JSON.stringify(value, null, 1) + "\n", { mode });
+  renameSync(tmp, file);
+}
+function readJson(file, fallback) {
+  try {
+    return JSON.parse(readFileSync2(file, "utf8"));
+  } catch (e) {
+    if (e.code === "ENOENT") return fallback;
+    throw new Error(`${basename(file)} cannot be read: ${e.message}`);
+  }
+}
+function keepOutOfGit(root) {
+  try {
+    const file = join(root, ".gitignore"), was = existsSync(file) ? readFileSync2(file, "latin1") : "", have = was.split("\n").map((l) => l.trim());
+    const missing = [CREDENTIALS, "runtime/", "pending/", "gods/", "memory/", "MEMORY.md"].filter((l) => !have.includes(l));
+    if (missing.length) appendFileSync(file, `${was && !was.endsWith("\n") ? "\n" : ""}${missing.join("\n")}
+`);
+  } catch {
+  }
+}
+function slugOf(url) {
+  const m = /\/w\/([a-z0-9-]+)\/*$/.exec(String(url));
+  if (m) return m[1];
+  try {
+    const u = new URL(url);
+    return `${u.hostname}${u.port ? `-${u.port}` : ""}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  } catch {
+    return "world";
+  }
+}
+var keyOf = (worlds, url) => Object.keys(worlds).find((k) => worlds[k].url === url) ?? null;
+var originOf = (url) => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return String(url);
+  }
+};
+function newerThan(a, b) {
+  const p = (v) => String(v ?? "0").split(".").map(Number), x = p(a), y = p(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d) return d > 0;
+  }
+  return false;
+}
+var plainName = (v, max = 64) => String(v ?? "").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, max).trim();
+var norm = (s) => String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+function splitSecrets(s) {
+  const { token, identity, home, pendingApproval, ...open } = s;
+  if (home) open.home = { world: home.world, soul: home.soul };
+  if (pendingApproval) {
+    const { pollSecret, ...input } = pendingApproval.input ?? {};
+    open.pendingApproval = { ...pendingApproval, input };
+  }
+  return { open, secrets: { token, identity, homeToken: home?.token, pollSecret: pendingApproval?.input?.pollSecret } };
+}
+function selectSoul(cfg, sel) {
+  const at = sel.lastIndexOf("@"), who2 = at > 0 ? sel.slice(0, at) : sel, world = at > 0 ? sel.slice(at + 1) : null;
+  const named = Object.entries(cfg.souls).filter(([id, e]) => (id === who2 || norm(e.name) === norm(who2)) && (!world || e.world === world || e.at === world));
+  const live = named.filter(([, e]) => e.state === "active");
+  if (live.length === 1) return live[0][0];
+  if (live.length > 1) throw new Error(`Several Souls answer to ${who2}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
+  if (named.length) throw new Error(`${named[0][1].name} is ${named[0][1].state} and takes no commands here. See: list, doctor, adopt.`);
+  return null;
+}
+function runtimeLocks(dir, alive2) {
+  const out = [];
+  for (const name of RUNTIME_LOCKS) {
+    const lock = readJsonQuietly(join(dir, name));
+    if (lock) out.push({ name, pid: lock.pid ?? null, alive: Number.isSafeInteger(lock.pid) && lock.pid > 0 && alive2(lock.pid) });
+  }
+  return out;
+}
+function readJsonQuietly(file) {
+  try {
+    return JSON.parse(readFileSync2(file, "utf8"));
+  } catch {
+    return existsSync(file) ? {} : null;
+  }
+}
+function openHome(root, { reserved = /* @__PURE__ */ new Set(), sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  keepOutOfGit(root);
+  const at = (...p) => join(root, ...p);
+  const config = () => ({ worlds: {}, souls: {}, gods: {}, ...readJson(at("config.json"), {}) });
+  const credentials = () => ({ souls: {}, worlds: {}, approvals: {}, gods: {}, ...readJson(at(CREDENTIALS), {}) });
+  function locked(fn) {
+    const lock = at(".lock");
+    for (let i = 0; ; i++) {
+      try {
+        closeSync(openSync(lock, "wx", 384));
+        break;
+      } catch (e) {
+        if (e.code !== "EEXIST") throw e;
+        if (i >= 100) {
+          try {
+            unlinkSync(lock);
+          } catch {
+          }
+        } else sleepMs(20);
+      }
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        unlinkSync(lock);
+      } catch {
+      }
+    }
+  }
+  const updateConfig = (fn) => locked(() => {
+    const c = config(), r = fn(c);
+    writeJson(at("config.json"), c);
+    return r;
+  });
+  function updateCredentials(fn) {
+    const c = credentials(), before = JSON.stringify(c);
+    fn(c);
+    if (JSON.stringify(c) !== before) locked(() => {
+      const fresh = credentials();
+      fn(fresh);
+      writeJson(at(CREDENTIALS), fresh);
+    });
+  }
+  function ensureWorld(url, facts = {}) {
+    return updateConfig((c) => {
+      let key = keyOf(c.worlds, url);
+      if (!key) {
+        const base = slugOf(url);
+        key = base;
+        for (let n = 2; c.worlds[key]; n++) key = `${base}-${n}`;
+        c.worlds[key] = { url };
+      }
+      Object.assign(c.worlds[key], Object.fromEntries(Object.entries(facts).filter(([, v]) => v !== void 0)));
+      return key;
+    });
+  }
+  function madeFor(url) {
+    if (config().awaitingFirstWorld) updateConfig((c) => {
+      if (c.awaitingFirstWorld) {
+        delete c.awaitingFirstWorld;
+        c.trustedOrigins ??= [originOf(url)];
+      }
+    });
+  }
+  const setCurrentWorld = (key) => updateConfig((c) => {
+    c.currentWorld = key;
+  });
+  const noteConsolidation = (patch) => updateConfig((c) => {
+    c.consolidation = { ...c.consolidation && typeof c.consolidation === "object" && !Array.isArray(c.consolidation) ? c.consolidation : {}, ...patch };
+  });
+  const seat2 = (key) => {
+    const dir = at("pending", key);
+    mkdirSync2(dir, { recursive: true, mode: 448 });
+    return { kind: "seat", key, dir };
+  };
+  const soul = (id) => {
+    if (!SOUL_ID.test(id ?? "")) throw new Error(`"${String(id).slice(0, 40)}" is not a Soul id; nothing was kept for it.`);
+    const dir = at("souls", id, "runtime");
+    mkdirSync2(dir, { recursive: true, mode: 448 });
+    return { kind: "soul", id, dir };
+  };
+  const seatState = (key) => readJson(at("pending", key, STATE_FILE), {});
+  function load2(ctx) {
+    const s = { ...readJson(join(ctx.dir, STATE_FILE), {}) }, cfg = config(), creds = credentials();
+    const key = keyOf(cfg.worlds, s.world) ?? ctx.key;
+    const identity = (ctx.kind === "soul" ? creds.souls[ctx.id]?.[cfg.souls[ctx.id]?.world]?.identity : null) ?? creds.worlds[key]?.identity;
+    if (identity) s.identity = identity;
+    if (ctx.kind === "soul") {
+      const token = creds.souls[ctx.id]?.[key]?.token;
+      if (token) s.token = token;
+      if (s.home) {
+        const t = creds.souls[ctx.id]?.[keyOf(cfg.worlds, s.home.world)]?.token;
+        if (t) s.home = { ...s.home, token: t };
+      }
+    }
+    if (s.pendingApproval) {
+      const pollSecret = creds.approvals[key]?.pollSecret;
+      if (pollSecret) s.pendingApproval = { ...s.pendingApproval, input: { ...s.pendingApproval.input, pollSecret } };
+    }
+    return s;
+  }
+  function promote(ctx, open) {
+    const id = open.home?.soul ?? open.soul;
+    const { world, worldId, accountAuth } = open;
+    writeJson(join(ctx.dir, STATE_FILE), Object.fromEntries(Object.entries({ world, worldId, accountAuth }).filter(([, v]) => v !== void 0)));
+    Object.assign(ctx, soul(id));
+    process.chdir(ctx.dir);
+    const kept = readJson(join(ctx.dir, STATE_FILE), {});
+    if (kept.world === world) {
+      for (const [k, v] of Object.entries(kept)) if (!(k in open)) open[k] = v;
+    }
+    enlist(id, open, ctx.key);
+  }
+  function enlist(id, open, fallbackKey) {
+    updateConfig((c) => {
+      const { retiredAt, at: was, ...old } = c.souls[id] ?? {}, key = keyOf(c.worlds, open.world) ?? fallbackKey, home = open.home ? keyOf(c.worlds, open.home.world) ?? key : key;
+      c.souls[id] = { name: id, ...old, world: old.world ?? home, ...home !== key ? { at: key } : {}, state: "active" };
+      c.currentWorld = key;
+    });
+    identify(id);
+  }
+  function identify(id) {
+    const c = config(), e = c.souls[id];
+    if (e) writeJson(at("souls", id, "soul.json"), { id, name: e.name, world: c.worlds[e.world]?.url ?? null });
+  }
+  function save2(ctx, s) {
+    const { open, secrets } = splitSecrets(s);
+    let key = ctx.key;
+    if (open.world) key = keyOf(config().worlds, open.world) ?? ensureWorld(open.world);
+    const seatKey = ctx.kind === "seat" ? ctx.key : null;
+    if (seatKey && open.soul && secrets.token) promote(ctx, open);
+    writeJson(join(ctx.dir, STATE_FILE), open);
+    if (ctx.kind === "soul") {
+      const e = config().souls[ctx.id];
+      if (e && (e.at ?? e.world) !== key) updateConfig((c) => {
+        c.souls[ctx.id].at = key;
+      });
+    }
+    updateCredentials((c) => {
+      if (secrets.identity && seatKey) (c.worlds[seatKey] ??= {}).identity ??= secrets.identity;
+      if (seatKey && secrets.pollSecret && ctx.kind === "seat") c.approvals[seatKey] = { pollSecret: secrets.pollSecret };
+      else if (seatKey) delete c.approvals[seatKey];
+      if (ctx.kind !== "soul") return;
+      const mine = c.souls[ctx.id] ??= {}, homeKey = open.home ? keyOf(config().worlds, open.home.world) ?? key : key;
+      if (secrets.token) (mine[key] ??= {}).token = secrets.token;
+      if (secrets.homeToken && homeKey !== key) (mine[homeKey] ??= {}).token = secrets.homeToken;
+      if (secrets.identity) (mine[config().souls[ctx.id]?.world ?? homeKey] ??= {}).identity = secrets.identity;
+    });
+    return s;
+  }
+  function ensureGod(url) {
+    const key = ensureWorld(url);
+    updateConfig((c) => {
+      c.gods[key] ??= {};
+    });
+    return key;
+  }
+  function dropGod(key, { world = false } = {}) {
+    updateConfig((c) => {
+      delete c.gods[key];
+      if (world) delete c.worlds[key];
+    });
+    updateCredentials((c) => {
+      delete c.gods[key];
+    });
+    rmSync2(at("gods", key), { recursive: true, force: true });
+    if (!readdirSync(at("gods")).length) rmSync2(at("gods"), { recursive: true, force: true });
+  }
+  const godSeat = (key) => {
+    const dir = at("gods", key);
+    mkdirSync2(dir, { recursive: true, mode: 448 });
+    return dir;
+  };
+  const godSecrets = (key) => {
+    const { token, identity } = credentials().gods[key] ?? {};
+    return { ...token ? { token } : {}, ...identity ? { identity } : {} };
+  };
+  const saveGodSecrets = (key, patch) => updateCredentials((c) => {
+    for (const k of ["token", "identity"]) if (patch[k]) (c.gods[key] ??= {})[k] = patch[k];
+  });
+  function importGod(folder) {
+    const legacy = JSON.parse(readFileSync2(join(folder, GOD_LEGACY), "utf8"));
+    if (!legacy.world) throw new Error(`${GOD_LEGACY} names no world; nothing to import.`);
+    const key = ensureGod(legacy.world);
+    if (godSecrets(key).token) return { imported: false, world: key, reason: "This world already has a god seat in this home." };
+    const dir = godSeat(key), { token, identity, ...open } = legacy;
+    writeJson(join(dir, GOD_LEGACY), open);
+    saveGodSecrets(key, { token, identity });
+    updateConfig((c) => {
+      c.gods[key].importedFrom = real(folder);
+    });
+    for (const f of readdirSync(folder)) if (GOD_KEPT.test(f)) copyFileSync(join(folder, f), join(dir, f));
+    return { imported: true, world: key, reusedToken: !!token, note: `${GOD_LEGACY} stays where it was and still holds the token: delete it once the seat works.` };
+  }
+  function named(id, raw) {
+    const name = plainName(raw);
+    if (!name || config().souls[id]?.name === name) return;
+    updateConfig((c) => {
+      if (c.souls[id]) c.souls[id].name = name;
+    });
+    identify(id);
+  }
+  function principals() {
+    const c = config(), all = Object.entries(c.souls);
+    return all.map(([id, e]) => {
+      const twin = reserved.has(norm(e.name)) || all.some(([other, o]) => other !== id && o.state === "active" && norm(o.name) === norm(e.name));
+      const state = readJson(at("souls", id, "runtime", STATE_FILE), {});
+      return { name: plainName(e.name) || id, id, world: e.world, ...e.at && e.at !== e.world ? { visiting: e.at } : {}, state: e.state, address: twin ? `${norm(e.name)}@${e.world}` : norm(e.name), ...c.default === id ? { default: true } : {}, lastSeen: state.lastActAt ?? null };
+    });
+  }
+  function list2() {
+    const c = config();
+    return {
+      home: root,
+      souls: principals(),
+      gods: Object.keys(c.gods).map((world) => ({ world, paired: !!credentials().gods[world]?.token })),
+      worlds: Object.entries(c.worlds).map(([key, w]) => ({ key, url: w.url, name: w.name ?? null, current: c.currentWorld === key })),
+      waiting: Object.keys(c.worlds).filter((k) => seatState(k).pendingApproval).map((world) => ({ world, approvalId: seatState(world).pendingApproval.approvalId }))
+    };
+  }
+  function setDefault(sel) {
+    const id = selectSoul(config(), sel);
+    if (!id) throw new Error(`No Soul here answers to ${sel}.`);
+    updateConfig((c) => {
+      c.default = id;
+    });
+    return id;
+  }
+  function importLegacy(folder) {
+    const legacy = JSON.parse(readFileSync2(join(folder, LEGACY_STATE), "utf8"));
+    if (!legacy.world) throw new Error(`${LEGACY_STATE} names no world; nothing to import.`);
+    const s = Object.fromEntries(IMPORTED_FIELDS.filter((k) => legacy[k] !== void 0).map((k) => [k, legacy[k]]));
+    s.token ??= legacy.delegations?.[s.soul]?.token;
+    if (!s.token) delete s.token;
+    const id = s.home?.soul ?? s.soul;
+    if (id && config().souls[id]?.state === "active") return { imported: false, soul: id, reason: "This Soul already lives in this home." };
+    const key = ensureWorld(s.world, { worldId: s.worldId, accountAuth: s.accountAuth });
+    if (s.home?.world) ensureWorld(s.home.world);
+    if (!id || !s.token) {
+      if (seatState(key).pendingApproval) throw new Error(`An approval already waits in ${key}. Finish it first: approval wait`);
+      save2(seat2(key), { ...s, ...legacy.pendingApproval ? { pendingApproval: legacy.pendingApproval } : {} });
+      setCurrentWorld(key);
+      return { imported: true, soul: null, world: key };
+    }
+    if (!seatState(key).world) writeJson(join(seat2(key).dir, STATE_FILE), Object.fromEntries(Object.entries({ world: s.world, worldId: s.worldId, accountAuth: s.accountAuth }).filter(([, v]) => v !== void 0)));
+    const ctx = soul(id);
+    enlist(id, s, key);
+    save2(ctx, s);
+    updateCredentials((c) => {
+      if (s.identity) (c.worlds[key] ??= {}).identity ??= s.identity;
+    });
+    for (const f of IMPORTED_RUNTIME) if (existsSync(join(folder, f))) copyFileSync(join(folder, f), join(ctx.dir, f));
+    return { imported: true, soul: id, world: key, ctx };
+  }
+  function exportSoul(id, out) {
+    if (existsSync(out)) throw new Error(`${out} already exists; choose another --out.`);
+    cpSync(at("souls", id), out, { recursive: true, filter: (p) => basename(p) !== "runtime" });
+    return out;
+  }
+  function importExport(folder) {
+    const me = JSON.parse(readFileSync2(join(folder, "soul.json"), "utf8"));
+    if (!SOUL_ID.test(me.id ?? "")) throw new Error("soul.json names no Soul.");
+    if (config().souls[me.id]) return { imported: false, soul: me.id, reason: "This Soul already lives in this home." };
+    const key = me.world ? ensureWorld(me.world) : null;
+    cpSync(folder, at("souls", me.id), { recursive: true, filter: (p) => basename(p) !== "runtime" && basename(p) !== CREDENTIALS });
+    updateConfig((c) => {
+      c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" };
+    });
+    return { imported: true, soul: me.id, world: key, paired: false };
+  }
+  async function doctor2(ask, { alive: alive2 }) {
+    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], orphanCredentials: [], locksCleared: [] };
+    const retire = (id) => {
+      updateConfig((c) => {
+        c.souls[id].state = "retired";
+        c.souls[id].retiredAt = (/* @__PURE__ */ new Date()).toISOString();
+      });
+      out.retired.push({ id, name: config().souls[id].name });
+    };
+    const cfg = config(), creds = credentials();
+    for (const [key, w] of Object.entries(cfg.worlds)) {
+      const local = Object.entries(cfg.souls).filter(([, e]) => e.world === key && e.state === "active");
+      const identities = [...new Set([creds.worlds[key]?.identity, ...local.map(([id]) => creds.souls[id]?.[key]?.identity)].filter(Boolean))];
+      const answers = [];
+      for (const identity of identities) answers.push(await ask(`${w.url}/v1/me`, `dev:${identity}`));
+      const me = answers.find((a) => a.status === 0) ?? answers.find((a) => a.status !== 200) ?? answers[0];
+      if (me?.status === 200 && answers.every((a) => Array.isArray(a.data?.souls))) {
+        const owned2 = answers.flatMap((a) => a.data.souls), ids = new Set(owned2.map((s) => s.id));
+        for (const [id, e] of local) if (!ids.has(id) && !(e.at && e.at !== e.world)) retire(id);
+        for (const s of owned2) {
+          named(s.id, s.name);
+          if (config().souls[s.id]?.state !== "active") out.adoptable.push({ id: s.id, name: s.name, world: key });
+        }
+        out.worlds.push({ world: key, checked: "account" });
+        continue;
+      }
+      if (me?.status === 0) {
+        out.worlds.push({ world: key, checked: "unreachable" });
+        continue;
+      }
+      let reachable = true;
+      for (const [id] of local) {
+        const token = creds.souls[id]?.[key]?.token;
+        if (!token) {
+          out.controlLost.push({ id, name: cfg.souls[id].name, why: "no token in this home" });
+          continue;
+        }
+        const r = await ask(`${w.url}/v1/agent/me`, token);
+        if (r.status === 0) {
+          reachable = false;
+          break;
+        }
+        if (r.status === 200) {
+          if (r.data?.soul?.name) named(id, r.data.soul.name);
+          continue;
+        }
+        if (r.status === 401 && r.data?.code === "control.revoked" && r.data?.reason === "retired") retire(id);
+        else out.controlLost.push({ id, name: cfg.souls[id].name, why: r.data?.reason ?? r.data?.code ?? `http-${r.status}` });
+      }
+      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...reachable ? { note: "This world shows a Soul token its own Soul only, so account Souls that are not here cannot be listed. Adopt one by its id from the Soul card." } : {} });
+    }
+    const after = config();
+    for (const [id, worlds] of Object.entries(creds.souls)) if (!after.souls[id]) for (const world of Object.keys(worlds)) out.orphanCredentials.push({ principal: id, world });
+    for (const world of Object.keys(creds.worlds)) if (!after.worlds[world]) out.orphanCredentials.push({ principal: "account", world });
+    for (const world of Object.keys(creds.gods)) if (!after.gods[world]) out.orphanCredentials.push({ principal: "god", world });
+    for (const id of existsSync(at("souls")) ? readdirSync(at("souls")) : []) {
+      const dir = at("souls", id, "runtime");
+      for (const lock of runtimeLocks(dir, alive2)) {
+        if (lock.alive) continue;
+        try {
+          unlinkSync(join(dir, lock.name));
+          out.locksCleared.push({ soul: id, lock: lock.name });
+        } catch {
+        }
+        if (lock.name === ".eden-serve.lock") try {
+          unlinkSync(join(dir, SERVE_SOCKET));
+        } catch {
+        }
+      }
+    }
+    if ((statSync2(at(CREDENTIALS)).mode & 511) !== 384) {
+      chmodSync(at(CREDENTIALS), 384);
+      out.credentialsMode = "was too open; now 0600";
+    }
+    out.healthy = !out.retired.length && !out.controlLost.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
+    return out;
+  }
+  function installBundle(bytes, running, version) {
+    if (!newerThan(version, config().client)) return null;
+    mkdirSync2(at("bin"), { recursive: true, mode: 448 });
+    const write = (file) => {
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync2(tmp, bytes, { mode: 493 });
+      renameSync(tmp, file);
+    };
+    write(at("bin", "eden.mjs"));
+    if (running && dirname(real(running)) === dirname(real(root))) write(running);
+    updateConfig((c) => {
+      c.client = version;
+    });
+    return at("bin", "eden.mjs");
+  }
+  const trustOrigin = (origin) => updateConfig((c) => {
+    c.trustedOrigins = [.../* @__PURE__ */ new Set([...c.trustedOrigins ?? [], origin])];
+  });
+  return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat: seat2, soul, seatState, load: load2, save: save2, named, principals, list: list2, setDefault, importLegacy, exportSoul, importExport, doctor: doctor2 };
+}
+
+// lib/seat.mjs
+var seat = null;
+var registering = null;
+var registerAs = null;
+var godFile = (name) => seat ? join2(seat.dir, name) : name;
+var seatDir = () => seat?.dir ?? null;
+var seatSecrets = () => seat?.home.godSecrets(seat.key) ?? null;
+var keepSecrets = (patch) => seat?.home.saveGodSecrets(seat.key, patch);
+function sit(home, key) {
+  seat = { home, key, dir: home.godSeat(key) };
+  process.env.SOULS_HOME = home.root;
+  process.env.EDEN_GOD_SEAT = key;
+}
+var LEGACY = ".eden-god.json";
+var readWorld = (file) => {
+  try {
+    return JSON.parse(readFileSync3(file, "utf8")).world ?? null;
+  } catch {
+    return null;
+  }
+};
+function fileHolds(h, cfg, cwd) {
+  let raw;
+  try {
+    raw = readFileSync3(join2(cwd, LEGACY), "utf8");
+  } catch {
+    return null;
+  }
+  let world;
+  try {
+    world = JSON.parse(raw).world;
+  } catch {
+    return { key: null };
+  }
+  if (!world) return null;
+  const key = keyOf(cfg.worlds, world);
+  return key && cfg.gods[key]?.importedFrom === realpathSync2(cwd) ? null : { key };
+}
+function seatForRegister(url) {
+  if (!registering) return () => {
+  };
+  const h = registering, before = h.config(), known2 = keyOf(before.worlds, url), held = known2 && before.gods[known2];
+  if (registerAs !== null && known2 !== registerAs) throw new Error(`The seat ${registerAs} is for ${before.worlds[registerAs]?.url}, not ${url}. For another world: node eden-god.mjs register <world-url>`);
+  const key = h.ensureGod(url);
+  sit(h, key);
+  return held ? () => {
+  } : () => {
+    h.dropGod(key, { world: !known2 });
+    seat = null;
+    delete process.env.EDEN_GOD_SEAT;
+  };
+}
+function enterGodSeat(argv, commands, { cwd = process.cwd(), env: env2 = process.env, home = homedir() } = {}) {
+  const found = findHome({ cwd, env: env2, homedir: home });
+  if (found.kind !== "home") return argv;
+  const h = openHome(found.root), cfg = h.config(), first = argv[0] ?? "", say = (w) => commands[w] ? `@${w}` : w;
+  const inherited = env2.EDEN_GOD_SEAT || null;
+  const worded = inherited ? null : first.startsWith("@") ? first.slice(1) : !commands[first] && (cfg.gods[first] || cfg.worlds[first]) ? first : null;
+  const asked = inherited ?? worded, line2 = worded === null ? argv : argv.slice(1), cmd = line2[0];
+  if (asked !== null && !cfg.gods[asked]) throw new Error(`No god seat for ${asked} here. Run: node eden-god.mjs register <world-url>`);
+  if (env2.EDEN_GOD_HELPER) {
+    if (["register", "pair", "mint"].includes(cmd)) throw new Error("A helper works under its lead's seat; it does not pair or register.");
+    const key = keyOf(cfg.worlds, readWorld(resolve3(cwd, env2.EDEN_GOD_HELPER)));
+    if (asked !== null && asked !== key) throw new Error(`This helper works in ${key ?? "another world"}, not ${asked}.`);
+    if (key && cfg.gods[key] && h.godSecrets(key).token && !fileHolds(h, cfg, cwd)) sit(h, key);
+    return line2;
+  }
+  if (asked !== null) {
+    if (cmd === "register") {
+      registering = h;
+      registerAs = asked;
+    } else sit(h, asked);
+    return line2;
+  }
+  if (fileHolds(h, cfg, cwd)) return argv;
+  const moved = Object.keys(cfg.gods).find((k) => cfg.gods[k].importedFrom === realpathSync2(cwd));
+  if (moved && !["register", "pair", "mint", "help"].includes(cmd)) {
+    sit(h, moved);
+    return line2;
+  }
+  if (cmd === "register") {
+    registering = h;
+    return line2;
+  }
+  const seats = Object.keys(cfg.gods);
+  if (seats.length === 1 && cmd !== "help") sit(h, seats[0]);
+  else if (seats.length > 1 && commands[cmd] && cmd !== "help") throw new Error(`Several god seats here: ${seats.join(", ")}. Say which: node eden-god.mjs ${say(seats[0])} ${cmd}`);
+  return line2;
+}
+
+// lib/wire.mjs
 var WIRE = ".eden-god.wire.json";
 var HOP = /* @__PURE__ */ new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "proxy-connection", "host", "http2-settings", "te"]);
 var pidAlive = (pid) => {
@@ -302,7 +885,7 @@ var pidAlive = (pid) => {
     return e.code === "EPERM";
   }
 };
-async function startWire(world, { file = WIRE } = {}) {
+async function startWire(world, { file = godFile(WIRE) } = {}) {
   const origin = new URL(world).origin, secret2 = randomBytes(18).toString("base64url");
   let used = 0, closed = false, mode = origin.startsWith("https:") ? "h2" : "h1", session = null;
   const agent = new (origin.startsWith("https:") ? https : http).Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 3e4 });
@@ -409,9 +992,9 @@ async function startWire(world, { file = WIRE } = {}) {
     }
   });
   server.keepAliveTimeout = 5e3;
-  await new Promise((resolve6, reject) => {
+  await new Promise((resolve10, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve6);
+    server.listen(0, "127.0.0.1", resolve10);
   });
   server.unref();
   const port = server.address().port;
@@ -436,7 +1019,7 @@ async function startWire(world, { file = WIRE } = {}) {
       session?.close();
       agent.destroy();
       try {
-        if (JSON.parse(readFileSync2(file, "utf8")).pid === process.pid) rmSync2(file, { force: true });
+        if (JSON.parse(readFileSync4(file, "utf8")).pid === process.pid) rmSync3(file, { force: true });
       } catch {
       }
     }
@@ -447,7 +1030,7 @@ function relayFor(url) {
   if (known === void 0) {
     known = null;
     if (!/^(0|off|false|no)$/i.test(process.env.EDEN_GOD_WIRE ?? "")) try {
-      const w = JSON.parse(readFileSync2(WIRE, "utf8"));
+      const w = JSON.parse(readFileSync4(godFile(WIRE), "utf8"));
       if (w?.port && w.secret && w.world && pidAlive(w.pid)) known = w;
     } catch {
     }
@@ -463,8 +1046,8 @@ async function wireFetch(url, init = {}) {
     r = await fetch(`http://127.0.0.1:${w.port}/`, { ...init, headers });
   } catch (e) {
     if (init.signal?.aborted) throw e;
-    const refused2 = /ECONNREFUSED|ECONNRESET|EPIPE|ENOTFOUND/.test(String(e?.cause?.code ?? e?.code ?? ""));
-    if (refused2 || !init.method || init.method === "GET") {
+    const refused3 = /ECONNREFUSED|ECONNRESET|EPIPE|ENOTFOUND/.test(String(e?.cause?.code ?? e?.code ?? ""));
+    if (refused3 || !init.method || init.method === "GET") {
       known = null;
       return fetch(url, init);
     }
@@ -505,16 +1088,17 @@ function noticeInboxHeader(headers) {
 
 // lib/state.mjs
 var STATE = ".eden-god.json";
-var read = (file) => existsSync(file) ? JSON.parse(readFileSync3(file, "utf8")) : {};
-var claimFile = (id) => {
+var read = (file) => existsSync2(file) ? JSON.parse(readFileSync5(file, "utf8")) : {};
+var claimName = (id) => {
   if (!/^c_[0-9a-f]{8}$/.test(id)) throw new Error("EDEN_GOD_CLAIM must be c_ followed by eight hexadecimal digits");
   return `.eden-god.claim-${id}.json`;
 };
-var helperFile = (id) => `.eden-god.helper-${claimFile(id).slice(".eden-god.claim-".length, -".json".length)}.json`;
+var claimFile = (id) => godFile(claimName(id));
+var helperFile = (id) => `.eden-god.helper-${claimName(id).slice(".eden-god.claim-".length, -".json".length)}.json`;
 function helperState() {
   const file = process.env.EDEN_GOD_HELPER;
   if (!file) return null;
-  if (!existsSync(file)) throw new Error(`EDEN_GOD_HELPER names a missing file: ${file}`);
+  if (!existsSync2(file)) throw new Error(`EDEN_GOD_HELPER names a missing file: ${file}`);
   const s = read(file), cid = s.helper?.claim;
   if (!cid) throw new Error(`${file} is not a helper file (no helper.claim)`);
   if (process.env.EDEN_GOD_CLAIM && process.env.EDEN_GOD_CLAIM !== cid) throw new Error(`EDEN_GOD_CLAIM=${process.env.EDEN_GOD_CLAIM} differs from the helper file's claim ${cid}`);
@@ -524,18 +1108,18 @@ var activeClaim = () => process.env.EDEN_GOD_CLAIM || helperState()?.helper.clai
 function atomicWrite(file, text) {
   const temp = `${file}.${process.pid}.${randomUUID2()}.tmp`;
   try {
-    writeFileSync2(temp, text, { mode: 384, flag: "wx" });
-    renameSync(temp, file);
+    writeFileSync3(temp, text, { mode: 384, flag: "wx" });
+    renameSync2(temp, file);
   } finally {
     try {
-      unlinkSync(temp);
+      unlinkSync2(temp);
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
   }
 }
 function load() {
-  const s = helperState() ?? read(STATE), cid = activeClaim();
+  const s = helperState() ?? { ...read(godFile(STATE)), ...seatSecrets() }, cid = activeClaim();
   if (!cid) return s;
   const local = read(claimFile(cid)), b = s.build;
   const merged = { ...s, group: void 0, build: b ? { id: b.id, claim: cid, n: 1, label: b.steps?.[0] ?? "step 1", steps: b.steps } : void 0, ...local };
@@ -546,7 +1130,7 @@ function load() {
   return merged;
 }
 function withStateLock(run) {
-  const cid = activeClaim(), file = cid ? claimFile(cid) : STATE;
+  const cid = activeClaim(), file = cid ? claimFile(cid) : godFile(STATE);
   const release = acquireLock(`${file}.lock`, { label: "claim/step state", reentrant: true });
   try {
     const out = run();
@@ -562,9 +1146,15 @@ function save(patch) {
   return withStateLock(() => saveUnlocked(patch));
 }
 function saveUnlocked(patch) {
-  const cid = activeClaim(), file = cid ? claimFile(cid) : STATE;
+  const cid = activeClaim(), file = cid ? claimFile(cid) : godFile(STATE);
   const s = { ...read(file), ...patch };
   for (const k of Object.keys(s)) if (s[k] === void 0) delete s[k];
+  if (seatSecrets()) {
+    const { token, identity } = patch;
+    keepSecrets({ token, identity });
+    delete s.token;
+    delete s.identity;
+  }
   if (cid && Object.hasOwn(patch, "build") && !patch.build) s.build = null;
   atomicWrite(file, JSON.stringify(s, null, 2) + "\n");
   return load();
@@ -763,34 +1353,34 @@ var num = (v) => {
 var r2 = (v) => Math.round(v * 100) / 100;
 
 // lib/doctor.mjs
-function localDoctor({ fix = false, cwd = process.cwd(), chrome = CHROME_LOCK } = {}) {
-  const slots = chromeSlotDirs(chrome), paths = [...slots, resolve2(cwd, ".eden-god.look.json.lock"), resolve2(cwd, ".eden-god.json.lock"), ...readdirSync(cwd).filter((n) => /^\.eden-god\.claim-c_[0-9a-f]{8}\.json\.lock$/.test(n)).map((n) => resolve2(cwd, n))];
-  for (let i = 0; i < paths.length; i++) if (existsSync2(paths[i] + ".reclaim")) paths.push(paths[i] + ".reclaim");
+function localDoctor({ fix = false, cwd = seatDir() ?? process.cwd(), chrome = CHROME_LOCK } = {}) {
+  const slots = chromeSlotDirs(chrome), paths = [...slots, resolve4(cwd, ".eden-god.look.json.lock"), resolve4(cwd, ".eden-god.json.lock"), ...readdirSync2(cwd).filter((n) => /^\.eden-god\.claim-c_[0-9a-f]{8}\.json\.lock$/.test(n)).map((n) => resolve4(cwd, n))];
+  for (let i = 0; i < paths.length; i++) if (existsSync3(paths[i] + ".reclaim")) paths.push(paths[i] + ".reclaim");
   const locks = paths.map((path2) => {
     const slot = slots.indexOf(path2), row = { kind: slot >= 0 ? "chrome" : "state", ...slot >= 0 ? { slot } : {}, ...inspectLock(path2) };
     if (fix && row.stale) row.fixed = breakLock(path2);
     return row;
   });
-  const path = resolve2(cwd, ".eden-god.look.json");
-  if (existsSync2(path)) {
+  const path = resolve4(cwd, ".eden-god.look.json");
+  if (existsSync3(path)) {
     let raw, k;
     try {
-      raw = readFileSync4(path, "utf8");
+      raw = readFileSync6(path, "utf8");
       k = JSON.parse(raw);
     } catch {
     }
-    const status2 = lockStatus(parseHolder(k?.holder), k?.heartbeatAt ?? statSync2(path).mtimeMs, k?.ttlMs ?? 3e4);
+    const status2 = lockStatus(parseHolder(k?.holder), k?.heartbeatAt ?? statSync3(path).mtimeMs, k?.ttlMs ?? 3e4);
     const row = { kind: "look-keeper", path, present: true, ...status2 };
-    if (fix && row.stale && readFileSync4(path, "utf8") === raw) {
-      unlinkSync2(path);
+    if (fix && row.stale && readFileSync6(path, "utf8") === raw) {
+      unlinkSync3(path);
       row.fixed = true;
     }
     locks.push(row);
   } else locks.push({ kind: "look-keeper", path, present: false, stale: false, holder: null });
-  for (const name of readdirSync(cwd).filter((n) => /^\.eden-god(?:\.claim-c_[0-9a-f]{8})?\.json$/.test(n))) {
+  for (const name of readdirSync2(cwd).filter((n) => /^\.eden-god(?:\.claim-c_[0-9a-f]{8})?\.json$/.test(n))) {
     try {
-      const b = JSON.parse(readFileSync4(resolve2(cwd, name), "utf8")).build;
-      if (b) locks.push({ kind: b.claim ? "claim/step-file" : "build/step-file", path: resolve2(cwd, name), present: true, stale: false, durable: true, build: b.id, step: b.n, claim: b.claim, note: "durable workflow state; server lease below is authoritative" });
+      const b = JSON.parse(readFileSync6(resolve4(cwd, name), "utf8")).build;
+      if (b) locks.push({ kind: b.claim ? "claim/step-file" : "build/step-file", path: resolve4(cwd, name), present: true, stale: false, durable: true, build: b.id, step: b.n, claim: b.claim, note: "durable workflow state; server lease below is authoritative" });
     } catch {
     }
   }
@@ -854,11 +1444,11 @@ async function taxonomy(flags2 = {}) {
 }
 
 // cli.mjs
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync5, existsSync as existsSync8, mkdirSync as mkdirSync3, appendFileSync } from "node:fs";
-import { resolve as resolve5 } from "node:path";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync7, existsSync as existsSync10, mkdirSync as mkdirSync4, appendFileSync as appendFileSync2 } from "node:fs";
+import { resolve as resolve9 } from "node:path";
 
 // lib/mirror.mjs
-import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
+import { existsSync as existsSync4, readFileSync as readFileSync7 } from "node:fs";
 import { createHash } from "node:crypto";
 
 // lib/solver.mjs
@@ -881,7 +1471,7 @@ var unrot = (yaw, x, z) => {
   const c = Math.cos(yaw), s = Math.sin(yaw);
   return [x * c - z * s, x * s + z * c];
 };
-var norm = ([x, z]) => {
+var norm2 = ([x, z]) => {
   const l = Math.hypot(x, z) || 1;
   return [x / l, z / l];
 };
@@ -1009,9 +1599,9 @@ function boxInPolygon(box, poly) {
   return true;
 }
 function obbHit(a, b, margin = 0) {
-  const A = { ...a, half: [a.half[0] + margin, a.half[1] + margin] };
-  const axes = [[Math.cos(A.yaw), -Math.sin(A.yaw)], [Math.sin(A.yaw), Math.cos(A.yaw)], [Math.cos(b.yaw), -Math.sin(b.yaw)], [Math.sin(b.yaw), Math.cos(b.yaw)]];
-  const ca = corners(A), cb = corners(b);
+  const A2 = { ...a, half: [a.half[0] + margin, a.half[1] + margin] };
+  const axes = [[Math.cos(A2.yaw), -Math.sin(A2.yaw)], [Math.sin(A2.yaw), Math.cos(A2.yaw)], [Math.cos(b.yaw), -Math.sin(b.yaw)], [Math.sin(b.yaw), Math.cos(b.yaw)]];
+  const ca = corners(A2), cb = corners(b);
   for (const [ax, az] of axes) {
     let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
     for (const [x, z] of ca) {
@@ -1080,15 +1670,15 @@ function solve(v, thing, rel) {
   };
   if (thing.form === "path" && (rel.from || rel.between)) {
     const [a, b] = rel.between ?? [rel.from, rel.to];
-    let A = refPoint(v, a), B = refPoint(v, b);
+    let A2 = refPoint(v, a), B = refPoint(v, b);
     const toEdge = (P, Q) => {
       if (P.kind !== "region") return P;
-      const d = norm(COMPASS[P.word]), h = v.extent / 2 - 2;
+      const d = norm2(COMPASS[P.word]), h = v.extent / 2 - 2;
       const k = Math.min(...[0, 1].map((i) => Math.abs(d[i]) < 1e-9 ? Infinity : (Math.sign(d[i]) * h - (i ? Q.z : Q.x)) / d[i]));
       return { x: r22(Q.x + d[0] * k), z: r22(Q.z + d[1] * k), kind: "point", ref: `the ${P.word} edge` };
     };
-    if (A.kind === "region" && B.kind !== "region") A = toEdge(A, B);
-    else if (B.kind === "region") B = toEdge(B, A.kind === "region" ? { x: 0, z: 0 } : A);
+    if (A2.kind === "region" && B.kind !== "region") A2 = toEdge(A2, B);
+    else if (B.kind === "region") B = toEdge(B, A2.kind === "region" ? { x: 0, z: 0 } : A2);
     const ENDS_ONLY = /bridge|pier|deck|dock|jetty/;
     const approach = (P) => [P.x, P.z];
     const edge = (P, Q) => {
@@ -1100,7 +1690,7 @@ function solve(v, thing, rel) {
         if (ENDS_ONLY.test(v.def?.(P.row.def)?.ref ?? P.row.def)) return nearerEnd();
         const q = nearestOnPath(sh.path, [Q.x, Q.z]);
         if (Math.hypot(q.p[0] - a2[0], q.p[1] - a2[1]) < 3 || Math.hypot(q.p[0] - b2[0], q.p[1] - b2[1]) < 3) return nearerEnd();
-        const inset = P.row.layer === "surface" ? Math.max(0, (sh.width ?? 4) / 2 - 0.5) : 0, u2 = norm([Q.x - q.p[0], Q.z - q.p[1]]);
+        const inset = P.row.layer === "surface" ? Math.max(0, (sh.width ?? 4) / 2 - 0.5) : 0, u2 = norm2([Q.x - q.p[0], Q.z - q.p[1]]);
         return [r22(q.p[0] + u2[0] * inset), r22(q.p[1] + u2[1] * inset)];
       }
       const doors = (P.row.doors ?? []).filter((d) => d.out && (d.level ?? 0) === 0);
@@ -1110,7 +1700,7 @@ function solve(v, thing, rel) {
         doorUsed.set(P.row.path, d.id);
         return [r22(d.at[0] + f[0]), r22(d.at[1] + f[1])];
       }
-      const u = norm([Q.x - P.x, Q.z - P.z]);
+      const u = norm2([Q.x - P.x, Q.z - P.z]);
       if (sh?.area) {
         const k = rayExit(sh.area, [P.x, P.z], u);
         const wet = P.row.layer === "volume" || P.row.water !== void 0 && P.row.water !== null;
@@ -1129,16 +1719,16 @@ function solve(v, thing, rel) {
     const isPath = (P) => P.kind === "entity" && !!P.row.shape?.path;
     const towardA = via.length ? asQ(via[0]) : null, towardB = via.length ? asQ(via.at(-1)) : null;
     let pa, pb;
-    if (isPath(A) && !isPath(B)) {
-      pb = edge(B, towardB ?? asQ(isPath(A) ? nearestOnPath(A.row.shape.path, approach(B)).p : approach(A)));
-      pa = edge(A, towardA ?? asQ(pb));
+    if (isPath(A2) && !isPath(B)) {
+      pb = edge(B, towardB ?? asQ(isPath(A2) ? nearestOnPath(A2.row.shape.path, approach(B)).p : approach(A2)));
+      pa = edge(A2, towardA ?? asQ(pb));
     } else {
-      pa = edge(A, towardA ?? asQ(isPath(B) ? nearestOnPath(B.row.shape.path, approach(A)).p : approach(B)));
+      pa = edge(A2, towardA ?? asQ(isPath(B) ? nearestOnPath(B.row.shape.path, approach(A2)).p : approach(B)));
       pb = edge(B, towardB ?? asQ(pa));
     }
     const path = [pa, ...via, pb];
     for (const [ref, id] of doorUsed) notes.push(`starts at ${ref}'s door ${id}`);
-    notes.push(`path from ${A.ref ?? a} to ${B.ref ?? b}${via.length ? ` via ${via.length} point(s)` : ""}, ${r22(polylineLength(path))} m`);
+    notes.push(`path from ${A2.ref ?? a} to ${B.ref ?? b}${via.length ? ` via ${via.length} point(s)` : ""}, ${r22(polylineLength(path))} m`);
     return { items: [{ candidates: [{ shape: { path, ...rel.width ? { width: Number(rel.width) } : {} }, note: notes.at(-1) }] }], notes };
   }
   if (rel.across) {
@@ -1364,10 +1954,10 @@ function solve(v, thing, rel) {
     return { items: items2, notes };
   }
   if (rel.between) {
-    const [A, B] = rel.between.map((x2) => refPoint(v, x2));
-    const x = (A.x + B.x) / 2, z = (A.z + B.z) / 2;
-    const yaw2 = finalYaw(x, z, Math.atan2(-(B.z - A.z), B.x - A.x));
-    return { items: [{ candidates: [pose(x, z, yaw2, { note: `between ${A.ref ?? rel.between[0]} and ${B.ref ?? rel.between[1]}` })] }], notes };
+    const [A2, B] = rel.between.map((x2) => refPoint(v, x2));
+    const x = (A2.x + B.x) / 2, z = (A2.z + B.z) / 2;
+    const yaw2 = finalYaw(x, z, Math.atan2(-(B.z - A2.z), B.x - A2.x));
+    return { items: [{ candidates: [pose(x, z, yaw2, { note: `between ${A2.ref ?? rel.between[0]} and ${B.ref ?? rel.between[1]}` })] }], notes };
   }
   if (rel.near || rel.around) {
     const R = refPoint(v, rel.near ?? rel.around);
@@ -1600,7 +2190,7 @@ function sideDir(word, frontL) {
   }
   if (!n || w || a === 0 && b === 0) return null;
   const l = leftOf(frontL);
-  return norm([a * frontL[0] + b * l[0], a * frontL[1] + b * l[1]]);
+  return norm2([a * frontL[0] + b * l[0], a * frontL[1] + b * l[1]]);
 }
 var steps = (max, step) => {
   const out = [0];
@@ -1713,7 +2303,7 @@ function solveInRoom(v, host, room, thing, rel, ctx) {
     const rd = sideDir(w, fL);
     if (rd) return rd;
     const k = compassKey(w);
-    if (k) return norm(unrot(F.PY, COMPASS[k][0], COMPASS[k][1]));
+    if (k) return norm2(unrot(F.PY, COMPASS[k][0], COMPASS[k][1]));
     return null;
   };
   const round = !isRect;
@@ -1788,14 +2378,14 @@ var wasTrusted = () => trustedRead;
 var speaksMirror = () => speaks && !oldServer;
 function readCache() {
   try {
-    return existsSync3(CACHE) ? JSON.parse(readFileSync5(CACHE, "utf8")) : null;
+    return existsSync4(godFile(CACHE)) ? JSON.parse(readFileSync7(godFile(CACHE), "utf8")) : null;
   } catch {
     return null;
   }
 }
 function writeCache(c) {
   try {
-    atomicWrite(CACHE, JSON.stringify(c));
+    atomicWrite(godFile(CACHE), JSON.stringify(c));
   } catch {
   }
 }
@@ -2003,7 +2593,7 @@ async function follow(seconds = 3600, onEvent = () => {
 }
 
 // lib/args.mjs
-var FREE = /* @__PURE__ */ new Set(["title", "brief", "say", "note", "asks", "steps", "mass", "event", "views", "state", "path", "area", "label", "text"]);
+var FREE = /* @__PURE__ */ new Set(["title", "brief", "say", "note", "asks", "steps", "mass", "event", "views", "state", "path", "area", "label", "text", "description", "license", "source"]);
 var WORD = /* @__PURE__ */ new Set(["at", "near", "along", "t", "side", "facing", "name", "scale", "yaw", "dir", "dist", "offset", "by", "step", "inside", "on", "against", "wall", "corner", "count", "row", "gap", "spacing", "from", "to", "radius", "size", "setback", "around", "via"]);
 var REF_POS = /* @__PURE__ */ new Set(["place", "terrain", "move", "set", "clone", "describe", "where", "clear", "furnish"]);
 var POINT = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
@@ -2230,15 +2820,15 @@ function exportGenesis(snapshot3, { name } = {}) {
 
 // lib/look.mjs
 import { spawn as spawn2, spawnSync as spawnSync2 } from "node:child_process";
-import { existsSync as existsSync6, mkdirSync as mkdirSync2, readFileSync as readFileSync7, writeFileSync as writeFileSync4, rmSync as rmSync4, statSync as statSync3, utimesSync as utimesSync2 } from "node:fs";
+import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync5, rmSync as rmSync5, statSync as statSync4, utimesSync as utimesSync2 } from "node:fs";
 import { createRequire } from "node:module";
 import { createServer as createServer2 } from "node:net";
-import { dirname, resolve as resolve4 } from "node:path";
+import { dirname as dirname2, resolve as resolve6 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // lib/remote-look.mjs
-import { existsSync as existsSync4, writeFileSync as writeFileSync3 } from "node:fs";
-import { resolve as resolve3, win32 } from "node:path";
+import { existsSync as existsSync5, writeFileSync as writeFileSync4 } from "node:fs";
+import { resolve as resolve5, win32 } from "node:path";
 var needsLocalBrowser = (args) => !!args.views || args.frames > 1 || !!args.studio;
 var localBrowserError = () => Error("look: sheets (--views/--site), motion frames and kit workbench require local Playwright and Google Chrome; the remote renderer supports single views only");
 async function remoteLook(args, runtime = {}) {
@@ -2267,8 +2857,8 @@ async function remoteLook(args, runtime = {}) {
   const png = Buffer.from(await r.arrayBuffer());
   runtime.signal?.throwIfAborted();
   if (!r.headers.get("content-type")?.startsWith("image/png") || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw Error("look: world renderer did not return a PNG");
-  writeFileSync3(resolve3(args.out), png);
-  return { file: resolve3(args.out), ms: now() - t0, via: "remote", size: r.headers.get("x-look-size") ?? void 0 };
+  writeFileSync4(resolve5(args.out), png);
+  return { file: resolve5(args.out), ms: now() - t0, via: "remote", size: r.headers.get("x-look-size") ?? void 0 };
 }
 function chromeCandidates(platform = process.platform, env2 = process.env) {
   if (platform === "darwin") return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"];
@@ -2280,7 +2870,7 @@ function chromeCandidates(platform = process.platform, env2 = process.env) {
 async function withRemoteLook(args, runtime, local) {
   if (args.remote || process.env.EDEN_GOD_LOOK === "remote") return remoteLook(args, runtime);
   const candidates = (runtime.chromeCandidates ?? chromeCandidates)();
-  if (runtime.pw === void 0 && candidates && !(runtime.chromeExists ?? (() => candidates.some(existsSync4)))()) {
+  if (runtime.pw === void 0 && candidates && !(runtime.chromeExists ?? (() => candidates.some(existsSync5)))()) {
     try {
       return await remoteLook(args, runtime);
     } catch (remote) {
@@ -2303,7 +2893,7 @@ async function withRemoteLook(args, runtime, local) {
 
 // lib/warm.mjs
 import { spawn } from "node:child_process";
-import { existsSync as existsSync5, readFileSync as readFileSync6, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync6, readFileSync as readFileSync8, rmSync as rmSync4 } from "node:fs";
 var WARM = ".eden-god.warm.json";
 var LISTENER = ".eden-god.listen.json";
 var KEEPER = ".eden-god.look.json";
@@ -2312,7 +2902,7 @@ var FAILED_RETRY_MS = 10 * 6e4;
 var REMOTE_RETRY_MS = 60 * 6e4;
 var read2 = (f) => {
   try {
-    return JSON.parse(readFileSync6(f, "utf8"));
+    return JSON.parse(readFileSync8(f, "utf8"));
   } catch {
     return null;
   }
@@ -2326,10 +2916,10 @@ var pidAlive2 = (pid) => {
     return e.code === "EPERM";
   }
 };
-var readWarm = () => read2(WARM);
+var readWarm = () => read2(godFile(WARM));
 var writeWarm = (patch) => {
   try {
-    atomicWrite(WARM, JSON.stringify({ ...readWarm() ?? {}, ...patch, at: Date.now() }));
+    atomicWrite(godFile(WARM), JSON.stringify({ ...readWarm() ?? {}, ...patch, at: Date.now() }));
   } catch {
   }
 };
@@ -2341,7 +2931,7 @@ function warmEnabled(state = (() => {
   }
 })(), env2 = process.env, chrome = () => {
   const c = chromeCandidates();
-  return !c || c.some(existsSync5);
+  return !c || c.some(existsSync6);
 }) {
   if (env2.EDEN_GOD_WARM === "0" || env2.EDEN_GOD_LOOK === "remote") return false;
   if (!state?.world) return false;
@@ -2350,7 +2940,7 @@ function warmEnabled(state = (() => {
   return !!state.token && !state.identity && chrome();
 }
 function warmStatus(world, now = Date.now()) {
-  const k = read2(KEEPER);
+  const k = read2(godFile(KEEPER));
   if (k && !lockStatus(parseHolder(k.holder), k.heartbeatAt ?? 0).stale) return k.world === world ? "ready" : "other";
   const w = readWarm();
   if (!w || w.world && w.world !== world) return "none";
@@ -2386,11 +2976,11 @@ function autoWarm(cliPath, { force = false, pairing = false } = {}) {
 }
 function listenerBeat() {
   try {
-    atomicWrite(LISTENER, JSON.stringify({ holder: holder("eden-god listen"), at: Date.now() }));
+    atomicWrite(godFile(LISTENER), JSON.stringify({ holder: holder("eden-god listen"), at: Date.now() }));
   } catch {
   }
 }
-var listenerAt = () => read2(LISTENER)?.at ?? 0;
+var listenerAt = () => read2(godFile(LISTENER))?.at ?? 0;
 var remoteKnownUnavailable = (s = load(), now = Date.now()) => s.remoteLook?.ok === false && now - (s.remoteLook.at ?? 0) < REMOTE_RETRY_MS;
 var markRemote = (ok2) => {
   try {
@@ -2432,16 +3022,16 @@ function treeRssMb(psText, port) {
     if (!kids.has(r.ppid)) kids.set(r.ppid, []);
     kids.get(r.ppid).push(r);
   }
-  let kb2 = 0;
+  let kb3 = 0;
   const seen = /* @__PURE__ */ new Set(), stack = [...roots];
   while (stack.length) {
     const r = stack.pop();
     if (seen.has(r.pid)) continue;
     seen.add(r.pid);
-    kb2 += r.rss;
+    kb3 += r.rss;
     stack.push(...kids.get(r.pid) ?? []);
   }
-  return Math.round(kb2 / 1024);
+  return Math.round(kb3 / 1024);
 }
 
 // lib/look.mjs
@@ -2462,14 +3052,14 @@ var MAX_MB = () => Number(process.env.EDEN_GOD_KEEPER_MAX_MB ?? 1536);
 function findPlaywright({ timeoutMs = 6e4 } = {}) {
   const here = (() => {
     try {
-      return dirname(fileURLToPath(import.meta.url));
+      return dirname2(fileURLToPath(import.meta.url));
     } catch {
       return process.cwd();
     }
   })();
-  const bases = [process.env.EDEN_GOD_PLAYWRIGHT_FROM, readWarm()?.pwFrom, process.cwd(), here, resolve4(here, "../.."), resolve4(here, "../../.."), resolve4(here, "../../../mars/viewer"), resolve4(here, "../../mars/viewer"), resolve4(here, "../mars/viewer")].filter(Boolean);
+  const bases = [process.env.EDEN_GOD_PLAYWRIGHT_FROM, readWarm()?.pwFrom, process.cwd(), here, resolve6(here, "../.."), resolve6(here, "../../.."), resolve6(here, "../../../mars/viewer"), resolve6(here, "../../mars/viewer"), resolve6(here, "../mars/viewer")].filter(Boolean);
   for (const b of bases) {
-    const pkg = existsSync6(resolve4(b, "package.json")) ? resolve4(b, "package.json") : resolve4(b, "noop.js");
+    const pkg = existsSync7(resolve6(b, "package.json")) ? resolve6(b, "package.json") : resolve6(b, "noop.js");
     for (const name of ["playwright-core", "playwright", "@playwright/test"]) {
       try {
         const m = createRequire(pkg)(name);
@@ -2483,7 +3073,7 @@ function findPlaywright({ timeoutMs = 6e4 } = {}) {
     const r = spawnSync2("npx", ["-y", "-p", "playwright-core@1", "-c", 'echo "$PATH"'], { encoding: "utf8", timeout: Math.max(1, Math.min(6e4, timeoutMs)), killSignal: "SIGKILL", stdio: ["ignore", "pipe", "pipe"] });
     const bin = (r.stdout ?? "").trim().split(":").find((d) => /[\\/]_npx[\\/][^\\/]+[\\/]node_modules[\\/]\.bin$/.test(d));
     if (bin) {
-      const base = resolve4(bin, "../.."), m = createRequire(resolve4(base, "noop.js"))("playwright-core");
+      const base = resolve6(bin, "../.."), m = createRequire(resolve6(base, "noop.js"))("playwright-core");
       if (m?.chromium) {
         process.env.EDEN_GOD_PLAYWRIGHT_FROM = base;
         return m;
@@ -2522,7 +3112,7 @@ var alive = async (port) => {
 };
 var readKeeper = () => {
   try {
-    return JSON.parse(readFileSync7(KEEPER2, "utf8"));
+    return JSON.parse(readFileSync9(godFile(KEEPER2), "utf8"));
   } catch {
     return null;
   }
@@ -2530,7 +3120,7 @@ var readKeeper = () => {
 async function keeper(worldUrl, port, { warm = false } = {}) {
   let release;
   try {
-    release = acquireLock(`${KEEPER2}.lock`, { label: "look keeper" });
+    release = acquireLock(`${godFile(KEEPER2)}.lock`, { label: "look keeper" });
   } catch (e) {
     if (warm) process.exit(0);
     throw e;
@@ -2555,13 +3145,13 @@ async function keeper(worldUrl, port, { warm = false } = {}) {
     await page.goto(`${worldUrl}?shot=1&eye=0,60,60&at=0,0,0`, { waitUntil: "commit", timeout: 25e3 });
     const identity = me;
     let rssMb = null;
-    const write = () => atomicWrite(KEEPER2, JSON.stringify({ world: worldUrl, port, pid: process.pid, at: Date.now(), holder: identity, heartbeatAt: Date.now(), ttlMs: 3e4, ...rssMb != null ? { rssMb } : {} }));
+    const write = () => atomicWrite(godFile(KEEPER2), JSON.stringify({ world: worldUrl, port, pid: process.pid, at: Date.now(), holder: identity, heartbeatAt: Date.now(), ttlMs: 3e4, ...rssMb != null ? { rssMb } : {} }));
     write();
     phase("ready");
-    let lastUse = statSync3(KEEPER2).mtimeMs, nextMem = Date.now() + MEM_EVERY_MS, over = false;
+    let lastUse = statSync4(godFile(KEEPER2)).mtimeMs, nextMem = Date.now() + MEM_EVERY_MS, over = false;
     process.once("exit", () => {
       try {
-        if (readKeeper()?.holder?.start === identity.start && readKeeper()?.pid === identity.pid) rmSync4(KEEPER2, { force: true });
+        if (readKeeper()?.holder?.start === identity.start && readKeeper()?.pid === identity.pid) rmSync5(godFile(KEEPER2), { force: true });
       } finally {
         release();
       }
@@ -2570,7 +3160,7 @@ async function keeper(worldUrl, port, { warm = false } = {}) {
       await new Promise((r) => setTimeout(r, 5e3));
       let last = 0;
       try {
-        last = statSync3(KEEPER2).mtimeMs;
+        last = statSync4(godFile(KEEPER2)).mtimeMs;
       } catch {
         break;
       }
@@ -2591,7 +3181,7 @@ async function keeper(worldUrl, port, { warm = false } = {}) {
         } else over = false;
       }
       write();
-      utimesSync2(KEEPER2, new Date(lastUse), new Date(lastUse));
+      utimesSync2(godFile(KEEPER2), new Date(lastUse), new Date(lastUse));
     }
   } catch (e) {
     phase("failed", { error: String(e?.message ?? e).split("\n")[0].slice(0, 200) });
@@ -2613,7 +3203,7 @@ async function ensureKeeper(worldUrl, cliPath, runtime = {}) {
   if (k && !lockStatus(parseHolder(k.holder), k.heartbeatAt ?? 0).stale && k.world === worldUrl && await alive(k.port)) {
     const now = /* @__PURE__ */ new Date();
     try {
-      utimesSync2(KEEPER2, now, now);
+      utimesSync2(godFile(KEEPER2), now, now);
     } catch {
     }
     return k;
@@ -2623,7 +3213,7 @@ async function ensureKeeper(worldUrl, cliPath, runtime = {}) {
     process.kill(k.pid);
   } catch {
   }
-  rmSync4(KEEPER2, { force: true });
+  rmSync5(godFile(KEEPER2), { force: true });
   const port = await freePort();
   const child = spawn2(process.execPath, [cliPath, "look-keeper", worldUrl, String(port)], { detached: true, stdio: "ignore", cwd: process.cwd(), env: process.env });
   let failure;
@@ -2652,7 +3242,7 @@ async function ensureKeeper(worldUrl, cliPath, runtime = {}) {
       process.kill(process.platform === "win32" ? child.pid : -child.pid);
     } catch {
     }
-    if (readKeeper()?.pid === child.pid) rmSync4(KEEPER2, { force: true });
+    if (readKeeper()?.pid === child.pid) rmSync5(godFile(KEEPER2), { force: true });
     runtime.keeperChild = null;
     throw e;
   }
@@ -2668,7 +3258,7 @@ function stopKeeper() {
     process.kill(w.pid);
   } catch {
   }
-  rmSync4(KEEPER2, { force: true });
+  rmSync5(godFile(KEEPER2), { force: true });
   writeWarm({ ...w ?? {}, holder: void 0, phase: "stopped" });
   return k ? `stopped the look keeper (pid ${k.pid})` : starting ? `stopped the look keeper warm-up (pid ${w.pid})` : "no look keeper running";
 }
@@ -2691,7 +3281,7 @@ function drawableCount(snapshot3 = {}) {
   return (snapshot3.entities ?? []).filter((e) => drawable(e.def)).length;
 }
 function waitForShot({ expect = 0, timeoutMs = 6e5 } = {}) {
-  return new Promise((resolve6, reject) => {
+  return new Promise((resolve10, reject) => {
     let raf, timer, stable = 0, last = -1;
     const cleanup = () => {
       clearTimeout(timer);
@@ -2712,7 +3302,7 @@ function waitForShot({ expect = 0, timeoutMs = 6e5 } = {}) {
       last = drawn?.size ?? -1;
       if (ready && stable >= 2) {
         cleanup();
-        resolve6({ ready, drawn: drawn?.size ?? 0, want: expect, easing, shotReady: true });
+        resolve10({ ready, drawn: drawn?.size ?? 0, want: expect, easing, shotReady: true });
       } else raf = requestAnimationFrame(tick);
     };
     timer = setTimeout(() => {
@@ -2755,7 +3345,7 @@ function validateShot({ views, frames: frameCount = 1, every = 250, width = 1024
 async function shootLocal({ worldUrl, eye, at, out, hour, weather: weather2, hideRoofs = false, cut = null, span = 0, expect = 0, timeoutMs = Number(process.env.EDEN_GOD_LOOK_TIMEOUT_MS ?? LOOK_DEFAULT_MS), settleMs, cliPath, keep = false, width = 1024, height = 640, views, frames: frameCount = 1, every = 250, studio }, runtime = {}) {
   const sequence = views ?? [{ eye, at }], sheet = !!views || frameCount > 1;
   settleMs ??= sheet ? 0 : 800;
-  mkdirSync2(dirname(resolve4(out)), { recursive: true });
+  mkdirSync3(dirname2(resolve6(out)), { recursive: true });
   const now = runtime.now ?? Date.now, t0 = now();
   const overrides = { ...hour != null ? { hour } : {}, ...weather2 != null ? { weather: weather2 } : {} };
   const pw = runtime.pw === void 0 ? findPlaywright({ timeoutMs }) : runtime.pw;
@@ -2763,9 +3353,9 @@ async function shootLocal({ worldUrl, eye, at, out, hour, weather: weather2, hid
   if (!pw) {
     if (keep || sheet || studio) throw new Error("look: no Playwright found; sheets, motion frames and workbench need local Playwright and Google Chrome (--keep can fall back for a single view)");
     const q2 = new URLSearchParams({ shot: "1", eye: eye.join(","), at: at.join(","), ...hideRoofs ? { hideRoofs: "1", ...cut !== null ? { cut: String(cut) } : {} } : {}, ...overrides });
-    const r = (runtime.spawnSync ?? spawnSync2)("npx", ["-y", "playwright-core@1", "screenshot", "--channel", "chrome", "--wait-for-timeout", "30000", "--viewport-size", "1024,640", `${worldUrl}?${q2}`, resolve4(out)], { stdio: "pipe", encoding: "utf8", timeout: Math.max(1, timeoutMs - (now() - t0)), killSignal: "SIGKILL" });
+    const r = (runtime.spawnSync ?? spawnSync2)("npx", ["-y", "playwright-core@1", "screenshot", "--channel", "chrome", "--wait-for-timeout", "30000", "--viewport-size", "1024,640", `${worldUrl}?${q2}`, resolve6(out)], { stdio: "pipe", encoding: "utf8", timeout: Math.max(1, timeoutMs - (now() - t0)), killSignal: "SIGKILL" });
     if (r.status !== 0) throw new Error(`look: no Playwright found and npx playwright-core failed: ${(r.stderr || r.stdout || "").slice(0, 300)}. Install one (npm i -g playwright-core) and Google Chrome`);
-    return { file: resolve4(out), ms: now() - t0, via: "npx playwright-core screenshot" };
+    return { file: resolve6(out), ms: now() - t0, via: "npx playwright-core screenshot" };
   }
   let page, browser, release = () => {
   };
@@ -2826,8 +3416,8 @@ async function shootLocal({ worldUrl, eye, at, out, hour, weather: weather2, hid
       await page.waitForFunction(() => !!window.workbench, null, { timeout: timeoutMs, polling: "raf" });
       const result = await page.evaluate(async (payload) => window.workbench.render(payload), { ...studio, hour, width, height });
       runtime.signal?.throwIfAborted();
-      writeFileSync4(resolve4(out), Buffer.from(result.data.split(",")[1], "base64"));
-      return { file: resolve4(out), ms: now() - t0, via: "studio", ...result, data: void 0 };
+      writeFileSync5(resolve6(out), Buffer.from(result.data.split(",")[1], "base64"));
+      return { file: resolve6(out), ms: now() - t0, via: "studio", ...result, data: void 0 };
     }
     const waitMs = Math.max(1e3, timeoutMs - (now() - t0) - 2e3);
     const state = await (runtime.waitReady ? runtime.waitReady(page, { expect, timeoutMs: waitMs }) : page.evaluate(waitForShot, { expect, timeoutMs: waitMs }));
@@ -2921,8 +3511,8 @@ async function shootLocal({ worldUrl, eye, at, out, hour, weather: weather2, hid
     }
     const data = sheet ? await page.evaluate(composeSheet, { cells, width, height, strip: frameCount > 1 }) : cells[0].data;
     runtime.signal?.throwIfAborted();
-    writeFileSync4(resolve4(out), Buffer.from(data.split(",")[1], "base64"));
-    return { file: resolve4(out), ms: now() - t0, state, frames: sheet ? receipts : receipts[0], cells: cells.length, via: keep ? "keeper" : "chrome" };
+    writeFileSync5(resolve6(out), Buffer.from(data.split(",")[1], "base64"));
+    return { file: resolve6(out), ms: now() - t0, state, frames: sheet ? receipts : receipts[0], cells: cells.length, via: keep ? "keeper" : "chrome" };
   } finally {
     release();
     if (keep && page && !runtime.signal?.aborted) await page.evaluate(() => window.__lookRestore?.()).catch(() => {
@@ -2953,7 +3543,7 @@ async function shoot(options, runtime = {}) {
     }, ms);
   });
   try {
-    mkdirSync2(dirname(resolve4(options.out)), { recursive: true });
+    mkdirSync3(dirname2(resolve6(options.out)), { recursive: true });
     const args = { ...options, timeoutMs: ms };
     return await Promise.race([expired, withRemoteLook(args, scoped, () => shootLocal(args, scoped))]);
   } finally {
@@ -3437,7 +4027,7 @@ var LAYERS_POS = { hours: 1, event: 2, own: 2, access: 2, price: 2, currency: 1,
 var LAYERS_HELP = `layers: hours <ref> --open 07:00-15:00 (or 07:00-15:00@sat,sun) [--event "market 09:00 240 sat"] [--follow locked@open=false/true | on@dark=true/false] [--clear] (replaces the whole schedule) \xB7 event <ref> "market 09:00 240 sat" [--set market|concert] [--piece def@x,z[@yawdeg]] [--shift dx,dz] [--label "\u2026"] (adds one event; its set appears while it is on) \xB7 event <ref> <name> --remove \xB7 own <ref> <soul|god|group:x|none> [--private|--public] \xB7 access <ref> private|public|none \xB7 zone <name> <residential|commercial|park|farm|civic|industrial|wild> --rect|--circle|--area \xB7 zone-suggest <use> \xB7 layers \xB7 only where the world opts in (LAYERS=1): price <ref> <n|none> [--service "a coffee"] \xB7 currency <name> \xB7 give <soul> <n> \xB7 pay <from> <to> <n> \xB7 relate <a> <friend|neighbour|family|works-at|lives-at|member-of> <b> [--off]`;
 
 // lib/governance.mjs
-import { existsSync as existsSync7, readFileSync as readFileSync8 } from "node:fs";
+import { existsSync as existsSync8, readFileSync as readFileSync10 } from "node:fs";
 var clip = (s, n) => {
   const t = String(s ?? "").replace(/\s+/g, " ").trim();
   return t.length > n ? t.slice(0, n - 1) + "\u2026" : t;
@@ -3482,7 +4072,7 @@ function decideBody(id, decision, f = {}) {
   let text;
   if (f.text !== void 0) {
     if (typeof f.text !== "string" || !f.text.trim()) throw new Error("--text needs the new constitution (markdown, or a file holding it)");
-    text = existsSync7(f.text) && !f.text.includes("\n") ? readFileSync8(f.text, "utf8") : f.text;
+    text = existsSync8(f.text) && !f.text.includes("\n") ? readFileSync10(f.text, "utf8") : f.text;
   }
   return { decision, ...reason ? { reason } : {}, ...text !== void 0 ? { text } : {} };
 }
@@ -3546,7 +4136,964 @@ function missingAbout(m, { kind, limit = 30 } = {}) {
 }
 
 // lib/version.mjs
-var SKILL_VERSION = "1.7";
+var SKILL_VERSION = "1.8";
+
+// lib/upload.mjs
+import { existsSync as existsSync9, readFileSync as readFileSync11 } from "node:fs";
+import { basename as basename2, dirname as dirname3, resolve as resolve7 } from "node:path";
+
+// lib/glb.mjs
+var DEFAULT_BUDGET = Object.freeze({ tris: 8e4, bytes: 3e6, texPx: 2048 });
+var IMAGE_BUDGET = Object.freeze({ bytes: 2e6, texPx: 2048 });
+var DECODABLE = /* @__PURE__ */ new Set(["KHR_draco_mesh_compression", "EXT_meshopt_compression", "EXT_texture_webp", "KHR_mesh_quantization", "KHR_texture_transform", "KHR_materials_unlit", "KHR_materials_emissive_strength", "KHR_texture_basisu"]);
+var WARN_EXTENSIONS = /* @__PURE__ */ new Set(["KHR_texture_basisu"]);
+var u32 = (b, p) => (b[p] | b[p + 1] << 8 | b[p + 2] << 16 | b[p + 3] << 24) >>> 0;
+var ascii = (b, s, e) => String.fromCharCode(...b.subarray(s, e));
+function sniff(b) {
+  if (b.length >= 4 && ascii(b, 0, 4) === "glTF") return "glb";
+  if (b.length >= 8 && b[0] === 137 && ascii(b, 1, 4) === "PNG") return "png";
+  if (b.length >= 3 && b[0] === 255 && b[1] === 216 && b[2] === 255) return "jpg";
+  if (b.length >= 12 && ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 12) === "WEBP") return "webp";
+  let i = 0;
+  while (i < b.length && /\s/.test(String.fromCharCode(b[i]))) i++;
+  return b[i] === 123 ? "json" : "unknown";
+}
+function imageSize(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  if (b.length > 24 && b[0] === 137 && ascii(b, 1, 4) === "PNG") return { w: dv.getUint32(16), h: dv.getUint32(20), type: "png" };
+  if (b.length > 4 && b[0] === 255 && b[1] === 216) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 255) {
+        i++;
+        continue;
+      }
+      const marker = b[i + 1], len = dv.getUint16(i + 2);
+      if (marker >= 192 && marker <= 207 && marker !== 196 && marker !== 200 && marker !== 204) return { w: dv.getUint16(i + 7), h: dv.getUint16(i + 5), type: "jpg" };
+      i += 2 + len;
+    }
+    return { w: 0, h: 0, type: "jpg" };
+  }
+  if (b.length > 30 && ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 12) === "WEBP") {
+    const fmt = ascii(b, 12, 16);
+    if (fmt === "VP8 ") return { w: dv.getUint16(26, true) & 16383, h: dv.getUint16(28, true) & 16383, type: "webp" };
+    if (fmt === "VP8L") {
+      const v = dv.getUint32(21, true);
+      return { w: (v & 16383) + 1, h: (v >> 14 & 16383) + 1, type: "webp" };
+    }
+    if (fmt === "VP8X") return { w: 1 + (b[24] | b[25] << 8 | b[26] << 16), h: 1 + (b[27] | b[28] << 8 | b[29] << 16), type: "webp" };
+    return { w: 0, h: 0, type: "webp" };
+  }
+  return { w: 0, h: 0, type: "unknown" };
+}
+function parseGlb(b) {
+  if (b.length < 20) throw new Error("not a GLB (too short)");
+  if (ascii(b, 0, 4) !== "glTF") throw new Error('not a GLB (magic is not "glTF"): export binary glTF 2.0 (.glb), not .gltf, .obj or .fbx');
+  if (u32(b, 4) !== 2) throw new Error(`GLB version ${u32(b, 4)}; only glTF 2.0 is accepted`);
+  const total = u32(b, 8);
+  if (total !== b.length) throw new Error(total > b.length ? "GLB truncated" : "GLB length does not match the file");
+  let off = 12, json2 = null, bin = null;
+  while (off + 8 <= total) {
+    const len = u32(b, off), type = u32(b, off + 4);
+    if (len % 4 || off + 8 + len > total) throw new Error("GLB chunk is misaligned or truncated");
+    if (off === 12 && type !== 1313821514) throw new Error("GLB first chunk must be JSON");
+    const chunk = b.subarray(off + 8, off + 8 + len);
+    if (type === 1313821514) {
+      if (json2) throw new Error("GLB has duplicate JSON chunks");
+      json2 = JSON.parse(new TextDecoder().decode(chunk));
+    } else if (type === 5130562) {
+      if (bin) throw new Error("GLB has duplicate BIN chunks");
+      bin = chunk;
+    }
+    off += 8 + len;
+  }
+  if (!json2 || typeof json2 !== "object" || Array.isArray(json2)) throw new Error("GLB JSON chunk must be an object");
+  return { json: json2, bin };
+}
+var I4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+function mul(a, b) {
+  const o = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+function trs(t = [0, 0, 0], q = [0, 0, 0, 1], s = [1, 1, 1]) {
+  const [x, y, z, w] = q, [sx, sy, sz] = s;
+  return [(1 - 2 * (y * y + z * z)) * sx, 2 * (x * y + z * w) * sx, 2 * (x * z - y * w) * sx, 0, 2 * (x * y - z * w) * sy, (1 - 2 * (x * x + z * z)) * sy, 2 * (y * z + x * w) * sy, 0, 2 * (x * z + y * w) * sz, 2 * (y * z - x * w) * sz, (1 - 2 * (x * x + y * y)) * sz, 0, t[0], t[1], t[2], 1];
+}
+var apply = (m, p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]];
+var NORM = { 5120: 127, 5121: 255, 5122: 32767, 5123: 65535 };
+var r3 = (v) => Math.round(v * 1e3) / 1e3;
+function measureGlb(bytes) {
+  const { json: json2, bin } = parseGlb(bytes);
+  if (!String(json2.asset?.version ?? "").startsWith("2")) throw new Error("glTF asset.version must be 2.x");
+  for (const b of json2.buffers ?? []) if (b.uri && !b.uri.startsWith("data:")) throw new Error(`external buffer ${b.uri}: the GLB must be self-contained (export with embedded buffers)`);
+  for (const im of json2.images ?? []) if (im.uri && !im.uri.startsWith("data:")) throw new Error(`external image ${im.uri}: embed textures in the GLB`);
+  const required = json2.extensionsRequired ?? [];
+  const missing = required.filter((e) => !DECODABLE.has(e));
+  if (missing.length) throw new Error(`required extension(s) the viewer cannot decode: ${missing.join(", ")} (use meshopt + KHR_mesh_quantization for geometry, WebP for textures)`);
+  const acc = json2.accessors ?? [];
+  let tris = 0;
+  for (const [mi, m] of (json2.meshes ?? []).entries()) for (const [pi, p] of (m.primitives ?? []).entries()) {
+    const field = `meshes.${mi}.primitives.${pi}`;
+    const position = acc[p.attributes?.POSITION];
+    if (!position || position.min?.length !== 3 || position.max?.length !== 3) throw new Error(`${field}.attributes.POSITION needs an accessor with 3D min/max bounds`);
+    const mode = p.mode ?? 4, n = p.indices !== void 0 ? acc[p.indices]?.count ?? 0 : position.count ?? 0;
+    tris += mode === 4 ? n / 3 : mode === 5 || mode === 6 ? Math.max(0, n - 2) : 0;
+  }
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const nodes = json2.nodes ?? [], scene = json2.scenes?.[json2.scene ?? 0];
+  const roots = scene?.nodes ?? nodes.map((_, i) => i).filter((i) => !nodes.some((n) => n.children?.includes(i)));
+  const world = /* @__PURE__ */ new Map();
+  const walk = (i, parent, depth) => {
+    const n = nodes[i];
+    if (!n || depth > 64 || world.has(i)) return;
+    const m = mul(parent, n.matrix ?? trs(n.translation, n.rotation, n.scale));
+    world.set(i, m);
+    for (const c of n.children ?? []) walk(c, m, depth + 1);
+  };
+  for (const r of roots) walk(r, I4, 0);
+  for (const [i, m] of world) {
+    const n = nodes[i];
+    if (n.mesh === void 0) continue;
+    const mm = n.skin !== void 0 && json2.skins?.[n.skin]?.joints?.length ? world.get(json2.skins[n.skin].joints[0]) ?? m : m;
+    for (const p of json2.meshes?.[n.mesh]?.primitives ?? []) {
+      const a = acc[p.attributes?.POSITION];
+      if (!a?.min || !a.max) continue;
+      const k = a.normalized ? NORM[a.componentType] ?? 1 : 1, mn = a.min.map((v) => v / k), mx = a.max.map((v) => v / k);
+      for (let c = 0; c < 8; c++) {
+        const q = apply(mm, [c & 1 ? mx[0] : mn[0], c & 2 ? mx[1] : mn[1], c & 4 ? mx[2] : mn[2]]);
+        for (let j = 0; j < 3; j++) {
+          lo[j] = Math.min(lo[j], q[j]);
+          hi[j] = Math.max(hi[j], q[j]);
+        }
+      }
+    }
+  }
+  if (![...lo, ...hi].every(Number.isFinite)) throw new Error("GLB has no measurable geometry (no finite POSITION min/max)");
+  let texPx = 0;
+  const views = json2.bufferViews ?? [];
+  for (const im of json2.images ?? []) {
+    let b = null;
+    if (im.bufferView !== void 0 && bin) {
+      const v = views[im.bufferView];
+      if (v) b = bin.subarray(v.byteOffset ?? 0, (v.byteOffset ?? 0) + Math.min(v.byteLength, 4096));
+    } else if (im.uri?.startsWith("data:")) b = Uint8Array.from(Buffer.from(im.uri.slice(im.uri.indexOf(",") + 1, im.uri.indexOf(",") + 1 + 8192), "base64"));
+    if (b) {
+      const s = imageSize(b);
+      texPx = Math.max(texPx, s.w, s.h);
+    }
+  }
+  return {
+    tris: Math.round(tris),
+    bytes: bytes.byteLength,
+    textures: (json2.images ?? []).length,
+    texPx,
+    box: [r3(hi[0] - lo[0]), r3(hi[1] - lo[1]), r3(hi[2] - lo[2])],
+    min: lo.map(r3),
+    max: hi.map(r3),
+    animations: (json2.animations ?? []).map((a, i) => a.name ?? `clip-${i}`),
+    skins: (json2.skins ?? []).length,
+    meshes: (json2.meshes ?? []).length,
+    materials: (json2.materials ?? []).length,
+    nodes: roots.map((r) => nodes[r]?.name ?? `node-${r}`),
+    extensionsUsed: json2.extensionsUsed ?? [],
+    extensionsRequired: required,
+    vertexColors: (json2.meshes ?? []).some((m) => (m.primitives ?? []).some((p) => p.attributes?.COLOR_0 !== void 0))
+  };
+}
+var MB = (n) => `${(n / 1e6).toFixed(2)} MB`;
+var FIX = "reduce it first: node tools/god-skill/scripts/optimize-glb.mjs <file> --out <dir> --kind hero|scene|character|head|prop (or, without the repo: npx @gltf-transform/cli optimize in.glb out.glb --simplify-error 0.01 --texture-size 1024 --texture-compress webp --compress meshopt), then upload the output";
+function budgetRefusals(m, budget = DEFAULT_BUDGET) {
+  const out = [];
+  if (m.tris > budget.tris) out.push({ code: "asset.budget", field: "tris", measured: m.tris, allowed: budget.tris, message: `${m.tris.toLocaleString("en-US")} triangles > ${budget.tris.toLocaleString("en-US")}` });
+  if (m.bytes > budget.bytes) out.push({ code: "asset.budget", field: "bytes", measured: m.bytes, allowed: budget.bytes, message: `${MB(m.bytes)} > ${MB(budget.bytes)}` });
+  if (m.texPx > budget.texPx) out.push({ code: "asset.budget", field: "texPx", measured: m.texPx, allowed: budget.texPx, message: `a ${m.texPx} px texture > ${budget.texPx} px` });
+  return out;
+}
+function adviceFor(m) {
+  const out = [];
+  for (const e of m.extensionsUsed) if (WARN_EXTENSIONS.has(e)) out.push(`${e}: the web viewer has no KTX2 transcoder; these textures will not show. Use WebP (EXT_texture_webp).`);
+  if (m.texPx > 1024) out.push(`largest texture ${m.texPx} px: the viewer fits colour maps to 1024 px and other maps to 512 px on load; 2048 only pays off on a hero piece seen up close`);
+  if (m.tris > 6e3) out.push(`${m.tris.toLocaleString("en-US")} triangles: above the prop (400) and building (6000) guides; fine for a landmark, heavy if placed many times`);
+  if (m.box[1] < 0.05 || m.box[1] > 200) out.push(`measured height ${m.box[1]} m looks unlike metres; pass --height <m> to scale it`);
+  if (m.animations.length && !m.animations.some((a) => /^(idle|walk)$/i.test(a))) out.push(`clips ${m.animations.join(", ")}: name one Idle and one Walk (Fly/Swim/Run count as Walk) or the first clip plays for everything`);
+  return out;
+}
+function describeMeasure(m) {
+  return `${m.tris.toLocaleString("en-US")} tris, ${MB(m.bytes)}, ${m.textures} texture${m.textures === 1 ? "" : "s"}${m.textures ? ` (max ${m.texPx} px)` : ""}, box ${m.box.join(" \xD7 ")} m, clips ${m.animations.join(", ") || "none"}${m.skins ? `, ${m.skins} skin${m.skins === 1 ? "" : "s"}` : ""}${m.vertexColors ? ", vertex colours" : ""}`;
+}
+var UPLOAD_FIELDS = ["name", "height", "tags", "license", "source", "description", "layer", "define"];
+var MANIFEST_SCHEMA = "god-upload-manifest/1";
+function readManifest(doc) {
+  if (!doc || doc.schema !== MANIFEST_SCHEMA) throw new Error(`manifest.schema must be "${MANIFEST_SCHEMA}"`);
+  if (!Array.isArray(doc.assets) || !doc.assets.length) throw new Error("manifest.assets must be a non-empty array of { file, name, \u2026 }");
+  return doc.assets.map((a, i) => {
+    if (!a || typeof a.file !== "string" || !a.file) throw new Error(`assets[${i}].file must be a path`);
+    if (a.name !== void 0 && typeof a.name !== "string") throw new Error(`assets[${i}].name must be a string`);
+    if (a.height !== void 0 && !(Number(a.height) > 0 && Number(a.height) < 400)) throw new Error(`assets[${i}].height must be metres in (0, 400)`);
+    if (a.layer !== void 0 && !["solid", "decor"].includes(a.layer)) throw new Error(`assets[${i}].layer must be solid or decor`);
+    if (a.tags !== void 0 && !(Array.isArray(a.tags) || typeof a.tags === "string")) throw new Error(`assets[${i}].tags must be an array or a comma list`);
+    const unknown = Object.keys(a).filter((k) => !["file", "footprint", ...UPLOAD_FIELDS].includes(k));
+    if (unknown.length) throw new Error(`assets[${i}]: unknown field(s) ${unknown.join(", ")}; allowed: file, footprint, ${UPLOAD_FIELDS.join(", ")}`);
+    return { ...a, tags: Array.isArray(a.tags) ? a.tags.join(",") : a.tags };
+  });
+}
+
+// lib/upload.mjs
+var FOOTPRINT_BYTES = 1e6;
+var MIME = { glb: "model/gltf-binary", png: "image/png", jpg: "image/jpeg" };
+var USAGE = "usage: upload <file.glb|png|jpg> --name <n> [--height m] [--tags a,b] [--license \u2026] [--source \u2026] [--description \u2026] [--layer solid|decor] [--footprint fp.json] [--define] [--dry]  |  upload <manifest.json> [--dry]";
+var one = (v) => Array.isArray(v) ? v[v.length - 1] : v;
+function inspectFile(bytes, { footprint } = {}, budget = DEFAULT_BUDGET) {
+  const kind = sniff(bytes), refusals = [], advice = [];
+  let measure = null, mime;
+  if (kind === "glb") {
+    try {
+      measure = measureGlb(bytes);
+    } catch (e) {
+      return { kind, refusals: [{ code: "asset.invalid", field: "file", message: e.message, fix: /extension|self-contained|embed/.test(e.message) ? FIX : "export a valid self-contained binary glTF 2.0 file" }], advice, measure: null };
+    }
+    refusals.push(...budgetRefusals(measure, budget).map((r) => ({ ...r, fix: FIX })));
+    advice.push(...adviceFor(measure));
+    mime = MIME.glb;
+  } else if (kind === "png" || kind === "jpg") {
+    const s = imageSize(bytes);
+    measure = { tris: 0, bytes: bytes.byteLength, textures: 1, texPx: Math.max(s.w, s.h), box: [s.w, s.h, 0], animations: [], skins: 0, image: s };
+    if (!(s.w > 0 && s.h > 0)) refusals.push({ code: "asset.invalid", field: "file", message: "image has no readable dimensions" });
+    if (bytes.byteLength > Math.min(budget.bytes, IMAGE_BUDGET.bytes)) refusals.push({ code: "asset.budget", field: "bytes", measured: bytes.byteLength, allowed: Math.min(budget.bytes, IMAGE_BUDGET.bytes), message: `image ${(bytes.byteLength / 1e6).toFixed(2)} MB > ${(Math.min(budget.bytes, IMAGE_BUDGET.bytes) / 1e6).toFixed(2)} MB`, fix: "resize or recompress the image (JPEG quality 85 is plenty for a sign or a picture)" });
+    if (measure.texPx > budget.texPx) refusals.push({ code: "asset.budget", field: "texPx", measured: measure.texPx, allowed: budget.texPx, message: `image ${s.w}\xD7${s.h} > ${budget.texPx} px`, fix: `resize so the longer side is at most ${budget.texPx} px` });
+    mime = MIME[kind];
+  } else {
+    refusals.push({ code: "asset.type", field: "file", message: `${kind === "webp" ? "a standalone WebP" : kind === "json" ? "JSON that is not a god-upload-manifest/1" : "an unknown file type"}; accepted: GLB (binary glTF 2.0), PNG, JPEG`, fix: kind === "webp" ? "WebP is fine inside a GLB; a standalone image must be PNG or JPEG" : "export .glb (not .gltf/.obj/.fbx), .png or .jpg" });
+  }
+  if (footprint !== void 0) {
+    if (footprint.byteLength > FOOTPRINT_BYTES) refusals.push({ code: "asset.budget", field: "footprint", measured: footprint.byteLength, allowed: FOOTPRINT_BYTES, message: `footprint ${footprint.byteLength} bytes > ${FOOTPRINT_BYTES}` });
+    try {
+      const fp = JSON.parse(new TextDecoder().decode(footprint));
+      if (!fp || typeof fp !== "object" || Array.isArray(fp)) throw 0;
+      if (fp.schema && fp.schema !== "lm-building-footprint/1") throw new Error(`schema ${fp.schema}`);
+    } catch (e) {
+      refusals.push({ code: "asset.invalid", field: "footprint", message: `footprint is not an lm-building-footprint/1 object${e?.message ? ` (${e.message})` : ""}` });
+    }
+    if (kind !== "glb") refusals.push({ code: "asset.invalid", field: "footprint", message: "a footprint goes with a GLB, not an image" });
+  }
+  return { kind, mime, measure, refusals, advice };
+}
+var refusalLine = (file, r) => `REFUSED ${file}: ${r.code}${r.field ? ` ${r.field}` : ""}: ${r.message}${r.measured !== void 0 && typeof r.measured !== "object" ? ` (measured ${r.measured}, allowed ${r.allowed})` : ""}${r.fix ? `
+  fix: ${r.fix}` : ""}`;
+async function uploadOne(entry, { dry = false, budget = DEFAULT_BUDGET, send = postAsset } = {}) {
+  const file = entry.file, label = basename2(file);
+  if (!existsSync9(file)) return { ok: false, refused: true, lines: [`REFUSED ${label}: no such file ${file}`] };
+  const bytes = new Uint8Array(readFileSync11(file));
+  if (!bytes.byteLength) return { ok: false, refused: true, lines: [`REFUSED ${label}: the file is empty`] };
+  let footprint;
+  if (entry.footprint) {
+    if (!existsSync9(entry.footprint)) return { ok: false, refused: true, lines: [`REFUSED ${label}: no such footprint ${entry.footprint}`] };
+    footprint = new Uint8Array(readFileSync11(entry.footprint));
+  }
+  const height = entry.height !== void 0 && entry.height !== "" ? Number(entry.height) : void 0;
+  if (height !== void 0 && !(height > 0 && height < 400)) return { ok: false, refused: true, lines: [`REFUSED ${label}: --height must be metres in (0, 400), got ${entry.height}`] };
+  const insp = inspectFile(bytes, { footprint }, budget);
+  if (insp.refusals.length) return { ok: false, refused: true, measure: insp.measure, lines: insp.refusals.map((r4) => refusalLine(label, r4)) };
+  const fields = {};
+  for (const k of UPLOAD_FIELDS) {
+    const v = entry[k];
+    if (v === void 0 || v === "" || v === false) continue;
+    fields[k] = k === "define" ? "1" : String(v);
+  }
+  const what = `${insp.measure.tris !== void 0 && insp.kind === "glb" ? "mesh" : "image"} ${label}: ${describeMeasure(insp.measure)}`;
+  const meta = [fields.name && `as ${fields.name}`, height !== void 0 && `height ${height} m`, footprint && "with footprint", fields.define && "define"].filter(Boolean).join(", ");
+  if (dry) return { ok: true, dry: true, measure: insp.measure, lines: [`would upload ${what}${meta ? ` (${meta})` : ""}`, ...insp.advice.map((a) => `  note: ${a}`)] };
+  const r = await send({ bytes, mime: insp.mime, filename: label, footprint, fields });
+  if (!r.ok) {
+    const d2 = r.data ?? {};
+    const detail = d2.measured !== void 0 || d2.allowed !== void 0 ? `
+  measured ${JSON.stringify(d2.measured)} allowed ${JSON.stringify(d2.allowed)}` : "";
+    return { ok: false, response: r, lines: [`REFUSED ${label}: HTTP ${r.status} ${d2.code ?? ""}${d2.field ? ` ${d2.field}` : ""}: ${d2.message ?? d2.raw ?? ""}${detail}${d2.fix ? `
+  fix: ${d2.fix}` : ""}`] };
+  }
+  const d = r.data, lines = [`uploaded ${what}${meta ? ` (${meta})` : ""}`, `  ${d.asset?.url ?? ""}  sha ${d.asset?.sha ?? "?"}`];
+  if (d.footprint) lines.push(`  footprint: ${d.footprint.rooms} rooms, ${d.footprint.openings} openings, ${d.footprint.links} links, ${d.footprint.colliders} colliders`);
+  if (d.def) {
+    const ref = `${d.def.name}@${d.def.version ?? 1}`;
+    if (d.defined?.accepted) lines.push(`  defined ${ref} (${d.def.size.box.map((v) => Math.round(v * 100) / 100).join(" \xD7 ")} m, layer ${d.def.layer}) \u2014 place it with: place ${ref} --at \u2026`);
+    else if (d.defined) lines.push(`  define REFUSED: ${(d.defined.failures ?? []).map((f) => `${f.code}${f.field ? ` ${f.field}` : ""}: ${f.message}`).join("; ")}`);
+    else lines.push(`  def ${ref} proposed, not defined: rerun with --define, or edit it and run define`);
+  } else if (!fields.name && insp.kind === "glb") lines.push("  no --name: stored only; give --name (and --define) to make it placeable");
+  for (const w of d.warnings ?? []) lines.push(`  note: ${w}`);
+  const said = (s) => s.replace(/[,\s]/g, "").slice(0, 24);
+  for (const a of insp.advice) if (!(d.warnings ?? []).some((w) => said(w) === said(a))) lines.push(`  note: ${a}`);
+  return { ok: true, response: r, measure: insp.measure, lines };
+}
+async function postAsset({ bytes, mime, filename, footprint, fields }, { timeoutMs = Number(process.env.EDEN_GOD_TIMEOUT_MS ?? 18e4) } = {}) {
+  const s = load();
+  if (!s.world) throw new Error("Run: node eden-god.mjs register <world-url>");
+  if (!s.token) throw new Error("no god token: run pair (or mint on a dev server)");
+  const fd = new FormData();
+  fd.set("file", new Blob([bytes], { type: mime }), filename);
+  if (footprint) fd.set("footprint", new Blob([footprint], { type: "application/json" }), "footprint.json");
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  const headers = { authorization: `Bearer ${s.token}`, "x-eden-god-holder": JSON.stringify(holder("eden-god CLI")) };
+  const r = await fetchWithRetry(`${s.world}/v1/god/assets`, { method: "POST", headers, body: fd, timeoutMs }, { fetch: wireFetch });
+  const text = await r.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text.slice(0, 400) };
+  }
+  return { ok: r.ok, status: r.status, data };
+}
+async function upload(path, flags2 = {}, deps = {}) {
+  if (!path) throw new Error(USAGE);
+  if (!existsSync9(path)) throw new Error(`upload: no such file ${path}`);
+  const bytes = new Uint8Array(readFileSync11(path));
+  const dry = !!flags2.dry;
+  let entries;
+  if (sniff(bytes) === "json") {
+    let doc;
+    try {
+      doc = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      throw new Error(`upload: ${path} is not JSON`);
+    }
+    if (doc?.schema !== MANIFEST_SCHEMA) throw new Error(`upload: a JSON argument must be a ${MANIFEST_SCHEMA} (schema: "${MANIFEST_SCHEMA}", assets: [{ file, name, height, \u2026 }]); a footprint goes with --footprint beside its GLB`);
+    for (const k of UPLOAD_FIELDS) if (flags2[k] !== void 0) throw new Error(`upload <manifest>: --${k} belongs in the manifest's entries, not on the command`);
+    const dir = dirname3(resolve7(path));
+    entries = readManifest(doc).map((a) => ({ ...a, file: resolve7(dir, a.file), ...a.footprint ? { footprint: resolve7(dir, a.footprint) } : {} }));
+  } else {
+    const entry = { file: path };
+    for (const k of UPLOAD_FIELDS) if (flags2[k] !== void 0) entry[k] = k === "tags" ? [].concat(flags2[k]).join(",") : one(flags2[k]);
+    if (flags2.footprint !== void 0) entry.footprint = one(flags2.footprint);
+    if (entry.layer !== void 0 && !["solid", "decor"].includes(entry.layer)) throw new Error("--layer is solid or decor");
+    entries = [entry];
+  }
+  const results = [];
+  for (const e of entries) results.push({ file: e.file, ...await uploadOne(e, { dry, send: deps.send }) });
+  if (flags2.json) return results.map(({ lines, ...r }) => ({ ...r, text: lines.join("\n") }));
+  const out = results.flatMap((r) => r.lines);
+  if (entries.length > 1) {
+    const sent = results.filter((r) => r.ok).length, refused3 = results.filter((r) => !r.ok);
+    out.push(`${dry ? "would upload" : "uploaded"} ${sent} of ${entries.length}${refused3.length ? `; refused ${refused3.length}: ${refused3.map((r) => basename2(r.file)).join(", ")}` : ""}`);
+  }
+  return out.join("\n");
+}
+
+// lib/thumbnail.mjs
+import { mkdtempSync, readFileSync as readFileSync12, rmSync as rmSync6, writeFileSync as writeFileSync6 } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as join3, resolve as resolve8 } from "node:path";
+
+// lib/jpeg.mjs
+import { inflateSync } from "node:zlib";
+var ZIGZAG = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
+var LUMA_Q = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99];
+var CHROMA_Q = [17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99, ...Array(32).fill(99)];
+var DC_LUMA = [[0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]];
+var DC_CHROMA = [[0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]];
+var AC_LUMA = [[0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125], [
+  1,
+  2,
+  3,
+  0,
+  4,
+  17,
+  5,
+  18,
+  33,
+  49,
+  65,
+  6,
+  19,
+  81,
+  97,
+  7,
+  34,
+  113,
+  20,
+  50,
+  129,
+  145,
+  161,
+  8,
+  35,
+  66,
+  177,
+  193,
+  21,
+  82,
+  209,
+  240,
+  36,
+  51,
+  98,
+  114,
+  130,
+  9,
+  10,
+  22,
+  23,
+  24,
+  25,
+  26,
+  37,
+  38,
+  39,
+  40,
+  41,
+  42,
+  52,
+  53,
+  54,
+  55,
+  56,
+  57,
+  58,
+  67,
+  68,
+  69,
+  70,
+  71,
+  72,
+  73,
+  74,
+  83,
+  84,
+  85,
+  86,
+  87,
+  88,
+  89,
+  90,
+  99,
+  100,
+  101,
+  102,
+  103,
+  104,
+  105,
+  106,
+  115,
+  116,
+  117,
+  118,
+  119,
+  120,
+  121,
+  122,
+  131,
+  132,
+  133,
+  134,
+  135,
+  136,
+  137,
+  138,
+  146,
+  147,
+  148,
+  149,
+  150,
+  151,
+  152,
+  153,
+  154,
+  162,
+  163,
+  164,
+  165,
+  166,
+  167,
+  168,
+  169,
+  170,
+  178,
+  179,
+  180,
+  181,
+  182,
+  183,
+  184,
+  185,
+  186,
+  194,
+  195,
+  196,
+  197,
+  198,
+  199,
+  200,
+  201,
+  202,
+  210,
+  211,
+  212,
+  213,
+  214,
+  215,
+  216,
+  217,
+  218,
+  225,
+  226,
+  227,
+  228,
+  229,
+  230,
+  231,
+  232,
+  233,
+  234,
+  241,
+  242,
+  243,
+  244,
+  245,
+  246,
+  247,
+  248,
+  249,
+  250
+]];
+var AC_CHROMA = [[0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119], [
+  0,
+  1,
+  2,
+  3,
+  17,
+  4,
+  5,
+  33,
+  49,
+  6,
+  18,
+  65,
+  81,
+  7,
+  97,
+  113,
+  19,
+  34,
+  50,
+  129,
+  8,
+  20,
+  66,
+  145,
+  161,
+  177,
+  193,
+  9,
+  35,
+  51,
+  82,
+  240,
+  21,
+  98,
+  114,
+  209,
+  10,
+  22,
+  36,
+  52,
+  225,
+  37,
+  241,
+  23,
+  24,
+  25,
+  26,
+  38,
+  39,
+  40,
+  41,
+  42,
+  53,
+  54,
+  55,
+  56,
+  57,
+  58,
+  67,
+  68,
+  69,
+  70,
+  71,
+  72,
+  73,
+  74,
+  83,
+  84,
+  85,
+  86,
+  87,
+  88,
+  89,
+  90,
+  99,
+  100,
+  101,
+  102,
+  103,
+  104,
+  105,
+  106,
+  115,
+  116,
+  117,
+  118,
+  119,
+  120,
+  121,
+  122,
+  130,
+  131,
+  132,
+  133,
+  134,
+  135,
+  136,
+  137,
+  138,
+  146,
+  147,
+  148,
+  149,
+  150,
+  151,
+  152,
+  153,
+  154,
+  162,
+  163,
+  164,
+  165,
+  166,
+  167,
+  168,
+  169,
+  170,
+  178,
+  179,
+  180,
+  181,
+  182,
+  183,
+  184,
+  185,
+  186,
+  194,
+  195,
+  196,
+  197,
+  198,
+  199,
+  200,
+  201,
+  202,
+  210,
+  211,
+  212,
+  213,
+  214,
+  215,
+  216,
+  217,
+  218,
+  226,
+  227,
+  228,
+  229,
+  230,
+  231,
+  232,
+  233,
+  234,
+  242,
+  243,
+  244,
+  245,
+  246,
+  247,
+  248,
+  249,
+  250
+]];
+function codes([counts, symbols]) {
+  const out = /* @__PURE__ */ new Map();
+  let code = 0, k = 0;
+  for (let len = 1; len <= 16; len++) {
+    for (let i = 0; i < counts[len - 1]; i++) out.set(symbols[k++], [code++, len]);
+    code <<= 1;
+  }
+  return out;
+}
+var scaled = (table, quality) => {
+  const q = Math.min(100, Math.max(1, Math.round(quality))), s = q < 50 ? 5e3 / q : 200 - 2 * q;
+  return table.map((v) => Math.min(255, Math.max(1, Math.floor((v * s + 50) / 100))));
+};
+var A = Array.from({ length: 8 }, (_, u) => Array.from({ length: 8 }, (_2, x) => (u ? 1 : Math.SQRT1_2) / 2 * Math.cos((2 * x + 1) * u * Math.PI / 16)));
+var Bits = class {
+  constructor() {
+    this.bytes = [];
+    this.acc = 0;
+    this.n = 0;
+  }
+  put(code, len) {
+    for (let i = len - 1; i >= 0; i--) {
+      this.acc = this.acc << 1 | code >> i & 1;
+      if (++this.n === 8) {
+        this.bytes.push(this.acc);
+        if (this.acc === 255) this.bytes.push(0);
+        this.acc = 0;
+        this.n = 0;
+      }
+    }
+  }
+  flush() {
+    if (this.n) this.put((1 << 8 - this.n) - 1, 8 - this.n);
+  }
+  // pad with 1s
+};
+var magnitude = (v) => {
+  let a = Math.abs(v), n = 0;
+  while (a) {
+    n++;
+    a >>= 1;
+  }
+  return n;
+};
+function encodeJpeg({ width, height, data, channels = 4 }, { quality = 82 } = {}) {
+  if (!(width > 0 && height > 0 && width < 65536 && height < 65536) || data.length < width * height * channels) throw Error("jpeg: bad image size");
+  const ql = scaled(LUMA_Q, quality), qc = scaled(CHROMA_Q, quality);
+  const dcL = codes(DC_LUMA), acL = codes(AC_LUMA), dcC = codes(DC_CHROMA), acC = codes(AC_CHROMA);
+  const W = Math.ceil(width / 16) * 16, H = Math.ceil(height / 16) * 16;
+  const Y = new Float32Array(W * H), Cb = new Float32Array(W * H), Cr = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const o = (Math.min(y, height - 1) * width + Math.min(x, width - 1)) * channels, r = data[o], g = data[o + 1], b = data[o + 2], i = y * W + x;
+    Y[i] = 0.299 * r + 0.587 * g + 0.114 * b - 128;
+    Cb[i] = -0.168736 * r - 0.331264 * g + 0.5 * b;
+    Cr[i] = 0.5 * r - 0.418688 * g - 0.081312 * b;
+  }
+  const bits = new Bits(), block = new Float32Array(64), tmp = new Float32Array(64), pred = [0, 0, 0];
+  const encodeBlock = (q, dc, ac, comp) => {
+    for (let v = 0; v < 8; v++) for (let x = 0; x < 8; x++) {
+      let s = 0;
+      for (let y = 0; y < 8; y++) s += A[v][y] * block[y * 8 + x];
+      tmp[v * 8 + x] = s;
+    }
+    const zz = new Int32Array(64);
+    for (let v = 0; v < 8; v++) for (let u = 0; u < 8; u++) {
+      let s = 0;
+      for (let x = 0; x < 8; x++) s += tmp[v * 8 + x] * A[u][x];
+      block[v * 8 + u] = s;
+    }
+    for (let i = 0; i < 64; i++) zz[i] = Math.round(block[ZIGZAG[i]] / q[ZIGZAG[i]]);
+    const diff = zz[0] - pred[comp];
+    pred[comp] = zz[0];
+    const n = magnitude(diff);
+    bits.put(...dc.get(n));
+    if (n) bits.put(diff < 0 ? diff + (1 << n) - 1 : diff, n);
+    let run = 0;
+    for (let i = 1; i < 64; i++) {
+      const c = zz[i];
+      if (!c) {
+        run++;
+        continue;
+      }
+      while (run > 15) {
+        bits.put(...ac.get(240));
+        run -= 16;
+      }
+      const m = magnitude(c);
+      bits.put(...ac.get(run << 4 | m));
+      bits.put(c < 0 ? c + (1 << m) - 1 : c, m);
+      run = 0;
+    }
+    if (run) bits.put(...ac.get(0));
+  };
+  for (let my = 0; my < H; my += 16) for (let mx = 0; mx < W; mx += 16) {
+    for (const [ox, oy] of [[0, 0], [8, 0], [0, 8], [8, 8]]) {
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) block[y * 8 + x] = Y[(my + oy + y) * W + mx + ox + x];
+      encodeBlock(ql, dcL, acL, 0);
+    }
+    for (const [plane, comp] of [[Cb, 1], [Cr, 2]]) {
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const i = (my + 2 * y) * W + mx + 2 * x;
+        block[y * 8 + x] = (plane[i] + plane[i + 1] + plane[i + W] + plane[i + W + 1]) / 4;
+      }
+      encodeBlock(qc, dcC, acC, comp);
+    }
+  }
+  bits.flush();
+  const seg = (marker, body) => [255, marker, body.length + 2 >> 8, body.length + 2 & 255, ...body];
+  const dht = (cls, id, [counts, symbols]) => [cls << 4 | id, ...counts, ...symbols];
+  const head = [
+    255,
+    216,
+    ...seg(224, [74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    ...seg(219, [0, ...ZIGZAG.map((k) => ql[k]), 1, ...ZIGZAG.map((k) => qc[k])]),
+    ...seg(192, [8, height >> 8, height & 255, width >> 8, width & 255, 3, 1, 34, 0, 2, 17, 1, 3, 17, 1]),
+    ...seg(196, [...dht(0, 0, DC_LUMA), ...dht(1, 0, AC_LUMA), ...dht(0, 1, DC_CHROMA), ...dht(1, 1, AC_CHROMA)]),
+    ...seg(218, [3, 1, 0, 2, 17, 3, 17, 0, 63, 0])
+  ];
+  const out = new Uint8Array(head.length + bits.bytes.length + 2);
+  out.set(head);
+  out.set(bits.bytes, head.length);
+  out.set([255, 217], head.length + bits.bytes.length);
+  return out;
+}
+function decodePng(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const u322 = (p2) => (b[p2] << 24 >>> 0) + (b[p2 + 1] << 16) + (b[p2 + 2] << 8) + b[p2 + 3];
+  if (b.length < 33 || u322(0) !== 2303741511 || u322(4) !== 218765834) throw Error("png: not a PNG file");
+  let p = 8, width = 0, height = 0, depth = 0, color = 0, interlace = 0;
+  const idat = [];
+  while (p + 8 <= b.length) {
+    const n = u322(p), type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]), d = b.subarray(p + 8, p + 8 + n);
+    if (type === "IHDR") {
+      width = u322(p + 8);
+      height = u322(p + 12);
+      depth = d[8];
+      color = d[9];
+      interlace = d[12];
+    } else if (type === "IDAT") idat.push(d);
+    else if (type === "IEND") break;
+    p += 12 + n;
+  }
+  const ch = { 0: 1, 2: 3, 4: 2, 6: 4 }[color];
+  if (depth !== 8 || !ch || interlace) throw Error(`png: only 8-bit non-interlaced grey/RGB/RGBA images are supported (depth ${depth}, colour type ${color}, interlace ${interlace})`);
+  const raw = inflateSync(Buffer.concat(idat)), stride = width * ch;
+  if (raw.length < (stride + 1) * height) throw Error("png: truncated image data");
+  const px = new Uint8Array(stride * height), rgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (stride + 1)], row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), o = y * stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= ch ? px[o + i - ch] : 0, up = y ? px[o - stride + i] : 0, c = i >= ch && y ? px[o - stride + i - ch] : 0;
+      const pa = Math.abs(up - c), pb = Math.abs(a - c), pc = Math.abs(a + up - 2 * c);
+      const pred = f === 1 ? a : f === 2 ? up : f === 3 ? a + up >> 1 : f === 4 ? pa <= pb && pa <= pc ? a : pb <= pc ? up : c : 0;
+      px[o + i] = row[i] + pred & 255;
+    }
+  }
+  for (let i = 0, j = 0; i < width * height; i++, j += ch) {
+    const g = ch < 3;
+    rgba[i * 4] = px[j];
+    rgba[i * 4 + 1] = g ? px[j] : px[j + 1];
+    rgba[i * 4 + 2] = g ? px[j] : px[j + 2];
+    rgba[i * 4 + 3] = ch === 4 ? px[j + 3] : ch === 2 ? px[j + 1] : 255;
+  }
+  return { width, height, data: rgba, channels: 4 };
+}
+
+// lib/thumbnail.mjs
+var THUMB_SIZE = Object.freeze({ width: 1280, height: 720 });
+var TARGET_BYTES = 480 * 1024;
+var QUALITIES = [82, 72, 62, 50];
+var THUMBNAIL_HELP = 'thumbnail [--from sw] [--at ref|x,z] [--dist m] [--span m] [--hour 12:00] [--weather clear] [--remote] [--out file.jpg] [--dry] \xB7 thumbnail --file <image.jpg|png> \xB7 thumbnail --clear  (the world list picture: a 16:9 look sent as a JPEG; SKILL.md "Thumbnail")';
+var one2 = (v) => Array.isArray(v) ? v[v.length - 1] : v;
+function thumbnailEndpoint(worldUrl) {
+  const m = /^(https?:\/\/[^/?#]+(?:\/[^?#]*?)?)\/w\/([a-z][a-z0-9-]{0,31})\/?$/.exec(String(worldUrl ?? "").split(/[?#]/)[0]);
+  if (!m) throw Error(`thumbnail: ${worldUrl || "this folder"} is not a world served by a world launcher (<site>/w/<slug>); thumbnails belong to the world list`);
+  return { url: `${m[1]}/__sim/worlds/${m[2]}/thumbnail`, slug: m[2], site: `${m[1]}/` };
+}
+var LIMITS = Object.freeze({ maxBytes: 512 * 1024, minWidth: 640, maxWidth: 1920, aspect: 16 / 9, tolerance: 0.02 });
+function cleanJpeg(b) {
+  const keep = [b.subarray(0, 2)];
+  let p = 2, w = 0, h = 0;
+  while (p + 4 <= b.length && b[p] === 255) {
+    const m = b[p + 1], n = b[p + 2] << 8 | b[p + 3], end2 = p + 2 + n;
+    if (n < 2 || end2 > b.length) throw Error("thumbnail: the JPEG is truncated");
+    if ([192, 193, 194].includes(m)) {
+      h = b[p + 5] << 8 | b[p + 6];
+      w = b[p + 7] << 8 | b[p + 8];
+    }
+    const meta = m === 254 || m >= 225 && m <= 239 && m !== 226 && m !== 238;
+    if (m === 218) {
+      let e = b.length;
+      for (let i = b.length - 2; i > end2; i--) if (b[i] === 255 && b[i + 1] === 217) {
+        e = i + 2;
+        break;
+      }
+      keep.push(b.subarray(p, e));
+      break;
+    }
+    if (!meta) keep.push(b.subarray(p, end2));
+    p = end2;
+  }
+  if (!w || !h) throw Error("thumbnail: not a readable JPEG (no frame header)");
+  return { jpeg: new Uint8Array(Buffer.concat(keep)), width: w, height: h };
+}
+function precheck({ jpeg, width, height }) {
+  if (jpeg.length > LIMITS.maxBytes) return `${Math.round(jpeg.length / 1024)} KB is over ${LIMITS.maxBytes / 1024} KB; save it as a 1280\xD7720 JPEG at quality 80 or lower`;
+  if (width < LIMITS.minWidth || width > LIMITS.maxWidth || Math.abs(width / height - LIMITS.aspect) / LIMITS.aspect > LIMITS.tolerance) return `${width}\xD7${height} is not 16:9 and ${LIMITS.minWidth}\u2013${LIMITS.maxWidth} px wide; crop or resize it (1280\xD7720 is the default)`;
+  return null;
+}
+function toJpeg(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (b[0] === 255 && b[1] === 216 && b[2] === 255) return { ...cleanJpeg(b), quality: null };
+  if (b[0] !== 137 || b[1] !== 80) throw Error("thumbnail: --file takes a JPEG or PNG image");
+  const img = decodePng(b);
+  let jpeg, quality;
+  for (quality of QUALITIES) {
+    jpeg = encodeJpeg(img, { quality });
+    if (jpeg.length <= TARGET_BYTES) break;
+  }
+  return { jpeg, width: img.width, height: img.height, quality };
+}
+function framing(flags2 = {}) {
+  const out = { from: one2(flags2.from) ?? "sw", hour: one2(flags2.hour) ?? "12:00", weather: one2(flags2.weather) ?? "clear", width: String(THUMB_SIZE.width), h: String(THUMB_SIZE.height), json: true };
+  for (const k of ["at", "dist", "span", "remote"]) if (flags2[k] !== void 0) out[k] = one2(flags2[k]);
+  return out;
+}
+var kb2 = (n) => `${Math.round(n / 1024)} KB`;
+var refused2 = (verb, r, e) => Error(`thumbnail ${verb} refused: ${e.code ?? r.status}: ${e.message ?? "the launcher refused it"}${e.fix ? `
+  fix: ${e.fix}` : ""}`);
+async function thumbnail(flags2 = {}, runtime = {}) {
+  const st = (runtime.load ?? load)(), send = runtime.fetch ?? fetch;
+  const { url, slug, site } = thumbnailEndpoint(st.world);
+  for (const k of ["out", "file"]) if (flags2[k] === true) throw Error(`thumbnail --${k} takes a file name`);
+  if (flags2.clear && (flags2.file || flags2.out)) throw Error("thumbnail --clear takes no picture: drop --file/--out");
+  if (flags2.clear && flags2.dry) return `thumbnail (dry): --clear would send ${slug} back to its template's default picture; nothing sent`;
+  if (!st.token && !flags2.dry) throw Error("thumbnail: this folder has no god token; run pair first");
+  const headers = { authorization: `Bearer ${st.token}` };
+  if (flags2.clear) {
+    const r4 = await send(url, { method: "DELETE", headers, signal: AbortSignal.timeout(3e4) });
+    const e2 = await r4.json().catch(() => ({}));
+    if (!r4.ok) throw refused2("clear", r4, e2);
+    return `thumbnail: cleared for ${slug}; the world list shows ${e2.thumbnailSource === "template" ? "the template's default picture" : "no picture"} (${site})`;
+  }
+  let jpeg, how;
+  if (flags2.file) {
+    const file = resolve8(String(one2(flags2.file)));
+    const t = toJpeg(readFileSync12(file));
+    const wrong = precheck(t);
+    if (wrong) throw Error(`thumbnail: ${file}: ${wrong}`);
+    jpeg = t.jpeg;
+    how = t.quality ? `${file}, re-encoded as JPEG q${t.quality}` : `${file}, metadata removed`;
+  } else {
+    const dir = mkdtempSync(join3(tmpdir(), "eden-god-thumb-"));
+    try {
+      const shot = await runtime.look({ ...framing(flags2), out: join3(dir, "look.png") });
+      const t = toJpeg(readFileSync12(shot.file));
+      jpeg = t.jpeg;
+      how = `a look from the ${framing(flags2).from} at ${framing(flags2).hour} toward (${(shot.at ?? []).join(", ")}), ${t.width}\xD7${t.height}, JPEG q${t.quality}`;
+    } finally {
+      rmSync6(dir, { recursive: true, force: true });
+    }
+  }
+  const out = flags2.out ? resolve8(String(one2(flags2.out))) : null;
+  if (out) writeFileSync6(out, jpeg);
+  if (flags2.dry) return `thumbnail (dry): ${how}, ${kb2(jpeg.length)}${out ? ` \u2192 ${out}` : ""}; nothing sent`;
+  const r = await send(url, { method: "POST", headers: { ...headers, "content-type": "image/jpeg" }, body: jpeg, signal: AbortSignal.timeout(6e4) });
+  const e = await r.json().catch(() => ({}));
+  if (!r.ok) throw refused2("upload", r, e);
+  return `thumbnail: set for ${slug} from ${how}, ${e.width}\xD7${e.height}, ${kb2(e.bytes)}${out ? ` (kept at ${out})` : ""}
+  the world list (${site}) shows it on its next refresh; retake any time, or thumbnail --clear for the template's default`;
+}
 
 // lib/features.mjs
 var GOD_FEATURES = Object.freeze({ flags: false, previews: false, constitution: false });
@@ -3564,8 +5111,12 @@ var SELF = (() => {
 async function register(url, identity) {
   if (!url) throw new Error("usage: register <world-url> [dev:identity]");
   const base = url.replace(/[?#].*$/, "").replace(/\/$/, "");
+  const leaveSeat = seatForRegister(base);
   save({ world: base, ...identity ? { identity } : {} });
-  const cfg = ok(await call("/v1/config", { as: "none" }), "register");
+  const cfg = await call("/v1/config", { as: "none" }).then((r) => ok(r, "register")).catch((e) => {
+    leaveSeat();
+    throw e;
+  });
   return { world: base, worldId: cfg.worldId, devAuth: !!cfg.devAuth, next: cfg.devAuth && identity ? "Run: mint" : "Run: pair (your human approves in the browser)" };
 }
 async function pair(agent = "eden-god " + SKILL_VERSION) {
@@ -3745,12 +5296,12 @@ async function defs(q, flags2 = {}) {
   if (flags2.remove && !flags2.unused) throw Error("defs --remove requires --unused");
   if (flags2.unused) {
     if (q || flags2.tag) throw Error("defs --unused does not take a search or tag filter");
-    const r3 = ok(await call(`/v1/god/defs/unused${flags2.remove ? "/remove" : ""}`, flags2.remove ? { body: {} } : {}), "defs --unused");
+    const r4 = ok(await call(`/v1/god/defs/unused${flags2.remove ? "/remove" : ""}`, flags2.remove ? { body: {} } : {}), "defs --unused");
     if (flags2.remove) {
       invalidate();
-      return flags2.json ? r3 : `removed ${r3.removed.length} never-placed trial defs (seq ${r3.seq})${r3.remaining ? `; ${r3.remaining} remain` : ""}; undo restores them`;
+      return flags2.json ? r4 : `removed ${r4.removed.length} never-placed trial defs (seq ${r4.seq})${r4.remaining ? `; ${r4.remaining} remain` : ""}; undo restores them`;
     }
-    return flags2.json ? r3.defs : `${r3.defs.length} never-placed trial defs${r3.defs.length ? ":\n" + r3.defs.map((d) => "- " + d.ref).join("\n") : ""}`;
+    return flags2.json ? r4.defs : `${r4.defs.length} never-placed trial defs${r4.defs.length ? ":\n" + r4.defs.map((d) => "- " + d.ref).join("\n") : ""}`;
   }
   if (q && !/\s/.test(q.trim())) {
     const name = q.trim().toLowerCase().replace(/^core[/-]/, "").replace(/@\d+$/, "");
@@ -4028,7 +5579,7 @@ var bakeCache = /* @__PURE__ */ new Map();
 var BAKES = ".eden-god.bakes.json";
 var readBakes = (lib) => {
   try {
-    const b = JSON.parse(readFileSync9(BAKES, "utf8"));
+    const b = JSON.parse(readFileSync13(godFile(BAKES), "utf8"));
     return b.lib === lib ? b.bakes : {};
   } catch {
     return {};
@@ -4038,7 +5589,7 @@ function saveBakes(lib, fresh) {
   if (!lib || !Object.keys(fresh).length) return;
   try {
     const all = Object.entries({ ...readBakes(lib), ...fresh }).slice(-300);
-    atomicWrite(BAKES, JSON.stringify({ lib, bakes: Object.fromEntries(all) }));
+    atomicWrite(godFile(BAKES), JSON.stringify({ lib, bakes: Object.fromEntries(all) }));
   } catch {
   }
 }
@@ -4169,7 +5720,7 @@ async function commitItems(v, def, info, flags2, params, items, notes, { op = "p
   const taken = /* @__PURE__ */ new Set();
   if (op === "place" && flags2.name && items.length === 1) {
     const parentId = items[0].candidates[0]?.in ? v.get(items[0].candidates[0].in.parent)?.id ?? items[0].candidates[0].in.parent : "world";
-    const clash = v.rows.find((r3) => r3.parent === parentId && r3.name === flags2.name);
+    const clash = v.rows.find((r4) => r4.parent === parentId && r4.name === flags2.name);
     if (clash) throw new Error(`REFUSED: name.taken: "${flags2.name}" is already ${clash.path} [${clash.def.replace(/^core-/, "core/")}]. Pick another --name, or move/remove that one.`);
   }
   const stem = flags2.name ?? def.replace(/^core\//, "").replace(/@\d+$/, "").replace(/^core-/, "");
@@ -4431,7 +5982,7 @@ async function recolor(id, color, flags2 = {}) {
   const v = view(await mirror()), row = v.get(id);
   if (!row && setOf(v, id)) {
     const out = [];
-    for (const r3 of setOf(v, id).members) out.push(await recolor(r3.path, color, flags2));
+    for (const r4 of setOf(v, id).members) out.push(await recolor(r4.path, color, flags2));
     return out.join("\n");
   }
   if (!row) throw new Error(`no such thing: ${id}`);
@@ -4442,7 +5993,7 @@ async function recolor(id, color, flags2 = {}) {
 }
 async function remove(ids) {
   const v0 = view(await mirror());
-  const list2 = [].concat(ids).filter(Boolean).flatMap((id) => v0.get(id) ? [id] : setOf(v0, id)?.members.map((r3) => r3.path) ?? [id]);
+  const list2 = [].concat(ids).filter(Boolean).flatMap((id) => v0.get(id) ? [id] : setOf(v0, id)?.members.map((r4) => r4.path) ?? [id]);
   if (!list2.length) throw new Error("usage: remove <ref> [<ref>\u2026]");
   const r = await act({ ops: list2.map((id) => ({ op: "remove", id })) });
   return r.accepted ? `removed ${list2.join(", ")} (and what was inside)` : `REFUSED: ${r.failures.map(explainFailure).join("; ")}`;
@@ -4696,13 +6247,13 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
       const masses = f.mass === void 0 ? void 0 : typeof f.mass === "string" ? f.mass.split(",").map((x) => x.trim()) : [];
       if (masses && (!masses.length || masses.length > 8 || masses.some((x) => !/^[a-z0-9][a-z0-9-]{0,18}$/.test(x)))) throw new Error("--mass needs at most 8 mass names, e.g. nave,tower");
       if (!b.claim && !b.lease) throw new Error("no build lease; build resume first");
-      const r3 = ok(await call(BUILD_API.path(b.id, "step"), { body: { ...BUILD_API.stepBody(b, n, label, say, masses), ...f.include !== void 0 ? { include: buildValues(f.include, ",", "include", 512, 300) } : {}, ...f.asks !== void 0 ? { asks: buildValues(f.asks, ";", "asks", 64, 500) } : {} } }), "build step");
-      if (!r3.ok) return f.json ? r3 : `REFUSED: ${r3.failures.map(explainFailure).join("; ")}`;
-      const step = BUILD_API.stepEcho(r3.build, b);
+      const r4 = ok(await call(BUILD_API.path(b.id, "step"), { body: { ...BUILD_API.stepBody(b, n, label, say, masses), ...f.include !== void 0 ? { include: buildValues(f.include, ",", "include", 512, 300) } : {}, ...f.asks !== void 0 ? { asks: buildValues(f.asks, ";", "asks", 64, 500) } : {} } }), "build step");
+      if (!r4.ok) return f.json ? r4 : `REFUSED: ${r4.failures.map(explainFailure).join("; ")}`;
+      const step = BUILD_API.stepEcho(r4.build, b);
       if (!step) throw new Error("build step response is missing the server step; build show before continuing");
-      save({ build: { ...b, n: step.n, label: step.label, status: r3.build.status } });
+      save({ build: { ...b, n: step.n, label: step.label, status: r4.build.status } });
       invalidate();
-      return f.json ? r3 : `step ${step.n}/${b.steps.length}: ${step.label}${BUILD_API.say(r3.build) ? ` \u2014 designing: ${BUILD_API.say(r3.build)}` : ""}`;
+      return f.json ? r4 : `step ${step.n}/${b.steps.length}: ${step.label}${BUILD_API.say(r4.build) ? ` \u2014 designing: ${BUILD_API.say(r4.build)}` : ""}`;
     }
     save({ build: { ...b, n, label } });
     return `step ${n}/${b.steps.length}: ${label} (rides on your next edit)`;
@@ -4714,16 +6265,16 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
   if (sub === "show") {
     const response2 = await call(BUILD_API.path(arg));
     if (arg && BUILD_API.unknown(response2)) return buildChoices(sub, `unknown build: ${arg}`, f);
-    const r3 = ok(response2, "build show");
-    if (r3.ok === false) return `REFUSED: ${r3.failures.map(explainFailure).join("; ")}`;
-    return f.json ? r3 : buildReport(r3);
+    const r4 = ok(response2, "build show");
+    if (r4.ok === false) return `REFUSED: ${r4.failures.map(explainFailure).join("; ")}`;
+    return f.json ? r4 : buildReport(r4);
   }
   if (sub === "check") {
     const id2 = arg ?? b?.id;
     if (!id2) throw new Error("build check needs an id or current build");
-    const r3 = ok(await call(BUILD_API.path(id2, "check"), { body: {} }), "build check");
-    if (r3.ok === false) return f.json ? r3 : `REFUSED: ${r3.failures.map(explainFailure).join("; ")}`;
-    return f.json ? r3 : checkedReceipt(r3.receipt);
+    const r4 = ok(await call(BUILD_API.path(id2, "check"), { body: {} }), "build check");
+    if (r4.ok === false) return f.json ? r4 : `REFUSED: ${r4.failures.map(explainFailure).join("; ")}`;
+    return f.json ? r4 : checkedReceipt(r4.receipt);
   }
   if (sub === "district") {
     if (arg !== void 0 && !/^[a-z0-9][a-z0-9-]{0,29}$/.test(arg)) throw new Error("build district needs a district id (slug, at most 30 characters)");
@@ -4734,32 +6285,32 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
       if (f.file !== void 0) throw new Error("--delete and --file are separate commands");
       const response3 = await call(`/v1/god/districts/${encodeURIComponent(arg)}`, { method: "DELETE" });
       if (response3.status === 404) return unknown();
-      const r4 = ok(response3, "build district --delete");
-      if (!r4.ok) return f.json ? r4 : `REFUSED: ${r4.failures.map(explainFailure).join("; ")}`;
-      return f.json ? r4 : `district ${arg} deleted: its buildings and ${r4.chapters.length} chapter build(s) stay; undo --group <chapter> still works`;
+      const r5 = ok(response3, "build district --delete");
+      if (!r5.ok) return f.json ? r5 : `REFUSED: ${r5.failures.map(explainFailure).join("; ")}`;
+      return f.json ? r5 : `district ${arg} deleted: its buildings and ${r5.chapters.length} chapter build(s) stay; undo --group <chapter> still works`;
     }
     if (f.file !== void 0) {
       if (!arg) throw new Error("build district <id> --file plan.json");
       if (typeof f.file !== "string") throw new Error("--file needs a plan file or inline JSON");
       let plan;
       try {
-        plan = JSON.parse(f.file.trim().startsWith("{") ? f.file : readFileSync9(f.file, "utf8"));
+        plan = JSON.parse(f.file.trim().startsWith("{") ? f.file : readFileSync13(f.file, "utf8"));
       } catch (e) {
         throw new Error(`--file: cannot read the plan (${e.message})`);
       }
       if (plan.id !== void 0 && plan.id !== arg) throw new Error(`the plan's id ${plan.id} differs from ${arg}`);
-      const r4 = ok(await call("/v1/god/districts", { body: { ...plan, id: arg } }), "build district");
-      if (!r4.ok) return f.json ? r4 : `REFUSED: ${r4.failures.map(explainFailure).join("; ")}`;
-      return f.json ? r4 : [...r4.replayed ? [`district ${arg}: already recorded with this plan`] : [], ...districtLines(r4.district), ...r4.warnings.map((w) => `WARNING: ${w}`)].join("\n");
+      const r5 = ok(await call("/v1/god/districts", { body: { ...plan, id: arg } }), "build district");
+      if (!r5.ok) return f.json ? r5 : `REFUSED: ${r5.failures.map(explainFailure).join("; ")}`;
+      return f.json ? r5 : [...r5.replayed ? [`district ${arg}: already recorded with this plan`] : [], ...districtLines(r5.district), ...r5.warnings.map((w) => `WARNING: ${w}`)].join("\n");
     }
     if (!arg) {
-      const r4 = ok(await call("/v1/god/districts"), "build district");
-      return f.json ? r4 : r4.districts.map((x) => `${x.id}: ${x.title}; ${x.counts.built}/${x.counts.plots} built; ${districtNext(x)}`).join("\n") || "no districts; build district <id> --file plan.json records one";
+      const r5 = ok(await call("/v1/god/districts"), "build district");
+      return f.json ? r5 : r5.districts.map((x) => `${x.id}: ${x.title}; ${x.counts.built}/${x.counts.plots} built; ${districtNext(x)}`).join("\n") || "no districts; build district <id> --file plan.json records one";
     }
     const response2 = await call(`/v1/god/districts/${encodeURIComponent(arg)}`);
     if (response2.status === 404) return unknown();
-    const r3 = ok(response2, "build district");
-    return f.json ? r3 : districtLines(r3.district).join("\n");
+    const r4 = ok(response2, "build district");
+    return f.json ? r4 : districtLines(r4.district).join("\n");
   }
   if (sub === "rewind") {
     const id2 = arg ?? b?.id;
@@ -4767,13 +6318,13 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
     if (typeof f.to !== "string" || !/^\d{1,3}$/.test(f.to)) throw new Error("build rewind needs --to <step>: 0 (the start) up to the current step");
     const response2 = await call(BUILD_API.path(id2, "rewind"), { body: { to: Number(f.to), ...f.dry ? { dry: true } : {}, ...f.force ? { force: true } : {} } });
     if (BUILD_API.unknown(response2)) return buildChoices(sub, `unknown build: ${id2}`, f);
-    const r3 = ok(response2, "build rewind");
-    if (r3.ok === false) return f.json ? r3 : `REFUSED: ${r3.failures.map(explainFailure).join("; ")}${r3.edits?.length ? `; nothing was undone (${r3.edits.length} edit(s) checked)` : ""}`;
+    const r4 = ok(response2, "build rewind");
+    if (r4.ok === false) return f.json ? r4 : `REFUSED: ${r4.failures.map(explainFailure).join("; ")}${r4.edits?.length ? `; nothing was undone (${r4.edits.length} edit(s) checked)` : ""}`;
     if (!f.dry) {
-      if (b?.id === id2) save({ build: { ...b, n: r3.build.step.n, label: r3.build.step.label, status: r3.build.status }, buildPreviews: void 0 });
+      if (b?.id === id2) save({ build: { ...b, n: r4.build.step.n, label: r4.build.step.label, status: r4.build.status }, buildPreviews: void 0 });
       invalidate();
     }
-    return f.json ? r3 : rewindReport(id2, r3, !!f.dry);
+    return f.json ? r4 : rewindReport(id2, r4, !!f.dry);
   }
   if (sub === "continue") {
     if (!arg) throw new Error("build continue needs a previous build id");
@@ -4803,7 +6354,7 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
     for (const k of ["at", "offset", "size", "yaw", "mass", "root"]) if (f[k] !== void 0) throw new Error(`--${k} does not apply to a district chapter: the plan holds each plot's rectangle and massing`);
     const plots = buildValues(f.plots, ",", "plots", 8, 8), steps2 = f.steps === void 0 ? void 0 : buildValues(f.steps, ",", "steps", 24, 60);
     if (f.title !== void 0 && (typeof f.title !== "string" || !f.title.trim() || f.title.length > 80)) throw new Error("--title is 1..80 characters");
-    const brief = f.brief === void 0 ? void 0 : existsSync8(f.brief) ? readFileSync9(f.brief, "utf8") : f.brief;
+    const brief = f.brief === void 0 ? void 0 : existsSync10(f.brief) ? readFileSync13(f.brief, "utf8") : f.brief;
     if (brief !== void 0 && (typeof brief !== "string" || brief.length > 4e3)) throw new Error("--brief is at most 4000 characters");
     const asks = buildValues(f.asks, ";", "asks", 64, 500), include = buildValues(f.include, ",", "include", 512, 300);
     body = { id: arg, district: { id: f.district, ...plots ? { plots } : {} }, ...f.title ? { title: f.title } : {}, ...steps2 ? { steps: steps2 } : {}, ...asks ? { asks } : {}, ...include ? { include } : {}, ...brief !== void 0 ? { brief } : {} };
@@ -4814,7 +6365,7 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
     const steps2 = f.steps.split(",").map((x) => x.trim());
     if (steps2.length > 24 || steps2.some((x) => !x || x.length > 60)) throw new Error("--steps needs 1..24 labels, each 1..60 characters");
     const massing = inheritedMassing ?? parseMassing(f.mass), site = await buildSite(f);
-    const brief = f.brief === void 0 ? void 0 : existsSync8(f.brief) ? readFileSync9(f.brief, "utf8") : f.brief;
+    const brief = f.brief === void 0 ? void 0 : existsSync10(f.brief) ? readFileSync13(f.brief, "utf8") : f.brief;
     if (brief !== void 0 && (typeof brief !== "string" || brief.length > 4e3)) throw new Error("--brief is at most 4000 characters");
     const asks = buildValues(f.asks, ";", "asks", 64, 500), include = buildValues(f.include, ",", "include", 512, 300);
     body = { id: arg, title: f.title, steps: steps2, site, massing, ...asks ? { asks } : {}, ...include ? { include } : {}, ...brief !== void 0 ? { brief } : {}, ...f.root ? { root: f.root } : {} };
@@ -4866,7 +6417,7 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
   if (sub === "claim") {
     const file = claimFile(r.claim.id), release = acquireLock(`${file}.lock`, { label: "claim state creation" });
     try {
-      const previous = existsSync8(file) ? JSON.parse(readFileSync9(file, "utf8")) : null;
+      const previous = existsSync10(file) ? JSON.parse(readFileSync13(file, "utf8")) : null;
       if (previous?.build?.id !== r.build.id || previous.build.claim !== r.claim.id) atomicWrite(file, JSON.stringify({ build: BUILD_API.claim(r.build, r.claim) }, null, 2) + "\n");
     } finally {
       release();
@@ -4884,7 +6435,7 @@ async function build2(sub = "show", args = [], f = {}, inheritedMassing) {
 async function helperEnv(s, r, f) {
   const m = ok(await call(BUILD_API.path(r.build.id, `claims/${encodeURIComponent(r.claim.id)}/helper`), { body: { ...f.ttl !== void 0 ? { ttlMs: Math.round(Number(f.ttl) * 6e4) } : {} } }), "build claim --helper");
   if (!m.ok) return f.json ? m : `${r.claim.id}: ${r.claim.part} claimed, but no helper token: ${m.failures.map(explainFailure).join("; ")}`;
-  const file = resolve5(helperFile(r.claim.id));
+  const file = resolve9(helperFile(r.claim.id));
   atomicWrite(file, JSON.stringify({ world: s.world, token: m.token, helper: m.helper, build: BUILD_API.claim(r.build, r.claim) }, null, 2) + "\n");
   if (f.json) return { ...r, helper: m.helper, helperFile: file };
   return [
@@ -5057,7 +6608,7 @@ async function kitLookInner(json2, flags2, runtime, signal) {
     timeoutMs: Math.max(1, runtime.deadlineAt - Date.now()),
     worldUrl: load().world,
     studio: admitted,
-    out: resolve5(flags2.out ?? "looks/kit-workbench.png"),
+    out: resolve9(flags2.out ?? "looks/kit-workbench.png"),
     ...overrides,
     ...flags2.width ? { width: num(flags2.width) } : {},
     ...flags2.h ? { height: num(flags2.h) } : {}
@@ -5120,7 +6671,7 @@ async function lookInner(flags2 = {}, runtime = {}, signal) {
   const cam = views[0];
   signal.throwIfAborted();
   void attention(cam.at, cam.eye);
-  const out = resolve5(flags2.out ?? `looks/look-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19)}.png`);
+  const out = resolve9(flags2.out ?? `looks/look-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19)}.png`);
   const args = {
     timeoutMs: Math.max(1, runtime.deadlineAt - Date.now()),
     remote: !!flags2.remote,
@@ -5162,13 +6713,13 @@ async function lookInner(flags2 = {}, runtime = {}, signal) {
 async function exportWorld(file, flags2 = {}) {
   const s = await snapshot2();
   const g = exportGenesis(s, flags2);
-  const out = resolve5(file ?? `${s.worldId}.genesis.json`);
-  writeFileSync5(out, JSON.stringify(g, null, 1));
+  const out = resolve9(file ?? `${s.worldId}.genesis.json`);
+  writeFileSync7(out, JSON.stringify(g, null, 1));
   const ops = g.batches.flatMap((b) => b.ops), things = ops.filter((op) => op.op === "place").length, defs2 = ops.filter((op) => op.op === "define").length;
   return `exported ${things} things${defs2 ? ` and ${defs2} defs` : ""} in ${g.batches.length} batches to ${out}`;
 }
 var importWorld = (file, flags2 = {}) => withoutBuild(async () => {
-  const g = JSON.parse(readFileSync9(file, "utf8"));
+  const g = JSON.parse(readFileSync13(file, "utf8"));
   if (g.schema !== "genesis/1") throw new Error("import: file must be genesis/1");
   const out = [];
   const s = await snapshot2();
@@ -5188,7 +6739,7 @@ var importWorld = (file, flags2 = {}) => withoutBuild(async () => {
   return out.join("\n");
 });
 async function define(json2, ignored = []) {
-  const def = typeof json2 === "string" ? JSON.parse(existsSync8(json2) ? readFileSync9(json2, "utf8") : json2) : json2;
+  const def = typeof json2 === "string" ? JSON.parse(existsSync10(json2) ? readFileSync13(json2, "utf8") : json2) : json2;
   if (def.make?.kind === "gen" && !def.params) {
     const g = (await schema()).generators?.find((x) => x.id === def.make.gen);
     if (g && Object.keys(g.params).length) def.params = g.params;
@@ -5204,7 +6755,7 @@ function correctedLine(warnings = [], ignored = []) {
   return shown.length ? `corrected${refs.length === 1 ? ` ${refs[0]}` : ""}: ${shown.join("; ")}` : "";
 }
 async function defineKit(json2, flags2 = {}) {
-  const k = typeof json2 === "string" ? JSON.parse(existsSync8(json2) ? readFileSync9(json2, "utf8") : json2) : json2;
+  const k = typeof json2 === "string" ? JSON.parse(existsSync10(json2) ? readFileSync13(json2, "utf8") : json2) : json2;
   if (!k.name || !Array.isArray(k.shapes)) throw new Error("define-kit needs {name, shapes:[\u2026]} (see SKILL.md, kit primitives in SCHEMA.md)");
   const matches = (await searchDefs([k.name.replace(/[-_.]/g, " "), ...k.tags ?? []].join(" "))).defs;
   const picks = [...matches.filter((d) => usedIn(d).length), ...matches.filter((d) => !usedIn(d).length)].slice(0, 5);
@@ -5234,13 +6785,13 @@ var EXAMPLES = { hamlet: "a hamlet in 8 commands: knoll, cottage, pond + bench, 
 async function examples(name) {
   if (!name) return ["worked examples (each = the exact commands a god agent typed and the answers it got):", ...Object.entries(EXAMPLES).map(([k, d]) => `- ${k}: ${d}`), `read one: examples <name>  (saves examples/<name>.log and .mjs here; also served at ${load().world}/god/examples/<name>.log)`].join("\n");
   if (!EXAMPLES[name]) throw new Error(`no example ${name}; examples: ${Object.keys(EXAMPLES).join(", ")}`);
-  mkdirSync3("examples", { recursive: true });
+  mkdirSync4("examples", { recursive: true });
   const out = [];
   for (const ext of ["log", "mjs"]) {
     const r = await fetch(`${load().world}/god/examples/${name}.${ext}`);
     if (!r.ok) throw new Error(`the world did not serve ${name}.${ext} (${r.status})`);
     const t = await r.text();
-    writeFileSync5(`examples/${name}.${ext}`, t);
+    writeFileSync7(`examples/${name}.${ext}`, t);
     if (ext === "log") out.push(t);
   }
   return `${out[0].trim()}
@@ -5276,7 +6827,7 @@ async function status() {
   return `${s.world} \u2014 you are ${st.you}; ${st.entities} entities, seq ${st.seq}${s.group ? `; group "${s.group}"` : ""}${s.build ? `; ${buildHeader(s.build, st.builds?.find((b) => b.id === s.build.id))}` : ""}; skill ${SKILL_VERSION}${v ? `; server protocol ${v.protocol}, schema ${v.schema}, skill ${v.skill}, source ${v.source}` : ""}`;
 }
 var BOOL = /* @__PURE__ */ new Set(["missing", "clear", "fix", "helper", "local", "remote", "no-build", "done", "force", "undo", "float", "dry", "plan", "nudge", "json", "all", "keep", "hide-roofs", "stop", "site", "unused", "off", "md", "fresh", "remove", "free", "list", ...ENV_BOOLS, ...LAYERS_BOOLS]);
-var boolsFor = (cmd) => cmd === "look" ? /* @__PURE__ */ new Set([...BOOL, "inside"]) : cmd === "listen" ? /* @__PURE__ */ new Set([...BOOL, "once", "follow"]) : cmd === "ack" ? /* @__PURE__ */ new Set([...BOOL, "failed"]) : BOOL;
+var boolsFor = (cmd) => cmd === "look" ? /* @__PURE__ */ new Set([...BOOL, "inside"]) : cmd === "listen" ? /* @__PURE__ */ new Set([...BOOL, "once", "follow"]) : cmd === "ack" ? /* @__PURE__ */ new Set([...BOOL, "failed"]) : cmd === "upload" ? /* @__PURE__ */ new Set([...BOOL, "define"]) : BOOL;
 function parseFlags(argv, bools = BOOL) {
   const flags2 = {}, rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -5334,6 +6885,8 @@ var FLAGS = {
   schema: "md",
   act: "note request-ref",
   prayers: "all",
+  upload: "name height tags license source description layer footprint define dry",
+  thumbnail: "from at dist span hour weather remote out dry file clear",
   catalog: "category has tag page per",
   find: "category has tag all",
   parts: "",
@@ -5342,7 +6895,7 @@ var FLAGS = {
   ...LAYERS_FLAGS,
   ...GOV_FLAGS
 };
-var POS = { ...GOV_POS, listen: 0, ack: 2, doctor: 0, trace: 0, kit: 2, build: 2, "verify-use": 1, ...LAYERS_POS, catalog: 0, taxonomy: 0, time: 2, strike: 0, land: 3, place: 1, terrain: 1, move: 1, set: 1, about: 1, recolor: 2, clone: 1, describe: 1, where: 1, reach: 2, clear: 1, free: 1, look: 0, sky: 0, weather: 0, select: 0, group: 1, undo: 0, redo: 0, history: 1, map: 0, furnish: 1, mint: 1, pair: 1, register: 2, status: 0, flags: 0, prayers: 0, schema: 0, snapshot: 0, examples: 1, expand: 1, import: 1, export: 1, define: 1, "define-kit": 1, act: 1, dryrun: 1, plan: 1, preview: 1, commit: 1, request: 1, query: 1, stream: 1, follow: 1, mirror: 0, gallery: 0, help: 1 };
+var POS = { ...GOV_POS, listen: 0, ack: 2, doctor: 0, trace: 0, kit: 2, build: 2, "verify-use": 1, ...LAYERS_POS, catalog: 0, taxonomy: 0, time: 2, strike: 0, land: 3, place: 1, terrain: 1, move: 1, set: 1, about: 1, recolor: 2, clone: 1, describe: 1, where: 1, reach: 2, clear: 1, free: 1, look: 0, sky: 0, weather: 0, select: 0, group: 1, undo: 0, redo: 0, history: 1, map: 0, furnish: 1, mint: 1, pair: 1, register: 2, status: 0, flags: 0, prayers: 0, schema: 0, snapshot: 0, examples: 1, expand: 1, import: 1, export: 1, define: 1, "define-kit": 1, upload: 1, thumbnail: 0, act: 1, dryrun: 1, plan: 1, preview: 1, commit: 1, request: 1, query: 1, stream: 1, follow: 1, mirror: 0, gallery: 0, help: 1 };
 var NUMERIC = /* @__PURE__ */ new Set(["dist", "count", "t", "setback", "row", "spacing", "width", "span", "radius", "sun", "clouds", "wind", "rain", "fog", "intensity", "speed", "amount", "level", "depth", "metres", "peak", "edge", "face", "steps", "scale", "floor", "height", "h", "frames", "every", "slope", "gap", "yaw"]);
 var SIDES = ["left", "right", "both", "center", "centre"];
 function checkArgs(cmd, f, rest) {
@@ -5376,7 +6929,7 @@ function helpFor(cmd) {
   return [...lines.length ? lines : [`${cmd}: see help`], `${cmd} options: ${opts.map((x) => "--" + x).join(" ")}`].join("\n");
 }
 var CLI_SHAPE = { POS, FLAGS, BOOL, NUMERIC, boolsFor };
-var readArg = (r) => r[0] !== void 0 ? existsSync8(r[0]) && !r[0].trim().startsWith("{") ? readFileSync9(r[0], "utf8") : r[0] : readFileSync9(0, "utf8");
+var readArg = (r) => r[0] !== void 0 ? existsSync10(r[0]) && !r[0].trim().startsWith("{") ? readFileSync13(r[0], "utf8") : r[0] : readFileSync13(0, "utf8");
 var COMMANDS = {
   doctor: (r, f) => doctor(f),
   trace: (r, f) => trace(f),
@@ -5436,6 +6989,8 @@ var COMMANDS = {
   import: (r, f) => importWorld(r[0], f),
   define: (r) => define(readArg(r)),
   "define-kit": (r, f) => defineKit(readArg(r), f),
+  upload: (r, f) => upload(r[0], f),
+  thumbnail: (r, f) => thumbnail(f, { look }),
   furnish: (r, f) => furnish(r[0], f),
   gallery,
   examples: (r) => examples(r[0]),
@@ -5487,6 +7042,7 @@ for (const [feature, verbs] of Object.entries(OFF_VERBS)) for (const verb of ver
 }
 for (const [name, fn] of Object.entries(COMMANDS)) COMMANDS[name] = (r = [], f = {}) => withBuildOptions(f, () => ["build", "group"].includes(name) ? withStateLock(() => fn(r, f)) : fn(r, f));
 var HELP = `eden-god ${SKILL_VERSION} \u2014 god mode for one Eden world. Read SKILL.md.
+home:   in a Souls home, several seats: <world> <command> (or @<world> when a command has that name); a legacy god folder moves in with: node eden.mjs import
 locks:  doctor [--fix] [--local] [--json] (holders, stale locks; --fix breaks only stale ownership)
 trace:  trace [--build id] [--limit n] (the world's recent god requests: route, outcome, ms, no payloads; LOOP = the same refusal 3+ times in 2 min, also in build show)
 read:   verify-use <target> [--seat ref] [--from ref|x,z] [--uses enter,sit] \xB7 map \xB7 defs <words> \xB7 describe <ref> \xB7 where <x,z|ref> ([bounds] containment / [collider] hit) \xB7 reach <from> <to> \xB7 clear <x,z|ref> --size WxD \xB7 free WxD [--near ref] \xB7 look [--at ref|x,z] [--from s|n|e|w|above] [--dist m] [--span m] [--inside [--floor k]] \xB7 history \xB7 resolve \xB7 schema [--md]
@@ -5503,6 +7059,8 @@ resume: omit id to resume the only paused build or active build with a dead lead
 mass:   site-local metres; h = wall/eave height, not total height. Gable/pyramid roofs add half the shorter side; flat adds none. Example: 26x12 h15 gable = 15 m walls + 6 m roof = 21 m total.
 batch:  plan '<batch>' \xB7 preview '<batch>' \xB7 commit <preview-id> \xB7 act '<batch>' \xB7 dryrun '<batch>' \xB7 request <clientRef>
 world:  sky [--palette p --sun s] \xB7 time [19:30|7pm] [--speed h/h] [--pause|--resume] \xB7 weather [--kind storm|rain|fog|wind|cloudy|clear|auto] [--intensity i] [--clouds --wind --rain --fog] [--minutes m] \xB7 strike [--at x,z|thing] ${godFeature("constitution") ? "\xB7 constitution <md> " : ""}\xB7 expand <m> \xB7 export [file] \xB7 import <genesis.json> \xB7 define <def.json> \xB7 define-kit <kit.json> \xB7 furnish <house>[/room]
+models: upload <file.glb|png|jpg> --name n [--height m] [--tags a,b] [--license text] [--source text] [--description text] [--layer solid|decor] [--footprint fp.json] [--define] [--dry] \xB7 upload <manifest.json> [--dry] (god-upload-manifest/1: one entry per asset with file, name, height, tags, license, source, description, layer, footprint, define; budget 80 000 tris, 3 MB, 2048 px per file \u2014 reduce heavy GLBs first with tools/god-skill/scripts/optimize-glb.mjs; SKILL.md "Importing your own models")
+thumb:  ${THUMBNAIL_HELP}
 inbox:  listen [--after message-id] [--timeout 25] [--once|--follow] \xB7 ack <message-id> [reply] [--failed] (a reply of up to 140 characters; --failed when it could not be done)
 pair:   register <world-url> \xB7 pair \xB7 ${godFeature("flags") ? "flags \xB7 flag <label> --at x,z \xB7 " : ""}prayers [--all] (answered too) \xB7 answer <id> <text> \xB7 status
 ${LAND_HELP}
@@ -5513,7 +7071,14 @@ ${SECRET_HELP}
 ${godFeature("constitution") ? GOV_HELP + "\n" : ""}learn:  examples [name] \xB7 defs <name|core/x@1> (one def in full) \xB7 sky (palettes) \xB7 a row named stall = the set "stall"`;
 var NO_WARM = /* @__PURE__ */ new Set(["help", "register", "mint", "pair", "doctor", "look", "look-shot", "look-keeper"]);
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("eden-god.mjs")) {
-  const [cmd, ...argv] = process.argv.slice(2);
+  let line2;
+  try {
+    line2 = enterGodSeat(process.argv.slice(2), COMMANDS);
+  } catch (e) {
+    console.error(e.message);
+    process.exit(2);
+  }
+  const [cmd, ...argv] = line2;
   const { flags: f, rest, argv: readAs, notes, hint } = readArgs(cmd, argv);
   const fn = COMMANDS[cmd ?? "help"];
   if (!fn) {
@@ -5534,7 +7099,7 @@ ${HELP}`);
   const record = (out, error) => {
     if (!tr || cmd === "look-shot" || cmd === "look-keeper") return;
     try {
-      appendFileSync(tr, JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), cmd: redact([cmd, ...argv].join(" ")), argv: [cmd ?? "help", ...argv].map(redact), ...changed ? { readAs: [cmd, ...readAs].map(redact) } : {}, ms: Date.now() - t0, ...error ? { error } : { out: typeof out === "string" ? out : JSON.stringify(out).slice(0, 4e3) } }) + "\n");
+      appendFileSync2(tr, JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), cmd: redact([cmd, ...argv].join(" ")), argv: [cmd ?? "help", ...argv].map(redact), ...changed ? { readAs: [cmd, ...readAs].map(redact) } : {}, ms: Date.now() - t0, ...error ? { error } : { out: typeof out === "string" ? out : JSON.stringify(out).slice(0, 4e3) } }) + "\n");
     } catch {
     }
   };
@@ -5554,7 +7119,7 @@ ${HELP}`);
     process.exit(2);
   }
   if (tr && cmd === "look") try {
-    appendFileSync(tr, JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), cmd: [cmd, ...argv].join(" "), phase: "start" }) + "\n");
+    appendFileSync2(tr, JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), cmd: [cmd, ...argv].join(" "), phase: "start" }) + "\n");
   } catch {
   }
   if (!NO_WARM.has(cmd ?? "help")) autoWarm(SELF, { force: ["status", "listen"].includes(cmd) });
@@ -5624,7 +7189,7 @@ export {
   map,
   mint,
   mirror,
-  mkdirSync3 as mkdirSync,
+  mkdirSync4 as mkdirSync,
   move,
   movedNote,
   pair,
