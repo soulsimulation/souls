@@ -84,6 +84,7 @@ const paramsRefusal = (cap: Pick<EdgeCapability, 'id' | 'verb' | 'params'>, para
 export function offerCheck(L: EdgeLedger, soul: EdgeSoul, input: {capability?: unknown; params?: unknown; verb?: unknown; target?: unknown; clientRef?: unknown}): OfferRefusal | null {
   const asked = typeof input.capability === 'string' ? input.capability.trim() : '';
   if (typeof input.clientRef === 'string' && input.clientRef.length <= 100 && L.coreA.byClientRef(soul.soulId, input.clientRef)) return null;   // a retry returns the first result
+  if (L.repeatOf(soul, input)) return null;   // #1272: the act under way answers, whatever its offer says now
   // an offer's id is whatever the menu calls it: `pray` and `propose-amendment` have no target, so look it up before any shape
   if (OFFER_ID.test(asked)) {
     const verb = asked.slice(0, asked.indexOf(':'));
@@ -101,6 +102,6 @@ export function offerCheck(L: EdgeLedger, soul: EdgeSoul, input: {capability?: u
   const candidates = resolveCandidates(L, soul, d);
   const label = asked || String(input.verb ?? '');
   return {accepted: false, code: 'capability.unknown', capability: label,
-    reason: `"${label}" is not an offer on this Soul right now, so nothing was done. Send an offered id; candidates lists the closest.`,
+    reason: `"${label}" is not an offer on this Soul right now, so nothing was done. Send an offered id; did_you_mean lists the closest.`,
     ...(candidates.length ? {did_you_mean: candidates.map(c => ({id: c.id, label: c.label})), candidates} : {})};
 }

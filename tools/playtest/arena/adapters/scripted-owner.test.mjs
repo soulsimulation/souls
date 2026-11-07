@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateScript, classify, matchRule, stepOutcome, turn, renderChat, ownerWokeOpen, waitWindowSec, bindPrev, keptOutput, OUTPUT_KEEP } from './scripted-owner.mjs';
+import { validateScript, classify, matchRule, stepOutcome, turn, renderChat, ownerWokeOpen, waitWindowSec, bindPrev, keptOutput, OUTPUT_KEEP, firstCandidate } from './scripted-owner.mjs';
 import { seatActs } from '../../review/run.mjs';
 import { brief } from '../../../world-launcher/soul/eden.mjs';
 import { ADAPTERS } from '../seat.mjs';
@@ -284,4 +284,10 @@ else console.log(JSON.stringify({ ok: true }));`);
   // short outputs are stored exactly as before
   assert.deepEqual(keptOutput('{"ok":true}\n'), { content: '{"ok":true}\n' });
   assert.deepEqual(keptOutput('abcdef', 4), { content: 'abcd\n[scripted-owner: output truncated: 4 of 6 characters kept]', truncated: true });
+});
+
+test('#1268: a refused resolve names its first id under did_you_mean, a found one under candidates', () => {
+  assert.equal(firstCandidate({ stdout: JSON.stringify({ candidates: [{ id: 'walk:a' }] }) }), 'walk:a');
+  assert.equal(firstCandidate({ stdout: JSON.stringify({ ok: false, did_you_mean: [{ id: 'walk:b', label: 'B' }] }) }), 'walk:b');
+  assert.equal(firstCandidate({ stdout: '{"ok":false}' }), ''); assert.equal(firstCandidate({ stdout: 'not json' }), '');
 });

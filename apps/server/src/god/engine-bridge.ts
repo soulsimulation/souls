@@ -284,7 +284,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
-    this.nav = new GodNav({ model: this.god.model, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
+    this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
@@ -1086,6 +1086,7 @@ export class EngineBridge {
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
     if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
+    else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
     if (this.rescued !== this.editTick && tick - this.editTick >= 10 && (tick - this.editTick >= 20 || tick - this.rescuedAt >= 40)) { this.rescuedAt = tick; this.rescueTrapped(); if (S) t = S.add('rescue', t); }
     if (S && S.due()) this.log(S.line(this));
@@ -1235,23 +1236,40 @@ export class EngineBridge {
   }
   /** Last tick each Soul was stepped out (nav-connect/1): at most once a minute each, as the ledger's walk rescue. */
   private navRescuedAt = new Map<string, number>();
+  /** #1287: Souls a rescue passed over, cut off, because a program was running: asked again once it has ended. */
+  private navWaiting = new Set<string>();
+  private navRescueWaiting() {
+    try {
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
+      const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
+      if (!souls.length) return;
+      if (!E.navWarmV1?.(0)) { this.navWarm = false; return; }   // stale labels answer "not cut off": navStep warms them, and they stay queued
+      this.navRescueSouls(0, souls);
+    } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
+  }
+  /** Is this body off the main walkable area where it stands now? Asked with the labels warm. */
+  private navCutOff(id: string) {
+    const E = this.engine as unknown as { navCheckV1?: (pts: { id: string; p: Vec2; level?: number; tol?: number }[]) => { ok: boolean }[] }, b = this.engine.world.entities[id] as { pose: { p: number[] }; human?: { level?: number } } | undefined;
+    return !!b && E.navCheckV1?.([{ id, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0, tol: 0.6 }])[0]?.ok === false;
+  }
   /** Step every Soul cut off from the main walkable area to open ground (logged). Returns how many were moved. A seated
    *  Soul is judged where it would stand up (its seat's approach): connected there, it stays seated and nothing is
    *  logged; when that spot is closed off it rises and lands on open ground once (a god walk-out, which a plain
    *  relocate cannot do to a held body). Only moves that change where a Soul is are logged or counted. */
-  private navRescueSouls(budgetMs = 0): number {
+  private navRescueSouls(budgetMs = 0, souls: Iterable<{ soulId: string; entityId: string; name: string }> = this.host.minds.values()): number {
     const E = this.engine as unknown as { navRescueV1?: (id: string, budgetMs?: number) => { to: Vec2; code: string; pocket?: number; level: number; seated?: true } | null };
     if (!E.navRescueV1) return 0;
     const tick = this.engine.world.tick;
     let n = 0;
-    for (const m of this.host.minds.values()) {
-      if (isVerificationProbe(m.soulId) || this.engine.programOf(m.entityId)) continue;
+    for (const m of souls) {
+      if (isVerificationProbe(m.soulId)) continue;
+      if (this.engine.programOf(m.entityId)) { if (this.navCutOff(m.entityId)) this.navWaiting.add(m.soulId); else this.navWaiting.delete(m.soulId); continue; }
       if ((this.navRescuedAt.get(m.soulId) ?? -1e9) > tick - 1200) continue;
-      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) continue;
+      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) { this.navWaiting.delete(m.soulId); continue; }
       const where = `${r.seated ? 'sat' : 'stood'} ${r.level ? `upstairs (floor ${r.level}) with no way down` : `in a closed-off ${r.pocket !== undefined ? `${Math.round(r.pocket)} m² ` : ''}pocket`}`;
       this.log(`${m.name} ${where} (${r.code}): steps to open ground at (${r.to.join(', ')})`);
       const payload = { soulId: m.soulId, entityId: m.entityId, to: r.to, why: `nav-connect/1: ${where}, no walk out: ${r.seated ? 'stood up and ' : ''}stepped to the nearest open ground`, policy: 'nav-connect/1', ...(r.seated ? { godWalkout: true, released: [], level: 0 } : {}) };
-      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); n++; } catch { /* clock not ready */ }
+      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); this.navWaiting.delete(m.soulId); n++; } catch { /* clock not ready */ }
     }
     return n;
   }
