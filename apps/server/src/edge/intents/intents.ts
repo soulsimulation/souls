@@ -24,6 +24,7 @@ export type Resolution =
   | {ok: true; kind: 'setting'; capability: string; apply: () => void; chosen: Chosen}
   | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
 import {classWords} from './class-words.ts';
+import {signWords} from '../ledger/vocabulary.ts';
 export type IntentInput = {verb?: unknown; target?: unknown; params?: unknown; clientRef?: unknown; [k: string]: unknown};
 type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
 
@@ -389,7 +390,7 @@ export class Intents {
       const place=explicitPlaceCapability(this.L,soul,asked),onDemand=!!place&&!place.ok&&place.code==='place.unwalkable'&&this.L.onDemandId(soul,asked);if(place&&!onDemand){if(!place.ok)return place;return {ok:true,would:{capability:place.chosen.capability,channel:'body',chosen:place.chosen,...resolvedParts(this.L,soul,place.chosen.capability,asked)}};}
       const bodyIssue=asked.startsWith('object:')?null:this.L.bodyVerbProblem(soul,asked.split(/[:\s]/)[0]!);if(bodyIssue)return {ok:false,...bodyIssue};
       if (!asked || asked.length > 200) return {ok: false, code: 'capability.params', reason: 'capability must be 1..200 characters.'};
-      const plain = offeredAttention(caps, asked) ? null : attentionWords(asked); if (plain) return this.dryRun(soul, plain);
+      const plain = offeredAttention(caps, asked) || signWords(asked, {caps}) ? null : attentionWords(asked); if (plain) return this.dryRun(soul, plain);
       const cls = classWords(asked, this.L.places.byId.values()); if (cls) return this.dryRun(soul, cls);
       const strict = strictCheck(this.L, soul, asked, caps); if (strict && !this.L.onDemandId(soul, asked)) return {ok: false, ...strict};
       // quality cases 21/28: resolve reads social phrasing exactly as act does ("ride the balloon with X" invites X; "hug X")
