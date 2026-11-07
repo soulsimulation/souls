@@ -39,7 +39,7 @@ const STUCK_RADIUS = 0.34;
  *  bench by the fountain), never the 30 m walk to a chair in another house. 3 m failed the party and activities gates. */
 export const HERE_SEAT_M = 8;
 const STUCK_REASON = 'The walk made no headway for 30 seconds, even after looking for another way from where it stood; choose another way or somewhere else.';
-import {EdgeError, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
+import {EdgeError, SEAT_KEPT, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
 import {CATALOG} from '../../../../../mars/viewer/engine/world/catalog.ts';
 import {PlaceIndex, centroid, derivePlaceData, happenings, validatePlaceData, type PlaceData,type Place} from './places.ts';
 /** Loops round a place (jog/run/cycle-around) are offered within this distance of its outline (m). */
@@ -121,9 +121,6 @@ type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label:
 type StandReleaseV1={actor:string;owner:string;seats:{action:string;slot:string}[]};
 
 /** The body plans behind a Soul's offered capabilities, by capability id. */
-/** #485: a sit that a newer act took over from the seat itself: it did what it was asked, so it ends completed, and a plan
- *  still pauses on it as on a replaced step. */
-export const SEAT_KEPT = 'seat.kept';
 type MenuReads = {taken: {at: [number, number]; v: boolean}[]; groups: Map<string, number>; seats: {entity: string; slot: string; v: boolean}[]};
 type Plans = Map<string, {label: string; steps: Program['steps']; seconds?: boolean; stop?: boolean}>;
 
@@ -1883,10 +1880,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (!cap.available && cap.blocked && !WAIT_CODES.has(cap.blocked.code) && !this.host.quietBarrier) return {...refuse(cap.blocked.code, cap.blocked.reason), ...resolved};
     return this.launch(soul, capability, plan.label, this.standIfSeated(soul, steps), clientRef, resolved, refuse, prep.commit,params,cap.target?{capability:cap.id,target:cap.target.id,kind:cap.target.kind,...(cap.target.kind==='place'?{place:cap.target.id}:{})}:undefined);
   }
-  /** CN5 (acceptance: reservation.conflict on the Soul's own seat): a seated body that is going somewhere or doing
-   *  something with its whole body gets up first; overlays done on the seat (read, eat, wave…) keep it. */
   /** #485: on the seat already, not on the way to one (a walking sit holds its claim before she sits). */
   private sittingNow(entityId: string): boolean {const h = (this.mw.world as NativeWorld).entities[entityId]?.human; return !!this.seatOf(entityId) && (h?.activity === 'sit' || h?.baseActivity === 'sit');}
+  /** CN5 (acceptance: reservation.conflict on the Soul's own seat): a seated body that is going somewhere or doing
+   *  something with its whole body gets up first; overlays done on the seat (read, eat, wave…) keep it. */
   private standIfSeated(soul: EdgeSoul, steps: Program['steps']): Program['steps'] {
     const first = steps[0]?.verb; if (!first || ['stand', 'mars:pose_v1', 'wave', 'face', 'rest'].includes(first) || (!this.seatOf(soul.entityId) && !this.lyingOnBerth(soul.entityId))) return steps;
     return [{verb: 'stand', params: {}}, ...steps];
@@ -1909,7 +1906,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if ('ok' in prepared) return refuse(prepared.code, prepared.message);
       painting = prepared;
     }
-        const detail={...((chosen||typeof seatSlot==='string')?{chosen:{...structuredClone(chosen??{}),...(typeof seatSlot==='string'?{seat:seatSlot.split('#')[0],slot:seatSlot}:{})}}:{}), ...(painting ? {paintingV1: painting} : {})}, keepsSeat=()=>steps[0]?.verb==='stand'?{}:{seatHeld:this.sittingNow(soul.entityId)};
+    const detail={...((chosen||typeof seatSlot==='string')?{chosen:{...structuredClone(chosen??{}),...(typeof seatSlot==='string'?{seat:seatSlot.split('#')[0],slot:seatSlot}:{})}}:{}), ...(painting ? {paintingV1: painting} : {})}, keepsSeat=()=>steps[0]?.verb==='stand'?{}:{seatHeld:this.sittingNow(soul.entityId)};
     const busy = this.sharedBusy(soul.soulId); if (busy) return {...refuse('shared.busy', busy.reason), ...this.busyExtra(busy), ...resolved};
     const nativeUse = this.nativeUseRefusal?.(capability, steps);
     if (nativeUse) return {...refuse(nativeUse.code, nativeUse.reason), ...resolved};

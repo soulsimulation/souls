@@ -3,6 +3,7 @@
 // {id, tick, clock, kind, salience 0–3, about, where, text (one line), media, untrusted, raw, data}.
 // Pure functions: the same stored event always projects to the same envelope.
 import type {StreamEvent} from '../comms/stream.ts';
+import {SEAT_KEPT} from '../contract.ts';
 
 export type Media = {type: 'image'; url: string; alt: string};
 export type Where = {place?: string; placeId?: string; dist?: number; bearing?: string};
@@ -141,7 +142,7 @@ export function classify(e: StreamEvent, me: Viewer): {kind: string; salience: 0
       if (r.channel === 'attention' || r.channel === 'none') return k('receipt.terminal', 0);
       if (r.phase === 'waiting') return k('receipt.waiting');
       if (r.phase === 'started') return k('receipt.started', plan ? 0 : 1);
-      if (r.phase === 'replaced' || r.code === 'seat.kept') return k('receipt.terminal', plan ? 0 : 1);
+      if (r.phase === 'replaced' || r.code === SEAT_KEPT) return k('receipt.terminal', plan ? 0 : 1);
       if (r.phase === 'failed' && BLOCKING.test(String(r.code ?? ''))) return k('blocked', plan ? 1 : 3);
       return k('receipt.terminal', plan ? 1 : 3);
     }

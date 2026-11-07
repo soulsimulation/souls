@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {bootEden} from '../test/eden-capabilities-timing.ts';
+import {menuWorldOf} from './split/menu-world.ts';
 import {accept, invite} from '../test/native-owner-fixture.ts';
 
 const hamlet = new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url);
@@ -36,11 +37,24 @@ test('#485: a named seat someone holds is not offered as free, and refuses at on
   assert.equal(offer(w, bo)?.available, true, 'free again once she stands');
 });
 
+test('#485: a kept menu follows the seat, whoever moved', {timeout: 300000}, async t => {
+  const {w, bo} = await seated(t), world = menuWorldOf(w.host as never) as any, seats = world.seatOccupantsV1;
+  assert.equal(offer(w, bo)?.available, false);
+  await w.settle(1); world.seatOccupantsV1 = () => []; t.after(() => {world.seatOccupantsV1 = seats;});   // nobody moved, so only the seat read can see it
+  await w.settle(1);
+  assert.equal(offer(w, bo)?.available, true, 'the kept menu is dropped when the seat it read changed');
+});
+
 test('#485: a sit still on its way to the seat is replaced as before, seat claim or not', {timeout: 300000}, async t => {
   const w = await bootEden(() => {}, hamlet); t.after(w.close);
   const act = (capability: string, params?: unknown) => accept(w.host, Promise.resolve(w.edge.act(w.soul as never, {capability, ...(params ? {params} : {})} as never))) as Promise<any>;
-  const sit = await act(BENCH); assert.equal(sit.accepted, true); await w.settle(4);
-  const read = await act('read:here', {seconds: 20}); assert.equal(read.accepted, true, JSON.stringify(read)); await w.settle(4);
+  const sit = await act(BENCH); assert.equal(sit.accepted, true);
+  // the window: her claim on the seat is held, and she hasn't sat yet
+  const holds = () => (w.host.engine as any).nativeSeatHoldsV1(w.soul.entityId).length, activity = () => (w.host.engine.world.entities as any)[w.soul.entityId].human.activity;
+  for (let i = 0; i < 2400 && !holds(); i++) await w.settle(1);
+  assert.ok(holds() > 0, 'the walking sit holds its seat'); assert.notEqual(activity(), 'sit', 'and she is not on it yet');
+  // rest, because it doesn't stand her first: a read or a wave here does, and never asks whether she is seated
+  const rest = await act('rest:here', {seconds: 20}); assert.equal(rest.accepted, true, JSON.stringify(rest)); await w.settle(4);
   const r = w.edge.receipt(w.soul.soulId, sit.receipt.id)!;
   assert.equal(r.phase, 'replaced', JSON.stringify(r)); assert.equal(r.code ?? null, null);
 });
@@ -51,6 +65,7 @@ test('#485: a read on a seat leaves the sit done, not cut short; getting up to g
   await w.settle(10);
   const done = w.edge.receipt(w.soul.soulId, sit.receipt.id)!;
   assert.equal(done.phase, 'completed', JSON.stringify(done)); assert.equal(done.code, 'seat.kept'); assert.match(done.reason ?? '', /Still seated/);
+  assert.match(done.outcome?.summary ?? '', /, still seated\.$/, JSON.stringify(done.outcome));
   assert.ok((w.host.engine as any).nativeSeatHoldsV1(w.soul.entityId).length > 0, 'and she is still on the seat');
   const sit2 = await act(w.soul, 'stand:here'); assert.equal(sit2.accepted, true);
   await w.settle(10);
