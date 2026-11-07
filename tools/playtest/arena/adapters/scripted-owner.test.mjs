@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateScript, classify, matchRule, stepOutcome, turn, renderChat, ownerWokeOpen, waitWindowSec } from './scripted-owner.mjs';
+import { validateScript, classify, matchRule, stepOutcome, turn, renderChat, ownerWokeOpen, waitWindowSec, bindPrev, keptOutput, OUTPUT_KEEP } from './scripted-owner.mjs';
+import { seatActs } from '../../review/run.mjs';
 import { brief } from '../../../world-launcher/soul/eden.mjs';
 import { ADAPTERS } from '../seat.mjs';
 import { providerPolicy } from '../../lib/provider-policy.mjs';
@@ -14,7 +15,8 @@ import { wakeText, onboardingText } from '../seat.mjs';
 
 const STANDIN = `import { appendFileSync } from 'node:fs';
 const a = process.argv.slice(2); appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
-if (a[0] === 'act') { if (a[1].includes('swim')) { console.log(JSON.stringify({ accepted: false, code: 'no-offer' })); } else console.log(JSON.stringify({ accepted: true, receipt: { id: 'r1', phase: a.includes('--wait') ? 'completed' : 'running' } })); }
+if (a[0] === 'resolve') console.log(JSON.stringify({ candidates: a[1].includes('nothing') ? [] : [{ id: 'give:s_123' }, { id: 'give:s_456' }] }));
+else if (a[0] === 'act') { if (a[1].includes('swim')) { console.log(JSON.stringify({ accepted: false, code: 'no-offer' })); } else console.log(JSON.stringify({ accepted: true, receipt: { id: 'r1', phase: a.includes('--wait') ? 'completed' : 'running' } })); }
 else if (a[0] === 'status') console.log(JSON.stringify({ paired: true, soul: { id: 's1' } }));
 else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
 const folder = (standin = STANDIN) => { const d = mkdtempSync(join(tmpdir(), 'scripted-owner-')); writeFileSync(join(d, 'eden.mjs'), standin); return d; };
@@ -92,6 +94,18 @@ test('a refused step and an unmatched message both end in an honest failed resul
   assert.deepEqual(calls(d), [['ack', 'm1', 'On it.'], ['act', 'swim across'], ['result', 'm1', 'failed', 'act: no-offer'], ['ack', 'm2'], ['result', 'm2', 'failed', 'no scripted response']]);
 });
 
+test('a resolve step hands its first candidate to the next act, and no candidate stops the rule (#1192)', async () => {
+  const script = { rules: [
+    { match: 'offer', ack: 'ok', do: [['resolve', 'offer Ben the coffee'], ['act', '{resolved}', '--wait', '5']], result: 'Offered' },
+    { match: 'void', ack: 'ok', do: [['resolve', 'nothing here'], ['act', '{resolved}']], result: 'Never' }] };
+  const cwd = folder(), calls = () => readFileSync(join(cwd, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  await ADAPTERS['scripted-owner'].turn({ cwd, text: wake([{ id: 'm1', text: 'offer it' }]), script });
+  assert.deepEqual(calls().find((c) => c[0] === 'act'), ['act', 'give:s_123', '--wait', '5']);
+  await ADAPTERS['scripted-owner'].turn({ cwd, text: wake([{ id: 'm2', text: 'void' }]), script });
+  assert.equal(calls().filter((c) => c[0] === 'act').length, 1, 'no act after an empty resolve');
+  assert.match(JSON.stringify(calls().filter((c) => c[0] === 'result').at(-1)), /m2.*failed.*nothing on offer/);
+});
+
 test('onboarding runs register, create and status from the served CLI already in the folder', async () => {
   const d = folder();
   const r = await turn({ cwd: d, text: onboardingText('http://127.0.0.1:1/w/x', 'Ada'), script: SCRIPT });
@@ -162,6 +176,30 @@ test('an unresolved {{prev…}} fails its step without running it; onRefused app
   assert.match(resultOf(d)[3], /unresolved \{\{prev\.alternatives\[0\]\.id\}\}/);
 });
 
+test('a refused final step fails the request even with onRefused continue', async () => {
+  const d = recoverFolder();
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly' }]), script: { rules: [{ match: 'fly', do: [['act', 'walk:g-field'], ['act', 'fly up', { onRefused: 'continue' }]], result: 'Flew' }] } });
+  assert.equal(calls(d).filter((c) => c[0] === 'act').length, 2);
+  assert.deepEqual(resultOf(d).slice(0, 3), ['result', 'm1', 'failed']);
+  assert.match(resultOf(d)[3], /^act: .*capability\.unknown/);
+});
+
+test('a step skipped for an unresolved {{prev…}} leaves no JSON for the step after it', async () => {
+  const d = recoverFolder();
+  const script = { rules: [{ match: 'fly', do: [['act', 'fly up', { onRefused: 'continue' }], ['act', '{{prev.alternatives[0].id}}', { onRefused: 'continue' }], ['act', '{{prev.did_you_mean[0].id}}']] }] };
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly' }]), script });
+  assert.equal(calls(d).filter((c) => c[0] === 'act').length, 1, 'neither placeholder step ran: the refusal two steps back is not reused');
+  assert.deepEqual(resultOf(d).slice(0, 3), ['result', 'm1', 'failed']);
+  assert.match(resultOf(d)[3], /unresolved \{\{prev\.did_you_mean\[0\]\.id\}\} \(the previous step printed no JSON\)/);
+});
+
+test('bindPrev reads own properties only, never the prototype chain', () => {
+  const prev = JSON.parse('{"did_you_mean":[{"id":"walk:g-field"}],"n":3}');
+  assert.deepEqual(bindPrev(['{{prev.did_you_mean[0].id}}', 'x{{prev.n}}'], prev), { args: ['walk:g-field', 'x3'] });
+  for (const path of ['constructor.name', 'toString', 'did_you_mean[0].constructor.name', '__proto__.constructor.name', 'did_you_mean[0].id.length'])
+    assert.match(bindPrev([`{{prev.${path}}}`], prev).error, /^unresolved/, path);
+});
+
 test('step options and {{prev}} placeholders are validated by field', () => {
   const v = (step, j = 1) => validateScript({ rules: [{ match: 'x', do: j ? [['status'], step] : [step] }] });
   assert.deepEqual(v(['act', 'x', { onRefused: 'continue' }]), []);
@@ -220,4 +258,30 @@ else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
   await turn({ cwd: d, text: wake([{ id: 'm1', text: 'sit on the bench' }]), script: { rules: [{ match: 'bench', do: [['act', 'sit on the bench', '--wait', '8']], result: 'Sitting' }] } });
   const c = calls(d);
   assert.equal(c.filter((x) => x[0] === 'receipt').length, 0); assert.deepEqual(c.at(-1), ['result', 'm1', 'done', 'Sitting']);
+});
+
+test('a long CLI output is kept whole for scoring; past the bound it carries a marker and a flag (#371)', async () => {
+  // `around` with a route and `map` with its flags run past the old 4000-character window: the scorer read them as broken strings
+  const d = mkdtempSync(join(tmpdir(), 'scripted-owner-')), route = Array.from({ length: 600 }, (_, i) => ({ step: i, toward: `the far gate ${i}` }));
+  writeFileSync(join(d, 'eden.mjs'), `const a = process.argv.slice(2);
+if (a[0] === 'around') console.log(JSON.stringify({ places: [], route: { found: true, steps: ${JSON.stringify(route)} } }));
+else if (a[0] === 'map') process.stdout.write('x'.repeat(${OUTPUT_KEEP + 512 * 1024}));
+else console.log(JSON.stringify({ ok: true }));`);
+  const t = await turn({ cwd: d, text: wake([{ id: 'm1', text: 'look around' }]), script: { rules: [{ match: 'look', do: [['around'], ['map']] }] } });
+  const results = t.stream.flatMap((e) => e.message?.content ?? []).filter((c) => c.type === 'tool_result');
+  const around = results[1], map = results[2];
+  assert.ok(around.content.length > 20000, `around is ${around.content.length} characters`);
+  assert.deepEqual(JSON.parse(around.content).route.steps, route, 'kept byte for byte');
+  assert.equal(around.truncated, undefined);
+  assert.equal(map.truncated, true);
+  assert.ok(map.content.startsWith('x'.repeat(OUTPUT_KEEP)));
+  assert.match(map.content, new RegExp(`\\n\\[scripted-owner: output truncated: ${OUTPUT_KEEP} of ${OUTPUT_KEEP + 512 * 1024} characters kept\\]$`));
+  // the scorer reads the transcript as the run stores it
+  const acts = seatActs({ seats: { pip: { turns: [{ turn: 1 }], transcript: t.stream.map((e) => ({ ...e, turn: 1 })) } } }, 'pip', [1]);
+  const a = acts.find((x) => / around$/.test(x.cmd)), m = acts.find((x) => / map$/.test(x.cmd));
+  assert.equal(a.output.route.found, true, 'parsed as JSON, not a cut string'); assert.equal(a.truncated, undefined);
+  assert.equal(m.truncated, true);
+  // short outputs are stored exactly as before
+  assert.deepEqual(keptOutput('{"ok":true}\n'), { content: '{"ok":true}\n' });
+  assert.deepEqual(keptOutput('abcdef', 4), { content: 'abcd\n[scripted-owner: output truncated: 4 of 6 characters kept]', truncated: true });
 });

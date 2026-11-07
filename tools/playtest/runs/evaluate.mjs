@@ -21,7 +21,7 @@ export const INDEX_SCHEMA = 'soul-run-index/1';
 const VERDICTS = ['pass', 'fail', 'unknown'];
 // Never indexed: world data, the seat working folders (owner identity, controller credentials, the served CLI) and
 // earlier evaluations. Seat transcripts are indexed (hash only) because they are the controller's evidence.
-const SKIP = [/^evaluations(\/|$)/, /^playtest\/server\/data(\/|$)/, /^playtest\/seats\/[^/]+\/folder(\/|$)/, /(^|\/)node_modules(\/|$)/];
+const SKIP = [/^evaluations(\/|$)/, /^derived(\/|$)/, /^playtest\/server\/data(\/|$)/, /^playtest\/seats\/[^/]+\/folder(\/|$)/, /(^|\/)node_modules(\/|$)/];
 
 const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
 const r3 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 1000) / 1000);
@@ -275,6 +275,7 @@ function questionContext(sr, requests, sources) {
     runId: sr.runId, status: sr.status, scenario: sr.scenario, setup: sr.setup, requests, seats: sr.seatIds,
     steps: (seat) => sr.steps[seat] ?? [],
     hasTranscript: (seat) => (sr.steps[seat]?.length ?? 0) > 0,
+    listens: (seat) => (sr.playtestDir ? readJsonl(join(sr.playtestDir, 'seats', seat, 'listen.jsonl')) : []),
     observer: { packs: packs.length, available: packs.length > 0, receipt: sr.receipt?.observer ?? null },
     evidencePacks: packs,
     ref: (path, line = null) => ({ path, ...(line ? { line } : {}), sha256: sources[path]?.sha256 ?? null }),
@@ -308,9 +309,13 @@ function scenarioAcceptance(sr) {
 /** Identity of what ran (must match for repeats to pool) and the conditions it ran under (listed, not pooled on). */
 export function runIdentity(sr) {
   const sc = sr.scenario ? structuredClone(sr.scenario) : null;
-  if (sc) { for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot', 'castPath']) delete sc[k]; if (sc.world) delete sc.world.port; }
+  if (sc) {
+    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot', 'castPath']) delete sc[k]; if (sc.world) delete sc.world.port;
+    // A traced seat is a different condition from an untraced one, but its run-specific trace file and ids are not.
+    for (const s of sc.seats ?? []) if (s.diagnostics?.trace) s.diagnostics = { trace: true };
+  }
   const eff = sr.receipt?.spec?.effective ?? null;
-  const seats = (sc?.seats ?? []).map((s) => ({ id: s.id, adapter: s.adapter ?? 'claude-headless', model: s.model ?? null, effort: s.effort ?? null, persona: s.persona ?? null, script: s.script ? hashOf(s.script).slice(0, 16) : null }));
+  const seats = (sc?.seats ?? []).map((s) => ({ id: s.id, adapter: s.adapter ?? 'claude-headless', model: s.model ?? null, effort: s.effort ?? null, persona: s.persona ?? null, script: s.script ? hashOf(s.script).slice(0, 16) : null, ...(s.diagnostics?.trace ? { traced: true } : {}) }));
   const components = {
     scenario: sc ? hashOf(sc).slice(0, 16) : null,
     worldSource: eff?.world?.source ? `${eff.world.source.kind}:${eff.world.source.path}@${eff.world.source.sha256.slice(0, 16)}` : sc?.world ? `${sc.world.snapshot ? 'snapshot' : 'genesis'}:${sc.world.snapshot ?? sc.world.genesis}@unhashed` : null,
@@ -321,7 +326,10 @@ export function runIdentity(sr) {
   const pre = sr.receipt?.preflight?.scenario?.checks ?? (sr.playtestDir ? readJson(join(sr.playtestDir, 'preflight.json'), null)?.checks : null) ?? null;
   const ev = sr.receipt?.evidence ?? {};
   const conditions = {
-    commit: sr.receipt?.source?.commit ?? null, dirtyTrackedFiles: sr.receipt?.source?.dirtyTrackedFiles ?? null, node: sr.receipt?.source?.node ?? null,
+    commit: sr.receipt?.source?.commit ?? null, dirtyTrackedFiles: sr.receipt?.source?.dirtyTrackedFiles ?? null,
+    // #785: the tools checkout (runner, adapters, director) can differ from the server root; null on older receipts.
+    toolsCommit: sr.receipt?.source?.tools?.commit ?? null, toolsDirtyTrackedFiles: sr.receipt?.source?.tools?.dirtyTrackedFiles ?? null,
+    node: sr.receipt?.source?.node ?? null,
     cli: ev.cli ?? null, skill: ev.skill ?? null, build: ev.build ?? null,
     machine: pre ? { load1: pre.laptopLoad?.[0] ?? null, freeGb: pre.freeGb ?? null, machineOk: pre.machineOk ?? null } : null,
     observer: sr.receipt?.observer ? { ok: sr.receipt.observer.ok, stage: sr.receipt.observer.stage ?? null } : null,
@@ -369,6 +377,8 @@ export async function evaluateRun(dir, { questions = [], write = true, now = () 
     coverage: {
       directorSeats: Object.keys(sr.director).length, seatTranscripts: Object.values(sr.steps).filter((s) => s.length).length, requests: requests.length,
       observerEvidencePacks: sr.run?.evidence?.length ?? 0, observer: sr.receipt?.observer ?? null,
+      // Diagnostics (SR3) are linked, not interpreted here: `run.mjs correlate` is the analysis of a trace.
+      diagnostics: sr.receipt?.diagnostics?.capture ? Object.fromEntries(Object.entries(sr.receipt.diagnostics.capture.seats).map(([seat, x]) => [seat, { file: x.file, present: sr.receipt.diagnostics.capture.result?.[seat]?.present ?? null, sha256: before[x.file]?.sha256 ?? null }])) : 'off',
       // Semantic (model) review is never run here. When the run had one, its mode, model and outputs are identified so
       // an answer built on it can say what it rests on; review/cli.mjs review is the explicit, separately budgeted path.
       semanticReview: review ? { mode: sr.scenario?.review?.mode ?? 'model', provider: (sr.scenario?.review?.mode ?? 'model') === 'model' ? 'claude' : null, model: (sr.scenario?.review?.mode ?? 'model') === 'model' ? (sr.scenario?.review?.reviewerModel ?? 'opus') : null, requests: review.requests ?? 0, inputs: (sr.scenario?.review?.mode ?? 'model') === 'model' ? 'bounded per-request evidence projections (review/run.mjs projectEvidence)' : 'deterministic oracles only', outputs: ['ledger.tsv', 'reviews.jsonl'].map((f) => sr.at(f)).filter((f) => before[f]), note: 'indexed, not re-run; evaluate makes no model call' } : null,
@@ -458,11 +468,12 @@ export async function compareRunSet(dirs, { questions = [], now = () => new Date
       const versions = [...new Set(Object.values(v).filter(Boolean).map((x) => x.version))];
       return [id, { verdicts: v, pass: Object.values(v).filter((x) => x?.verdict === 'pass').length, fail: Object.values(v).filter((x) => x?.verdict === 'fail').length, unknown: Object.values(v).filter((x) => !x || x.verdict === 'unknown').length, ...(versions.length > 1 ? { flag: `scorer versions differ: ${versions.join(', ')}` } : {}) }];
     }));
-    const keys = ['commit', 'dirtyTrackedFiles', 'node', 'cli', 'skill', 'build', 'machine', 'observer'];
+    const keys = ['commit', 'dirtyTrackedFiles', 'toolsCommit', 'toolsDirtyTrackedFiles', 'node', 'cli', 'skill', 'build', 'machine', 'observer'];
     const all = attempts.filter((t) => t.arm === arm.arm);
     arm.conditions = Object.fromEntries(all.map((t) => [t.runId, t.conditions]));
     arm.conditionsDiffer = keys.filter((k) => new Set(all.map((t) => JSON.stringify(k === 'machine' ? { ok: t.conditions?.machine?.machineOk } : t.conditions?.[k]))).size > 1);
-    if (all.some((t) => t.conditions?.dirtyTrackedFiles)) arm.caveats = [`source not exactly identified for ${all.filter((t) => t.conditions?.dirtyTrackedFiles).map((t) => t.runId).join(', ')} (uncommitted tracked files)`];
+    const dirty = all.filter((t) => t.conditions?.dirtyTrackedFiles || t.conditions?.toolsDirtyTrackedFiles);
+    if (dirty.length) arm.caveats = [`source not exactly identified for ${dirty.map((t) => `${t.runId}${t.conditions?.toolsDirtyTrackedFiles ? (t.conditions?.dirtyTrackedFiles ? ' (server root and tools)' : ' (tools)') : ''}`).join(', ')} (uncommitted tracked files)`];
     if (reps.length < 2) arm.caveats = [...(arm.caveats ?? []), `${reps.length} completed repeat(s): no spread can be read`];
   }
   const incompatible = [];
@@ -477,6 +488,8 @@ export function renderIndex(ix) {
   const L = [`# Run comparison`, '', `${ix.attempts.length} attempt(s), ${ix.arms.length} arm(s). ${ix.pooled}.`, ''];
   for (const a of ix.arms) {
     L.push(`## Arm \`${a.arm}\``, '', `Attempts: ${a.attempts.map((t) => `${t.runId} (${t.status})`).join(', ')}. Completed repeats: ${a.repeats.length}.${a.conditionsDiffer.length ? ` Conditions differ: ${a.conditionsDiffer.join(', ')}.` : ''}${a.caveats ? ` Caveats: ${a.caveats.join('; ')}.` : ''}`, '');
+    const src = (c) => `server root ${c?.commit?.slice(0, 8) ?? '?'}${c?.dirtyTrackedFiles ? `+${c.dirtyTrackedFiles}` : ''}, tools ${c?.toolsCommit?.slice(0, 8) ?? 'unrecorded'}${c?.toolsDirtyTrackedFiles ? `+${c.toolsDirtyTrackedFiles}` : ''}`;
+    L.push(`Source: ${Object.entries(a.conditions ?? {}).map(([id, c]) => `${id} (${src(c)})`).join('; ')}.`, '');
     if (a.repeats.length) {
       L.push(`| measure | unit | ${a.repeats.join(' | ')} | measured / unavailable |`, `|---|---|${a.repeats.map(() => '---').join('|')}|---|`);
       for (const [id, m] of Object.entries(a.measures)) L.push(`| ${id} | ${m.unit} | ${a.repeats.map((r) => fmt(m.values[r])).join(' | ')} | ${m.measured} / ${m.unavailable} |`);

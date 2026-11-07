@@ -4,7 +4,7 @@
 // reason naming it. Only the one door walked through is ever named; doors elsewhere never enter the plan or the receipt.
 import {actuatorPoint,HAND_OPEN_ANGLE} from '../../../../mars/viewer/engine/social/hand-actuator.ts';
 import type {EdgeSoul} from '../edge/contract.ts';
-import type {WorldModel} from '@sim/world-compiler';
+import type {WorldModel} from '@souls/world-compiler';
 import {actionsOf,actuatedState} from './actuators.ts';
 import {isContactActuator,type ContactActuatorIntent,type ContactActuatorService} from './contact-actuator.ts';
 
@@ -48,6 +48,7 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    // lock it again from outside, and must not leave the owner's door open to all). Anyone else outside is refused.
    const lockedNow=actuatedState(e,def).locked===true,inside=o.side<0,own=lockedNow?d.owner?.(id,soul):null;
    if(lockedNow&&(!def.tags.includes('lockable')||(!inside&&own?.mine!==true))){refusal??={refuse:true,code:'door.locked',reason:lockedReason(id,soul,what,name)};continue;}
+   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened.`};continue;}
    const unlock=lockedNow?d.contact.plan(soul,id,'unlock'):null;if(lockedNow&&!unlock)continue;
    const intent=d.contact.prepare(soul,id,'open');if(!intent)continue;
    const passage={door:[wp.x,wp.z] as [number,number],from:o.side};

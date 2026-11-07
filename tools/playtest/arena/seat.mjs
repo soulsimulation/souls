@@ -55,6 +55,28 @@ export class Seat {
       wake: (seat.adapter ?? 'claude-headless') === 'codex-headless' ? seat.wake === true : seat.wake !== false };
   }
   save() { writeJson(join(this.dir, 'seat.json'), this.info); }
+  /** A new start for this Soul's owner: its resident client restarts, and the next turn opens a new chat. What the last chat
+   *  left unread goes with it, or a replay would stand in for memory. A seat with `home` moves into a Souls home first. */
+  async restart() {
+    await this.chain;   // a turn in flight would write its session back
+    const cli = async (...args) => {
+      const r = await run('node', [this.cli.file, ...args], { cwd: this.folder, maxWallMs: 20000 });
+      if (r.code !== 0) throw new Error(`seat ${this.seat.id}: ${args.join(' ')} exited ${r.code}: ${r.stderr.slice(0, 300)}`);
+      return JSON.parse(r.stdout);
+    };
+    const listening = !!this.listener;
+    this.stopListen();
+    try {
+      if ((await cli('serve', '--status')).serving) await cli('pending');
+      await cli('serve', '--stop');
+      let up = true;
+      for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
+      if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
+      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
+      this.info.sessionId = null; this.save();
+    } finally { if (listening) this.startListen(); }
+  }
   get sessionId() { return this.info.sessionId; }
   /** Number of completed turns (as recorded in turns.jsonl, so it survives a harness restart). */
   turnCount() { return readJsonl(join(this.dir, 'turns.jsonl')).length; }
@@ -113,7 +135,7 @@ export class Seat {
     let r;
     try {
       r = await this.adapter.turn({ cwd: this.folder, sessionId: this.info.sessionId, resume: !first, model: this.info.model ?? undefined, effort: this.info.effort,
-        text, allowedTools: this.allowedTools, maxWallSec: this.rails.maxTurnWallSec, prevCumulative: this.cumulative, script: this.seat.script,
+        text, allowedTools: this.allowedTools, maxWallSec: this.rails.maxTurnWallSec, prevCumulative: this.cumulative, script: this.seat.script, diagnostics: this.seat.diagnostics,
         ...(hold ? { maxBudgetUsd: hold.capUsd, maxOutputTokens: this.budget.maxOutputTokens } : {}) });
     } catch (e) { if (hold) this.budget.settle(hold, null); throw e; }
     const ended = now();
@@ -237,7 +259,10 @@ export class Seat {
     const args = [file, ...this.cli.listen(this.lastListenId)];
     const cmdLine = `node ${args.join(' ')}`;
     const startedAt = now();
-    const h = start('node', args, { cwd: this.folder, onExit: ({ code, signal, stdout, stderr }) => {
+    // Soul Runs diagnostics (#752): a traced seat's harness listen carries the same passive preload as its commands, so
+    // the trace sees each owner message's delivery. Untraced seats get no extra argument or environment.
+    const tr = this.seat.diagnostics?.trace;
+    const h = start('node', tr ? ['--import', tr.tap, ...args] : args, { cwd: this.folder, env: tr ? { SOUL_TRACE_FILE: tr.file, SOUL_TRACE_RUN: tr.run, SOUL_TRACE_SEAT: tr.seat } : undefined, onExit: ({ code, signal, stdout, stderr }) => {
       const killed = h.killedByUs; if (this.listener === h) this.listener = null;
       const msgs = listenMessages(stdout);
       appendJsonl(join(this.dir, 'listen.jsonl'), { ...now(), startMono: startedAt.mono, cmd: cmdLine, code, signal, killedByUs: !!killed, messages: msgs.map((m) => m.id), stdout: killed ? undefined : stdout, stderr: stderr.slice(-500) || undefined });

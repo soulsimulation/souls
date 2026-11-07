@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Hosts proof media (clips, images, logs, proof.json) for a PR, so the PR links it and the repo never stores it.
 //
-//   node tools/proof/upload.mjs --pr <n> [--repo owner/name] [--proof <proof.json>] [--dry-run] [--json]
-//        [--no-preview] [--preview-start <s>] [--preview-seconds <s>] <file>...
+//   node tools/proof/upload.mjs --pr <n> [--repo owner/name] [--release <tag>] [--proof <proof.json>] [--dry-run]
+//        [--json] [--no-preview] [--preview-start <s>] [--preview-seconds <s>] <file>...
 //
 // Targets:
-//   default   a GitHub release named `proofs` (a prerelease on tag `proofs`, created on first use), through `gh api`.
+//   default   the PR's own GitHub prerelease `proofs-<n>` (tag `proofs-<n>` on the default branch, created on first
+//             use), through `gh api`. One release per PR keeps every release under GitHub's 1000-asset limit, which the
+//             old shared `proofs` release reached. `--release <tag>` (or SIM_PROOF_RELEASE) names another release.
 //             Release asset names cannot hold "/", so the logical name `pr-<n>/<file>` is stored as `pr-<n>.<file>`.
 //   SIM_PROOF_UPLOAD_URL (+ SIM_PROOF_UPLOAD_TOKEN)
 //             any endpoint that takes `PUT <url>/pr-<n>/<file>` with `Authorization: Bearer <token>` and answers
@@ -13,11 +15,17 @@
 //             `${SIM_PROOF_PUBLIC_URL || SIM_PROOF_UPLOAD_URL}/pr-<n>/<file>`. For a future CDN endpoint.
 //
 // An existing name is never overwritten: a re-take gets `-2`, `-3`, ... so earlier (failed) takes stay linkable.
-// With --proof, each uploaded file's url is written into proof.json `media[]` (matched by file name; new media get
-// an entry to complete), then proof.json itself is uploaded last and its link printed: that is the link for the PR.
+// With --proof, a clip's uncut, realSpeed, seconds, viewport and caption come from its `<clip>.json` sidecar where proof.json
+// leaves them unset; a clip whose uncut or realSpeed would stay unset is refused (proof.media-incomplete) before anything
+// is uploaded. A clip whose sidecar records a privacy hit (clip-privacy.mjs) is refused (proof.clip-private) with or
+// without --proof, and so is a sidecar itself, which holds local paths and stays unpublished.
+// With --proof, clip and image urls are written into proof.json `media[]` and other files' (logs, JSON) into `files[]`,
+// matched by file name (new media get an entry to complete). Then proof.json itself is uploaded last and its link
+// printed: that is the link for the PR.
 //
 // Inline previews: GitHub serves release assets as downloads, so an mp4 link never plays in the PR. For each video,
-// ffmpeg makes `<clip>.preview.gif` beside it (the first --preview-seconds, default 6, from --preview-start, default 0;
+// ffmpeg makes `<clip>.preview.gif` beside it (--preview-seconds, default 6, from --preview-start, default the clip's
+// `arrived` mark in its `<clip>.json` sidecar, else 0, or 0 for a take recorded from load on purpose (#888);
 // real speed, at most 5 MB, smaller frames until it fits), uploads it next to the clip and records it as proof.json
 // `media[].preview`. The printed `[![...](preview.gif)](clip.mp4)` line embeds it in the PR, linked to the full clip.
 // Without ffmpeg the clip is uploaded alone, with a warning. --no-preview skips it.
@@ -29,9 +37,21 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { clipPrivacyHits, hitSummary } from './clip-privacy.mjs';
+import { assertPublishable, readPublication } from './publication.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-export const RELEASE_TAG = 'proofs';
+/** The release a PR's proof goes to: `override` when given, else the PR's own `proofs-<n>` (the shared `proofs`
+ *  release every PR used before is full: GitHub caps a release at 1000 assets). */
+export const releaseTag = (pr, override) => override || `proofs-${pr}`;
+
+/** GitHub's per-release asset cap, and what to do when a release has reached it. */
+export const RELEASE_ASSET_CAP = 1000;
+export const fullRelease = (tag, pr) => `release "${tag}" is at GitHub's ${RELEASE_ASSET_CAP}-asset limit, so nothing was uploaded. `
+  + `Use the PR's own release: drop --release and SIM_PROOF_RELEASE (the default is proofs-${pr}). On a branch whose upload.mjs `
+  + `still defaults to the shared "proofs" release, run main's copy: git show origin/main:tools/proof/upload.mjs > .local/upload-main.mjs, `
+  + `then node .local/upload-main.mjs --pr ${pr} <files>.`;
+const TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_BYTES = 2 * 1024 ** 3, WARN_BYTES = 100 * 1024 ** 2;
 export const TYPES = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
@@ -42,6 +62,10 @@ export const contentType = file => TYPES[extname(file).toLowerCase()] ?? 'applic
 export const kindOf = file => /^video\//.test(contentType(file)) ? 'video' : /^image\//.test(contentType(file)) ? 'image' : 'file';
 
 export class Blocked extends Error {}
+/** A clip whose proof.json entry would fail `proof-ok`, refused before anything is uploaded. */
+export class IncompleteMedia extends Error { code = 'proof.media-incomplete'; }
+/** A clip that showed something private, or a sidecar, refused before anything is uploaded. */
+export class PrivateClip extends Error { code = 'proof.clip-private'; }
 const BLOCKED = /HTTP 40[134]|Resource not accessible|not logged|gh auth login|authentication|Could not resolve host|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|network|proxy|tunnel|ENOENT/i;
 
 export const safeName = s => s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '');
@@ -75,37 +99,58 @@ export function checkLocal(files, git = (...a) => execFileSync('git', a, { cwd: 
 }
 
 // ── targets ─────────────────────────────────────────────────────────────────────────────────────────────────────
-/** GitHub release target through `gh api`. `run(args, opts)` returns stdout; injected in tests. */
-export function githubTarget({ repo, run, dryRun = false }) {
+/**
+ * GitHub release target through `gh api`: release `tag`, or the PR's own `proofs-<n>` when no tag is given. One target
+ * serves one release, so without a tag it uploads for one PR only (a second PR number throws; the CLI takes one --pr).
+ * `run(args, opts)` returns stdout; injected in tests.
+ */
+export function githubTarget({ repo, run, dryRun = false, tag = null }) {
+  if (tag && !TAG_RE.test(tag)) throw Error(`--release ${tag}: not a valid tag name`);
   const gh = (args, input) => {
     try { return run(['api', ...args], input); } catch (e) {
       const msg = `${e.stderr ?? ''} ${e.message ?? ''}`.trim();
       throw BLOCKED.test(msg) ? new Blocked(`gh api ${args[0] === '-X' ? args.slice(0, 3).join(' ') : args[0]}: ${msg.split('\n')[0]}`) : e;
     }
   };
-  let release = null, taken = null;
-  const ensure = () => {
-    if (release) return release;
-    try { release = JSON.parse(gh([`repos/${repo}/releases/tags/${RELEASE_TAG}`])); }
+  let release = null, taken = null, current = tag;
+  const ensure = (pr) => {
+    const want = releaseTag(pr, tag);
+    if (release && current === want) return release;
+    if (release) throw Error(`one upload run targets one release: ${current}, not also ${want}`);
+    current = want;
+    try { release = JSON.parse(gh([`repos/${repo}/releases/tags/${want}`])); }
     catch (e) {
       if (!(e instanceof Blocked) || !/404|Not Found/i.test(e.message)) throw e;
       if (dryRun) { release = { id: 0, assets: [] }; taken = new Set(); return release; }
-      release = JSON.parse(gh(['-X', 'POST', `repos/${repo}/releases`, '-f', `tag_name=${RELEASE_TAG}`, '-f', `name=${RELEASE_TAG}`,
-        '-F', 'prerelease=true', '-f', 'make_latest=false',
-        '-f', 'body=Proof media for pull requests (clips, images, proof.json), uploaded by tools/proof/upload.mjs. Assets are named pr-<n>.<file>. Not a release of the software.']));
+      // A new tag is created on the default branch; the release is a prerelease that never becomes "latest".
+      const body = tag
+        ? 'Proof media for pull requests (clips, images, proof.json), uploaded by tools/proof/upload.mjs. Assets are named pr-<n>.<file>. Not a release of the software.'
+        : `Proof media for PR #${pr} (clips, images, proof.json), uploaded by tools/proof/upload.mjs. Not a release of the software.`;
+      release = JSON.parse(gh(['-X', 'POST', `repos/${repo}/releases`, '-f', `tag_name=${want}`, '-f', `name=${tag ? want : `Proof for PR #${pr}`}`,
+        '-F', 'prerelease=true', '-f', 'make_latest=false', '-f', `body=${body}`]));
     }
     return release;
   };
   return {
-    name: `GitHub release "${RELEASE_TAG}" on ${repo}`,
+    get name() { return `GitHub release "${current ?? 'proofs-<pr>'}" on ${repo}`; },
     upload(pr, file) {
-      const rel = ensure();
+      const rel = ensure(pr);
       if (!taken) taken = new Set(JSON.parse(gh([`repos/${repo}/releases/${rel.id}/assets?per_page=100`, '--paginate', '--slurp'])).flat().map(a => a.name));
+      // A full release (the old shared `proofs` one) refuses every new asset: say so before uploading anything.
+      if (taken.size >= RELEASE_ASSET_CAP) throw Error(fullRelease(current, pr));
       const name = uniqueName(releaseAssetName(pr, file), taken);
       taken.add(name);
-      if (dryRun) return { name, url: `https://github.com/${repo}/releases/download/${RELEASE_TAG}/${name}`, dryRun: true };
-      const out = JSON.parse(gh(['-X', 'POST', `https://uploads.github.com/repos/${repo}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`,
-        '-H', `Content-Type: ${contentType(file)}`, '--input', file]));
+      if (dryRun) return { name, url: `https://github.com/${repo}/releases/download/${current}/${name}`, dryRun: true };
+      let out;
+      try {
+        out = JSON.parse(gh(['-X', 'POST', `https://uploads.github.com/repos/${repo}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`,
+          '-H', `Content-Type: ${contentType(file)}`, '--input', file]));
+      } catch (e) {
+        const msg = `${e.stderr ?? ''} ${e.message ?? ''}`;
+        // `taken` already holds this name: a release listed one short of the cap filled up meanwhile (another upload).
+        if (/HTTP 422/.test(msg) && taken.size >= RELEASE_ASSET_CAP) throw Error(fullRelease(current, pr));
+        throw e;
+      }
       return { name, url: out.browser_download_url };
     },
   };
@@ -135,10 +180,10 @@ export function httpTarget({ url, token, publicUrl, fetchImpl = fetch, read = re
   };
 }
 
-export function pickTarget({ env = process.env, repo, run, fetchImpl, dryRun }) {
+export function pickTarget({ env = process.env, repo, run, fetchImpl, dryRun, release = null }) {
   if (env.SIM_PROOF_UPLOAD_URL) return httpTarget({ url: env.SIM_PROOF_UPLOAD_URL, token: env.SIM_PROOF_UPLOAD_TOKEN, publicUrl: env.SIM_PROOF_PUBLIC_URL, fetchImpl, dryRun });
   if (!repo) throw new Blocked('no repository: pass --repo owner/name (or set GITHUB_REPOSITORY)');
-  return githubTarget({ repo, run, dryRun });
+  return githubTarget({ repo, run, dryRun, tag: release || env.SIM_PROOF_RELEASE || null });
 }
 
 // ── previews ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -170,28 +215,90 @@ export function makePreview(file, { start = 0, seconds = 6, ffmpeg = args => exe
   return { skipped: `even a ${PREVIEW_LADDER.at(-1).width}px preview is over ${PREVIEW_MAX_BYTES / 1024 ** 2} MB; use --preview-seconds to shorten it` };
 }
 
-/** The Markdown that embeds a clip's preview in a PR, linked to the full clip. */
-export const embedLine = (u, alt = basename(u.file)) => u.preview ? `[![${alt}](${u.preview})](${u.url})` : `[${alt}](${u.url})`;
+const SIDECAR = /\.(?:mp4|m4v|webm|mov)\.json$/i;
+/** A clip's sidecar (`<clip>.json`, written by record.mjs and the run cameras), or null. */
+export function clipSidecar(file, read = readFileSync) { try { return JSON.parse(read(`${file}.json`, 'utf8')); } catch { return null; } }
 
-/** Writes uploaded links into proof.json media[] (by file name); returns the updated object. */
+/** Where a clip's inline preview starts (#888): its `arrived` mark (the world on screen), unless the take was recorded
+ *  from load on purpose (`--from-load`: the loading is what it shows), then 0. → {start, why} */
+export function previewStartFor(sidecar) {
+  if (!sidecar) return { start: 0, why: 'no sidecar' };
+  if (sidecar.startRequested === 'load') return { start: 0, why: 'recorded from load on purpose' };
+  const arrived = (sidecar.marks ?? []).find(m => m.label === 'arrived')?.atSec;
+  return Number.isFinite(arrived) ? { start: arrived, why: 'arrived mark' } : { start: 0, why: 'no arrived mark' };
+}
+
+/** The Markdown that embeds a clip's preview in a PR, linked to the full clip. */
+export const embedLine = (u, alt = basename(u.file)) => u.preview
+  ? `[Full-resolution video: ${alt}](${u.url}) — reduced GIF preview below.\n\n[![Reduced preview: ${alt}](${u.preview})](${u.url})`
+  : `[Full-resolution video: ${alt}](${u.url})`;
+
+/** What a clip's sidecar can vouch for, or null. Only record.mjs writes one, and it never edits, speeds up or cuts, so a
+ *  sidecar of that shape means an uncut, real-speed take. `videoSec` is the recording itself; `durationSec`, all an older
+ *  sidecar has, stops before the recording closes, so it runs about a second short. */
+export function clipFacts(side) {
+  const seconds = side?.videoSec ?? side?.durationSec;
+  if (!side?.playwright || typeof side.viewport !== 'string' || !(seconds > 0)) return null;
+  return { uncut: true, realSpeed: true, seconds, viewport: side.viewport, caption: `${side.viewport} take${side.commit ? ` recorded at ${String(side.commit).slice(0, 9)}` : ''}` };
+}
+
+/** Fills what the author left unset. Anything already stated stands, an `uncut: false` above all. */
+const fillFacts = (entry, facts) => { for (const [k, v] of Object.entries(facts ?? {})) if (entry[k] == null || entry[k] === '') entry[k] = v; };
+
+/** Writes uploaded links into proof.json: clips and images into media[], everything else (logs, JSON) into files[],
+ *  both matched by file name. A non-media entry left in media[] by an older upload moves to files[]. */
 export function linkMedia(proof, uploaded) {
   const media = Array.isArray(proof.media) ? proof.media : [];
+  const files = Array.isArray(proof.files) ? proof.files : [];
+  const named = (list, file) => list.find(m => m?.file && basename(m.file) === file);
   for (const u of uploaded) {
-    const file = basename(u.file);
-    const entry = media.find(m => m.file && basename(m.file) === file);
-    if (entry) { entry.url = u.url; if (u.preview) entry.preview = u.preview; }
-    else media.push({ file, url: u.url, ...(u.preview ? { preview: u.preview } : {}), kind: kindOf(file), ...(kindOf(file) === 'video' ? { uncut: null, realSpeed: null, seconds: null, viewport: null } : {}), caption: '' });
+    const file = basename(u.file), kind = kindOf(file);
+    if (kind === 'file') {
+      const stale = named(media, file);
+      if (stale) media.splice(media.indexOf(stale), 1);
+      const entry = named(files, file);
+      if (entry) entry.url = u.url;
+      else files.push({ file, url: u.url, caption: stale?.caption ?? '' });
+      continue;
+    }
+    const entry = named(media, file);
+    // Which start the take used (#888): "arrival" (the default) or "load" (from page creation), from its sidecar.
+    const start = u.start ? { start: u.start, ...(u.previewStartSec != null ? { previewStartSec: u.previewStartSec } : {}) } : {};
+    if (entry) { entry.url = u.url; if (u.preview) entry.preview = u.preview; Object.assign(entry, start); if (kind === 'video') fillFacts(entry, u.facts); }
+    else {
+      media.push({ file, url: u.url, ...(u.preview ? { preview: u.preview } : {}), kind, ...(kind === 'video' ? { uncut: null, realSpeed: null, seconds: null, viewport: null } : {}), ...start, caption: '' });
+      if (kind === 'video') fillFacts(media.at(-1), u.facts);
+    }
   }
-  return { ...proof, media };
+  return { ...proof, media, ...(files.length || Array.isArray(proof.files) ? { files } : {}) };
 }
 
 /** Uploads `files` (each video with its preview when `preview(file)` makes one), then proof.json last. */
-export async function uploadAll({ pr, files, proofPath = null, target, read = readFileSync, write = writeFileSync, preview = null, warn = () => {} }) {
+export async function uploadAll({ pr, files, proofPath = null, target, read = readFileSync, write = writeFileSync, preview = null, previewStart = null, warn = () => {} }) {
+  // Check the entire batch before the first network write, including a late proof/log payload.
+  for (const file of [...files, ...(proofPath ? [proofPath] : [])]) {
+    if (SIDECAR.test(file)) throw new PrivateClip(`proof.clip-private: ${basename(file)} is a clip's sidecar: it holds local paths and stays unpublished.`);
+    const hits = kindOf(file) === 'video' ? clipPrivacyHits(clipSidecar(file, read)) : [];
+    if (hits.length) throw new PrivateClip(`proof.clip-private: ${basename(file)} showed ${hitSummary(hits)}. Record a new take; this one is never published.`);
+    assertPublishable(basename(file));
+    if (file === proofPath || kindOf(file) === 'file') assertPublishable(readPublication(file, read, { json: file === proofPath }));
+  }
+  // proof-ok fails a video without uncut and realSpeed, so say so now, not after the upload.
+  if (proofPath) {
+    const media = JSON.parse(read(proofPath, 'utf8')).media ?? [];
+    const bad = files.filter(f => kindOf(f) === 'video' && !clipFacts(clipSidecar(f, read))).filter(f => { const m = media.find(x => x?.file && basename(x.file) === basename(f)); return m?.uncut == null || m?.realSpeed == null; });
+    if (bad.length) throw new IncompleteMedia(`proof.media-incomplete: ${bad.map(f => basename(f)).join(', ')}: no record.mjs sidecar (<clip>.json) beside the clip, and proof.json does not state uncut and realSpeed. Record with .claude/skills/proof/record.mjs, or state both in the clip's media entry yourself.`);
+  }
   const uploaded = [];
   for (const file of files) {
     const u = { file, ...(await target.upload(pr, file)) };
+    const side = kindOf(file) === 'video' ? clipSidecar(file, read) : null;
+    if (side?.start) u.start = side.start;
+    if (clipFacts(side)) u.facts = clipFacts(side);
     if (preview && kindOf(file) === 'video') {
-      const p = preview(file);
+      const at = previewStart ?? previewStartFor(side).start;
+      u.previewStartSec = at;
+      const p = preview(file, at);
       if (p.skipped) warn(`${basename(file)}: no inline preview (${p.skipped}); the PR will link the clip only`);
       else u.preview = (await target.upload(pr, p.file)).url;
     }
@@ -200,6 +307,7 @@ export async function uploadAll({ pr, files, proofPath = null, target, read = re
   let proofLink = null;
   if (proofPath) {
     const proof = linkMedia(JSON.parse(read(proofPath, 'utf8')), uploaded);
+    assertPublishable(proof);
     write(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
     const r = await target.upload(pr, proofPath);
     proofLink = r.url;
@@ -229,11 +337,11 @@ function repoFromGit() {
 
 async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
-  const valued = new Set(['--pr', '--repo', '--proof', '--preview-start', '--preview-seconds']);
+  const valued = new Set(['--pr', '--repo', '--release', '--proof', '--preview-start', '--preview-seconds']);
   const files = argv.filter((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1]));
   const pr = opt('--pr'), proofPath = opt('--proof') ?? null, dryRun = argv.includes('--dry-run');
   if (!pr || !/^\d+$/.test(pr) || (!files.length && !proofPath)) {
-    console.error('usage: upload.mjs --pr <n> [--repo owner/name] [--proof proof.json] [--dry-run] [--json] [--no-preview] [--preview-start s] [--preview-seconds s] <file>...');
+    console.error('usage: upload.mjs --pr <n> [--repo owner/name] [--release tag] [--proof proof.json] [--dry-run] [--json] [--no-preview] [--preview-start s] [--preview-seconds s] <file>...');
     return 2;
   }
   const local = checkLocal([...files, ...(proofPath ? [proofPath] : [])]);
@@ -242,12 +350,14 @@ async function main(argv) {
   const repo = opt('--repo') ?? process.env.GITHUB_REPOSITORY ?? repoFromGit();
   const run = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 26 });
   try {
-    const target = pickTarget({ repo, run, dryRun });
-    console.error(`${dryRun ? 'dry run: would upload' : 'uploading'} ${files.length + (proofPath ? 1 : 0)} file(s) to ${target.name}`);
+    const release = opt('--release') ?? null;
+    const target = pickTarget({ repo, run, dryRun, release });
+    const where = process.env.SIM_PROOF_UPLOAD_URL ? target.name : `GitHub release "${releaseTag(pr, release || process.env.SIM_PROOF_RELEASE)}" on ${repo}`;
+    console.error(`${dryRun ? 'dry run: would upload' : 'uploading'} ${files.length + (proofPath ? 1 : 0)} file(s) to ${where}`);
     const previews = !dryRun && !argv.includes('--no-preview');
-    const start = Number(opt('--preview-start') ?? 0), seconds = Number(opt('--preview-seconds') ?? 6);
-    const out = await uploadAll({ pr: Number(pr), files, proofPath, target, write: dryRun ? () => {} : writeFileSync,
-      preview: previews ? file => makePreview(file, { start, seconds }) : null, warn: m => console.error(`warn: ${m}`) });
+    const start = opt('--preview-start') != null ? Number(opt('--preview-start')) : null, seconds = Number(opt('--preview-seconds') ?? 6);
+    const out = await uploadAll({ pr: Number(pr), files, proofPath, target, write: dryRun ? () => {} : writeFileSync, previewStart: start,
+      preview: previews ? (file, at) => makePreview(file, { start: at, seconds }) : null, warn: m => console.error(`warn: ${m}`) });
     if (argv.includes('--json')) console.log(JSON.stringify(out, null, 2));
     else {
       for (const u of out.uploaded) console.log(`${u.url}  (${basename(u.file)})${u.preview ? `\n  preview ${u.preview}` : ''}`);
@@ -258,6 +368,7 @@ async function main(argv) {
     return 0;
   } catch (e) {
     if (e instanceof Blocked) { console.error(blockedMessage({ reason: e.message, files, pr, proofPath })); return 3; }
+    if (e instanceof IncompleteMedia || e instanceof PrivateClip) { console.error(`error: ${e.message}`); return 1; }
     throw e;
   }
 }

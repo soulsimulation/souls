@@ -257,16 +257,18 @@ test('#1098: console.clockFrom "paired" starts the script clock once every seat 
   const pairAt = 30_000;
   const late = (sw, clock, w) => { (async () => { await clock.sleep(pairAt); w.seats.cy.info.soulId = 's_cy'; sw.paired('cy'); })(); };
   const script = [{ atSec: 6, line: 'cy: are you there' }];
+  const toCy = (r) => r.dirs.filter((d) => d.seat === 'cy' && d.by === 'console');
   const gated = await play({ cast: { ...testCast(), console: { script, clockFrom: 'paired' } }, script, behaviour: { cy: { unpaired: true } }, onboarding: { cy: true }, during: late });
-  const say = readJsonl(join(gated.runDir, 'director', 'commands.jsonl')).find((c) => c.cmd === 'say');
-  assert.equal(say.outcome, 'applied', JSON.stringify(say));
-  assert.ok(say.elapsedSec >= pairAt / 1000 + 6, `delivered ${say.elapsedSec} s in, after pairing at ${pairAt / 1000} s + 6 s`);
+  const sent = toCy(gated);
+  assert.equal(sent.length, 1, JSON.stringify(sent)); assert.equal(sent[0].error ?? null, null);
+  assert.ok(sent[0].elapsedSec >= pairAt / 1000 + 6, `delivered ${sent[0].elapsedSec} s in, after pairing at ${pairAt / 1000} s + 6 s`);
   const clockRow = readJsonl(join(gated.runDir, 'director', 'timeline.jsonl')).find((e) => e.kind === 'cast-clock');
   assert.ok(clockRow && clockRow.afterSec >= pairAt / 1000);
-  // without it, the same line at 6 s reaches a seat that isn't paired yet, as before
+  // without it the same line at 6 s reaches a seat that isn't paired yet, as before
   const plain = await play({ script, behaviour: { cy: { unpaired: true } }, onboarding: { cy: true }, during: late });
-  const early = readJsonl(join(plain.runDir, 'director', 'commands.jsonl')).find((c) => c.cmd === 'say');
-  assert.deepEqual([early.outcome, early.reason], ['refused', 'seat not paired']);
+  const early = toCy(plain);
+  assert.ok(early.every((d) => d.elapsedSec < pairAt / 1000), JSON.stringify(early));
+  assert.ok(early.some((d) => /not paired/.test(String(d.error ?? ''))), JSON.stringify(early));
 });
 
 test('#1098: a seat turn refused by the world budget ends the scene', async () => {
