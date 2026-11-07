@@ -253,9 +253,11 @@ context-size checks below), regression runs, and an uncut real-client recording 
     ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
   - **No crew waits for good.** A crew's stop waits while the frame they hold can't stand, in case someone finishes it, and as
     long as the build goes on. Under the repair rules, a stop a Soul asked for whose body, load and frame joins don't change
-    for five minutes gives up (`world.stop-gave-up`): the crew lets go, the part stands where it is as a god's joined upright
-    does, and crews on the rest of that frame are let go with them. That answers a frame nobody can finish now, such as after
-    a god extends its group, or a beam removed from under a held upright. It is no glitch and the crew is told it.
+    for five minutes, or half an hour whatever changes, gives up (`world.stop-gave-up`): the crew lets go, the part stands
+    where it is as a god's joined upright does, and crews on the rest of that frame are let go with them
+    (`world.frame-let-go`). That answers a frame nobody can finish now, such as after a god extends its group, or a beam
+    removed from under a held upright. It is no glitch. The crew hears that the part stands where it was and its frame isn't
+    finished. Only joins seated count as progress: a beam on its way doesn't, so a slow build can still lose its waiting crew.
   - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
     the model has heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
