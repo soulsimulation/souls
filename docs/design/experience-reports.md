@@ -5,7 +5,7 @@ Future design for [#590](https://github.com/soulsimulation/souls/issues/590), wi
 The goal is to inspect an actual game episode, understand an undesirable experience and turn a supported diagnosis
 into a reproducible improvement—even when no exception occurred.
 
-**Built so far (first slice, local only).** An owner creates `.eden-report-on` in a Soul's folder to turn reports on, then
+**Built so far (first slice, local only).** An owner creates `.eden-report-on` in a Soul's folder (in a Souls home, its `souls/<id>/runtime/`, beside the record) to turn reports on, then
 runs `node eden.mjs guide` to add the one guide line, and deletes the file to turn them off. While on, `eden.mjs` records
 its own requests as `soul-trace/1` records in `.eden-report.jsonl`, which `tools/soul-trace/readout.mjs` reads, and offers
 one optional command, `note "<expected>" "<observed>"`. Nothing leaves the machine. While off, the client has no such

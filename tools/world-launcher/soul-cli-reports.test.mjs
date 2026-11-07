@@ -134,6 +134,28 @@ test('with serve up, a request is recorded once, and a plan step reaches its end
   } finally { w.close(); rmSync(d, { recursive: true, force: true }); }
 });
 
+test('in a Souls home the switch lives beside the record, in the Soul\'s runtime folder', { timeout: 60_000 }, async () => {
+  const w = await world(), home = folder(w.url, false);
+  try {
+    const imported = await run(home, 'import'); assert.equal(imported.code, 0, imported.err);
+    const souls = join(home, '.souls', 'souls'), [id] = readdirSync(souls), runtime = join(souls, id, 'runtime');
+    assert.ok(existsSync(runtime), 'the Soul has a runtime folder');
+    // a switch in the folder the person stands in is not this Soul's switch
+    writeFileSync(join(home, '.eden-report-on'), '');
+    assert.equal((await run(home, 'here')).code, 0);
+    assert.ok(!existsSync(join(runtime, '.eden-report.jsonl')) && !existsSync(join(home, '.eden-report.jsonl')), 'off: nothing recorded anywhere');
+    assert.notEqual((await run(home, 'note', 'a', 'b')).code, 0, 'off: no note command');
+    rmSync(join(home, '.eden-report-on'));
+    // the switch in the runtime folder turns it on for a command run from the home, and the record lands beside it
+    writeFileSync(join(runtime, '.eden-report-on'), '');
+    assert.equal((await run(home, 'here')).code, 0);
+    assert.ok(existsSync(join(runtime, '.eden-report.jsonl')), 'on: recorded beside the switch');
+    assert.ok(!existsSync(join(home, '.eden-report.jsonl')), 'and nowhere else');
+    assert.equal((await run(home, 'note', 'expected', 'observed')).code, 0, 'on: note reaches the Soul');
+    assert.match(readFileSync(join(runtime, '.eden-report.jsonl'), 'utf8'), /expected/);
+  } finally { await w.close(); rmSync(home, { recursive: true, force: true }); }
+});
+
 test('the copied whitelist answers as the trace tap does', () => {
   for (const u of ['https://x.test/w/slug/v1/edge/receipts/r_1?after=c_9&timeout=5', 'https://x.test/v1/edge/inspect/a%20b%20c', 'https://x.test/mcp']) assert.equal(reportRoute(u), routeOf(u), u);
   for (const d of [null, [], { accepted: true, code: 'a.b', receipt: { id: 'r', phase: 'started', capability: 'walk:x', soulId: 's', acceptedTick: 1, startedTick: 2, endedTick: 3, code: 'c', text: 'no' } },
