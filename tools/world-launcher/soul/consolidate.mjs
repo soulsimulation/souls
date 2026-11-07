@@ -31,6 +31,14 @@ export function settingsOf(config) {
   return { callsPerDay: whole(c.callsPerDay, CAPS.callsPerDay, 100), tokensPerPass: whole(c.tokensPerPass, CAPS.tokensPerPass, 1_000_000), everyHours: whole(c.everyHours, CAPS.everyHours, EVERY_HOURS_MAX) };
 }
 
+/** The owner's answer: a pass spends their money and sends journal text to a model, so nothing runs until they say yes. `null` is not asked yet. */
+export const answerOf = (config) => (config?.enabled === true || config?.enabled === false ? config.enabled : null);
+/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. */
+export function offerOf(config) {
+  const { callsPerDay, tokensPerPass } = settingsOf(config);
+  return `This Soul's journal is past its budget. A reflective pass has a model read the oldest days and write a short summary into MEMORY.md, gather notes it wrote more than once, and propose lines for SOUL.md for you to apply or ignore. The Soul keeps what mattered and wakes with less to read, and the full log stays on this machine. Cost: your own claude CLI on your account, at most ${callsPerDay} passes a day, ${tokensPerPass} tokens and $${PASS_USD} each. What leaves this machine: those journal days, which include what worlds said, sent to that model, and nothing else. Yes: consolidate on. No: consolidate off.`;
+}
+
 /** The stand-in a world with fake minds gets: the same plumbing, with no model. */
 export function fakeMind(prompt) {
   const lines = prompt.split("\n").filter((l) => l.startsWith("- ")).map(clean);

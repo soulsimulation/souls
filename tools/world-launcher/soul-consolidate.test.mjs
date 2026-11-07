@@ -246,7 +246,7 @@ test('A2: the ledger counts what came back too', async (t) => {
   assert.ok(JSON.parse(readFileSync(join(dir, 'memory/consolidation.json'), 'utf8')).tokens >= 1000);
 });
 
-test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; a Soul with none set off doesn\'t', async (t) => {
+async function cliSite(t) {
   const souls = new Map(), server = createServer((req, res) => { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
     const path = req.url.replace(/^\/w\/a/, '').split('?')[0], body = raw ? JSON.parse(raw) : {}, me = /^Bearer sim_(s_[a-z0-9]+)_/.exec(req.headers.authorization ?? '')?.[1], json = (b) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
     if (path === '/v1/config') return json({ devAuth: true, worldId: 'w_a', worldName: 'World a' });
@@ -267,12 +267,41 @@ test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; 
   const soul = join(dir, '.souls/souls/s_a1'), cfg = join(dir, '.souls/config.json');
   for (let d = 1; d <= 5; d++) writeFileSync(join(soul, `memory/journal/2026-10-0${d}.md`), `# 2026-10-0${d}\n\n${'- A day.\n'.repeat(5000)}`);
   writeFileSync(join(soul, 'memory/consolidation.json'), JSON.stringify({ lastLook: new Date(Date.now() - 2 * 3600_000).toISOString() }));   // clocks in this test run fast, wall time doesn't
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { everyHours: 0 } }));
+  return { run, soul, cfg };
+}
+
+test('#1256: off until the owner says yes; the offer says what it costs and what leaves; an answer ends it', async (t) => {
+  const { run, soul, cfg } = await cliSite(t), offer = async () => JSON.parse(await run('status')).consolidation;
+  const asked = await offer();
+  assert.equal(asked.state, 'not asked');
+  for (const told of [/MEMORY\.md/, /your own claude CLI/, /at most 2 passes a day, 8000 tokens and \$0\.05 each/, /What leaves this machine: those journal days/, /consolidate on/, /consolidate off/]) assert.match(asked.offer, told);
+  assert.equal(JSON.parse(await run('consolidate')).skipped, 'off'); assert.equal(JSON.parse(await run('consolidate', '--force')).skipped, 'off', 'force is no yes');
+  await run('serve'); await new Promise((r) => setTimeout(r, 500)); await run('serve', '--stop');
+  assert.ok(!existsSync(join(soul, 'MEMORY.md')), 'no answer, no pass, on any path');
+  assert.deepEqual(JSON.parse(await run('consolidate', 'off')).consolidation, 'off');
+  assert.deepEqual(await offer(), { state: 'off' }, 'no is an answer: the offer goes');
+  assert.equal(JSON.parse(await run('consolidate')).skipped, 'off');
+  assert.equal(JSON.parse(await run('consolidate', 'on')).consolidation, 'on'); assert.deepEqual(await offer(), { state: 'on' });
+  assert.equal(JSON.parse(readFileSync(cfg, 'utf8')).consolidation.enabled, true);
+  assert.ok(JSON.parse(await run('consolidate')).consolidated.length > 0); assert.ok(existsSync(join(soul, 'MEMORY.md')));
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { callsPerDay: 1, enabled: true } }));
+  await run('consolidate', 'off'); assert.equal(JSON.parse(readFileSync(cfg, 'utf8')).consolidation.callsPerDay, 1, 'an answer leaves the caps as they were');
+});
+
+test('#1256: under budget there is no question, and `status` reads as it did', async (t) => {
+  const { run, soul } = await cliSite(t);
+  for (let d = 1; d <= 5; d++) rmSync(join(soul, `memory/journal/2026-10-0${d}.md`));
+  assert.equal('consolidation' in JSON.parse(await run('status')), false);
+});
+
+test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; a Soul with none set off doesn\'t', async (t) => {
+  const { run, soul, cfg } = await cliSite(t);
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { enabled: true, everyHours: 0 } }));
   await run('serve');
   await new Promise((r) => setTimeout(r, 400));
   assert.ok(!existsSync(join(soul, 'MEMORY.md')), 'everyHours 0: never'); await run('serve', '--stop');
   await new Promise((r) => setTimeout(r, 300));
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { everyHours: 1 } }));
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { enabled: true, everyHours: 1 } }));
   writeFileSync(join(soul, 'memory/consolidation.json'), 'null');
   chmodSync(join(soul, 'memory'), 0o500);
   assert.equal(JSON.parse(await run('serve')).serving, true, 'a ledger it can\'t read or write never stops a serve'); await run('serve', '--stop');

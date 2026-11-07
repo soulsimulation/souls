@@ -151,7 +151,13 @@ by the mind saying so. Any turn of theirs since counts, even a greeting: the min
 
 ### Consolidation
 
-`consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
+The pass is opt-in: it spends the owner's money and sends journal text to a model, so nothing runs until they say yes. Past the
+journal budget with no answer yet, `status` carries `consolidation.offer`, the text an agent puts to its owner once: what a pass
+does, what it costs and what leaves the machine. `consolidate on` or `consolidate off` records the answer for the whole home
+(`consolidation.enabled` in `config.json`), and the offer goes. Until it's on, `consolidate` says so and an idle `serve` doesn't
+look.
+
+Once on, `consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
 `MEMORY.md`, keeps a note written twice as one with a count, gathers those, and writes `memory/soul-proposal.diff` for the
 owner. It never writes `SOUL.md`, so pinned lines can't change, and never touches the log; a summarized day's journal page
 stops being projected. A day too big for one pass is read as far as fits. `memory` searches `MEMORY.md`, and the brief's
