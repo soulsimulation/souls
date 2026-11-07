@@ -84,6 +84,9 @@ export function servingWait(whenServing: () => Promise<void> | null): Middleware
  *  Moderation (`/v1/moderation`, `/v1/moderation/*`): a takedown, a quarantine release and the veto list read only the
  *  moderation log, never the engine or the clock, and a safety action must not wait on an unrelated clock fault.
  *  `/healthz` is deliberately not here: its 503 is the health answer for a halted world. */
+// #894: the world page and its public guides may be indexed (the launcher marks every response of an unlisted world
+// noindex itself); the API, MCP, health, debug and any query-string variant never are.
+export const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
 export const CLOCK_EXEMPT: readonly RegExp[] = [/^\/v1\/moderation(?:\/|$)/];
 export const clockExempt = (path: string) => CLOCK_EXEMPT.some(r => r.test(path));
 type Deps = { cfg: Config; db: Db; host: WorldHost; auth: Auth; hub: Hub; brain: Brain; souls: Souls; takes?: TakeArchive; station?:CandidateStationV1; stationV2?:CandidateStationV2; intentV2?:IntentControlV2; edge?:EdgeLedger; god?: GodMode; contextReady?:()=>boolean; contextWait?:(signal:AbortSignal)=>Promise<void>; contextLevelAt?:(x:number,z:number,y:number)=>number; load?:{admission?:Admission;monitor:LoadMonitor;crowded?:(soulId:string)=>{position:number;eta_s:number}|null} };
@@ -105,9 +108,6 @@ export function buildApp(d: Deps) {
   const refusals = new RefusalLog();   // every 429/413 this world answers, in its log without flooding it
   // #1006: the shared security headers come first, so every answer carries them: each route, a 404, and the flood and
   // body-ceiling refusals below. A route's own CSP (the edge body asset's default-src 'none') keeps its directives.
-  // #894: the world page and its public guides may be indexed (the launcher marks every response of an unlisted world
-  // noindex itself); the API, MCP, health, debug and any query-string variant never are.
-  const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
   const securityHeaders: MiddlewareHandler = async (c, next) => { await next(); if (!((c.req.method === 'GET' || c.req.method === 'HEAD') && INDEXABLE.has(c.req.path) && !c.req.url.includes('?'))) c.header('X-Robots-Tag', 'noindex, nofollow'); c.header('X-Frame-Options', 'DENY'); const csp = c.res.headers.get('Content-Security-Policy'); c.header('Content-Security-Policy', !csp ? "frame-ancestors 'none'" : /frame-ancestors/i.test(csp) ? csp : `${csp}; frame-ancestors 'none'`); };
   app.use('*', securityHeaders);
   if (process.env.SIM_FLOOD !== '0') app.use('*', floodGuard({ log: refusals, godPool: (t) => { const who = d.god?.godIdentity(t); return who ? poolOf(who) : hashToken(t); } }));

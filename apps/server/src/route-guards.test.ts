@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture, invite, accept} from '../test/native-owner-fixture.ts';
-import {buildApp, CLOCK_EXEMPT, clockExempt} from './http.ts';
+import {buildApp, CLOCK_EXEMPT, clockExempt, INDEXABLE} from './http.ts';
 import {config} from './config.ts';
 import {GodMode} from './god/god.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
@@ -12,8 +12,8 @@ import {Hono} from 'hono';
 
 const UNAVAILABLE = {ok: false, code: 'world-unavailable', message: 'World temporarily unavailable.'};
 const haltClock = (host: unknown) => { (host as {clockFailure: unknown}).clockFailure = new Error('test: clock halted'); };
-const secure = (r: Response, why: string) => {
-  assert.equal(r.headers.get('x-robots-tag'), 'noindex, nofollow', why);
+const secure = (r: Response, why: string, url = '') => {
+  assert.equal(r.headers.get('x-robots-tag'), INDEXABLE.has(url) ? null : 'noindex, nofollow', why);
   assert.equal(r.headers.get('x-frame-options'), 'DENY', why);
   assert.match(r.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/, why);
 };
@@ -75,14 +75,15 @@ test('every route in the table carries the security headers, and answers 503 whi
   for (const early of ['/v1/edge/act', '/v1/god/act', '/v1/moderation/hide', '/v1/site/arrive', '/v1/edge/owner/:soulId/inbox', '/v1/souls/:soulId/command', '/v1/world/env', '/SKILL.md'])
     assert.ok(routes.some(r => r.path === early), `${early} is in the walk`);
   for (const r of routes) assert.ok(await reaches(r.registered, r.path, r.url), `${r.url} reaches ${r.registered} ${r.path}`);
-  for (const r of [...routes, {method: 'GET', url: '/v1/no-such-route', path: ''}, {method: 'GET', url: '/no-such-page', path: ''}]) secure(await call(app as never, r.method, r.url), `${r.method} ${r.url}`);
+  for (const r of [...routes, {method: 'GET', url: '/v1/no-such-route', path: ''}, {method: 'GET', url: '/no-such-page', path: ''}]) secure(await call(app as never, r.method, r.url), `${r.method} ${r.url}`, r.url);
   haltClock(f.host);
   const exempt: string[] = [];
   for (const r of routes) {
     const res = await call(app as never, r.method, r.url), why = `${r.method} ${r.url} (halted)`;
-    secure(res, why);
+    secure(res, why, r.url);
     if (clockExempt(r.url)) { assert.notEqual(res.status, 503, why); exempt.push(`${r.method} ${r.url}`); continue; }
-    assert.equal(res.status, 503, why); assert.equal(res.headers.get('cache-control'), 'no-store', why); assert.deepEqual(await res.json(), UNAVAILABLE, why);
+    assert.equal(res.status, 503, why); assert.equal(res.headers.get('cache-control'), 'no-store', why); const body = await res.json() as Record<string, unknown>; if (r.url.endsWith('/healthz')) { assert.equal(body.halted, true, why); delete body.halted; delete body.glitches; }
+    assert.deepEqual(body, UNAVAILABLE, why);
   }
   assert.ok(exempt.includes('GET /v1/moderation') && exempt.includes('POST /v1/moderation/hide'), 'the moderation routes answer while halted');
 });
