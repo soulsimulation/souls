@@ -1,4 +1,5 @@
 import {mountSoulRuntimePublication} from './soul-runtime-publication.ts';
+import {soulClientManifest} from './soul-client-manifest.ts';
 import {mountContextViews} from './god/context-views.ts';
 import {AutoPortraits} from './portrait/auto-portraits.ts';
 import {SoulProfiles} from './soul-profile.ts';
@@ -29,7 +30,7 @@ import { publicTakes, type Hub } from './hub.ts';
 import { cardGrammar } from '@souls/brain';
 import { skillMd } from './skill.ts';
 import { edgeSkillStub } from './edge/skill-stub.ts';
-import { agentReader } from './agent-reader.ts';
+import { agentReader, LEGACY_READER_KEYS, worldReader } from './agent-reader.ts';
 import { ApiError, type Souls } from './souls.ts';
 import { mountMarsStatic } from './mars-static.ts';
 import type {TakeArchive} from './take-archive.ts';
@@ -125,6 +126,8 @@ export function buildApp(d: Deps) {
     travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
       site: launcherSite(process.env.SIM_SITE_URL, process.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
       resolveBodyRef: (ref, owner) => bodyRefResolvers.get(d.host)?.(ref, owner) ?? {ok: false, code: 'body.ref-unsupported', reason: 'This world cannot resolve carried body references'} });
+    d.edge.travelLogOf = (soulId) => { const row = d.db.soul(soulId), t = row ? travel!.identity(row) : null; return t ? t.log.filter((e) => e.kind === 'travel' && e.from === d.cfg.worldKey).map((e) => ({at: e.at, to: e.toName, from: e.fromName})) : []; };
+    travel.onLeave = (soulId, at, world) => d.edge?.noteTravel(soulId, at, world);
     mountTravelRoutes(app, { travel, siteKey: process.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
       tokenSoul: (c) => { const s = d.souls.soulFromToken(bearer(c)); if (!s) { const r = d.souls.controlRefusal(bearer(c)); throw new TravelError(401, r.code, r.message, r.extra); } return s; },
       ownerSoul: async (c, id) => { const u = await requireUser(c); return ownSoul(u, id); },
@@ -216,7 +219,9 @@ export function buildApp(d: Deps) {
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
       tickMs, clockRate: d.host.clockRate, ...(mon ? {load: mon.health()} : {}) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
-  const configOf = (c: Context) => ({ authProvider:d.cfg.authProvider, authenticationOrigin:d.cfg.authProvider==='clerk'&&d.auth.ready?new URL(d.cfg.publicUrl).origin:'', clerkPublishableKey:d.cfg.authProvider==='clerk'?d.cfg.clerkPublishableKey:'', clerkIssuer:d.cfg.authProvider==='clerk'?d.cfg.clerkIssuer:'', ...(d.cfg.authProvider==='clerk'&&d.cfg.clerkSatelliteDomain?{clerkSatellite:{domain:d.cfg.clerkSatelliteDomain,signInUrl:d.cfg.clerkSignInUrl}}:{}), privyAppId:d.cfg.authProvider==='privy'?d.cfg.privyAppId:'', publicUrl: baseOf(c), worldURL:baseOf(c), instructionsURL:baseOf(c)+'/instructions.md', accountAuthRequired:d.cfg.accountAuthRequired, accountApproval:d.souls.accounts?{contract:'account-soul-approval/1',start:'/v1/agent/approval/start',poll:'/v1/agent/approval/poll',cancel:'/v1/agent/approval/cancel'}:null, soulProfile:{contract:'soul-profile/1',auth:'owner',edit:'PATCH /v1/souls/:id/profile',photo:'POST /v1/souls/:id/photo',resetPhoto:'DELETE /v1/souls/:id/photo',autoPortrait:portraits.enabled,photoFormat:'PNG RGB/RGBA8',maxPhotoBytes:262144,maxPhotoDimension:512}, worldId: d.host.worldId, worldKey: d.cfg.worldSlug ?? d.cfg.worldKey, worldEngine: d.cfg.worldEngine, worldName: displayWorldName, worldPath: d.cfg.worldPath, authReady: d.auth.ready, devAuth: d.auth.devAuth, inviteRequired: d.cfg.inviteRequired, build: d.cfg.build });
+  // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
+  const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile); return soulClient ? {soulClient} : {}; };
+  const configOf = (c: Context) => ({ ...soulClientField(), authProvider:d.cfg.authProvider, authenticationOrigin:d.cfg.authProvider==='clerk'&&d.auth.ready?new URL(d.cfg.publicUrl).origin:'', clerkPublishableKey:d.cfg.authProvider==='clerk'?d.cfg.clerkPublishableKey:'', clerkIssuer:d.cfg.authProvider==='clerk'?d.cfg.clerkIssuer:'', ...(d.cfg.authProvider==='clerk'&&d.cfg.clerkSatelliteDomain?{clerkSatellite:{domain:d.cfg.clerkSatelliteDomain,signInUrl:d.cfg.clerkSignInUrl}}:{}), privyAppId:d.cfg.authProvider==='privy'?d.cfg.privyAppId:'', publicUrl: baseOf(c), worldURL:baseOf(c), instructionsURL:baseOf(c)+'/instructions.md', accountAuthRequired:d.cfg.accountAuthRequired, accountApproval:d.souls.accounts?{contract:'account-soul-approval/1',start:'/v1/agent/approval/start',poll:'/v1/agent/approval/poll',cancel:'/v1/agent/approval/cancel'}:null, soulProfile:{contract:'soul-profile/1',auth:'owner',edit:'PATCH /v1/souls/:id/profile',photo:'POST /v1/souls/:id/photo',resetPhoto:'DELETE /v1/souls/:id/photo',autoPortrait:portraits.enabled,photoFormat:'PNG RGB/RGBA8',maxPhotoBytes:262144,maxPhotoDimension:512}, worldId: d.host.worldId, worldKey: d.cfg.worldSlug ?? d.cfg.worldKey, worldEngine: d.cfg.worldEngine, worldName: displayWorldName, worldPath: d.cfg.worldPath, authReady: d.auth.ready, devAuth: d.auth.devAuth, inviteRequired: d.cfg.inviteRequired, build: d.cfg.build });
   app.get('/v1/config', (c) => c.json(configOf(c)));
   const safeConfig = (c: Context) => { try { return configOf(c); } catch { return null; } };  // the page never fails because of it
   app.get('/v1/world', (c) => c.json(d.souls.worldSummary()));
@@ -303,7 +308,8 @@ export function buildApp(d: Deps) {
   // Selected-world text producer, before the SPA fallback. Origin/prefix come
   // from approved server configuration, never forwarded or caller headers.
   app.get('/llms.txt', c => {
-    try { return c.text(agentReader(d.cfg), 200, { 'content-type':'text/plain; charset=utf-8', 'cache-control':'public, max-age=60' }); }
+    // #897: the four original worlds keep their reviewed reader; every other world serves worldReader
+    try { return c.text(LEGACY_READER_KEYS.includes(d.cfg.worldKey) ? agentReader(d.cfg) : worldReader(d.cfg, displayWorldName), 200, { 'content-type':'text/plain; charset=utf-8', 'cache-control':'public, max-age=60' }); }
     catch { return c.text('World agent instructions are unavailable.', 503, { 'cache-control':'no-store' }); }
   });
   app.get('/w/:key/llms.txt', c => c.text('No agent reader for this world on this process.', 404));
