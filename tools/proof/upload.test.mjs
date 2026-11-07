@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
-  Blocked, blockedMessage, checkLocal, contentType, embedLine, githubTarget, httpTarget, linkMedia, makePreview, pickTarget, previewArgs, previewPath,
-  releaseAssetName, releaseTag, uniqueName, uploadAll, PREVIEW_MAX_BYTES,
+  Blocked, IncompleteMedia, PrivateClip, blockedMessage, clipFacts, checkLocal, contentType, embedLine, githubTarget, httpTarget, linkMedia, makePreview, pickTarget, previewArgs, previewPath,
+  releaseAssetName, releaseTag, uniqueName, uploadAll, PREVIEW_MAX_BYTES, previewStartFor,
 } from './upload.mjs';
+import { validateProof } from './acceptance.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'proof-upload-'));
 const clip = join(dir, 'desktop.mp4'), proofPath = join(dir, 'proof.json');
@@ -69,8 +70,19 @@ test('github target: --release / SIM_PROOF_RELEASE override the per-PR release',
   assert.throws(() => githubTarget({ repo: 'o/r', run: gh.run, tag: '../x' }), /not a valid tag/);
 });
 
-test('github target: a full release says how to get out of it', async () => {
+test('github target: a full release is refused before any upload, dry run included (#920)', async () => {
   const full = Array.from({ length: 1000 }, (_, i) => ({ name: `pr-1.f${i}.png` }));
+  for (const dryRun of [false, true]) {
+    const gh = fakeGh({ release: { id: 5 }, assets: full });
+    await assert.rejects(async () => githubTarget({ repo: 'o/r', run: gh.run, tag: 'proofs', dryRun }).upload(7, clip), /"proofs" is at GitHub's 1000-asset limit, so nothing was uploaded.*proofs-7.*git show origin\/main:tools\/proof\/upload\.mjs/s);
+    assert.ok(!gh.calls.some(a => a.join(' ').includes('uploads.github.com')), 'no upload was attempted');
+  }
+  const room = fakeGh({ release: { id: 5 }, assets: full.slice(1) });
+  assert.match((await githubTarget({ repo: 'o/r', run: room.run, tag: 'proofs' }).upload(7, clip)).url, /proofs\/pr-7\.desktop\.mp4$/, 'one slot left still uploads');
+});
+
+test('github target: a release that fills up during the upload says how to get out of it', async () => {
+  const full = Array.from({ length: 999 }, (_, i) => ({ name: `pr-1.f${i}.png` }));
   const gh = fakeGh({ release: { id: 5 }, assets: full, fail: { 'uploads.github.com': 'gh: Validation Failed (HTTP 422)' } });
   await assert.rejects(async () => githubTarget({ repo: 'o/r', run: gh.run, tag: 'proofs' }).upload(7, clip), /1000-asset limit.*proofs-7/);
 });
@@ -127,6 +139,100 @@ test('--proof: links uploaded media into proof.json, then uploads proof.json las
 test('linkMedia leaves a new video for the author to assert uncut / real speed', () => {
   const p = linkMedia({}, [{ file: '/x/phone.webm', url: 'https://h/pr-1.phone.webm' }]);
   assert.equal(p.media[0].uncut, null);
+});
+
+// A record.mjs sidecar for `clip`, written beside it for one test.
+const withSidecar = (t, extra = {}, file = clip) => { writeFileSync(`${file}.json`, JSON.stringify({ file: basename(file), viewport: 'desktop', durationSec: 38.5, videoSec: 39.4, playwright: '1.0', commit: 'a'.repeat(40), start: 'arrival', ...extra })); t.after(() => rmSync(`${file}.json`, { force: true })); };
+const proofOf = (media) => writeFileSync(proofPath, JSON.stringify({ schema: 'sim-proof/1', tier: 'T2', media }));
+const send = async () => { const gh = fakeGh({ release: { id: 5 }, assets: [] }); const out = await uploadAll({ pr: 8, files: [clip], proofPath, target: githubTarget({ repo: 'o/r', run: gh.run }) }); return { gh, out, saved: JSON.parse(readFileSync(proofPath, 'utf8')) }; };
+
+test('clipFacts: a recorder sidecar vouches for its clip; the recording\'s own length wins; anything else vouches for nothing', () => {
+  const side = { viewport: 'phone', durationSec: 38.5, videoSec: 39.4, playwright: '1.0', commit: 'abcdef0123456' };
+  assert.deepEqual(clipFacts(side), { uncut: true, realSpeed: true, seconds: 39.4, viewport: 'phone', caption: 'phone take recorded at abcdef012' });
+  assert.equal(clipFacts({ ...side, videoSec: undefined }).seconds, 38.5, 'an older sidecar');
+  for (const bad of [null, {}, { ...side, playwright: undefined }, { ...side, viewport: undefined }, { ...side, videoSec: 0, durationSec: 0 }]) assert.equal(clipFacts(bad), null);
+});
+
+test('--proof: a new clip takes its facts from the sidecar, and the proof.json passes proof-ok', async (t) => {
+  withSidecar(t); proofOf([]);
+  const m = (await send()).saved.media[0];
+  assert.deepEqual([m.uncut, m.realSpeed, m.seconds, m.viewport, m.caption], [true, true, 39.4, 'desktop', `desktop take recorded at ${'a'.repeat(9)}`]);
+  assert.deepEqual(validateProof({ media: [m] }, { tier: 'T1' }).problems.filter(p => /media/.test(p)), []);
+});
+
+test('--proof: what the author stated stands, uncut: false above all; only the gaps are filled', async (t) => {
+  withSidecar(t); proofOf([{ file: 'desktop.mp4', kind: 'video', uncut: false, viewport: 'phone', caption: 'mine' }]);
+  const m = (await send()).saved.media[0];
+  assert.deepEqual([m.uncut, m.viewport, m.caption, m.realSpeed, m.seconds], [false, 'phone', 'mine', true, 39.4]);
+});
+
+test('--proof: a clip with no sidecar and no stated facts is refused by name, before any upload', async () => {
+  proofOf([]);
+  const gh = fakeGh({ release: { id: 5 }, assets: [] });
+  await assert.rejects(uploadAll({ pr: 8, files: [clip], proofPath, target: githubTarget({ repo: 'o/r', run: gh.run }) }),
+    (e) => e instanceof IncompleteMedia && e.code === 'proof.media-incomplete' && /desktop\.mp4/.test(e.message) && /record\.mjs/.test(e.message));
+  assert.equal(gh.calls.length, 0, 'nothing went out');
+});
+
+test('--proof: a sidecar that is not a recorder\'s proves nothing; a stated entry still uploads without one', async (t) => {
+  withSidecar(t, { playwright: undefined }); proofOf([]);
+  await assert.rejects(send(), IncompleteMedia);
+  proofOf([{ file: 'desktop.mp4', kind: 'video', uncut: true, realSpeed: true }]);
+  assert.equal((await send()).saved.media[0].uncut, true);
+});
+
+test('without --proof nothing is refused: a clip can be hosted on its own', async () => {
+  const gh = fakeGh({ release: { id: 5 }, assets: [] });
+  assert.equal((await uploadAll({ pr: 8, files: [clip], target: githubTarget({ repo: 'o/r', run: gh.run }) })).uploaded.length, 1);
+});
+
+test('a clip whose sidecar records a privacy hit is refused by name before any upload, with or without --proof', async (t) => {
+  withSidecar(t, { privacy: { polls: 9, hits: [{ kind: 'reconnect-box', firstSec: 3.5, lastSec: 7, polls: 8 }] } });
+  proofOf([{ file: 'desktop.mp4', kind: 'video', uncut: true, realSpeed: true }]);
+  const shot = join(dir, 'first.png'); writeFileSync(shot, 'png');
+  for (const proof of [proofPath, null]) {
+    const gh = fakeGh({ release: { id: 5 }, assets: [] });
+    await assert.rejects(uploadAll({ pr: 8, files: [shot, clip], proofPath: proof, target: githubTarget({ repo: 'o/r', run: gh.run }) }),
+      (e) => e instanceof PrivateClip && e.code === 'proof.clip-private' && /desktop\.mp4 showed reconnect-box at 3\.5-7 s/.test(e.message));
+    assert.equal(gh.calls.length, 0, 'nothing went out, not even the file ahead of it');
+  }
+});
+
+test('a clean watch uploads, and a sidecar never does', async (t) => {
+  withSidecar(t, { privacy: { polls: 9, hits: [] } }); proofOf([]);
+  assert.equal((await send()).saved.media[0].uncut, true);
+  const gh = fakeGh({ release: { id: 5 }, assets: [] });
+  await assert.rejects(uploadAll({ pr: 8, files: [`${clip}.json`], target: githubTarget({ repo: 'o/r', run: gh.run }) }), (e) => e instanceof PrivateClip && /stays unpublished/.test(e.message));
+  assert.equal(gh.calls.length, 0);
+});
+
+test('linkMedia: a mixed upload puts the clip in media[] and the log and JSON in files[]; old file entries move', () => {
+  const old = { media: [{ file: 'run.log', url: 'https://h/old.log', kind: 'file', caption: 'server log' }] };
+  const p = linkMedia(old, [
+    { file: '/x/desktop.mp4', url: 'https://h/pr-1.desktop.mp4' },
+    { file: '/x/run.log', url: 'https://h/pr-1.run.log' },
+    { file: '/x/summary.json', url: 'https://h/pr-1.summary.json' },
+  ]);
+  assert.deepEqual(p.media.map(m => [m.file, m.kind]), [['desktop.mp4', 'video']]);
+  assert.deepEqual(p.files, [
+    { file: 'run.log', url: 'https://h/pr-1.run.log', caption: 'server log' },
+    { file: 'summary.json', url: 'https://h/pr-1.summary.json', caption: '' },
+  ]);
+  assert.equal(linkMedia({}, [{ file: '/x/a.png', url: 'https://h/a.png' }]).files, undefined, 'no files[] when nothing needs it');
+});
+
+test('--proof with a clip, a log and a JSON summary yields a proof.json that passes acceptance at T2', async () => {
+  const log = join(dir, 'server.log'), summary = join(dir, 'summary.json');
+  writeFileSync(log, 'log'); writeFileSync(summary, '{}');
+  const criteria = [{ id: 'A1', text: 't', status: 'met', evidence: ['`node --test x` -> pass'] }];
+  writeFileSync(proofPath, JSON.stringify({ schema: 'sim-proof/1', tier: 'T2', criteria, media: [{ file: 'desktop.mp4', kind: 'video', uncut: true, realSpeed: true }],
+    checks: [{ cmd: 'node --test x', result: 'pass' }], failedAttempts: [], externalities: [{ what: 'bytes', result: '+0', ok: true }], limits: [] }));
+  const gh = fakeGh({ release: { id: 5 }, assets: [] });
+  await uploadAll({ pr: 8, files: [clip, log, summary], proofPath, target: githubTarget({ repo: 'o/r', run: gh.run }) });
+  const saved = JSON.parse(readFileSync(proofPath, 'utf8'));
+  assert.deepEqual(saved.media.map(m => m.file), ['desktop.mp4']);
+  assert.deepEqual(saved.files.map(f => f.file), ['server.log', 'summary.json']);
+  assert.deepEqual(validateProof(saved, { tier: 'T2' }).problems, []);
 });
 
 test('checkLocal refuses committed media and warns on unignored media in the tree', () => {
@@ -187,6 +293,27 @@ test('uploadAll: each video gets its preview uploaded beside it and recorded in 
   assert.match(warned[0], /no inline preview \(ffmpeg is not installed\)/);
 });
 
+test('previews start where the take opens on the world (#888): the arrived mark, or 0 for a take recorded from load on purpose', async () => {
+  assert.deepEqual(previewStartFor({ start: 'arrival', startRequested: 'arrival', marks: [{ label: 'arrived', atSec: 0 }] }), { start: 0, why: 'arrived mark' });
+  assert.deepEqual(previewStartFor({ start: 'load', startRequested: 'arrival', startFallback: 'no screencast', marks: [{ label: 'goto', atSec: 0 }, { label: 'arrived', atSec: 7.4 }] }), { start: 7.4, why: 'arrived mark' }, 'a fallback load take still previews from arrival');
+  assert.deepEqual(previewStartFor({ start: 'load', startRequested: 'load', marks: [{ label: 'arrived', atSec: 7.4 }] }), { start: 0, why: 'recorded from load on purpose' });
+  assert.deepEqual(previewStartFor(null), { start: 0, why: 'no sidecar' });
+  const d = mkdtempSync(join(tmpdir(), 'proof-start-')), fromLoad = join(d, 'load.mp4'), fallback = join(d, 'fallback.mp4'), proof = join(d, 'proof.json');
+  writeFileSync(fromLoad, 'v'); writeFileSync(fallback, 'v');
+  const take = { playwright: '1.0', viewport: 'desktop', videoSec: 9 };
+  writeFileSync(`${fromLoad}.json`, JSON.stringify({ ...take, start: 'load', startRequested: 'load', marks: [{ label: 'arrived', atSec: 5 }] }));
+  writeFileSync(`${fallback}.json`, JSON.stringify({ ...take, start: 'load', startRequested: 'arrival', marks: [{ label: 'arrived', atSec: 6.5 }] }));
+  writeFileSync(proof, JSON.stringify({ schema: 'sim-proof/1', media: [{ file: 'load.mp4', kind: 'video' }] }));
+  const asked = [];
+  const preview = (file, at) => { asked.push([basename(file), at]); const out = previewPath(file); writeFileSync(out, 'gif'); return { file: out, bytes: 3 }; };
+  await uploadAll({ pr: 8, files: [fromLoad, fallback], proofPath: proof, target: githubTarget({ repo: 'o/r', run: fakeGh({ release: { id: 5 }, assets: [] }).run }), preview });
+  assert.deepEqual(asked, [['load.mp4', 0], ['fallback.mp4', 6.5]]);
+  const media = JSON.parse(readFileSync(proof, 'utf8')).media;
+  assert.deepEqual(media.map((m) => [m.file, m.start, m.previewStartSec]), [['load.mp4', 'load', 0], ['fallback.mp4', 'load', 6.5]], 'proof.json records which start each take used');
+  asked.length = 0;
+  await uploadAll({ pr: 8, files: [fallback], target: githubTarget({ repo: 'o/r', run: fakeGh({ release: { id: 5 }, assets: [] }).run }), preview, previewStart: 2 });
+  assert.deepEqual(asked, [['fallback.mp4', 2]], '--preview-start still wins');
+});
 
 test('all outgoing metadata is preflighted before any media network write', async () => {
   const home = ['', 'Users', 'private-person', 'work'].join('/');

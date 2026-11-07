@@ -1,4 +1,4 @@
-// 2.7.2 (#371 H-b): EDEN_TRACE=1 writes one stderr line per HTTP attempt with the CLI's wall ms and the world's
+// 2.21.1 (#371 H-b): EDEN_TRACE=1 writes one stderr line per HTTP attempt with the CLI's wall ms and the world's
 // x-handler-ms, so a late answer splits into server and client/network time. Without the variable nothing changes.
 import test from 'node:test';
 import {randomBytes} from 'node:crypto';
