@@ -15,6 +15,14 @@ test('the wording watched for is the app\'s own: a copy change fails here, not i
   assert.deepEqual(pageTextHits(prompt, ''), ['start-prompt']);
 });
 
+test('the other prompts that print a URL are caught by the host: new Soul, God Mode\'s connect line, For agents', () => {
+  const fill = (template) => template.replace(/\$\{\w+\}/g, 'http://127.0.0.1:4710/w/a/x.md');
+  const soul = /text:`(Read the instructions at \$\{instructionsUrl\}[^`]*)`/.exec(app('auth-ui.ts'))[1];
+  const god = /const line = `(Read \$\{url\}[^`]*)`/.exec(app('god-ui/GodModal.tsx'))[1];
+  const agents = /agentPrompt = \(origin: string\) => `(Read \$\{origin\}[^`]*)`/.exec(app('god-ui/LauncherHome.tsx'))[1];
+  for (const prompt of [soul, god, agents]) assert.deepEqual(pageTextHits(fill(prompt), '127.0.0.1'), ['page-host'], prompt);
+});
+
 test('pageTextHits: the page\'s own host on any port, in any case; never another page\'s, and never the live site\'s', () => {
   assert.deepEqual(pageTextHits('read http://LocalHost:4710/w/a/skill.md', 'localhost'), ['page-host']);
   assert.deepEqual(pageTextHits('on 127.0.0.1:9999 now', '127.0.0.1'), ['page-host']);

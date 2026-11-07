@@ -5,7 +5,7 @@
 // no guards. Every command is one or two HTTP calls to the world and prints JSON.
 // Private state (world URL, Soul id, bearer token) lives in a `.souls/` home, or .eden-agent.json in a legacy folder.
 
-import { existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { createHash, randomUUID, randomBytes } from "node:crypto";
@@ -1670,9 +1670,80 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.21.1";
+const VERSION = "2.22.1";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
+
+// ---------------------------------------------------------------- experience reports (off unless the owner opts in)
+
+// The owner creates .eden-report-on to turn reports on and deletes it to turn them off; nothing else does. It lives beside the
+// record, in the folder a command runs in: the Soul's folder, or in a Souls home its souls/<id>/runtime/. So it is read after
+// enterHome, and a command and its `serve` child read the same switch, per Soul.
+// Off, none of this is reachable: no `note` command, no help or guide line, no file, no field in any answer. On, this client
+// records its own requests in .eden-report.jsonl (schema soul-trace/1, so tools/soul-trace reads it). It never records text,
+// speech, tokens or hosts, sends nothing anywhere, and a failure to write never reaches a command.
+const REPORT_ON = ".eden-report-on", REPORT_FILE = ".eden-report.jsonl";
+const REPORT_LIMITS = { records: 2000, recordBytes: 8 * 1024, fileBytes: 2 * 1024 * 1024, noteChars: 500 };
+const plainFile = (f) => { try { const st = lstatSync(f); return st.isFile() && !st.isSymbolicLink(); } catch (e) { return e?.code === "ENOENT" ? null : false; } };
+let REPORTS = false;
+const reportsHere = () => plainFile(REPORT_ON) === true && plainFile(REPORT_FILE) !== false;
+const reportRef = (v) => (typeof v === "string" && /^[A-Za-z0-9._:~-]{1,100}$/.test(v) ? v : undefined);
+const reportInt = (v) => (Number.isSafeInteger(v) ? v : undefined);
+const reportPrune = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+// Route path only: no origin, world prefix, query values or free-text segments. The same rule as tools/soul-trace/tap.mjs.
+export function reportRoute(url) {
+  const u = new URL(String(url));
+  const path = u.pathname.replace(/^\/w\/[^/]+(?=\/v1\/)/, "").split("/").map((p) => (p === "" || reportRef(p) ? p : ":omitted")).join("/");
+  const names = [...new Set([...u.searchParams.keys()].filter((k) => reportRef(k)))].sort();
+  return names.length ? `${path}?${names.join("&")}` : path;
+}
+// Whitelisted facts from an answer; everything else is left out. The same fields as tools/soul-trace/tap.mjs.
+export function reportFacts(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  const receipt = (r) => (r && typeof r === "object" && reportRef(r.id) ? reportPrune({ id: r.id, soulId: reportRef(r.soulId), capability: reportRef(r.capability), phase: reportRef(r.phase), code: reportRef(r.code), acceptedTick: reportInt(r.acceptedTick), startedTick: reportInt(r.startedTick), endedTick: reportInt(r.endedTick) }) : undefined);
+  const message = (m) => (m && typeof m === "object" && reportRef(m.id) ? reportPrune({ id: m.id, sentAt: reportInt(m.sentAt), state: reportRef(m.state) }) : undefined);
+  const messages = [...(Array.isArray(data.backlog) ? data.backlog : []), data.inbox?.latest, data.message].map(message).filter(Boolean).slice(0, 20);
+  const events = (Array.isArray(data.events) ? data.events : []).map((e) => receipt(e?.receipt)).filter(Boolean).slice(0, 50);
+  return reportPrune({
+    accepted: typeof data.accepted === "boolean" ? data.accepted : undefined, code: reportRef(data.error?.code ?? data.code),
+    alternatives: Array.isArray(data.alternatives) && data.alternatives.length ? data.alternatives.slice(0, 3).map((a) => reportRef(a?.id)).filter(Boolean) : undefined,
+    receipt: receipt(data.receipt), for: reportRef(typeof data.for === "string" ? data.for : data.for?.id), channel: reportRef(data.channel), cursor: reportRef(data.cursor),
+    queued: reportInt(data.inbox?.queued), messages: messages.length ? messages : undefined, events: events.length ? events : undefined,
+  });
+}
+const report = { proc: null, seq: 0, records: 0, dropped: 0, failures: 0, start: 0 };
+function reportWrite(kind, fields) {
+  if (!REPORTS || report.failures) return;
+  try {
+    if (!report.proc) {
+      report.proc = randomBytes(8).toString("hex"); report.start = performance.now();
+      try { if (lstatSync(REPORT_FILE).size > REPORT_LIMITS.fileBytes) renameSync(REPORT_FILE, REPORT_FILE + ".1"); } catch {}
+      process.once("exit", (code) => { reportWrite("proc.end", { exitCode: reportInt(code) ?? null, stats: { records: report.records, dropped: report.dropped } }); });
+      reportWrite("proc.start", { cli: "eden.mjs", version: VERSION, command: /^[a-z][a-z-]{0,30}$/.test(process.argv[2] ?? "") ? process.argv[2] : undefined, node: process.version, clocks: { at: "local-wall-ms", mono: "process-monotonic-ms", sentAt: "server-wall-ms", ticks: "world-tick" }, omitted: ["text", "speech", "observation-content", "authorization", "origin-host", "query-values"] });
+    }
+    if (report.records >= REPORT_LIMITS.records && kind !== "proc.end") { report.dropped++; return; }
+    const head = { v: "soul-trace/1", kind, proc: report.proc, seq: ++report.seq, at: Date.now(), mono: Math.round((performance.now() - report.start) * 1000) / 1000 };
+    let line = JSON.stringify({ ...head, ...fields }) + "\n";
+    if (Buffer.byteLength(line) > REPORT_LIMITS.recordBytes) { const { facts: _f, ...rest } = fields; line = JSON.stringify({ ...head, ...rest, omitted: ["facts:size"] }) + "\n"; }
+    appendFileSync(REPORT_FILE, line, { mode: 0o600 });
+    report.records++;
+  } catch { report.failures++; }
+}
+function reportRequest(url, method, t0, r) {
+  if (!REPORTS) return;
+  try { reportWrite("http", reportPrune({ method, route: reportRoute(url), status: r?.status, durationMs: Math.round((performance.now() - t0) * 1000) / 1000, retryAfterMs: reportInt(r?.retryAfterMs), facts: reportFacts(r?.data) })); } catch { report.failures++; }
+}
+/** A serve's own world call (inbox, stream, receipt poll), which no CLI process records for it. */
+async function serveCall(url, o) {
+  const t0 = performance.now(), r = await worldOnce(url, o);
+  reportRequest(url, o.method, t0, r);
+  return r;
+}
+async function note(expected, observed) {
+  if (typeof expected !== "string" || typeof observed !== "string" || !expected.trim() || !observed.trim()) throw new Error('usage: note "<expected>" "<observed>"');
+  reportWrite("note", { annotation: "agent", expected: expected.slice(0, REPORT_LIMITS.noteChars), observed: observed.slice(0, REPORT_LIMITS.noteChars) });
+  return { noted: true };
+}
 
 // ---------------------------------------------------------------- state
 
@@ -1918,7 +1989,7 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
   }
 }
 
-// 2.21.1 (#371 H-b): EDEN_TRACE=1 writes one stderr line per HTTP attempt, `TRACE {method, path, status, ms, handlerMs,
+// 2.22.1 (#371 H-b): EDEN_TRACE=1 writes one stderr line per HTTP attempt, `TRACE {method, path, status, ms, handlerMs,
 // attempt}`: this CLI's wall time (send to body read) beside the world's own x-handler-ms, so a late answer splits into
 // server time and the rest (client, network, waiting for the world's event loop). The path has no query, and a segment
 // carrying an opaque value (a run of 20+ word characters, or 16+ hex digits) is redacted whatever its extension: the view
@@ -1939,6 +2010,12 @@ function trace(method, url, status, t0, handler, attempt) { if (TRACE) process.s
 // With `serve` up in this folder every request goes through it; with no serve (no socket, or nobody on it) it goes straight
 // to the world as before. A request the serve took but did not answer is reported like a world that did not answer.
 async function callOnce(url, o) {
+  if (!REPORTS) return callOnceTo(url, o);
+  const t0 = performance.now(), r = await callOnceTo(url, o);
+  reportRequest(url, o.method, t0, r);
+  return r;
+}
+async function callOnceTo(url, o) {
   if (!IS_SERVE) {
     const t0 = performance.now(), a = await askServe({ op: "http", url, method: o.method, headers: o.headers, body: o.body, timeoutMs: o.timeoutMs }, o.timeoutMs + 5_000);
     if (a?.lost) { trace(o.method, url, 0, t0, null, o.attempt); return { status: 0, data: { error: { code: "unreachable", message: "the serve process stopped before it answered" } } }; }
@@ -2898,7 +2975,7 @@ For “take a seat” with no requested duration, use a durable fixture's exact 
 Other Souls are independent people: being near is not consent.
 
 Full reference: \`${CLI} help\`.
-`;
+${REPORTS ? `\nIf something didn't do what you expected: \`${CLI} note "<expected>" "<observed>"\` (optional; the client records the rest).\n` : ""}`;
   // Replace an earlier Eden guide (ours or the v1 client's); keep anything else the human wrote.
   for (const name of ["CLAUDE.md", "AGENTS.md"]) {
     const f = HOME ? joinPath(homeFolder(), name) : name;
@@ -3221,7 +3298,7 @@ async function serveForeground() {
     let attempt = 0, code, recovered = false;
     while (!stopping && !terminal) {
       const q = new URLSearchParams({ timeoutMs: recovered ? "50000" : "0", ...(recovered && st.inboxAfter ? { after: st.inboxAfter } : {}) });
-      const r = await worldOnce(`${world}/v1/edge/inbox/listen?${q}`, { method: "GET", headers: auth, timeoutMs: 60_000, recoverRead: true });
+      const r = await serveCall(`${world}/v1/edge/inbox/listen?${q}`, { method: "GET", headers: auth, timeoutMs: 60_000, recoverRead: true });
       if (r.status === 401 || r.status === 403) { terminal = r; log(`inbox: control ended (${codeOf(r.data) ?? r.status})`); wake(); return; }
       if (r.status === 0 || r.status === 429 || r.status === 409 || r.status >= 500) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -3241,7 +3318,7 @@ async function serveForeground() {
   async function eventLoop() {
     let attempt = 0, code;
     while (!stopping && !terminal) {
-      const r = await worldOnce(`${world}/v1/edge/wait?timeout=55&after=${encodeURIComponent(st.cursor ?? s.cursor ?? "c_0")}`, { method: "GET", headers: auth, timeoutMs: 65_000, recoverRead: true });
+      const r = await serveCall(`${world}/v1/edge/wait?timeout=55&after=${encodeURIComponent(st.cursor ?? s.cursor ?? "c_0")}`, { method: "GET", headers: auth, timeoutMs: 65_000, recoverRead: true });
       if (r.status === 401 || r.status === 403) { terminal = r; wake(); return; }
       if (r.status < 200 || r.status >= 300) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -3396,8 +3473,10 @@ async function serveForeground() {
         if (s.state !== "pending") return;
         const last = p.at === p.steps.length - 1;
         // Only the last step closes the owner's message; an earlier one posts progress and the card stays open (the world's D3c).
+        const reportT0 = performance.now();   // a plan's step is this process's own request; a proxied one is recorded by the CLI that asked
         const r = await forward({ url: `${world}/v1/edge/act`, method: "POST", headers: { ...auth, "idempotency-key": s.clientRef }, timeoutMs: 40_000,
           body: { capability: s.id, ...(s.params ? { params: s.params } : {}), clientRef: s.clientRef, strict: true, ...(p.for ? { for: p.for, ...(last ? {} : { forDefault: true }) } : {}) } });
+        reportRequest(`${world}/v1/edge/act`, "POST", reportT0, r);
         if (st.plan !== p || s.state !== "pending") return;   // replaced while it was asking
         if (r.status === 0 || r.status === 429 || r.status >= 500 || isBusy(r.status, r.data)) return;   // the next tick tries again
         const wasStopped = p.state;
@@ -3416,7 +3495,7 @@ async function serveForeground() {
     const p = st.plan, s = p?.steps[p.at];
     if (p?.state === "running" && s?.receipt && Date.now() - planReadAt >= 15_000) {
       planReadAt = Date.now();
-      const r = await worldOnce(`${world}/v1/edge/receipts/${encodeURIComponent(s.receipt)}`, { method: "GET", headers: auth, timeoutMs: 25_000 });
+      const r = await serveCall(`${world}/v1/edge/receipts/${encodeURIComponent(s.receipt)}`, { method: "GET", headers: auth, timeoutMs: 25_000 });
       if (st.plan === p && r.status === 200 && r.data?.receipt) { planPhase(p, r.data.receipt); persist(); }
     }
     await planTick();
@@ -3612,7 +3691,7 @@ async function batch(json) {
 
 // ---------------------------------------------------------------- help and dispatch
 
-const HELP = `eden ${VERSION} — one Soul, one controller. Commands print JSON.
+const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.
 
 setup     register <world-url>            create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
           approval [status|wait|cancel]   status                          guide
@@ -3631,7 +3710,7 @@ self      profile [name|description|photo …]   body [presets|set|look …]   t
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
-`;
+${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
@@ -3759,7 +3838,7 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => HELP };
+const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
@@ -3770,9 +3849,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     child.on("exit", (code) => process.exit(code ?? 1));
     await new Promise(() => {});
   }
+  // `note` stays in `commands` until here so enterHome routes it to its Soul's folder like any command
+  REPORTS = reportsHere();
+  if (!REPORTS) delete commands.note;
   const [cmd, ...args] = line;
   const fn = commands[cmd];
-  if (!fn) { process.stdout.write(HELP); process.exit(cmd ? 1 : 0); }
+  if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;
   try { argv = ["act", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null;
