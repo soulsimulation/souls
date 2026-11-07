@@ -30,7 +30,7 @@ import { publicTakes, type Hub } from './hub.ts';
 import { cardGrammar } from '@souls/brain';
 import { skillMd } from './skill.ts';
 import { edgeSkillStub } from './edge/skill-stub.ts';
-import { agentReader } from './agent-reader.ts';
+import { agentReader, LEGACY_READER_KEYS, worldReader } from './agent-reader.ts';
 import { ApiError, type Souls } from './souls.ts';
 import { mountMarsStatic } from './mars-static.ts';
 import type {TakeArchive} from './take-archive.ts';
@@ -126,6 +126,8 @@ export function buildApp(d: Deps) {
     travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
       site: launcherSite(process.env.SIM_SITE_URL, process.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
       resolveBodyRef: (ref, owner) => bodyRefResolvers.get(d.host)?.(ref, owner) ?? {ok: false, code: 'body.ref-unsupported', reason: 'This world cannot resolve carried body references'} });
+    d.edge.travelLogOf = (soulId) => { const row = d.db.soul(soulId), t = row ? travel!.identity(row) : null; return t ? t.log.filter((e) => e.kind === 'travel' && e.from === d.cfg.worldKey).map((e) => ({at: e.at, to: e.toName, from: e.fromName})) : []; };
+    travel.onLeave = (soulId, at, world) => d.edge?.noteTravel(soulId, at, world);
     mountTravelRoutes(app, { travel, siteKey: process.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
       tokenSoul: (c) => { const s = d.souls.soulFromToken(bearer(c)); if (!s) { const r = d.souls.controlRefusal(bearer(c)); throw new TravelError(401, r.code, r.message, r.extra); } return s; },
       ownerSoul: async (c, id) => { const u = await requireUser(c); return ownSoul(u, id); },
@@ -306,7 +308,8 @@ export function buildApp(d: Deps) {
   // Selected-world text producer, before the SPA fallback. Origin/prefix come
   // from approved server configuration, never forwarded or caller headers.
   app.get('/llms.txt', c => {
-    try { return c.text(agentReader(d.cfg), 200, { 'content-type':'text/plain; charset=utf-8', 'cache-control':'public, max-age=60' }); }
+    // #897: the four original worlds keep their reviewed reader; every other world serves worldReader
+    try { return c.text(LEGACY_READER_KEYS.includes(d.cfg.worldKey) ? agentReader(d.cfg) : worldReader(d.cfg, displayWorldName), 200, { 'content-type':'text/plain; charset=utf-8', 'cache-control':'public, max-age=60' }); }
     catch { return c.text('World agent instructions are unavailable.', 503, { 'cache-control':'no-store' }); }
   });
   app.get('/w/:key/llms.txt', c => c.text('No agent reader for this world on this process.', 404));
