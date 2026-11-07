@@ -26,7 +26,7 @@ test('open sign: words, contact, what is read nearby, refusals, long tail', {tim
  const absent = JSON.stringify(await here()).length;
  const p = f.host.engine.world.entities[ana.entityId].pose.p;
  // 100 signs far off change nothing
- {const r = god.act({ops: Array.from({length: 100}, (_, i) => ({op: 'place', def: 'core/open-sign@1', name: `far-${i}`, p: [p[0] + 120 + i % 10 * 2, p[2] + 120 + Math.floor(i / 10) * 2]}))}); assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 400));} await tick(45);
+ {const r = god.act({ops: Array.from({length: 100}, (_, i) => ({op: 'place', def: 'core/open-sign@1', name: `far-${i}`, p: [p[0] + 100 + i % 10 * 2, p[2] + Math.floor(i / 10) * 2]}))}); assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 400));} await tick(45);
  assert.equal(JSON.stringify(await here()).length, absent, 'here is the same with 100 signs far away');
  assert.equal(god.act({ops: [{op: 'place', def: 'core/open-sign@1', name: 'shop-sign', p: [p[0] + 1, p[2] + 2.5]}]}).accepted, true); await tick(45);
  const sign = god.model.get('shop-sign'), id = sign.id, state = () => god.model.get('shop-sign').state?.open;
@@ -42,6 +42,9 @@ test('open sign: words, contact, what is read nearby, refusals, long tail', {tim
  assert.equal((await finish(close)).phase, 'completed'); assert.equal(state(), false);
  assert.equal(await facts(), false, 'the fact follows the sign');
  assert.equal(WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())), undefined, god.model.library).get('shop-sign').state.open, false, 'it survives a restore');
+ // by the words themselves, not only the offer
+ const byWords = await post('/v1/edge/act', {capability: 'turn the sign to open'}); assert.equal(byWords.accepted, true, JSON.stringify(byWords).slice(0, 300)); assert.equal((await finish(byWords)).phase, 'completed'); assert.equal(state(), true);
+ const flipped = await post('/v1/edge/act', {capability: 'flip the sign'}); assert.equal(flipped.accepted, true, JSON.stringify(flipped).slice(0, 300)); assert.equal((await finish(flipped)).phase, 'completed'); assert.equal(state(), false);
  // refused: already closed
  const again = await post('/v1/edge/act', {capability: `object:${id}:close`, strict: true}); assert.equal(again.accepted, false); assert.equal(again.code, 'object.state');
  for (const words of ['open the sign', 'turn the sign to open', 'flip the sign']) {const r = await post('/v1/edge/resolve', {capability: words}); assert.equal(r.resolve?.capability ?? r.resolve?.would?.capability, `object:${id}:open`, `${words}: ${JSON.stringify(r).slice(0, 300)}`);}
@@ -57,4 +60,14 @@ test('open sign: words, contact, what is read nearby, refusals, long tail', {tim
  const mine = `object:${god.model.get('ben-sign').id}:close`;
  const denied = await post('/v1/edge/act', {capability: mine}); assert.equal(denied.accepted, false, JSON.stringify(denied).slice(0, 300)); assert.match(denied.code ?? '', /private|owner|access/);
  soul = ben; const own = await post('/v1/edge/act', {capability: mine, strict: true}); assert.equal(own.accepted, true, JSON.stringify(own).slice(0, 300)); assert.equal((await finish(own)).phase, 'completed'); assert.equal(god.model.get('ben-sign').state?.open, false);
+ // other words keep their meanings, with a neon sign, a plain sign and a second shop sign about
+ soul = ana;
+ assert.equal(god.act({ops: [{op: 'place', def: 'core/neon-sign@1', name: 'neon', p: [p[0] + 3, p[2] + 3]}, {op: 'place', def: 'core/sign@1', name: 'welcome-sign', p: [p[0] - 3, p[2] + 1]}]}).accepted, true); await tick(45);
+ const said = async words => {const r = (await post('/v1/edge/resolve', {capability: words})).resolve; return r.capability ?? r.would?.capability ?? r.code;};
+ assert.equal(await said('turn on sign'), `object:${god.model.get('neon').id}:switch-on`);
+ for (const w of ['turn the neon sign', 'turn the welcome sign', 'turn to sign', 'turn the sign']) assert.doesNotMatch(String(await said(w)), /^object:/, w);
+ assert.equal(god.act({ops: [{op: 'place', def: 'core/open-sign@1', name: 'cafe-sign', p: [p[0] + 2, p[2] + 2.5]}]}).accepted, true); await tick(45);
+ assert.equal(await said('turn the sign to closed'), 'place.ambiguous');
+ assert.equal(await said('turn the cafe sign to closed'), `object:${god.model.get('cafe-sign').id}:close`);
+ assert.equal(await said('flip the cafe sign'), `object:${god.model.get('cafe-sign').id}:close`);
 });

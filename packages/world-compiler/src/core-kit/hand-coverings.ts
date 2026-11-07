@@ -70,7 +70,7 @@ const openSign = {
   tags: ['signage', 'shop', 'hand-operated', 'local-fixture'],
   make: { kind: 'gen', gen: 'kit/2', args: { v: 2, round: 0.006, shapes: [
     { kind: 'box', at: [0, 0.02, 0], size: [0.34, 0.04, 0.34], tint: 'post', collide: true },
-    { kind: 'box', at: [0, 0.63, 0], size: [0.05, 1.18, 0.05], tint: 'post', collide: true },
+    { kind: 'box', at: [0, 0.65, 0], size: [0.05, 1.22, 0.05], tint: 'post', collide: true },
     { kind: 'cyl', at: [0.04, 1.1, 0], r: 0.022, h: 0.03, segments: 10, tint: 'valve', roll: Math.PI / 2 },   // on the post's side, so she stands clear of the board's face
     ...signBoard('@open=true', 'OPEN', '#2f6b3a'), ...signBoard('@open=false', 'CLOSED', '#8c2f25')] } },
   params: Object.fromEntries(Object.entries(signPalette).map(([k, v]) => [k, { type: 'color', default: v, doc: `${k} colour${k === 'valve' ? ' (the knob; the hand goes here)' : ''}` }])),
