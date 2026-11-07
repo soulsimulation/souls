@@ -124,7 +124,7 @@ export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaul
  const validation=runValidate(dir);
  return {kit:opts.dir,starter:opts.starter,source:start.source,files:readdirSync(dir).sort(),validation,
   recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:`${cli} body set <assetId or preset>`},
-  next:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`,
+  next:[...(validation.skipped?[]:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`]),
    `from the paired folder: ${cli} body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,`${cli} body set <returned assetId>`]};
 }
 function defaultValidate(dir){

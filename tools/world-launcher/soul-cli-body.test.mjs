@@ -95,7 +95,7 @@ test('body kit: the world\'s files and a starter, relative to where it ran, no c
   for (const f of ['body.glb', 'manifest.json', 'kit.json', 'contract.json', 'validate.mjs']) assert.ok(existsSync(join(kit, f)), f);
   assert.ok(!readFileSync(join(kit, 'kit.json'), 'utf8').includes('sim_fixture_secret_token'));
   assert.ok(w.seen.filter(s => s.path.includes('/body-authoring/')).every(s => !s.auth), 'the kit files are public: no token sent');
-  assert.match(r.json.next.join('\n'), /node eden\.mjs body upload/); assert.doesNotMatch(JSON.stringify(r.json), /eden-agent\.mjs/);
+  assert.match(r.json.next.join('\n'), /node eden\.mjs body upload/); assert.doesNotMatch(r.json.next.join('\n'), /validate\.mjs/, 'the CLI\'s own next steps never send you to the world\'s code'); assert.doesNotMatch(JSON.stringify(r.json), /eden-agent\.mjs/);
   assert.match((await w.cli('body', 'kit', 'my-body')).err, /already has/);
 });
 
