@@ -487,6 +487,9 @@ function openHome(root, { reserved = /* @__PURE__ */ new Set(), sleepMs = (ms) =
   const setCurrentWorld = (key) => updateConfig((c) => {
     c.currentWorld = key;
   });
+  const noteConsolidation = (patch) => updateConfig((c) => {
+    c.consolidation = { ...c.consolidation && typeof c.consolidation === "object" && !Array.isArray(c.consolidation) ? c.consolidation : {}, ...patch };
+  });
   const seat2 = (key) => {
     const dir = at("pending", key);
     mkdirSync2(dir, { recursive: true, mode: 448 });
@@ -802,7 +805,7 @@ function openHome(root, { reserved = /* @__PURE__ */ new Set(), sleepMs = (ms) =
     c.trustedOrigins = [.../* @__PURE__ */ new Set([...c.trustedOrigins ?? [], origin])];
   });
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, config, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat: seat2, soul, seatState, load: load2, save: save2, named, principals, list: list2, setDefault, importLegacy, exportSoul, importExport, doctor: doctor2 };
+  return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat: seat2, soul, seatState, load: load2, save: save2, named, principals, list: list2, setDefault, importLegacy, exportSoul, importExport, doctor: doctor2 };
 }
 
 // lib/seat.mjs
