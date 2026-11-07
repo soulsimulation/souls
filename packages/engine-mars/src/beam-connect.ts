@@ -295,9 +295,6 @@ export function settleFrames(rt: Runtime): string[] {
   for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
   return ids;
 }
-  for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
-  return ids;
-}
 
 /** Every tick: an installed loose beam has both ends joined to standing frames, and an upright a crew let go into its beams
  *  (support `connected`, as the native release) stands in a frame that stands on its own. A god's joined upright stands on
