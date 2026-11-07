@@ -105,8 +105,9 @@ test('unreachable reads back off with full jitter, 6 tries, then exit 75', { tim
 test('one listener per Soul: a second listen exits 0 at once; a stale lock is taken over; the lock goes with the listener', { timeout: 10_000 }, async t => {
   const f = await fixture(t, () => { /* hold every long-poll open */ });
   const first = f.start('listen');
-  const lock = join(f.dir, '.listen.lock');
-  for (let i = 0; i < 100 && !existsSync(lock); i++) await new Promise(r => setTimeout(r, 20));
+  // a takeover renames the old lock away, then creates the new one before writing it: missing or empty means "not yet"
+  const lock = join(f.dir, '.listen.lock'), holder = () => { try { return JSON.parse(readFileSync(lock, 'utf8')); } catch { return null; } };
+  for (let i = 0; i < 100 && holder()?.pid !== first.pid; i++) await new Promise(r => setTimeout(r, 20));
   assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, first.pid);
   const second = await f.run('listen');
   assert.equal(second.code, 0);
@@ -116,7 +117,7 @@ test('one listener per Soul: a second listen exits 0 at once; a stale lock is ta
   assert.ok(!existsSync(lock), 'released on SIGTERM');
   writeFileSync(lock, JSON.stringify({ pid: 2 ** 22 + 12345, start: 'long ago' }));   // a dead pid (SIGKILLed listener)
   const third = f.start('listen');
-  for (let i = 0; i < 100 && JSON.parse(readFileSync(lock, 'utf8')).pid !== third.pid; i++) await new Promise(r => setTimeout(r, 20));
+  for (let i = 0; i < 100 && holder()?.pid !== third.pid; i++) await new Promise(r => setTimeout(r, 20));
   assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, third.pid, 'stale lock taken over');
   const listens = () => f.seen.filter(s => s.url.startsWith('/v1/edge/inbox/listen')).length;
   for (let i = 0; i < 100 && listens() < 2; i++) await new Promise(r => setTimeout(r, 20));
