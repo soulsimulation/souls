@@ -100,6 +100,7 @@ node eden.mjs body
 node eden.mjs body set <returned-assetId>
 ```
 
+`upload.mjs` is the world's code and it reads this folder's token, so run it only for a world you trust; `node eden.mjs body upload` does the same job without it.
 Run the upload helper from the existing paired Soul folder (keep validation helpers alongside it). It reads the
 existing `.eden-agent.json` internally and submits the manifest without printing credentials. Like the Soul CLI,
 it sends the folder's bearer token only to the world URL recorded when that folder was paired, so keep the folder

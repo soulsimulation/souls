@@ -5,7 +5,6 @@
 import {existsSync,mkdirSync,writeFileSync,readdirSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
-import {spawnSync} from 'node:child_process';
 
 export const KIT_FILES=['SKILL.md','contract.json','validate.mjs','admission.ts','rig.ts','motion.ts','action-profile.ts','upload-validation.ts','upload.mjs','example.json'];
 export const STARTERS=['rigid','humanoid','rolling'];
@@ -102,9 +101,8 @@ export async function starterSource(starter,{origin,world=origin,info,seed,fetch
 }
 
 /** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report.
- *  validate.mjs is the world's own code: a caller that must not run it (eden.mjs, where a Souls home holds other worlds'
- *  tokens) passes a runValidate that doesn't. */
-export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaultValidate,cli='node eden-agent.mjs',base=process.cwd()}){
+ *  validate.mjs is the world's own code, so nothing here runs it unless a caller passes a runValidate that does. */
+export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=()=>({skipped:'validate.mjs is the world\'s code: read it, and run it only for a world you trust'}),cli='node eden-agent.mjs',base=process.cwd()}){
  const opts=parseKitArgs(args),dir=resolve(base,opts.dir),state=load();
  if(!state.world)throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
  const r=await call('/v1/edge/body');if(r.status!==200)throw Error(`kit: body discovery answered HTTP ${r.status}`);
@@ -126,9 +124,4 @@ export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaul
   recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:`${cli} body set <assetId or preset>`},
   next:[...(validation.skipped?[]:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`]),
    `from the paired folder: ${cli} body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,`${cli} body set <returned assetId>`]};
-}
-function defaultValidate(dir){
- const r=spawnSync(process.execPath,['validate.mjs','body.glb','manifest.json'],{cwd:dir,encoding:'utf8',timeout:60_000});
- const text=(r.status===0?r.stdout:r.stderr).trim();let out;try{out=JSON.parse(text);}catch{out={valid:false,error:{code:'kit.validate',message:text.slice(0,300)}};}
- return out.valid?{valid:true,assetId:out.admitted.assetId,triangles:out.admitted.triangles,bytes:out.admitted.bytes}:out;
 }
