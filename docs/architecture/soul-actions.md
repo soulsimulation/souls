@@ -541,7 +541,8 @@ Other known limits:
 - At a hand-over the model's record of who holds the item lags the engine by a few samples.
 - The `here` frame lists at most two things of a kind (three seats); more appear only as a count under `more`.
 - A parasol's `me.shade` is a disc under the open canopy at any hour but night: it doesn't follow the sun's angle, and it
-  says nothing about rain.
+  says nothing about rain. The lean observation in `tools/edge-skill/eden-agent.mjs` lists its own `me` fields and doesn't
+  carry `shade` yet, so that client sees only the parasol's `open` row.
 - Some defs are over the library's geometry budgets: triangles for the kettle and mug, and draw calls for the newest
   door and locker revisions. They are getting lighter revisions family by family (#494). The drum kit, mic stand,
   jukebox, garden fountain and curtained window already have one (`@2`, in budget), and so do the watering can, the

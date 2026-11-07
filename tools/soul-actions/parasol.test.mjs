@@ -8,6 +8,7 @@ import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
 import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {WorldModel} from '../../packages/world-compiler/src/model.ts';
+import {contextTargetRows} from '../../apps/server/src/god/context-view-scene.ts';
 
 // #427: a parasol opened and folded by hand at the crank on its pole, by plain words; open, it shades a Soul under it.
 test('parasol: words, contact, shade, refusals, long tail', {timeout: 240000}, async t => {
@@ -23,11 +24,11 @@ test('parasol: words, contact, shade, refusals, long tail', {timeout: 240000}, a
  const post = (path, body) => accept(f.host, app.request(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)})).then(r => r.json());
  const here = async () => (await (await app.request('/v1/edge/here?include=doHere')).json()).here;
  const finish = async r => {let rc; for (let n = 0; n < 1600; n++) {rc = edge.receipt(soul.soulId, r.receipt.id); if (['completed', 'failed', 'cancelled', 'replaced'].includes(rc?.phase)) break; await tick(1);} return rc;};
- const absent = JSON.stringify(await here()).length;
+ const frame = async () => JSON.stringify({...await here(), tick: undefined}), absent = await frame();
  const body = () => f.host.engine.world.entities[soul.entityId], p = body().pose.p;
  // 100 parasols far off change nothing
  {const r = god.act({ops: Array.from({length: 100}, (_, i) => ({op: 'place', def: 'core/parasol@1', name: `far-${i}`, p: [p[0] + 100 + i % 10 * 3, p[2] + Math.floor(i / 10) * 3]}))}); assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 400));} await tick(45);
- assert.equal(JSON.stringify(await here()).length, absent, 'here is the same with 100 parasols far away');
+ assert.equal(await frame(), absent, 'here is the same with 100 parasols far away');
  assert.equal(god.act({ops: [{op: 'place', def: 'core/parasol@1', name: 'garden-parasol', p: [p[0] + 1, p[2] + 3]}]}).accepted, true); await tick(45);
  const id = god.model.get('garden-parasol').id, state = () => god.model.get('garden-parasol').state?.open;
  const row = async () => (await here()).objects.find(o => o.id === id);
@@ -75,11 +76,24 @@ test('parasol: words, contact, shade, refusals, long tail', {timeout: 240000}, a
  const at = () => body().pose.p, put = async (dx, name) => {assert.equal(god.act({ops: [{op: 'place', def: 'core/parasol@1', name, p: [at()[0] + dx, at()[2]]}]}).accepted, true); await tick(45); return (await here()).me.shade;};
  assert.equal(await put(-1.45, 'just-beyond'), undefined, 'beyond the rim');
  assert.equal(god.act({ops: [{op: 'remove', id: 'just-beyond'}]}).accepted, true); assert.equal(await put(-1.2, 'just-inside'), 'just-inside', 'inside the rim');
+ // a wall between her and the pole: she can't see it, so it is not her shade
+ {const [x, z] = [at()[0] - 0.6, at()[2]]; assert.equal(god.act({ops: [{op: 'place', def: 'core/garden-wall@1', name: 'shade-wall', shape: {path: [[x, z - 1], [x, z + 1]]}, params: {height: 2.2, thickness: 0.2}}]}).accepted, true); await tick(45);
+  assert.equal((await here()).me.shade, undefined, 'behind a wall'); assert.equal(god.act({ops: [{op: 'remove', id: 'shade-wall'}]}).accepted, true); await tick(45); assert.equal((await here()).me.shade, 'just-inside', 'the wall gone');}
+ // an auto-framed view of it takes in the canopy, not only the base
+ assert.ok([...contextTargetRows(god.model)].find(r => r.entity === god.model.get('just-inside').id)?.radius >= 1.3, 'framed to the canopy');
  assert.equal(god.act({ops: [{op: 'remove', id: 'just-inside'}, {op: 'place', def: 'core/rug@1', name: 'rug', p: [at()[0], at()[2]]}]}).accepted, true); await tick(45);
  assert.ok((await here()).objects.some(o => o.name === 'rug' || /rug/.test(o.name ?? '')), 'the rug is listed'); assert.equal((await here()).me.shade, undefined, 'a rug is no parasol');
  // a table beside it on her way: she stands on a clear side and it still works
  const [tx, tz] = [at()[0] + 4, at()[2]]; assert.equal(god.act({ops: [{op: 'place', def: 'core/parasol@1', name: 'table-side', p: [tx, tz]}, {op: 'place', def: 'core/table@1', name: 'garden-table', p: [tx - 0.75, tz]}]}).accepted, true); await tick(45);
  const beside = await post('/v1/edge/act', {capability: `object:${god.model.get('table-side').id}:close`, strict: true}); assert.equal(beside.accepted, true, JSON.stringify(beside).slice(0, 300)); assert.equal((await finish(beside)).phase, 'completed', 'a table across her approach'); assert.equal(god.model.get('table-side').state.open, false);
+ // the same with the table on the crank's side, from that side, at a square yaw and a turned one: another side is open
+ for (const [name, r, ang, reach] of [['crank-side', Math.PI, Math.PI, 0.75], ['crank-turned', Math.PI * 7 / 6, Math.PI * 3 / 4, 0.95]]) {
+  const [x, z] = [at()[0] + 4, at()[2]], r0 = god.act({ops: [{op: 'place', def: 'core/parasol@1', name, p: [x, z], r}, {op: 'place', def: 'core/table@1', name: `${name}-table`, p: [x + Math.cos(ang) * reach, z + Math.sin(ang) * reach]}]}); assert.equal(r0.accepted, true, JSON.stringify(r0).slice(0, 500)); await tick(45);
+  const go = await post('/v1/edge/act', {capability: `object:${god.model.get(name).id}:close`, strict: true}); assert.equal(go.accepted, true, JSON.stringify(go).slice(0, 300)); const done = await finish(go); assert.equal(done.phase, 'completed', `${name}: ${JSON.stringify(done).slice(0, 300)}`); assert.equal(god.model.get(name).state.open, false);
+ }
+ // tables on every side leave no stand point: she doesn't get there, it says so, and the parasol stays as it was
+ {const [x, z] = [at()[0] + 4, at()[2]]; assert.equal(god.act({ops: [{op: 'place', def: 'core/parasol@1', name: 'hemmed-in', p: [x, z]}, ...[[.75, 0], [-.75, 0], [0, .75], [0, -.75]].map(([a, b], i) => ({op: 'place', def: 'core/table@1', name: `hem-${i}`, p: [x + a, z + b]}))]}).accepted, true); await tick(45);
+  const go = await post('/v1/edge/act', {capability: `object:${god.model.get('hemmed-in').id}:close`, strict: true}); assert.equal(go.accepted, true); const done = await finish(go); assert.deepEqual([done.phase, done.code], ['failed', 'route.goal-blocked'], JSON.stringify(done).slice(0, 300)); assert.equal(god.model.get('hemmed-in').state.open, true);}
  // private: the owner works it, nobody else
  assert.equal(god.act({ops: [{op: 'place', def: 'core/parasol@1', name: 'ben-parasol', p: [p[0] - 4, p[2] + 3], owner: 'soul:ben', access: 'private'}]}).accepted, true); await tick(45);
  const mine = `object:${god.model.get('ben-parasol').id}:close`;
