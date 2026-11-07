@@ -6,16 +6,25 @@
 export const RECORD_STARTS = ['arrival', 'load'];
 
 /** Runs inside the page (keep it self-contained): the world is drawn and no arrival or loading card is showing. The
- *  arrival card ("Arriving in <World>") fades for 0.25 s and is then removed, so its text going is the dismissal. */
+ *  arrival light dissolves for 2 s and is then removed, so its element going is the dismissal. */
 export function worldArrived() {
-  return !!document.body && !document.body.innerText.includes('Arriving in') && !!document.querySelector('.viewer-history[data-viewer-ready="true"]');
+  return !!document.body && !document.querySelector('.viewer-arrival') && !!document.querySelector('.viewer-history[data-viewer-ready="true"]');
 }
 
 /** True when this Playwright can start a page recording mid-page (page.screencast; older Playwright lacks it). */
 export const canScreencast = (page) => typeof page?.screencast?.start === 'function' && typeof page.screencast.stop === 'function';
 
-/** startScreencast(page, {path, size}) → {startedAt, mono}: the recording of this page begins now. */
+/** Runs inside the page: resolves once two frames have been painted. When `worldArrived` turns true the arrival card
+ *  has left the DOM, but the compositor may not have painted that yet: a screencast started then opens on the last
+ *  painted frame, which still shows the card (about 1.5 s under load, #1040). */
+export function twoPaintedFrames() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))));
+}
+
+/** startScreencast(page, {path, size}) → {startedAt, mono}: the recording of this page begins now, at the first frame
+ *  painted after arrival (twoPaintedFrames), so the take's first frame is the arrived world. */
 export async function startScreencast(page, { path, size }) {
+  await page.evaluate(twoPaintedFrames);
   await page.screencast.start({ path, ...(size ? { size } : {}) });
   return { startedAt: new Date().toISOString(), mono: performance.timeOrigin + performance.now() };
 }
