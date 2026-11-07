@@ -375,9 +375,11 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
   const exitWalks = new Set(exits.map(e => e.walk)); let wayBytes = 0;
   const walkOf = (id: string) => {
     const p = ledger.places.byId.get(id); if (!p || !P.pos || inside.has(id)) return undefined;
-    const listed = P.menu().caps.find(x => x.verb === 'walk' && x.target?.kind === 'place' && x.target.id === id), walk = listed?.id ?? `walk:${p.ref ?? p.id}`;
-    const one = listed ?? (r => r.kind !== 'unknown' && r.cap.id === walk ? r.cap : undefined)(ledger.resolveIdV1(soul, walk));
-    if (!one?.available || one.target?.id !== id || exitWalks.has(walk) || ledger.routeProblem(soul, walk)) return undefined;
+    const menu = P.menu(), listed = menu.caps.find(x => x.verb === 'walk' && x.target?.kind === 'place' && x.target.id === id), walk = listed?.id ?? `walk:${p.ref ?? p.id}`;
+    if (exitWalks.has(walk)) return undefined;
+    // (with its plan, because the route check reads one: an offer made on demand has none to find by id)
+    const od = listed ? null : ledger.resolveOnDemand(soul, walk, [...menu.caps], new Map(menu.plans)), one = listed ?? (od && od.v.kind !== 'unknown' && od.v.cap.id === walk ? od.v.cap : undefined), plans = od?.plans ?? menu.plans;
+    if (!one?.available || !plans.has(walk) || ledger.routeProblem(soul, walk, plans)) return undefined;
     wayBytes += Buffer.byteLength(` · ${walk}`); return walk;
   };
   const named: {flags?: string[]; flagsMore?: number} = flagLines(ledger, P);

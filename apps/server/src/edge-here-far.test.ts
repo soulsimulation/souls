@@ -32,6 +32,35 @@ test('#1281 H3: from a room with no way out no far line offers a walk that would
   assert.deepEqual(ids(h), [], JSON.stringify(h.far));
 });
 
+const marsTwo = new URL('../../../worlds/templates/mars-two.json', import.meta.url);
+
+test('#1281 H3: a walk offered only on demand is route-checked too: none from a closed house', {timeout: 300000}, async t => {
+  const {w, put, here, ids, act} = await world(t, marsTwo);
+  const {ref: _r, hash: _h, by: _b, born: _bo, ...definition} = w.god.model.resolvedDef('core/cottage@1') as any;
+  const built = w.god.act({ops: [{op: 'define', def: {...definition, name: 'closed-cottage-control', state: {...definition.state, doors: {type: 'json', default: {}}}}}, {op: 'place', def: 'closed-cottage-control@1', name: 'closed-house', p: [440, 0], state: {doors: {'front-door': 'closed'}}}]} as never);
+  assert.equal(built.accepted, true, JSON.stringify(built)); await w.settle(8); w.edge.map();
+  const room = [...w.edge.places.byId.values()].find(p => /closed-house.*bedroom/.test(p.id))!;
+  await put(room.polygon.reduce((s, q) => [s[0] + q[0] / room.polygon.length, s[1] + q[1] / room.polygon.length], [0, 0]) as [number, number]);
+  const h = here(); assert.deepEqual(ids(h), [], JSON.stringify(h.far));
+  assert.equal((await act('walk:chiba')).code, 'route.unreachable', 'the walk the line left out would have been refused');
+});
+
+test('#1281 H1: a water place keeps its walk, though the walk aims at its shore', {timeout: 300000}, async t => {
+  const {put, here, ids} = await world(t, marsTwo);
+  await put([450, 2]);
+  assert.ok(ids(here()).includes('walk:campus-swimming-pond'), JSON.stringify(here().far));
+});
+
+test('#1281: on a replica no route issue is not remembered, so a verdict that arrives later counts', {timeout: 300000}, async t => {
+  const {w} = await world(t);
+  const edge = w.edge as any, feas = edge.mw.feasibility, ask = feas.canPerform, plans = new Map([['walk:x', {label: 'Walk', steps: [{verb: 'walk_to', params: {to: [0, 0]}}]}]]);
+  edge.readOnly = true; t.after(() => {edge.readOnly = false; feas.canPerform = ask;});
+  feas.canPerform = () => null;
+  assert.equal(w.edge.routeProblem(w.soul, 'walk:x', plans as never), null);
+  feas.canPerform = () => ({code: 'route.unreachable'});
+  assert.equal(w.edge.routeProblem(w.soul, 'walk:x', plans as never)?.code, 'route.unreachable');
+});
+
 test('#1281: a far line repeats neither an exit nor the place she stands in', {timeout: 300000}, async t => {
   const {here, ids} = await world(t);
   const h = here(), exits = new Set(h.exits.map((e: any) => e.walk));
