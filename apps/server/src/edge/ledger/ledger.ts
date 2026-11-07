@@ -496,7 +496,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       onApplied: e => {this.onRecovery(e);if(e.kind==='body-assignment-v1'&&typeof e.payload?.soulId==='string')this.ownerControlGrace(e.payload.soulId);},
       onDecision: (e, r) => this.onDecision(e, r),
       onProgram: ev => this.onProgram(ev),
-      afterTick: tick => {this.afterTick(tick);this.stallGuard.afterTick(tick);},
+      afterTick: tick => {this.afterTick(tick);this.stallGuard.afterTick(tick);for(const l of this.tickListeners)try{l(tick);}catch{/* a listener fault never stops the clock */}},
     });
   }
   /** Read worker (readOnly): after each applied delta, what main's afterTick keeps for the read code: the faded set (from
@@ -2722,6 +2722,18 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** Last ambient-life decision per Soul (ms): a posture ambient life chose is not the Soul's own choice. */
   private ambientAt = new Map<string, number>();
   onReceipt(l: (r: EdgeReceipt) => void) {this.receiptListeners.push(l);}
+  private tickListeners: ((tick: number) => void)[] = [];
+  /** #1295: told after each world tick (the owner loop's sweep). */
+  onTick(l: (tick: number) => void) {this.tickListeners.push(l);}
+  /** #1295: whether this open act has done what it was asked and only holds now: a sit, sit-ground, lie or nap whose body
+   *  holds that pose under the act's own programme (started at least a second ago, so a body still seated from an earlier
+   *  sit doesn't count), or a follow, which goes on until stopped. Such an act doesn't keep its owner message open. */
+  holding(soulId: string, id: string): boolean {
+    const r = this.rows("receipt_id=? AND soul_id=? AND phase='started'", id, soulId)[0], m = this.host.minds.get(soulId); if (!r || !m) return false;
+    const verb = r.capability.split(':')[0]!; if (verb === 'follow') return true;
+    const poses = HELD_POSES[verb]; if (!poses || r.started_tick === null || this.host.engine.world.tick - r.started_tick < 20) return false;
+    return !!r.program_id && this.mw.programOf(m.entityId) === r.program_id && poses.includes(stateOf(this.host, m.entityId));
+  }
   onPlaceChange(l: (e: {soulId: string; from: string | null; to: string | null; tick: number}) => void) {this.placeListeners.push(l);}
 
   /** #1139: the cross-world identity every other Soul sees: `<home>/<homeSoulId>`. A visiting incarnation answers with its
@@ -3035,6 +3047,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
 }
 
 /** Receipt detail (Core-A): channel (body | attention | none), chosen (what an intent picked), endedAt (terminal). */
+/** #1295: the postures that hold an open-ended act's pose (the CLI's HELD_POSE). */
+const HELD_POSES: Record<string, string[]> = {sit: ['seated'], 'sit-ground': ['seated'], lie: ['lying', 'sleeping'], nap: ['lying', 'sleeping']};
 function detailOf(r: Row): {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown} {
   if (!r.detail) return {};
   try {const d = JSON.parse(r.detail) as {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown}; return {...(d.channel ? {channel: d.channel} : {}), ...(d.chosen ? {chosen: d.chosen} : {}), ...(d.endedAt ? {endedAt: d.endedAt} : {}), ...(d.alternatives ? {alternatives: d.alternatives} : {}), ...(d.meal ? {meal: d.meal} : {}), ...(d.approach ? {approach: d.approach} : {})};}

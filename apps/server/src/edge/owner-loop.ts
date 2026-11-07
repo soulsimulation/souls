@@ -12,7 +12,16 @@
 // pavilion, Tam): the receipt's own target is it or a place inside it, or the body ended inside the named place or near
 // the named thing or Soul. A last step whose target the world cannot resolve is never closed by default: progress only,
 // the agent's `result` closes it. One-step messages and explicit links are unchanged.
+// #1295: the world never records a message as finished while an act linked to it runs. A close then (`result`, a Soul's
+// ack with `outcome`) is refused and writes nothing (`running`); an act that ends while another linked to the same
+// message runs posts progress, and the last one to end closes it. Every message still reaches a close: a linked act
+// replaced with nothing else serving its message closes it `failed` (after GONE_TICKS, so a replacing act linked to the
+// message can take it); one still running after HOLD_TICKS has it closed `failed` (never done), and its real end
+// replaces that line. An open-ended hold the body has reached (a sit or lie with no `seconds`) or a follow has done what
+// it was asked and holds nothing. Links are kept durably beside the receipts (`ownerLinkStore`), not in the world's log:
+// a restart keeps the guard and the close, and a link whose receipt is gone (a rewind or restore) is dropped.
 import type {EdgeReceipt, EdgeSoul} from './contract.ts';
+import type {Db} from '../db.ts';
 import {messageSteps, type MessageStep, type StepTarget} from './ledger/vocabulary.ts';
 
 export type OwnerLoopInbox = {
@@ -20,6 +29,8 @@ export type OwnerLoopInbox = {
   serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed'): boolean;
   messageText?(s: {scope: string; owner: string}, id: string): string | null;
   serverProgress?(s: {scope: string; owner: string}, id: string, text: string): boolean;
+  /** #1295: set by the loop; the inbox refuses a close while it answers a receipt. */
+  closeHold?: ((s: {scope: string; owner: string}, id: string) => {receipt: string; capability: string} | null) | null;
 };
 /** D3d: what the world knows to judge a step's target (the ledger): the resolver, what an offered capability points at
  *  (its target's id), a place's id with its ancestors (null: not a place), and where a thing or Soul stands now. */
@@ -28,11 +39,29 @@ export type OwnerLoopWorld = {
   actTarget(soul: EdgeSoul, capability: string): string | null;
   placePath(id: string): string[] | null;
   posOf(id: string): [number, number] | null;
+  /** #1295: whether this open act is an open-ended hold its body has reached, or a follow (the ledger's `holding`). */
+  holding?(soulId: string, receiptId: string): boolean;
 };
+/** #1295: where links are kept across a restart (`ownerLinkStore`); without one they live in memory only. */
+export type OwnerLinkStore = {load(): [string, string][]; save(receipt: string, soulId: string, link: string): void; drop(receipt: string): void};
+export function ownerLinkStore(db: Db, worldId: string): OwnerLinkStore {
+  db.db.exec('CREATE TABLE IF NOT EXISTS edge_owner_links_v1 (world_id TEXT NOT NULL, receipt_id TEXT NOT NULL, soul_id TEXT NOT NULL, link TEXT NOT NULL, PRIMARY KEY (world_id, receipt_id))');
+  const save = db.db.prepare('INSERT INTO edge_owner_links_v1 (world_id,receipt_id,soul_id,link) VALUES (?,?,?,?) ON CONFLICT(world_id,receipt_id) DO UPDATE SET link=excluded.link');
+  const drop = db.db.prepare('DELETE FROM edge_owner_links_v1 WHERE world_id=? AND receipt_id=?');
+  return {
+    load: () => (db.db.prepare('SELECT receipt_id,link FROM edge_owner_links_v1 WHERE world_id=?').all(worldId) as {receipt_id: string; link: string}[]).map(r => [r.receipt_id, r.link]),
+    save: (receipt, soulId, link) => {save.run(worldId, receipt, soulId, link);},
+    drop: receipt => {drop.run(worldId, receipt);},
+  };
+}
 /** `steps`: the message's steps when the link is implicit and its words name some (else the act closes it, as before). */
 type Link = {scope: {scope: string; owner: string}; message: string; steps?: MessageStep[]; act?: string[];
   /** #1272: other messages on this receipt: a repeated act returns the one under way, and each message still closes with it. */
-  also?: Link[]};
+  also?: Link[];
+  /** #1295: the act asked for its own duration (`seconds`), so a held pose is still running; `gone`: the tick the receipt was
+   *  replaced (the world closes its messages GONE_TICKS later unless another act serves them); `late`: past HOLD_TICKS, the
+   *  world has said it hadn't finished. */
+  timed?: true; gone?: number; late?: true};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
@@ -40,6 +69,12 @@ function pending(step: string[]) {
   return v === 'rest' || v === 'nap' || v === 'lie' ? 'resting' : v === 'sit' ? 'sitting' : step.includes('walk') ? 'there' : v === 'ride' ? 'aboard' : `${v} done`;
 }
 const MAX_LINKS = 2000;
+const OPEN = ['waiting', 'started', 'accepted'];
+/** #1295: a linked act still running this long (world ticks, 15 minutes) has its message closed `failed`, never done. */
+export const HOLD_TICKS = 15 * 60 * 20;
+/** #1295: how long a replaced act's messages wait for the replacing act to be linked to them (world ticks). */
+export const GONE_TICKS = 40;
+const SWEEP_TICKS = 20;
 /** How near a named thing or Soul the body must end to be at it (metres). */
 const AT_M = 6;
 
@@ -68,9 +103,14 @@ export class OwnerLoop {
   private inbox: OwnerLoopInbox;
   private read: (soulId: string, receiptId: string) => (EdgeReceipt & {outcome?: {summary?: string}; done?: string}) | null;
   private world: OwnerLoopWorld | null;
-  constructor(inbox: OwnerLoopInbox, read: OwnerLoop['read'], onReceipt: (l: (r: EdgeReceipt) => void) => void, world: OwnerLoopWorld | null = null) {
-    this.inbox = inbox; this.read = read; this.world = world;
+  private store: OwnerLinkStore | null;
+  private holdTicks: number;
+  constructor(inbox: OwnerLoopInbox, read: OwnerLoop['read'], onReceipt: (l: (r: EdgeReceipt) => void) => void, world: OwnerLoopWorld | null = null,
+    {store = null, holdTicks = HOLD_TICKS}: {store?: OwnerLinkStore | null; holdTicks?: number} = {}) {
+    this.inbox = inbox; this.read = read; this.world = world; this.store = store; this.holdTicks = holdTicks;
     onReceipt(r => this.ended(r));
+    for (const [id, json] of store?.load() ?? []) try {this.links.set(id, JSON.parse(json) as Link);} catch {store!.drop(id);}
+    inbox.closeHold = (s, id) => {const r = this.running(s, id); return r ? {receipt: r.id, capability: r.capability} : null;};
   }
   /** D3d: whether this act serves step `i` of a linked message: its verb, and (several steps, last one) its target. */
   private serves(l: Link, i: number, r: EdgeReceipt, ended: boolean): boolean {
@@ -86,27 +126,76 @@ export class OwnerLoop {
     return this.inbox.hasMessage(this.scope(soul), message) ? null : `no owner message ${message} for this Soul (it may be too old)`;
   }
   /** Link an accepted act's receipt to its owner message; a receipt already terminal closes the message now. Implicit
-   *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open. */
-  link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false): {open: boolean} {
+   *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open.
+   *  `timed`: the act asked for its own duration (#1295: a held pose still runs until it ends). */
+  link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, timed = false): {open: boolean} {
     const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
     const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
     const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
-    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {})};
+    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(timed ? {timed: true} : {})};
     const prior = this.links.get(receipt.id);
-    if (prior) l.also = [...(prior.message === message ? [] : [{...prior, also: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)];
-    this.links.set(receipt.id, l);
-    if (this.links.size > MAX_LINKS) this.links.delete(this.links.keys().next().value!);
+    if (prior) {l.also = [...(prior.message === message ? [] : [{...prior, also: undefined, late: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)]; if (prior.late) l.late = true;}
+    this.keep(receipt.id, l);
+    if (this.links.size > MAX_LINKS) this.forget(this.links.keys().next().value!);
     const open = !!l.steps && !this.serves(l, l.steps.length - 1, receipt, false);
-    if (receipt.phase !== 'waiting' && receipt.phase !== 'started') this.ended(receipt);
+    if (!OPEN.includes(receipt.phase)) this.ended(receipt);
     return {open};
   }
-  private ended(r: EdgeReceipt) {
-    const l = this.links.get(r.id); if (!l || ['waiting', 'started', 'accepted'].includes(r.phase)) return;
-    this.links.delete(r.id);
-    const full = this.read(r.soulId, r.id) ?? r, line = resultLine(full); if (!line) return;
-    const seen = {...r, ...(full.endedAt !== undefined ? {endedAt: full.endedAt} : {})};
-    for (const one of [l, ...(l.also ?? [])]) this.report(one, seen, line);
+  /** #1295: the act linked to this message that is running now (not ended, not replaced, not an open-ended hold its body
+   *  has reached), or null. `except`: a receipt not to count (the one ending). A link whose receipt is gone is dropped. */
+  running(s: {scope: string; owner: string}, message: string, except?: string): EdgeReceipt | null {
+    for (const [id, l] of [...this.links]) {
+      if (id === except || l.gone !== undefined) continue;
+      const mine = [l, ...(l.also ?? [])].find(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner); if (!mine) continue;
+      const soul = l.scope.scope.slice(5), r = this.read(soul, id);
+      if (!r) {this.forget(id); continue;}
+      if (!OPEN.includes(r.phase)) continue;
+      if (!mine.timed && this.world?.holding?.(soul, id)) continue;
+      return r;
+    }
+    return null;
   }
+  /** #1295: whether any act not replaced is still linked to this message (it will close it). */
+  private serving(s: {scope: string; owner: string}, message: string) {
+    return [...this.links.values()].some(l => l.gone === undefined && [l, ...(l.also ?? [])].some(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner));
+  }
+  private ended(r: EdgeReceipt) {
+    const l = this.links.get(r.id); if (!l || OPEN.includes(r.phase)) return;
+    const full = this.read(r.soulId, r.id) ?? r, line = resultLine(full);
+    // replaced: the act that replaced it closes the message when it is linked to it; else the world does (sweep)
+    if (!line) {if (l.gone === undefined) {l.gone = r.endedTick ?? r.acceptedTick; this.keep(r.id, l);} return;}
+    this.forget(r.id);
+    const seen = {...r, ...(full.endedAt !== undefined ? {endedAt: full.endedAt} : {})};
+    for (const one of [l, ...(l.also ?? [])]) {
+      // #1295: another act linked to this message still runs: it closes the message when it ends
+      const other = this.running(one.scope, one.message, r.id);
+      if (other) {this.inbox.serverProgress?.(one.scope, one.message, `now: ${line.text.replace(/[.\s]+$/, '')}; ${other.capability} still going`); continue;}
+      this.report(one, seen, line);
+    }
+  }
+  /** #1295: once a second (call after each world tick): close what a replaced act left with nothing serving it, close a
+   *  message whose act has run past the hold limit as not done, catch an end this process missed (a restart), and drop a
+   *  link whose receipt is gone. */
+  sweep(tick: number) {
+    if (tick % SWEEP_TICKS) return;
+    for (const [id, l] of [...this.links]) {
+      const soul = l.scope.scope.slice(5), r = this.read(soul, id);
+      if (!r) {this.forget(id); continue;}
+      if (l.gone !== undefined) {
+        if (tick - l.gone < GONE_TICKS) continue;
+        this.forget(id);
+        for (const one of [l, ...(l.also ?? [])]) if (!this.serving(one.scope, one.message) && !this.running(one.scope, one.message)) this.inbox.serverResult(one.scope, one.message, `${r.capability} was replaced by a newer act before it finished.`, 'failed');
+        continue;
+      }
+      if (!OPEN.includes(r.phase)) {this.ended(r); continue;}
+      if (l.late || tick - r.acceptedTick < this.holdTicks) continue;
+      const held = this.world?.holding?.(soul, id) ?? false;
+      l.late = true; this.keep(id, l);
+      for (const one of [l, ...(l.also ?? [])]) if (one.timed || !held) this.inbox.serverResult(one.scope, one.message, `${r.capability} hadn't finished after ${Math.round(this.holdTicks / 1200)} minutes, so it isn't done.`, 'failed');
+    }
+  }
+  private keep(id: string, l: Link) {this.links.set(id, l); try {this.store?.save(id, l.scope.scope.slice(5), JSON.stringify(l));} catch {/* kept in memory */}}
+  private forget(id: string) {this.links.delete(id); try {this.store?.drop(id);} catch {/* the sweep drops it again */}}
   private report(l: Link, seen: EdgeReceipt, line: NonNullable<ReturnType<typeof resultLine>>) {
     if (!l.steps || this.serves(l, l.steps.length - 1, seen, true)) { this.reached.delete(l.message); this.inbox.serverResult(l.scope, l.message, line.text, line.outcome); return; }
     // not the last step (or not its target): the owner sees what happened and what is still to come; the message stays open
