@@ -487,6 +487,31 @@ test('plan #1289: a repeat of the step under way leaves the plan running, and it
   }
 });
 
+test('plan #1289: a repeat of the step under way for the plan\'s own message goes to the world without that message', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  w.repeats = 'walk:mill';
+  await w.cli('act', 'walk:mill', '--for', 'msg_1');
+  assert.equal(w.bodies.at(-1).capability, 'walk:mill'); assert.equal(w.bodies.at(-1).for, undefined, 'linked, the world would close it when the step ends');
+  assert.equal((await w.cli('plan', '--status')).json.plan?.state, 'running');
+});
+
+test('plan #1289: a plan on disk still guards its message when serve is gone', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  await w.cli('serve', '--stop');
+  assert.ok(await until(async () => !(await w.cli('serve', '--status')).json?.serving));
+  const said = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(said.json.closed, false, said.err); assert.match(said.json.why, /plan is still going/);
+  assert.deepEqual(w.results, []);
+});
+
 test('plan #1289: nothing closes a message while its plan runs', async (t) => {
   const w = await world(t);
   await w.cli('serve');

@@ -2733,12 +2733,20 @@ async function act(...argv) {
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
-  // every message on a receipt, not only the last: a repeat links a second one to the act under way (#1289)
-  if (d.for) save({ links: [...(load().links ?? []).filter((l) => l.message !== d.for), { receipt: d.receipt?.id, message: d.for }].slice(-64) });
+  // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
+  // still going while a later step of it has ended (#1289)
+  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for }], d.receipt.id) });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+/** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
+export function keepLinks(links, open, max = 64) {
+  const out = [...links];
+  for (let i = 0; out.length > max && i < out.length;) if (out[i].receipt !== open) out.splice(i, 1); else i++;
+  return out;
 }
 
 /** A receipt that has ended guards nothing, so its links make room: the list must never lose one that may still be open. */
@@ -3067,14 +3075,17 @@ async function closing(id, outcome, text, seen = {}) {
   const first = await read(), early = stop(first);
   seen.acked = first?.data?.message?.state === "acknowledged";
   if (early) return early;
-  const plan = (await askServe({ op: "planStatus" }))?.plan;
+  // a serve that is gone or hung still has its plan on disk, and the next serve resumes it
+  const asked = await askServe({ op: "planStatus" }), plan = asked && !asked.lost ? asked.plan : loadServeState().plan;
   if (plan?.for === id && !PLAN_OVER.has(plan.state)) return { closed: false, why: "its plan is still going: if `closed` doesn't follow, `result` once it has ended" };
-  const link = (load().links ?? []).find((l) => l.message === id);
-  if (link?.receipt) {
-    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+  const mine = [...new Set((load().links ?? []).filter((l) => l.message === id).map((l) => l.receipt))].reverse();
+  for (const receipt of mine) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(receipt)}`, quick).catch(() => null);
     // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
     if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
-    const late = stop(await read());   // the act may have ended between the reads, and then the world's close stands
+  }
+  if (mine.length) {
+    const late = stop(await read());   // an act may have ended between the reads, and then the world's close stands
     if (late) return late;
   }
   try { const r = await result(id, outcome, text); return r.reported === false ? { closed: false, why: r.why } : { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
@@ -3768,6 +3779,12 @@ async function serveForeground() {
       if (known?.full && ENDED.has(known.phase)) return { status: 200, data: { receipt: known.full } };
       // An act for the plan's own message serves it, so the plan won't close it. Noted before the request: on a real world the step's
       // replaced comes down the stream before this act's answer comes back.
+      // A repeat of the step under way, for the plan's own message, goes without its `for`: linked, the world would close the
+      // message when that step ends, with later steps still to run (#1289). The plan closes it.
+      const step = st.plan && !PLAN_OVER.has(st.plan.state) ? st.plan.steps?.[st.plan.at] : null;
+      if (path === "/v1/edge/act" && m.method === "POST" && step && m.body?.for && m.body.for === st.plan.for && step.id === m.body.capability && JSON.stringify(step.params ?? {}) === JSON.stringify(m.body.params ?? {})) {
+        const { for: _for, forDefault: _default, ...body } = m.body; m = { ...m, body };
+      }
       const planActFor = path === "/v1/edge/act" && m.method === "POST" && st.plan && m.body?.for && m.body.for === st.plan.for ? st.plan : null;
       if (planActFor) planActFor.servedByAct = (planActFor.servedByAct ?? 0) + 1;
       const r = await forward(m);

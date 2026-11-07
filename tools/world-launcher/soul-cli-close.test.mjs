@@ -3,11 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
-import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, writeFileSync, rmSync, readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {clipped} from './soul/eden.mjs';
+import {clipped, keepLinks} from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 
@@ -36,7 +36,7 @@ async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, re
   t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
   writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: `http://127.0.0.1:${server.address().port}`, soul: 's_pip', token: 'tok'}));
   const cli = (...args) => new Promise(res => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (e, out, err) => {let json = null; try {json = JSON.parse(out);} catch {/* words */} res({code: e?.code ?? 0, json, err});}));
-  return {seen, cli, results};
+  return {seen, cli, results, dir};
 }
 const posted = (seen, tail) => seen.filter(([m, u]) => m === 'POST' && u.endsWith(tail));
 
@@ -132,6 +132,20 @@ test('the links outlast a long run of repeats, and a re-linked message is guarde
   const re = await world(t, {actAnswer: (b) => ({accepted: true, channel: 'body', receipt: {...receipts[`r_${++next}`], phase: 'started'}, for: b.for}), receiptOf: (id) => receipts[id]});
   await re.cli('act', 'walk:a', '--for', 'msg_1'); await re.cli('act', 'walk:b', '--for', 'msg_1');
   assert.equal((await re.cli('say', 'On my way', '--for', 'msg_1')).json.closed, false, 'its newest act is the one running');
+});
+
+test('links: past the cap, the open receipt keeps all of its own; an ended receipt makes room and leaves the others (#1289)', async t => {
+  const many = Array.from({length: 70}, (_, i) => ({receipt: 'r_1', message: `msg_${i}`}));
+  assert.equal(keepLinks(many, 'r_1').length, 70, 'none on the open receipt goes');
+  const mixed = [...Array.from({length: 10}, (_, i) => ({receipt: `r_old${i}`, message: `msg_o${i}`})), ...many.slice(0, 60)];
+  const kept = keepLinks(mixed, 'r_1'); assert.equal(kept.length, 64); assert.equal(kept.filter((l) => l.receipt === 'r_1').length, 60, 'others go first, oldest first');
+  const receipts = {r_1: {id: 'r_1', capability: 'walk:a', phase: 'started'}, r_2: {id: 'r_2', capability: 'make:mark', phase: 'completed'}};
+  let next = 0;
+  const w = await world(t, {actAnswer: (b) => ({accepted: true, channel: 'body', receipt: receipts[`r_${++next}`], for: b.for}), receiptOf: (id) => receipts[id]});
+  await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'make:mark', '--for', 'msg_1');
+  const links = JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).links;
+  assert.deepEqual(links, [{receipt: 'r_1', message: 'msg_1'}], 'the ended mark made room; the walk stays');
+  assert.equal((await w.cli('say', 'On my way', '--for', 'msg_1')).json.closed, false, 'a later step ended, the walk is still going');
 });
 
 test('an act that ends between the reads keeps the world\'s close (#1289)', async t => {
