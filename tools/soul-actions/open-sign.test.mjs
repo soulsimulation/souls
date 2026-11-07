@@ -70,4 +70,11 @@ test('open sign: words, contact, what is read nearby, refusals, long tail', {tim
  assert.equal(await said('turn the sign to closed'), 'place.ambiguous');
  assert.equal(await said('turn the cafe sign to closed'), `object:${god.model.get('cafe-sign').id}:close`);
  assert.equal(await said('flip the cafe sign'), `object:${god.model.get('cafe-sign').id}:close`);
+ // a name inside another name is not that name; a sign already there says so; the sign's own label and a trailing please work
+ assert.equal(god.act({ops: [{op: 'place', def: 'core/open-sign@1', name: 'workshop-sign', p: [p[0] + 3, p[2] + 1.5]}, {op: 'set', id: 'cafe-sign', state: {open: false}}, {op: 'set', id: 'shop-sign', state: {open: false}}]}).accepted, true); await tick(45);
+ assert.equal(await said('turn the shop sign to closed'), `object:${id}:close`, 'the named sign, not workshop-sign');
+ assert.equal(await said('turn the cafe sign to closed please'), `object:${god.model.get('cafe-sign').id}:close`);
+ assert.equal(await said('Turn the sign to Open (cafe-sign)'), `object:${god.model.get('cafe-sign').id}:open`);
+ const label = await post('/v1/edge/act', {capability: 'Turn the sign to Open (cafe-sign)'}); assert.equal(label.accepted, true, JSON.stringify(label).slice(0, 300));
+ const kept = await post('/v1/edge/act', {capability: 'turn the shop sign to closed'}); assert.equal(kept.accepted, false); assert.equal(kept.code, 'object.state'); assert.equal(god.model.get('workshop-sign').state?.open, true);
 });
