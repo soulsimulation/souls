@@ -12,7 +12,7 @@ import {clipped} from './soul/eden.mjs';
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 
 async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, reads = 200, receipts = 200} = {}) {
-  const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
+  const seen = [], acked = new Set(), dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
       const body = JSON.parse(b || '{}'), url = req.url.split('?')[0], send = (s, j) => {res.writeHead(s, {'content-type': 'application/json'}); res.end(JSON.stringify(j));};
@@ -24,9 +24,9 @@ async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, re
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
       if (m?.[2] === '/result' && results.refuse) return send(404, {error: {code: 'not-found', message: 'no such message'}});
       if (m?.[2] === '/result') {results[m[1]] = body; return send(200, {inbox: {}});}
-      if (m?.[2] === '/ack') return send(200, {inbox: {}});
+      if (m?.[2] === '/ack') {acked.add(m[1]); return send(200, {inbox: {}});}
       if (m && reads !== 200) return send(reads, {error: {code: reads === 503 ? 'world.busy' : 'broken', message: 'the inbox broke'}});
-      if (m) return send(200, {message: {id: m[1], ...(results[m[1]] ? {result: results[m[1]].text ?? results[m[1]], outcome: results[m[1]].outcome} : {})}});
+      if (m) return send(200, {message: {id: m[1], ...(acked.has(m[1]) ? {state: 'acknowledged'} : {}), ...(results[m[1]] ? {result: results[m[1]].text ?? results[m[1]], outcome: results[m[1]].outcome} : {})}});
       send(200, {});
     });
   });
@@ -103,6 +103,36 @@ test('say --for leaves a message alone while its linked act is going, and closes
   const pruned = await world(t, {actAnswer: () => started, receipts: 404});
   await pruned.cli('act', 'walk:a', '--for', 'msg_1');
   assert.equal((await pruned.cli('say', 'Here', '--for', 'msg_1')).json.closed, true, 'a receipt too old to hold has ended');
+});
+
+test('every message linked to a running receipt is guarded, not only the last (#1289)', async t => {
+  const started = (id) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: id});
+  const w = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: started().receipt});
+  await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'walk:a', '--for', 'msg_2');
+  for (const id of ['msg_1', 'msg_2']) {
+    const said = await w.cli('say', 'On my way', '--for', id); assert.equal(said.json.closed, false, id); assert.match(said.json.why, /still going/);
+    assert.equal((await w.cli('ack', id, 'Nearly', '--close', 'failed')).json.closed, false, id);
+  }
+  assert.equal(posted(w.seen, '/result').length, 0);
+  const ended = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: {...started().receipt, phase: 'completed', done: 'walked.'}});
+  await ended.cli('act', 'walk:a', '--for', 'msg_1'); await ended.cli('act', 'walk:a', '--for', 'msg_2');
+  assert.equal((await ended.cli('say', 'Here', '--for', 'msg_1')).json.closed, true, 'once the act has ended');
+});
+
+test('act says when the world answered with the act under way (#1289)', async t => {
+  const answer = (extra) => () => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, ...extra});
+  const w = await world(t, {actAnswer: answer({repeat: true})});
+  assert.equal((await w.cli('act', 'walk:a')).json.repeat, true); assert.equal((await w.cli('act', 'walk:a', '--json')).json.repeat, true);
+  const fresh = await world(t, {actAnswer: answer({})});
+  assert.equal((await fresh.cli('act', 'walk:a')).json.repeat, undefined); assert.equal((await fresh.cli('act', 'walk:a', '--json')).json.repeat, undefined);
+});
+
+test('ack --close on a message already acked claims no reply: the first one stands (#1289)', async t => {
+  const started = {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: 'msg_1'};
+  const w = await world(t, {actAnswer: () => started, waitReceipt: started.receipt});
+  await w.cli('ack', 'msg_1', 'Got it'); await w.cli('act', 'walk:a', '--for', 'msg_1');
+  const r = await w.cli('ack', 'msg_1', 'Nearly there.', '--close', 'done');
+  assert.equal(r.json.closed, false); assert.equal(r.json.reply, undefined); assert.equal(posted(w.seen, '/msg_1/ack').length, 1, 'only the first');
 });
 
 test('say --for none is the flag, not speech', async t => {

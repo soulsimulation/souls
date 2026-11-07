@@ -1715,7 +1715,7 @@ return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 
-const VERSION = "2.23.5";
+const VERSION = "2.23.6";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2729,11 +2729,12 @@ async function act(...argv) {
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
-  if (d.for) save({ lastLink: { receipt: d.receipt?.id, message: d.for } });
+  // every message on a receipt, not only the last: a repeat links a second one to the act under way (#1289)
+  if (d.for) save({ links: [...(load().links ?? []).filter((l) => l.message !== d.for), { receipt: d.receipt?.id, message: d.for }].slice(-8) });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   return json ? out : brief(out);
@@ -2775,7 +2776,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2816,8 +2817,8 @@ async function resolve(...args) {
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
   let out = await waitRaw(secArg, idArg);
-  const link = load().lastLink;
-  if (link?.receipt && link.receipt === out.receipt?.id && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
+  const link = (load().links ?? []).findLast((l) => l.receipt === out.receipt?.id);
+  if (link?.receipt && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -3034,9 +3035,9 @@ async function ack(id, ...rest) {
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so the text still reaches the card.
-  const shut = close ? await closing(id, close, reply) : {};
+  const seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
   if (shut.closed) return { ...said, closed: true };
-  if (shut.already) return { acked: id, ...shut };   // a closed message is acked already: nothing to send
+  if (seen.acked || shut.already) return { acked: id, ...shut };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
   return { ...said, ...d, ...shut };
@@ -3045,18 +3046,19 @@ async function ack(id, ...rest) {
 /** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
  *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
  *  closed or is about to: `closed` here means this command closed it. */
-async function closing(id, outcome, text) {
-  const quick = { retry: false, timeoutMs: 5000 }, link = load().lastLink;
-  if (link?.message === id && link.receipt) {
-    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
-    // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
-    if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
-  }
-  const read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+async function closing(id, outcome, text, seen = {}) {
+  const quick = { retry: false, timeoutMs: 5000 }, read = await call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
   if (read?.status !== 200) return { closed: false, why: `${read?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+  seen.acked = read.data?.message?.state === "acknowledged";
   if (read.data?.message?.result !== undefined) {
     if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
     return { closed: false, already: read.data.message.outcome, why: "already closed: nothing more to do" };
+  }
+  const link = (load().links ?? []).find((l) => l.message === id);
+  if (link?.receipt) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(link.receipt)}`, quick).catch(() => null);
+    // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
+    if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
   }
   try { await result(id, outcome, text); return { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
