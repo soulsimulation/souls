@@ -1,7 +1,7 @@
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
-import {holdsSecret,withoutSecrets} from '../perception/public-scrub.ts';
+import {holdsSecret,withoutSecrets,withoutSecretsBut} from '../perception/public-scrub.ts';
 import {StallGuard} from './stall-guard.ts';
 import {randomUUID} from 'node:crypto';
 import {hasDeclaredProfile} from '../../../../../mars/viewer/engine/bodies/action-profile.ts';
@@ -2686,7 +2686,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     this.timeline.ensure(soulId, () => (this.db.db.prepare("SELECT * FROM edge_receipts_v1 WHERE world_id=? AND soul_id=? AND phase='completed' ORDER BY accepted_tick DESC LIMIT ?").all(this.host.worldId, soulId, REBUILD_MAX) as Row[]).map((r) => ({receipt: this.view(r), at: r.created_at})));
     const at = (ms: number) => ({real: new Date(ms).toISOString(), tick: null, worldDay: null, time: null});
     const extra: TimelineEntry[] = [{kind: 'arrival', when: at(row.created_at), place: {id: null, name: null}}, ...(this.travelLogOf?.(soulId) ?? []).filter((e) => Number.isFinite(e.at) && Math.abs(e.at) <= MAX_DATE_MS).slice(-TIMELINE_MAX).map((e): TimelineEntry => ({kind: 'travel', when: at(e.at), place: {id: null, name: null}, ...(e.to ? {world: String(e.to).slice(0, 80)} : {})}))];
-    return timelineView(this.timeline.rows(soulId, limit), extra, {limit, placeName: (id) => (this.knowledge.isSecret(id) ? null : this.places.byId.get(id)?.name ?? null), gone: (id) => this.comms?.objects.isRemoved?.(id) ?? false});
+    return withoutSecretsBut(timelineView(this.timeline.rows(soulId, limit), extra, {limit, placeName: (id) => (this.knowledge.isSecret(id) ? null : this.places.byId.get(id)?.name ?? null), gone: (id) => this.comms?.objects.isRemoved?.(id) ?? false}), 'title', this.knowledge.publicMatcher());
   }
   /** G430 public per-Soul page: no owner data, conversation turns or tokens, and nothing of a secret place. Its own public speech is on it. */
   publicSoul(soulId: string) {
@@ -2700,7 +2700,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (has('edge_comms_speech')) for (const e of this.db.db.prepare('SELECT tick,at,channel,text FROM edge_comms_speech WHERE world_id=? AND soul_id=? ORDER BY tick DESC LIMIT 30').all(this.host.worldId, soulId) as {tick: number; at: number; channel: string; text: string}[]) events.push({tick: e.tick, at: e.at, kind: 'speech', channel: JSON.parse(e.channel), text: e.text, untrusted: true});
     events.sort((a, b) => b.tick - a.tick);
     // Anyone can read this, with no token (#1234). What the world says of the Soul passes the secret places. What the Soul said itself,
-    // its name, description, `now` and speech, is its own to say: scrubbing it would also let any owner test a guessed name.
+    // its name, description, `now`, speech and the titles of what it made, is its own to say: scrubbing it would also let any owner test a guessed name.
     const secrets = this.knowledge.publicMatcher(), plain = (r: object) => {if (!secrets) return r; const {chosen: _c, ...rest} = r as {chosen?: unknown}; return rest;}, inSecret = !!secrets && !!m && this.placePathOf(soulId).some((p) => this.knowledge.isSecret(p.id));
     const hiddenAt = (r: EdgeReceipt) => {const at = (r.endedAt as {pos?: number[]} | null)?.pos; return !!secrets && !!at && this.places.containing(at[0]!, at[1]!, 0).some((p) => this.knowledge.isSecret(p.id));};
     const open = (r: EdgeReceipt) => r.phase === 'waiting' || r.phase === 'started';
