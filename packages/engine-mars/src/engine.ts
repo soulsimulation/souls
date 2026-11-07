@@ -661,7 +661,7 @@ export class MarsEngine implements Engine {
       // PC08: while an `untilSafe` stop's action is held up it stands still, so a retry would refuse again and only hide
       // the hold-up's own diagnostic (who is in the way); it is retried once the action moves again
       if(p.stopByV1!==undefined&&this.rt.tick>=p.stopByV1&&p.action&&this.rt.isActive(p.action))this.abandonV1(p.action,`the stop did not finish: ${p.stopping.code}`);
-      if(p.stopQuietV1&&p.action&&this.rt.isActive(p.action)){const key=this.stopProgressV1(p);if(key!==p.stopQuietV1.key)p.stopQuietV1={...p.stopQuietV1,key,since:tick};if(tick-p.stopQuietV1.since>=ASKED_STOP_QUIET_TICKS||tick-p.stopQuietV1.from>=ASKED_STOP_MAX_TICKS)this.abandonV1(p.action,`nothing moved for ${ASKED_STOP_QUIET_TICKS} ticks: ${p.stopping.code}`,STOP_GAVE_UP);}
+      if(p.stopQuietV1&&p.action&&this.rt.isActive(p.action)){const key=this.stopProgressV1(p);if(key!==p.stopQuietV1.key)p.stopQuietV1={...p.stopQuietV1,key,since:tick};if(tick-p.stopQuietV1.since>=ASKED_STOP_QUIET_TICKS||tick-p.stopQuietV1.from>=ASKED_STOP_MAX_TICKS)this.abandonV1(p.action,`${tick-p.stopQuietV1.since>=ASKED_STOP_QUIET_TICKS?`nothing moved for ${ASKED_STOP_QUIET_TICKS} ticks`:`still pending after ${ASKED_STOP_MAX_TICKS} ticks`}: ${p.stopping.code}`,STOP_GAVE_UP);}
       if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.cancelOrAbandonV1(p.action,p.stopping);return;}
       return this.end(p,p.refusalsV1&&!p.build?'failed':'cancelled',p.stopping);   // an unfinished build's failure throws
     }

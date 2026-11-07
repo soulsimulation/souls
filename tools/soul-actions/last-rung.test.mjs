@@ -809,3 +809,24 @@ test('R a steady throw asks for a snapshot once per cooldown: rare, and never si
   w.control.midThrow = () => true; for (let i = 0; i < 2600; i++) h.tickOnce(); await setImmediate();
   assert.ok(taken >= 3 && taken <= 6, `${taken} snapshots`);
 });
+test('R a Soul stop that a rung 3 gives twenty seconds and that stays refused is engine.action-threw, counted', async (t) => {
+  quiet(t); const w = await world(t, repair), h = w.f.host, {Ada, Bo} = w.souls, def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
+  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}}); def.step = () => ({status: 'running'});
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6); const id = h.engine.programOf(Ada.entityId);
+  void h.enqueue('edge-stop', 'world:test', {programId: id}); await w.tick(3); assert.ok(h.engine.programs.get(id)?.stopQuietV1);
+  h.saveSnapshot(true); await w.tick(4); fall(w, Bo); await w.tick(3); const p = h.engine.programs.get(id);
+  const g0 = byRung(h).refusal ?? 0; await w.tick(450);
+  const rules = w.f.db.events(h.worldId).filter((e) => e.author === 'world:refusal').map((e) => e.payload.refusal.rule);
+  assert.equal(h.engine.programOf(Ada.entityId), null); assert.equal(rules.at(-1), 'engine.action-threw'); assert.equal((byRung(h).refusal ?? 0), g0 + 1);
+});
+test('R a stop whose key changes every 50 s still gives up at half an hour, and not before', async (t) => {
+  quiet(t); const w = await world(t, repair), h = w.f.host, {Ada} = w.souls, def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
+  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}});
+  def.step = (rt) => { if (rt.tick % 1000 === 0) { const e = rt.world.entities[Ada.entityId]; e.pose.p = [e.pose.p[0] + (rt.tick % 2000 ? 0.03 : -0.03), e.pose.p[1], e.pose.p[2]]; } return {status: 'running'}; };
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6); const id = h.engine.programOf(Ada.entityId);
+  void h.enqueue('edge-stop', 'world:test', {programId: id}); await w.tick(3); const q = h.engine.programs.get(id).stopQuietV1; assert.ok(q && q.from === q.since);
+  while (h.engine.world.tick < q.from + 35990) h.tickOnce(); assert.ok(h.engine.programOf(Ada.entityId), 'still waiting before half an hour');
+  for (let i = 0; i < 30 && h.engine.programOf(Ada.entityId); i++) h.tickOnce();
+  assert.equal(h.engine.programOf(Ada.entityId), null); await w.tick(2);
+  const row = w.f.db.events(h.worldId).filter((e) => e.author === 'world:refusal').at(-1)?.payload.refusal; assert.equal(row.rule, 'world.stop-gave-up');
+});
