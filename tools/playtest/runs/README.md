@@ -12,6 +12,7 @@ node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/smoke-world.
 node tools/playtest/runs/run.mjs start    --scenario tools/playtest/scenarios/unified-codex-smoke.json --cast none --port 4311 --duration 30
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio.json   # three scripted-owner Souls, one redirection
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/garden-setup.json  # another world, a setup batch, another cast
+node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio-direct.json  # a directed cast: swarm director, scripted-owner seats
 node tools/playtest/runs/run.mjs cleanup  .local/soul-runs/<run> --world-data --controller-state
 node tools/playtest/runs/run.mjs evaluate .local/soul-runs/<run> --question tools/playtest/runs/questions/redirect-honoured.mjs
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio-recorded.json   # the trio, recorded: wide, free and follow cameras
@@ -94,6 +95,31 @@ transcript up to 1 MiB; past that the tool result ends with a `[scripted-owner: 
 `truncated: true`, which the scorer's `seatActs` passes on. Live casts stay on `playtest.mjs direct` and
 the souls-director skill.
 
+A step `["resolve", "<words>"]` keeps its first candidate's id as `{resolved}` for the steps after it in that rule, so a
+script can reach offers whose ids differ every run (`give:<soul>`, `accept:<invitation>`) the way an agent does. A resolve
+with no candidate fails the rule.
+
+## Directed casts
+
+A spec can name a swarm cast (`tools/playtest/scenarios/casts/`, the format `playtest.mjs direct` and the
+souls-director skill use) instead of a scenario: `{"soulRun": 1, "cast": {"file": "<cast.json>"}}`. The run executes
+`cmdDirect` headless through the lifecycle hooks: the cast's world, seats and browser are owned and released, the
+cast's `console.script` supplies the direction (broadcasts, per-seat lines, `redirect`, `pause`, `resume`, `end`), and a
+cancel ends play the way the console's `end` does. A session that ran to its end is `completed` whatever its verdict;
+the verdict is in `evidence.verdict`, and the direction journal (`playtest/director/commands.jsonl`, referenced as
+`references.journal`) feeds the `directions` measure. The effective cast is written to `cast.effective.json`
+(`references.cast`).
+
+A directed spec takes `name`, `world` (`port`, `slug` only), `durationSec`, `observer` (`check`, `required`,
+`timeoutMs`, `cameras` as a subset of `follow` and `wide`), `limits`, `controllers`, `retention` and `evaluation`.
+Validation refuses before anything starts: a spec that names both a cast and a scenario, unknown `cast` fields, a
+missing or invalid cast file, an invalid scripted-owner script, `setup` (not supported with a cast yet),
+`diagnostics`, `observer.record`, `recordSize`, `freeComposition` or an `observer.mode` other than `cameras` (scenario
+specs only for now), and
+(`controllers.live-model`) any seat that is not `scripted-owner` or a `planner`, unless `controllers.allowLiveModels`
+is true. `cmdDirect` refuses the same live minds again inside the runner. `specs/hamlet-trio-direct.json` runs three
+scripted-owner Souls in the hamlet pond hall, with one redirection of Bo delivered while Ada speaks.
+
 ## Setup
 
 Setup batches are existing god-edit batches (`{ops: [...]}` as `eden-god.mjs act` takes them), applied through the world
@@ -133,7 +159,9 @@ sha256, never copied; seat working folders (owner identity, credentials) and wor
   seat's ack and result calls, and the director's own open time), `physical-completion` (receipt phases the world
   returned to the seat's act calls: completed, ongoing such as seated, or started and not observed to end),
   `seat-claims` (result calls, which are claims), `observed-walking-speed` and the review oracles (only from the
-  observer's evidence packs, through `review/metrics.mjs`), `tick-timing`, `token-cost` and `lifecycle`. Emergence
+  observer's evidence packs, through `review/metrics.mjs`), `tick-timing`, `token-cost`, `lifecycle` and, for directed
+  casts, `direction` (the `directions` measure: the journal's commands by command and outcome, and each redirection
+  with its target, run-relative time, outcome and whether the target spoke afterwards). Emergence
   numbers are labelled `social-heuristic`. A measure without its source is `unavailable` with the reason, never 0
   (for example no seat transcript after `controllerState: "delete"`, or no evidence packs while the observer failed).
 - **Questions** are small named scorer modules (`questions/*.mjs`, default export `{id, version, question,

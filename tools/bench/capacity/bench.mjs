@@ -242,6 +242,7 @@ function runCli(soul, args, deadlineMs, rec) {
 async function join_(run, i) {
   const dir = join(run.dir, 'souls', `s${i}`); mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'eden.mjs'), Buffer.from(await (await fetch(`${BASE}/eden.mjs`)).arrayBuffer()));
+  writeFileSync(join(dir, '.eden-agent.json'), '{}\n', { mode: 0o600 });   // a one-Soul folder, not a Souls home: the bench reads this file
   const soul = { i, dir };
   const a = await runCli(soul, ['register', BASE], 60_000);
   // v3 (srv-cli-lifecycle): the SAME name on every try, until the folder holds a token or 120 s pass. Soul CLI 2.5.3
@@ -262,7 +263,7 @@ async function join_(run, i) {
 // What `go to <target>` reads as in this world, through the CLI's own resolve. Empty is an error: the bench would measure refusals.
 let WALK_IDS = [];
 async function learnWalkIds(soul) {
-  const read = (words) => new Promise((done) => execFile(process.execPath, ['eden.mjs', 'resolve', words], { cwd: soul.dir, timeout: 60_000 }, (_e, out) => { try { const d = JSON.parse(out); done({ id: d.candidates?.find((c) => c.available)?.id ?? null, why: d.code ?? null }); } catch { done({ id: null, why: String(out).slice(0, 80) }); } }));
+  const read = (words) => new Promise((done) => execFile(process.execPath, ['eden.mjs', 'resolve', words], { cwd: soul.dir, timeout: 60_000 }, (_e, out) => { try { const d = JSON.parse(out); done({ id: (d.candidates ?? d.did_you_mean)?.find((c) => c.available !== false)?.id ?? null, why: d.code ?? null }); } catch { done({ id: null, why: String(out).slice(0, 80) }); } }));
   // one after another, as an agent would: the world's read limits are not what this measures
   const ids = new Set(), misses = [];
   for (const t of TARGETS) { const r = await read(`go to ${t}`); if (r.id) ids.add(r.id); else misses.push(`${t}: ${r.why ?? 'no available candidate'}`); }
