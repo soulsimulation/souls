@@ -78,7 +78,11 @@ test('#1288 W3: a swim held up for 30 s ends swim.stuck and leaves the swimmer f
 });
 test('#1288 W4: a swim that waits and then gets past completes, and the count starts again',()=>{
  const {e,b}=heldUp(),adm=e.perform({actor:'h_swimmer',label:'swim',steps:[{verb:'mars:swim_to',params:{x:32,z:0}}]});assert.equal(adm.ok,true,JSON.stringify(adm));
- for(let i=0;i<300;i++)e.step();b.pose.p=[26,b.pose.p[1],8];
+ // two holds of 400 ticks, 800 in all, with headway between: only a hold in one go ends it
+ const body=e.world.entities.h_swimmer;for(let i=0;i<400;i++)e.step();
+ b.pose.p=[26,b.pose.p[1],8];for(let i=0;i<20;i++)e.step();
+ b.pose.p=[body.pose.p[0]+1,b.pose.p[1],0];for(let i=0;i<400;i++)e.step();assert.equal(body.human.task!==undefined,true,'still swimming');
+ b.pose.p=[26,b.pose.p[1],8];
  const r=run2(e,adm.id,1500);assert.equal(r.end?.kind,'completed',JSON.stringify(r));
 });
 test('#1288 W5: an unhindered swim holds no wait state, and a held one keeps its count across a restore',()=>{

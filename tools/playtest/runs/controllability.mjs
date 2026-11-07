@@ -52,7 +52,7 @@ ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.clos
 seat.approach-busy seat.none-free seat.taken seat.yours shared.busy shared.full shared.left shared.not-member shared.not-ready shared.not-running shared.revision-changed shared.stop-asked shared.stop-requested shared.too-far
 site.under-construction sky.daylight sky.no-clock slot.none-free soul.faded soul.not-in-sight stall.released state.asleep state.changed state.safe-stop-timeout steer.unavailable surface.full swim.no-deep-middle
 tea.counter-blocked tea.cup-clean tea.cup-empty tea.cup-full tea.cup-not-down tea.cup-not-empty tea.hands-full tea.kettle-cold tea.kettle-empty tea.kettle-full tea.kettle-hot tea.kettle-not-down tea.kettle-on tea.no-bag tea.no-cup tea.no-kettle tea.no-tap tea.not-boiled tea.not-holding tea.tap-blocked
-together.nobody-leading travel.failed walk.stuck wallet.insufficient
+together.nobody-leading travel.failed swim.stuck walk.stuck wallet.insufficient
 water.hands-full water.no-source water.no-tap water.no-vessel water.plant-blocked water.plant-wet water.source-empty water.tap-blocked water.vessel-empty water.vessel-full
 activity.readiness-committed carrier.aloft carrier.busy classroom.owned-host-control-required construction.committed construction.one-job construction.site-busy disassembly.one-job
 eat.bowl-empty food.service-in-use food.unavailable gait.dry-ground-required gait.unsupported-body object.changed object.refused physical.unavailable punt.unsupported-water
