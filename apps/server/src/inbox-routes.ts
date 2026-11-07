@@ -5,7 +5,7 @@ import type {GodMode} from './god/god.ts';
 import {ApiError, type Souls} from './souls.ts';
 import {AgentInbox, type InboxScope, type TicketFocus} from './inbox.ts';
 import {soulLink} from './soul-link.ts';
-import type {WorldModel} from '@sim/world-compiler';
+import type {WorldModel} from '@souls/world-compiler';
 
 /** Who answers POST /v1/souls/<id>/command in a world (#982): one route, one handler per world mode. An edge world
  *  delivers the owner's text to the Soul's agent inbox (this file); a central-mind world translates it (http.ts). */

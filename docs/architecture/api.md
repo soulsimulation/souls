@@ -13,14 +13,17 @@ the original worlds. The server strips the world path (`WORLD_PATH`) before rout
 - **Halted clock.** While the world's clock is halted, every route answers 503 `world-unavailable` with
   `Cache-Control: no-store`, before auth and before the body is read; only the flood limits (429) and the
   1 MB body ceiling (413) can answer first. That includes `/healthz`, whose 503 is the
-  health answer. The only exception is moderation (`/v1/moderation`, `/v1/moderation/*`): a takedown, a quarantine
+  health answer and also says why, as counts by rule and rung. The only exception is moderation (`/v1/moderation`, `/v1/moderation/*`): a takedown, a quarantine
   release and the veto list read only the moderation log, never the engine, so they keep working. The list is
   `CLOCK_EXEMPT` in `apps/server/src/http.ts`.
-- **Headers.** Every answer from the app (`buildApp`), refusals and 404s included, sets `X-Robots-Tag: noindex, nofollow`,
-  `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`. A route with its own CSP keeps it, and
-  `frame-ancestors 'none'` is added to it. Both rules are mounted ahead of every route. The two answers `main.ts` writes
-  itself, `/mcp` and an Eden core world's `503 Server restarting.`, set the same headers from the same definition
-  (`SECURITY_HEADERS` in `apps/server/src/http.ts`).
+- **Headers.** Every answer from the app (`buildApp`), refusals and 404s included, sets `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'`. A route with its own CSP keeps it, and `frame-ancestors 'none'` is
+  added to it. Every answer except the world page (`/`) and its public guides (`/SKILL.md`, `/skill.md`,
+  `/instructions.md`, `/llms.txt`, `/cards.md`, GET or HEAD without a query string) sets
+  `X-Robots-Tag: noindex, nofollow`. These rules are mounted ahead of every route. The two answers `main.ts`
+  writes itself, `/mcp` and an Eden core world's `503 Server restarting.`, set the same headers from the same definition
+  (`SECURITY_HEADERS` in `apps/server/src/http.ts`). The launcher adds `X-Robots-Tag` to every response of an unlisted world, every `/__sim`
+  answer and every root path it hands to whichever world is running, and serves `/robots.txt` and `/sitemap.xml` (`tools/world-launcher/crawl.mjs`): public pages and listed worlds only.
 - **Auth**, three kinds:
   - **User:** `Authorization: Bearer <session token>` from the web app's sign-in. Production uses Clerk
     (`AUTH_PROVIDER=clerk` with `CLERK_PUBLISHABLE_KEY`, `CLERK_ISSUER_URL`, `CLERK_AUTHORIZED_PARTIES`,
