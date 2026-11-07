@@ -1716,15 +1716,20 @@ export class MarsEngine implements Engine {
   }
   removeEntity(id: string) {
     if(this.cfg.safeCrewRemoval)for(const p of this.programs.values())if(p.build?.crew.includes(id))this.stop(p.id);
-    // #1250: under repair, a body leaving a crew (its Soul retired) is that crew's stop, kept until it lands or gives up: a
-    // cut would end the programme and leave its action holding the others, and this body, for good
-    const repair = this.cfg.soulsRepairV1 === true, records = (this.rt as any).records as Map<string, { parent?: string }>;
-    const rootOf = (a: string) => { let r = a; for (let up = records.get(r)?.parent; up; up = records.get(r)?.parent) r = up; return r; };
-    // what lets go (a conversation, a meal) is let go first, as `tryRemove` would; only an action that refuses still holds it
-    if (repair) for (const h of this.holders(id)) this.rt.cancel(h, { code: 'actor.removed', message: 'actor removed' });
-    const crews = repair ? new Set(this.holders(id).filter((h) => this.rt.isActive(h)).map(rootOf)) : new Set<string>();
-    for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (p.action && p.actor !== id && crews.has(rootOf(p.action))) this.stop(p.id, { untilSafe: true });
+    const repair = this.cfg.soulsRepairV1 === true;
     const pid = this.byActor.get(id); if (pid) this.stop(pid, repair ? { untilSafe: true } : undefined);
+    // #1250: under repair, a body leaving a crew (its Soul retired) is that crew's stop, kept until it lands or gives up: a
+    // cut would end the programme and leave its action holding the others, and this body, for good. What lets go (a
+    // conversation, a meal) is let go first, as `tryRemove` would; a programme whose action refuses, and still holds the
+    // body, is stopped until safe. A committed build keeps its own crew guard: its holders are never pulled here.
+    const built = this.cfg.safeCrewRemoval && [...this.programs.values()].some((p) => p.build?.crew.includes(id));
+    if (repair && !built) {
+      const records = (this.rt as any).records as Map<string, { parent?: string }>, live = (this.rt as any).live as Map<string, { cancelling?: boolean }>;
+      const rootOf = (a: string) => { let r = a; for (let up = records.get(r)?.parent; up; up = records.get(r)?.parent) r = up; return r; };
+      for (const h of this.holders(id)) this.rt.cancel(h, { code: 'actor.removed', message: 'actor removed' });
+      const crews = new Set(this.holders(id).filter((h) => this.rt.isActive(h) && !live.get(h)?.cancelling).map(rootOf));
+      for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (p.action && p.actor !== id && crews.has(rootOf(p.action))) this.stop(p.id, { untilSafe: true });
+    }
     if (!this.tryRemove(id)&&(!this.cfg.safeCrewRemoval||!this.leaving.includes(id))) this.leaving.push(id); // finish owned obligations first
   }
 
