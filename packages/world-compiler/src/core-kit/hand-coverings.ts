@@ -59,4 +59,35 @@ const blindWindow = {
   actions: [{ ...actions('blind')[0], label: 'Open the blind' }, { ...actions('blind')[1], label: 'Close the blind' }],
 } as unknown as DefInput;
 
-export const HAND_COVERINGS: DefInput[] = [curtainedWindow, blindWindow];
+// #427 (W043): an Open / Closed sign, the same contact at a knob on its post. The board reads the same from both sides, as it
+// stands on a post anyone can walk round, and turns over 0.7 s when it changes (role flip, opening-motion.ts).
+const signBoard = (when: string, text: string, ink: string): Shape[] => [{ kind: 'box', at: [0, 1.42, 0], size: [0.56, 0.32, 0.024], round: 0.008, tint: 'board', role: 'flip', pivot: [0, 1.42, 0], when, faces: [
+  { side: 'front', text, bg: '#f1e7cf', ink, font: 'sans' }, { side: 'back', text, bg: '#f1e7cf', ink, font: 'sans' }] }];
+const signPalette = { post: '#4a3a2c', board: '#f1e7cf', valve: '#b08a3e' };
+const openSign = {
+  schema: 'def/1', name: 'core-open-sign', version: 1, form: 'point',
+  description: 'A small sign on a post for a shop or stall: its board says OPEN or CLOSED, from both sides. A Soul turns it by hand at the knob on the post, and anyone nearby can read which it says.',
+  tags: ['signage', 'shop', 'hand-operated', 'local-fixture'],
+  make: { kind: 'gen', gen: 'kit/2', args: { v: 2, round: 0.006, shapes: [
+    { kind: 'box', at: [0, 0.02, 0], size: [0.34, 0.04, 0.34], tint: 'post', collide: true },
+    { kind: 'box', at: [0, 0.65, 0], size: [0.05, 1.22, 0.05], tint: 'post', collide: true },
+    { kind: 'cyl', at: [0.04, 1.1, 0], r: 0.022, h: 0.03, segments: 10, tint: 'valve', roll: Math.PI / 2 },   // on the post's side, so she stands clear of the board's face
+    ...signBoard('@open=true', 'OPEN', '#2f6b3a'), ...signBoard('@open=false', 'CLOSED', '#8c2f25')] } },
+  params: Object.fromEntries(Object.entries(signPalette).map(([k, v]) => [k, { type: 'color', default: v, doc: `${k} colour${k === 'valve' ? ' (the knob; the hand goes here)' : ''}` }])),
+  palette: signPalette,
+  state: { open: { type: 'bool', default: true } },
+  size: { box: [0.56, 1.6, 0.34] },
+  actions: [{ ...actions('sign')[0], label: 'Turn the sign to Open' }, { ...actions('sign')[1], label: 'Turn the sign to Closed' }],
+} as unknown as DefInput;
+
+// #494 / #416: v1 above is immutable (worlds keep its geometry); v2 fits the 400-triangle kit budget. Every shape and
+// role is v1's (the twenty curtain folds, the tassel the hand goes to); only the sill's 6 mm rounding becomes the 5 mm
+// of the rest of the wall (a sharp box: 12 triangles instead of 44), and the rod and the tassel turn with 6 sides.
+const curtainedWindow2 = structuredClone(curtainedWindow) as DefInput & { version: number; make: { args: { shapes: Shape[] } } };
+curtainedWindow2.version = 2;
+for (const sh of curtainedWindow2.make.args.shapes) {
+  if (sh.tint === 'frame' && sh.round === 0.006) sh.round = 0.005;
+  if (sh.tint === 'rod' || sh.tint === 'valve') sh.segments = 6;
+}
+
+export const HAND_COVERINGS: DefInput[] = [curtainedWindow, blindWindow, curtainedWindow2, openSign];

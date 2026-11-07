@@ -16,6 +16,7 @@ import { deckRaised, railGaps, rasterOf } from '@souls/generators';
 import { applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
+import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
 import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
@@ -259,6 +260,8 @@ export class EngineBridge {
   readonly nav: GodNav;
   /** F1: god-built things Souls can see, look at and read (perceive.ts). */
   readonly perceive: GodPerceive;
+  /** PC17 (#696): the world's projects, behind the shared-carry flag. */
+  private projects?: Projects;
   /** R4-INFO: god-built places (areas, waters, buildings and their rooms, landmarks) in the Souls' map (places.ts). */
   readonly places: GodPlaces;
   /** LAYERS: schedules, ownership, zones, relationships, economy for Souls (layers.ts). */
@@ -281,7 +284,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
-    this.nav = new GodNav({ model: this.god.model, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
+    this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
@@ -311,6 +314,7 @@ export class EngineBridge {
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
     if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
+      settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
       moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
@@ -639,15 +643,33 @@ export class EngineBridge {
     return { code: 'carry.joined', reason: `${nameOf(id)} is joined to ${to.length > 1 ? `${to.slice(0, -1).join(', ')} and ${to.at(-1)}` : to[0]} (${js.map(([c, j]) => `${c} to ${j.at}`).join(', ')}); a joined part is not carried until it is disconnected.` };
   }
 
-  /** The engine physics of one entity: its solids, floors and stairs, or its fixture registration. */
-  derive(e: Entity, assets: Record<string, unknown>, known: Record<string, unknown>): Part | null {
-    const def = this.model.resolvedDef(e.def); if (!def) return null;
-    const baked = this.model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape);
+  private frameOf(e: Entity, def: StoredDef) {
     const wp = this.model.worldPose(e);
     // path/area forms at the root carry world-frame geometry (L3): heights ground-relative unless `abs`
     const worldFrame = def.form !== 'point' && e.in.parent === 'world';
     const toWorld = (x: number, z: number): Vec2 => { if (worldFrame) return [r3(x), r3(z)]; const c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); return [r3(wp.x + (x * c + z * s) * wp.s), r3(wp.z + (-x * s + z * c) * wp.s)]; };
     const heightAt = (y: number, at: Vec2, abs?: boolean) => r3(worldFrame ? (abs ? y : this.model.terrain.sample(at[0], at[1]) + y) : wp.y + y * wp.s);
+    return {wp, worldFrame, toWorld, heightAt};
+  }
+
+  /** The box one opening's gap blocks while it is shut. */
+  private gapBox(o: {at: Vec2; width: number; yaw: number}, def: StoredDef, e: Entity) {
+    const {wp, worldFrame, toWorld} = this.frameOf(e, def), sc = worldFrame ? 1 : wp.s;
+    return {c: toWorld(o.at[0], o.at[1]), half: [r3((o.width / 2) * sc), r3(0.08 * sc)] as Vec2, yaw: r3(-((worldFrame ? 0 : wp.yaw) + o.yaw))};
+  }
+
+  /** #1070: the boxes a door entity's gaps will block once it is shut (`isShut` closes all of them). */
+  private shutGaps(id: string) {
+    const e = this.model.entities.get(id), def = e && this.model.resolvedDef(e.def);if (!e || !def?.components.opening) return [];
+    const baked = this.model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), free = freeDoorOpening(def, baked);
+    return [...(baked.openings ?? []), ...(free ? [free] : [])].map((o) => this.gapBox(o, def, e));
+  }
+
+  /** The engine physics of one entity: its solids, floors and stairs, or its fixture registration. */
+  derive(e: Entity, assets: Record<string, unknown>, known: Record<string, unknown>): Part | null {
+    const def = this.model.resolvedDef(e.def); if (!def) return null;
+    const baked = this.model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape);
+    const {wp, worldFrame, toWorld, heightAt} = this.frameOf(e, def);
     const part: Part = {};
     const walkableKit = def.make.kind === 'gen' && def.make.gen === 'kit/2' && !!def.make.args?.footprint; // XP5 hook
     // PC15 (#694): a deck sheet is an item that is also a floor once laid (below)
@@ -693,8 +715,8 @@ export class EngineBridge {
       const closed = doorState[o.id] === 'closed' || (doorState[o.id] === undefined && o.state === 'closed') || shut;
       if (!closed) continue;
       // a gate of a world-frame wall/fence sits on the ground under it (sill and height are ground-relative)
-      const c = toWorld(o.at[0], o.at[1]), sc = worldFrame ? 1 : wp.s;
-      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb: { c, half: [r3((o.width / 2) * sc), r3(0.08 * sc)], yaw: r3(-((worldFrame ? 0 : wp.yaw) + o.yaw)) }, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)` });
+      const obb = this.gapBox(o, def, e), c = obb.c;
+      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)` });
     }
     // floors: polygons → oriented rectangles on levels
     const surfaces = [...(baked.surfaces ?? [])];
@@ -1893,6 +1915,13 @@ export class EngineBridge {
     L.thingAt = (id) => { const t = this.nav.thingById(id); return t ? [t.at[0], t.at[1]] : null; };
     L.thingWords = () => pass('thing words', () => this.nav.thingWords(), [] as string[]);
     L.beforeMap = () => { this.flush(); this.perceiveSync(); };
+    if (L.sharedCarry && !this.readSide) {
+      // a joint a crew made reaches the model within 10 ticks; a god batch in those ticks would re-derive the world without it
+      let settling = false;
+      this.god.beforeBatch = () => { if (settling) return; settling = true; try { this.writeBack(); } finally { settling = false; } };
+      this.projects = new Projects({ db: this.god.db, host: this.host, edge: L as never, world: () => this.mw.world as never, defOf: (id) => this.model.entities.get(id)?.def.replace(/^core-/, 'core/') });
+      L.projects = this.projects;
+    }
     const prev = L.worldProfile;
     L.worldProfile = (soul, caps, plans) => { prev?.(soul, caps, plans); try { this.capabilities(soul, caps, plans as never); } catch (e) { this.log(`capabilities: ${(e as Error).message}`); } };
     L.exactAuthoredWalkRef=ref=>this.nav.exactPlaceWalkRef(ref);
@@ -2031,6 +2060,8 @@ export class EngineBridge {
     // the object scans read every entity of the world (three passes) and perceive/layers scan signs and stalls
     const named = (...verbs: string[]) => !focus || focus.targets.size > 0 || verbs.some((v) => wantsPrefix(focus, v + ':', v));
     if (named('read')) try { this.perceive.capabilities(soul, caps, plans); } catch (e) { this.log(`perceive capabilities: ${(e as Error).message}`); }
+    // PC17 (#696): projects near this Soul, and stock to organize one with (nothing else: a far Soul's menu gains no row)
+    if (this.projects && named('organize', 'volunteer', 'leave-project', 'revise-project')) try { this.projects.capabilities(soul, caps, plans as never); } catch (e) { this.log(`project capabilities: ${(e as Error).message}`); }
     caps.push({ id: 'pray', verb: 'pray', label: 'Pray to the god of this world (params: {"text": "…"}); answers come back under GET /v1/god/prayers/mine', available: true, params: { text: { type: 'string', required: true, maxLength: 2000 } } });
     const ents = this.mw.world.entities as Record<string, any>, me = ents[soul.entityId]; if (!me?.human) return;
     const here: Vec2 = [me.pose.p[0], me.pose.p[2]];
@@ -2152,7 +2183,7 @@ export class EngineBridge {
             if(sdef!.tags.includes('upright')){
               const rid=`raise-with:${x.id}`,rlabel=`Raise ${name(x.id)} upright with other Souls and hold it until one of you stops (asks them first; ${crew[0]}–${crew[1]} people; with: who)`;
               const rblock=sblock??(x.pose.roll?{code:'raise.not-lying',reason:`${name(x.id)} is not lying flat on the ground.`}:null);
-              caps.push({id:rid,verb:'raise-with',label:rlabel,target:{id:x.id,kind:'object'},available:!rblock,...(rblock?{blocked:rblock}:{}),params:{with:{type:'string',maxLength:300,description:'the Souls who raise it with you (names or ids: "Bo and Cy", "Bo, Cy and Dee")'},invite:{type:'string',optional:true,description:'amend your own open proposal'}}});
+              caps.push({id:rid,verb:'raise-with',label:rlabel,target:{id:x.id,kind:'object'},available:!rblock,...(rblock?{blocked:rblock}:{}),params:{with:{type:'string',maxLength:300,description:'the Souls who raise it with you (names or ids: "Bo and Cy", "Bo, Cy and Dee")'},project:{type:'string',optional:true,maxLength:40,description:'a project this is a frame of: it stands where the blueprint says'},invite:{type:'string',optional:true,description:'amend your own open proposal'}}});
               const rplan={label:rlabel,steps:[],together:{kind:'shared' as const,template:'raise-hold' as const,load:x.id,def:sharedDef.def,name:name(x.id),crew,mass:{kg:mass,each:MAX_KG_PER_CARRIER}}};
               if(!rblock)plans.set(rid,rplan);
             }
