@@ -135,8 +135,9 @@ if [ -n "${PLAYTEST_SPECS:-}" ]; then
 fi
 
 # --- secret guard: refuse to publish token-shaped strings
-if grep -rIlE 'sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gho_[A-Za-z0-9]{30,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
-  say "token-shaped strings found in $(wc -l < "$PARENT/.secret-hits") files (names in $PARENT/.secret-hits); NOT committing"; exit 3
+# (tools/playtest/cloud/secret-guard.sh; a scan that can't run refuses too)
+if ! bash tools/playtest/cloud/secret-guard.sh "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
+  say "token-shaped strings found in $(wc -l < "$PARENT/.secret-hits") files, or the scan failed (names in $PARENT/.secret-hits); NOT committing"; exit 3
 fi
 rm -f "$PARENT/.secret-hits"
 

@@ -3,10 +3,12 @@
 #   run-specs.sh <server-root> <out-dir> <repeats> <spec.json>...
 # Order: every spec, then every spec again (1, 3, 4, 1, 3, 4). Before each run it waits for the 5-minute load to drop under 8 (PLAYTEST_LOAD_MAX).
 # Stops: SIGINT to a run whose world reaches $1; no further run once the arm reaches $4; the arm stops if the first card isn't
-# predeclared. A world's own cap is its cast's rails.worldBudgetUsd. Everything lands in <out-dir>/arm.log.
+# predeclared. PLAYTEST_WORLD_MAX_USD can lower the $1, and a value above it is refused (exit 2). A world's own cap is its cast's rails.worldBudgetUsd. Everything lands in <out-dir>/arm.log.
 set -uo pipefail
 SERVER="$1"; OUT="$2"; REPEATS="$3"; shift 3
 WORLD_MAX="${PLAYTEST_WORLD_MAX_USD:-1}"; ARM_MAX="${PLAYTEST_ARM_MAX_USD:-4}"; LOAD_MAX="${PLAYTEST_LOAD_MAX:-8}"
+# the environment may lower the per-world stop, never raise it: $1 per world per rolling 24 h (AGENTS.md)
+node -e 'const v=Number(process.argv[1]);process.exit(process.argv[1]!==""&&v>0&&v<=1?0:1)' "$WORLD_MAX" || { echo "PLAYTEST_WORLD_MAX_USD=$WORLD_MAX refused: the per-world stop can be lowered, never set above \$1" >&2; exit 2; }
 L="$OUT/arm.log"; arm=0; first=1
 note() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$L" >&2; }
 over() { node -e 'process.exit(Number(process.argv[1])>=Number(process.argv[2])?0:1)' "$1" "$2"; }
