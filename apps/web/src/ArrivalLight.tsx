@@ -13,7 +13,8 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
   useEffect(() => {
     const frame = root.current, picture = canvas.current, plain = disc.current, words = text.current;
     if (!frame || !picture || !plain || !words || instant) return;
-    let light: Light | null = null, raf = 0, fillTimer = 0, goneTimer = 0, fraction = 0, last = 0, drawn = false, filling = false, white = false, dissolving = false;
+    // #1266: from where the progress already is (the first paint's boot light showed it), so the light never shrinks back
+    let light: Light | null = null, raf = 0, fillTimer = 0, goneTimer = 0, fraction = Math.min(1, live.current.progress ?? 0), last = 0, drawn = false, filling = false, white = false, dissolving = false;
     light = startLight(picture, () => { light = null; picture.hidden = true; plain.hidden = false; });
     if (!light) picture.hidden = true;
     const still = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
