@@ -125,7 +125,7 @@ export interface Engine {
   previewAdmission?(program: Program): ProgramAdmission;
   /** #1150 rung 3, for an engine that declares rules. None of these steps the world, so no rule can fire during them. */
   /** `from`: the tick a ladder's stop starts counting from, when the clock is about to move there. */
-  stopAllV1?(why: { code: string; message: string }, from?: number): number;
+  stopAllV1?(why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
   setClockV1?(tick: number): void;
   /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
   containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };

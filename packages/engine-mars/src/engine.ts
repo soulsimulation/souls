@@ -486,12 +486,13 @@ export class MarsEngine implements Engine {
   private tryRelocateV1(id: string): boolean { const e = this.ents[id]; try { return this.restoreHumanPoseV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: e.human.level }, this.bodyRadiusV1(e)); } catch { return false; } }
   /** Did this step take a body further into the break it is already in? Nearer the solid thing, or nearer the other body. */
   private pressesInV1(v: { code: string; subjects?: string[] }, copy: Map<string, RefusalCopy>): boolean {
+    if (!v.code.startsWith('collision.')) return false;   // for a rule like `lift.hands-out-of-reach`, nearer is the cure
     const ents = this.ents, was = (id: string) => copy.get(id)?.pose.p ?? ents[id]?.pose.p, ids = (v.subjects ?? []).filter(id => ents[id]);
     if (v.code !== 'collision.human-static') { const [a, b] = ids, [p, q] = [was(a), was(b)]; return !!p && !!q && Math.hypot(ents[a].pose.p[0] - ents[b].pose.p[0], ents[a].pose.p[2] - ents[b].pose.p[2]) < Math.hypot(p[0] - q[0], p[2] - q[2]); }
     const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
     return ids.some(id => {
-      const e = ents[id], c = copy.get(id), grid = c && spatial.levelAt(c.level ?? 0, [c.pose.p[0], c.pose.p[2]]); if (!grid || !e.human) return false;
-      const now = clearanceAt(grid, [e.pose.p[0], e.pose.p[2]]); return now < this.bodyRadiusV1(e) && now < clearanceAt(grid, [c!.pose.p[0], c!.pose.p[2]]);
+      const e = ents[id], c = copy.get(id), at: [number, number] = [e.pose.p[0], e.pose.p[2]], grid = e.human && spatial.levelAt(e.human.level ?? 0, at), from = c && spatial.levelAt(c.level ?? 0, [c.pose.p[0], c.pose.p[2]]); if (!grid || !from) return false;
+      const now = clearanceAt(grid, at); return now < this.bodyRadiusV1(e) && now < clearanceAt(from, [c!.pose.p[0], c!.pose.p[2]]);
     });
   }
   /** Contained entries don't fault again, and leave the list once they have been quiet for a hold. A key that fired
@@ -551,17 +552,17 @@ export class MarsEngine implements Engine {
     return v => known.has(containedKey(v)) || known.has(containedByRule(v.code));
   }
   /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
-  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): number {
-    let stopped = 0;   // what this call changed, deadlines too, so a host knows if a replay has to make the same stops
+  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } {
+    let stopped = 0, deadlines = 0;   // what this call changed, so a host knows if a replay has to make the same stops. A deadline ends nothing yet.
     const cancel = (id: string) => { try { this.cancelOrAbandonV1(id, why); } catch (e) { console.error('[engine] a stop could not end its action:', String(e).slice(0, 200)); } };   // this rung can't fail
     for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
-      if (p.stopping && p.action && this.rt.isActive(p.action)) { if (p.stopByV1 === undefined) { p.stopByV1 = from + LADDER_STOP_TICKS; stopped++; } continue; }   // already on its way down: its own reason and cleanup stand, for a while
+      if (p.stopping && p.action && this.rt.isActive(p.action)) { if (p.stopByV1 === undefined) { p.stopByV1 = from + LADDER_STOP_TICKS; deadlines++; } continue; }   // already on its way down: its own reason and cleanup stand, for a while
       if (p.action && this.rt.isActive(p.action)) cancel(p.action);
       if (p.action && this.rt.isActive(p.action)) { stopped++; p.stopping = why; p.refusalsV1 ??= []; p.stopByV1 = from + LADDER_STOP_TICKS; continue; }
       stopped++;
       try { this.end(p, p.build ? 'cancelled' : 'failed', why); } catch { this.programs.delete(p.id); if (this.byActor.get(p.actor) === p.id) this.byActor.delete(p.actor); }
     }
-    return stopped;
+    return { stopped, deadlines };
   }
   /** #1150: the take ends and the next begins, even if closing this one throws: a recorder left finished would throw every tick after. */
   private recutV1(between?: () => void) {

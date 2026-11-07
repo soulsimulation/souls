@@ -135,8 +135,8 @@ can only see across ticks, like `motion.teleport`, is contained the same way.
 
 An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
 once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
-of it, never further in: a move that takes it nearer the solid thing, inside its own width, or nearer the other body, goes to
-rung 1 as any move would. A `motion.*` key never counts as standing. Anything else on the list only absorbs what has no plan:
+of it, never further in: a move that takes a body nearer the solid thing, inside its own width, or nearer the other body or
+load, goes to rung 1 as any move would. A carried load's own `carry.load-static` names only the load, so that one isn't judged. A `motion.*` key never counts as standing. Anything else on the list only absorbs what has no plan:
 a body that moves into forbidden geometry under a held key is refused by rung 1 as it would be with nothing held. The list keeps eight subjects of a rule; past that the rule goes on
 whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that names someone new each tick writes a few rows
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
@@ -147,8 +147,8 @@ ladder boots. A world made with the ladder can't go back: it needs these rules t
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
 a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
-`clock-frontier.replay-differs`. What ran since the last snapshot can be lost that way, so the next clean tick after a throw
-asks for a snapshot.
+`clock-frontier.replay-differs`. What ran since the last snapshot can be lost that way, so a throw asks for a snapshot, at most
+once per cooldown in a stretch of them.
 
 **An action whose step or stop throws ends alone** (`engine.action-threw`, logged and counted as a refusal). Its whole tree ends,
 its Soul is told, and whatever it held is set down where it is, on the bearer's level: the one time a load is let go without its
@@ -160,8 +160,8 @@ in the same way, since nobody can finish it with them now. What a part does to a
 **A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
 that long, counted from the fault's tick, and is then abandoned the same way. So a stop that is refused
 (`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for gets the same
-deadline the next time the ladder fires, and that deadline is written as a stop in place, so a replay has it. Until then it isn't
-bounded here.
+deadline the next time the ladder fires, and that deadline is written in a stop-in-place row that tells nobody, so a replay has
+it. Until then it isn't bounded here.
 
 Going back doesn't answer a rule twice: a rule a rung 3 has gone back for stays on the head after that, a thrown step counting as
 one rule, so what returns past the hold writes a small row, not a whole world. A restart allows it one more.

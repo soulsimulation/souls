@@ -17,7 +17,7 @@ import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {marsFactory, GREEN_FIELD_WORLD} from '../../packages/engine-mars/src/engine.ts';
 import {forgetMotion} from '../../mars/viewer/engine/runtime/invariants.ts';
-import {kernelHash} from '../../apps/server/src/fold.ts';
+import {kernelHash, replayFromGenesis} from '../../apps/server/src/fold.ts';
 import {clearanceAt} from '../../mars/viewer/engine/spatial/grid.ts';
 
 const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true}), today = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: false});
@@ -315,8 +315,8 @@ test('a programme already on its way down keeps its reason; its deadline is writ
   const w = await world(t), host = w.f.host, {Bo} = w.souls;
   ok(await act(w, Bo, {capability: 'walk:shed'})); await w.tick(5);
   const p = host.engine.programs.get(host.engine.programOf(Bo.entityId)), own = {code: 'world.refused:carry.load-static', message: 'its own'}; p.stopping = own;
-  assert.equal(host.engine.stopAllV1({code: 'world.rewound', message: 'x'}), 1); assert.equal(p.stopping, own); const by = p.stopByV1; assert.ok(by > host.engine.world.tick);
-  assert.equal(host.engine.stopAllV1({code: 'world.rewound', message: 'x'}), 0); assert.equal(p.stopByV1, by);
+  assert.deepEqual(host.engine.stopAllV1({code: 'world.rewound', message: 'x'}), {stopped: 0, deadlines: 1}); assert.equal(p.stopping, own); const by = p.stopByV1; assert.ok(by > host.engine.world.tick);
+  assert.deepEqual(host.engine.stopAllV1({code: 'world.rewound', message: 'x'}), {stopped: 0, deadlines: 0}); assert.equal(p.stopByV1, by);
 });
 
 test('L7 a burst, a clean gap, then a fault that never ends: a crash after a snapshot from the faulted head still boots', async (t) => {
@@ -716,6 +716,7 @@ test('R after a rung 3 the god side reads the engine that runs: a Soul puts down
   quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls, was = h.engine, [x, , z] = was.world.entities[Ada.entityId].pose.p;
   ok(w.god.act({ops: [{op: 'place', def: 'core/bowl@2', name: 'bowl', p: [x + 1, z]}]})); await w.tick(30); const id = w.god.model.get('bowl').id;
   fall(w, Bo); await w.tick(6); assert.notEqual(h.engine, was, 'the engine was replaced'); assert.equal(byRung(h).rewind, 1);
+  for (const part of [w.bridge.perceive, w.bridge.nav, w.bridge.activitySpots]) assert.equal(part.h.engine, h.engine);
   const up = ok(await act(w, Ada, {capability: `pick-up:${id}`})); await w.tick(200); assert.equal(read(w, Ada, up).phase, 'completed');
   const down = ok(await act(w, Ada, {capability: `put-down:${id}`})); await w.tick(200); assert.equal(read(w, Ada, down).phase, 'completed');
   await w.tick(40); assert.doesNotThrow(() => w.bridge.contextReady());
@@ -725,12 +726,14 @@ test('R after a rung 3 the god side reads the engine that runs: a Soul puts down
 test('R a repeat fault that gives a stop under way its deadline writes it, so a crash boot agrees and the body comes free', async (t) => {
   quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada} = w.souls;
   h.lastRewindTick = h.engine.world.tick; w.control.throwAt = h.engine.world.tick + 2; await w.tick(4);
-  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6);
   const def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
-  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}}); def.step = () => ({status: 'running'});
+  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}}); def.step = () => ({status: 'running'});   // before the walk: a replay runs with these
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6);
   const id = h.engine.programOf(Ada.entityId); void h.enqueue('edge-stop', 'world:test', {programId: id}); await w.tick(3);
   assert.equal(h.engine.programs.get(id).stopByV1, undefined); const n = rows(w, "author='world:rewind'");
+  const told = [], {deliver} = w.comms.streams; w.comms.streams.deliver = (soul, code, ...x) => { told.push(code); return deliver.call(w.comms.streams, soul, code, ...x); }; const rewinds = h.rewinds;
   w.control.throwAt = h.engine.world.tick + 2; await w.tick(4); assert.equal(rows(w, "author='world:rewind'"), n + 1, 'the deadline is a row'); const by = h.engine.programs.get(id).stopByV1; assert.ok(by);
+  assert.deepEqual(told.filter(c => c === 'world.rewound'), [], 'nothing ended, so nobody is told'); assert.equal(h.rewinds, rewinds, 'and it is no rewind');
   await w.tick(20); const hash = h.engine.stateHash(), r = reboot(t, w, path);
   assert.equal(r.engine.stateHash(), hash); assert.equal(r.engine.programs.get(id).stopByV1, by);
   for (let i = 0; i < 450 && r.engine.programOf(Ada.entityId); i++) r.tickOnce();
@@ -745,6 +748,7 @@ for (const age of [50, 600]) test(`R a stop's twenty seconds start at the rewind
   fall(w, Bo); await w.tick(3); assert.equal(byRung(h).rewind, 1); const p = h.engine.programs.get(id); assert.ok(p?.stopByV1 >= h.engine.world.tick + 390, `by ${p?.stopByV1} at ${h.engine.world.tick}`);
   const n = rows(w, "author='world:refusal'"); await w.tick(45);
   assert.equal(left, 30, 'its own cleanup ran'); assert.equal(h.engine.programOf(Ada.entityId), null); assert.equal(rows(w, "author='world:refusal'"), n, 'nothing abandoned');
+  const again = replayFromGenesis(w.factory, seed, w.f.db.events(h.worldId), h.engine.world.tick, {includeHeadEvents: true}).engine; assert.equal(again.stateHash(), h.engine.stateHash()); assert.deepEqual(again.world.containedV1, h.engine.world.containedV1);
 });
 test('R a repeat stop that ended a Soul\'s work is counted, and a thrown step asks for a snapshot', async (t) => {
   quiet(t); const w = await world(t), h = w.f.host, {Bo} = w.souls; h.lastRewindTick = h.engine.world.tick;
@@ -769,4 +773,34 @@ test('L3 stops and refusals since the baseline are left out too: what they answe
   fall(w, Bo); await w.tick(6); const recipe = JSON.parse(w.f.db.db.prepare("SELECT payload FROM events WHERE author='world:recovery' ORDER BY seq DESC LIMIT 1").get().payload).recovery;
   assert.ok(recipe.lastRung); assert.deepEqual(recipe.events.filter(e => e.kind === 'edge-stop' || e.kind === 'decision' || e.author === 'world:refusal'), []);
   assert.equal(w.f.host.engine.programOf(Ada.entityId), null);
+});
+test('R an action that threw on a tick that faulted stands, so its row is written and a boot agrees', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada, Bo} = w.souls;
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(4); h.lastRewindTick = h.engine.world.tick;
+  const def = h.engine.rt.registry.get('walk_to'), {step} = def; t.after(() => { def.step = step; }); let armed = true; def.step = (...a) => { if (armed) { armed = false; throw new Error('fixture.action'); } return step(...a); };
+  const at = h.engine.world.tick + 1; w.control.fault = violate('support.floating', [Bo.entityId]); w.control.at = at; await w.tick(3);
+  const row = w.f.db.db.prepare("SELECT tick, payload FROM events WHERE author='world:refusal' ORDER BY seq DESC LIMIT 1").get(); assert.equal(JSON.parse(row.payload).refusal.rule, 'engine.action-threw'); assert.equal(JSON.parse(row.payload).refusal.tick, at);
+  await w.tick(20); assert.equal(reboot(t, w, path).engine.stateHash(), h.engine.stateHash());
+});
+const standing = async (t, code, subjects, toward) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls, id = Ada.entityId, E = () => h.engine.world.entities, a = h.engine.world.tick + 3, names = subjects(Ada, Bo), fire = (r) => (r.tick >= a ? [{code, message: 'forced', subjects: names}] : []);
+  w.control.every = fire; await w.tick(20); assert.equal(h.engine.world.containedV1?.[0]?.code, code);
+  const before = rows(w, "author='world:refusal'"), walk = ok(await act(w, Ada, {capability: 'walk:yard'})); await w.tick(2);
+  const cur = E()[id].pose.p, [bx, , bz] = E()[Bo.entityId].pose.p, n = Math.hypot(cur[0] - bx, cur[2] - bz) || 1, step = toward ? -0.05 : 0.05, dx = (cur[0] - bx) / n * step, dz = (cur[2] - bz) / n * step; let px = cur[0], pz = cur[2], last = -1;
+  w.control.every = (r) => { const e = r.world.entities[id]; if (r.tick !== last) { last = r.tick; if (h.engine.programOf(id)) { px += dx; pz += dz; e.pose.p = [px, e.pose.p[1], pz]; } } return fire(r); };
+  await w.tick(12); w.control.every = null; return {refused: rows(w, "author='world:refusal'") - before, read: read(w, Ada, walk)};
+};
+test('C4 two bodies in a standing break: nearer is refused, further is walking out', async (t) => {
+  const pair = (a, b) => [a.entityId, b.entityId];
+  assert.equal((await standing(t, 'collision.human-human', pair, true)).read.code, 'world.refused:collision.human-human');
+  assert.equal((await standing(t, 'collision.human-human', pair, false)).refused, 0);
+});
+test('C4 a rule where nearer is the cure is no break to walk out of: a body can go to what it holds', async (t) => {
+  const r = await standing(t, 'lift.hands-out-of-reach', (a, b) => [b.entityId, a.entityId], true); assert.notEqual(r.read.code, 'world.refused:lift.hands-out-of-reach');
+});
+test('C4 a motion rule never stands: a body moved under a firing key is refused like any other', async (t) => {
+  const r = await standing(t, 'motion.teleport', (a) => [a.entityId], false); assert.equal(r.read.code, 'world.refused:motion.teleport');
+});
+test('R an engine put back with no recovery row, as a refused atomic decision does, leaves context readable', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host; await w.tick(30); const body = h.captureBody(); h.restoreBody(body); await w.tick(40); assert.doesNotThrow(() => w.bridge.contextReady());
 });

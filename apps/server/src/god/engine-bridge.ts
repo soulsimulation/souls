@@ -345,7 +345,7 @@ export class EngineBridge {
     this.god.onBuild((e) => { if (!PERCEPTION_QUIET_BUILD.has(e.kind)) { const ids = this.layers.buildRetag(); if (ids.length) { this.perceive.noteRetag(ids); this.notePerceive([], false); } } });
     if (!R) this.host.listeners.push({
       afterTick: (tick, context) => { try { this.afterTickWork(tick, context?.startedAtMs); } catch (error) { this.failProjection(error); throw error; } },
-      onApplied: (e) => { this.projectionApplied(e); this.followRepair(e); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
+      onApplied: (e) => { this.projectionApplied(e); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
@@ -399,7 +399,7 @@ export class EngineBridge {
    * Call again immediately before publishing HTTP: a model commit may occur between promise continuations. */
   initialProjectionReady(): boolean {
     if (this.projectionFailure) throw this.projectionFailure;
-    if (this.host.engine !== this.initialEngine) throw new Error('bridge.readiness.engine-replaced');
+    if (this.engineReplaced()) throw new Error('bridge.readiness.engine-replaced');
     if (!this.host.clockAvailable || this.host.engineFault) throw new Error('bridge.readiness.clock-unavailable');
     if (!this.reconciled || this.pending.size || this.projectionDrafts.size ||
         this.completedTicks <= this.lastProjectionFold || this.completedEdits !== this.godEdits) return false;
@@ -486,12 +486,16 @@ export class EngineBridge {
     this.checkProjectionSoon();
   }
   /** #1150: under the repair rules a world goes on from a replaced engine by design, so that engine is the one to read. */
-  private followRepair(e: LogEvent) { if (e.kind === 'rules' && e.payload?.recovery && this.host.engine.rulesVersion.includes('+souls-repair/')) this.initialEngine = this.host.engine; }
+  private engineReplaced(): boolean {
+    if (this.host.engine === this.initialEngine) return false;
+    if (!this.host.engine.rulesVersion.includes('+souls-repair/')) return true;
+    this.initialEngine = this.host.engine; return false;
+  }
   private projectionApplied(event: LogEvent) {
     if (event.kind !== 'world-edit') return;
     const draft = event.payload as WorldEditV1, pending = this.projectionDrafts.get(draft);
     if (!pending) return;
-    if (this.host.engine !== this.initialEngine || this.engine.world.entityPhysicsV1?.hash !== draft.hash) {
+    if (this.engineReplaced() || this.engine.world.entityPhysicsV1?.hash !== draft.hash) {
       this.failProjection(new Error('bridge.readiness.projection-not-installed')); return;
     }
     pending.applied = true; this.lastProjectionFold = this.completedTicks;
@@ -574,7 +578,7 @@ export class EngineBridge {
     try {
       void this.host.enqueue('world-edit', 'god', draft).then(event => {
         this.projectionDrafts.delete(draft);
-        if (event.payload !== draft || !acceptance.applied || this.host.engine !== this.initialEngine) {
+        if (event.payload !== draft || !acceptance.applied || this.engineReplaced()) {
           this.failProjection(new Error('bridge.readiness.draft-not-accepted')); return;
         }
         this.checkProjectionSoon();

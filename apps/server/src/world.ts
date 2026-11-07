@@ -1620,11 +1620,12 @@ export class WorldHost {
     const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
-    const stopped = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
-    if (!keys.length) this.snapshotSoon ??= 'a step threw';   // the next clean tick is what a boot should start from
-    if (repeat && !stopped && !keys.length) return;
+    const {stopped, deadlines} = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
+    // the next clean tick is what a boot should start from, and a stretch of throws asks once per cooldown, not every tick
+    if (!keys.length && (!repeat || stopped || tick - this.lastSnapshotTick >= REWIND_COOLDOWN_TICKS)) this.snapshotSoon ??= 'a step threw';
+    if (repeat && !stopped && !deadlines && !keys.length) return;
     if (!repeat) this.inPlaceAt.set(rule, tick);
-    const inPlace = {...this.engine.containV1!(keys), stopped, reason: String(error).slice(0, 300)};
+    const inPlace = {...this.engine.containV1!(keys), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
