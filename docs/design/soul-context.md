@@ -220,7 +220,7 @@ A reflective pass, run by the owner's local model CLI under a hard local cap (ca
 - merges duplicate people and place notes,
 - never deletes from the log.
 
-It runs on a schedule the owner sets (default: once per real day, when `serve` is idle) and is skipped silently when
+It is off until the owner says yes (#1256). Then it runs on a schedule the owner sets (default: once per real day, when `serve` is idle) and is skipped silently when
 the cap is spent. With `BRAIN_MODE=fake` it runs a deterministic stand-in so tests cover the plumbing.
 
 ## 6. Proof
