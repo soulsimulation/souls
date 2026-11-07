@@ -71,7 +71,10 @@
         "act",
         "{resolved}",
         "--wait",
-        "60"
+        "60",
+        {
+         "onRefused": "continue"
+        }
        ],
        [
         "wait",
