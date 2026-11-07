@@ -94,8 +94,16 @@ before this client trusts nothing until a person says so. Reading a world, a tra
 to the list, so a Soul moved in with `import` starts with no trusted site. `upgrade` follows no redirect.
 
 Reconciling needs the account's list, which `/v1/me` gives a dev identity. A delegated Soul token sees only its own Soul,
-so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one, and
-`adopt` takes an id. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
+so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one.
+A window code stands in for the account there: `doctor --for <CODE>` (`@<world> doctor --for <CODE>` for another world: a code goes
+only to the world named, or the home's current one) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name (an imported Soul's world comes from its file, so import only your own export), and `create <name> --for <CODE>` for a name
+the account already holds reconnects that Soul instead of making a second one. The code conveys no control: approval
+still does. Without a code, a taken name stays `name-taken` and reveals nothing.
+
+A home can lose a file and keep its Souls. Without `credentials.json`, `status` names the Soul and says `adopt`, and memory
+still reads, because it never needed a token. A `config.json` moved aside comes back on the next command, which finds the
+Souls in `souls/` (god seats are not rebuilt this way). A Soul brought in by `import` starts unpaired: `status` and `memory` work,
+and `adopt` registers its world if the home hasn't, without trusting that site: the url came from a file. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
 under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/upload.mjs`, which read that file directly.
 
 `eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run
@@ -211,7 +219,7 @@ response returns the original receipt.
 |---|---|
 | `GET /v1/edge/boot` | Fresh session: clocks, the Soul (`me`), `here` with local offers, and the static manifest; never cached |
 | `GET /v1/edge/boot/static[?page=]`, `GET /v1/edge/boot/places` | Public, ETag-cached world knowledge: destinations, rules, verbs (paged within a 10 KB budget), and the full authored map |
-| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters |
+| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters. A `far` line ends with the walk to that place when one would go and `exits` doesn't already give it; `flags` lists the nearest four named flags, each with its walk when a route reaches it, leaving out any in a place the Soul doesn't know |
 | `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
 | `GET /v1/edge/map` | Public map: the places, and the named god flags as `flags: [{name, walk, at}]` |
 | `POST /v1/edge/resolve` | Dry run of an action: the resolved target and capability, no event |

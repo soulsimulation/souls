@@ -107,7 +107,7 @@ the souls-director skill.
 
 A step `["resolve", "<words>"]` keeps its first candidate's id as `{resolved}` for the steps after it in that rule, so a
 script can reach offers whose ids differ every run (`give:<soul>`, `accept:<invitation>`) the way an agent does. A resolve
-with no candidate fails the rule.
+with no candidate fails the rule, unless the step says `{"onRefused": "continue"}`.
 
 ## Directed casts
 
