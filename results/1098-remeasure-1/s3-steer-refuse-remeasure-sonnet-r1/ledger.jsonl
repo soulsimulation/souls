@@ -1,8 +1,0 @@
-{"at":"2026-11-07T17:01:56.398Z","event":"borrow","seq":1,"kind":"checkout","id":"server-root","owner":"borrowed","meta":{"path":"<home>/souls-playtest/server","use":"read-only source and web build"}}
-{"at":"2026-11-07T17:01:56.398Z","event":"borrow","seq":2,"kind":"port-range","id":"host","owner":"borrowed","meta":{"note":"other services on this host are never stopped"}}
-{"at":"2026-11-07T17:01:56.815Z","event":"own","seq":3,"kind":"world","id":"s3-steer-refuse","owner":"run","meta":{"pid":1085441,"port":4452,"dataDir":"<home>/souls-playtest/results/1098-remeasure-1/s3-steer-refuse-remeasure-sonnet-r1/playtest/server/data"}}
-{"at":"2026-11-07T17:01:59.576Z","event":"own","seq":4,"kind":"controller","id":"ada","owner":"run","meta":{"dir":"<home>/souls-playtest/results/1098-remeasure-1/s3-steer-refuse-remeasure-sonnet-r1/playtest/seats/ada","adapter":"claude-headless","model":"sonnet"}}
-{"at":"2026-11-07T17:01:59.577Z","event":"own","seq":5,"kind":"controller","id":"bo","owner":"run","meta":{"dir":"<home>/souls-playtest/results/1098-remeasure-1/s3-steer-refuse-remeasure-sonnet-r1/playtest/seats/bo","adapter":"claude-headless","model":"sonnet"}}
-{"at":"2026-11-07T17:06:01.014Z","event":"release","seq":5,"kind":"controller","id":"bo","owner":"run","state":"released","releaseMs":0}
-{"at":"2026-11-07T17:06:01.014Z","event":"release","seq":4,"kind":"controller","id":"ada","owner":"run","state":"released","releaseMs":0}
-{"at":"2026-11-07T17:06:01.015Z","event":"release","seq":3,"kind":"world","id":"s3-steer-refuse","owner":"run","state":"released","releaseMs":0}
