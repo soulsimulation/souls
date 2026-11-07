@@ -17,9 +17,12 @@ import {registerEdgeComms} from '../../apps/server/src/edge/comms/index.ts';
 import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {WorldHost} from '../../apps/server/src/world.ts';
+import {framesStand} from '../../packages/engine-mars/src/beam-connect.ts';
 
 const STEP_MS = 50, UP_L = 3.6576, UP_T = 0.0762, BEAM_L = 2.7432, D = BEAM_L + 2 * UP_T;
-const factory = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true});
+// `fault`: a forced rule at one tick, in every runtime, for the ladder tests below; nothing fires unless it is armed
+const fault = {at: -1}, base = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true}), armed = (e) => { const rt = e.rt, fired = new WeakSet(); rt.invariants = [(r) => { if (r.tick === fault.at && !fired.has(r)) { fired.add(r); return [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}]; } return []; }, ...rt.invariants]; return e; };
+const factory = {...base, create: (x) => armed(base.create(x)), restore: (x) => armed(base.restore(x))};
 function mount(w, host, db, sharedCarry = true) {
   const edge = new EdgeLedger(host, db, undefined, {ambient: false, sharedCarry, now: w.now}), app = new Hono();
   const comms = registerEdgeComms(app, {host, db, souls: w.f.souls, ledger: edge, soul: () => w.current}, {fading: true, beam: true, now: w.now, sweepMs: 0});
@@ -207,6 +210,34 @@ for (const clean of [true, false]) test(`R7: a ${clean ? 'clean' : 'crash'} rest
   assert.equal(Object.keys(joinsOf(w, 'beam1')).length, 2, 'the entity world kept both joints');
   ok(await act(w, Ada, {capability: `stop-carry:${a.op.id}`})); await w.tick(30);
   assert.equal(w.E()[fa].support.kind, 'held', 'one beam: kept held'); assert.equal(inviteOf(w, a.id).shared.op.phase, 'stopping');
+});
+
+// #1150: the stop of a joined frame is refused until the frame stands, and a fault ends the shared work that would have made it stand.
+const freed = async (w, souls, ids) => {
+  for (const s of souls) { const h = w.E()[s.entityId].human; assert.ok(!h.grip && !w.host.engine.rt.holder(`actor:${s.entityId}`).length && !w.host.engine.programOf(s.entityId), `${s.name} is free: ${JSON.stringify({grip: h.grip, prog: w.host.engine.programOf(s.entityId)})}`); }
+  for (const id of ids) { const e = w.E()[id]; assert.ok(['ground', 'connected'].includes(e.support.kind), `${id} ${e.support.kind}`); assert.ok(e.connections?.length, 'it keeps its joints'); assert.equal(e.phase, 'installed'); }
+  assert.deepEqual(framesStand({world: w.host.engine.world}), [], 'nothing left for the rule to find'); assert.equal(w.host.stepFailing, null); assert.equal(w.host.paused, false);
+};
+for (const mode of ['a rung 3', 'a stop in place'])
+  test(`#1150 ${mode} while a joined frame is held: every crew is free inside the bound, standing frames stay, and a crash boot agrees`, {timeout: 600000}, async (t) => {
+    t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {}); t.after(() => { fault.at = -1; });
+    const w = await world(t), {Ada, Bo, Cy, Dee} = w.souls, ids = [w.idOf('fa'), w.idOf('fb'), w.idOf('beam1')];
+    await frames(w); await seat(w, 'beam1', 'l', 0.76); await w.tick(10); w.host.saveSnapshot(true); await w.tick(5);
+    if (mode === 'a stop in place') w.host.lastRewindTick = w.host.engine.world.tick;
+    fault.at = w.host.engine.world.tick + 2; await w.tick(450);
+    await freed(w, [Ada, Bo, Cy, Dee], ids);
+    const walks = []; for (const s of [Ada, Dee]) walks.push([s, ok(await act(w, s, {capability: 'walk:field'}))]);
+    await w.tick(60); for (const [s, r] of walks) assert.ok(['started', 'completed'].includes(read(w, s, r).phase), JSON.stringify(read(w, s, r)));
+    await w.tick(10); await restart(w, false); await w.tick(320); await freed(w, [Bo, Cy], ids);
+  });
+test('#1150 a raise whose action throws while its upright is joined: both crews are let go at once, and the frame stands', {timeout: 600000}, async (t) => {
+  t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {});
+  const w = await world(t), {Ada, Bo, Cy, Dee} = w.souls, fa = w.idOf('fa'), ids = [fa, w.idOf('fb'), w.idOf('beam1')];
+  await frames(w); await seat(w, 'beam1', 'l', 0.76); await w.tick(10); w.host.saveSnapshot(true); await w.tick(5);
+  const def = w.host.engine.rt.registry.get('raise_hold_v1'), {step} = def; t.after(() => { def.step = step; }); def.step = (rt, ex, dt) => { if (ex.p.item === fa) throw new Error('fixture.action-bug'); return step(rt, ex, dt); };
+  await w.tick(10); await freed(w, [Ada, Bo, Cy, Dee], ids); assert.equal(w.E()[fa].support.kind, 'ground');
+  const r = ok(await act(w, Cy, {capability: 'walk:field'})); await w.tick(20); assert.ok(['started', 'completed'].includes(read(w, Cy, r).phase), JSON.stringify(read(w, Cy, r)));
+  await restart(w, false); await w.tick(5); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(w.host.stepFailing, null);
 });
 
 test('R8: with the flag off nothing is offered', {timeout: 300000}, async (t) => {

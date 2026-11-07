@@ -15,8 +15,8 @@ type Would = { ok: boolean; code?: string; reason?: string; would?: { capability
 test('Eden 2026: naive Soul phrases resolve to the thing they name', { timeout: 600_000, skip: NO_EDEN }, async (t) => {
   const w = await bootEden();
   t.after(() => w.close());
-  const e = (w.host.engine.world.entities as Record<string, { pose: { p: number[] } }>)[w.soul.entityId];
-  const stand = async (x: number, z: number) => { e.pose.p = [x, e.pose.p[1], z]; await w.settle(2); };
+  // moved as the world moves a body, not written: a write is a jump, and the world repairs it by putting the Soul back (#1150)
+  const stand = async (x: number, z: number) => { assert.ok((w.host.engine as unknown as { relocateHumanV1(id: string, to: [number, number]): boolean }).relocateHumanV1(w.soul.entityId, [x, z]), `stand at ${x},${z}`); await w.settle(2); };
   const dry = (text: string) => w.edge.intents.dryRun(w.soul, { capability: text }) as Would;
   const ok = (text: string) => { const r = dry(text); assert.equal(r.ok, true, `${text}: ${r.code ?? ''} ${r.reason ?? ''}`); return r.would!; };
 
@@ -42,4 +42,5 @@ test('Eden 2026: naive Soul phrases resolve to the thing they name', { timeout: 
   assert.equal(ok('find the pond').capability, 'walk:land-commons-shore-pond');
   const out = dry('go upstairs');
   assert.equal(out.ok, false); assert.equal(out.code, 'floor.no-building', `${out.code} ${out.reason}`);
+  assert.equal(w.db.events(w.host.worldId).filter((x) => x.payload?.recovery).length, 0, 'no repair ran: the Soul was moved, not jumped');
 });
