@@ -16,7 +16,8 @@
 //              step's JSON output (a refusal's too), e.g. "{{prev.did_you_mean[0].id}}", reading own properties only; a
 //              placeholder that does not resolve fails its step without running it, and that skipped step leaves no JSON.
 //              A `resolve` step keeps its first candidate's id as "{resolved}" for the steps after it, as an agent reads an
-//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run.
+//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run. One
+//              that reads nothing stops the rule, unless it says onRefused "continue", as a refused act can.
 //   close      "done" (default): `result <id> done|failed` from the steps' outcome. "open": leave the request open (the
 //              activity continues in the world) until a later rule supersedes it or the run ends.
 //   supersede  text for `result <old> failed "<text>"` on every request still open when this rule fires (owner redirection)
