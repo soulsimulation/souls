@@ -77,7 +77,7 @@ switch independent. A previously saved master mute migrates to both switches off
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,
-  `template` or `null`). The owner sets the picture with a 16:9 JPEG
+  `template` or `null`). The owner, or a site owner from the Picture button on `/__sim/health`, sets the picture with a 16:9 JPEG
   ([API](api.md#world-owner-api-served-by-the-launcher)). It is checked and stripped by the upload gate in
   `apps/server/src/moderation/` (including the site admin's vetoes, which also stop a stored or default picture from
   being listed or served) and stored as `<data>/worlds/<slug>/thumbs/<sha>.jpg`, so it moves with the world on
