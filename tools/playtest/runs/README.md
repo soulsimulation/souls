@@ -86,10 +86,20 @@ entry with `command` is refused at validation; end a run by cancelling it.
 world's served `eden.mjs` in the seat folder. Onboarding fetches the CLI from the world and runs `register`, `create` and
 `status`; owner cards reach it through the harness wake loop's `listen`; it answers each with `ack`, the matching rule's
 `eden.mjs` steps and `result done|failed` from those steps' real outcome. A `--wait` step counts as done only when its
-receipt completed or the world shows that receipt's activity under way; output without a readable receipt (the brief
-form drops it past 600 characters) is a failure, never a claimed success. Rules are matched in order by a
+receipt completed or the world shows that receipt's activity under way; output without a readable receipt (CLI 2.8.0
+and earlier drop it from the brief form past 600 characters) is a failure, never a claimed success. When an owner card
+ends the wait while the receipt is still open, the step keeps checking that receipt (`receipt <id>` every 2 s; a `wait`
+returns at once while the card is unacknowledged) for the rest of its window (at most 60 s, as the CLI applies `--wait`) and is judged on that; the card is handled next turn. Rules are matched in order by a
 case-insensitive regular expression on the card text; `close: "open"` leaves a request open while its activity
-continues, and `supersede` closes requests still open as failed when a later rule fires (an owner redirection). It has
+continues, and `supersede` closes requests still open as failed when a later rule fires (an owner redirection).
+A refused or failed step stops its rule and fails the request, unless the step ends with `{"onRefused": "continue"}`
+(default `"fail"`): then the refusal is said in the transcript and the next step runs (#828). A refused final step
+fails the request even with `continue`, since no later step can recover. An argument
+`{{prev.<path>}}` (dots and `[n]`, e.g. `{{prev.did_you_mean[0].id}}`) takes a value from the previous step's JSON
+output, a refusal's included, reading own properties only, so a script can act on the world's own suggestion:
+`[["act", "fly up to the field", {"onRefused": "continue"}], ["act", "{{prev.did_you_mean[0].id}}", "--wait", "60"]]`.
+The transcript shows the resolved command. A placeholder that does not resolve fails its step without running it, and
+that skipped step leaves no JSON for the step after it. It has
 no provider and no cost, and its transcript renders like a model seat's. Each CLI output is kept whole in the
 transcript up to 1 MiB; past that the tool result ends with a `[scripted-owner: output truncated: …]` line and carries
 `truncated: true`, which the scorer's `seatActs` passes on. Live casts stay on `playtest.mjs direct` and
