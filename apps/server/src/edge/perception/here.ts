@@ -23,7 +23,7 @@ type V2 = [number, number];
 export const SIGHT_RADIUS = 30;
 /** Things (seats, spots, fires, items) are listed within this many metres. */
 export const OBJECT_RADIUS = 15;
-const LIMITS = {near: 6, objects: 6, seats: 3, exits: 5, conversations: 3, flags: 6};
+const LIMITS = {near: 6, objects: 6, seats: 3, exits: 5, conversations: 3, flags: 4};
 
 export type Located = {kind: 'soul' | 'seat' | 'fire' | 'spot' | 'object' | 'item' | 'fixture' | 'place'; id: string; name: string; at: V2; entityId?: string; free?: boolean; capability?: string; distance: number;level?:number; what?: string};
 
@@ -187,11 +187,13 @@ export class Perception {
 }
 
 /** #1281: the world's named flags, nearest first, each with the walk that goes there: a Soul reading only `here` can't say a
- *  flag isn't there. Flags are public (the map lists them). */
+ *  flag isn't there. A flag standing in a place this Soul doesn't know yet isn't named: a secret stays one. */
 function flagLines(ledger: EdgeLedger, P: Perception) {
   const all = (ledger as {namedFlagsV1?: () => {name: string; walk: string; at: V2}[]}).namedFlagsV1?.() ?? [];
   if (!P.pos || !all.length) return {};
-  const pos = P.pos, flags = all.map(f => ({f, d: dist2(pos, f.at)})).sort((a, b) => a.d - b.d || a.f.walk.localeCompare(b.f.walk));
+  const pos = P.pos, shown = all.filter(f => ledger.places.containing(f.at[0], f.at[1]).every(p => ledger.knowledge.knows(P.soul.soulId, p.id)));
+  if (!shown.length) return {};
+  const flags = shown.map(f => ({f, d: dist2(pos, f.at)})).sort((a, b) => a.d - b.d || a.f.walk.localeCompare(b.f.walk));
   return {flags: flags.slice(0, LIMITS.flags).map(({f, d}) => `${f.name} · ${compassPoint(compassOf(f.at[0] - pos[0], f.at[1] - pos[1]))} ${Math.round(d)}m · ${f.walk}`),
     ...(flags.length > LIMITS.flags ? {flagsMore: flags.length - LIMITS.flags} : {})};
 }
@@ -368,6 +370,17 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
       // RT: an exit the body cannot walk from here says so (no eta), instead of an eta for a walk that is refused
       const problem = ledger.routeProblem(soul, x.c.id, P.menu().plans);   // (the exit's plan from this frame's menu)
       return problem ? {...base, reachable: false, why: problem.code} : {...base, eta: '~' + durationWord(walkSeconds(x.d * 1.25))};}) : [];
+  // #1281: the walk that ends a `far` line, beyond what the frame's own menu reaches: a place's one offer, looked up alone (at
+  // most six). Only a walk that would go: none from a room with no way out, none for where she is, none an exit already gives.
+  const exitWalks = new Set(exits.map(e => e.walk)); let wayBytes = 0;
+  const walkOf = (id: string) => {
+    const p = ledger.places.byId.get(id); if (!p || !P.pos || inside.has(id)) return undefined;
+    const listed = P.menu().caps.find(x => x.verb === 'walk' && x.target?.kind === 'place' && x.target.id === id), walk = listed?.id ?? `walk:${p.ref ?? p.id}`;
+    const one = listed ?? (r => r.kind !== 'unknown' && r.cap.id === walk ? r.cap : undefined)(ledger.resolveIdV1(soul, walk));
+    if (!one?.available || one.target?.id !== id || exitWalks.has(walk) || ledger.routeProblem(soul, walk)) return undefined;
+    wayBytes += Buffer.byteLength(` · ${walk}`); return walk;
+  };
+  const named: {flags?: string[]; flagsMore?: number} = flagLines(ledger, P);
   const where=whereLine([...ledger.places.byId.values()].filter(p=>ledger.knowledge.knows(soul.soulId,p.id)),ledger.placePathOf(soul.soulId).map(p=>p.id),P.pos);
   const frame = {
     ...(c ? {now: worldNow(c)} : {}), tick, ...(c ? {clock: `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}`, day: WEEKDAYS[new Date(c.datetime).getUTCDay()], light: lightOf(c.hour, c.minute)} : {}),
@@ -377,14 +390,16 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
     near, objects, ...(Object.keys(more).length ? {more} : {}), conversations_in_earshot: conversations, exits, ...(() => {const f = floorLines(ledger, P); return f.length ? {floors: f} : {};})(),
     ...(() => {const l = ledger.projects?.hereLines(soul) ?? []; return l.length ? {projects: l} : {};})(),
     // knowledge/1: the district summarised, far districts as names and directions (more once visited)
-    ...(ledger.knowledge?.scales(soul.soulId, ledger.placePathOf(soul.soulId).filter(p => p.kind !== 'occupier').map(p => p.id), P.pos, c ? c.hour * 60 + c.minute : null, id => P.menu().caps.find(x => x.verb === 'walk' && x.available && x.target?.kind === 'place' && x.target.id === id)?.id) ?? {}),
-    ...flagLines(ledger, P),
+    ...(ledger.knowledge?.scales(soul.soulId, ledger.placePathOf(soul.soulId).filter(p => p.kind !== 'occupier').map(p => p.id), P.pos, c ? c.hour * 60 + c.minute : null, walkOf) ?? {}),
+    ...named,
     untrusted: true,
   };
   if(!options.doHere)return frame;
   const local=new Set([...ledger.placePathOf(soul.soulId).map(p=>p.id),...objects.map(o=>o.id),...near.filter(n=>n.dist<=8).map(n=>n.id)]);
   // CTRL-2 (#1094): the grouped view comes first, so a big room with no budget left for doHere still says what can be done
   const offers=groupedOffers(P.menu().caps,local,exits.length);
-  const baseBytes=Buffer.byteLength(JSON.stringify({...frame,offers})),budget=Math.max(0,Math.min(1800,2600-baseBytes-240));
+  // (#1281: what `far` and `flags` name doesn't come out of the room for what can be done here)
+  if (named.flags) wayBytes += Buffer.byteLength(JSON.stringify(named));
+  const baseBytes=Buffer.byteLength(JSON.stringify({...frame,offers}))-wayBytes,budget=Math.max(0,Math.min(1800,2600-baseBytes-240));
   return {...frame,offers,...compactDoHere(P.menu().caps,local,budget)};
 }
