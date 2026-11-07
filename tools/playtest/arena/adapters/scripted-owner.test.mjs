@@ -106,6 +106,13 @@ test('a resolve step hands its first candidate to the next act, and no candidate
   assert.match(JSON.stringify(calls().filter((c) => c[0] === 'result').at(-1)), /m2.*failed.*nothing on offer/);
 });
 
+test('an empty resolve with onRefused continue goes on to the next step', async () => {
+  const script = { rules: [{ match: 'void', ack: 'ok', do: [['resolve', 'nothing here', { onRefused: 'continue' }], ['act', 'walk:yes']], result: 'Went' }] };
+  const cwd = folder(), calls = () => readFileSync(join(cwd, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  await ADAPTERS['scripted-owner'].turn({ cwd, text: wake([{ id: 'm1', text: 'void' }]), script });
+  assert.deepEqual(calls().find((c) => c[0] === 'act'), ['act', 'walk:yes']);
+});
+
 test('onboarding runs register, create and status from the served CLI already in the folder', async () => {
   const d = folder();
   const r = await turn({ cwd: d, text: onboardingText('http://127.0.0.1:1/w/x', 'Ada'), script: SCRIPT });
