@@ -24,7 +24,10 @@ const TURN_RATE = 4;
 /** Dry ground a swim route may cross to step into the water (m from the start). */
 const STEP_IN_M = 6;
 type Params = { actor: string; x: number; z: number; landing?: boolean };
-type Exec = { actor: string; id: string; points: Vec2[]; index: number };
+/** `waited`: ticks in a row held up by a body in the water; absent unless held up, so an unhindered swim's state is unchanged. */
+type Exec = { actor: string; id: string; points: Vec2[]; index: number; waited?: number };
+/** #1288: a swim held up this long ends honestly, as a walk with no headway does (walk.stuck, 30 s). */
+const SWIM_WAIT_TICKS = 600;
 // Derived validation only; restore rechecks against its newly rebuilt scene.
 const swimScenes = new WeakMap<Exec, SpatialScene>();
 
@@ -216,6 +219,11 @@ export const swimTo: ActionDef<Params, Vec2[], Exec> = {
       swimScenes.set(ex, g.sp.scene);
     }
     const who = crowd(rt, ex.actor, next);
+    if (who && (ex.waited = (ex.waited ?? 0) + 1) >= SWIM_WAIT_TICKS) {
+      const at = poseAt(f, cur, false); h.activity = at.activity; delete h.speed; delete h.task;
+      return { status: 'failed', diagnostic: fail('stuck', 'the swim made no headway for 30 s because someone stayed in the way in the water; choose another way or somewhere else', [ex.actor, who]) };
+    }
+    if (!who) delete ex.waited;
     if (who) { const at = poseAt(f, cur, false); h.activity = at.activity; h.speed = 0; return { status: 'blocked', diagnostic: fail('occupied', `${ex.actor} waits for ${who} in the water`, [ex.actor, who]) }; }
     const at = poseAt(f, next, true);
     e.pose.p = [next[0], at.y, next[1]]; h.activity = at.activity; h.speed = Math.round((step / dt) * 1000) / 1000;
