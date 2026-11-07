@@ -39,3 +39,29 @@ test('plain caps lists the page with notListed; search, verb and all read the wh
   await run(['caps', '--verb', 'walk']); assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1');
   await run(['caps', '--all']); assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1');
 });
+
+test('#1268: a search shows the best dozen in short labels; --limit, --json, --verb and the plain page keep what they had', async (t) => {
+  const label = (i) => `Walk to Pier ${i} [pier-${i}], ${'a long description of the water and the boards, '.repeat(4)}by the pond (${i} m)`;
+  const menu = Array.from({length: 20}, (_, i) => ({id: `walk:pier-${i}`, verb: 'walk', label: label(i), available: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'capssearch-'));
+  const server = createServer((req, res) => {res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({tick: 1, capabilities: menu}));});
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
+  writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: 'http://127.0.0.1:' + server.address().port, soul: 's_pip', token: 'sim_fixture'}));
+  const run = (...args) => new Promise((resolve, reject) => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (err, out, e) => err ? reject(new Error(e)) : resolve(JSON.parse(out))));
+
+  const found = await run('caps', '--search', 'pier');
+  assert.equal(found.matching, 20); assert.equal(found.shown, 12); assert.equal(found.offers.length, 12); assert.match(found.more, /--limit 20/);
+  assert.ok(found.offers.every(o => o.label.length <= 80 && !o.label.includes('[')), 'short labels');
+  assert.match(found.offers[3].label, /\(3 m\)$/, 'the distance stays');
+
+  const more = await run('caps', '--search', 'pier', '--limit', '20');
+  assert.equal(more.offers.length, 20); assert.equal(more.more, undefined);
+  assert.equal((await run('caps', '--search', 'pier', '--json')).offers[0].label, label(0), '--json has the world\'s label');
+
+  for (const args of [['caps'], ['caps', '--verb', 'walk'], ['caps', '--all']]) {
+    const page = await run(...args);
+    assert.equal(page.offers.length, 20, args.join(' ')); assert.equal(page.offers[0].label, label(0), args.join(' ')); assert.equal(page.more, undefined);
+  }
+  assert.equal((await run('caps', '--all', '--search', 'pier')).offers.length, 20, '--all keeps the catalogue limit');
+});

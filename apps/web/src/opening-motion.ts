@@ -4,8 +4,9 @@ export type OpeningMotion={at:number;parts:{obj:THREE.Object3D;key:Key;from:numb
 /** Entry 37: a radio's needle slides and its tuning knob turns over this long (the tuning hand holds the knob ~0.9 s). */
 export const NEEDLE_SWEEP_MS=800;
 // A hinged leaf swings in 450 ms; curtains slide along their rod and a roller blind rolls in 1.1 s (Soul Actions entry 23);
-// a radio's needle slides and its knob turns in NEEDLE_SWEEP_MS (entry 37).
-const ROLES:Record<string,[Key,number]>={door:['ry',450],'curtain-l':['sx',1100],'curtain-r':['sx',1100],blind:['sy',1100],needle:['px',NEEDLE_SWEEP_MS],knob:['rz',NEEDLE_SWEEP_MS]};
+// a radio's needle slides and its knob turns in NEEDLE_SWEEP_MS (entry 37);
+// an Open / Closed sign's board turns in 700 ms (#427).
+const ROLES:Record<string,[Key,number]>={door:['ry',450],'curtain-l':['sx',1100],'curtain-r':['sx',1100],blind:['sy',1100],flip:['ry',700],needle:['px',NEEDLE_SWEEP_MS],knob:['rz',NEEDLE_SWEEP_MS]};
 const get=(o:THREE.Object3D,k:Key)=>k==='ry'?o.rotation.y:k==='sx'?o.scale.x:k==='sy'?o.scale.y:k==='px'?o.position.x:o.rotation.z;
 const put=(o:THREE.Object3D,k:Key,v:number)=>{if(k==='ry')o.rotation.y=v;else if(k==='sx')o.scale.x=v;else if(k==='sy')o.scale.y=v;else if(k==='px')o.position.x=v;else o.rotation.z=v;};
 /** One bounded tween per changed opening; preserve the actual angle (or draw) on reversal. Parts match by name and role. */

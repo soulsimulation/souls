@@ -13,6 +13,8 @@
 //              there is no next step to recover with. "{{prev.<path>}}" in an argument is replaced from the previous
 //              step's JSON output (a refusal's too), e.g. "{{prev.did_you_mean[0].id}}", reading own properties only; a
 //              placeholder that does not resolve fails its step without running it, and that skipped step leaves no JSON.
+//              A `resolve` step keeps its first candidate's id as "{resolved}" for the steps after it, as an agent reads an
+//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run.
 //   close      "done" (default): `result <id> done|failed` from the steps' outcome. "open": leave the request open (the
 //              activity continues in the world) until a later rule supersedes it or the run ends.
 //   supersede  text for `result <old> failed "<text>"` on every request still open when this rule fires (owner redirection)
@@ -111,6 +113,8 @@ export function stepOutcome(r, { waited = false } = {}) {
   if (!ongoing) return { ok: false, why: `still ${phase ?? 'open'} after waiting` };
   return { ok: true, phase, ongoing: true };
 }
+/** The offered id a `resolve` step read its words as, or '' when it read none. */
+export const firstCandidate = (r) => { try { const d = JSON.parse(r.stdout); return (d.candidates ?? d.did_you_mean)?.[0]?.id ?? ''; } catch { return ''; } };
 /** How much of one CLI output a tool result keeps (#371): all of it up to this many characters. It was 4000, which cut
  *  `around` (its route) and `map` (its flags) mid-JSON, so the scorer read output the Soul really got as a broken string. */
 export const OUTPUT_KEEP = 1024 * 1024;
@@ -183,14 +187,19 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
       save();
     }
     if (id) await cli(['ack', id, clip(rule.ack ?? 'On it.')]);
-    let failed = null, prev = null;
+    let failed = null, prev = null, resolved = '';
     for (const [i, step] of rule.do.entries()) {
       const args = stepArgs(step), onRefused = stepOptions(step)?.onRefused ?? 'fail';
-      const bound = bindPrev(args.map((a) => (id ? a.replaceAll('{id}', id) : a)), prev);
-      let o;
+      const bound = bindPrev(args.map((a) => (id ? a.replaceAll('{id}', id) : a).replaceAll('{resolved}', resolved)), prev);
+      let o, r = null;
       if (bound.error) { o = { ok: false, why: bound.error }; prev = null; }
-      else { const r = await cli(bound.args); prev = stepJson(r); o = stepOutcome(r, { waited: args.includes('--wait') }); }
-      if (o.ok) continue;
+      else { r = await cli(bound.args); prev = stepJson(r); o = stepOutcome(r, { waited: args.includes('--wait') }); }
+      if (o.ok) {
+        if (args[0] !== 'resolve') continue;
+        resolved = firstCandidate(r);
+        if (resolved) continue;
+        failed = `resolve: nothing on offer reads as "${clip(args[1])}"`; break;
+      }
       if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] ${args[0]} refused, continuing: ${o.why}`); continue; }
       failed = `${args[0]}: ${o.why}`; break;
     }
