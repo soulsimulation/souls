@@ -1025,10 +1025,11 @@ export class EngineBridge {
       const joins = Object.entries(e.joins ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
       const bears = new Set(cs.filter((c) => c.bears).map((c) => c.id)), on = [...new Set(joins.filter(([c]) => bears.has(c)).map(([, j]) => j.to))];
       // PC17 (#696): a frame a crew let go of is held up by its beams, as `raise_hold_v1` recorded, though none of its own
-      // connectors bears. The model can't say so, so a boot's derive would stand it back on the ground; only that record is
-      // kept, and only while it names exactly what the part is joined to. Nothing here makes a part connected.
+      // connectors bears. The model can't say so, so any derive (a boot's above all) would stand it back on the ground. That
+      // record is kept as it is while everything it names is still joined; it can have grown no names since (a beam seated
+      // later joins the frame without touching it). Nothing here makes a part connected.
       const cur = this.engine.world.entities[e.id], joined = new Set(joins.map(([, j]) => j.to));
-      const kept = !on.length && cur?.phase === 'installed' && cur.support?.kind === 'connected' && cur.support.to.length === joined.size && cur.support.to.every((t: string) => joined.has(t)) ? cur.support : null;
+      const kept = !on.length && cur?.phase === 'installed' && cur.support?.kind === 'connected' && cur.support.to.length > 0 && cur.support.to.every((t: string) => joined.has(t)) ? cur.support : null;
       return { ...spec, ...(roll ? { roll } : {}), support: on.length ? { kind: 'connected', to: on } : kept ? { kind: 'connected', to: [...kept.to] } : { kind: 'ground' },
         ...(joins.length ? { connections: joins.map(([c, j]) => ({ socket: c, to: j.to, toSocket: j.at })) } : {}) };
     }

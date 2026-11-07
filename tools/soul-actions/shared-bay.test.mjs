@@ -18,6 +18,8 @@ import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {inspectFrame} from '../../apps/server/src/edge/perception/inspect.ts';
 import {hereFrame} from '../../apps/server/src/edge/perception/here.ts';
+import {beamBays, worldPoint} from '../../packages/engine-mars/src/beam-connect.ts';
+import {def} from '../../mars/viewer/engine/world/catalog.ts';
 
 const STEP_MS = 50, IN = 0.0254, T = 3 * IN, UP_L = 12 * 0.3048, BEAM_L = 9 * 0.3048, D = BEAM_L + 2 * T, H = D / 2 + UP_L / 2, SPAN = 24 * IN, R = Math.PI / 2;
 const PROC = 'rack-bay-build@1';
@@ -411,10 +413,37 @@ test('R11: a restart past the frames checkpoint reads the same, the crew finishe
   const end = see(w, Ada, pj).state; assert.equal(end.complete, true); assert.equal(end.joints.made, 29); assert.equal(end.checkpoint, 'deck-stairs');
 });
 
-// what a boot's derive does to a part's support: it keeps what the engine recorded, and only that
+// what a derive does to a part's support: it keeps what the engine recorded, and only that
 const claim = (w, id, to) => Object.assign(w.E()[id], {phase: 'installed', support: {kind: 'connected', to}});
 const derived = (w, e) => w.bridge.derive(e, {}, w.bridge.physics?.assets ?? {});
-test('R11: a boot keeps a recorded support only for the joins behind it, and grants none', {timeout: 240000}, async (t) => {
+test('R11: a frame that took another beam after its release keeps its support, live and across a restart', {timeout: 900000}, async (t) => {
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
+  let pj = null;
+  await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {pj = id; if (st.checkpoint === 'frames') throw new Error('checkpoint');}}), /checkpoint/);
+  await until(w, () => Object.values(w.souls).every((s) => !open(w, s).length), 600);
+  const frame = w.bridge.projects.rows.get(pj).bound['upright-a'], extra = w.idOf('beam5'), support = structuredClone(w.E()[frame].support), joints = w.E()[frame].connections.length;
+  // a fifth beam, by the ordinary offer: it lies under a free pair of seats
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: P(0, 2.9), r: 0}]})); await w.tick(30);
+  const bay = beamBays(w.host.engine.world, extra, 3.5)[0]; assert.ok(bay, 'a free pair of seats is offered');
+  const seat = (u, id) => worldPoint(w.E()[u], def(w.E()[u].def).sockets.find((q) => q.id === id).local), qa = seat(bay.a, bay.seats[0]), qb = seat(bay.b, bay.seats[1]), mx = (qa[0] + qb[0]) / 2, mz = (qa[2] + qb[2]) / 2;
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: [mx, mz + Math.sign(mz - w.az) * 0.7], r: 0}]})); await w.tick(30);
+  for (const s of [Cy, Dee]) await w.at(s, ...P(-1, 2)); await w.tick(10);
+  const r = ok(await act(w, Ada, {capability: `connect-beam-with:${extra}`, params: {column: bay.column, height: bay.height, with: 'Bo'}}));
+  ok(await act(w, Bo, {capability: `accept:${r.receipt.shared.invite}`, params: {revision: r.receipt.shared.revision ?? 1}}));
+  await until(w, () => w.E()[extra].phase === 'installed' && !open(w, Ada).length, 3000); await w.tick(60);
+  assert.equal(w.E()[frame].connections.length, joints + 1, 'it joined the frame'); assert.deepEqual(w.E()[frame].support, support, 'whose record stays as it was');
+  const reading = () => {const st = see(w, Ada, pj).state; return [st.checkpoint, st.section, st.maneuvers.done];}, was = reading();
+  assert.equal(was[0], 'frames');
+  // a touch of the frame re-derives it, as an edit nearby does
+  w.bridge.pending.add(frame); w.bridge.flush(); await w.tick(5);
+  assert.deepEqual(w.E()[frame].support, support); assert.deepEqual(reading(), was);
+  await restart(w);
+  assert.deepEqual(w.E()[frame].support, support); assert.deepEqual(reading(), was);
+  assert.equal(glitches(w), 0);
+});
+
+test('R11: a derive keeps a recorded support only while its joins stand, and grants none', {timeout: 240000}, async (t) => {
   const w = await world(t); await yard(w);
   const id = w.idOf('fa'), e = w.god.model.get('fa'), beam = w.idOf('beam1'), other = w.idOf('beam2'), was = structuredClone(w.E()[id]);
   const joined = (...to) => ({...e, joins: Object.fromEntries(to.map((x, i) => [`socket-${i}`, {to: x, at: 'seat'}]))});
@@ -422,14 +451,21 @@ test('R11: a boot keeps a recorded support only for the joins behind it, and gra
   claim(w, id, [beam]);
   assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'a record with no join behind it grants nothing');
   assert.deepEqual(derived(w, joined(other)).fixture.support, {kind: 'ground'}, 'nor one naming something else');
-  assert.deepEqual(derived(w, joined(beam, other)).fixture.support, {kind: 'ground'}, 'nor one that names only some of its joins');
-  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'connected', to: [beam]}, 'a record of exactly what it is joined to is kept');
+  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'connected', to: [beam]}, 'a record of what it is joined to is kept');
+  assert.deepEqual(derived(w, joined(beam, other)).fixture.support, {kind: 'connected', to: [beam]}, 'as it is, when a beam seated later has joined it too');
+  claim(w, id, [beam, other]);
+  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'a record naming a beam that has gone is not');
+  claim(w, id, []);
+  assert.deepEqual(derived(w, e).fixture.support, {kind: 'ground'}, 'nor an empty one');
+  claim(w, id, [beam]); w.E()[id].phase = 'staged';
+  assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'nor one on a part that is not installed');
+  w.E()[id].phase = 'installed';
   Object.assign(w.E()[id], {support: {kind: 'ground'}});
   assert.deepEqual(derived(w, joined(beam)).fixture.support, {kind: 'ground'}, 'a god\'s joined upright stands on the ground, as before');
   Object.assign(w.E()[id], was);
 });
 
-test('R11: with the flag off, a boot does not read what the engine recorded', {timeout: 240000}, async (t) => {
+test('R11: with the flag off, a derive does not read what the engine recorded', {timeout: 240000}, async (t) => {
   const w = await world(t, {sharedCarry: false}); await yard(w);
   const id = w.idOf('fa'), e = w.god.model.get('fa'), was = structuredClone(w.E()[id]), beam = w.idOf('beam1');
   const joined = {...e, joins: {'socket-0': {to: beam, at: 'seat'}}}, clean = [JSON.stringify(derived(w, e)), JSON.stringify(derived(w, joined))];

@@ -238,8 +238,8 @@ context-size checks below), regression runs, and an uncut real-client recording 
     and a `volunteer` for the old revision is refused `project.revision-changed`, naming it. A like-for-like swap is not.
     A site with anything built on it does not move (`project.site-built`).
   - **Across a restart.** A frame a crew let go of is held up by its beams, as `raise_hold_v1` recorded, though none of its
-    own connectors bears. The model doesn't hold that, so a boot's derive keeps the engine's record, and only while it
-    names exactly what the part is joined to. It never makes a part connected: a god's joined upright stands on the ground.
+    own connectors bears. The model doesn't hold that, so a derive, a boot's above all, keeps the engine's record as it is
+    while everything it names is still joined. It never makes a part connected: a god's joined upright stands on the ground.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
     someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
     person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no
