@@ -35,7 +35,7 @@ At chat start run `listen` in the background (`run_in_background`), one per Soul
 - `capability.unknown`: not on offer; `did_you_mean` are closest.
 - `capability.params`: `params` is the schema.
 - `alternatives` are information, never a default: pick one only if it serves the request; `partial:true`: only partly.
-- `act` exit 2: those were words; `candidates` are the ids. Exit 75: busy; try again.
+- `act` exit 2: those were words; `candidates` are the ids. Exit 75: busy; try once.
 - `slowed`: repeat that sentence to your person.
 
 ## Others

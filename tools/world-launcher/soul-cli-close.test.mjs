@@ -11,7 +11,7 @@ import {clipped} from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 
-async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, reads = 200, receipts = 200} = {}) {
+async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, reads = 200, receipts = 200, receiptOf} = {}) {
   const seen = [], acked = new Set(), dir = mkdtempSync(join(tmpdir(), 'eden-close-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
@@ -19,6 +19,7 @@ async function world(t, {results = {}, saySays = 200, actAnswer, waitReceipt, re
       seen.push([req.method, url, body]);
       if (url === '/v1/edge/say') return saySays === 200 ? send(200, {said: {id: 'sp_1', heardBy: 1}}) : send(saySays, {error: {code: 'say.refused', message: 'No.'}});
       if (url === '/v1/edge/act') return send(200, actAnswer(body));
+      if (url.startsWith('/v1/edge/receipts/') && receiptOf) return send(200, {receipt: receiptOf(url.split('/').pop())});
       if (url.startsWith('/v1/edge/receipts/')) return receipts === 200 ? send(200, {receipt: waitReceipt}) : send(receipts, {error: {code: 'broken', message: 'the receipts broke'}});
       if (url === '/v1/edge/wait') return send(200, {cursor: 'c_1', events: [{kind: 'receipt.updated', receipt: waitReceipt}]});
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
@@ -117,6 +118,34 @@ test('every message linked to a running receipt is guarded, not only the last (#
   const ended = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: {...started().receipt, phase: 'completed', done: 'walked.'}});
   await ended.cli('act', 'walk:a', '--for', 'msg_1'); await ended.cli('act', 'walk:a', '--for', 'msg_2');
   assert.equal((await ended.cli('say', 'Here', '--for', 'msg_1')).json.closed, true, 'once the act has ended');
+});
+
+test('the links outlast a long run of repeats, and a re-linked message is guarded by its newest act (#1289)', async t => {
+  const started = (id) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'sit:a', phase: 'started'}, for: id});
+  const w = await world(t, {actAnswer: (b) => started(b.for), waitReceipt: started().receipt});
+  for (let i = 1; i <= 12; i++) await w.cli('act', 'sit:a', '--for', `msg_${i}`);
+  assert.equal((await w.cli('say', 'Still here', '--for', 'msg_1')).json.closed, false, 'the first of twelve, on a receipt still open');
+  assert.equal(posted(w.seen, '/result').length, 0);
+  const receipts = {r_1: {id: 'r_1', capability: 'walk:a', phase: 'replaced'}, r_2: {id: 'r_2', capability: 'walk:b', phase: 'started'}};
+  let next = 0;
+  const re = await world(t, {actAnswer: (b) => ({accepted: true, channel: 'body', receipt: {...receipts[`r_${++next}`], phase: 'started'}, for: b.for}), receiptOf: (id) => receipts[id]});
+  await re.cli('act', 'walk:a', '--for', 'msg_1'); await re.cli('act', 'walk:b', '--for', 'msg_1');
+  assert.equal((await re.cli('say', 'On my way', '--for', 'msg_1')).json.closed, false, 'its newest act is the one running');
+});
+
+test('an act that ends between the reads keeps the world\'s close (#1289)', async t => {
+  const started = {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: 'msg_1'};
+  const results = {}, w = await world(t, {results, actAnswer: () => started, receiptOf: () => {results.msg_1 = {text: 'walk completed.', outcome: 'done'}; return {...started.receipt, phase: 'completed'};}});
+  await w.cli('act', 'walk:a', '--for', 'msg_1');
+  const r = await w.cli('ack', 'msg_1', 'I could not get there.', '--close', 'failed');
+  assert.equal(r.json.closed, false); assert.equal(r.json.already, 'done'); assert.equal(posted(w.seen, '/result').length, 0);
+});
+
+test('wait names the newest message on the receipt (#1289)', async t => {
+  const started = (id) => ({accepted: true, channel: 'body', receipt: {id: 'r_1', capability: 'walk:a', phase: 'started'}, for: id});
+  const w = await world(t, {results: {msg_1: {text: 'walked.'}, msg_2: {text: 'walked.'}}, actAnswer: (b) => started(b.for), waitReceipt: {...started().receipt, phase: 'completed', done: 'walked.'}});
+  await w.cli('act', 'walk:a', '--for', 'msg_1'); await w.cli('act', 'walk:a', '--for', 'msg_2');
+  const done = await w.cli('wait', '1', 'r_1'); assert.equal(done.json.closed, true); assert.equal(done.json.for, 'msg_2');
 });
 
 test('act says when the world answered with the act under way (#1289)', async t => {
