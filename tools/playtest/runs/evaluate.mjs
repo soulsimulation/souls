@@ -65,7 +65,11 @@ export function seatSteps(file, seat) {
         open.set(c.id, s); steps.push(s);
       } else if (c.type === 'tool_result' && open.has(c.tool_use_id)) {
         const s = open.get(c.tool_use_id), raw = typeof c.content === 'string' ? c.content : JSON.stringify(c.content ?? '');
-        let out = raw; try { out = JSON.parse(raw); } catch { /* plain text */ }
+        let out = raw; try { out = JSON.parse(raw); } catch {
+          // #1098: the CLI can print owner banner lines ("OWNER: 1 message(s) waiting …") before its JSON answer; read the
+          // answer from the first line that opens a JSON object
+          const j = raw.search(/^\{/m); if (j > 0) { try { out = JSON.parse(raw.slice(j)); } catch { /* plain text */ } }
+        }
         Object.assign(s, { resultLine: i + 1, doneMs: ev._rx ?? null, out, isError: !!c.is_error });
       }
     }
@@ -306,7 +310,7 @@ function scenarioAcceptance(sr) {
 export function runIdentity(sr) {
   const sc = sr.scenario ? structuredClone(sr.scenario) : null;
   if (sc) {
-    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot']) delete sc[k]; if (sc.world) delete sc.world.port;
+    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot', 'castPath']) delete sc[k]; if (sc.world) delete sc.world.port;
     // A traced seat is a different condition from an untraced one, but its run-specific trace file and ids are not.
     for (const s of sc.seats ?? []) if (s.diagnostics?.trace) s.diagnostics = { trace: true };
   }

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateScript, classify, matchRule, stepOutcome, turn, renderChat, keptOutput, OUTPUT_KEEP, firstCandidate } from './scripted-owner.mjs';
+import { validateScript, classify, matchRule, stepOutcome, turn, renderChat, ownerWokeOpen, waitWindowSec, bindPrev, keptOutput, OUTPUT_KEEP, firstCandidate } from './scripted-owner.mjs';
 import { seatActs } from '../../review/run.mjs';
 import { brief } from '../../../world-launcher/soul/eden.mjs';
 import { ADAPTERS } from '../seat.mjs';
@@ -19,7 +19,7 @@ if (a[0] === 'resolve') console.log(JSON.stringify({ candidates: a[1].includes('
 else if (a[0] === 'act') { if (a[1].includes('swim')) { console.log(JSON.stringify({ accepted: false, code: 'no-offer' })); } else console.log(JSON.stringify({ accepted: true, receipt: { id: 'r1', phase: a.includes('--wait') ? 'completed' : 'running' } })); }
 else if (a[0] === 'status') console.log(JSON.stringify({ paired: true, soul: { id: 's1' } }));
 else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
-const folder = () => { const d = mkdtempSync(join(tmpdir(), 'scripted-owner-')); writeFileSync(join(d, 'eden.mjs'), STANDIN); return d; };
+const folder = (standin = STANDIN) => { const d = mkdtempSync(join(tmpdir(), 'scripted-owner-')); writeFileSync(join(d, 'eden.mjs'), standin); return d; };
 const calls = (d) => readFileSync(join(d, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 const SCRIPT = { rules: [
   { match: 'orchard', ack: 'Heading to the orchard', do: [['act', 'walk to the orchard']], close: 'open' },
@@ -54,8 +54,9 @@ test('classify reads onboarding, nudges, wakes and typed chat from the harness t
   // Shapes produced by the real brief(), not hand-written, so a change to the CLI's output keeps this honest.
   const walking = { id: 'r2', capability: 'walk', phase: 'started', now: 'walking to the hall, 12 m left.' };
   const owner = [1, 2, 3].map((i) => ({ id: `m${i}`, text: `owner message ${i} `.repeat(12) }));
-  const cut = brief({ accepted: true, waited: '9s', receipt: walking, ownerMessages: owner });
-  assert.equal(cut.receipt, undefined, 'brief drops the receipt for a long output');
+  // eden 2.8.1 (#832) keeps the receipt beside long owner messages; before it, brief dropped it. Either way no done.
+  const kept = brief({ accepted: true, waited: '9s', receipt: walking, ownerMessages: owner });
+  const cut = { ...kept }; delete cut.receipt;
   assert.equal(cut.done, false);
   assert.deepEqual(stepOutcome({ code: 0, stdout: JSON.stringify(cut) }, { waited: true }), { ok: false, why: 'receipt unknown after waiting: completion not confirmed' });
   const fetchErr = brief({ accepted: true, waited: '60s', receipt: { error: 'HTTP 503' } });
@@ -105,6 +106,13 @@ test('a resolve step hands its first candidate to the next act, and no candidate
   assert.match(JSON.stringify(calls().filter((c) => c[0] === 'result').at(-1)), /m2.*failed.*nothing on offer/);
 });
 
+test('an empty resolve with onRefused continue goes on to the next step', async () => {
+  const script = { rules: [{ match: 'void', ack: 'ok', do: [['resolve', 'nothing here', { onRefused: 'continue' }], ['act', 'walk:yes']], result: 'Went' }] };
+  const cwd = folder(), calls = () => readFileSync(join(cwd, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  await ADAPTERS['scripted-owner'].turn({ cwd, text: wake([{ id: 'm1', text: 'void' }]), script });
+  assert.deepEqual(calls().find((c) => c[0] === 'act'), ['act', 'walk:yes']);
+});
+
 test('onboarding runs register, create and status from the served CLI already in the folder', async () => {
   const d = folder();
   const r = await turn({ cwd: d, text: onboardingText('http://127.0.0.1:1/w/x', 'Ada'), script: SCRIPT });
@@ -137,6 +145,126 @@ console.log(JSON.stringify(a[0] === 'act' ? { accepted: true, receipt: { id: 'r1
   try { await turn({ cwd: d, text: wake([{ id: 'm1', text: 'the pond' }]), script: pond }); } finally { delete process.env.FAST; }
   assert.deepEqual(calls(d).at(-1), ['result', 'm1', 'done', 'At the pond']);
   assert.deepEqual(JSON.parse(readFileSync(join(d, '.scripted-owner.json'), 'utf8')).handled, ['m1']);
+});
+
+// #828: a refusal the script expects, then a recovery that takes the refusal's own suggestion.
+const RECOVER = `import { appendFileSync } from 'node:fs';
+const a = process.argv.slice(2); appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
+if (a[0] === 'act' && a[1].includes('fly')) { console.log(JSON.stringify({ accepted: false, code: 'capability.unknown', did_you_mean: [{ id: 'walk:g-field', label: 'Walk to the field' }, { id: 'walk:g-pond' }] })); process.exit(1); }
+else if (a[0] === 'act') console.log(JSON.stringify({ accepted: true, receipt: { id: 'r9', phase: 'completed', capability: a[1] } }));
+else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
+const recoverFolder = () => { const d = mkdtempSync(join(tmpdir(), 'scripted-recover-')); writeFileSync(join(d, 'eden.mjs'), RECOVER); return d; };
+const resultOf = (d) => calls(d).find((c) => c[0] === 'result');
+
+test('onRefused continue: a refused step is recorded and the next step takes the refusal\'s alternative', async () => {
+  const d = recoverFolder();
+  const script = { rules: [{ match: 'field', do: [['act', 'fly up to the field', { onRefused: 'continue' }], ['act', '{{prev.did_you_mean[0].id}}', '--wait', '30']], result: 'Walked instead' }] };
+  assert.deepEqual(validateScript(script), []);
+  const t = await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly to the field' }]), script });
+  assert.deepEqual(calls(d).filter((c) => c[0] === 'act'), [['act', 'fly up to the field'], ['act', 'walk:g-field', '--wait', '30']]);
+  assert.deepEqual(resultOf(d), ['result', 'm1', 'done', 'Walked instead']);
+  const text = JSON.stringify(t.stream);
+  assert.match(text, /act refused, continuing: .*capability\.unknown/);
+  assert.match(text, /node eden.mjs act walk:g-field --wait 30/, 'the transcript shows the resolved command');
+});
+
+test('the default stays fail: a refused step stops the rule and the request fails', async () => {
+  const d = recoverFolder();
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly' }]), script: { rules: [{ match: 'fly', do: [['act', 'fly up'], ['act', '{{prev.did_you_mean[0].id}}']] }] } });
+  assert.equal(calls(d).filter((c) => c[0] === 'act').length, 1);
+  assert.equal(resultOf(d)[2], 'failed');
+});
+
+test('an unresolved {{prev…}} fails its step without running it; onRefused applies to it too', async () => {
+  const d = recoverFolder();
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly' }]), script: { rules: [{ match: 'fly', do: [['act', 'fly up', { onRefused: 'continue' }], ['act', '{{prev.alternatives[0].id}}']] }] } });
+  assert.equal(calls(d).filter((c) => c[0] === 'act').length, 1, 'the unresolved step never ran');
+  assert.deepEqual(resultOf(d).slice(0, 3), ['result', 'm1', 'failed']);
+  assert.match(resultOf(d)[3], /unresolved \{\{prev\.alternatives\[0\]\.id\}\}/);
+});
+
+test('a refused final step fails the request even with onRefused continue', async () => {
+  const d = recoverFolder();
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly' }]), script: { rules: [{ match: 'fly', do: [['act', 'walk:g-field'], ['act', 'fly up', { onRefused: 'continue' }]], result: 'Flew' }] } });
+  assert.equal(calls(d).filter((c) => c[0] === 'act').length, 2);
+  assert.deepEqual(resultOf(d).slice(0, 3), ['result', 'm1', 'failed']);
+  assert.match(resultOf(d)[3], /^act: .*capability\.unknown/);
+});
+
+test('a step skipped for an unresolved {{prev…}} leaves no JSON for the step after it', async () => {
+  const d = recoverFolder();
+  const script = { rules: [{ match: 'fly', do: [['act', 'fly up', { onRefused: 'continue' }], ['act', '{{prev.alternatives[0].id}}', { onRefused: 'continue' }], ['act', '{{prev.did_you_mean[0].id}}']] }] };
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'fly' }]), script });
+  assert.equal(calls(d).filter((c) => c[0] === 'act').length, 1, 'neither placeholder step ran: the refusal two steps back is not reused');
+  assert.deepEqual(resultOf(d).slice(0, 3), ['result', 'm1', 'failed']);
+  assert.match(resultOf(d)[3], /unresolved \{\{prev\.did_you_mean\[0\]\.id\}\} \(the previous step printed no JSON\)/);
+});
+
+test('bindPrev reads own properties only, never the prototype chain', () => {
+  const prev = JSON.parse('{"did_you_mean":[{"id":"walk:g-field"}],"n":3}');
+  assert.deepEqual(bindPrev(['{{prev.did_you_mean[0].id}}', 'x{{prev.n}}'], prev), { args: ['walk:g-field', 'x3'] });
+  for (const path of ['constructor.name', 'toString', 'did_you_mean[0].constructor.name', '__proto__.constructor.name', 'did_you_mean[0].id.length'])
+    assert.match(bindPrev([`{{prev.${path}}}`], prev).error, /^unresolved/, path);
+});
+
+test('step options and {{prev}} placeholders are validated by field', () => {
+  const v = (step, j = 1) => validateScript({ rules: [{ match: 'x', do: j ? [['status'], step] : [step] }] });
+  assert.deepEqual(v(['act', 'x', { onRefused: 'continue' }]), []);
+  assert.deepEqual(v(['act', 'x', { onRefused: 'ignore' }]), ['script.rules[0].do[1].onRefused: continue or fail']);
+  assert.deepEqual(v(['act', 'x', { retry: 2 }]), ['script.rules[0].do[1].retry is unknown (step options: onRefused)']);
+  assert.deepEqual(v(['act', { onRefused: 'continue' }, 'x']), ['script.rules[0].do: a list of eden.mjs argument lists'], 'options only at the end');
+  assert.deepEqual(v(['act', '{{prev.did_you_mean[0].id}}'], 0), ['script.rules[0].do[0]: {{prev.did_you_mean[0].id}} needs a previous step']);
+  assert.deepEqual(v(['act', '{{prev.a..b}}']), ['script.rules[0].do[1]: {{prev.a..b}} is not a path like prev.did_you_mean[0].id']);
+});
+
+// #832 (S3 demo, #831): the director's "Your turn" card ended Ada's `act "walk to the pond hall" --wait` at 0 m left, and
+// the seat failed the steered request although she arrived a second later. An owner-woken wait on an open receipt now
+// keeps checking that receipt (`receipt <id>`, every 2 s; a `wait` returns at once while the card is unacknowledged)
+// for the rest of the step's window; the card is handled on the next turn.
+const WOKEN = (receiptReply) => `import { appendFileSync } from 'node:fs';
+const a = process.argv.slice(2); appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
+const rec = (phase) => ({ id: 'r_walk', capability: 'walk:lab-pond-hall', phase });
+if (a[0] === 'act') console.log(JSON.stringify({ accepted: true, waited: '32s', now: 'walking to Waterside Hall, 0 m left; not there yet', done: false, receipt: rec('started'), ownerMessages: [{ id: 'm_turn', text: 'Your turn: give the talk now' }] }));
+else if (a[0] === 'receipt') console.log(JSON.stringify(${receiptReply}));
+else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
+const STEER = (s = '100') => ({ rules: [{ match: 'green', do: [['act', 'walk to the pond hall', '--wait', s]], result: 'At the pond hall' }] });
+const steer = async (reply, s) => { const d = folder(WOKEN(reply)); await turn({ cwd: d, text: wake([{ id: 'm1', text: 'by the village green first' }]), script: STEER(s) }); return calls(d); };
+
+test('owner-woken wait: an open receipt is checked for the rest of the window, then judged (#832)', async () => {
+  const c = await steer(`rec('completed')`);
+  assert.deepEqual(c.slice(1), [['act', 'walk to the pond hall', '--wait', '100'], ['receipt', 'r_walk'], ['result', 'm1', 'done', 'At the pond hall']], 'one check, no wait (it would return at once), the owner card left for the next turn');
+});
+
+test('owner-woken wait: still open when the window runs out, or ended badly, is a failure (#832)', async () => {
+  let c = await steer(`rec('started')`, '3');
+  assert.equal(c.filter((x) => x[0] === 'receipt').length, 1, 'a 3 s window has room for one check'); assert.deepEqual(c.at(-1), ['result', 'm1', 'failed', 'act: still started after waiting']);
+  c = await steer(`rec('replaced')`);
+  assert.equal(c.at(-1)[2], 'failed', 'a replaced walk is not a done');
+  c = await steer(`{ error: 'gone' }`);
+  assert.equal(c.filter((x) => x[0] === 'receipt').length, 1); assert.deepEqual(c.at(-1), ['result', 'm1', 'failed', 'act: still started after waiting'], 'an unreadable check keeps the woken output: still open');
+  c = await steer(`rec('completed')`, '1');
+  assert.equal(c.filter((x) => x[0] === 'receipt').length, 0, 'a 1 s window has nothing left to wait'); assert.equal(c.at(-1)[2], 'failed');
+});
+
+test('ownerWokeOpen and waitWindowSec: only an owner wake on an open receipt resumes; no extra command otherwise (#832)', () => {
+  const out = (o) => ({ code: 0, stdout: JSON.stringify(o) });
+  assert.equal(ownerWokeOpen(out({ receipt: { id: 'r1', phase: 'started' }, ownerMessages: [{ id: 'm' }] })), 'r1');
+  assert.equal(ownerWokeOpen(out({ receipt: { id: 'r1', phase: 'started' } })), null, 'no owner message: the wait ended on its own');
+  assert.equal(ownerWokeOpen(out({ receipt: { id: 'r1', phase: 'completed' }, ownerMessages: [{ id: 'm' }] })), null);
+  assert.equal(ownerWokeOpen(out({ receipt: { id: 'r1', error: 'HTTP 503' }, ownerMessages: [{ id: 'm' }] })), null);
+  assert.equal(ownerWokeOpen({ code: 1, stdout: '' }), null);
+  assert.deepEqual([waitWindowSec(['act', 'x', '--wait']), waitWindowSec(['act', 'x', '--wait', '100']), waitWindowSec(['act', 'x', '--wait', '20'])], [60, 60, 20]);
+});
+
+test('owner-woken wait: a sit the world shows under way is not re-checked and stays done (#832 review)', async () => {
+  const SIT = `import { appendFileSync } from 'node:fs';
+const a = process.argv.slice(2); appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
+if (a[0] === 'act') console.log(JSON.stringify({ accepted: true, waited: '3s', done: false, receipt: { id: 'r_sit', capability: 'sit:bench', phase: 'started' }, ownerMessages: [{ id: 'm_x', text: 'next' }], events: [{ kind: 'activity.observed', receipt: { id: 'r_sit' }, action: { status: 'executing' } }] }));
+else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
+  const d = folder(SIT);
+  await turn({ cwd: d, text: wake([{ id: 'm1', text: 'sit on the bench' }]), script: { rules: [{ match: 'bench', do: [['act', 'sit on the bench', '--wait', '8']], result: 'Sitting' }] } });
+  const c = calls(d);
+  assert.equal(c.filter((x) => x[0] === 'receipt').length, 0); assert.deepEqual(c.at(-1), ['result', 'm1', 'done', 'Sitting']);
 });
 
 test('a long CLI output is kept whole for scoring; past the bound it carries a marker and a flag (#371)', async () => {
