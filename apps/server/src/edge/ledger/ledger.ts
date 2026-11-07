@@ -2740,7 +2740,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   holding(soulId: string, id: string): boolean {
     const r = this.rows("receipt_id=? AND soul_id=? AND phase='started'", id, soulId)[0], m = this.host.minds.get(soulId); if (!r || !m) return false;
     const verb = r.capability.split(':')[0]!; if (verb === 'follow') return true;
-    const poses = HELD_POSES[verb]; if (!poses || r.started_tick === null || this.host.engine.world.tick - r.started_tick < 20) return false;
+    const poses = HELD_POSES[verb]; if (!poses || r.started_tick === null || this.mw.world.tick - r.started_tick < 20) return false;
     return !!r.program_id && this.mw.programOf(m.entityId) === r.program_id && poses.includes(stateOf(this.host, m.entityId));
   }
   onPlaceChange(l: (e: {soulId: string; from: string | null; to: string | null; tick: number}) => void) {this.placeListeners.push(l);}
