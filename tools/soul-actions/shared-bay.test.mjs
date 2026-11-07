@@ -633,6 +633,8 @@ test('#1250: a beam joined between uprights lying flat leaves the clock running,
   ok(w.god.act({ops: [{op: 'move', id: 'bm', in: {parent: 'world'}, p: [m[0], m[1] - 0.0508, m[2]], r: 0}, {op: 'connect', a: {id: 'bm', connector: 'end-l'}, b: {id: 'fa', connector: seat}}, {op: 'connect', a: {id: 'bm', connector: 'end-r'}, b: {id: 'fb', connector: seat}}]})); await w.tick(40);
   assert.equal(w.E()[w.idOf('bm')].support.kind, 'ground'); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(glitches(w), 0);
   await reboot(w); assert.equal(w.host.clockFailure, undefined); assert.equal(glitches(w), 0);
+});
+
 // #1150 on shared building: whatever a god's batch or a late verb leaves, the world goes on, a Soul can act, and a crash reboot boots
 const goesOn = async (w, ticks = 60) => {
   await w.tick(ticks); assert.equal(w.host.clockFailure, undefined); assert.equal(w.host.paused, false); assert.equal(w.host.stepFailing, null);
