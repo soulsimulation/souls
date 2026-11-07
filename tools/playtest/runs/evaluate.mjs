@@ -13,7 +13,7 @@ import { readJson, readJsonl } from '../lib/jsonl.mjs';
 import { loadRun } from '../review/run.mjs';
 import { computeMetrics, readLedger } from '../review/metrics.mjs';
 import { runOracles } from '../review/oracles.mjs';
-import { SCORER, scoreRun, scorecardMeasures, renderScorecard } from './controllability.mjs';
+import { SCORER, closureOf, scoreRun, scorecardMeasures, renderScorecard } from './controllability.mjs';
 
 export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '2' }); // v2: the controllability scorecard (#1097)
 export const SCHEMA = 'soul-run-evaluation/1';
@@ -127,7 +127,8 @@ export function joinRequests(sr) {
       const ci = d.cutoffs.findIndex((c) => c.requestId === del.requestId), cut = ci >= 0 ? d.cutoffs[ci] : null;
       const mine = sr.steps[seat] ?? [], mid = del.messageId;
       const ack = mid ? mine.find((s) => s.verb === 'ack' && s.args[0] === mid) : null;
-      const result = mid ? mine.find((s) => s.verb === 'result' && s.args[0] === mid) : null;
+      const forOfReceipt = new Map(mine.filter((s) => s.verb === 'act' && s.out?.receipt?.id && s.out?.for).map((s) => [s.out.receipt.id, s.out.for]));
+      const result = mid ? mine.find((s) => (s.verb === 'result' && s.args[0] === mid) || closureOf(s, forOfReceipt)?.id === mid) : null;
       // An act belongs to a request when the CLI says so (`for`); a refusal carries no `for`, so an act between this
       // request's ack and result calls in the same transcript belongs to it too.
       const between = (s) => ack && s.line > ack.line && (!result || s.line < result.line);
@@ -135,7 +136,7 @@ export function joinRequests(sr) {
       const say = mine.filter((s) => s.verb === 'say' && between(s));
       const cutMs = cut ? Date.parse(cut.t) : null;
       const physical = acts.map((s) => ({ capability: s.out?.receipt?.capability ?? s.out?.resolved ?? null, waited: s.args.includes('--wait'), ...actOutcome(s), ref: ref(sr, s.file, s.resultLine ?? s.line) }));
-      const seatOutcome = result ? (result.out?.outcome ?? result.args[1] ?? null) : null;
+      const seatOutcome = result ? (result.out?.outcome ?? (result.verb === 'result' ? result.args[1] : closureOf(result, forOfReceipt)?.outcome) ?? null) : null;
       const r = {
         requestId: del.requestId, seat, channel: del.channel ?? dec.scripted?.channel ?? null, text: dec.scripted?.text ?? dec.decision?.text ?? null,
         budgetSec: dec.scripted?.budgetSec ?? null, broadcast: !!dec.scripted?.broadcast, sentAt: dec.t, messageId: mid ?? null,

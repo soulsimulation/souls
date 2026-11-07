@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonl } from '../lib/jsonl.mjs';
 
-export const SCORER = Object.freeze({ id: 'controllability', version: '3', path: 'tools/playtest/runs/controllability.mjs' });
+export const SCORER = Object.freeze({ id: 'controllability', version: '4', path: 'tools/playtest/runs/controllability.mjs' });
 export const SCORECARD_SCHEMA = 'soul-run-scorecard/1';
 
 // ---- refusal classes (#1097 A2, #628). Only `offer` counts against M1.
@@ -74,6 +74,18 @@ const SAY_VERBS = new Set(['say', 'converse']);
 const REPLY_VERBS = new Set(['ack', 'result']);
 const WAIT_VERBS = new Set(['wait', 'listen']);
 const MSG = /^msg_/;
+
+const flag = (args, name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] ?? null : null; };
+/** A close the step itself made (#1269): `closed: true` in its answer, from a client that needs no `result`. `ack` names the message
+ *  and `--close`, `say` names it with `--for`, and an `act` or `wait` the world closed names it through `for` or the act that took
+ *  the receipt, and its outcome is the receipt's. Returns {id, outcome}, or null when the step closed nothing we can place. */
+export function closureOf(s, forOfReceipt = new Map()) {
+  if (s.out?.closed !== true) return null;
+  const id = s.verb === 'ack' ? s.args[0] : s.verb === 'say' ? flag(s.args, '--for') : s.out.for ?? forOfReceipt.get(s.out.receipt?.id) ?? null;
+  if (!MSG.test(id ?? '')) return null;
+  const outcome = s.verb === 'ack' ? flag(s.args, '--close') : s.verb === 'say' ? 'done' : s.out.receipt?.phase === 'completed' ? 'done' : 'failed';
+  return ['done', 'failed'].includes(outcome) ? { id, outcome } : null;
+}
 
 /** The assistant turns of one transcript: stream events sharing a message id are one model decision. */
 export function seatDecisions(file) {
@@ -262,10 +274,13 @@ function scoreSeat(sr, seat, packs) {
   for (const s of steps) if (isPlanCall(s) && reasons.get(s.turn) !== 'onboard') actRows.push(...readPlan(s, plans, planCounted));
 
   // Which message each act and reply belongs to: the world's `for`, the id the seat named, or the seat's latest ack.
-  const closedAt = new Map(), resultOf = new Map(), ackAt = new Map();
+  const closedAt = new Map(), resultOf = new Map(), ackAt = new Map(), forOfReceipt = new Map();
   for (const s of steps) {
     if (s.verb === 'ack' && MSG.test(s.args[0] ?? '')) { if (!ackAt.has(s.args[0])) ackAt.set(s.args[0], s); }
     if (s.verb === 'result' && MSG.test(s.args[0] ?? '') && !resultOf.has(s.args[0])) { resultOf.set(s.args[0], s); closedAt.set(s.args[0], s.line); }
+    if (s.verb === 'act' && s.out?.receipt?.id && MSG.test(s.out.for ?? '')) forOfReceipt.set(s.out.receipt.id, s.out.for);
+    const c = closureOf(s, forOfReceipt);
+    if (c && !resultOf.has(c.id)) { resultOf.set(c.id, { verb: 'result', args: [c.id, c.outcome], out: { outcome: c.outcome }, line: s.line, resultLine: s.resultLine, atMs: s.atMs, doneMs: s.doneMs, viaClose: true }); closedAt.set(c.id, s.line); }
   }
   // The client closes a plan's message itself. The seat knows only once a report says so; until then it is an open intention.
   for (const p of plans.values()) if (p.for && p.ended && !resultOf.has(p.for)) {
@@ -282,7 +297,7 @@ function scoreSeat(sr, seat, packs) {
       if (r) { r.intention = r.for ?? current; actFor.set(r.line, r.intention); }
     }
     if (isPlanCall(s)) for (const r of actRows.filter((x) => x.viaPlan && x.line === (s.resultLine ?? s.line))) { r.intention = r.for ?? current; actFor.set(r.line, r.intention); }
-    if (s.verb === 'result' && s.args[0] === current) current = null;
+    if ((s.verb === 'result' && s.args[0] === current) || (current && closedAt.get(current) === s.line)) current = null;
   }
 
   const hasBody = (id) => actRows.some((r) => r.intention === id);
