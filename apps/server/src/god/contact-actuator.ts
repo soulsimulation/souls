@@ -225,6 +225,11 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
    if(ins){const slots=new Set(ins.slots.map(s=>s.id)),holds:string[]=[];for(const c of m.children.get(target)??[]){const x=m.entities.get(c);if(!x||!slots.has(x.in.slot??''))continue;const n=x.name??(m.resolvedDef(x.def)?.name.replace(/^core-/,'')??'something'),note=noted?d.keptNote?.(target,c,soul):null;holds.push(note?`${n} (${note})`:n);}if(holds.length)facts.holds=holds.sort();}
    return facts;
   },
+  /** #427: how far (m) this thing shades the ground around it now: a def tagged `shade` while it is open, the disc of its size box. */
+  shade(target:string){
+   const m=d.model(),e=m.entities.get(target),def=e&&m.resolvedDef(e.def);if(!e||!def||!def.tags.includes('shade')||actuatedState(e,def).open!==true)return 0;
+   return def.size.box[0]/2*m.worldPose(e).s;
+  },
   searched:(soul:EdgeSoul,spot:string,failed?:boolean,overlapped?:boolean)=>d.searchOutcome?.(soul,spot,failed,overlapped)??null,
   /** Entry 33: a neon sign's words for a Soul near it (the same nearby rule as `facts`): its owner's text, at most 32
    *  characters on two lines, control characters removed, with the owner ref that set it. Untrusted text. */
