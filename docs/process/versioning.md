@@ -14,7 +14,7 @@ named beside each one is the authority.
 | Schema notes | 2.9.3 | `schemaNotes` in `SOURCES.json` | moves with the guide |
 | Instructions | 2.0.3 | `instructions` in `SOURCES.json` | a new published capture |
 | Managed runtime | 0.1.0 | `runtime` in `SOURCES.json` | a new runtime publication |
-| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.19 | `cli` in `SOURCES.json` | retained; `tools/edge-skill/eden-agent.mjs` says 1.9.20, which is not what worlds serve |
+| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.19 | `cli` in `SOURCES.json` | retained; `tools/edge-skill/eden-agent.mjs` says 1.9.20, which is not what worlds serve. Since #949 the served file is that build with one printed sentence changed, so don't rebuild it casually: a rebuild brings in the later source |
 | Edge wire contract | `eden-edge/1` | `EDGE_CONTRACT` in `apps/server/src/edge/contract.ts` | a breaking wire change; none so far |
 | Edge API contract | `eden-edge/1.1` | `BOOT_API_CONTRACT` in `apps/server/src/edge/boot/routes.ts` | additive changes |
 | Build id | `we-<sha12>` | `build` in `/v1/config` and `/__sim/healthz` | every build, from the commit |
