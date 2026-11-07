@@ -23,7 +23,7 @@ type V2 = [number, number];
 export const SIGHT_RADIUS = 30;
 /** Things (seats, spots, fires, items) are listed within this many metres. */
 export const OBJECT_RADIUS = 15;
-const LIMITS = {near: 6, objects: 6, seats: 3, exits: 5, conversations: 3};
+const LIMITS = {near: 6, objects: 6, seats: 3, exits: 5, conversations: 3, flags: 6};
 
 export type Located = {kind: 'soul' | 'seat' | 'fire' | 'spot' | 'object' | 'item' | 'fixture' | 'place'; id: string; name: string; at: V2; entityId?: string; free?: boolean; capability?: string; distance: number;level?:number; what?: string};
 
@@ -186,6 +186,15 @@ export class Perception {
   }
 }
 
+/** #1281: the world's named flags, nearest first, each with the walk that goes there: a Soul reading only `here` can't say a
+ *  flag isn't there. Flags are public (the map lists them). */
+function flagLines(ledger: EdgeLedger, P: Perception) {
+  const all = (ledger as {namedFlagsV1?: () => {name: string; walk: string; at: V2}[]}).namedFlagsV1?.() ?? [];
+  if (!P.pos || !all.length) return {};
+  const pos = P.pos, flags = all.map(f => ({f, d: dist2(pos, f.at)})).sort((a, b) => a.d - b.d || a.f.walk.localeCompare(b.f.walk));
+  return {flags: flags.slice(0, LIMITS.flags).map(({f, d}) => `${f.name} · ${compassPoint(compassOf(f.at[0] - pos[0], f.at[1] - pos[1]))} ${Math.round(d)}m · ${f.walk}`),
+    ...(flags.length > LIMITS.flags ? {flagsMore: flags.length - LIMITS.flags} : {})};
+}
 /** Floors (2026-10-26): the raised floors near the body in plain words — the one it stands on, or how far one is, the
  *  step up and which sides are open — so an agent knows the true floors and openings of the buildings around it. */
 const SIDE_WORDS: Record<string, string> = {N: 'north', NE: 'northeast', E: 'east', SE: 'southeast', S: 'south', SW: 'southwest', W: 'west', NW: 'northwest'};
@@ -368,7 +377,8 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
     near, objects, ...(Object.keys(more).length ? {more} : {}), conversations_in_earshot: conversations, exits, ...(() => {const f = floorLines(ledger, P); return f.length ? {floors: f} : {};})(),
     ...(() => {const l = ledger.projects?.hereLines(soul) ?? []; return l.length ? {projects: l} : {};})(),
     // knowledge/1: the district summarised, far districts as names and directions (more once visited)
-    ...(ledger.knowledge?.scales(soul.soulId, ledger.placePathOf(soul.soulId).filter(p => p.kind !== 'occupier').map(p => p.id), P.pos, c ? c.hour * 60 + c.minute : null) ?? {}),
+    ...(ledger.knowledge?.scales(soul.soulId, ledger.placePathOf(soul.soulId).filter(p => p.kind !== 'occupier').map(p => p.id), P.pos, c ? c.hour * 60 + c.minute : null, id => P.menu().caps.find(x => x.verb === 'walk' && x.available && x.target?.kind === 'place' && x.target.id === id)?.id) ?? {}),
+    ...flagLines(ledger, P),
     untrusted: true,
   };
   if(!options.doHere)return frame;
