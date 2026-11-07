@@ -61,7 +61,7 @@ export type WorldState = {
   /** Explicit prospective office guard prisms; absent on all earlier worlds. */
   officeStairGuardsV1?:import('./office-stair-guards-v1.ts').OfficeStairGuardsV1;
   /** #1150 rung 3: rule breaks the world could not repair, kept visible. Each is counted once and leaves when it stops firing. */
-  containedV1?:{code:string;subjects:string[]}[];
+  containedV1?:{code:string;subjects:string[];until?:number}[];
   authoredBoundariesV1?:import('./authored-boundaries-v1.ts').AuthoredBoundariesV1;
   schema: string;
   base: BaseRef;

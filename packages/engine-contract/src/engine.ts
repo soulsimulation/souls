@@ -123,6 +123,8 @@ export interface Engine {
   stopAllV1?(why: { code: string; message: string }): number;
   setClockV1?(tick: number): void;
   containV1?(): { contained: { code: string; subjects: string[] }[]; relocated: string[] };
+  /** #1150: a rule is firing that isn't contained. */
+  uncontainedV1?(): boolean;
   /** Stop a running program (the actor is left idle where it is). */
   /** `untilSafe` (PC08, a shared carry's stop): the programme stays until its native cleanup has finished, retrying a
    *  refused cancel each tick the action moves (not while it is held up), as a physical runtime does; without it,

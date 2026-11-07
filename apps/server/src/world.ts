@@ -82,6 +82,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
 const REWIND_COOLDOWN_TICKS = 1200;
 /** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
 const STEP_FAILING_WINDOW_TICKS = 200, STEP_FAILING_FAULTS = 100;
+/** #1150: at most one stop in place a second for a rule that isn't contained yet, so a rule can't grow the log every tick. */
+const LOOSE_RULE_TICKS = 20;
 /** What rung 3 leaves out: decisions, and the facts that only mean something for a programme a decision started. */
 const DROPPED_ON_REWIND = new Set(['decision', 'play', 'edge-stop', 'intent-admission-v2', 'intent-arrival-v1', 'intent-sleep-stop-v1']);
 export type RecoveryPose = { p: [number, number, number]; yaw: number; level: number };
@@ -1600,12 +1602,17 @@ export class WorldHost {
   /** #1150 rung 3 with no restore: stop what runs, contain what fires. Only a list and some stops, so it can't fail. A replay
    *  makes the same stops from the event, so a stop is never left unwritten; a fault that only repeats is written once per
    *  cooldown. The fold does this on a replay; live it runs here, so the event can carry what it found. */
+  private looseAt = -Infinity;
   private containInPlace(error: unknown) {
     const tick = this.engine.world.tick, facts = faultFacts(error), key = `${facts.rule}|${facts.bodies.join()}`, seen = this.inPlaceAt.get(key);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
     const stopped = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
-    if (repeat && !stopped) { this.tellQuietly(false); return; }
+    // a repeat with nothing stopped has nothing to write, unless a rule is firing outside the list: that is what this rung is for,
+    // and it would otherwise fault every tick for good. A rule whose subjects never settle is contained at most once a second.
+    const loose = repeat && !stopped && tick - this.looseAt >= LOOSE_RULE_TICKS && !!this.engine.uncontainedV1?.();
+    if (repeat && !stopped && !loose) { this.tellQuietly(false); return; }
+    if (loose) this.looseAt = tick;
     if (!repeat) this.inPlaceAt.set(key, tick);
     const inPlace = {...this.engine.containV1!(), reason: String(error).slice(0, 800)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};

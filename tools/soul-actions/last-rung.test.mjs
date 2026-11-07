@@ -19,7 +19,7 @@ import {marsFactory, GREEN_FIELD_WORLD} from '../../packages/engine-mars/src/eng
 import {forgetMotion} from '../../mars/viewer/engine/runtime/invariants.ts';
 import {kernelHash} from '../../apps/server/src/fold.ts';
 
-const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true}), today = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true});
+const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true}), today = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: false});
 function faulted(base, control) {
   const wrap = (e) => {
     const rt = e.rt, fired = new WeakSet(), step = e.step.bind(e);
@@ -170,7 +170,7 @@ test('L3 decisions are left out, and god edits and Souls are kept', async (t) =>
   assert.ok(r.lastRung); assert.equal(r.untilTick, tick); assert.equal(r.events.filter((x) => x.kind === 'decision').length, 0); assert.ok(r.events.some((x) => x.kind === 'world-edit'));
 });
 
-test('L4 what still fires is contained: counted once, no second fault, gone when it stops firing, and no key when empty', async (t) => {
+test('L4 what still fires is contained: counted once, no second fault, gone a hold after it stops firing, and no key when empty', async (t) => {
   t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {});
   const w = await world(t), host = w.f.host, {Ada} = w.souls, eng = () => host.engine; let firing = true;
   await w.tick(5); const before = eng().stateHash();
@@ -179,8 +179,8 @@ test('L4 what still fires is contained: counted once, no second fault, gone when
   assert.ok(before);
   w.f.host.factory.restore = w.factory.restore;
   await w.tick(20);
-  assert.equal(host.paused, false); assert.deepEqual(eng().world.containedV1, [{code: 'support.floating', subjects: ['g-standing']}]); assert.equal(byRung(host).rewind, 1, 'counted once');
-  firing = false; await w.tick(3);
+  assert.equal(host.paused, false); assert.deepEqual(eng().world.containedV1.map(({code, subjects}) => ({code, subjects})), [{code: 'support.floating', subjects: ['g-standing']}]); assert.equal(byRung(host).rewind, 1, 'counted once');
+  firing = false; await w.tick(3); assert.equal(eng().world.containedV1?.length, 1, 'it stays through a hold, so a flicker is not a fault'); await w.tick(1205);
   assert.equal('containedV1' in eng().world, false, 'off the list, and no key'); ok(await act(w, Ada, {capability: 'walk:shed'}));
 });
 
@@ -234,7 +234,8 @@ const rows = (w, where = '1') => w.f.db.db.prepare(`SELECT COUNT(*) n FROM event
 // each fires at the ticks it was armed for, live and in every replay, as a bug in the engine would
 const armed = (w) => { const at = w.control.ticks ??= new Set(); at.add(w.f.host.engine.world.tick + 2); return at; };
 const faultOnce = {
-  'a violation': async (w, s) => { const at = armed(w); w.control.every = (r) => at.has(r.tick) ? [{code: 'support.floating', message: 'forced', subjects: [s.entityId]}] : []; await w.tick(4); },
+  // who it names is a function of the tick, so a replay fires the same rule
+  'a violation': async (w, s) => { const at = armed(w), whom = w.control.whom ??= new Map(); whom.set(w.f.host.engine.world.tick + 2, s.entityId); w.control.every = (r) => at.has(r.tick) ? [{code: 'support.floating', message: 'forced', subjects: [whom.get(r.tick)]}] : []; await w.tick(4); },
   'a thrown step': async (w) => { const at = armed(w); w.control.midThrow = (e) => at.has(e.world.tick); await w.tick(4); },
   'a throw before the tick moves': async (w) => { const at = armed(w); w.control.preThrow = (e) => at.has(e.world.tick); await w.tick(4); },
 };
@@ -245,7 +246,7 @@ for (const [kind, once] of Object.entries(faultOnce))
     host.lastRewindTick = host.engine.world.tick;
     await once(w, Ada); assert.equal(rows(w, "author='world:rewind'"), 1);
     const walk = ok(await act(w, Bo, {capability: 'walk:shed'})); await w.tick(10); assert.ok(host.engine.programOf(Bo.entityId));
-    await once(w, Ada); await w.tick(8);
+    await once(w, Bo); await w.tick(8);   // a new one: the same rule on the same subjects is held, and stops nobody again
     assert.equal(rows(w, "author='world:rewind'"), 2); assert.equal(host.engine.programOf(Bo.entityId), null);
     assert.equal(read(w, Bo, walk).code, 'world.rewound');
     const hash = host.engine.stateHash(), tick = host.engine.world.tick, h2 = reboot(t, w, path);
@@ -443,6 +444,41 @@ for (const inPlace of [true, false])
     assert.equal(rows(w, "json_extract(payload, '$.after') = 1"), 0); assert.equal(host.engine.world.tick, tick, 'no step from that head');
     assert.equal(host.paused, true); assert.equal(host.glitches.byRule['durability.repair'].halt, 1);
   });
+
+// The steward's three, forced: a rule that could be contained must be, whatever the host was doing when it began.
+const loose = (w, code = 'support.floating') => ({stuck: () => !!w.f.host.stepFailing, contained: () => (w.f.host.engine.world.containedV1 ?? []).some((c) => c.code === code)});
+const settles = async (t, w, Ada, baseRows) => {
+  const l = loose(w); await w.tick(300);
+  assert.equal(l.contained(), true, 'contained'); assert.equal(l.stuck(), false, 'not refused'); ok(await act(w, Ada, {capability: 'walk:shed'}));
+  assert.ok(rows(w, "author='world:rewind'") - baseRows <= 12, `a bounded number of rows: ${rows(w, "author='world:rewind'") - baseRows}`);
+};
+test('a rule that drops out twice inside a minute and then fires steadily is contained, and Souls act', async (t) => {
+  quiet(t); const w = await world(t), {Ada} = w.souls, at = w.f.host.engine.world.tick + 5, off = new Set([at + 2, at + 4]), base = rows(w, "author='world:rewind'");
+  w.control.every = (r) => (r.tick >= at && !off.has(r.tick) ? [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}] : []);
+  await settles(t, w, Ada, base);
+});
+test('a rule whose subjects change and settle on one seen before is contained, and Souls act', async (t) => {
+  quiet(t); const w = await world(t), {Ada} = w.souls, at = w.f.host.engine.world.tick + 5, base = rows(w, "author='world:rewind'");
+  w.control.every = (r) => { const n = r.tick - at; if (n < 0) return []; const subjects = n < 3 ? ['g-a'] : n < 6 ? ['g-b'] : n < 9 ? ['g-c'] : ['g-a']; return [{code: 'support.floating', message: 'forced', subjects}]; };
+  await settles(t, w, Ada, base);
+});
+test('a rule that begins in a stretch of thrown steps, which then end, is contained, and Souls act', async (t) => {
+  quiet(t); const w = await world(t), {Ada} = w.souls, host = w.f.host, base = rows(w, "author='world:rewind'");
+  w.control.throwEvery = true; await w.tick(160); assert.ok(host.stepFailing, 'failing');
+  w.control.every = () => [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}]; await w.tick(10);
+  w.control.throwEvery = false; await settles(t, w, Ada, base);
+});
+test('a rule that flickers every other tick costs a row, not a row a flicker', async (t) => {
+  quiet(t); const w = await world(t), {Ada} = w.souls, base = rows(w, "author='world:rewind'");
+  w.control.every = (r) => (r.tick % 2 ? [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}] : []);
+  await w.tick(600); assert.ok(rows(w, "author='world:rewind'") - base <= 2, String(rows(w, "author='world:rewind'") - base)); assert.equal(w.f.host.stepFailing, null); ok(await act(w, Ada, {capability: 'walk:shed'}));
+});
+test('a stop in place on a loose rule replays to the same state', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, repair, path), at = w.f.host.engine.world.tick + 5;
+  w.control.every = (r) => (r.tick >= at && r.tick !== at + 2 ? [{code: 'support.floating', message: 'forced', subjects: ['g-standing']}] : []);
+  await w.tick(120); const was = w.f.host.engine.world.containedV1;
+  const h = reboot(t, w, path); assert.deepEqual(h.engine.world.containedV1?.map((c) => c.code), was.map((c) => c.code));
+});
 
 test('a durability failure still halts, and says so', async (t) => {
   t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {});
