@@ -3626,7 +3626,11 @@ async function serveForeground() {
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
     if (m.op === "pending") { const out = takePending(st); persist(); return out; }
-    if (m.op === "status") return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    if (m.op === "status") {
+      // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
+      if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }); if (r.status > 0 && r.status < 500) worldDown = null; }
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "http") {
       const path = routeOf(m.url);

@@ -32,7 +32,8 @@ async function world(t) {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const close = () => new Promise((r) => { server.closeAllConnections(); server.close(r); });
   t.after(close);
-  return { w, close, url: `http://127.0.0.1:${server.address().port}/w/a` };
+  const port = server.address().port, reopen = () => new Promise((r) => server.listen(port, '127.0.0.1', r));
+  return { w, close, reopen, url: `http://127.0.0.1:${port}/w/a` };
 }
 function folder(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'soul-status-'))); t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -108,4 +109,6 @@ test('serve --status says when the world stops answering', async (t) => {
   await f.close();
   assert.ok(await until(async () => (await f.run('serve', '--status')).d.reachable === false, 15000));
   assert.equal((await f.run('serve', '--status')).d.serving, true);
+  await f.reopen();
+  assert.equal((await f.run('serve', '--status')).d.reachable, true, 'the moment the world is back, whatever the backoff');
 });
