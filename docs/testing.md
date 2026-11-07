@@ -24,6 +24,10 @@ pnpm test:client                             # Soul client and client-eval suite
 pnpm test                                    # everything (slow; prefer the focused forms)
 ```
 
+In CI, every god-skill unit test (each `*.test.mjs` under `tools/god-skill/`, its `lib/`, `scripts/` and `e2e/`, the
+replay corpus among them; none needs a browser or a live server) runs on the `server-0` job (`godSkill` and
+`GOD_SKILL_TESTS` in `.github/scripts/ci-scope.mjs`), which any `apps/server/` or `tools/god-skill/` change selects.
+
 The Pip authoring example's renderer test is manual, not part of CI: it needs pulled media and loads renderer code
 with parameter properties, so run `node --experimental-transform-types --test tools/body-authoring/robot/robot.test.mjs`
 when you change `tools/body-authoring/robot/` or the humanoid renderer it fits.
@@ -61,6 +65,10 @@ node tools/test-harness/bundle-budget/budget.mjs --build --write     # accept a 
 ```
 
 The gate never writes the baseline; only a reviewed commit does.
+
+The comparison runs in two places: the CI job `types-web`, on the build it already makes, so growth fails `ci-ok` on the
+PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
+`types-web`.
 
 ## Conformance
 
@@ -130,6 +138,11 @@ is behind main can still leave with `needs:rebase`. The decision is `windowFor` 
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
 `packages/engine-*`) and by every full-scope run, including each push to main, and a failure blocks through `ci-ok`. It
 is not a gate step, so the gate's suite tree and cached baseline don't change.
+
+**Soul runtime and trace tests.** `tools/soul-runtime/*.test.mjs` and `tools/soul-trace/*.test.mjs` run as the CI job
+`soul-tools`, about 17 s measured on a loaded laptop. It is picked by its own paths (`tools/soul-runtime`,
+`tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
+`ci-ok`. Like `soul-actions`, it is not a gate step.
 
 **Self-hosted runners.** The heavy `qualify` legs run on the runners named by the repository variable
 `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners. The browser `smoke` leg
