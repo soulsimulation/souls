@@ -49,7 +49,6 @@ const once = async (ref, r, stubs = [], {more = null, only = null} = {}) => {
   if (only) {await leg(only, only); return out;}
   const id = god.model.get('door').id, inside = () => (body().pose.p[0] - o[0]) * s + (body().pose.p[2] - o[1]) * c > 0, shut = () => god.model.get('door').state?.open === false;
   const through = async (name, wantInside) => {await leg(wantInside ? 'walk:inside-bench' : 'walk:outside-lamp', name); if (out.at(-1)[1] === 'completed') {assert.equal(inside(), wantInside, `${ref} r=${r} ${name}: the far side`); if (!stubs.length) assert.ok(shut(), `${ref} r=${r} ${name}: shut behind her`);}};
-  // with a wall in the way the shutting can fail by name, and the walk goes on with the door left open
   await through('in', true); await through('out', false);
   // by hand from each side: the hand opens it, she crosses the open doorway, and it is shut from there
   for (const wantInside of [true, false]) {
@@ -113,6 +112,8 @@ test('a door beside the way, with no room to shut it, does not answer for the wa
 
 test('a sidestep still held when the gap turns solid fails by name, never a fault', {timeout: 120000}, async () => {
  for (const [r, stubs] of [[0.4, [[-1, 0.62, -0.3, 0.62]]], [0.571, [[-1, 0.62, -0.3, 0.62]]], [0.4, [[-1.1, 0.62, -0.4, 0.62]]]]) {
-  for (const [name, code] of await once('core/door@3', r, stubs)) assert.notEqual(code, 'engine.fault-recovered', `r=${r} ${name}`);
+  const legs = await once('core/door@3', r, stubs);
+  for (const [name, code] of legs) assert.notEqual(code, 'engine.fault-recovered', `r=${r} ${name}`);
+  assert.ok(legs.some(([, code]) => code === 'contact.step-blocked'), `r=${r}: ${JSON.stringify(legs)}`);
  }
 });
