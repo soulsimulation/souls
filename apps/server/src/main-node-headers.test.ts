@@ -11,7 +11,7 @@ import {SECURITY_HEADERS, secureNodeResponse} from './http.ts';
 import {createServer} from 'node:http';
 import {fixture, invite} from '../test/native-owner-fixture.ts';
 import {handleMcp} from './mcp.ts';
-import {marsFactory, GREEN_FIELD_WORLD} from '@sim/engine-mars';
+import {marsFactory, GREEN_FIELD_WORLD} from '@souls/engine-mars';
 
 const port = 4953, base = `http://127.0.0.1:${port}/w/eden`;
 const secure = (h: Headers, why: string) => { for (const [name, value] of Object.entries(SECURITY_HEADERS)) assert.equal(h.get(name), value, `${why}: ${name}`); };
