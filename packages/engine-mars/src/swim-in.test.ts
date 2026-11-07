@@ -66,30 +66,3 @@ test('a lake below a cliff has no safe walk-in entry despite deep water beyond i
  const g=lake();g.landforms[0]={id:'lake',kind:'carve',area,bed:-12,edge:6};g.waters[0].level=-8;
  const r=run(setup(g));assert.equal(r.end?.kind,'failed');assert.equal(r.end?.code,'swim.no-reachable-entry');
 });
-
-// #1288: a swim held up by a body that never moves ends honestly, as a walk with no headway does
-function heldUp(){const e=setup(lake());e.spawnHuman({id:'h_block',label:'Blocker',soul:'s_block'});const b=e.world.entities.h_block,h=e.world.entities.h_swimmer;
- h.pose.p=[22,h.pose.p[1],0];b.pose.p=[26,b.pose.p[1],0];return {e,b,h};}
-const run2=(e:any,id:string,max:number)=>{let end:any,n=0;for(;n<max&&!end;n++)end=e.step().programs.find((p:any)=>p.id===id&&['failed','completed','cancelled'].includes(p.kind));return {end,n};};
-test('#1288 W3: a swim held up for 30 s ends swim.stuck and leaves the swimmer free',()=>{
- const {e,h}=heldUp(),adm=e.perform({actor:'h_swimmer',label:'swim',steps:[{verb:'mars:swim_to',params:{x:32,z:0}}]});assert.equal(adm.ok,true,JSON.stringify(adm));
- const r=run2(e,adm.id,800);assert.equal(r.end?.kind,'failed',JSON.stringify(r));assert.equal(r.end?.code,'swim.stuck',JSON.stringify(r));
- assert.ok(r.n>=590&&r.n<=720,`near 30 s (tick ${r.n})`);assert.equal(h.human.task,undefined);assert.ok(['tread','idle'].includes(h.human.activity),h.human.activity);
-});
-test('#1288 W4: a swim that waits and then gets past completes, and the count starts again',()=>{
- const {e,b}=heldUp(),adm=e.perform({actor:'h_swimmer',label:'swim',steps:[{verb:'mars:swim_to',params:{x:32,z:0}}]});assert.equal(adm.ok,true,JSON.stringify(adm));
- // two holds of 400 ticks, 800 in all, with headway between: only a hold in one go ends it
- const body=e.world.entities.h_swimmer;for(let i=0;i<400;i++)e.step();
- b.pose.p=[26,b.pose.p[1],8];for(let i=0;i<20;i++)e.step();
- b.pose.p=[body.pose.p[0]+1,b.pose.p[1],0];for(let i=0;i<400;i++)e.step();assert.equal(body.human.task!==undefined,true,'still swimming');
- b.pose.p=[26,b.pose.p[1],8];
- const r=run2(e,adm.id,1500);assert.equal(r.end?.kind,'completed',JSON.stringify(r));
-});
-test('#1288 W5: an unhindered swim holds no wait state, and a held one keeps its count across a restore',()=>{
- const free=setup(lake());free.world.entities.h_swimmer.pose.p=[22,free.world.entities.h_swimmer.pose.p[1],0];
- const a=free.perform({actor:'h_swimmer',label:'swim',steps:[{verb:'mars:swim_to',params:{x:32,z:0}}]});for(let i=0;i<40;i++)free.step();assert.equal(a.ok,true);
- assert.ok(!JSON.stringify(free.snapshot()).includes('"waited"'),'no new state');
- const {e}=heldUp(),adm=e.perform({actor:'h_swimmer',label:'swim',steps:[{verb:'mars:swim_to',params:{x:32,z:0}}]});for(let i=0;i<300;i++)e.step();
- const b=factory.restore(e.snapshot()) as any;for(let i=0;i<200;i++){e.step();b.step();}assert.equal(e.stateHash(),b.stateHash());
- assert.equal(run2(b,adm.id,300).end?.code,'swim.stuck');
-});

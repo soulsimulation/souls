@@ -38,6 +38,9 @@ const STUCK_RADIUS = 0.34;
 /** D2: a seat this close (m) with no enclosure boundary between is "here" for sit:here: a few steps (a fire-circle log, the
  *  bench by the fountain), never the 30 m walk to a chair in another house. 3 m failed the party and activities gates. */
 export const HERE_SEAT_M = 8;
+/** #1288: a swim that hasn't left this disc (m) in SWIM_HELD_TICKS ends: 30 s, as a walk with no headway does. */
+const SWIM_HEADWAY = 0.5, SWIM_HELD_TICKS = 600;
+const SWIM_STUCK_REASON = 'The swim made no headway for 30 seconds, so someone or something stayed in the way; choose another way or somewhere else.';
 const STUCK_REASON = 'The walk made no headway for 30 seconds, even after looking for another way from where it stood; choose another way or somewhere else.';
 import {EdgeError, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
 import {CATALOG} from '../../../../../mars/viewer/engine/world/catalog.ts';
@@ -475,7 +478,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       previewRaise: params => (this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message?: string; subjects?: string[]} | null}).previewMarsVerbV1?.('raise_hold_v1', params) ?? null,
       previewSeat: (verb, params) => (this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message?: string; subjects?: string[]} | null}).previewMarsVerbV1?.(verb, params) ?? null,
       previewBeam: params => (this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message?: string; subjects?: string[]} | null}).previewMarsVerbV1?.('connect_beam_v1', params) ?? null});
-    this.receiptListeners.push(r => {if(!OPEN.includes(r.phase)){this.actKeys.delete(r.id);this.menusChangedBy('receipt-closed', r.soulId, r.capability);}});
+    this.receiptListeners.push(r => {if(!OPEN.includes(r.phase)){this.actKeys.delete(r.id);this.swimsOpen?.delete(r.id);this.menusChangedBy('receipt-closed', r.soulId, r.capability);}});
     if (this.readOnly) return;
     // D1: the card's doing line names an edge act's approach ("walking to Kitchen chair") from this ledger's plans
     host.approachV1 = m => {const program = host.engine.programOf(m.entityId), r = program ? this.rows("soul_id=? AND phase='started' AND program_id=?", m.soulId, program)[0] : undefined; return r ? this.approachFor(m, r.receipt_id) : null;};
@@ -775,7 +778,25 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }catch{this.contactPending.delete(id);this.update(id,{phase:'failed',code:'contact.failed',reason:'The world could not apply the bound contact.'});}
     }
   }
+  /** #1288: open swims, by receipt, with where each last made headway. The engine's swim waits for ever behind a body that stays
+   *  put, and a repeat answers with the act under way, so the ledger ends a held swim with the logged stop a new act would use:
+   *  no engine state, and a replay is exact. Rebuilt from the open receipts after a restart, so a held swim ends 30 s after boot. */
+  private swimsOpen: Map<string, {at: [number, number]; since: number}> | null = null;
+  private swimWatch(tick: number) {
+    if (!this.swimsOpen) {this.swimsOpen = new Map(); for (const r of this.rows("phase IN ('waiting','started') AND capability LIKE 'swim:%'")) this.swimsOpen.set(r.receipt_id, {at: [NaN, NaN], since: tick});}
+    if (tick % 20 || !this.swimsOpen.size) return;
+    for (const [id, w] of this.swimsOpen) {
+      const r = this.rows('receipt_id=?', id)[0], m = r && this.host.minds.get(r.soul_id), p = m && this.body(m.entityId)?.pose.p;
+      if (!r || !OPEN.includes(r.phase as EdgeReceipt['phase'])) {this.swimsOpen.delete(id); continue;}
+      if (!m || !p || r.phase !== 'started' || this.host.quietBarrier || !(Math.hypot(p[0] - w.at[0], p[2] - w.at[1]) <= SWIM_HEADWAY)) {if (p) w.at = [p[0], p[2]]; w.since = tick; continue;}
+      if (tick - w.since < SWIM_HELD_TICKS) continue;
+      this.swimsOpen.delete(id);
+      this.update(id, {phase: 'failed', code: 'swim.stuck', reason: SWIM_STUCK_REASON});   // first: the stop's own cancel finds it ended
+      try {void this.host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId: m.entityId, receipt: id}).catch(() => {/* best effort */});} catch {/* clock not ready */}
+    }
+  }
   private afterTick(tick: number) {
+    this.swimWatch(tick);
     if(this.contactPending.size)this.contactTicks(tick);
     for (const [soulId, p] of this.pending) {
       if (this.host.quietBarrier) {p.deadline = Math.max(p.deadline, tick + WAIT_LIMIT_TICKS); continue;}   // the wait clock pauses during renewal
@@ -1591,7 +1612,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const again = this.repeatOf(soul, input);
     if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); this.comms?.fading.touch?.(soul.soulId); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}
     const replay = typeof input.clientRef === 'string' && !!this.coreA.byClientRef(soul.soulId, input.clientRef);   // its answer is another act's: nothing to note
-    try {const out = await this.actWork(soul, input); if (!replay) this.noteAct(input, out); return out;}
+    try {const out = await this.actWork(soul, input); if (!replay) this.noteAct(input, out); if (!replay && out.accepted && out.receipt.capability.startsWith('swim:') && OPEN.includes(out.receipt.phase)) this.swimsOpen?.set(out.receipt.id, {at: [NaN, NaN], since: this.host.engine.world.tick}); return out;}
     catch (e) {
       if (!(e instanceof EdgeError) || e.code !== 'shared.busy') throw e;
       const capability = typeof input.capability === 'string' ? input.capability : String(input.verb ?? '');

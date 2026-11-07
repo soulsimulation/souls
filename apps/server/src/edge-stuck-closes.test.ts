@@ -69,4 +69,10 @@ test('#1288 W3, W6: a swim offer held up by a Soul treading in its place ends sw
   assert.equal(end.phase, 'failed', JSON.stringify(end)); assert.equal(end.code, 'swim.stuck');
   assert.equal(body.human.task, undefined); assert.ok(['tread', 'idle'].includes(body.human.activity), body.human.activity);
   const again = await go(ann); assert.equal(again.accepted, true, JSON.stringify(again)); assert.equal(again.repeat, undefined); assert.notEqual(again.receipt.id, a.receipt.id);
+  // W4: held for a while, then he moves off: the swim goes on and arrives
+  for (let i = 0; i < 300; i++) await tick(1);
+  assert.ok(open(ann, again.receipt.id), 'held');
+  await accept(w.host, w.host.enqueue('edge-relocate', 'test:bank', {soulId: bob.soulId, entityId: bob.entityId, to: [-4, -30], why: 'bank'}));
+  for (let i = 0; i < 2000 && open(ann, again.receipt.id); i++) await tick(1);
+  assert.equal(edge.receipt(ann.soulId, again.receipt.id)!.phase, 'completed');
 });
