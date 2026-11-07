@@ -110,6 +110,7 @@ test('held things are let go of at the feet, and the reason names what was set d
 test('reason wording: buildings, construction sites, several things set down, no route', () => {
   assert.equal(walkoutReason({ verb: 'moving', subject: 'the church', how: 'walked', outside: true, seated: true }), 'The god is moving the church; you stood up and stepped outside.');
   assert.equal(walkoutReason({ verb: '', subject: 'Stone church', how: 'walked', outside: false, site: true, asleep: true }), 'The god started building Stone church here; you woke and stepped off the site.');
+  assert.equal(walkoutReason({ verb: 'placing', subject: 'a table', how: 'walked', outside: false, setDown: ['plank'], letGo: ['frame'] }), 'The god is placing a table; you set down the plank, you let go of the frame (it stays standing where it was) and stepped aside.');
   assert.equal(walkoutReason({ verb: 'removing', subject: 'the table', how: 'walked', outside: false, setDown: ['bowl', 'cup', 'book'] }), 'The god is removing the table; you set down the bowl, the cup and the book and stepped aside.');
   assert.equal(walkoutReason({ verb: 'reshaping', subject: 'the ground here', how: 'relocated', outside: false, lying: true }), 'The god is reshaping the ground here; you got up; no walking route was open, so you were moved safely aside.');
 });

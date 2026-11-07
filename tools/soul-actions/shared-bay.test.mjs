@@ -754,11 +754,11 @@ test('R12: with the flag off, nothing is offered and no project exists', {timeou
 // #1250, burial: a god edit walks a holder of a joined frame out. The walkout lets go of what it holds; a frame joined to
 // others is left standing where it was, as a god's joined upright is, so the engine and the god's model agree and the
 // crew can finish the bay. Laid flat, it kept its joints: the engine's frame lay on the ground while the model had it standing.
-test('#1250: a god edit that walks out a holder of a joined frame leaves it standing where it was, in the engine and the model, and the crew finish the bay', {timeout: 900000}, async (t) => {
+test('#1302: a god edit that walks out a holder of a joined frame leaves it standing where it was, in the engine and the model, and the crew finish the bay', {timeout: 900000}, async (t) => {
   const {w, held, holders} = await heldWhileExtended(t, {extend: false}), E = w.E, {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, pj = [...w.bridge.projects.rows.keys()][0];
   const was = structuredClone(E()[held].pose), p = E()[holders[0].entityId].pose.p;
   const r = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'in-the-way', p: [p[0], p[2]]}]})); await w.tick(60);
-  assert.ok(r.warnings.some((x) => x.startsWith('body.walked-out:') && /let go of the \w+, which stands where it was/.test(x) && !/set down/.test(x)), JSON.stringify(r.warnings));
+  assert.ok(r.warnings.some((x) => x.startsWith('body.walked-out:') && /let go of the \w+ \(it stays standing where it was\)/.test(x) && !/set down/.test(x)), JSON.stringify(r.warnings));
   assert.ok(holders.every((s) => !E()[s.entityId].human.grip), 'the crew let go');
   const now = E()[held].pose, m = w.god.model.entities.get(held);
   assert.deepEqual([now.p, now.yaw, now.roll], [was.p, was.yaw, was.roll], 'the frame stands where it was in the engine');
@@ -769,4 +769,27 @@ test('#1250: a god edit that walks out a holder of a joined frame leaves it stan
   await build(w, Ada, [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {project: pj});
   assert.equal(see(w, Ada, pj).state.complete, true); assert.equal(glitches(w), 0);
   await reboot(w); assert.equal(w.host.clockFailure, undefined);
+});
+
+test('#1302: mid-build, both frames held and one beam in, a walkout of a holder: both frames stand where they were, the other crew is let go, and the world goes on', {timeout: 900000}, async (t) => {
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]]; await yard(w);
+  let frames;
+  await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {
+    const {bound} = w.bridge.projects.rows.get(id); frames = [bound['upright-a'], bound['upright-b']];
+    const E = w.E(), beams = Object.values(E).filter((e) => e.def?.includes('rack-beam') && e.phase === 'installed' && e.connections?.length);
+    if (frames.every((f) => E[f]?.support?.kind === 'held') && beams.length >= 1) throw new Error('mid');
+  }}), /mid/);
+  const E = w.E, [fa, fb] = frames, holdersOf = (f) => Object.values(w.souls).filter((s) => E()[s.entityId].human.grip?.entity === f);
+  const was = frames.map((f) => structuredClone(E()[f].pose)), hb = holdersOf(fb), ha = holdersOf(fa); assert.equal(ha.length, 2); assert.equal(hb.length, 2);
+  const p = E()[hb[0].entityId].pose.p, r = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'in-the-way', p: [p[0], p[2]]}]})); await w.tick(60);
+  assert.ok(r.warnings.some((x) => x.startsWith('body.walked-out:') && /\(it stays standing where it was\)/.test(x)), JSON.stringify(r.warnings));
+  assert.deepEqual([...ha, ...hb].filter((s) => E()[s.entityId].human.grip).map((s) => s.name), [], 'both crews let go');
+  for (const [i, f] of frames.entries()) {
+    const now = E()[f].pose, m = w.god.model.entities.get(f);
+    assert.deepEqual([now.p, now.yaw, now.roll], [was[i].p, was[i].yaw, was[i].roll], `${f} stands where it was`);
+    assert.ok(Math.abs(m.p[1] - now.p[1]) < 0.01 && Math.abs(m.r[2] - now.roll) < 0.01, `and the model has it so: ${JSON.stringify(m)}`);
+  }
+  assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(glitches(w), 0); assert.equal(w.host.stepFailing, null);
+  ok(await act(w, ha[0], {capability: 'wave:here'}));
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); await w.tick(20); assert.equal(w.host.clockFailure, undefined);
 });

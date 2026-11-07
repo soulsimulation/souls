@@ -60,7 +60,7 @@ import { disassemblyPlan, DISASSEMBLY_POLICY } from './disassembly.ts';
 import { MARS_2026_MAP, withMars2026Map } from './mars-2026-map.ts';
 import { disassemblyRegistry } from '../../../mars/viewer/engine/construction/disassembly.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { connectBeamV1, frameProgress, framesFell, framesStand, framesUp, isFrame, settleFrames } from './beam-connect.ts';
+import { connectBeamV1, frameProgress, framesFell, framesStand, framesUp, isFrame, settleFrames, standing } from './beam-connect.ts';
 import { decksBear, installJoistV1, laySheetV1 } from './deck-install.ts';
 import { installFlightV1, installTreadV1, stairsBear } from './stair-install.ts';
 import { captureRenderScene, commonsSceneMetadataV1Schema, type RenderSceneCaptureV1, type RenderScene } from '@souls/engine-contract';
@@ -1460,6 +1460,8 @@ export class MarsEngine implements Engine {
    * and completed at its endpoint in this request; no engine/world ticks or unrelated actions are stepped.
    * All carried items are set down at `dropAt` (default: the body's original feet) before it leaves. Historical
    * edge-relocate stays unchanged; only its explicit godWalkout payload may use this stronger, synchronous intervention. */
+  /** #1302: a part a walkout lets go of that stays standing where it is: under shared building, a standing frame joined to others. */
+  letGoStandsV1(id:string):boolean{const e=this.ents[id];return this.cfg.sharedCarryV1===true&&isFrame(e)&&standing(e)&&(e.connections?.length??0)>0;}
   godWalkoutV1(id:string,to:[number,number],released:string[],how:'walked'|'relocated',dropAt?:[number,number,number],toLevel=0):boolean {
     const e=this.ents[id];
     if(!e?.human||!Array.isArray(to)||to.length!==2||!to.every(Number.isFinite)||!Array.isArray(released)||released.some(x=>typeof x!=='string')||!['walked','relocated'].includes(how))return false;
@@ -1470,7 +1472,7 @@ export class MarsEngine implements Engine {
     const start=this.godWalkoutStartV1(id)!,feet:[number,number,number]=[e.pose.p[0],e.pose.p[1],e.pose.p[2]],yaw=e.pose.yaw;
     const setDown:[number,number,number]=dropAt?[dropAt[0],dropAt[1],dropAt[2]]:feet;
     const reason={code:'god.walkout',message:'The god is rebuilding here; the activity ended and you stepped clear.',subjects:[id]};
-    const drop=new Set<string>();
+    const drop=new Set<string>(),stood:string[]=[];
     for(const item of listEntities(this.ents) as any[]){const support=item.support;if(support?.kind==='in-hand'&&support.by===id||support?.kind==='held'&&support.by.includes(id))drop.add(item.id);}
     // A shared carry is let go of too: the other carrier's action on that load ends with this one (never half-cancelled).
     const internal=this.rt.internals(),affected=new Set<string>(),resources=new Set([`actor:${id}`,`holds:${id}`,`hand:${id}:left`,`hand:${id}:right`,...[...released,...drop].map(x=>`entity:${x}`)]);
@@ -1503,9 +1505,9 @@ export class MarsEngine implements Engine {
     if(this.rt.services.socialReturns)this.rt.services.socialReturns=this.rt.services.socialReturns.filter((ret:any)=>ret.actor!==id&&!affected.has(ret.source)&&!affected.has(ret.directive));
     // Finish the seat's ordinary rise before admitting a native route from that standing point.
     const land=()=>{
-      // a part joined to others (shared building) stays where it is and stands by itself, as a god's joined upright does: laid
-      // flat it would keep its joints, the engine's frame lying while the god's model has it standing (#1250 burial)
-      for(const itemId of drop){const item=this.ents[itemId];delete item.reservedBy;if(this.cfg.sharedCarryV1===true&&item.connections?.length){item.support={kind:'ground'};item.phase='installed';continue;}placeOnGround(item,setDown,yaw);acknowledgeRelocation(this.rt,itemId);}
+      // #1302: a standing frame joined to others stays where it is and stands by itself, as a god's joined upright does: laid
+      // flat it would keep its joints, the engine's frame lying while the god's model has it standing
+      for(const itemId of drop){const item=this.ents[itemId];if(this.letGoStandsV1(itemId)){delete item.reservedBy;item.support={kind:'ground'};item.phase='installed';stood.push(itemId);continue;}delete item.reservedBy;placeOnGround(item,setDown,yaw);acknowledgeRelocation(this.rt,itemId);}
       e.pose.p=[r3(to[0]),toLevel===0&&field?r3(standOn(spatial.ground!,...to)):r3(spatial.base.levels.find(l=>l.id===toLevel)?.y??0),r3(to[1])];e.human.level=toLevel;
     };
     let walked=false;
@@ -1521,6 +1523,10 @@ export class MarsEngine implements Engine {
     }
     // No admitted walk (or no route at all): land at the same clear point, as a relocation.
     if(!walked)land();
+    // #1302: the crews holding the rest of that frame can't finish it with this part let go: they let go too, as when a
+    // crew's action breaks (abandonV1), and their parts stand where they are
+    if(stood.length){const group=new Set(stood);for(const x of group)for(const c of this.ents[x]?.connections??[])group.add(c.to);
+      for(const x of [...group].sort()){const by=this.ents[x]?.support?.kind==='held'?this.ents[x].support.by as string[]:[];for(const body of by)for(const h of this.holders(body))if(this.rt.isActive(h))this.abandonV1(h,`a crew on the same frame let go: ${x}`,FRAME_LET_GO);}}
     delete e.human.task;delete e.human.speed;e.human.activity='idle';acknowledgeRelocation(this.rt,id);
     this.rt.mark('god.walkout',{entityId:id,to:[...to],...(toLevel?{level:toLevel}:{}),how:walked?'walked':'relocated',released:[...drop].sort()});
     return true;
