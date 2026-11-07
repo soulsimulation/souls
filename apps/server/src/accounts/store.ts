@@ -220,7 +220,7 @@ export class AccountStore {
       // Lane SOULSIM-E (real-agent run 2026-10-21): a new Soul under a name already taken in this world was accepted here and
       // refused only when the person approved it, while the agent sat in `approval wait` for its full ten minutes. Refuse
       // it now, when the agent can still ask its person for another name. (A retry of a request made earlier is answered above.)
-      if (mode === 'create' && this.nameTaken(name)) fail('name-taken', `a soul named ${name} already exists in this world; ask your person for another name`);
+      if (mode === 'create' && this.nameTaken(name)) fail('name-taken', `a soul named ${name} already exists in this world. If it is yours, ask your person for the code on their open page: adopt ${name} --for <CODE>. If not, ask them for another name`);
       const id = nonce('ap_'), pollSecret = input.pollSecret ?? randomBytes(32).toString('base64url'), now = this.time();
       // Lane PUX: a live window code addresses the request to its account; an unknown or stale code leaves the link only
       // Lane PAIR-INWINDOW (Gene's review #1): a repair names a Soul whose owner is already known, so with no code the request
@@ -294,6 +294,14 @@ export class AccountStore {
     if (typeof code !== 'string' || !WINDOW_CODE.test(code)) return null;
     const row = this.db.db.prepare('SELECT account_id FROM account_window_codes_v1 WHERE world_id=? AND code=? AND expires_at>?').get(this.worldId, code, this.time()) as { account_id: string } | undefined;
     return row?.account_id ?? null;
+  }
+  /** #1274: whether a live window code's account holds this Soul. It conveys no control: approve() still checks membership. */
+  codeHolds(code: unknown, soulId: string): boolean { const account = this.codeAccount(code); return account !== null && this.member(soulId)?.account_id === account; }
+  /** #1274: the Soul ids a live window code's account holds in this world, or null for a code that is not live. */
+  codeSouls(code: unknown): string[] | null {
+    const account = this.codeAccount(code);
+    if (account === null) return null;
+    return (this.db.db.prepare('SELECT soul_id FROM account_soul_memberships_v1 WHERE world_id=? AND account_id=?').all(this.worldId, account) as { soul_id: string }[]).map((r) => r.soul_id);
   }
   /** Lane PUX: the signed-in person's window code (reused while it has over an hour left), for their agent's request. */
   windowCode(identity: AccountIdentity): { code: string; expiresAt: number } {
