@@ -1086,6 +1086,7 @@ export class EngineBridge {
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
     if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
+    else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
     if (this.rescued !== this.editTick && tick - this.editTick >= 10 && (tick - this.editTick >= 20 || tick - this.rescuedAt >= 40)) { this.rescuedAt = tick; this.rescueTrapped(); if (S) t = S.add('rescue', t); }
     if (S && S.due()) this.log(S.line(this));
@@ -1235,18 +1236,26 @@ export class EngineBridge {
   }
   /** Last tick each Soul was stepped out (nav-connect/1): at most once a minute each, as the ledger's walk rescue. */
   private navRescuedAt = new Map<string, number>();
+  /** #1287: Souls a rescue passed over because a program was running, asked again once it has ended. */
+  private navWaiting = new Set<string>();
+  private navRescueWaiting() {
+    const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m ? [m] : []; });
+    this.navRescueSouls(0, souls.filter((m) => !this.engine.programOf(m.entityId)));
+  }
   /** Step every Soul cut off from the main walkable area to open ground (logged). Returns how many were moved. A seated
    *  Soul is judged where it would stand up (its seat's approach): connected there, it stays seated and nothing is
    *  logged; when that spot is closed off it rises and lands on open ground once (a god walk-out, which a plain
    *  relocate cannot do to a held body). Only moves that change where a Soul is are logged or counted. */
-  private navRescueSouls(budgetMs = 0): number {
+  private navRescueSouls(budgetMs = 0, souls: Iterable<{ soulId: string; entityId: string; name: string }> = this.host.minds.values()): number {
     const E = this.engine as unknown as { navRescueV1?: (id: string, budgetMs?: number) => { to: Vec2; code: string; pocket?: number; level: number; seated?: true } | null };
     if (!E.navRescueV1) return 0;
     const tick = this.engine.world.tick;
     let n = 0;
-    for (const m of this.host.minds.values()) {
-      if (isVerificationProbe(m.soulId) || this.engine.programOf(m.entityId)) continue;
+    for (const m of souls) {
+      if (isVerificationProbe(m.soulId)) continue;
+      if (this.engine.programOf(m.entityId)) { this.navWaiting.add(m.soulId); continue; }
       if ((this.navRescuedAt.get(m.soulId) ?? -1e9) > tick - 1200) continue;
+      this.navWaiting.delete(m.soulId);
       const r = E.navRescueV1(m.entityId, budgetMs); if (!r) continue;
       const where = `${r.seated ? 'sat' : 'stood'} ${r.level ? `upstairs (floor ${r.level}) with no way down` : `in a closed-off ${r.pocket !== undefined ? `${Math.round(r.pocket)} m² ` : ''}pocket`}`;
       this.log(`${m.name} ${where} (${r.code}): steps to open ground at (${r.to.join(', ')})`);

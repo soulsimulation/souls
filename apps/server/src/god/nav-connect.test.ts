@@ -181,4 +181,26 @@ test('a Soul already cut off (an edit the hook did not see) steps out when its w
   assert.equal(out.accepted, true, JSON.stringify(out));
   const ev = w.db.events(w.host.worldId).filter((e: any) => e.kind === 'edge-relocate' && e.payload.policy === 'nav-connect/1');
   assert.equal(ev.length, 1, 'one logged step out'); assert.match(ev[0].payload.why, /nav-connect\/1: stood cut off \(nav\.disconnected\)/);
+  assert.equal(out.receipt.reason, 'Moved to open ground first: no walk led out from where you stood.', 'the receipt says so');
+});
+
+test('#1287: a Soul mid-walk when walls close round it is passed over, then steps out when its walk ends', async t => {
+  const w = world(t); await w.settle(1);
+  await invite(w, 'di'); const row: any = await accept(w.host, w.souls.create('dev:di', { name: 'Di', description: 'steady' })); await w.settle(8);
+  const s = { soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner };
+  const b0 = w.host.engine.world.entities[row.entity_id]!; assert.equal(w.E.relocateHumanV1(row.entity_id, [b0.pose.p[0] + 20, b0.pose.p[2]]), true); await w.settle(2);
+  const b = w.host.engine.world.entities[row.entity_id]!, at: [number, number] = [b.pose.p[0], b.pose.p[2]];
+  assert.equal((w.god.act({ ops: [{ op: 'define', def: box('crate', 0.6, 0.6) }, { op: 'place', def: 'crate@1', name: 'crate', p: [at[0] + 2.5, at[1] + 2.5] }] }) as any).accepted, true); await w.settle(3);
+  const walk: any = await accept(w.host, w.ledger.act(s as any, { capability: 'walk:crate' })); assert.equal(walk.accepted, true, JSON.stringify(walk)); await w.settle(3);
+  assert.ok(w.host.engine.programOf(row.entity_id), 'walking');
+  const r: any = w.god.act({ ops: ring(at, 9, 'd') }); assert.equal(r.accepted, true, JSON.stringify(r.failures));
+  const steps = () => w.db.events(w.host.worldId).filter((e: any) => e.kind === 'edge-relocate' && e.payload.policy === 'nav-connect/1');
+  assert.equal(steps().length, 0, 'not moved while it walks');
+  for (let i = 0; i < 600 && w.host.engine.programOf(row.entity_id); i++) await w.settle(1);
+  assert.equal(w.host.engine.programOf(row.entity_id), null, 'the walk ended');
+  await w.settle(15);
+  assert.equal(steps().length, 1, 'one logged step out, once it stopped');
+  const p = w.host.engine.world.entities[row.entity_id]!.pose.p;
+  assert.equal(w.E.navCheckV1([{ id: 'di', p: [p[0], p[2]], level: 0 }])[0].ok, true, 'out on the main area');
+  await w.settle(30); assert.equal(steps().length, 1, 'asked once, not every tick');
 });
