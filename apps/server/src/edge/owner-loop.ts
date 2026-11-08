@@ -20,6 +20,10 @@
 // replaces that line. An open-ended hold the body has reached (a sit or lie with no `seconds`) or a follow has done what
 // it was asked and holds nothing. Links are kept durably beside the receipts (`ownerLinkStore`), not in the world's log:
 // a restart keeps the guard and the close, and a link whose receipt is gone (a rewind or restore) is dropped.
+// #1329 (Eden smoke test, bug 8): a ride join (`object:<ride>:join`) completes at boarding, but the owner asked for the
+// ride: its message stays open ("now: aboard the <ride>") and the join counts as running while the body is aboard, so no
+// other close gets past it; it closes once the body is back on the ground: done when the ride departed with this Soul
+// aboard, failed when the Soul left before it did, or after RIDE_TICKS still aboard.
 import type {EdgeReceipt, EdgeSoul} from './contract.ts';
 import type {Db} from '../db.ts';
 import {messageSteps, type MessageStep, type StepTarget} from './ledger/vocabulary.ts';
@@ -167,7 +171,8 @@ export class OwnerLoop {
       try {
         const r = this.peek(soul, id);
         if (!r) {this.forget(id); continue;}
-        if (!OPEN.includes(r.phase)) continue;
+        // #1329: a ride join runs until the body is back on the ground (its receipt completed at boarding)
+        if (!OPEN.includes(r.phase)) {if (l.ride?.since !== undefined && this.world?.aboard?.(soul)) return r as EdgeReceipt; continue;}
         if (!mine.timed && this.world?.holding?.(soul, id)) continue;
         return r as EdgeReceipt;
       } catch {/* a link that can't be read holds nothing */}
@@ -202,11 +207,12 @@ export class OwnerLoop {
     if (!l.ride || r.phase !== 'completed' || !this.world?.aboard) return null;
     const ride = l.ride, now = this.world.aboard(r.soulId);
     if (now) {
+      const was = JSON.stringify(ride);
       ride.since ??= r.endedTick ?? r.acceptedTick;
       if (now.phase !== 'boarding') ride.flew = true;
       if (tick !== undefined && tick - ride.since >= RIDE_TICKS) return {text: `Still on the ${ride.name} after ${Math.round(RIDE_TICKS / 1200)} minutes.`, outcome: 'failed'};
       if (!ride.said) {ride.said = true; for (const one of [l, ...(l.also ?? [])]) this.inbox.serverProgress?.(one.scope, one.message, `now: aboard the ${ride.name}; not back on the ground yet`);}
-      this.keep(r.id, l);
+      if (JSON.stringify(ride) !== was) this.keep(r.id, l);   // written when it changes, not once a second
       return 'aboard';
     }
     // never seen aboard (a join that completed while the Soul was already out): the join's own line
