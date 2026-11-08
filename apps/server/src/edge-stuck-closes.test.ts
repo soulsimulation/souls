@@ -85,3 +85,37 @@ test('#1288 W3, W6, W7: a swim offer, and a go-near from deep water, held up by 
   for (let i = 0; i < 2000 && open(ann, again.receipt.id); i++) await tick(1);
   assert.equal(edge.receipt(ann.soulId, again.receipt.id)!.phase, 'completed');
 });
+
+test('#1288 review: a swim sent again while the first is held gets its own 30 s', {timeout: 300000}, async t => {
+  const w = fixture(':memory:', factory, {durableClockV1: true}); w.brain.quiesce();
+  const god = new GodMode(w.db, {worldId: w.host.worldId, ownerId: 'owner', tick: () => w.host.engine.world.tick, emit() {}});
+  new GroundHost(w.db, w.host, god); const edge = new EdgeLedger(w.host, w.db);
+  installGroundCapabilities(edge as never, god, w.host); installEngineBridge({host: w.host, god, edge, log() {}, worldClock: false, worldLore: false});
+  t.after(() => {w.brain.quiesce(); w.host.stop(); edge.comms?.close(); w.db.close();});
+  const tick = async (n: number) => {for (let i = 0; i < n; i++) {w.host.tickOnce(); if (i % 20 === 0) {await setImmediate(); w.host.drainInputs();}}};
+  await tick(4);
+  assert.equal((god.act({ops: [{op: 'place', def: 'core/pond@1', name: 'progress-pond', params: {depth: 3}, shape: {area: [[-22, -36], [-10, -36], [-10, -24], [-22, -24]]}}]} as never) as {accepted: boolean}).accepted, true); await tick(4);
+  const soul = async (n: string) => {
+    await invite(w, n); const row = await accept(w.host, w.souls.create('dev:' + n, {name: n, description: 'swims'})) as any; await tick(4);
+    await accept(w.host, w.host.enqueue('edge-relocate', 'test:bank', {soulId: row.id, entityId: row.entity_id, to: [-4, -30], why: 'bank'})); await tick(4);
+    return {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner};
+  };
+  const bob = await soul('bob'), ann = await soul('ann'), SWIM = 'swim:progress-pond/middle', open = (s: typeof bob, id: string) => ['waiting', 'started'].includes(edge.receipt(s.soulId, id)!.phase);
+  const act = (s: typeof bob, capability: string) => accept(w.host, Promise.resolve(edge.act(s as never, {capability} as never))) as Promise<any>;
+  const b = await act(bob, SWIM); for (let i = 0; i < 4000 && open(bob, b.receipt.id); i++) await tick(1);
+  const held = () => {const t = (w.host.engine.world.entities as any)[ann.entityId].human.task, r = t ? (w.host.engine.runtime as any).records.get(t) : null; return r?.verb === 'swim_to' && r.status === 'blocked' && r.diagnostic?.code === 'swim.occupied';};
+  const a = await act(ann, SWIM); let heldAt = -1;
+  for (let i = 0; i < 4000 && heldAt < 0; i++) {await tick(1); if (held()) heldAt = w.host.engine.world.tick;}
+  assert.ok(heldAt > 0, 'the first swim is held');
+  while (w.host.engine.world.tick < heldAt + 440 || w.host.engine.world.tick % 20 !== 3) await tick(1);   // most of its 30 s, between two samples
+  assert.ok(open(ann, a.receipt.id), 'still waiting');
+  await act(ann, 'stand:here'); await tick(1);
+  const a2 = await act(ann, SWIM); assert.equal(a2.accepted, true, JSON.stringify(a2)); assert.notEqual(a2.receipt.id, a.receipt.id);
+  let held2 = -1; for (let i = 0; i < 400 && held2 < 0; i++) {await tick(1); if (held()) held2 = w.host.engine.world.tick;}
+  assert.ok(held2 > 0, 'the new swim is held too');
+  while (w.host.engine.world.tick < held2 + 560) await tick(1);
+  assert.ok(open(ann, a2.receipt.id), 'the new swim is not ended on the first one\'s count');
+  for (let i = 0; i < 200 && open(ann, a2.receipt.id); i++) await tick(1);
+  const end = edge.receipt(ann.soulId, a2.receipt.id)!;
+  assert.equal(end.code, 'swim.stuck', JSON.stringify(end)); assert.ok(end.endedTick! - held2 >= 580, `ended ${end.endedTick! - held2} ticks after it was held`);
+});

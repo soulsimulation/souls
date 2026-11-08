@@ -803,25 +803,29 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  the held record (a go-near from deep water lowers to a swim_to child, held the same way), never the receipt: a walk to
    *  the shore that waits is no swim. Kept in memory: after a restart it is rebuilt from the world, so a held swim ends at
    *  most 30 s after boot. Not paused for a quiet renewal: a held swim would keep the world from ever becoming quiet. */
-  private swimHeld = new Map<string, number>();
+  private swimHeld = new Map<string, {id: string; since: number}>();
   private swimWatch(tick: number) {
     if (tick % 20) return;
     const rt = this.host.engine.runtime as unknown as {records: Map<string, {id: string; verb: string; status?: string; diagnostic?: {code?: string}}>; liveIds(): string[]};
     let live: Set<string> | null = null;
+    const seen = new Set<string>();
     for (const m of this.host.minds.values()) {
+      seen.add(m.entityId);
       const task = this.body(m.entityId)?.human?.task, rec = task ? rt.records.get(task) : undefined;
       if (!rec || rec.verb !== 'swim_to' || rec.status !== 'blocked' || rec.diagnostic?.code !== 'swim.occupied' || !(live ??= new Set(rt.liveIds())).has(rec.id)) {this.swimHeld.delete(m.entityId); continue;}
-      const since = this.swimHeld.get(m.entityId);
-      if (since === undefined) {this.swimHeld.set(m.entityId, tick); continue;}
-      if (tick - since < SWIM_HELD_TICKS) continue;
+      // counted per held record: a new swim (a resend, another act) starts its own 30 s
+      const held = this.swimHeld.get(m.entityId);
+      if (held?.id !== rec.id) {this.swimHeld.set(m.entityId, {id: rec.id, since: tick}); continue;}
+      if (tick - held.since < SWIM_HELD_TICKS) continue;
+      // only the receipt running the body's program owns the swim; a body with none is the stall guard's (stall-guard.ts)
+      const program = this.host.engine.programOf(m.entityId), r = program ? this.rows("soul_id=? AND phase IN ('waiting','started') AND program_id=?", m.soulId, program)[0] : undefined;
+      if (!r) continue;
       this.swimHeld.delete(m.entityId);
-      // the open receipt that owns the body: the one running its program, else its newest open one
-      const program = this.host.engine.programOf(m.entityId), open = this.rows("soul_id=? AND phase IN ('waiting','started') ORDER BY created_at", m.soulId);
-      const r = open.find(x => program && x.program_id === program) ?? open.at(-1);
-      try {void this.host.enqueue('edge-stop', `edge:${m.soulId}`, {soulId: m.soulId, entityId: m.entityId, ...(r ? {receipt: r.receipt_id} : {})}).catch(() => {/* best effort: seen again next time */});}
+      try {void this.host.enqueue('edge-stop', `edge:${m.soulId}`, {soulId: m.soulId, entityId: m.entityId, receipt: r.receipt_id, why: 'swim.stuck'}).catch(() => {/* best effort: seen again next time */});}
       catch {continue;}   // the clock isn't taking inputs: nothing was stopped, so nothing is said
-      if (r) this.update(r.receipt_id, {phase: 'failed', code: 'swim.stuck', reason: SWIM_STUCK_REASON});
+      this.update(r.receipt_id, {phase: 'failed', code: 'swim.stuck', reason: SWIM_STUCK_REASON});
     }
+    for (const id of this.swimHeld.keys()) if (!seen.has(id)) this.swimHeld.delete(id);
   }
   private afterTick(tick: number) {
     try {this.swimWatch(tick);} catch (e) {console.error('[edge] swim watch', e instanceof Error ? e.message : e);}
