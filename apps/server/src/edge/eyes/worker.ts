@@ -4,6 +4,7 @@
 // answers 503 with the caption only.
 import {fork, type ChildProcess} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {EYES_EXIT_NO_BROWSER} from './browser-config.mjs';
 
 export type RenderJob = {mode: 'eyes' | 'map'; w: number; h: number; quality: number; pose: {p: [number, number, number]; yaw: number; pitch: number; vfov: number}; self: string; show: string[]; span?: number};
 export type RenderResult = {jpeg: Buffer; ms: number; queueMs: number; frameTick: number | null};
@@ -29,7 +30,7 @@ export class EyesWorker implements EyesRenderer {
   private queue: Pending[] = []; private inflight: Pending | null = null; private seq = 0;
   private renders = 0; private failures = 0; private recent: number[] = [];
   private closed = false; private backoffMs = 5000; private restartTimer: NodeJS.Timeout | null = null;
-  private readonly opts: {viewerUrl: string; env?: Record<string, string | undefined>; timeoutMs?: number; maxQueue?: number; script?: string};
+  private readonly opts: {viewerUrl: string; env?: Record<string, string | undefined>; timeoutMs?: number; maxQueue?: number; script?: string; noBrowserBackoffMs?: number};
   constructor(opts: EyesWorker['opts']) {this.opts = opts; this.spawn();}
 
   private spawn() {
@@ -54,10 +55,13 @@ export class EyesWorker implements EyesRenderer {
     });
     child.on('exit', code => {
       if (this.child !== child) return;
-      this.child = null; this.state = this.closed ? 'off' : 'down'; this.since = null; this.detail = `worker exited (${code ?? 'signal'})`;
+      // #1340: no Chromium at all is not fixed by a retry in 2 minutes: keep the worker's own reason and wait long
+      const noBrowser = code === EYES_EXIT_NO_BROWSER;
+      this.child = null; this.state = this.closed ? 'off' : 'down'; this.since = null;
+      this.detail = noBrowser ? `no browser (retry in ${Math.round((this.opts.noBrowserBackoffMs ?? 30 * 60_000) / 60_000)} min): ${this.detail ?? 'missing'}` : `worker exited (${code ?? 'signal'})`;
       const lost = [this.inflight, ...this.queue].filter(Boolean) as Pending[]; this.inflight = null; this.queue = [];
       for (const p of lost) {if (p.timer) clearTimeout(p.timer); p.reject(new EyesUnavailable('render worker restarted'));}
-      if (!this.closed) {this.restartTimer = setTimeout(() => this.spawn(), this.backoffMs); this.backoffMs = Math.min(120_000, this.backoffMs * 2);}
+      if (!this.closed) {this.restartTimer = setTimeout(() => this.spawn(), noBrowser ? this.opts.noBrowserBackoffMs ?? 30 * 60_000 : this.backoffMs); if (!noBrowser) this.backoffMs = Math.min(120_000, this.backoffMs * 2);}
     });
   }
   private pump() {

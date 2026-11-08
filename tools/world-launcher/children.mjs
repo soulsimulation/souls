@@ -626,7 +626,7 @@ export class ChildPool {
   async closeAll() { this.closing = true; this.stopGuard(); await Promise.all([...this.kids.keys()].map((s) => this.stop(s))); }
 }
 
-export const EYES_ENV = ['EDGE_EYES', 'EDGE_EYES_GPU', 'EDGE_EYES_SOUL_SECONDS', 'EDGE_EYES_GLOBAL_PER_MINUTE', 'EDGE_EYES_TIMEOUT_SECONDS', 'EDGE_EYES_RELOAD_HOURS', 'EDGE_EYES_NICE', 'EDGE_EYES_CPUS', 'EDGE_EYES_CHROME_ARGS', 'PLAYWRIGHT_BROWSERS_PATH', 'SIM_RENDER_LOCK_DIR', 'GOD_LOOK_CHROME', 'EDEN_GOD_GL'];
+export const EYES_ENV = ['EDGE_EYES', 'EDGE_EYES_GPU', 'EDGE_EYES_CHROME', 'EDGE_EYES_SOUL_SECONDS', 'EDGE_EYES_GLOBAL_PER_MINUTE', 'EDGE_EYES_TIMEOUT_SECONDS', 'EDGE_EYES_RELOAD_HOURS', 'EDGE_EYES_NICE', 'EDGE_EYES_CPUS', 'EDGE_EYES_CHROME_ARGS', 'PLAYWRIGHT_BROWSERS_PATH', 'SIM_RENDER_LOCK_DIR', 'GOD_LOOK_CHROME', 'EDEN_GOD_GL'];
 
 /** Launcher-only exact world allowlist; the server still checks its own viewer URL and world path.
  *  Unset keeps the legacy env bytes. Empty disables all; enabling members requires EDGE_EYES=world.
