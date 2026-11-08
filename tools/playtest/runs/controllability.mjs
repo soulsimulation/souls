@@ -7,8 +7,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonl } from '../lib/jsonl.mjs';
+import { readFinalCardsFile } from './final-cards.mjs';
 
-export const SCORER = Object.freeze({ id: 'controllability', version: '4', path: 'tools/playtest/runs/controllability.mjs' });
+export const SCORER = Object.freeze({ id: 'controllability', version: '5', path: 'tools/playtest/runs/controllability.mjs' });
 export const SCORECARD_SCHEMA = 'soul-run-scorecard/1';
 
 // ---- refusal classes (#1097 A2, #628). Only `offer` counts against M1.
@@ -88,6 +89,9 @@ export function closureOf(s, forOfReceipt = new Map()) {
   const outcome = s.verb === 'ack' ? flag(s.args, '--close') : s.verb === 'say' ? 'done' : worldOutcome(s.out);
   return ['done', 'failed'].includes(outcome) ? { id, outcome } : null;
 }
+
+/** A `result` the world refused (#1309): `reported: false`, e.g. "its act is still going" (#1299). It closed nothing. */
+export const refusedResult = (s) => s.verb === 'result' && s.out?.reported === false;
 
 /** The assistant turns of one transcript: stream events sharing a message id are one model decision. */
 export function seatDecisions(file) {
@@ -279,7 +283,7 @@ function scoreSeat(sr, seat, packs) {
   const closedAt = new Map(), resultOf = new Map(), ackAt = new Map(), forOfReceipt = new Map();
   for (const s of steps) {
     if (s.verb === 'ack' && MSG.test(s.args[0] ?? '')) { if (!ackAt.has(s.args[0])) ackAt.set(s.args[0], s); }
-    if (s.verb === 'result' && MSG.test(s.args[0] ?? '') && !resultOf.has(s.args[0])) { resultOf.set(s.args[0], s); closedAt.set(s.args[0], s.line); }
+    if (s.verb === 'result' && MSG.test(s.args[0] ?? '') && !refusedResult(s) && !resultOf.has(s.args[0])) { resultOf.set(s.args[0], s); closedAt.set(s.args[0], s.line); }
     if (s.verb === 'act' && s.out?.receipt?.id && MSG.test(s.out.for ?? '')) forOfReceipt.set(s.out.receipt.id, s.out.for);
     const c = closureOf(s, forOfReceipt);
     if (c && !resultOf.has(c.id)) { resultOf.set(c.id, { verb: 'result', args: [c.id, c.outcome], out: { outcome: c.outcome }, line: s.line, resultLine: s.resultLine, atMs: s.atMs, doneMs: s.doneMs, viaClose: true }); closedAt.set(c.id, s.line); }
@@ -299,7 +303,7 @@ function scoreSeat(sr, seat, packs) {
       if (r) { r.intention = r.for ?? current; actFor.set(r.line, r.intention); }
     }
     if (isPlanCall(s)) for (const r of actRows.filter((x) => x.viaPlan && x.line === (s.resultLine ?? s.line))) { r.intention = r.for ?? current; actFor.set(r.line, r.intention); }
-    if ((s.verb === 'result' && s.args[0] === current) || (current && closedAt.get(current) === s.line)) current = null;
+    if ((s.verb === 'result' && !refusedResult(s) && s.args[0] === current) || (current && closedAt.get(current) === s.line)) current = null;
   }
 
   const hasBody = (id) => actRows.some((r) => r.intention === id);
@@ -523,13 +527,19 @@ export function scoreRun(sr, { answers = [], scorer = null } = {}) {
 
   const metrics = { M1, M2, M3, M4, M5, M6, M7 }, guardrails = { G1, G2, G3 };
   for (const [k, m] of [...Object.entries(metrics), ...Object.entries(guardrails)]) m.target = TARGETS[k];
+  // #1309: what the world says of every owner message at run end; the seat's calls can't see the world's own later closes.
+  const fc = sr.playtestDir ? readFinalCardsFile(sr.playtestDir) : null, finalOf = new Map((fc?.cards ?? []).filter((c) => c.found).map((c) => [c.messageId, c]));
+  const messages = fc ? { status: 'measured', ...fc.summary, source: `final-cards.json (${fc.source})`,
+    basis: 'every owner message the director delivered, as the world records it at run end: closed when it has a result, by the agent or the server (a replaced or overlong act, #1299)' }
+    : { status: 'unknown', reason: 'no final-cards.json: the run predates #1309, or its world could not be read at run end' };
+  for (const i of intentions) { const c = finalOf.get(i.id); i.final = c ? { closed: c.closed, outcome: c.outcome, closedBy: c.closedBy } : null; }
   return {
     schema: SCORECARD_SCHEMA,
     scorer: { ...SCORER, ...(scorer ?? {}) },
     run: { runId: sr.runId, status: sr.status, kind: sr.kind },
     controllers: seats.map((s) => ({ seat: s.seat, adapter: s.adapter, transcript: s.hasTranscript })),
     modelFree, source, ...(sourceNote ? { sourceNote } : {}),
-    metrics, guardrails,
+    metrics, guardrails, messages,
     intentions: intentions.map(({ deliveredMs, closeMs, ...i }) => i),
     limits: ['Two repeats is a demonstration, not a rate.', 'Refusal classes come from the code alone: a state code cannot tell a seat taken after the agent looked from one it could have seen.', 'Absolute times need a quiet machine.'],
   };
@@ -552,5 +562,9 @@ export function renderScorecard(card) {
   for (const [k, m] of [...Object.entries(card.metrics), ...Object.entries(card.guardrails)]) L.push(`| ${k} | ${fmt(m.value)}${m.reason ? ` (${m.reason})` : ''} | ${fmt(m.denominator)} | ${miss(m)} | ${m.target} |`);
   const c = card.metrics.M1.classes;
   L.push('', `M1 refusals: offer ${c.offer} (resolution ${c.offerResolution}, route ${c.offerRoute}), state ${c.state}, admission ${c.admission}, unclassified ${card.metrics.M1.missing.unclassified}${card.metrics.M1.unclassifiedCodes?.length ? ` (${card.metrics.M1.unclassifiedCodes.join(', ')})` : ''}.`);
+  const g = card.messages;
+  if (g) L.push('', g.status === 'measured'
+    ? `Owner messages at run end (the world's record): ${g.delivered} delivered, ${g.closed} closed (agent ${g.closedBy.agent}, server ${g.closedBy.server}; done ${g.outcome.done}, failed ${g.outcome.failed}), ${g.open} open${g.unread ? `, ${g.unread} not read` : ''}.`
+    : `Owner messages at run end: unknown (${g.reason}).`);
   return L.join('\n') + '\n';
 }
