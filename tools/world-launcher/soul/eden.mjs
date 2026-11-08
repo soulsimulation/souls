@@ -2039,10 +2039,14 @@ export function retryAfterMs(headers, data) {
 export const codeOf = (data) => data?.error?.code ?? data?.code ?? null;
 /** A designed refusal that says "later", not "no". */
 export const isBusy = (status, data) => (status === 503 || status === 429) && BUSY_CODES.has(codeOf(data));
-// #1328 / #1327 (P10): a world that could not answer (its ledger or clock failed) may still have taken a write. A read or
-// a keyed write waits it out like a busy world, with the same key, so the world acts at most once; an unkeyed write never.
+// #1328 / #1327 (P10): a world that could not answer (its ledger or clock failed) may still have taken a write. A read
+// waits it out like a busy world. So does an act, whose clientRef is its key: the world answers a known clientRef with
+// its first receipt, so it acts at most once. Speech, conversation and object writes have no such answer yet (the
+// world keeps no 5xx answer for a key), so they are waited out only on `world-unavailable`, which the world answers
+// before any route runs. An unkeyed write is never repeated.
 export const STALL_CODES = new Set(["unavailable", "world.unavailable", "world-unavailable", "world.stalled"]);
 export const isStalled = (status, data) => status >= 500 && STALL_CODES.has(codeOf(data));
+export const stallRetries = (cls, data, once) => cls === "read" || (cls === "keyed" && (once || codeOf(data) === "world-unavailable"));
 // Writes the world deduplicates by Idempotency-Key (apps/server/src/edge/events/idempotency.ts) — the only writes that retry.
 const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+)$/;
 const READ_POSTS = /^\/v1\/edge\/resolve$/;
@@ -2092,8 +2096,9 @@ export function refusalOf(status, data, ms) {
 export function readSlowed(ch, at = Date.now()) {
   try { const j = JSON.parse(readFileSync(SLOWED_FILES[ch], "utf8")); return Array.isArray(j) ? j.filter((x) => at - x.at < SLOWED_WINDOW_MS) : []; } catch { return []; }
 }
-/** next: "retry" (this CLI waits ms and asks again), "listen" (the listen loop does), "check" (a write the world did not
- *  confirm: never repeated blind; the CLI looks it up by its key first), "none" (given up; try again after ms). */
+/** next: "retry" (this CLI waits ms and asks again), "listen" (the listen loop does), "check" (an act the world did not
+ *  confirm: a rerun checks first and keeps its key), "verify" (another write the world did not confirm: look before
+ *  doing it again), "none" (given up; try again after ms). */
 function noteRefusal(path, r, next, ms) {
   const ch = channelOf(path), e = { at: Date.now(), ...refusalOf(r.status, r.data, ms), next };
   slowedRun.push({ ch, ...e });
@@ -2116,7 +2121,8 @@ export function slowedSentence(list, ch = "requests", at = Date.now()) {
     : SLOW_CODES.has(last.code) ? (n === 1 ? `The world asked me to slow down${last.ms ? ` for ${secs(last.ms)}` : ""}: ${why}` : `The world asked me to slow down ${n} times in the last ${span}: ${why}`)
     : n === 1 ? `My last request was refused: ${why}` : `My last ${n} requests were refused in the last ${span}: ${why}`;
   const tail = last.next === "listen" ? `still listening, next try ${when}` : last.next === "retry" ? `retrying ${when}`
-    : last.next === "check" ? "the world did not confirm it; the same command again checks first and sends the same key, so the world acts at most once" : `not retried; I can try once more ${when}`;
+    : last.next === "check" ? "the world did not confirm it; the same command again checks first and sends the same key, so the world acts at most once"
+    : last.next === "verify" ? "the world did not confirm it; I check whether it took before doing it again" : `not retried; I can try once more ${when}`;
   return `${lead}; ${tail}.`;
 }
 /** Refused, then answered within this command: said once, in the past tense. */
@@ -2140,8 +2146,9 @@ export function slowedLine(at = Date.now()) {
 // #1328 (with #1327's client half, P10): one intention, one key. In the Eden incident an act got 503 after the world had
 // taken it; the agent ran it again with a fresh key and the world made a second receipt that replaced the first. A keyed
 // write (act, say, converse, object act) now keeps its key in PENDING_FILE until the world confirms it, so a rerun of the
-// same write sends the same key (and, for act, the same clientRef: the world answers it with the first receipt). A write
-// that ends unconfirmed is looked up by its key before anything is advised. `--key <k>` names the key outright.
+// same write sends the same key. For act the key is also the clientRef, which the world answers with the first receipt:
+// an act is done at most once. The others gain a replay only when the world kept their answer. A write that ends
+// unconfirmed is looked up by its key before anything is advised. `--key <k>` names the key outright.
 export const PENDING_FILE = ".eden-pending.json", PENDING_MS = 10 * 60_000, PENDING_MAX = 20;
 const stable = (v) => Array.isArray(v) ? `[${v.map(stable).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
 /** What makes two writes the same intention: the route and the body, without the key, the public now line or the message it serves. */
@@ -2153,39 +2160,50 @@ export function readPending(at = Date.now()) {
   try { const j = JSON.parse(readFileSync(PENDING_FILE, "utf8")); return Array.isArray(j) ? j.filter((x) => x && typeof x.key === "string" && at - x.at < PENDING_MS) : []; } catch { return []; }
 }
 function writePending(list) {
-  try { if (list.length) writeFileSync(PENDING_FILE, JSON.stringify(list.slice(-PENDING_MAX)) + "\n", { mode: 0o600 }); else if (existsSync(PENDING_FILE)) unlinkSync(PENDING_FILE); } catch { /* a read-only folder: this run's key only */ }
+  try {
+    if (!list.length) { if (existsSync(PENDING_FILE)) unlinkSync(PENDING_FILE); return; }
+    const tmp = `${PENDING_FILE}.${process.pid}.tmp`;   // whole or not at all: a reader never sees half a file
+    writeFileSync(tmp, JSON.stringify(list.slice(-PENDING_MAX)) + "\n", { mode: 0o600 }); renameSync(tmp, PENDING_FILE);
+  } catch { /* a read-only folder: this run's key only */ }
 }
-/** A 2xx or 4xx is the world's answer; no answer, a 5xx, a 429 the CLI stopped waiting out, or a key reused with another body is not. */
-export const confirmedAnswer = (r) => r.status >= 200 && r.status < 500 && r.status !== 429 && !(r.status === 409 && codeOf(r.data) === "idempotency-key-reused");
+/** A 2xx or 4xx is the world's answer; no answer, a 5xx or a 429 the CLI stopped waiting out is not. A key this client
+ *  kept and reused with another body (a new --now, a new --for) is not either: the world has its first answer. A key you
+ *  named that was used for another write is a refusal: its record is that other write's. */
+export const confirmedAnswer = (r, named = false) => r.status >= 200 && r.status < 500 && r.status !== 429 && (named || !(r.status === 409 && codeOf(r.data) === "idempotency-key-reused"));
 /** The world's record of a write by its key (`GET /v1/edge/operations/<key>`): {status, response} when it took, else null. */
 async function lookupWrite(path, key) {
   const route = `POST ${path.split("?")[0]}`;
   const r = await call(`/v1/edge/operations/${encodeURIComponent(key)}?route=${encodeURIComponent(route)}`, { retry: false, timeoutMs: 10_000, keepSlowed: true }).catch(() => null);
   return r?.status === 200 && r.data?.state === "recorded" && Number.isInteger(r.data.status) && r.data.response ? { status: r.data.status, data: r.data.response } : null;
 }
-/** One keyed write. `ref`: the key is also the act's clientRef. Returns the answer (or the world's record of it) with
- *  `key`, `resent` (this key came from an earlier unconfirmed run), `checked` (found by lookup) or `unconfirmed`. */
-async function keyedWrite(path, body, { key: given, ref = false } = {}) {
+/** One keyed write. `once` (act): a clientRef rides with the key, the key itself unless `ref` names an earlier one, and
+ *  the world answers a known clientRef with its first receipt. Returns the answer (or the world's record of it) with
+ *  `key`, `ref`, `resent` (this key came from an earlier unconfirmed run), `checked` (found by lookup) or `unconfirmed`. */
+async function keyedWrite(path, body, { key: given, ref: givenRef, once = false } = {}) {
   const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent);
-  const key = given ?? held?.key ?? randomUUID(), resent = !!held, sent = ref ? { ...body, clientRef: key } : body;
-  writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, at: held?.at ?? Date.now() }]);
-  const r = await call(path, { body: sent, key });
+  const key = given ?? held?.key ?? randomUUID(), ref = once ? givenRef ?? held?.ref ?? key : undefined, resent = !!held;
+  writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now() }]);
+  const r = await call(path, { body: ref ? { ...body, clientRef: ref } : body, key, once });
   const settle = () => writePending(readPending().filter((x) => x.intent !== intent));
-  if (confirmedAnswer(r)) { settle(); return { r, key, resent }; }
+  if (confirmedAnswer(r, !!given)) { settle(); return { r, key, ref, resent }; }
   const found = await lookupWrite(path, key);
-  if (found) { settle(); clearSlowed(path); return { r: { ...r, ...found }, key, resent, checked: true }; }
-  return { r, key, resent, unconfirmed: true };
+  if (found) { settle(); clearSlowed(path); return { r: { ...r, ...found }, key, ref, resent, checked: true }; }
+  return { r, key, ref, resent, once, unconfirmed: true };
 }
+/** A key of its own for a second write that carries the same clientRef (the act sent again without its default --for). */
+export const sideKey = (key) => { const k = `${key}.f`; return k.length <= 100 ? k : createHash("sha256").update(k).digest("hex").slice(0, 40); };
 /** A write the world did not confirm and has no record of: said plainly, never "try once more". Exit 75 (try later). */
 function unconfirmed(what, w) {
   const code = codeOf(w.r.data) ?? (w.r.status ? `http-${w.r.status}` : "unreachable");
   process.exitCode = 75;
-  return { unconfirmed: true, code, key: w.key, reason: `The world did not confirm this ${what} (${code}) and has no record of it yet. It may still have taken it: running the same command again checks first and sends the same key, so the world acts at most once.` };
+  return { unconfirmed: true, code, key: w.key, reason: w.once
+    ? `The world did not confirm this ${what} (${code}) and has no record of it yet. It may still have taken it: running the same command again checks first and sends the same key, so the world acts at most once.`
+    : `The world did not confirm this ${what} (${code}) and has no record of it yet. It may still have taken it: check \`events\` or \`here\` before doing it again.` };
 }
 
 // as: "soul" (default, the Soul's delegated token), "owner" (account routes under /v1/agent, same token),
 // "dev" (legacy self-made identity), "none". retry: false hands every answer back at once (listen runs its own loop).
-async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext, key, keepSlowed = false } = {}) {
+async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext, key, once = false, keepSlowed = false } = {}) {
   const s = load();
   if (as === "soul") ({ path, body } = withNow(path, body));
   const url = need(s, "world", `Run: ${CLI} register <world-url>`) + path;
@@ -2201,10 +2219,10 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     const r = await callOnce(url, { method, headers, body, timeoutMs, recoverRead });
     if (r.load && r.load !== "green") calm(`the world is under load (${r.load}); answers may be slow`);
     worldNote(r.data);
-    const refused = r.status === 429 || r.status === 503, waitOut = (isBusy(r.status, r.data) || isStalled(r.status, r.data)) && cls !== "none" && busy < RETRY.busyWaits;
+    const refused = r.status === 429 || r.status === 503, waitOut = (isBusy(r.status, r.data) || (isStalled(r.status, r.data) && stallRetries(cls, r.data, once))) && cls !== "none" && busy < RETRY.busyWaits;
     const waitMs = waitOut ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null;
     if (keepSlowed) { /* a lookup about an earlier refusal neither adds one nor clears it */ }
-    else if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? (cls === "keyed" ? "check" : "none"), waitMs ?? r.retryAfterMs);
+    else if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? (cls !== "keyed" ? "none" : once ? "check" : "verify"), waitMs ?? r.retryAfterMs);
     else if (r.status >= 200 && r.status < 500) clearSlowed(path);
     if (r.status === 0 && cls !== "none") {
       if (++failed < RETRY.tries) {
@@ -2912,8 +2930,9 @@ async function act(...argv) {
   const s = load(), implicit = forArg === undefined && s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS;
   const forId = forArg === "none" ? undefined : forArg ?? (implicit ? s.lastAcked : undefined);
   // #1328: the key is the clientRef too, kept until the world confirms the act, so a rerun is answered with the first receipt
-  let w = await keyedWrite("/v1/edge/act", forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body, { key, ref: true });
-  if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { ref: true }); }
+  let w = await keyedWrite("/v1/edge/act", forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body, { key, once: true });
+  // without the default link: a key of its own (the first one's answer is kept), the same clientRef, so it is still one act
+  if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { key: sideKey(w.key), ref: w.ref, once: true }); }
   if (w.unconfirmed) return unconfirmed("act", w);
   const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
@@ -3087,7 +3106,13 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
 
 // say "<text>" [--for <message-id>] [--key <k>]: with --for, the speech is what the owner asked for, so it closes that message too.
 async function say(...input) {
-  const k = input.findIndex((w, i) => w === "--key" && i === input.length - 2), key = k < 0 ? undefined : keyArg(input[k + 1]), words = k < 0 ? input : input.slice(0, k);   // only a trailing --key: "--key" inside speech is words
+  // --key only among the trailing flags (with or around --for): "--key" inside speech is words
+  let words = input, key;
+  for (let n = words.length; n >= 2; n = words.length) {
+    if (words[n - 2] === "--key" && key === undefined) { key = keyArg(words[n - 1]); words = [...words.slice(0, n - 2)]; }
+    else if (words[n - 2] === "--for" && n >= 4 && words[n - 4] === "--key" && key === undefined) { key = keyArg(words[n - 3]); words = [...words.slice(0, n - 4), ...words.slice(n - 2)]; }
+    else break;
+  }
   const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
   if (!text) throw new Error('usage: say "<text>" [--for <message-id>] [--key <k>]');

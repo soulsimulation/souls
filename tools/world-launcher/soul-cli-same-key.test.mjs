@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { intentionOf, confirmedAnswer, keyArg, slowedSentence, STALL_CODES, PENDING_FILE } from './soul/eden.mjs';
+import { intentionOf, confirmedAnswer, keyArg, sideKey, slowedSentence, stallRetries, STALL_CODES, PENDING_FILE } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -48,6 +48,14 @@ test('helpers: the intention leaves out key, clientRef, now and the message serv
   const s = slowedSentence([{ at: 1000, code: 'unavailable', reason: 'the ledger could not answer', ms: null, next: 'check' }], 'requests', 2000);
   assert.doesNotMatch(s, /try once more/);
   assert.match(s, /did not confirm it; the same command again checks first and sends the same key, so the world acts at most once\.$/);
+  assert.match(slowedSentence([{ at: 1000, code: 'world.stalled', reason: 'x', ms: null, next: 'verify' }], 'requests', 2000), /I check whether it took before doing it again\.$/);
+  assert.equal(confirmedAnswer({ status: 409, data: { error: { code: 'idempotency-key-reused' } } }, true), true, 'a named key used before: the world\'s refusal');
+  assert.equal(sideKey('k'), 'k.f'); assert.equal(sideKey('x'.repeat(100)).length, 40);
+  assert.equal(stallRetries('read', { error: { code: 'unavailable' } }, false), true);
+  assert.equal(stallRetries('keyed', { error: { code: 'unavailable' } }, true), true, 'an act: its clientRef answers a repeat');
+  assert.equal(stallRetries('keyed', { error: { code: 'world.stalled' } }, false), false, 'speech: nothing answers a repeat');
+  assert.equal(stallRetries('keyed', { code: 'world-unavailable' }, false), true, 'refused before any route ran');
+  assert.equal(stallRetries('none', { error: { code: 'unavailable' } }, true), false);
 });
 
 test('the Eden shape: an act taken but answered 503, run again, is answered with the first receipt under the same key; one receipt', { timeout: 20_000 }, async t => {
@@ -106,25 +114,75 @@ test('check first: an unconfirmed act the world has a record of is reported with
   assert.doesNotMatch(got.stdout, /try once more/);
 });
 
-test('world.stalled is waited out with the same key and then answers; say and --key; an unkeyed write is never repeated', { timeout: 20_000 }, async t => {
+test('say: world-unavailable (answered before any route runs) is waited out with the same key; --key among the trailing flags', { timeout: 20_000 }, async t => {
   let n = 0;
   const f = await fixture(t, (req, res, s) => {
-    if (s.url === '/v1/edge/say') return ++n === 1 ? json(res, 503, { error: { code: 'world.stalled', message: 'the world clock has stalled' } }) : json(res, 200, { said: true });
+    if (s.url === '/v1/edge/say') return ++n === 1 ? json(res, 503, { ok: false, code: 'world-unavailable', message: 'World temporarily unavailable.' }) : json(res, 200, { said: true });
     if (s.url.startsWith('/v1/edge/inbox/')) return unavailable(res);
     json(res, 200, {});
   });
   const said = await f.run('say', 'hello', 'there', '--key', 'my-key-1');
   assert.equal(said.code, 0, said.stderr);
-  const says = f.seen.filter(s => s.url === '/v1/edge/say');
-  assert.equal(says.length, 2); assert.deepEqual(says.map(s => s.key), ['my-key-1', 'my-key-1']);
-  assert.equal(says[0].body.text, 'hello there');
-  assert.match(said.stderr, /the world's clock has stalled; waiting/);
-  const speech = await f.run('say', 'what', '--key', 'means');   // only a trailing --key is a flag
-  assert.equal(f.seen.filter(s => s.url === '/v1/edge/say').at(-1).body.text, 'what');
-  assert.equal(speech.code, 0);
+  const says = () => f.seen.filter(s => s.url === '/v1/edge/say');
+  assert.equal(says().length, 2); assert.deepEqual(says().map(s => s.key), ['my-key-1', 'my-key-1']);
+  assert.equal(says()[0].body.text, 'hello there');
+  assert.match(said.stderr, /the world could not answer; waiting/);
+  for (const [args, text, key] of [[['what', '--key', 'means'], 'what', 'means'], [['hi', '--key', 'k2', '--for', 'none'], 'hi', 'k2'], [['hi', '--for', 'none', '--key', 'k3'], 'hi', 'k3']]) {
+    const r = await f.run('say', ...args);
+    assert.equal(r.code, 0, r.stderr); assert.equal(says().at(-1).body.text, text); assert.equal(says().at(-1).key, key);
+  }
   const ack = await f.run('ack', 'msg_1', 'Got it.');
   assert.notEqual(ack.code, 0);
   assert.equal(f.seen.filter(s => s.url.startsWith('/v1/edge/inbox/')).length, 1, 'ack has no key: one try');
   const bad = await f.run('act', 'read:here', '--key', 'has space');
   assert.equal(bad.code, 1); assert.match(bad.stderr, /--key takes/);
+});
+
+test('speech the world took but answered 503 is not said again: no clientRef answers it, and the world keeps no 5xx answer', { timeout: 20_000 }, async t => {
+  const spoken = [], kept = new Map();   // the idempotency table: only answers under 500 are kept
+  const f = await fixture(t, (req, res, s) => {
+    if (s.url.startsWith('/v1/edge/operations/')) { const k = decodeURIComponent(s.url.split('/')[4].split('?')[0]); return json(res, 200, kept.has(k) ? { state: 'recorded', status: 200, response: kept.get(k) } : { state: 'unknown' }); }
+    if (s.url === '/v1/edge/say') {
+      if (kept.has(s.key)) return json(res, 200, kept.get(s.key));
+      spoken.push(s.body.text);
+      if (spoken.length === 1) return json(res, 503, { error: { code: 'world.stalled', message: 'the world clock has stalled' } });
+      kept.set(s.key, { said: true }); return json(res, 200, { said: true });
+    }
+    json(res, 200, {});
+  });
+  const got = await f.run('say', 'hello');
+  assert.equal(got.code, 75, got.stderr);
+  assert.deepEqual(spoken, ['hello'], 'said once: not resent on its own');
+  assert.equal(got.d.unconfirmed, true);
+  assert.match(got.d.reason, /may still have taken it: check `events` or `here` before doing it again/);
+  assert.doesNotMatch(got.stdout, /at most once|try once more/);
+  assert.match(got.d.slowed, /did not confirm it; I check whether it took before doing it again/);
+});
+
+test('an act sent again without its default --for keeps its clientRef under a key of its own', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, (req, res, s, w) => {
+    if (s.url === '/v1/edge/act') return s.body.for ? json(res, 400, { error: { code: 'invalid', message: 'that owner message is closed' } }) : json(res, 200, { accepted: true, receipt: receiptFor(w.receipts, s.body.clientRef), channel: 'body' });
+    json(res, 200, {});
+  });
+  const state = JSON.parse(readFileSync(join(f.dir, '.eden-agent.json'), 'utf8'));
+  writeFileSync(join(f.dir, '.eden-agent.json'), JSON.stringify({ ...state, lastAcked: 'msg_1', lastAckedAt: new Date().toISOString() }), { mode: 0o600 });
+  const got = await f.run('act', 'read:here', '--key', 'k-for');
+  assert.equal(got.code, 0, got.stderr);
+  const [a, b] = acts(f.seen);
+  assert.equal(a.body.for, 'msg_1'); assert.equal(b.body.for, undefined);
+  assert.equal(a.body.clientRef, 'k-for'); assert.equal(b.body.clientRef, 'k-for', 'one clientRef: one act');
+  assert.equal(a.key, 'k-for'); assert.equal(b.key, 'k-for.f', 'its own key: the first answer stays the first');
+  assert.equal(f.receipts.size, 1);
+});
+
+test('a key you named that was used for another write is a refusal, never that write\'s receipt', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, (req, res, s) => {
+    if (s.url.startsWith('/v1/edge/operations/')) return json(res, 200, { state: 'recorded', status: 200, response: { accepted: true, receipt: { id: 'r_other', capability: 'wave:here', phase: 'completed' } } });
+    if (s.url === '/v1/edge/act') return json(res, 409, { error: { code: 'idempotency-key-reused', message: 'this Idempotency-Key was already used with a different request body' } });
+    json(res, 200, {});
+  });
+  const got = await f.run('act', 'read:here', '--key', 'used-before');
+  assert.equal(got.code, 1);
+  assert.match(got.stderr, /idempotency-key-reused/);
+  assert.equal(f.seen.filter(s => s.url.startsWith('/v1/edge/operations/')).length, 0, 'not looked up');
 });
