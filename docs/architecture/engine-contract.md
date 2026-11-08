@@ -48,6 +48,12 @@ Optional hooks cover recorded takes and scenes (`takeChunks`, `renderScene`, `ta
 (`previewAdmission`) and a set of paired `preview*V1` / `adopt*V1` transitions that add authored content to an existing
 world as logged, replayable facts. The declarations are the reference.
 
+A runtime policy is a `cfg` key a world may turn on after genesis by a logged `rules` event without changing its rules
+version. The Mars engine keeps them in one registry, `RUNTIME_POLICY_KEYS` in `packages/engine-mars/src/engine.ts`
+(with the render clock and ground-reclaim/1); a physical-binding snapshot reader ignores exactly those keys
+(`physicalBindingCfgV1`), so adopting a policy on a bound world never makes its snapshots unrestorable (#1363). A new
+flag goes in `RUNTIME_POLICY_FLAGS`; `runtime-policy-registry.test.ts` fails until it does.
+
 - **Program** `{ actor, label, steps: {verb, params}[] }`: the verb steps one body runs. A `decision` event starts one.
   One actor runs one program.
 - **ProgramEvent** `{ tick, id, actor, kind: 'step'|'completed'|'failed'|'cancelled', step, code?, message? }`: how the
@@ -72,6 +78,24 @@ This matters on paged ground, where a long walk's plan checks only its first fin
 ride's own collider used to pass the plan. A step without the marker keeps the goal it always chose, so recorded
 programmes replay unchanged.
 
+A ride's `carrier_steer` with `land` may carry `landing: 'clear/1'` (#1324), and the ride object always sends it. The spot must
+be clear on the fine clearance raster over a 2.6 m disc: the basket, its door and both seat exits, plus a body radius. That raster
+holds the thin wall segments and closed doors the coarse solids drop, and it also holds benches, water edges and steep cells. Nothing
+in the raw scene may stand over the disc either, so no wall, lintel, roof or god-built floor: the descent column is open sky. The ride
+lands on the nearest such spot within 30 m, in rings of 2 m, and the plan returns `landing: {requested, at, adjustedM, reason}`.
+With no spot it is refused `carrier.no-landing-spot`, naming how far the nearest clear ground is. The spot is read again through
+the second half of the flight and on the touchdown tick. When the spot is no longer clear, the landing moves to the nearest clear
+spot to the asked point: the ride climbs back to cruise height (35 m), flies across, then comes down. After a third move it
+flies home. With no clear spot it hovers and looks again every
+2 s, and flies home after the 2-minute hover. The ride state's `landNote` says which happened. A ride's own home is never
+re-checked; a home that no longer reads clear is only reported, as a `carrier.home-not-clear` mark. A steer without the marker
+keeps the landing it always chose, so recorded programmes replay unchanged.
+A `carrier_ride` boarded with `clear: 'step-out/1'` (the ride object's join sends it) steps out only onto ground the body can stand
+on. The leg to the door waits while the door spot isn't clear. The last leg goes to the exit, or to the nearest clear spot round it
+that a straight step from the door reaches. The rider stands at the ground's height there. A 12 s set-down uses the same check,
+searching up to 12 m round the exit, and a rider with nowhere clear stays aboard instead
+of being placed in a wall. God edits never walk out a rider whose ride is in the air (#1339).
+
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another
 venue. A seated Soul still stands first; active movement and occupied support keep their native admission rules.
 Direct `pose_v1` admission reads clearance at the actor's position, independently of the last paged ground window
@@ -84,13 +108,33 @@ out. Invariants run at the end of every tick, so a held step would have been a v
 later in that tick moved the obstacle), and every earlier step moves as it did.
 An opening or a slide can't stop short, because its body follows the handle: where the next step would trip the same rule, the
 rest of its path shifts aside by the smallest step with room, at most 0.18 m in all, easing back once there is room, and with no such step it fails `step-blocked`.
-A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra. Other body steps owned by actions do not go through it yet.
+A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra.
+
+One guard decides all of these (#1332): `guardBodyStep` in `runtime/static-step.ts` holds a step whose end is below the
+limit and worse than where the body stands, and names the nearest blocker; it reads what the invariant reads (the grid of
+the body's level at that point, the body's own radius, deep water exempt). The walker's hard static layer calls it on its
+own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a logged runtime-policy `rules` event every world
+adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
+it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
+stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
+stall release with nothing clear near leaves the body where it stands. Births keep their own arrival check. A carrier's rider
+legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
+handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
 ## Refusal
 
-With the `souls-repair/1` rules (`soulsRepairV1`: on with `SIM_SOULS_REPAIR=1` or with `SIM_SHARED_CARRY=1`, and `SIM_SOULS_REPAIR=0`
-turns it off under either; new worlds only for now: a world whose history lacks it refuses to boot with it on), a move that
-would break a rule is not applied ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+With the `souls-repair/1` rules (`soulsRepairV1`), a move that would break a rule is not applied
+([#1150](https://github.com/soulsimulation/souls/issues/1150)). Every world the server runs has them by default
+([#1323](https://github.com/soulsimulation/souls/issues/1323)). The server reads a world's history with
+`soulsRepairReaderV1` over its own reader: the history replays and restores under the rules it was written with, and a world
+whose history began without them adopts them in one logged `rules` event at its head, after replay and the clock check
+(`{soulsRepairAdoptV1: {contract: 'souls-repair-adoption/1', tick, fromRulesVersion, toRulesVersion, fromStateHash}}`). Its
+fold turns the rules on, and the world header's `rules_version` follows in the same acceptance. A new world is born without
+them and adopts at tick 0. A snapshot restores under the policy it was taken with; the state hash never names the rules
+(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (4.16,
+or `marsFactory` alone) refuses an adopted history. `SIM_SOULS_REPAIR=0` adopts nothing, still replays a logged adoption, and
+is ignored for a world that has adopted. A factory that already has the rules (`SIM_SOULS_REPAIR=1`, `SIM_SHARED_CARRY=1`, or
+`soulsRepairV1: true`) is used as it is: an old history refuses it, as before.
 
 - `Engine.step` leaves no refusable violation standing. The bodies that moved go back to their pose before the tick, and
   their programmes end `failed` with `world.refused:<rule>` and a plain reason, in that tick.
@@ -109,8 +153,8 @@ would break a rule is not applied ([#1150](https://github.com/soulsimulation/sou
   refused pose for that one tick.
 - **The one relocation exception.** A `collision.human-static` naming a body that did not move means the world landed on it
   (a god edit past the bridge's own walk-out). There is no pose to go back to, so it stands at the nearest free spot,
-  logged and told to the Soul. Apart from a body a rung 3 finds inside something, below, this is the only time a body
-  changes place without moving there.
+  logged and told to the Soul. Apart from a body a rung 3 finds inside something, and a broken body that quarantine/1
+  holds (below), this is the only time a body changes place without moving there.
 - `step().refusals` reports each one. The host logs it as a `rules` event from `world:refusal`. Replay reads those only to
   compare the count, and a difference is reported, not fatal.
 
@@ -142,8 +186,8 @@ whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that n
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
 started what it stopped. A body inside something is relocated once.
 
-`SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
-ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
+The ladder comes with the rules, so every world the server runs has it by default (see Refusal for adoption). A world made
+with the ladder, or that adopted it, can't go back: it needs these rules to replay. Under these rules an invariant that
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
 a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
@@ -176,8 +220,34 @@ capture waits until the next is due. A snapshot from a clean tick in the stretch
 any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
 placed clears it, and a rung 3 keeps god edits, so it survives a restart until then.
 
-**What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
-persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+**The ladder's end: quarantine/1 (#1369).** A logged, host-only runtime policy (`runtimePolicy.quarantineV1`, adopted at
+boot after body-step-guard/1; the engine never reads it, so no snapshot binding changes). Under it:
+- When rung 3 can't go back (its baseline won't restore, its kept events won't re-apply, or the pending baseline won't
+  materialize), the host puts back the head it had before rung 2, by reference, and quarantines what the fault named.
+  It stops those bodies' programmes alone (`stopBodiesV1`, `world.quarantined`). It contains the fault's keys, and a body
+  inside something is moved clear once, as rung 3 does. It logs one `quarantineV1` rules event, which a replay applies
+  without reading an invariant. The glitch is rung `contained`, with the restore error as evidence. Everyone else goes on.
+  The quarantined Soul can act again at once: it is never held or refused for the quarantine. The rule a rung 3 went back
+  for stays on the head after that, and a snapshot is taken at once, so a restart never boots from the refused baseline.
+- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies.
+  A fault that names none still stops everything in place, as above.
+- A broken body (`entity.corrupt`: a person with no human state, or any number in its pose or human state that is no
+  finite number) can make every step or the state hash throw while no rule names it. It is found when a step faults,
+  when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
+  own is broken, and its last whole pose if its pose is broken. If no whole pose is on record, it goes to the nearest free
+  spot by the arrival, which is loud: logged, counted and told to its Soul. The event carries the pose, so a replay holds
+  it in the same place. A body that breaks again within a cooldown is not held again: the in-place rung's once-per-cooldown
+  report takes it.
+
+**What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
+persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it
+still halts as before (`recovery.baseline-unusable`). A state that still won't hash after its broken bodies are held halts
+as `engine.unhashable`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+
+A snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt. On the
+periodic path (#1368), the manual `saveSnapshot` and the repair snapshot (#1376), it is skipped and counted at rung
+`contained` as `durability.snapshot-skipped`, and the clock runs on. A manual save answers `pending: true` and logs an
+`unsnappable-head` checkpoint. Other capture faults propagate as before.
 
 ## Conformance
 
