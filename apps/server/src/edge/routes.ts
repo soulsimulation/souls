@@ -24,7 +24,7 @@ import {mountEdgeEyes} from './eyes/routes.ts';
 import {mountBodyRoutes} from './body/routes.ts';
 import {mountOwnerDay} from './owner-day.ts';
 import {livePlatforms} from './eyes/platforms.ts';
-import {OwnerLoop, type OwnerLoopInbox} from './owner-loop.ts';
+import {OwnerLoop, ownerLinkStore, type OwnerLoopInbox} from './owner-loop.ts';
 import type {WorldHost} from '../world.ts';
 import type {Souls} from '../souls.ts';
 import {loadOf, worldBlock} from '../load/admission.ts';
@@ -42,7 +42,11 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // D3: an act names the owner message it serves (`for`); the world closes that message when the act ends
   const box = deps.ownerInbox as Partial<OwnerLoopInbox> | undefined;
   const loop = box?.hasMessage && box.serverResult ? new OwnerLoop(box as OwnerLoopInbox, (soul, id) => L.receipt(soul, id) as never, l => L.onReceipt(l),
-    {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id)}) : null;
+    {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id),
+      holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id)}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
+  // #1295: the loop closes what a replaced or overlong act left open, once a second of world time. SIM_OWNER_HOLD_S
+  // shortens the hold limit (15 minutes) for tests and proof worlds.
+  if (loop) L.onTick(tick => loop.sweep(tick));
   mountBootRoutes(app,deps,[...EDGE_ACT_VERBS,...INTENT_VERBS]);
   mountOutcomeRoutes(app,deps);
   mountBodyRoutes(app,deps);
@@ -69,7 +73,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
     const out = await L.act(s, input) as {accepted?: boolean; receipt?: EdgeReceipt};
     // D3c: `forDefault` = the CLI linked it by default; `open` = this act is not the message's last step (the card stays open)
-    if (forMessage !== undefined && loop && out?.accepted && out.receipt) {const {open} = loop.link(s, out.receipt, forMessage as string, forDefault === true); return {...out, for: forMessage, ...(open ? {open} : {})};}
+    if (forMessage !== undefined && loop && out?.accepted && out.receipt) {const {open} = loop.link(s, out.receipt, forMessage as string, forDefault === true, secondsOf(input.params)); return {...out, for: forMessage, ...(open ? {open} : {})};}
     return out;}));
   // perception/1 + intents/1 (Core-A, EDGE-CONTRACT-v1 §8): a compact first-person frame, and the dry run of act.
   app.get('/v1/edge/here', wrap(c => {const s = deps.soul(c); limit(s, 'here', 240);
@@ -119,3 +123,6 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const close = comms.close;
   return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); eyes.close(); close(); }});
 }
+
+/** #1295: the duration an act asked for (`params.seconds`), when it is a number. */
+function secondsOf(params: unknown): number | undefined {const n = (params as {seconds?: unknown} | null | undefined)?.seconds; return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;}

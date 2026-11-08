@@ -241,7 +241,7 @@ export class EngineBridge {
   private levelsNow = new Set<number>();
   private reconciled = false;
   // Readiness observes the ordinary queue/fold; it never steps, drains or changes the projection.
-  private readonly initialEngine: WorldHost['engine'];
+  private initialEngine: WorldHost['engine'];
   private projectionFailure: Error | null = null;
   private projectionDrafts = new Map<WorldEditV1, { applied: boolean }>();
   private completedTicks = 0;
@@ -285,7 +285,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
-    this.nav = new GodNav({ model: this.god.model, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
+    this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
@@ -322,15 +322,15 @@ export class EngineBridge {
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
     // #442: repair with a tool in hand (mending.ts): the world changes when the receipt completes, no tick work
-    this.mending = createMending({ model: this.god.model, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), occupied: (id) => this.seatTakers(id).length > 0, denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never),
+    this.mending = createMending({ model: this.god.model, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), occupied: (id) => this.seatTakers(id).length > 0, denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never),
       reserved: (id, actor) => { const rt = (this.host.engine as unknown as { rt?: { holder(r: string): string[]; records: Map<string, { params?: { actor?: string } }> } }).rt; return !!rt?.holder(`entity:${id}`).some((r) => rt.records.get(r)?.params?.actor !== actor); }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     if (this.edge) this.edge.repairEffects = (r) => this.mending?.effects(r) ?? {};
     this.edge?.onReceipt((r) => { try { this.mending?.onReceipt(r); } catch (e) { this.log(`mending: ${(e as Error).message}`); } });
     // Entry 34: the watering-can act (watering.ts): planned for perceive's offers, its moments committed per tick
-    this.watering = createWatering({ model: this.god.model, version: () => this.version, engine: this.host.engine as never, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
+    this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     // Entry 43: the tea acts (tea.ts), the same way
-    this.tea = createTea({ model: this.god.model, version: () => this.version, engine: this.host.engine as never, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, engine: this.host.engine as never, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
+    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -346,7 +346,7 @@ export class EngineBridge {
     this.god.onBuild((e) => { if (!PERCEPTION_QUIET_BUILD.has(e.kind)) { const ids = this.layers.buildRetag(); if (ids.length) { this.perceive.noteRetag(ids); this.notePerceive([], false); } } });
     if (!R) this.host.listeners.push({
       afterTick: (tick, context) => { try { this.afterTickWork(tick, context?.startedAtMs); } catch (error) { this.failProjection(error); throw error; } },
-      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
+      onApplied: (e) => { this.projectionApplied(e); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
@@ -374,7 +374,7 @@ export class EngineBridge {
     // R8: residents near a visible map change hear of it once per request; a build near them, at start and at done.
     this.mapNotices = new MapNotices((soulId, text, place) => this.notices.notify(soulId, { text, tick: this.engine.world.tick, native: true, ...(place ? { place } : {}) }), () => this.god.now());
     if (!R) this.god.onBuild(e => this.buildNotice(e));
-    this.activitySpots = new GodActivitySpots({ model: this.god.model, engine: this.host.engine as never, version: () => `${this.godEdits}|${this.engine.world.entityPhysicsV1?.hash ?? ''}`, bodies: () => this.modelBodies(), levelAt: (x, z, y) => this.levelAt(x, z, y),
+    this.activitySpots = new GodActivitySpots({ model: this.god.model, get engine() { return o.host.engine as never; }, version: () => `${this.godEdits}|${this.engine.world.entityPhysicsV1?.hash ?? ''}`, bodies: () => this.modelBodies(), levelAt: (x, z, y) => this.levelAt(x, z, y),
       placeAt: (at, level) => this.places.placeAt(at, level), placeLocator: () => this.places.placeLocator(), prepare: () => this.places.sync(true), catchingUp: () => this.perceiveRunning || !!this.perceive?.pending(), sliced: () => !!this.host.running, placeName: (id) => this.edge?.places.byId.get(id)?.name ?? null });
     if (this.edge && !R) this.edge.spotsProvider = () => { if (!this.reconciled || this.activitySpots.pendingFirst()) return null; this.flush(); const n = this.activitySpots.stats.derives, d = this.activitySpots.data(); if (this.activitySpots.stats.derives !== n) this.logSpots(); return d; };
     if (this.edge) {
@@ -385,7 +385,7 @@ export class EngineBridge {
     }
     if (this.edge) this.hookEdge(this.edge);
     // F3: a god thing in a Soul's hand shows as held (observe, receipts) and can be put down (held.ts)
-    if (this.edge) installHeld(this.edge, { engine: this.host.engine as never, model: this.model, minds: this.host.minds });
+    if (this.edge) installHeld(this.edge, { get engine() { return o.host.engine as never; }, model: this.model, minds: this.host.minds });
     // F3: a god's world keeps time like the live worlds (a logged dayConfig; world-clock.ts)
     if (!R && (o.worldClock ?? (!config.livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey)))) installWorldClock(this.host, this.god, this.log);
     // F3: a god's new world serves its constitution (or a neutral line) as lore, never Eden's (world-lore.ts)
@@ -402,7 +402,7 @@ export class EngineBridge {
    * Call again immediately before publishing HTTP: a model commit may occur between promise continuations. */
   initialProjectionReady(): boolean {
     if (this.projectionFailure) throw this.projectionFailure;
-    if (this.host.engine !== this.initialEngine) throw new Error('bridge.readiness.engine-replaced');
+    if (this.engineReplaced()) throw new Error('bridge.readiness.engine-replaced');
     if (!this.host.clockAvailable || this.host.engineFault) throw new Error('bridge.readiness.clock-unavailable');
     if (!this.reconciled || this.pending.size || this.projectionDrafts.size ||
         this.completedTicks <= this.lastProjectionFold || this.completedEdits !== this.godEdits) return false;
@@ -488,11 +488,17 @@ export class EngineBridge {
     this.projectionDrafts.clear();
     this.checkProjectionSoon();
   }
+  /** #1150: under the repair rules a world goes on from a replaced engine by design, so that engine is the one to read. */
+  private engineReplaced(): boolean {
+    if (this.host.engine === this.initialEngine) return false;
+    if (!this.host.engine.rulesVersion.includes('+souls-repair/')) return true;
+    this.initialEngine = this.host.engine; return false;
+  }
   private projectionApplied(event: LogEvent) {
     if (event.kind !== 'world-edit') return;
     const draft = event.payload as WorldEditV1, pending = this.projectionDrafts.get(draft);
     if (!pending) return;
-    if (this.host.engine !== this.initialEngine || this.engine.world.entityPhysicsV1?.hash !== draft.hash) {
+    if (this.engineReplaced() || this.engine.world.entityPhysicsV1?.hash !== draft.hash) {
       this.failProjection(new Error('bridge.readiness.projection-not-installed')); return;
     }
     pending.applied = true; this.lastProjectionFold = this.completedTicks;
@@ -575,7 +581,7 @@ export class EngineBridge {
     try {
       void this.host.enqueue('world-edit', 'god', draft).then(event => {
         this.projectionDrafts.delete(draft);
-        if (event.payload !== draft || !acceptance.applied || this.host.engine !== this.initialEngine) {
+        if (event.payload !== draft || !acceptance.applied || this.engineReplaced()) {
           this.failProjection(new Error('bridge.readiness.draft-not-accepted')); return;
         }
         this.checkProjectionSoon();
@@ -1089,6 +1095,7 @@ export class EngineBridge {
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
     if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
+    else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
     if (this.rescued !== this.editTick && tick - this.editTick >= 10 && (tick - this.editTick >= 20 || tick - this.rescuedAt >= 40)) { this.rescuedAt = tick; this.rescueTrapped(); if (S) t = S.add('rescue', t); }
     if (S && S.due()) this.log(S.line(this));
@@ -1238,23 +1245,40 @@ export class EngineBridge {
   }
   /** Last tick each Soul was stepped out (nav-connect/1): at most once a minute each, as the ledger's walk rescue. */
   private navRescuedAt = new Map<string, number>();
+  /** #1287: Souls a rescue passed over, cut off, because a program was running: asked again once it has ended. */
+  private navWaiting = new Set<string>();
+  private navRescueWaiting() {
+    try {
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
+      const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
+      if (!souls.length) return;
+      if (!E.navWarmV1?.(0)) { this.navWarm = false; return; }   // stale labels answer "not cut off": navStep warms them, and they stay queued
+      this.navRescueSouls(0, souls);
+    } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
+  }
+  /** Is this body off the main walkable area where it stands now? Asked with the labels warm. */
+  private navCutOff(id: string) {
+    const E = this.engine as unknown as { navCheckV1?: (pts: { id: string; p: Vec2; level?: number; tol?: number }[]) => { ok: boolean }[] }, b = this.engine.world.entities[id] as { pose: { p: number[] }; human?: { level?: number } } | undefined;
+    return !!b && E.navCheckV1?.([{ id, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0, tol: 0.6 }])[0]?.ok === false;
+  }
   /** Step every Soul cut off from the main walkable area to open ground (logged). Returns how many were moved. A seated
    *  Soul is judged where it would stand up (its seat's approach): connected there, it stays seated and nothing is
    *  logged; when that spot is closed off it rises and lands on open ground once (a god walk-out, which a plain
    *  relocate cannot do to a held body). Only moves that change where a Soul is are logged or counted. */
-  private navRescueSouls(budgetMs = 0): number {
+  private navRescueSouls(budgetMs = 0, souls: Iterable<{ soulId: string; entityId: string; name: string }> = this.host.minds.values()): number {
     const E = this.engine as unknown as { navRescueV1?: (id: string, budgetMs?: number) => { to: Vec2; code: string; pocket?: number; level: number; seated?: true } | null };
     if (!E.navRescueV1) return 0;
     const tick = this.engine.world.tick;
     let n = 0;
-    for (const m of this.host.minds.values()) {
-      if (isVerificationProbe(m.soulId) || this.engine.programOf(m.entityId)) continue;
+    for (const m of souls) {
+      if (isVerificationProbe(m.soulId)) continue;
+      if (this.engine.programOf(m.entityId)) { if (this.navCutOff(m.entityId)) this.navWaiting.add(m.soulId); else this.navWaiting.delete(m.soulId); continue; }
       if ((this.navRescuedAt.get(m.soulId) ?? -1e9) > tick - 1200) continue;
-      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) continue;
+      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) { this.navWaiting.delete(m.soulId); continue; }
       const where = `${r.seated ? 'sat' : 'stood'} ${r.level ? `upstairs (floor ${r.level}) with no way down` : `in a closed-off ${r.pocket !== undefined ? `${Math.round(r.pocket)} m² ` : ''}pocket`}`;
       this.log(`${m.name} ${where} (${r.code}): steps to open ground at (${r.to.join(', ')})`);
       const payload = { soulId: m.soulId, entityId: m.entityId, to: r.to, why: `nav-connect/1: ${where}, no walk out: ${r.seated ? 'stood up and ' : ''}stepped to the nearest open ground`, policy: 'nav-connect/1', ...(r.seated ? { godWalkout: true, released: [], level: 0 } : {}) };
-      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); n++; } catch { /* clock not ready */ }
+      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); this.navWaiting.delete(m.soulId); n++; } catch { /* clock not ready */ }
     }
     return n;
   }
