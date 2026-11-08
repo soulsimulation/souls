@@ -3139,6 +3139,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const exact = caps.find(c => c.id === text);
     // #1381: "stop", "pause", "cancel" while an act is open mean the act under way (else, as before, stand:here)
     if (!exact && STOP_WORDS.test(text.trim())) {const stop = caps.find(c => c.id === STOP_CURRENT && c.available); if (stop) return {v: {kind: 'alias', cap: stop, note: `${text} is ${STOP_CURRENT} (${stop.label}).`}, caps, plans};}
+    // #1381: only its id and those words mean stop:current; other words keep their own reading ("stop singing", "stop the
+    // record" are the act's own stop, as before), never a looser match on its label
+    if (!exact && caps.some(c => c.id === STOP_CURRENT)) caps = caps.filter(c => c.id !== STOP_CURRENT);
     if(exact && this.secretOffer(soul,exact))return {v:{kind:'unknown',code:'capability.unknown',reason:'That action is not known here.',didYouMean:[]},caps,plans};
     if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery){
       // #849: the one seat the words name was taken: bind it by its exact id (offered on demand when the listing leaves it out)
