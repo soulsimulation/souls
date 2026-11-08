@@ -120,3 +120,42 @@ test('body-step-guard/1: a restore keeps a floater clear and apart, the rule is 
   }
   assert.equal(restored.stateHash(), on.stateHash());
 });
+
+const BIG = { family: 'floater', model: 'verdelis', radius: .45, hoverHeight: 1.45 };
+for (const guarded of [false, true]) test(`relocating beside a body when both radii exceed the old 0.8 m gap: ${guarded ? 'body-step-guard/1 keeps them apart' : 'the old rule writes an overlap'}`, () => {
+  const e = world(`guard-apart-${guarded}`);
+  if (guarded) e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true } as never);
+  e.spawnHuman({ id: 'h', label: 'Ada', soul: 's_h' }); e.spawnHuman({ id: 'g', label: 'Bo', soul: 's_g' });
+  (e.world.entities.h as { body?: unknown }).body = BIG; (e.world.entities.g as { body?: unknown }).body = BIG;
+  const to: [number, number] = [30, 10], gp = e.world.entities.g.pose.p;
+  e.world.entities.g.pose.p = [to[0] + .81, gp[1], to[1]];
+  e.step();
+  assert.equal(e.relocateHumanV1('h', to), true);
+  const p = e.world.entities.h.pose.p, q = e.world.entities.g.pose.p;
+  e.step();
+  const overlaps = (e.runtime.violations as { code: string }[]).filter(v => v.code === 'collision.human-human');
+  if (guarded) { assert.ok(Math.hypot(p[0] - q[0], p[2] - q[2]) >= .9 - 1e-9, `apart: ${p} ${q}`); assert.deepEqual(overlaps, []); }
+  else { assert.deepEqual([p[0], p[2]], to); assert.equal(overlaps.length, 1); }
+});
+
+test('body-step-guard/1: a stall release stands a held floater only where the invariant passes it and apart from others', () => {
+  const e = world('guard-stall');
+  e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true } as never);
+  e.spawnHuman({ id: 'h', label: 'Ada', soul: 's_h' }); e.spawnHuman({ id: 'g', label: 'Bo', soul: 's_g' });
+  (e.world.entities.h as { body?: unknown }).body = BIG; (e.world.entities.g as { body?: unknown }).body = BIG;
+  const at = squeeze(e, 12), hp = e.world.entities.h.pose.p;
+  e.world.entities.h.pose.p = [at[0], hp[1], at[1]];
+  e.world.entities.g.pose.p = [at[0] - .95, hp[1], at[1] + .2];
+  const adm = e.perform({ actor: 'h', label: 'walk', steps: [{ verb: 'walk_to', params: { to: [at[0] - 20, at[1]] } }] });
+  assert.ok(adm.ok, JSON.stringify(adm));
+  e.step();
+  const r = e.stallReleaseV1('h', { code: 'stall.test', message: 'released by the test' });
+  assert.ok(r, 'released');
+  const p = e.world.entities.h.pose.p, q = e.world.entities.g.pose.p;
+  assert.ok(clearance(e, [p[0], p[2]]) >= .45 - .03, `clear of the wall: ${p}`);
+  assert.ok(Math.hypot(p[0] - q[0], p[2] - q[2]) >= .9 - 1e-9, `apart: ${p} ${q}`);
+  // (the body was put in the squeeze by hand, so the ticks before the release record it there; none after)
+  const seen = e.runtime.violations.length;
+  e.step();
+  assert.deepEqual((e.runtime.violations as { code: string }[]).slice(seen).filter(v => v.code.startsWith('collision.')), []);
+});

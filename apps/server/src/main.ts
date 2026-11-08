@@ -18,7 +18,7 @@ import { Hub } from './hub.ts';
 import { handleMcp } from './mcp.ts';
 import { Souls } from './souls.ts';
 import { WorldHost } from './world.ts';
-import { enableEdgeRuntimeRules } from './edge-runtime-rules.ts';
+import { adoptBootRuntimePoliciesV1 } from './edge-runtime-rules.ts';
 import { LivingWorld } from './living.ts';
 import { CampCards } from './camp.ts';
 import {FloaterCards} from './floaters.ts';
@@ -128,9 +128,6 @@ let courtesy: Promise<unknown> = Promise.resolve();
 if (living && host.engine.configureRuntimePolicy && !runtimePolicy?.quietSeatCourtesy) {
   courtesy = host.enqueue('rules','world',{runtimePolicy:{sleepBlockTicks:1200,...host.extra.runtimePolicy as object,quietSeatCourtesy:true},why:'enable ordinary idle-bystander courtesy at quiet seat exits prospectively; retain historical replay before this event'});
 }
-// #1332 body-step-guard/1: every world with runtime policies adopts it once, prospectively (its history replays as recorded); after
-// the courtesy event, so each policy event carries the one before it
-if (host.engine.configureRuntimePolicy) void courtesy.then((): Promise<unknown> => host.enableBodyStepGuardV1('world')).catch((e) => console.error('[world] body-step-guard/1 could not be adopted; placements keep their old checks:', String(e).slice(0, 300)));
 const campCards = living?.camp ? new CampCards(host) : null;
 if(config.worldKey==='littlemartians')new FloaterCards(host);
 void campCards;
@@ -164,7 +161,8 @@ hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPers
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
 const edge = config.mindDriver === 'edge' ? new EdgeLedger(host, db, process.env.PLACE_DATA ? JSON.parse(readFileSync(process.env.PLACE_DATA, 'utf8')) : undefined) : undefined;
-if (edge && host.engine.configureRuntimePolicy) void enableEdgeRuntimeRules(host, config.worldKey);  // not the stair-traffic rules on the Little Martians worlds
+// Boot runtime policies one after another (edge-runtime-rules.ts): the edge rules after the courtesy event, then #1332 body-step-guard/1
+if (host.engine.configureRuntimePolicy) void adoptBootRuntimePoliciesV1(host, { after: courtesy, edge: !!edge, worldKey: config.worldKey }).catch((e) => console.error('[world] a boot runtime policy could not be adopted:', String(e).slice(0, 300)));
 // God mode + entity world (spec eden4/28): the owner's edge agent builds the world; viewers get diffs over the hub.
 const genesis = process.env.GENESIS_FILE ? JSON.parse(readFileSync(process.env.GENESIS_FILE, 'utf8')) : undefined;
 const god = config.worldEngine ? new GodMode(db, { genesis, worldId: host.worldId, ownerId: process.env.WORLD_OWNER_ID || null /* explicit only: on a fresh world the first person to claim it becomes its god */, tick: () => host.engine.world.tick, emit: (m) => hub.broadcast(m as never), cobuilders: process.env.SIM_COBUILDERS === '1' /* off: one god per world (Gene 2026-10-16) */ }) : undefined;

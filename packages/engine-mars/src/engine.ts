@@ -1325,8 +1325,9 @@ export class MarsEngine implements Engine {
     const from=setDownFrom(this.rt,actor),upper=(a.human?.level??0)!==0;
     const guard=this.cfg.bodyStepGuardV1===true,level=a.human?.level??0;
     // #1332 body-step-guard/1: its own radius, and upstairs the nearest spot on its floor the invariant passes (rings of 0.4 m to
-    // 2 m); none there: released where it stands, never stood somewhere it would not pass
-    const xz=upper?(guard?this.upperClearNearV1(a,from.at,level):from.at):(this.freeStandingNearV1([r3(from.at[0]),r3(from.at[1])],guard?this.bodyRadiusV1(a):a.body?.radius??HUMAN_RADIUS,guard?a:undefined)??from.at);
+    // 2 m); nothing clear near (either floor): released where it stands, never stood somewhere it would not pass
+    const near=upper?null:this.freeStandingNearV1([r3(from.at[0]),r3(from.at[1])],guard?this.bodyRadiusV1(a):a.body?.radius??HUMAN_RADIUS,guard?a:undefined);
+    const xz=upper?(guard?this.upperClearNearV1(a,from.at,level):from.at):near??(!guard||this.placeClearV1(a,from.at[0],from.at[1],0,this.guardBodiesV1())?from.at:null);
     const f=this.rt.world.groundV1&&!upper?(this.rt.services.spatial as Spatial).ground:undefined;
     const y=xz&&f?standOn(f,xz[0],xz[1]):(from.y??a.pose.p[1]);
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
