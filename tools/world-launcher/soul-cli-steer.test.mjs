@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { landingSentence, STEER_TARGET_REFUSALS } from './soul/eden.mjs';
+import { landingSentence, stalledSentence, STEER_TARGET_REFUSALS } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -18,12 +18,15 @@ const steerAction = (blocked) => ({ object: { id: RIDE, kind: 'ride', actions: [
 
 async function fixture(t, { onAct, object = () => steerAction(null) }) {
   const dir = mkdtempSync(join(tmpdir(), 'souls-steer-')), seen = [];
+  let api;
   const server = createServer((req, res) => {
     let body = ''; req.on('data', c => { body += c; });
     req.on('end', () => {
       const s = { method: req.method, url: req.url, body: body ? JSON.parse(body) : null }; seen.push(s);
       if (req.url === `/v1/edge/objects/${RIDE}`) { const o = object(); return o === 500 ? json(res, 500, { error: { code: 'unavailable' } }) : json(res, 200, o); }
       if (req.url === '/v1/edge/act') return onAct(s, res);
+      if (req.url.startsWith('/v1/edge/wait') && api.waitFrame) return setTimeout(() => json(res, 200, api.waitFrame), 200);
+      if (req.url.startsWith('/v1/edge/receipts/')) return json(res, 200, { receipt: { id: 'r_6', capability: 'walk:flag-orchard', phase: 'started' } });
       json(res, 200, {});
     });
   });
@@ -35,16 +38,20 @@ async function fixture(t, { onAct, object = () => steerAction(null) }) {
     let out = '', err = ''; child.stdout.on('data', c => { out += c; }); child.stderr.on('data', c => { err += c; });
     child.on('exit', code => { let d = null; try { d = JSON.parse(out); } catch {} resolve({ code, d, stdout: out, stderr: err }); });
   });
-  return { seen, run, acts: () => seen.filter(s => s.url === '/v1/edge/act') };
+  api = { seen, run, acts: () => seen.filter(s => s.url === '/v1/edge/act'), waitFrame: null };
+  return api;
 }
 
-test('landingSentence: the distance, the place asked, where and why; nothing when nothing moved', () => {
+test('landingSentence: the distance, the place asked, where and why, always "lands", bounded; nothing when nothing moved', () => {
   const l = { requested: 'Eden Library', at: 'the lawn east of its door', adjustedM: 14.4, reason: 'The library has no room for the basket.' };
-  assert.equal(landingSentence(l, false), 'Lands 14 m from Eden Library, at the lawn east of its door: The library has no room for the basket.');
-  assert.equal(landingSentence({ ...l, requested: { label: 'Eden Library' }, at: null, reason: null }, true), 'Landed 14 m from Eden Library.');
-  for (const none of [null, { adjustedM: 0 }, { adjustedM: 'x' }]) assert.equal(landingSentence(none, true), null);
-  for (const c of ['ride.no-landing-spot', 'ride.no-water-route', 'ride.out-of-bounds', 'steer.unknown-place']) assert.ok(STEER_TARGET_REFUSALS.has(c), c);
-  for (const c of ['ride.steered', 'ride.on-ground', 'ride.not-aboard']) assert.ok(!STEER_TARGET_REFUSALS.has(c), c);
+  assert.equal(landingSentence(l), 'Lands 14 m from Eden Library, at the lawn east of its door: The library has no room for the basket.');
+  assert.equal(landingSentence({ ...l, requested: { label: 'Eden Library' }, at: null, reason: null }), 'Lands 14 m from Eden Library.');
+  assert.ok(landingSentence({ ...l, requested: 'x'.repeat(500), at: 'y'.repeat(500), reason: 'z'.repeat(500) }).length <= 250);
+  for (const none of [null, { adjustedM: 0 }, { adjustedM: 'x' }]) assert.equal(landingSentence(none), null);
+  for (const c of ['ride.no-landing-spot', 'ride.out-of-bounds', 'steer.unknown-place']) assert.ok(STEER_TARGET_REFUSALS.has(c), c);
+  for (const c of ['ride.steered', 'ride.on-ground', 'ride.not-aboard', 'ride.no-water-route']) assert.ok(!STEER_TARGET_REFUSALS.has(c), c);
+  assert.equal(stalledSentence({ stalled: true, tick_age_ms: 4200, note: "The world's clock has not moved for 4 s; nothing you do takes effect until it runs again." }), "The world's clock has not moved for 4 s; nothing you do takes effect until it runs again.");
+  assert.equal(stalledSentence({ stalled: true, tick_age_ms: 4200 }), "The world's clock has not moved for 4 s; what I asked waits until it runs again.");
 });
 
 test('"land at the library" is one accepted steer, and the answer names the real landing distance', { timeout: 10_000 }, async t => {
@@ -72,6 +79,12 @@ test('a steer the world refused for its target is answered with the world\'s wor
   assert.equal(other.d.accepted, true); assert.equal(f.acts().length, 2);
 });
 
+test('"land here" and a direction depend on where the ride is now: a refusal of either is never remembered', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, { onAct: (s, res) => json(res, 200, { accepted: false, code: s.body.params.land ? 'ride.no-landing-spot' : 'ride.out-of-bounds', reason: 'Not here.', capability: STEER }) });
+  for (const p of ['{"land":true}', '{"land":true}', '{"direction":"N","distance":100}', '{"direction":"N","distance":100}']) assert.equal((await f.run('act', STEER, p)).d.repeat, undefined);
+  assert.equal(f.acts().length, 4, 'each sent: the ride may have moved');
+});
+
 test('a refusal that passes (someone else is steering) is not remembered', { timeout: 10_000 }, async t => {
   let n = 0;
   const f = await fixture(t, { onAct: (s, res) => ++n === 1
@@ -97,10 +110,18 @@ test('the ride\'s own offer says blocked: answered without an act; an unreadable
 
 test('other acts read no offer; words read as another id and a stalled clock are said', { timeout: 10_000 }, async t => {
   const f = await fixture(t, { onAct: (s, res) => json(res, 200, { accepted: true, receipt: { id: 'r_5', capability: 'walk:flag-orchard', phase: 'started' }, channel: 'body',
-    resolved: { from: 'walk:orchard', to: 'walk:flag-orchard', note: 'The orchard is reached by its flag.' }, world: { load: 'green', stalled: { ageMs: 4200 } } }) });
+    resolved: { from: 'walk:orchard', to: 'walk:flag-orchard', note: 'The orchard is reached by its flag.' }, world: { load: 'red', stalled: true, tick_age_ms: 4200, note: "The world's clock has not moved for 4 s; nothing you do takes effect until it runs again." } }) });
   const got = await f.run('act', 'walk:orchard');
   assert.equal(got.code, 0, got.stderr);
   assert.equal(f.seen.filter(s => s.url.startsWith('/v1/edge/objects/')).length, 0);
   assert.equal(got.d.adjusted, 'The orchard is reached by its flag.');
-  assert.equal(got.d.stalled, "The world's clock has not moved for 4 s; what I asked may wait until it moves again.");
+  assert.equal(got.d.stalled, "The world's clock has not moved for 4 s; nothing you do takes effect until it runs again.");
+});
+
+test('a wait whose frames say the clock has stalled says so in the answer', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, { onAct: (s, res) => json(res, 200, { accepted: true, receipt: { id: 'r_6', capability: 'walk:flag-orchard', phase: 'started' }, channel: 'body' }) });
+  const stall = { load: 'red', stalled: true, tick_age_ms: 9000, note: "The world's clock has not moved for 9 s; nothing you do takes effect until it runs again." };
+  const got = await (async () => { f.waitFrame = { events: [], cursor: 'c_1', world: stall }; return f.run('act', 'walk:flag-orchard', '--wait', '1'); })();
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.d.stalled, stall.note);
 });

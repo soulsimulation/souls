@@ -2869,7 +2869,7 @@ async function act(...argv) {
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled ? { stalled: d.world.stalled } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
@@ -2884,33 +2884,38 @@ async function act(...argv) {
 
 // #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
 // GET /v1/edge/objects/<id>, whose actions carry the world's `blocked` code and reason); a failed or slow read changes
-// nothing. A steer the world refused for its target (no landing spot, no water route, out of bounds, an unknown place,
-// bad params) is not sent again with the same target for STEER_REFUSED_MS: the CLI answers with the world's own refusal.
-// Another target, another ride, or a refusal that passes (someone else steering, on the ground) is sent as usual.
+// nothing. A steer to a named place (`to`) that the world refused for that place (no landing spot there, out of bounds,
+// a place it doesn't know, bad params) is not sent again for STEER_REFUSED_MS in this world: the CLI answers with the
+// world's own refusal. Only a named place is fixed: "land here", a direction and distance, and a water route all depend
+// on where the ride is now, so those are always sent. So are another target, another ride, and refusals that pass
+// (someone else steering, on the ground).
 export const STEER_REFUSED_MS = 5 * 60_000;
-export const STEER_TARGET_REFUSALS = new Set(["ride.no-landing-spot", "ride.no-water-route", "ride.out-of-bounds", "ride.params", "ride.steer-params", "steer.unknown-place", "steer.params"]);
+export const STEER_TARGET_REFUSALS = new Set(["ride.no-landing-spot", "ride.out-of-bounds", "ride.params", "ride.steer-params", "steer.unknown-place", "steer.params"]);
 const STEER = /^object:([^:\s]+):steer$/;
-const steerKey = (p) => `${String(p.capability).trim()} ${JSON.stringify(Object.keys(p.params ?? {}).sort().map((k) => [k, p.params[k]]))}`;
+const steerKey = (p) => `${load().world ?? ""} ${String(p.capability).trim()} ${JSON.stringify(Object.keys(p.params ?? {}).sort().map((k) => [k, p.params[k]]))}`;
+const fixedTarget = (p) => typeof p.params?.to === "string" && p.params.to.trim() !== "";
 async function steerPreflight(parsed) {
   const m = STEER.exec(String(parsed.capability ?? "").trim());
   if (!m) return null;
-  const key = steerKey(parsed), held = (load().refusedSteers ?? []).find((x) => x.key === key && Date.now() - x.at < STEER_REFUSED_MS);
+  const key = steerKey(parsed), held = fixedTarget(parsed) ? (load().refusedSteers ?? []).find((x) => x.key === key && Date.now() - x.at < STEER_REFUSED_MS) : null;
   if (held) return { accepted: false, code: held.code, reason: held.reason, repeat: "refused", note: "The world refused this same steer; it was not sent again. Steer somewhere else, or tell your person why." };
   const r = await call(`/v1/edge/objects/${encodeURIComponent(m[1])}`, { retry: false, timeoutMs: 5_000 }).catch(() => null);
   const a = r?.status === 200 ? (r.data?.object?.actions ?? []).find((x) => x?.action === "steer") : null;
   return a && a.available === false && a.blocked?.code ? { accepted: false, code: a.blocked.code, reason: a.blocked.reason, preflight: true } : null;
 }
 function noteSteerRefusal(parsed, d) {
-  if (!STEER.test(String(parsed.capability ?? "").trim()) || !STEER_TARGET_REFUSALS.has(d.code)) return;
+  if (!STEER.test(String(parsed.capability ?? "").trim()) || !fixedTarget(parsed) || !STEER_TARGET_REFUSALS.has(d.code)) return;
   const key = steerKey(parsed), kept = (load().refusedSteers ?? []).filter((x) => x.key !== key && Date.now() - x.at < STEER_REFUSED_MS);
   save({ refusedSteers: [...kept, { key, code: d.code, reason: d.reason, at: Date.now() }].slice(-10) });
 }
-/** The landing the world chose, in one sentence (#1324's `result.landing`: {requested, at, adjustedM, reason}). */
-export function landingSentence(l, done) {
+/** The landing the world chose, in one sentence (#1324's `result.landing`: {requested, at, adjustedM, reason}). Always
+ *  "lands": a steer's receipt ends when the ride takes the steer, long before touchdown; the landing event says it landed. */
+export function landingSentence(l) {
   const m = Number(l?.adjustedM);
   if (!l || !(m > 0)) return null;
-  const name = (x) => typeof x === "string" ? x : x?.label ?? x?.name ?? x?.place ?? null, asked = name(l.requested), at = name(l.at);
-  return `${done ? "Landed" : "Lands"} ${Math.round(m)} m from ${asked ?? "where I asked"}${at ? `, at ${at}` : ""}${l.reason ? `: ${String(l.reason).replace(/[.\s]+$/, "")}` : ""}.`;
+  const name = (x) => { const v = typeof x === "string" ? x : x?.label ?? x?.name ?? x?.place ?? null; return v == null ? null : String(v).slice(0, 60); };
+  const asked = name(l.requested), at = name(l.at), why = l.reason ? String(l.reason).replace(/[.\s]+$/, "").slice(0, 100) : "";
+  return `Lands ${Math.round(m)} m from ${asked ?? "where I asked"}${at ? `, at ${at}` : ""}${why ? `: ${why}` : ""}.`;
 }
 
 /** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
@@ -2949,6 +2954,12 @@ function compactEvent(event) {
   // Unusual large producer payload: retain the event reference, never imply that omitted details were absent.
   return {id: e.id, kind: e.kind, at: e.at, tick: e.tick, detailsOmitted: true, untrusted: true};
 }
+/** #1326's `world: {stalled: true, tick_age_ms, note}`: the world's own sentence, else one from the tick age. */
+export function stalledSentence(w) {
+  if (typeof w?.note === "string" && w.note.trim()) return w.note.trim().slice(0, 200);
+  const s = Math.round((Number(w?.tick_age_ms) || 0) / 1000);
+  return `The world's clock has not moved${s > 0 ? ` for ${s} s` : ""}; what I asked waits until it runs again.`;
+}
 export function brief(out) {
   const rec = out.receipt && !out.receipt.error ? out.receipt : null, fin = !!rec && TERMINAL.has(rec.phase);
   // F2 (#373): only a completed receipt is `done`; a failed or replaced one says `failed` with the world's reason, never
@@ -2967,9 +2978,9 @@ export function brief(out) {
   };
   // #1337: where the world adjusted what was asked (a landing moved to clear ground, words read as another id), one sentence;
   // and a world whose clock has stalled says so
-  const adjusted = landingSentence(out.landing ?? rec?.result?.landing, fin) ?? (out.resolved?.note && out.resolved.to !== out.resolved.from ? String(out.resolved.note).slice(0, 200) : null);
+  const adjusted = landingSentence(out.landing ?? rec?.result?.landing) ?? (out.resolved?.note && out.resolved.to !== out.resolved.from ? String(out.resolved.note).slice(0, 200) : null);
   if (adjusted) o.adjusted = adjusted;
-  if (out.stalled) o.stalled = `The world's clock has not moved for ${Math.max(1, Math.round((Number(out.stalled.ageMs) || 0) / 1000))} s; what I asked may wait until it moves again.`;
+  if (out.stalled) o.stalled = stalledSentence(out.stalled);
   for (const k of ["resolved", "receipt", "stalled"]) if (JSON.stringify(o).length > 600) delete o[k];
   const over = JSON.stringify(o).length - 600;
   if (over > 0 && o[key]) o[key] = o[key].slice(0, Math.max(40, o[key].length - over - 1)) + "…";
@@ -3021,7 +3032,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
   const since = cursor;
   const seen = [];
-  let terminal = null, held = null, addressed = null, addressedSince = null;
+  let terminal = null, held = null, addressed = null, addressedSince = null, stalled = null;
   while (Date.now() < until) {
     const t = Math.max(1, Math.min(55, Math.round((until - Date.now()) / 1000)));
     const q = `timeout=${t}&after=${encodeURIComponent(cursor)}` + (Number.isSafeInteger(ownerMark) ? `&ownerSince=${ownerMark}` : "") + (addressedSince != null ? `&addressedSince=${addressedSince}` : "");
@@ -3032,6 +3043,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
       await pause(ms); continue;
     }
     const d = ok(r, "wait");
+    stalled = d.world?.stalled === true ? d.world : null;   // #1337: the latest frame's word on the world's clock
     if (!d.gap) seen.push(...(d.events ?? []));
     cursor = d.cursor ?? cursor;
     if (Number.isSafeInteger(d.ownerMark)) ownerMark = d.ownerMark;
@@ -3049,7 +3061,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;

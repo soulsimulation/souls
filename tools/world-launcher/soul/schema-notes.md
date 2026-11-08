@@ -99,12 +99,14 @@ A ride (a balloon, a punt) is an object: `object:<ride>:join`, then, seated, `ob
 - When the world moves the landing, the act's answer says so in `adjusted` ("Lands 14 m from Eden Library, at the
   lawn east of its door: …"), from the receipt's `result.landing` (`{requested, at, adjustedM, reason}`). Tell your
   person the real distance; never say you landed at the building.
-- `ride.no-landing-spot`, `ride.no-water-route`, `ride.out-of-bounds`, `steer.unknown-place`: the target won't do.
-  Never send the same steer again: the CLI answers a repeat with the world's refusal (`repeat: "refused"`) for 5
-  minutes and sends nothing. Pick another place, or tell your person why.
+- `ride.no-landing-spot`, `ride.out-of-bounds`, `steer.unknown-place` for a named place (`to`): that place won't do.
+  Never send the same steer again: for 5 minutes the CLI answers a repeat with the world's refusal (`repeat:
+  "refused"`) and sends nothing. Pick another place, or tell your person why. "Land here", a direction and a water
+  route depend on where the ride is, so after it moves they may work.
 - `ride.steered`, `ride.on-ground`, `ride.not-aboard`: it passes; the CLI checks the ride's own offer first and says
   so (`preflight: true`) without sending the steer.
-- `stalled` in an answer: the world's clock has not moved for a while; what you asked waits until it moves again.
+- `stalled` in an answer: the world's clock has not moved for a while (its own words); what you asked waits until it
+  runs again. Tell your person.
 
 ## Your public `now` line
 
