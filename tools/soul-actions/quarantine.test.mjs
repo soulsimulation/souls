@@ -158,3 +158,28 @@ test('Q5 a refused repair snapshot leaves the repair standing and the world runn
   w.control.fault = () => [{code: 'support.floating', message: 'forced', subjects: [Ada.entityId]}]; w.control.at = h.engine.world.tick + 2; await w.tick(10);
   assert.ok(running(h)); assert.equal(byRung(h).halt ?? 0, 0, JSON.stringify(h.glitches)); assert.ok((h.glitches.byRule['durability.snapshot-skipped']?.contained ?? 0) >= 1, JSON.stringify(h.glitches));
 });
+
+// A6(b) chaos: one entity's state is corrupted between ticks, as a bug elsewhere would leave it, and every restore the ladder
+// tries is refused. Whatever the ladder makes of it, the tick loop never stops: 600 ticks later the clock has moved 600 ticks,
+// nothing halted, and a bystander who sets off after the corruption gets where she was going.
+const CHAOS = {
+  'a body put inside another': (h, s, o) => { const e = h.engine.world.entities, p = e[o.entityId].pose.p; e[s.entityId].pose.p = [p[0] + 0.1, p[1], p[2]]; },
+  'a body with a non-finite pose': (h, s) => { const e = h.engine.world.entities[s.entityId]; e.pose.p = [NaN, e.pose.p[1], Infinity]; },
+  'a body on a floor that does not exist': (h, s) => { const e = h.engine.world.entities[s.entityId]; e.human.level = 7; e.pose.p = [e.pose.p[0], 21, e.pose.p[2]]; },
+  'a body whose human state is gone': (h, s) => { delete h.engine.world.entities[s.entityId].human; },
+  'an invariant that throws whenever it reads one body': (h, s, o, w) => { w.control.every = (r) => { if (r.world.entities[s.entityId]) throw new Error('fixture.invariant-bug on one body'); return []; }; },
+};
+for (const [name, corrupt] of Object.entries(CHAOS))
+  test(`chaos: ${name} never stops the tick loop`, {timeout: 300000}, async (t) => {
+    quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo, Cy} = w.souls;
+    ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
+    w.control.restoreFails = true; corrupt(h, Ada, Bo, w); forgetMotion(h.engine.rt);
+    const t0 = h.engine.world.tick; await w.tick(20);
+    const walk = await act(w, Cy, {capability: 'walk:yard'});
+    for (let i = 0; i < 580; i++) { h.tickOnce(); if (i % 10 === 0) { await setImmediate(); h.drainInputs(); } }
+    const report = JSON.stringify({glitches: h.glitches, stepFailing: h.stepFailing, walk: read(w, Cy, walk)});
+    assert.equal(h.engine.world.tick, t0 + 600, `the clock moved every tick: ${report}`); assert.ok(running(h), report);
+    assert.equal(byRung(h).halt ?? 0, 0, report);
+    assert.notEqual(walk.accepted, false, report); await w.tick(400); assert.equal(read(w, Cy, walk).phase, 'completed', report);
+    if (process.env.CHAOS_REPORT) console.info(`[chaos] ${name}: ${JSON.stringify(h.glitches.byRule)}`);
+  });

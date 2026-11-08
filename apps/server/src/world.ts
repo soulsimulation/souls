@@ -593,6 +593,7 @@ export class WorldHost {
     this.observeIntentActions();
     this.afterPrograms(out.programs, false);
     if (out.refusals) this.noteRefusals(out.refusals);
+    if (this.quarantineRule) this.noteWholePoses();
     if (this.repairRules && !this.clockAvailable) return;
     this.replayDebtMs += performance.now() - tStep;
     if(this.durableClockV1){
@@ -1562,6 +1563,16 @@ export class WorldHost {
   /** #1369: quarantine/1 is adopted (a logged runtime policy the host alone reads). */
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
   /** The bodies a fault names that are in the world, sorted. */
+  /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
+   *  rule names it, but it can make every step or the state hash throw). */
+  private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
+    let corrupt: string[] = [];
+    try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
+    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt])].sort(), corrupt };
+  }
+  /** #1369: each Soul's body's last whole pose (finite numbers), so a body whose pose breaks is held where it last stood. */
+  private wholePoses = new Map<string, RecoveryPose>();
+  private noteWholePoses() { for (const [id, pose] of this.soulPoses()) if (pose.p.every(Number.isFinite) && Number.isFinite(pose.yaw) && Number.isFinite(pose.level)) this.wholePoses.set(id, pose); }
   private namedBodies(error: unknown): string[] { const ents = this.engine.world.entities as Record<string, unknown>; return [...new Set(faultKeys(error).flatMap(k => k.subjects))].filter(id => id !== '*' && ents[id]).sort(); }
   /** #1369: everything a restore replaces, by reference, so a ladder whose restores all failed goes on from the head it had and
    *  never from a half-replayed one. The head's own objects are untouched by a restore: it builds new ones. */
@@ -1672,20 +1683,23 @@ export class WorldHost {
    *  keys go on the contained list (a body inside something is moved clear once, as rung 3 does), and the clock and everyone else
    *  go on. One logged event carries the stops and the keys, so a replay makes the same and reads no invariant. A fault that names
    *  no body takes the in-place rung. Only the write can fail, and that is the one halt left. */
-  private quarantine(error: unknown, restoreFailure?: unknown): void {
-    const tick = this.engine.world.tick, keys = faultKeys(error), bodies = this.namedBodies(error);
+  private quarantine(error: unknown, restoreFailure?: unknown, tell = true): void {
+    const tick = this.engine.world.tick, keys = faultKeys(error), {bodies, corrupt} = this.quarantineTargets(error);
     if (!bodies.length) return this.containInPlace(error);
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
     const {stopped, deadlines} = this.engine.stopBodiesV1!(bodies, QUARANTINED), souls = bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
-    const q = {...this.engine.containV1!(keys), bodies, souls, stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
+    // a broken body is held where it last stood whole; the log carries that pose, so a replay holds it in the same place
+    const held = corrupt.map(id => { const pose = this.wholePoses.get(id); return pose ? {id, pose: {p: [...pose.p] as [number, number, number], yaw: pose.yaw, level: pose.level}} : {id}; });
+    for (const h of held) try { this.engine.holdBodyV1!(h.id, h.pose); } catch (failure) { console.error('[world] a broken body could not be held:', String(failure).slice(0, 200)); }
+    const q = {...this.engine.containV1!(keys), bodies, souls, ...(held.length ? {held} : {}), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:quarantine', payload: {quarantineV1: q}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    this.recordGlitch('contained', error, {tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(q.restore ? {restore: q.restore} : {})}});
+    this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held: held.map(h => h.id)} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
-    this.tellQuietly(() => { this.flush(); this.heartbeat(); });
+    if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
   }
   /** The replayable half of rung 3: no engine step, so no rule can fire during it. */
   private applyLastRung(recipe: RecoveryRecipe) {
@@ -1705,7 +1719,7 @@ export class WorldHost {
    *  is off the list, so a named fault always gets here, even while steps are failing, and the list's cap per rule bounds those
    *  rows. Each stop row answers a decision that started what it stopped. A fault that only repeats is written once per cooldown. */
   private containInPlace(error: unknown): void {
-    if (this.quarantineRule && !this.stepFailing && this.namedBodies(error).length) return this.quarantine(error);   // #1369: only what the fault named stops
+    if (this.quarantineRule) { const t = this.quarantineTargets(error); if (t.corrupt.length || (!this.stepFailing && t.bodies.length)) return this.quarantine(error); }   // #1369: only what the fault named stops
     const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
@@ -2197,12 +2211,23 @@ export class WorldHost {
     // the debt the cancelled capture would have cleared is still owed (a superseding snapshot clears it again)
     this.replayDebtMs += job.previousDebt.ms; this.lastSnapshotWall = job.previousDebt.wall; this.snapshotSoon ??= job.previousDebt.soon;
   }
+  /** #1369: a state that won't hash because a body in it is broken (a pose that is no number) is no failed write. Under
+   *  quarantine/1 that body is held where it last stood whole and the hash is taken again; anything else fails as before. */
+  private hashOrQuarantine():string{
+    try{return this.engine.stateHash();}
+    catch(error){
+      if(!this.quarantineRule||!this.quarantineTargets(error).corrupt.length)throw error;
+      this.quarantine(error,undefined,false);
+      return this.engine.stateHash();
+    }
+  }
   private persistClockFrontier():void {
     try{
+      const engineHash=this.hashOrQuarantine();
       const frontier:ClockFrontierV1={contract:'durable-clock-frontier/1',worldId:this.worldId,
         seedHash:hashOf(this.db.world(this.worldId)!.seed),rulesVersion:this.engine.rulesVersion,dtSeconds:this.engine.dt,
         tick:this.engine.world.tick,throughSeq:this.seq,headEventHash:this.clockFrontiers.headHash(this.worldId,this.seq),
-        engineHash:this.engine.stateHash(),kernelHash:kernelHash(this.kernel)};
+        engineHash,kernelHash:kernelHash(this.kernel)};
       this.clockFrontiers.write(frontier);
     }catch(error){
       this.clockFailure=error;this.paused=true;this.stop();

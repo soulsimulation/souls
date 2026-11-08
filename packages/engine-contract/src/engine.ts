@@ -135,6 +135,9 @@ export interface Engine {
   stopAllV1?(why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
   /** #1369 quarantine/1: as `stopAllV1`, for these bodies' programmes alone. */
   stopBodiesV1?(bodies: string[], why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
+  /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
+  corruptBodiesV1?(): ContainedKeyV1[];
+  holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): boolean;
   setClockV1?(tick: number): void;
   /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
   containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };

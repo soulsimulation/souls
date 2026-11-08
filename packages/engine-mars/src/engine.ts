@@ -581,6 +581,30 @@ export class MarsEngine implements Engine {
   stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { return this.stopWhereV1(() => true, why, from); }
   /** #1369 quarantine/1: as `stopAllV1`, for the programmes of these bodies alone. Everyone else's go on. */
   stopBodiesV1(bodies: string[], why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { const ids = new Set(bodies); return this.stopWhereV1(p => ids.has(p.actor), why, from); }
+  /** #1369 quarantine/1: the bodies whose own state is broken (a person with no human state, a pose or level that is no finite
+   *  number). Such a body can make every step throw, or the state hash, without any rule naming it. A pure read. */
+  corruptBodiesV1(): { code: string; subjects: string[] }[] {
+    const bad = (n: unknown) => typeof n !== 'number' || !Number.isFinite(n), out: { code: string; subjects: string[] }[] = [];
+    for (const e of listEntities(this.ents) as any[]) {
+      if (e.kind !== 'human') continue;
+      if (!e.human || typeof e.human !== 'object' || !Array.isArray(e.pose?.p) || e.pose.p.length !== 3 || e.pose.p.some(bad) || bad(e.pose.yaw ?? 0) || bad(e.human.level ?? 0)) out.push({ code: 'entity.corrupt', subjects: [e.id] });
+    }
+    return out.sort((a, b) => (a.subjects[0] < b.subjects[0] ? -1 : 1));
+  }
+  /** #1369 quarantine/1: a broken body is held where it last stood whole: its programmes stopped, a fresh human state if it lost
+   *  its own, and `pose` (its last whole pose, which the host logged) if its own is no number. Never a respawn elsewhere: with no
+   *  whole pose it stays where it is. A body standing inside something is then moved clear once, as rung 3 does. */
+  holdBodyV1(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): boolean {
+    const e = this.ents[id]; if (!e) return false;
+    const fin = (n: unknown) => typeof n === 'number' && Number.isFinite(n), whole = Array.isArray(e.pose?.p) && e.pose.p.length === 3 && e.pose.p.every(fin) && fin(e.pose.yaw ?? 0);
+    if (!whole && pose) e.pose = { ...e.pose, p: [...pose.p], yaw: pose.yaw };
+    if (!e.human || typeof e.human !== 'object') { const fresh = this.m.human(id, e.pose.p[0], e.pose.p[2], { label: e.label }); e.human = fresh.human; if (pose) e.human.level = pose.level; }
+    if (!fin(e.human.level ?? 0)) e.human.level = pose?.level ?? 0;
+    e.human.speed = 0; acknowledgeRelocation(this.rt, id); this.tableCacheV1 = null;
+    if (e.pose.p.every(fin) && !this.standsClearV1(id)) this.tryRelocateV1(id);
+    rememberPosesAfterRestore(this.rt);
+    return true;
+  }
   private stopWhereV1(which: (p: Prog) => boolean, why: { code: string; message: string }, from: number): { stopped: number; deadlines: number } {
     let stopped = 0, deadlines = 0;   // what this call changed, so a host knows if a replay has to make the same stops. A deadline ends nothing yet.
     const cancel = (id: string) => { try { this.cancelOrAbandonV1(id, why); } catch (e) { console.error('[engine] a stop could not end its action:', String(e).slice(0, 200)); } };   // this rung can't fail
