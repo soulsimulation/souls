@@ -53,7 +53,10 @@ camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Bro
 The first touch of a page on a touch screen shows three glyphs (stick, drag, pinch; `touch/hints.tsx`) that fade on
 the first drag, a second finger or after 3 s. The device remembers it in `localStorage` (`sim.touch-hints`). `?shot`
 and automation (`navigator.webdriver`) never show it. `?hints=1` overrides `navigator.webdriver` only, for recording
-proof of the hint. Phones get the camera menu as a bottom sheet (Broadcast, Free, Follow for a selected Soul or Stop
+proof of the hint. While a world page is visible, it holds a screen wake lock (`wake-lock.ts`, #1390), so a phone
+does not dim while someone watches. It lets the lock go when the page is hidden and asks again when the page is shown.
+After 30 minutes with no input it also lets go, and the next input asks again. Where the API is missing or the request
+is refused, it does nothing. Phones get the camera menu as a bottom sheet (Broadcast, Free, Follow for a selected Soul or Stop
 following, Camera controls, Fullscreen) clear of `env(safe-area-inset-*)`. A device with `navigator.vibrate` ticks for
 12 ms when Follow starts and when a fly-to arrives (`touch/haptics.ts`).
 
