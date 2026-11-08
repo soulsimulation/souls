@@ -109,3 +109,17 @@ test('A3: plain say sends exactly what it did; flags in the middle are speech; b
   const closes = await w.cli('say', 'Done', '--to', 'Bo', '--for', 'msg_1');
   assert.equal(closes.json.faced.accepted, true); assert.equal(closes.json.closed, true, '--for still closes the message');
 });
+
+// Re-pin onto 2.24.2 (#1328): `--key` is one more trailing flag, in any order with --to, --gesture and --for, and goes
+// with the speech; a bad key sends nothing.
+test('#1328 with #1354: say --to takes --key among its trailing flags and still turns, speaks and gestures', async t => {
+  assert.deepEqual(sayFlags(['hi', '--to', 'Bo', '--key', 'k-1', '--for', 'msg_1']), {to: 'Bo', key: 'k-1', words: ['hi', '--for', 'msg_1']});
+  assert.deepEqual(sayFlags(['the', '--key', 'is', 'here']), {words: ['the', '--key', 'is', 'here']}, '--key inside the speech is words');
+  const {seen, cli} = await world(t);
+  const r = await cli('say', 'hello', '--to', 'Bo', '--gesture', 'nod', '--key', 'say-k-1');
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(seen.filter(([m]) => m === 'POST').map(([, u, b]) => u === '/v1/edge/act' ? b.capability : u), ['face:s_bo', '/v1/edge/say', 'nod:here']);
+  assert.equal(r.json.faced.accepted, true); assert.equal(r.json.gestured.accepted, true);
+  const bad = await cli('say', 'hello', '--to', 'Bo', '--key', 'has space');
+  assert.notEqual(bad.code, 0);
+});
