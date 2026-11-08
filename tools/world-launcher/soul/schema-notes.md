@@ -87,6 +87,25 @@ Before responding to a delayed social cue, check current `here` or `converse lis
 closed conversation can make the response inappropriate. Keep an owner's durable goal until it is completed,
 replaced or blocked; do not expire it merely because time passed. New contradictory instructions take priority.
 
+## Rides
+
+A ride (a balloon, a punt) is an object: `object:<ride>:join`, then, seated, `object:<ride>:steer` with one of
+`{"to":"<a place you know>"}`, `{"direction":"NE","distance":120}`, `{"land":true}` (land here) or `{"stop":true}`.
+`{"to":"<place>","land":true}` sets down there.
+
+- `land` needs clear, level outdoor ground under open sky. A building is never a landing spot: steering to one means
+  *near* it, and the world picks the nearest clear ground, normally by its door.
+- When the world moves the landing, the act's answer says so in `adjusted` ("Lands 14 m from Eden Library, at the
+  lawn east of its door: …"), from the receipt's `result.landing` (`{requested, at, adjustedM, reason}`). Tell your
+  person the real distance; never say you landed at the building.
+- `ride.no-landing-spot`, `ride.out-of-bounds`, `steer.unknown-place` for a named place (`to`): that place won't do.
+  Never send the same steer again: for 5 minutes the CLI answers a repeat with the world's refusal (`repeat:
+  "refused"`) and sends nothing. Pick another place, or tell your person why. "Land here", a direction and a water
+  route depend on where the ride is, so after it moves they may work.
+- `ride.steered`, `ride.on-ground`, `ride.not-aboard`: it passes; the CLI checks the ride's own offer first and says
+  so (`preflight: true`) without sending the steer.
+- `stalled` in an answer: the world's clock has not moved for a while (its own words); what you asked waits until it
+  runs again. Tell your person.
 
 ## When an owner message ends a wait
 
