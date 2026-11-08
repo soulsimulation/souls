@@ -94,7 +94,7 @@ test(`a real balloon landing steps its rider out into ${obstacle==='table'?'a go
   assert.equal(halted(),false,'the clock runs');assert.equal(adaAtFault,adaProg,'Ada was walking at the step-out');assert.ok(host.engine.world.tick>=faultTick+590,'600 ticks on');
   // rung 1 alone: the rider is relocated once, by a refusal row; nothing goes back, nobody else is stopped, nothing stands broken
   const rel=later.filter((r:any)=>r.refusal?.relocated&&r.refusal.bodies.includes(Kino.entityId));
-  assert.equal(rel.length,1,'relocated once: '+JSON.stringify(later).slice(0,2000));assert.equal(rel[0].refusal.rule,'collision.human-static');
+  assert.equal(rel.length,1,'relocated once: '+JSON.stringify(later).slice(0,2000));assert.equal(rel[0].refusal!.rule,'collision.human-static');
   assert.ok(!later.some((r:any)=>r.recovery||r.inPlace),'no rung 2 or 3');assert.equal(host.rewinds,0,'no rewind');
   assert.deepEqual(host.engine.runtime.violations.filter((v:any)=>v.tick>=tick0+5),[],'nothing stands broken');
   assert.ok(!host.db.db.prepare("SELECT 1 FROM events WHERE world_id=? AND seq>? AND payload LIKE ? LIMIT 1").get(host.worldId,seq0,'%'+Ada.entityId+'%world.re%'),'Ada was never refused, relocated or rewound');

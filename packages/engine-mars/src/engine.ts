@@ -1941,11 +1941,13 @@ export class MarsEngine implements Engine {
     return {ok:true,transition:soulsRepairAdoptionV1Schema.parse({contract:'souls-repair-adoption/1',tick:this.world.tick,fromRulesVersion:this.rulesVersion,
       toRulesVersion:this.composedRules(nativeRulesVersion(this.physical?.rulesVersion??this.m.rulesVersion,{...this.cfg,soulsRepairV1:true})),fromStateHash:this.stateHash()})};
   }
-  /** #1323: no quiet boundary is needed: a programme under way goes on under the repair rules from the next step. */
+  /** #1323: no quiet boundary is needed: a programme under way goes on under the repair rules from the next step. The fold
+   *  checks the rules versions only. Its tick and state hash are evidence: a recovery (rung 2 or 3) re-applies the fact over a
+   *  baseline from before it, at another tick or state, and the world must come out under the rules the header names. */
   adoptSoulsRepairV1(raw:SoulsRepairAdoptionV1){
     const fact=soulsRepairAdoptionV1Schema.parse(raw),preview=this.previewSoulsRepairAdoptionV1(true);
     if(!preview.ok)throw Error(preview.diagnostic.code+': '+preview.diagnostic.message);
-    if(hashOf(fact)!==hashOf(preview.transition))throw Error('souls-repair-adoption.stale-or-forged');
+    if(fact.fromRulesVersion!==preview.transition.fromRulesVersion||fact.toRulesVersion!==preview.transition.toRulesVersion)throw Error('souls-repair-adoption.stale-or-forged');
     this.turnOnSoulsRepairV1();
     if(this.rulesVersion!==fact.toRulesVersion)throw Error('souls-repair-adoption.rules-version');
   }
@@ -2898,7 +2900,8 @@ function checkedTable(t: EntityTable): EntityTable {
 function centroid(poly: [number, number][]): [number, number] { let x = 0, z = 0; for (const p of poly) { x += p[0]; z += p[1]; } return [r3(x / poly.length), r3(z / poly.length)]; }
 /** #1323: the repair rules are named by the rules version, never by the state hash, as in an engine without a physical
  *  binding; so an adoption leaves the hash where it was and a snapshot under them restores through the readers below them.
- *  A config without them is the same object, so every hash from before is unchanged. */
+ *  A config without them is the same object, so the hash of every world without the rules is unchanged. (A physically bound
+ *  world made with them, under `SIM_SHARED_CARRY=1` or `SIM_SOULS_REPAIR=1`, now hashes without the key: dev worlds only.) */
 function physicalPolicyV1(cfg:MarsWorldConfig):MarsWorldConfig{if(cfg.soulsRepairV1!==true)return cfg;const {soulsRepairV1:_,...rest}=cfg;return rest;}
 function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY+'+'+SHARED_BAY_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
 /** PC13 (#692): a world whose engine has the shared raise (SIM_SHARED_CARRY) says so in its rules version: a journal that

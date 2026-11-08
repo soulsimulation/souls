@@ -400,22 +400,26 @@ export class WorldHost {
     const preview=this.engine.previewSoulsRepairAdoptionV1?.();
     if(!preview?.ok)return Promise.resolve(null);
     if(this.stationHistoryV1())return Promise.reject(Error('souls-repair-adoption.station-carry-required'));
-    const expected=preview.transition;
+    // the header names the engine's version (Eden), or an older one this reader still replays (a launcher world's first rules)
+    const expected=preview.transition,header=this.db.world(this.worldId)?.rules_version;
+    if(!header||header.includes('+souls-repair/')||this.factory.canReplayHistory?.(header)===false)return Promise.reject(Error('souls-repair-adoption.header-unreadable'));
     const guard:AcceptanceGuard=()=>{
       if(this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
       const row=this.db.world(this.worldId);
-      if(row?.dt!==this.engine.dt||row.rules_version!==expected.fromRulesVersion)throw Error('souls-repair-adoption.header-moved');
+      if(row?.dt!==this.engine.dt||row.rules_version!==header)throw Error('souls-repair-adoption.header-moved');
       const current=this.engine.previewSoulsRepairAdoptionV1?.();
       if(!current?.ok||hashOf(current.transition)!==hashOf(expected))throw Error('souls-repair-adoption.source-moved');
       if(this.factory.canReplayHistory?.(expected.toRulesVersion)===false||this.factory.canRestoreSnapshot?.(expected.toRulesVersion)!==true)throw Error('souls-repair-adoption.reader-unavailable');
       return true;
     };
     const journal:AcceptanceJournal=()=>{
-      const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(expected.toRulesVersion,this.worldId,expected.fromRulesVersion);
+      const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(expected.toRulesVersion,this.worldId,header);
       if(r.changes!==1)throw Error('souls-repair-adoption.header-moved');return true;
     };
+    // the recovery baseline moves past the adoption at once, so no rung 2 or 3 has to re-apply it (it could: the fold allows it)
+    const rebaseline=()=>{if(this.stepFailing||this.bootedFaulted||this.engine.canSnapshot&&!this.engine.canSnapshot())return;try{this.recoveryBaseline=this.captureBody();this.recoveryCapture=null;}catch(e){console.warn('[world] no recovery baseline after the repair adoption yet:',String(e).slice(0,200));}};
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{soulsRepairAdoptV1:expected},guard,journal,
-      resolve:e=>{this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
+      resolve:e=>{if(this.engine.rulesVersion===expected.toRulesVersion)rebaseline();this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
   }
   private stationEraEvent(source:LogEvent):LogEvent|undefined {
     const old=this.stationHistoryV1();if(!old)return undefined;
