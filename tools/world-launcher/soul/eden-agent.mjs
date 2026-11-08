@@ -193,7 +193,7 @@ function handed(data, after) {
   return m && m.state !== "acknowledged" && m.id !== after ? [m] : [];
 }
 var line = (m, emittedAt) => ({ id: m.id, text: m.text, sentAt: m.sentAt, emittedAt });
-async function clientListen(args, { call: call2, sleep: sleep2 = (ms) => new Promise((resolve9) => setTimeout(resolve9, ms)), write, stop, now: now2 = Date.now, claim }) {
+async function clientListen(args, { call: call2, sleep: sleep2 = (ms) => new Promise((resolve10) => setTimeout(resolve10, ms)), write, stop, now: now2 = Date.now, claim }) {
   let seconds, after, once = false, follow = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -288,10 +288,10 @@ async function followInbox({ poll, after, write = (line2) => process.stdout.writ
 }
 
 // tools/edge-skill/eden-agent.mjs
-import { readFileSync as readFileSync11, writeFileSync as writeFileSync11, existsSync as existsSync9, appendFileSync as appendFileSync2, mkdirSync as mkdirSync3, statSync, unlinkSync as unlinkSync4, openSync as openSync4, closeSync as closeSync4, lstatSync as lstatSync10, realpathSync as realpathSync3 } from "node:fs";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync12, existsSync as existsSync10, appendFileSync as appendFileSync2, mkdirSync as mkdirSync4, statSync, unlinkSync as unlinkSync4, openSync as openSync4, closeSync as closeSync4, lstatSync as lstatSync10, realpathSync as realpathSync3 } from "node:fs";
 import { spawn as spawn3 } from "node:child_process";
 import { randomUUID as randomUUID5, randomBytes as randomBytes2 } from "node:crypto";
-import { resolve as resolve8 } from "node:path";
+import { resolve as resolve9 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // tools/edge-skill/client-json-file.mjs
@@ -1451,7 +1451,7 @@ function nearbySocialChoice(ownerText, chosen, nearby, selfName) {
   for (const p of [...nearby, chosen, { name: selfName }]) if (p?.name && literalSoulReference(ownerText, p.name)) rest = rest.split(identityText(p.name)).join(" ");
   return !nameWords(chosen.name ?? row.name).some((w) => literalSoulReference(rest, w));
 }
-function firstNameBinding(ownerText, chosen, resolve9) {
+function firstNameBinding(ownerText, chosen, resolve10) {
   const words2 = String(chosen?.name ?? "").normalize("NFKC").trim().split(/\s+/u), first = words2[0];
   if (!first || !literalSoulReference(ownerText, first)) return null;
   const text3 = String(ownerText).normalize("NFKC"), re = new RegExp("(?<![\\p{L}\\p{N}_-])" + first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\p{L}\\p{N}_-])\\s+([\\p{L}\\p{N}_-]+)", "giu");
@@ -1459,13 +1459,13 @@ function firstNameBinding(ownerText, chosen, resolve9) {
     const next = m[1];
     if (new RegExp("^\\p{Lu}|\\p{N}", "u").test(next) && identityText(next) !== identityText(words2[1] ?? "")) return null;
   }
-  const r = resolve9([first]);
+  const r = resolve10([first]);
   if (!r.ok) return r.code === "soul.name-ambiguous" ? r : null;
   return r.chosen[0]?.id === chosen.id ? { ok: true } : null;
 }
-function bindLiveSoulReferences(refs2, { ownerText = "", identityBasis, resolve: resolve9, social = false, nearby = [], selfName = null } = {}) {
+function bindLiveSoulReferences(refs2, { ownerText = "", identityBasis, resolve: resolve10, social = false, nearby = [], selfName = null } = {}) {
   const list2 = Array.isArray(refs2) ? refs2 : [refs2], generic = GENERIC_IDENTITY_BASES.has(identityText(identityBasis)) && literalSoulReference(ownerText, identityBasis);
-  const resolved = resolve9(list2);
+  const resolved = resolve10(list2);
   if (!resolved.ok) return resolved;
   let nearbySocial = false;
   if (ownerText && !generic) {
@@ -1477,7 +1477,7 @@ function bindLiveSoulReferences(refs2, { ownerText = "", identityBasis, resolve:
         continue;
       }
       if (!literalSoulReference(ownerText, name) && !literalSoulReference(ownerText, id3)) {
-        const byFirst = firstNameBinding(ownerText, chosen, resolve9);
+        const byFirst = firstNameBinding(ownerText, chosen, resolve10);
         if (byFirst?.ok === false) return { ...byFirst, requested: resolved.requested };
         if (byFirst) continue;
       }
@@ -1540,7 +1540,7 @@ async function runConversationStep(st, { conversations, refresh, converse: conve
 }
 
 // tools/edge-skill/eden-agent.mjs
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 
 // tools/edge-skill/client-queue.mjs
 import { existsSync as existsSync4, lstatSync as lstatSync5, mkdirSync, openSync as openSync3, closeSync as closeSync3, readFileSync as readFileSync6, writeFileSync as writeFileSync6, renameSync as renameSync2, unlinkSync as unlinkSync3 } from "node:fs";
@@ -2347,7 +2347,7 @@ function codexExecBrain({ model, system, resumeId, stateless, effort, executable
       if (proc) return Promise.reject(Error("codex turn already running"));
       if (thread && !/^[A-Za-z0-9_-]{1,160}$/.test(thread)) return Promise.reject(Error("invalid exact thread ID"));
       const resuming = !!thread && !stateless, args = codexExecArgs({ model, resumeId: resuming ? thread : null, effort }), epoch = ++generation;
-      return new Promise((resolve9, reject) => {
+      return new Promise((resolve10, reject) => {
         const child = spawn2(executable, args, { env, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
         proc = child;
         let processSession = resuming ? thread : null;
@@ -2358,7 +2358,7 @@ function codexExecBrain({ model, system, resumeId, stateless, effort, executable
           settled = true;
           clearTimeout(timer);
           if (epoch === generation) cancel = null;
-          error ? reject(error) : resolve9(value);
+          error ? reject(error) : resolve10(value);
         };
         const terminate = (reason) => {
           problem = reason;
@@ -2439,9 +2439,9 @@ ${text3}`);
     close() {
       const child = proc;
       if (child) {
-        const wait2 = new Promise((resolve9) => {
-          child.once("close", resolve9);
-          child.once("error", resolve9);
+        const wait2 = new Promise((resolve10) => {
+          child.once("close", resolve10);
+          child.once("error", resolve10);
         });
         cancel?.();
         generation++;
@@ -2617,7 +2617,7 @@ function nextReview(review, afterRealMs) {
 }
 
 // tools/edge-skill/client-living.mjs
-async function unresolvedBindingSteps(bindings, resolve9, limit = 8) {
+async function unresolvedBindingSteps(bindings, resolve10, limit = 8) {
   const out = [];
   for (const b of Array.isArray(bindings) ? bindings : []) {
     let steps;
@@ -2630,7 +2630,7 @@ async function unresolvedBindingSteps(bindings, resolve9, limit = 8) {
       if (out.length >= limit) return out;
       let r;
       try {
-        r = await resolve9(s.act);
+        r = await resolve10(s.act);
       } catch {
         continue;
       }
@@ -3068,12 +3068,38 @@ var md = (value) => String(value).replace(/[\r\n]+/g, " ").replace(/&/g, "&amp;"
 var personFile = (value) => `person-${createHash5("sha256").update(id2(value)).digest("hex")}.md`;
 var sorted = (map2) => [...map2.values()].sort((a, b) => lexical(a.id, b.id));
 var count = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1e6 ? value : fail2("invalid count");
+var CONTEXT = ["world", "when", "seen", "travellers", "of"];
+function validateContext(e) {
+  if (e.world !== void 0) id2(e.world);
+  if (e.when !== void 0) {
+    keys(e.when, ["real", "tick", "worldDay", "time"]);
+    instant(e.when.real);
+    for (const k of ["tick", "worldDay"]) if (e.when[k] !== null && !(Number.isSafeInteger(e.when[k]) && e.when[k] >= 0)) fail2("invalid world clock");
+    if (e.when.time !== null && !/^\d\d:\d\d$/.test(e.when.time ?? "")) fail2("invalid world clock");
+  }
+  if (e.seen !== void 0) {
+    if (!e.seen || typeof e.seen !== "object" || Array.isArray(e.seen) || Object.keys(e.seen).length > 160) fail2("invalid seen names");
+    for (const [k, name] of Object.entries(e.seen)) {
+      publicId(k);
+      text2(name, 200);
+    }
+  }
+  if (e.travellers !== void 0) {
+    if (!e.travellers || typeof e.travellers !== "object" || Array.isArray(e.travellers) || Object.keys(e.travellers).length > 64) fail2("invalid traveller ids");
+    for (const [k, v] of Object.entries(e.travellers)) {
+      publicId(k);
+      publicId(v);
+    }
+  }
+  if (e.of !== void 0) publicId(e.of);
+}
 function validateEvent(input) {
-  const fields = { gazetteer: ["places"], "public.references": ["references"], "place.observed": ["place"], conversation: ["conversationId", "personId"], "idle.sample": ["milliseconds"], scorecard: ["clock", "period", "from", "to", "metrics"], arrival: ["placeId"], "act.accepted": ["receiptId", "act"], meet: ["person", "placeId"], communication: ["person", "channel", "recipientPlace", "conversationId"], speech: ["personId", "text", "untrusted"], outcome: ["receiptId", "act", "phase", "summary", "learned", "produced", "met", "placeId", "untrusted"], refusal: ["act", "code"], lesson: ["attempt", "fix", "refusalId", "successId"], cost: ["usd", "modelCalls"], ledger: ["holding", "marks"], queue: ["steps"] };
+  const fields = { gazetteer: ["places"], "public.references": ["references"], "place.observed": ["place"], conversation: ["conversationId", "personId"], "idle.sample": ["milliseconds"], scorecard: ["clock", "period", "from", "to", "metrics"], arrival: ["placeId"], "act.accepted": ["receiptId", "act"], meet: ["person", "placeId"], communication: ["person", "channel", "recipientPlace", "conversationId"], speech: ["personId", "text", "untrusted", "channel", "conversationId", "placeId"], outcome: ["receiptId", "act", "phase", "summary", "learned", "produced", "met", "placeId", "untrusted", "messageId"], refusal: ["act", "code"], lesson: ["attempt", "fix", "refusalId", "successId"], cost: ["usd", "modelCalls"], ledger: ["holding", "marks"], queue: ["steps"], told: ["personIds", "text", "channel", "conversationId"], commitment: ["personId", "by", "what"], "commitment.kept": ["personId", "commitmentId", "evidence"] };
   if (!input || !Object.hasOwn(fields, input.type)) fail2("unknown public event type");
-  keys(input, ["type", "id", "at", ...fields[input.type]]);
+  keys(input, ["type", "id", "at", ...CONTEXT, ...fields[input.type]]);
   id2(input.id);
   instant(input.at);
+  validateContext(input);
   const e = structuredClone(input);
   switch (e.type) {
     case "gazetteer":
@@ -3142,6 +3168,9 @@ function validateEvent(input) {
       id2(e.personId);
       text2(e.text, 1e3);
       if (e.untrusted !== true) fail2("speech must be untrusted");
+      if (e.channel !== void 0 && !["private-conversation", "public-speech"].includes(e.channel)) fail2("invalid communication channel");
+      if (e.conversationId !== void 0) id2(e.conversationId);
+      if (e.placeId !== void 0 && e.placeId !== null) id2(e.placeId);
       break;
     case "outcome":
       id2(e.receiptId);
@@ -3150,6 +3179,7 @@ function validateEvent(input) {
       text2(e.summary, 160);
       if (typeof e.untrusted !== "boolean") fail2("outcome trust label required");
       if (e.placeId !== void 0) id2(e.placeId);
+      if (e.messageId !== void 0) id2(e.messageId);
       if (e.learned?.some((f) => f.untrusted) && !e.untrusted) fail2("untrusted facts require outcome label");
       list(e.learned, 5).forEach((f) => {
         keys(f, ["fact", "about", "source", "provenance", "untrusted"]);
@@ -3172,6 +3202,22 @@ function validateEvent(input) {
         text2(p.name, 200);
         if (p.where !== null) id2(p.where);
       });
+      break;
+    case "told":
+      list(e.personIds, 16).forEach(id2);
+      text2(e.text, 500);
+      if (!["private-conversation", "public-speech"].includes(e.channel)) fail2("invalid communication channel");
+      if (e.conversationId !== void 0) id2(e.conversationId);
+      break;
+    case "commitment":
+      id2(e.personId);
+      if (!["me", "them"].includes(e.by)) fail2("invalid commitment party");
+      text2(e.what, 300);
+      break;
+    case "commitment.kept":
+      id2(e.personId);
+      id2(e.commitmentId);
+      id2(e.evidence);
       break;
     case "refusal":
       text2(e.act, 160);
@@ -3223,13 +3269,14 @@ function validateEvent(input) {
   return e;
 }
 function validateRemember(input) {
-  keys(input, ["id", "at", "person", "place", "goal", "self", "note", "horizon", "metric", "next"]);
+  keys(input, ["id", "at", ...CONTEXT, "person", "place", "goal", "self", "note", "horizon", "metric", "next"]);
   id2(input.id);
   instant(input.at);
+  validateContext(input);
   const selectors = ["person", "place", "goal", "self"].filter((k) => input[k] !== void 0);
   if (selectors.length !== 1) fail2("exactly one remember selector required");
   const selector = selectors[0];
-  keys(input, ["id", "at", selector, ...selector === "self" ? [] : selector === "goal" ? ["note", "horizon", "metric", "next"] : ["note"]]);
+  keys(input, ["id", "at", ...CONTEXT, selector, ...selector === "self" ? [] : selector === "goal" ? ["note", "horizon", "metric", "next"] : ["note"]]);
   if (selector === "self") {
     list(input.self, 20).forEach((line2) => {
       text2(line2, 200);
@@ -3247,8 +3294,8 @@ function validateRemember(input) {
   }
   return structuredClone(input);
 }
-function openMemoryFolder(directory) {
-  const root = resolve7(directory), memory = join8(root, "memory"), logs = join8(root, "log");
+function openMemoryFolder(directory, { logs: logFolder = "log", observe: observe2 = null, personFiles = true, journalAfter = null } = {}) {
+  const root = resolve7(directory), memory = join8(root, "memory"), logs = join8(root, logFolder);
   const safe4 = (path) => {
     let p = path;
     while (true) {
@@ -3267,7 +3314,7 @@ function openMemoryFolder(directory) {
   };
   safe4(root);
   mkdirSync2(root, { recursive: true, mode: 448 });
-  for (const p of [memory, logs, join8(memory, "people"), join8(memory, "journal")]) {
+  for (const p of [memory, logs, ...personFiles ? [join8(memory, "people")] : [], join8(memory, "journal")]) {
     safe4(p);
     mkdirSync2(p, { recursive: true, mode: 448 });
   }
@@ -3281,45 +3328,64 @@ function openMemoryFolder(directory) {
   const scoreEvents = [], scorecards = [];
   let self = [], queue = [], holding = [], marks = [], recentOutcomes = [];
   const journals = /* @__PURE__ */ new Map(), costs = /* @__PURE__ */ new Map();
+  const stamp2 = (e) => e.world === void 0 ? "" : ` (${e.world}${dayOf(e) === null ? "" : `, day ${dayOf(e)}`}${e.when?.time ? ` ${e.when.time}` : ""})`;
   const journal = (at, message) => {
     const day2 = at.slice(0, 10);
     const lines = journals.get(day2) ?? [];
     lines.push(`${at.slice(11, 19)}Z ${message}`);
     journals.set(day2, lines);
   };
-  const knownPlace = (value) => places.has(value) || fail2("place absent from normalized gazetteer");
-  const meet = (p, at, where, together = false) => {
-    if (where !== null) knownPlace(where);
+  const seenAs = (e, value) => e?.seen && Object.hasOwn(e.seen, value) ? e.seen[value] : void 0;
+  const knownPlace = (value, e) => places.has(value) || seenAs(e, value) !== void 0 || fail2("place absent from normalized gazetteer");
+  const asSeen = (where, e) => where === null || where === void 0 ? null : seenAs(e, where) ?? places.get(where)?.name ?? where;
+  const dayOf = (e) => e.when?.worldDay === void 0 || e.when.worldDay === null ? null : e.when.worldDay;
+  const notePlace = (value, e) => {
+    const name = seenAs(e, value);
+    if (value === null || value === void 0 || name === void 0) return;
+    const old = places.get(value);
+    if (!old) {
+      places.set(value, { id: value, name, goodFor: [], visits: 0, last: null, admittedDestination: false, formerly: [] });
+      return;
+    }
+    if (old.name === name) return;
+    const bare = (n) => n === value || value.endsWith(`:${n}`);
+    if (bare(name)) return;
+    if (!bare(old.name)) old.formerly = [...old.formerly ?? [], { name: old.name, day: dayOf(e), at: e.at }].slice(-8);
+    old.name = name;
+  };
+  const meet = (p, at, where, together = false, e = null) => {
+    if (where !== null) knownPlace(where, e);
     const row = people.get(p.id) ?? { id: p.id, name: p.name, meetings: [], communications: [], words: [], impressions: [] };
     row.name = p.name;
-    row.meetings.push({ at, where, together });
+    row.meetings.push({ at, where, together, ...e?.seen ? { seenAs: asSeen(where, e), world: e.world ?? null, day: dayOf(e) } : {} });
     people.set(p.id, row);
   };
-  const communicate = (p, at, recipientPlace, channel, legacy = false) => {
-    if (recipientPlace !== null) knownPlace(recipientPlace);
+  const communicate = (p, at, recipientPlace, channel, legacy = false, e = null) => {
+    if (recipientPlace !== null) knownPlace(recipientPlace, e);
     const row = people.get(p.id) ?? { id: p.id, name: p.name, meetings: [], communications: [], words: [], impressions: [] };
     row.name = p.name;
-    row.communications.push({ at, recipientPlace, channel, legacy });
+    row.communications.push({ at, recipientPlace, channel, legacy, ...e?.seen ? { seenAs: asSeen(recipientPlace, e) } : {} });
     people.set(p.id, row);
   };
-  const communicationLine = (c) => `${c.at}: ${c.legacy ? "legacy communication-derived encounter; physical attribution unqualified" : c.channel}; recipient place (last observed) ${c.recipientPlace ?? "unknown"}; other-party location and co-location unknown`;
+  const communicationLine = (c) => `${c.at}: ${c.legacy ? "legacy communication-derived encounter; physical attribution unqualified" : c.channel}; recipient place (last observed) ${c.seenAs ?? c.recipientPlace ?? "unknown"}; other-party location and co-location unknown`;
   const admit = (record) => {
     if (record.kind === "remember") {
       const r = record.value;
-      if (r.person && !people.has(r.person)) fail2("cannot remember an unmet person");
+      if (r.person && !people.has(r.person) && seenAs(r, r.person) === void 0) fail2("cannot remember an unmet person");
       if (r.place && !places.has(r.place) && references.get(r.place)?.kind !== "place") fail2("place absent from public references");
       return;
     }
     const e = record.value;
-    if (e.type === "arrival" || e.type === "meet" && e.placeId !== null) knownPlace(e.placeId);
-    if (e.type === "communication" && e.recipientPlace !== null) knownPlace(e.recipientPlace);
-    if (e.type === "speech" && !people.has(e.personId)) fail2("speaker has no observed communication or confirmed meeting");
+    if (e.type === "arrival" || e.type === "meet" && e.placeId !== null) knownPlace(e.placeId, e);
+    if (e.type === "communication" && e.recipientPlace !== null) knownPlace(e.recipientPlace, e);
+    if (e.type === "speech" && !people.has(e.personId) && seenAs(e, e.personId) === void 0) fail2("speaker has no observed communication or confirmed meeting");
+    if (e.type === "speech" && e.placeId) knownPlace(e.placeId, e);
     if (e.type === "outcome") {
-      if (e.placeId) knownPlace(e.placeId);
-      for (const p of e.met) if (p.where !== null) knownPlace(p.where);
-      for (const o of e.produced) if (o.where !== null) knownPlace(o.where);
+      if (e.placeId) knownPlace(e.placeId, e);
+      for (const p of e.met) if (p.where !== null) knownPlace(p.where, e);
+      for (const o of e.produced) if (o.where !== null) knownPlace(o.where, e);
       for (const f of e.learned) {
-        if (!places.has(f.about) && !people.has(f.about) && !e.met.some((p) => p.id === f.about) && !objects.has(f.about) && !e.produced.some((o) => o.id === f.about) && !references.has(f.about)) fail2("fact about unknown public ID");
+        if (seenAs(e, f.about) === void 0 && !places.has(f.about) && !people.has(f.about) && !e.met.some((p) => p.id === f.about) && !objects.has(f.about) && !e.produced.some((o) => o.id === f.about) && !references.has(f.about)) fail2("fact about unknown public ID");
         const existing = knowledge.get(f.source);
         if (existing && canonical(existing) !== canonical(f)) fail2("conflicting learned source; supply a versioned source");
       }
@@ -3341,14 +3407,16 @@ function openMemoryFolder(directory) {
     return canonical(value);
   };
   const apply = (record) => {
+    observe2?.(record);
     const e = record.value;
     if (record.kind === "remember") {
       if (e.self) self = e.self;
       if (e.goal) goals.set(e.goal, { id: e.goal, note: e.note, horizon: e.horizon, metric: e.metric, next: e.next });
       if (e.place) impressions.set(e.place, e.note);
-      if (e.person) people.get(e.person).impressions.push(e.note);
+      if (e.person) people.get(e.person)?.impressions.push(e.note);
       return;
     }
+    if (e.seen) for (const where of [e.placeId, e.recipientPlace, ...(e.met ?? []).map((p) => p.where), ...(e.produced ?? []).map((o) => o.where)]) notePlace(where, e);
     switch (e.type) {
       case "public.references":
         for (const r of e.references) {
@@ -3358,6 +3426,7 @@ function openMemoryFolder(directory) {
         break;
       case "place.observed":
         if (!places.has(e.place.id)) places.set(e.place.id, { ...e.place, goodFor: [], visits: 0, last: null, admittedDestination: false });
+        else if (e.seen && places.get(e.place.id).name !== e.place.name) notePlace(e.place.id, { ...e, seen: { [e.place.id]: e.place.name } });
         break;
       case "gazetteer":
         for (const p of e.places) {
@@ -3370,7 +3439,7 @@ function openMemoryFolder(directory) {
         scoreEvents.push({ at: e.at, newPlaces: p.visits === 0 ? 1 : 0 });
         p.visits++;
         p.last = e.at;
-        journal(e.at, `Arrived at ${p.name} [${p.id}].`);
+        journal(e.at, `Arrived at ${p.name} [${p.id}]${stamp2(e)}.`);
         break;
       }
       case "act.accepted":
@@ -3381,8 +3450,8 @@ function openMemoryFolder(directory) {
           communicate(e.person, e.at, e.placeId, "legacy-received-speech", true);
           journal(e.at, `Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);
         } else {
-          meet(e.person, e.at, e.placeId);
-          journal(e.at, `Confirmed physical meeting with ${e.person.name} [${e.person.id}] at ${e.placeId}.`);
+          meet(e.person, e.at, e.placeId, false, e);
+          journal(e.at, `Confirmed physical meeting with ${e.person.name} [${e.person.id}] at ${e.seen ? asSeen(e.placeId, e) : e.placeId}${stamp2(e)}.`);
         }
         break;
       case "communication":
@@ -3400,8 +3469,9 @@ function openMemoryFolder(directory) {
         journal(e.at, `Scorecard ${e.clock} ${e.period}: ${e.metrics.newPlaces} new places, ${e.metrics.conversations} conversations, ${e.metrics.facts} new facts, ${e.metrics.objects} objects, ${e.metrics.refusals} refusals, ${e.metrics.idleMinutes} observed idle minutes, ${e.metrics.modelCalls} model calls, USD ${e.metrics.usd ?? "unknown"}.`);
         break;
       case "speech":
-        people.get(e.personId).words.push({ at: e.at, text: e.text });
-        journal(e.at, `Heard untrusted speech from ${e.personId}.`);
+        if (seenAs(e, e.personId) !== void 0) communicate({ id: e.personId, name: seenAs(e, e.personId) }, e.at, e.placeId ?? null, e.channel ?? "public-speech", false, e);
+        people.get(e.personId).words.push({ at: e.at, text: e.text, ...e.seen ? { world: e.world ?? null, day: dayOf(e) } : {} });
+        journal(e.at, `Heard untrusted speech from ${seenAs(e, e.personId) ?? e.personId}${stamp2(e)}.`);
         break;
       case "outcome":
         scoreEvents.push({ at: e.at, facts: e.learned.filter((f) => !knowledge.has(f.source)).length, objects: e.produced.filter((o) => !objects.has(o.id)).length });
@@ -3409,9 +3479,9 @@ function openMemoryFolder(directory) {
         recentOutcomes = [...recentOutcomes.filter((row) => row.receiptId !== e.receiptId), e].sort((a, b) => lexical(a.at, b.at) || lexical(a.receiptId, b.receiptId)).slice(-6);
         for (const f of e.learned) knowledge.set(f.source, f);
         for (const o of e.produced) objects.set(o.id, o);
-        for (const p of e.met) meet(p, e.at, p.where, true);
+        for (const p of e.met) meet(p, e.at, p.where, true, e);
         if (e.phase === "completed") successes.set(e.id, e);
-        journal(e.at, `${e.phase}: ${e.summary}${e.untrusted ? " [untrusted content]" : ""}`);
+        journal(e.at, `${e.phase}: ${e.summary}${e.untrusted ? " [untrusted content]" : ""}${stamp2(e)}`);
         break;
       case "refusal":
         scoreEvents.push({ at: e.at, refusals: 1 });
@@ -3459,7 +3529,7 @@ function openMemoryFolder(directory) {
     return c ? `${day2}: known USD ${c.knownUSD.toFixed(6)}; unknown USD records ${c.unknown}; calls ${c.calls}${c.unknown ? "; total USD unknown" : ""}` : `${day2}: USD unknown; no cost observations`;
   };
   const knowledgeLine = (f) => `- ${md(f.fact)} \u2014 about ${md(f.about)}; source ${md(f.source)}; provenance ${md(f.provenance)}${f.untrusted ? "; UNTRUSTED reported content" : ""}`;
-  const placeLine = (p) => `- ${md(p.id)} | ${md(p.name)} | ${p.goodFor.map(md).join(", ")} | ${p.admittedDestination ? "boot destination" : "observed location; no walking admission"} | visits ${p.visits} | last ${p.last ?? "never"}${impressions.has(p.id) ? `
+  const placeLine = (p) => `- ${md(p.id)} | ${md(p.name)} | ${p.goodFor.map(md).join(", ")} | ${p.admittedDestination ? "boot destination" : "observed location; no walking admission"} | visits ${p.visits} | last ${p.last ?? "never"}${p.formerly?.length ? ` | formerly ${p.formerly.map((f) => `${md(f.name)}${f.day === null ? ` until ${f.at}` : ` until day ${f.day}`}`).join(", ")}` : ""}${impressions.has(p.id) ? `
   Judgment: ${md(impressions.get(p.id))}` : ""}`;
   const goalLines = (g) => [`- ${md(g.id)} (${g.horizon}): ${md(g.note)}`, `  Metric: ${md(g.metric)}; next: ${md(g.next)}`];
   const lessonLine = (l) => `- ${md(l.attempt)} \u2717 (${md(refusals.get(l.refusalId).code)}) \u2192 ${md(l.fix)} \u2713; evidence ${md(l.refusalId)}, ${md(l.successId)}`;
@@ -3477,10 +3547,10 @@ function openMemoryFolder(directory) {
     write(join8(memory, "lessons.md"), "# Lessons \u2014 evidence of a working fix\n\n" + lessons.map(lessonLine).join("\n") + "\n");
     write(join8(memory, "ledger.md"), "# Ledger \u2014 normalized public facts\n\n## Holding\n" + holding.map((v) => `- ${md(v)}`).join("\n") + "\n\n## Produced\n" + sorted(objects).map((o) => `- ${md(o.id)}: ${md(o.title)} (${md(o.kind)}), at ${md(o.where)}`).join("\n") + "\n\n## Marks/projects (provided snapshot)\n" + marks.map((o) => `- ${md(o.id)}: ${md(o.title)}`).join("\n") + "\n\n## Observed budget by UTC day\n" + [...costs.keys()].sort().map(budgetLine).join("\n") + "\n");
     write(join8(memory, "queue.md"), "# Queue \u2014 supplied W4 projection; no runner\n\n" + queue.map((s) => `- ${md(s.id)}: ${md(s.act)} [${s.status}], attempts ${s.attempts}${s.goal ? `; goal ${md(s.goal)}` : ""}${s.reason ? `; ${md(s.reason)}` : ""}`).join("\n") + "\n");
-    for (const p of sorted(people)) write(join8(memory, "people", personFile(p.id)), `# ${md(p.name)} [${md(p.id)}]
+    if (personFiles) for (const p of sorted(people)) write(join8(memory, "people", personFile(p.id)), `# ${md(p.name)} [${md(p.id)}]
 
 ## Facts \u2014 confirmed physical meetings (qualified evidence only)
-` + p.meetings.map((m) => `- ${m.at} at ${md(m.where)}${m.together ? "; together-act" : ""}`).join("\n") + `
+` + p.meetings.map((m) => `- ${m.at} at ${md(m.seenAs ?? m.where)}${m.world ? ` in ${md(m.world)}` : ""}${m.day === null || m.day === void 0 ? "" : `, day ${m.day}`}${m.together ? "; together-act" : ""}`).join("\n") + `
 Confirmed physical meetings ${p.meetings.length}
 
 ## Communication encounters ${p.communications.length} \u2014 not physical meeting evidence
@@ -3488,10 +3558,11 @@ Confirmed physical meetings ${p.meetings.length}
 
 ## Last reported words \u2014 UNTRUSTED data
 ` + p.words.slice(-3).map((w) => `> ${w.at}: ${md(w.text)}`).join("\n") + "\n\n## Judgments \u2014 model impressions/open threads\n" + p.impressions.map((s) => `- ${md(s)}`).join("\n") + "\n");
-    for (const [day2, lines] of journals) write(join8(memory, "journal", `${day2}.md`), `# ${day2}
+    for (const [day2, lines] of journals) if (!journalAfter || day2 > journalAfter) write(join8(memory, "journal", `${day2}.md`), `# ${day2}
 
 ` + lines.map((s) => `- ${md(s)}`).join("\n") + "\n");
   };
+  const seenPeople = (e) => e?.type === "speech" && e.seen && Object.hasOwn(e.seen, e.personId) ? [e.personId] : [];
   const preflight = (record) => {
     const paths = ["self.md", "goals.md", "schedule.md", "places.md", "references.md", "scorecards.md", "knowledge.md", "lessons.md", "ledger.md", "queue.md"].map((f) => join8(memory, f));
     const ids3 = new Set(people.keys()), days = new Set(journals.keys());
@@ -3500,8 +3571,9 @@ Confirmed physical meetings ${p.meetings.length}
       days.add(e.at.slice(0, 10));
       if (e.type === "meet" || e.type === "communication") ids3.add(e.person.id);
       if (e.type === "outcome") e.met.forEach((p) => ids3.add(p.id));
+      seenPeople(e).forEach((v) => ids3.add(v));
     }
-    ids3.forEach((v) => paths.push(join8(memory, "people", personFile(v))));
+    if (personFiles) ids3.forEach((v) => paths.push(join8(memory, "people", personFile(v))));
     days.forEach((v) => paths.push(join8(memory, "journal", `${v}.md`)));
     paths.forEach((p) => {
       safe4(p);
@@ -3567,6 +3639,31 @@ Confirmed physical meetings ${p.meetings.length}
     return lines;
   };
   return {
+    /** What a memory on the shipping line looks things up by: known ids and the names they went by. */
+    placeName(placeId) {
+      return places.get(placeId)?.name ?? null;
+    },
+    /** The little the brief needs, looked up rather than scanned: its size never follows the log's. */
+    digest({ place, near = [] }) {
+      fresh();
+      const p = place ? places.get(place) : null;
+      return {
+        place: p ? { name: p.name, visits: p.visits, note: impressions.get(p.id) ?? null } : null,
+        people: near.flatMap((personId) => {
+          const row = people.get(personId);
+          if (!row) return [];
+          const m = row.meetings.at(-1);
+          return [{ id: row.id, name: row.name, met: row.meetings.length, last: m ? { world: m.world ?? null, worldDay: m.day ?? null, place: m.seenAs ?? null } : null, note: row.impressions.at(-1) ?? null }];
+        }),
+        goals: sorted(goals).sort((a, b) => ["today", "week", "month"].indexOf(a.horizon) - ["today", "week", "month"].indexOf(b.horizon)).slice(0, 4).map((g) => ({ note: g.note, next: g.next })),
+        recent: recentOutcomes.slice(-2).map((e) => ({ summary: e.summary, own: e.id.startsWith("owner:") })),
+        self: self.slice(0, 8)
+      };
+    },
+    known() {
+      fresh();
+      return { people: sorted(people).map((p) => ({ id: p.id, name: p.name, met: p.meetings.length })), places: sorted(places).map((p) => ({ id: p.id, name: p.name, formerly: (p.formerly ?? []).map((f) => f.name) })), self: [...self] };
+    },
     eventValue(eventId) {
       fresh();
       id2(eventId);
@@ -3893,8 +3990,229 @@ async function travelCommand(args, { load: load2, save: save2, live: live2 = () 
   return travelReport(r.data, st);
 }
 
+// tools/edge-skill/client-body-kit.mjs
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, writeFileSync as writeFileSync11, readdirSync as readdirSync2 } from "node:fs";
+import { join as join10, resolve as resolve8 } from "node:path";
+import { createHash as createHash7 } from "node:crypto";
+var KIT_FILES = ["SKILL.md", "contract.json", "validate.mjs", "admission.ts", "rig.ts", "motion.ts", "action-profile.ts", "upload-validation.ts", "upload.mjs", "example.json"];
+var STARTERS = ["rigid", "humanoid", "rolling"];
+var USAGE2 = "usage: body kit <dir> [--starter rigid|humanoid|rolling] [--seed N] [--force]";
+var HUMANOID_SOURCE = "/modular/environment/animated-casual.glb";
+function parseKitArgs(args) {
+  const out = { dir: void 0, starter: "rigid", seed: 1, force: false };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--force") out.force = true;
+    else if (a === "--starter") {
+      out.starter = args[++i];
+      if (!STARTERS.includes(out.starter)) throw Error("--starter must be rigid, humanoid or rolling");
+    } else if (a === "--seed") {
+      out.seed = Number(args[++i]);
+      if (!Number.isInteger(out.seed) || out.seed < 0 || out.seed > 2 ** 31) throw Error("--seed needs a whole number");
+    } else if (a.startsWith("--") || out.dir !== void 0) throw Error(USAGE2);
+    else out.dir = a;
+  }
+  if (!out.dir) throw Error(USAGE2);
+  return out;
+}
+var sha = (b) => createHash7("sha256").update(b).digest("hex");
+function glb(json2, bin) {
+  const j = Buffer.from(JSON.stringify(json2)), jp = Buffer.alloc(Math.ceil(j.length / 4) * 4, 32);
+  j.copy(jp);
+  const bp = Buffer.alloc(Math.ceil(bin.length / 4) * 4);
+  bin.copy(bp);
+  const head = Buffer.alloc(12);
+  head.writeUInt32LE(1179937895, 0);
+  head.writeUInt32LE(2, 4);
+  head.writeUInt32LE(12 + 8 + jp.length + 8 + bp.length, 8);
+  const ch = (n, k) => {
+    const c = Buffer.alloc(8);
+    c.writeUInt32LE(n, 0);
+    c.writeUInt32LE(k, 4);
+    return c;
+  };
+  return Buffer.concat([head, ch(jp.length, 1313821514), jp, ch(bp.length, 5130562), bp]);
+}
+function readGLB(bytes) {
+  if (bytes.length < 28 || bytes.readUInt32LE(0) !== 1179937895) throw Error("Starter source is not a GLB file");
+  const n = bytes.readUInt32LE(12), json2 = JSON.parse(bytes.toString("utf8", 20, 20 + n)), p = 20 + n, bn = bytes.readUInt32LE(p);
+  return { json: json2, bin: bytes.subarray(p + 8, p + 8 + bn) };
+}
+function rigidStarterGLB(seed = 1) {
+  let s = seed >>> 0 || 1;
+  const rnd = () => {
+    s = s + 1831565813 >>> 0;
+    let t = s;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  const g = (1 + Math.sqrt(5)) / 2, v = [[-1, g, 0], [1, g, 0], [-1, -g, 0], [1, -g, 0], [0, -1, g], [0, 1, g], [0, -1, -g], [0, 1, -g], [g, 0, -1], [g, 0, 1], [-g, 0, -1], [-g, 0, 1]].map((p) => {
+    const l = Math.hypot(...p);
+    return p.map((x) => x / l);
+  });
+  let f = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  const mid = /* @__PURE__ */ new Map(), m = (a, b) => {
+    const k = a < b ? a + "," + b : b + "," + a;
+    if (!mid.has(k)) {
+      const p = v[a].map((x, i) => (x + v[b][i]) / 2), l = Math.hypot(...p);
+      v.push(p.map((x) => x / l));
+      mid.set(k, v.length - 1);
+    }
+    return mid.get(k);
+  };
+  f = f.flatMap(([a, b, c]) => {
+    const ab = m(a, b), bc = m(b, c), ca = m(c, a);
+    return [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]];
+  });
+  const r = v.map(() => 0.85 + 0.3 * rnd()), palette = [[0.85, 0.55, 0.35], [0.35, 0.6, 0.75], [0.9, 0.82, 0.6], [0.55, 0.7, 0.45]].map((c) => c.map((x) => Math.min(1, x * (0.8 + 0.4 * rnd()))));
+  const pos = [], nrm = [], col = [];
+  for (const face of f) {
+    const p = face.map((i) => [v[i][0] * 0.3 * r[i], v[i][1] * 0.36 * r[i] + 0.36, v[i][2] * 0.3 * r[i]]);
+    const e1 = p[1].map((x, i) => x - p[0][i]), e2 = p[2].map((x, i) => x - p[0][i]), n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], l = Math.hypot(...n) || 1;
+    const c = palette[Math.floor(rnd() * palette.length)];
+    for (const q of p) {
+      pos.push(...q);
+      nrm.push(...n.map((x) => x / l));
+      col.push(...c);
+    }
+  }
+  const P = new Float32Array(pos), N = new Float32Array(nrm), C = new Float32Array(col), count2 = P.length / 3;
+  const lo = [0, 1, 2].map((a) => Math.min(...pos.filter((_, i) => i % 3 === a))), hi = [0, 1, 2].map((a) => Math.max(...pos.filter((_, i) => i % 3 === a)));
+  const bin = Buffer.concat([Buffer.from(P.buffer), Buffer.from(N.buffer), Buffer.from(C.buffer)]);
+  return glb({
+    asset: { version: "2.0", generator: "body kit rigid starter" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ name: "Sculpture", mesh: 0 }],
+    materials: [{ name: "Palette", pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 0.8 } }],
+    meshes: [{ name: "Sculpture", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, COLOR_0: 2 }, material: 0 }] }],
+    buffers: [{ byteLength: bin.length }],
+    bufferViews: [0, 1, 2].map((i) => ({ buffer: 0, byteOffset: i * P.byteLength, byteLength: P.byteLength, target: 34962 })),
+    accessors: [{ bufferView: 0, componentType: 5126, count: count2, type: "VEC3", min: lo, max: hi }, { bufferView: 1, componentType: 5126, count: count2, type: "VEC3" }, { bufferView: 2, componentType: 5126, count: count2, type: "VEC3" }]
+  }, bin);
+}
+function keepClips(bytes, keep) {
+  const { json: json2, bin } = readGLB(bytes);
+  json2.animations = (json2.animations ?? []).filter((a) => keep.includes(a.name));
+  for (const name of keep) if (!json2.animations.some((a) => a.name === name)) throw Error(`Starter source has no ${name} clip`);
+  const used = /* @__PURE__ */ new Set(), mark2 = (i) => {
+    if (i !== void 0) used.add(i);
+  };
+  for (const mesh of json2.meshes ?? []) for (const p of mesh.primitives) {
+    mark2(p.indices);
+    Object.values(p.attributes).forEach(mark2);
+    for (const t of p.targets ?? []) Object.values(t).forEach(mark2);
+  }
+  for (const skin of json2.skins ?? []) mark2(skin.inverseBindMatrices);
+  for (const a of json2.animations) for (const s of a.samplers) {
+    mark2(s.input);
+    mark2(s.output);
+  }
+  const acc = [...used].sort((a, b) => a - b), accAt = new Map(acc.map((o, i) => [o, i])), viewSet = new Set(acc.map((i) => json2.accessors[i].bufferView).filter((v) => v !== void 0));
+  for (const im of json2.images ?? []) if (im.bufferView !== void 0) viewSet.add(im.bufferView);
+  const views = [...viewSet].sort((a, b) => a - b), viewAt = /* @__PURE__ */ new Map(), parts2 = [];
+  let off = 0;
+  json2.bufferViews = views.map((o, i) => {
+    viewAt.set(o, i);
+    const v = json2.bufferViews[o], pad = (4 - off % 4) % 4;
+    if (pad) {
+      parts2.push(Buffer.alloc(pad));
+      off += pad;
+    }
+    parts2.push(bin.subarray(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength));
+    const out2 = { ...v, buffer: 0, byteOffset: off };
+    off += v.byteLength;
+    return out2;
+  });
+  json2.accessors = acc.map((o) => {
+    const a = { ...json2.accessors[o] };
+    if (a.bufferView !== void 0) a.bufferView = viewAt.get(a.bufferView);
+    return a;
+  });
+  const A = (i) => i === void 0 ? void 0 : accAt.get(i);
+  for (const mesh of json2.meshes ?? []) for (const p of mesh.primitives) {
+    if (p.indices !== void 0) p.indices = A(p.indices);
+    for (const k of Object.keys(p.attributes)) p.attributes[k] = A(p.attributes[k]);
+    for (const t of p.targets ?? []) for (const k of Object.keys(t)) t[k] = A(t[k]);
+  }
+  for (const skin of json2.skins ?? []) if (skin.inverseBindMatrices !== void 0) skin.inverseBindMatrices = A(skin.inverseBindMatrices);
+  for (const a of json2.animations) for (const s of a.samplers) {
+    s.input = A(s.input);
+    s.output = A(s.output);
+  }
+  for (const im of json2.images ?? []) if (im.bufferView !== void 0) im.bufferView = viewAt.get(im.bufferView);
+  const out = Buffer.concat(parts2, off);
+  json2.buffers = [{ byteLength: out.length }];
+  return glb(json2, out);
+}
+var MOTION = { contract: "body-motion/1", idle: { period: 4, bob: 0.035, pitch: 0.025, roll: 0.035, yaw: 0.05 }, move: { period: 3.2, bob: 0.025, pitch: 0.12, roll: 0.025, yaw: 0.02 }, rest: { period: 5, bob: 0.015, pitch: 0.012, roll: 0.015, yaw: 0.02 }, dance: { period: 0.95, bob: 0.045, pitch: 0.16, roll: 0.24, yaw: 0.32 } };
+async function bytesAt(url, fetchImpl) {
+  const r = await fetchImpl(url, { signal: AbortSignal.timeout(9e4) });
+  if (!r.ok) throw Error(`kit: ${new URL(url).pathname} answered HTTP ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+async function starterSource(starter, { origin, world = origin, info, seed, fetchImpl }) {
+  if (starter === "rigid") return {
+    model: rigidStarterGLB(seed),
+    manifest: { type: "ceramic", license: "CC0", rightsConfirmed: true, name: "Kit sculpture " + seed, description: "An original faceted sculpture from the body kit. It glides, rests and dances in place; no hands.", motion: structuredClone(MOTION) },
+    source: "generated locally by the body kit (original, CC0)"
+  };
+  if (starter === "humanoid") return {
+    model: keepClips(await bytesAt(world + HUMANOID_SOURCE, fetchImpl).catch(() => bytesAt(origin + HUMANOID_SOURCE, fetchImpl)), ["Idle", "Walk"]),
+    manifest: { type: "humanoid", rig: "quaternius/1", license: "CC0", rightsConfirmed: true, name: "Kit humanoid", description: "The canonical CC0 contact rig with its Idle and Walk clips, ready for local restyling." },
+    source: "the world's canonical CC0 humanoid (" + HUMANOID_SOURCE + "), reduced to Idle and Walk"
+  };
+  const pip = (info.presets ?? []).find((p) => p.id === "pip");
+  if (!pip?.body?.modelUrl) throw Error("kit: this world does not offer the shared rolling robot; choose --starter rigid or humanoid");
+  return {
+    model: await bytesAt(world + pip.body.modelUrl, fetchImpl).catch(() => bytesAt(origin + pip.body.modelUrl, fetchImpl)),
+    manifest: { type: "humanoid", rig: "quaternius/1", license: "owned", rightsConfirmed: false, actionProfile: "rolling-gripper/1", name: "Kit rolling robot", description: "A rolling robot variant started from the shared Pip source. Wheels, grippers and an upright standby." },
+    source: "the shared Pip rolling robot (repository source, MIT); rightsConfirmed is left false: set it only after your human confirms the variant is yours to upload"
+  };
+}
+async function bodyKit(args, { load: load2, call: call2, fetchImpl = fetch, runValidate = () => ({ skipped: "validate.mjs is the world's code: read it, and run it only for a world you trust" }), cli = "node eden-agent.mjs", base = process.cwd() }) {
+  const opts = parseKitArgs(args), dir = resolve8(base, opts.dir), state = load2();
+  if (!state.world) throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
+  const r = await call2("/v1/edge/body");
+  if (r.status !== 200) throw Error(`kit: body discovery answered HTTP ${r.status}`);
+  const info = r.data, origin = new URL(state.world).origin;
+  if (!info.available || !info.authoring?.skill) throw Error("kit: this world does not admit uploaded bodies");
+  const wanted = opts.starter === "rigid" ? "ceramic" : "humanoid";
+  if (!(info.types ?? []).includes(wanted)) throw Error(`kit: this world does not admit ${wanted} bodies; choose another --starter`);
+  const authoring = origin + info.authoring.skill.replace(/\/SKILL\.md$/, "");
+  const targets = [...KIT_FILES, "body.glb", "manifest.json", "kit.json"];
+  if (existsSync9(dir) && !opts.force) {
+    const clash = targets.filter((f) => existsSync9(join10(dir, f)));
+    if (clash.length) throw Error(`kit: ${opts.dir} already has ${clash.join(", ")}; nothing was changed (use --force to replace, or choose a new directory)`);
+  }
+  const files = {};
+  for (const f of KIT_FILES) files[f] = await bytesAt(authoring + "/" + f, fetchImpl);
+  const start = await starterSource(opts.starter, { origin, world: state.world.replace(/\/$/, ""), info, seed: opts.seed, fetchImpl });
+  mkdirSync3(dir, { recursive: true });
+  for (const [f, b] of Object.entries(files)) writeFileSync11(join10(dir, f), b);
+  writeFileSync11(join10(dir, "body.glb"), start.model);
+  writeFileSync11(join10(dir, "manifest.json"), JSON.stringify(start.manifest, null, 1) + "\n");
+  const kit = { kit: "body-kit/1", authoring, starter: opts.starter, source: start.source, files: Object.fromEntries(Object.entries(files).map(([f, b]) => [f, "sha256:" + sha(b)])), body: "sha256:" + sha(start.model) };
+  writeFileSync11(join10(dir, "kit.json"), JSON.stringify(kit, null, 1) + "\n");
+  const validation = runValidate(dir);
+  return {
+    kit: opts.dir,
+    starter: opts.starter,
+    source: start.source,
+    files: readdirSync2(dir).sort(),
+    validation,
+    recover: { current: info.body?.model ?? "humanoid", uploads: (info.uploads ?? []).map((u) => ({ assetId: u.assetId, name: u.name ?? null, type: u.type })), select: `${cli} body set <assetId or preset>` },
+    next: [
+      ...validation.skipped ? [] : [`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`, `node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`],
+      `from the paired folder: ${cli} body upload ${join10(opts.dir, "body.glb")} --manifest ${join10(opts.dir, "manifest.json")}`,
+      `${cli} body set <returned assetId>`
+    ]
+  };
+}
+
 // tools/edge-skill/eden-agent.mjs
-var SKILL_VERSION = "1.9.19";
+var SKILL_VERSION = "1.9.21";
 var CONTRACT = "eden-edge/1";
 var API_CONTRACT = "eden-edge/1.1";
 var STATE = ".eden-agent.json";
@@ -3966,7 +4284,7 @@ function withNow(path, body2) {
   return { path, body: body2 };
 }
 var TERMINAL3 = /* @__PURE__ */ new Set(["completed", "failed", "replaced"]);
-var load = () => existsSync9(STATE) ? JSON.parse(readFileSync11(STATE, "utf8")) : {};
+var load = () => existsSync10(STATE) ? JSON.parse(readFileSync11(STATE, "utf8")) : {};
 var save = (patch) => {
   const s = { ...load(), ...patch };
   writeAtomicJSON(STATE, s);
@@ -4009,6 +4327,35 @@ function need(s, k, hint) {
   if (!s[k]) throw new Error(`No ${k} yet. ${hint}`);
   return s[k];
 }
+var READ_BUSY_CODES = /* @__PURE__ */ new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
+var READ_BUSY_WAITS = 3;
+function shedReadWaitMs(status2, headers, data) {
+  if (status2 !== 503 && status2 !== 429) return null;
+  if (!READ_BUSY_CODES.has(data?.error?.code ?? data?.code)) return null;
+  const h = headers?.get?.("retry-after");
+  let ms = null;
+  if (h) {
+    const n = Number(h);
+    if (Number.isFinite(n) && n >= 0) ms = n * 1e3;
+    else {
+      const at = Date.parse(h);
+      if (Number.isFinite(at)) ms = Math.max(0, at - Date.now());
+    }
+  }
+  if (ms == null) {
+    for (const v of [data?.retryAfterMs, data?.error?.retryAfterMs]) if (Number.isFinite(v) && v >= 0) {
+      ms = v;
+      break;
+    }
+  }
+  if (ms == null) {
+    for (const v of [data?.retry_after, data?.error?.retry_after, data?.retry_after_s, data?.error?.retry_after_s]) if (Number.isFinite(v) && v >= 0) {
+      ms = v * 1e3;
+      break;
+    }
+  }
+  return ms == null ? null : Math.min(ms, 6e4);
+}
 async function call(path, { body: body2, method, as = "soul", timeoutMs = 9e4, signal, extraHeaders = {} } = {}) {
   assertLiveDispatch(IN_LIVE, leaseHeld, method ?? (body2 ? "POST" : "GET"));
   const s = load(), headers = { "content-type": "application/json", ...extraHeaders };
@@ -4018,19 +4365,25 @@ async function call(path, { body: body2, method, as = "soul", timeoutMs = 9e4, s
     if (s.token) headers.authorization = `Bearer ${s.token}`;
   } else if (as === "owner" && s.identity) headers.authorization = `Bearer dev:${s.identity}`;
   if (as === "soul" && s.token) headers.authorization = `Bearer ${s.token}`;
-  const url = need(s, "world", "Run: node eden-agent.mjs register <world-url>") + path;
-  let r;
-  try {
-    r = await fetch(url, { method: method ?? (body2 ? "POST" : "GET"), headers, body: body2 ? JSON.stringify(body2) : void 0, signal: signal && AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs) });
-  } catch (e) {
-    return { status: 0, data: { error: { code: signal?.aborted ? "aborted" : "unreachable", message: String(e.message) } } };
-  }
-  const text3 = await r.text();
-  let data;
-  try {
-    data = JSON.parse(text3);
-  } catch {
-    data = { raw: text3.slice(0, 200) };
+  const url = need(s, "world", "Run: node eden-agent.mjs register <world-url>") + path, verb = method ?? (body2 ? "POST" : "GET");
+  let r, text3, data;
+  for (let waits = 0; ; waits++) {
+    try {
+      r = await fetch(url, { method: verb, headers, body: body2 ? JSON.stringify(body2) : void 0, signal: signal && AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      return { status: 0, data: { error: { code: signal?.aborted ? "aborted" : "unreachable", message: String(e.message) } } };
+    }
+    text3 = await r.text();
+    try {
+      data = JSON.parse(text3);
+    } catch {
+      data = { raw: text3.slice(0, 200) };
+    }
+    const ms = verb === "GET" && waits < READ_BUSY_WAITS && !signal?.aborted ? shedReadWaitMs(r.status, r.headers, data) : null;
+    if (ms == null) break;
+    process.stderr.write(`The world asked me to wait ${Math.max(1, Math.round(ms / 1e3))} s before reading again; waiting.
+`);
+    await sleep(ms * (1 + 0.2 * Math.random()));
   }
   if (headers.authorization && !path.startsWith("/v1/edge/inbox/")) {
     noticeInboxHeader(r.headers);
@@ -4184,7 +4537,7 @@ function finishApproval(dto2, pending, world, connection, { release = false } = 
   const receipt2 = { ...approvalPublic(dto2, world), connection, worldId: pending.worldId, recordedAt: now() };
   const file = "approval-" + dto2.id + "-" + dto2.status + "-" + connection + ".json";
   try {
-    writeFileSync11(file, JSON.stringify(receipt2) + "\n", { flag: "wx", mode: 384 });
+    writeFileSync12(file, JSON.stringify(receipt2) + "\n", { flag: "wx", mode: 384 });
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
     const stat = lstatSync10(file);
@@ -5014,7 +5367,7 @@ function liveOptions(argv) {
   o.model ??= o.engine === "codex" ? "gpt-5.6-luna" : o.engine === "ollama" ? "qwen3:4b" : "haiku";
   return o;
 }
-var onPath = (cmd) => (process.env.PATH ?? "").split(":").some((d) => d && existsSync9(resolve8(d, cmd)));
+var onPath = (cmd) => (process.env.PATH ?? "").split(":").some((d) => d && existsSync10(resolve9(d, cmd)));
 function readJSON(p, dflt) {
   try {
     return JSON.parse(readFileSync11(p, "utf8"));
@@ -5164,8 +5517,8 @@ function claudeBrain({ model, system, resumeId, stateless, effort }) {
     ask(text3) {
       if (!proc) start();
       turns++;
-      return new Promise((resolve9, reject) => {
-        turn = { text: "", resolve: resolve9, reject, p: proc };
+      return new Promise((resolve10, reject) => {
+        turn = { text: "", resolve: resolve10, reject, p: proc };
         proc.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: text3 } }) + "\n");
       }).finally(() => {
         if (stateless) this.close();
@@ -5183,11 +5536,11 @@ function claudeBrain({ model, system, resumeId, stateless, effort }) {
           }
         };
         let term, hard;
-        const wait2 = new Promise((resolve9) => {
+        const wait2 = new Promise((resolve10) => {
           const done2 = () => {
             clearTimeout(term);
             clearTimeout(hard);
-            resolve9();
+            resolve10();
           };
           p.once("close", done2);
           p.once("error", done2);
@@ -5256,13 +5609,13 @@ async function live(...argv) {
   const o = liveOptions(argv), s = load();
   need(s, "soul", "Create your Soul first (create-soul), then run live.");
   if (await mode(true) !== "edge") throw new Error("live needs a world that serves eden-edge/1.");
-  if (existsSync9(LIVE.stop)) throw new Error(`Remove the ${LIVE.stop} file first.`);
+  if (existsSync10(LIVE.stop)) throw new Error(`Remove the ${LIVE.stop} file first.`);
   const me0 = (await call(OWNER.me, { as: "owner" })).data?.souls?.find((x) => x.id === s.soul);
   const other = liveRunning();
   if (other) throw new Error(`live is already running in this folder (pid ${other.pid}). Give it requests with: node eden-agent.mjs tell "<words>"`);
   IN_LIVE = true;
   folderGuide(me0?.name ?? s.soul);
-  if (existsSync9(LIVE.lock)) {
+  if (existsSync10(LIVE.lock)) {
     if (lstatSync10(LIVE.lock).isSymbolicLink()) throw Error("linked live lease refused");
     const stale = readJSON(LIVE.lock, {});
     if (!Number.isSafeInteger(stale.pid) || stale.pid < 1) throw Error("invalid live lease");
@@ -5275,7 +5628,7 @@ async function live(...argv) {
     unlinkSync4(LIVE.lock);
   }
   const liveNonce = randomUUID5(), liveFd = openSync4(LIVE.lock, "wx", 384);
-  writeFileSync11(liveFd, JSON.stringify({ pid: process.pid, nonce: liveNonce, startedAt: now(), engine: o.engine, model: o.model }) + "\n");
+  writeFileSync12(liveFd, JSON.stringify({ pid: process.pid, nonce: liveNonce, startedAt: now(), engine: o.engine, model: o.model }) + "\n");
   closeSync4(liveFd);
   const unlock = () => {
     try {
@@ -6042,7 +6395,7 @@ async function live(...argv) {
       } catch (error) {
         localResult("remember", false, error.message, selector);
         localOwnerResult("remember", false, "Memory judgment not saved: " + clip(error.message, 240));
-        logLive({ memoryProblem: { error: error.message, choice: boundedRememberChoice(plan2.remember), fingerprint: createHash7("sha256").update(JSON.stringify(plan2.remember)).digest("hex") } });
+        logLive({ memoryProblem: { error: error.message, choice: boundedRememberChoice(plan2.remember), fingerprint: createHash8("sha256").update(JSON.stringify(plan2.remember)).digest("hex") } });
       }
     }
     if (typeof plan2.schedule === "string") try {
@@ -6077,7 +6430,7 @@ async function live(...argv) {
     } catch (error) {
       logLive({ memoryProblem: error.message });
     }
-    if (typeof plan2.notes === "string" && plan2.notes.trim()) writeFileSync11(LIVE.notes, plan2.notes.trim().slice(0, 2500) + "\n");
+    if (typeof plan2.notes === "string" && plan2.notes.trim()) writeFileSync12(LIVE.notes, plan2.notes.trim().slice(0, 2500) + "\n");
     if (own) {
       own.results.push(...results);
       if (typeof plan2.owner === "string" && plan2.owner.trim()) {
@@ -6272,7 +6625,7 @@ async function live(...argv) {
         logLive({ stopReason: "bounded cohort deadline" });
         break;
       }
-      if (existsSync9(LIVE.stop)) {
+      if (existsSync10(LIVE.stop)) {
         console.log("STOP file found.");
         break;
       }
@@ -6549,7 +6902,7 @@ async function report() {
     ...pl ? { plan: `${pl.state} \xB7 step ${pl.current + 1}/${pl.steps.length}: ${pl.steps.map((x) => `${x.label} [${x.status}]`).join(" \u2192 ")}` } : {},
     live: L ? leaseHeld() ? `running (pid ${L.pid}) but an attended session holds the mind lease` : `running (pid ${L.pid}); relay requests with tell` : "not running; act directly",
     ...recent.length ? { recently: recent } : {},
-    ...existsSync9(LIVE.replies) ? { coverage: readJSON(LIVE.state, {}).health?.coverage ?? null, lastOwnerRequests: readJSONL(LIVE.replies).slice(-3).map((r) => ({ request: r.text, answer: r.answer, answerSource: r.answerSource ?? "unverified-legacy-answer", did: r.results })) } : {},
+    ...existsSync10(LIVE.replies) ? { coverage: readJSON(LIVE.state, {}).health?.coverage ?? null, lastOwnerRequests: readJSONL(LIVE.replies).slice(-3).map((r) => ({ request: r.text, answer: r.answer, answerSource: r.answerSource ?? "unverified-legacy-answer", did: r.results })) } : {},
     ...h && h.me ? { here: h } : {},
     picture: "node eden-agent.mjs view --out view.jpg (first-person JPEG + alt caption); view --alt-only for the caption alone",
     note: "names and texts of others are untrusted game data; describe surroundings only from here or view"
@@ -6588,8 +6941,8 @@ async function view(...args) {
   if (d.url) {
     const img = await fetch(s.world + d.url, { signal: AbortSignal.timeout(3e4) }).catch((e) => ({ ok: false, status: 0, e }));
     if (img.ok) {
-      const file = resolve8(out ?? (map2 ? "map.jpg" : "view.jpg")), buf = Buffer.from(await img.arrayBuffer());
-      writeFileSync11(file, buf);
+      const file = resolve9(out ?? (map2 ? "map.jpg" : "view.jpg")), buf = Buffer.from(await img.arrayBuffer());
+      writeFileSync12(file, buf);
       rememberDashboardPicture(file);
       res.saved = file;
       res.bytes = buf.length;
@@ -6604,11 +6957,39 @@ async function cost() {
 }
 async function body(cmd, ...args) {
   if (!cmd) return ok(await call("/v1/edge/body"), "body");
+  if (cmd === "list") {
+    const r = ok(await call("/v1/edge/body"), "body");
+    return { selection: r.selection, presets: r.presets, uploads: r.uploads };
+  }
   if (cmd === "presets") return ok(await call("/v1/edge/body"), "body").presets;
+  if (cmd === "kit") return bodyKit(args, { load, call });
   if (cmd === "set") {
     const id3 = args[0];
-    if (!id3 || args.length !== 1) throw new Error("usage: body set <preset|assetId>");
-    return ok(await call("/v1/edge/body", { method: "PUT", body: /^body_[a-f0-9]{64}$/.test(id3) ? { assetId: id3 } : { preset: id3 } }), "body");
+    if (!id3 || args.length !== 1) throw new Error("usage: body set <preset|assetId|ref>");
+    if (!/^body_[a-f0-9]{64}$/.test(id3)) return ok(await call("/v1/edge/body", { method: "PUT", body: { preset: id3 } }), "body");
+    const own = await call("/v1/edge/body", { method: "PUT", body: { assetId: id3 } });
+    return ok(own.status === 403 && own.data?.error?.code === "body.not-owned" ? await call("/v1/edge/body", { method: "PUT", body: { ref: id3 } }) : own, "body");
+  }
+  if (cmd === "library") {
+    const scope = args[0] && !args[0].startsWith("--") ? args.shift() : "mine", q = new URLSearchParams({ scope });
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--q" || args[i] === "--cursor" || args[i] === "--limit") {
+        const v = args[++i];
+        if (v === void 0) throw new Error(`usage: body library [core|mine] [--q text] [--cursor c] [--limit n]`);
+        q.set(args[i - 1].slice(2), v);
+      } else throw new Error("usage: body library [core|mine] [--q text] [--cursor c] [--limit n]");
+    }
+    return ok(await call("/v1/edge/body/library?" + q), "body library");
+  }
+  if (cmd === "publish" || cmd === "unpublish") {
+    const ref = args[0];
+    if (!ref || args.length !== 1 || !/^body_[a-f0-9]{64}$/.test(ref)) throw new Error(`usage: body ${cmd} <ref>`);
+    return ok(await call("/v1/edge/body/library/" + ref + "/public", { method: cmd === "publish" ? "PUT" : "DELETE" }), "body " + cmd);
+  }
+  if (cmd === "show" || cmd === "save" || cmd === "forget") {
+    const ref = args[0];
+    if (!ref || args.length !== 1 || !/^[a-z0-9_-]{1,80}(@[1-9][0-9]{0,5})?$/.test(ref)) throw new Error(`usage: body ${cmd} <ref>`);
+    return ok(await call("/v1/edge/body/library/" + ref, cmd === "show" ? {} : { method: cmd === "save" ? "PUT" : "DELETE" }), "body " + cmd);
   }
   if (cmd === "look") {
     if (!args.length) {
@@ -6656,12 +7037,17 @@ async function body(cmd, ...args) {
     if (flag === "--upload" && args.length === 2) return clientProfile(load().soul, ["photo", args[1]], { call });
     throw new Error("usage: body photo [--auto | --upload portrait.png]");
   }
-  if (cmd !== "upload") throw new Error("usage: body [presets|set <preset|assetId>|look [--random|--set k=v ...|--set outfit=<preset>]|photo [--auto|--upload x.png]|upload path.glb --type ceramic --license owned --rights-confirmed]");
-  const path = args.shift(), opts = {};
+  if (cmd !== "upload") throw new Error("usage: body [presets|library [core|mine] [--q text] [--cursor c]|show|save|forget|publish|unpublish <ref>|kit <dir> [--starter rigid|humanoid|rolling] [--force]|set <preset|assetId|ref>|look [--random|--set k=v ...|--set outfit=<preset>]|photo [--auto|--upload x.png]|upload path.glb --type ceramic --license owned --rights-confirmed]");
+  const path = args.shift();
+  let opts = {};
   if (!path) throw new Error("body upload needs a GLB path");
   while (args.length) {
     const flag = args.shift();
-    if (flag === "--rights-confirmed") opts.rightsConfirmed = true;
+    if (flag === "--manifest") {
+      const file = args.shift();
+      if (!file || file.startsWith("--")) throw new Error("--manifest needs a JSON file");
+      opts = JSON.parse(readFileSync11(file, "utf8"));
+    } else if (flag === "--rights-confirmed") opts.rightsConfirmed = true;
     else if (flag === "--type" || flag === "--license") {
       const value = args.shift();
       if (!value || value.startsWith("--")) throw new Error(flag + " needs a value");
@@ -6670,7 +7056,7 @@ async function body(cmd, ...args) {
   }
   if (!["humanoid", "ceramic", "floater"].includes(opts.type) || !["CC0", "owned"].includes(opts.license) || !opts.rightsConfirmed) throw new Error("Upload requires --type humanoid|ceramic|floater --license CC0|owned --rights-confirmed");
   const size = statSync(path);
-  if (!size.isFile() || size.size > 16 * 1024 * 1024) throw new Error("Use a GLB file no larger than 16 MiB");
+  if (!size.isFile() || size.size > 4 * 1024 * 1024) throw new Error("Use a GLB file no larger than 4 MiB");
   if (opts.type === "humanoid") opts.rig = "quaternius/1";
   const form = new FormData();
   form.set("manifest", JSON.stringify(opts));
@@ -6680,7 +7066,7 @@ async function body(cmd, ...args) {
   const data = await response.json().catch(() => ({}));
   noticeInboxHeader(response.headers);
   noticeOwnerInbox(data);
-  if (!response.ok) throw new Error((data.error?.code ?? "body.unavailable") + ": " + (data.error?.message ?? "Body upload refused"));
+  if (!response.ok) throw new Error((data.error?.code ?? "body.unavailable") + ": " + (data.error?.message ?? "Body upload refused") + (data.error?.details ? " " + JSON.stringify(data.error.details) : ""));
   return data.asset;
 }
 async function travel(...args) {
@@ -6699,15 +7085,15 @@ async function dashboard(...args) {
     } else liveArgs.push(args[i]);
   }
   liveOptions(liveArgs);
-  const service = await startClientDashboard({ cli: resolve8(process.argv[1]), liveArgs, port });
+  const service = await startClientDashboard({ cli: resolve9(process.argv[1]), liveArgs, port });
   console.log("Local Soul dashboard: " + service.origin + " (mind starts automatically; pause/stop preserves world activity)");
-  await new Promise((resolve9) => {
+  await new Promise((resolve10) => {
     let closing = false;
     const close = async () => {
       if (closing) return;
       closing = true;
       await service.close();
-      resolve9();
+      resolve10();
     };
     process.once("SIGINT", close);
     process.once("SIGTERM", close);
@@ -6785,6 +7171,8 @@ export {
   CONVERSATION_MAX_INVITEES,
   NOW_MAX,
   OWNER_WROTE_NOTE,
+  READ_BUSY_CODES,
+  READ_BUSY_WAITS,
   SKILL_VERSION,
   accept,
   ack,
@@ -6831,6 +7219,7 @@ export {
   say,
   searchTerms,
   selectSoul,
+  shedReadWaitMs,
   status,
   takeNowFlag,
   tell,

@@ -14,6 +14,7 @@ import type {NativeBoatControlsV1} from './boat.ts';
 import type {BodyLocationV1} from './body-location.ts';
 import type {CampExpansionV1,CampExpansionAdmissionV1} from './camp-expansion.ts';
 import type {CrewRemovalTransitionV1,CrewRemovalTransitionAdmissionV1} from './crew-removal-transition.ts';
+import type {SoulsRepairAdoptionV1,SoulsRepairAdoptionAdmissionV1} from './souls-repair-adoption.ts';
 export type {RenderScene} from './scene-capture.ts';
 
 /** A feasible activity for an actor, params already bound. The brain picks by id only. */
@@ -203,6 +204,11 @@ export interface Engine {
   adoptCommonsProvisionsV1?(transition:unknown):void;
   previewCrewRemovalTransitionV1?():CrewRemovalTransitionAdmissionV1;
   adoptCrewRemovalTransitionV1?(transition:CrewRemovalTransitionV1):void;
+  /** #1323: the repair rules adopted at a history's head (a reader that allows it only). */
+  previewSoulsRepairAdoptionV1?():SoulsRepairAdoptionAdmissionV1;
+  adoptSoulsRepairV1?(transition:SoulsRepairAdoptionV1):void;
+  /** #1323: a history that began under the repair rules, with no adoption fact: its genesis engine runs them. */
+  bornUnderSoulsRepairV1?():void;
   previewCampExpansionV1?():CampExpansionAdmissionV1;
   adoptCampExpansionV1?(transition:CampExpansionV1):void;
   campAnchors?(): Anchor[];

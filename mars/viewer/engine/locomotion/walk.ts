@@ -13,6 +13,7 @@ import {bodyProfile,bodySpatial} from '../bodies/navigation.ts';
 //   traffic   : single-file passages are exclusive resources per direction (yield, never oscillate)
 //   animation : consumers read pose + human.activity; they never write positions
 import { blockedWait, publishedWaitsFor } from '../runtime/waits.ts';
+import { guardBodyStep } from '../runtime/static-step.ts';
 import { z } from 'zod';
 import { pointInObb, add2, angleDelta, clamp, cross2, dist2, dot2, heading, len2, norm2, rot2, scale2, sub2, wrapAngle, type OBB2, type Vec2, hypot } from '../core/math.ts';
 import type { ActionDef, Diagnostic, StepResult } from '../actions/types.ts';
@@ -51,7 +52,6 @@ const FACE_LOOK = 0.3; // m: heading aims along the chord to the path point this
 /** Ground speed (m/s) below which a walker is not shown walking: activity 'walk' needs ≥ WALK_MIN. */
 export const WALK_MIN = 0.08;
 const LOOK_TIME = 1.5; // s of look-ahead along the corridor for standing people, loads, geometry
-const STATIC_TOL = 0.03; // m: the static-clearance invariant's tolerance (runtime/invariants.ts)
 const STOP_GAP = 0.02; // m kept before the exact contact point of a hazard when stopping for it
 const VEHICLE_GAP = 1.5; // m body gap to a vehicle being driven within which a walker slows (look-ahead included)
 const VEHICLE_WALK = 0.5; // m/s walking speed near a vehicle that is being driven
@@ -152,9 +152,9 @@ type Exec = {
   /**
    * Stepping aside for a directed task this blocked walker stands in the way of (a carry formation,
    * `makeWay` with `clearOf`): walk to `spot`, wait there until `clearOf(goal)` holds (the formation no
-   * longer needs the goal), then replan to the goal.
+   * longer needs the goal), then replan to the goal. `clearOf` is data naming a registered test (#1368).
    */
-  detour?: { spot: Vec2; level: number; by: string; blockers?: string[]; clearOf?: (q: Vec2) => boolean; landing?: {y:number;radius:number}; stage: 'pending' | 'going' | 'waiting'; faceoff?: boolean;
+  detour?: { spot: Vec2; level: number; by: string; blockers?: string[]; clearOf?: ClearOfRef; landing?: {y:number;radius:number}; stage: 'pending' | 'going' | 'waiting'; faceoff?: boolean;
     /** A validated short courtesy route; avoids repeating its budgeted search. */
     planned?:{epoch:number;route:Route;around:AroundPerson[]};egress?:true};
   /** Entity worlds: the walker this one has stood face to face with (each blocked by the other) since `since`, as of `tick`. */
@@ -213,6 +213,18 @@ function entityList(rt: Runtime): Entity[] {
 const targetOf = (ex: Exec) => (ex.detour?.stage === 'going' ? { level: ex.detour.level, p: ex.detour.spot } : ex.goal);
 /** Live walk_to execs by action id (so `makeWay` can ask a blocked walker to step aside). */
 const walkExecs = (rt: Runtime): Map<string, Exec> => (rt.services.walkExecs ??= new Map());
+/**
+ * A make-way detour's "clear of the requester" test, held as data so a snapshot taken while the detour is live can be
+ * written (#1368; a stored closure made it `snapshot.unencodable`). `kind` names the test its module registered with
+ * `registerClearOf`, `action` is the requesting action, `r` the stepping-aside body's radius and `at` fixed points the
+ * test keeps clear, where a test needs them. Every registered test is true once the requesting action is no longer live.
+ */
+export type ClearOfRef = { kind: string; action: string; r?: number; at?: Vec2[] };
+type ClearOfTest = (rt: Runtime, ref: ClearOfRef, q: Vec2) => boolean;
+const clearOfTests = new Map<string, ClearOfTest>();
+export function registerClearOf(kind: string, test: ClearOfTest) { clearOfTests.set(kind, test); }
+/** An unregistered kind can only belong to an action whose module is not loaded, so that action is not live: clear. */
+const clearOfAt = (rt: Runtime, ref: ClearOfRef, q: Vec2) => clearOfTests.get(ref.kind)?.(rt, ref, q) ?? true;
 /** W47: the last single-file yield of each walker (actor → whom it waited for, at which tick, since when); plain data. */
 const yieldsOf = (rt: Runtime): Record<string, { to: string; tick: number; since: number }> => (rt.services.walkYields ??= {});
 /** W47: ticks a mutual single-file wait must last before the waiter holding the passage lets it go (3 s). */
@@ -641,7 +653,7 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
   if (ex.detour?.stage === 'waiting') {
     // walk on once the goal and the first stretch of the way back to it are clear of the formation
     const d = ex.detour;
-    const clear=(q:Vec2)=>d.landing?(!rt.world.entities[d.by] || Math.abs(rt.world.entities[d.by].pose.p[1]-d.landing.y)>1 || dist2(q,[rt.world.entities[d.by].pose.p[0],rt.world.entities[d.by].pose.p[2]])>d.landing.radius):d.clearOf!(q);
+    const clear=(q:Vec2)=>d.landing?(!rt.world.entities[d.by] || Math.abs(rt.world.entities[d.by].pose.p[1]-d.landing.y)>1 || dist2(q,[rt.world.entities[d.by].pose.p[0],rt.world.entities[d.by].pose.p[2]])>d.landing.radius):clearOfAt(rt,d.clearOf!,q);
     const r = clear(ex.goal.p) ? planWalk(rt, a, ex.goal, ex.profile) : null;
     if (r && !r.ok) return { status: 'failed', diagnostic: { ...r.diagnostic, code: 'route.invalidated', message: `${ex.actor} cannot walk on after stepping aside: ${r.diagnostic.message}` } };
     if (!r || !routeHeadClear(r.route, clear, 4)) {
@@ -981,10 +993,11 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
   // from a start inside the radius runs its first leg straight to the nearest standable cell (spatial/path.ts snap), and
   // past a column corner that leg can cut into a beam end (chiba 2022, planned round people). The walker holds and
   // replans instead (as for a stale corridor). A step it takes here would be a collision.human-static violation.
+  // #1332: the rule is runtime/static-step.ts guardBodyStep, the one every body step goes through (on this walker's own grid and radius).
   if (p !== cur) {
-    const cn = clearanceAt(g, p);
-    if (cn < r - STATIC_TOL && cn < clearanceAt(g, cur) - 1e-9) {
-      geoBlock ??= nearestBlocker(g, p) ?? 'geometry';
+    const guard = guardBodyStep(rt, a, cur, p, { grid: g, radius: r });
+    if (guard.held) {
+      geoBlock ??= guard.blocker!;
       ex.s = prevS;
       ex.offset = bodyOff;
       ex.v = 0;
@@ -1294,12 +1307,12 @@ export function landingBlocker(rt: Runtime, me: Entity, landing: { p: Vec2; y: n
  * (true where the requester no longer needs the ground): it steps aside to a spot
  * `clearOf` accepts, waits there until its goal is clear, then walks on.
  */
-export function makeWay(rt: Runtime, who: string, keepClear: Vec2, clearOf?: { by: string; subjects: string[]; test?: (q: Vec2) => boolean; landing?: {y:number;radius:number} }) {
+export function makeWay(rt: Runtime, who: string, keepClear: Vec2, clearOf?: { by: string; subjects: string[]; test?: ClearOfRef; landing?: {y:number;radius:number} }) {
   const o = rt.world.entities[who];
   if (!o?.human || o.human.grip) return;
   let ex: Exec | undefined;
   if (o.human.task) {
-    if (!clearOf) return;
+    if (!clearOf || (!clearOf.test && !clearOf.landing)) return;
     const rec = rt.records.get(o.human.task);
     ex = walkExecs(rt).get(o.human.task);
     const settledFloater=o.body?.family==='floater' && !!clearOf.landing && (o.human.speed??0)<WALK_MIN && ex?.phase==='walk' && ex.s>=ex.total-1e-6;
@@ -1329,7 +1342,7 @@ export function makeWay(rt: Runtime, who: string, keepClear: Vec2, clearOf?: { b
       if (dist2(q, keepClear) < 1.0) continue;
       const c = clearanceAt(g, q);
       if (c < bodyProfile(o).radius + 0.1 || occupant(rt, o, q, bodyProfile(o).radius + 0.2)) continue;
-      if (ex && (!(clearOf!.landing?dist2(q,keepClear)>clearOf!.landing.radius:clearOf!.test!(q)) || !stepAwayClear(rt, o, from, q))) continue;
+      if (ex && (!(clearOf!.landing?dist2(q,keepClear)>clearOf!.landing.radius:clearOfAt(rt,clearOf!.test!,q)) || !stepAwayClear(rt, o, from, q))) continue;
       const score = Math.min(c, 1.0) - 0.1 * d + 0.3 * (dir[0] * base[0] + dir[1] * base[1]);
       if (score > bestScore) { bestScore = score; best = q; }
     }
@@ -1373,13 +1386,13 @@ function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   if (!m?.human || m.human.grip) return;
   const g = spatial(rt, mover).level(m.human.level);
   if (!g) return;
-  const test = clearOfWay(rt, forEx, moverEx.profile.radius), r = moverEx.profile.radius;
+  const r = moverEx.profile.radius, test: ClearOfRef = { kind: 'way', action: forEx.id, r };
   const from: Vec2 = [m.pose.p[0], m.pose.p[2]];
   // nearest free spot first; it must be reachable going round the other body (not through it, as a plain plan would)
   const spots: { q: Vec2; d: number }[] = [];
   for (let k = 0; k < 16; k++) for (const d of [0.8, 1.2, 1.6, 2.2, 3.0, 4.0]) {
     const q = add2(from, scale2(rot2([1, 0], (k * Math.PI) / 8), d));
-    if (clearanceAt(g, q) < r + 0.05 || occupant(rt, m, q, r + 0.1) || !test(q)) continue;
+    if (clearanceAt(g, q) < r + 0.05 || occupant(rt, m, q, r + 0.1) || !clearOfAt(rt, test, q)) continue;
     spots.push({ q, d });
   }
   spots.sort((a, b) => a.d - b.d);
@@ -1392,17 +1405,17 @@ function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   }
 }
 
-/** `q` is clear of what is left of `forEx`'s way (or that walk is over): a body of radius `r` there does not touch it. */
-function clearOfWay(rt: Runtime, forEx: Exec, r: number) {
-  return (q: Vec2) => {
-    if (walkExecs(rt).get(forEx.id) !== forEx || forEx.detour) return true;
-    const need = r + forEx.profile.radius + 0.1;
-    for (let s = forEx.s; ; s = Math.min(forEx.total, s + 0.2)) {
-      if (dist2(q, pointAt(forEx, s)) < need) return false;
-      if (s >= forEx.total) return true;
-    }
-  };
-}
+/** `q` is clear of what is left of walk `ref.action`'s way (or that walk is over or stepping aside itself): a body of
+ *  radius `ref.r` there does not touch it. */
+registerClearOf('way', (rt, ref, q) => {
+  const forEx = walkExecs(rt).get(ref.action);
+  if (!forEx || forEx.detour) return true;
+  const need = ref.r! + forEx.profile.radius + 0.1;
+  for (let s = forEx.s; ; s = Math.min(forEx.total, s + 0.2)) {
+    if (dist2(q, pointAt(forEx, s)) < need) return false;
+    if (s >= forEx.total) return true;
+  }
+});
 
 /** The straight way from `from` to `q` never brings `me` closer to a person or carried-load disc it is (or would be) touching. */
 function stepAwayClear(rt: Runtime, me: Entity, from: Vec2, q: Vec2): boolean {
