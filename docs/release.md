@@ -70,11 +70,14 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | `dry_run` | **true** | `ship.sh --no-switch`: every step for real except the backup and the activation, checked against the build that stays live. Stage skips `install.sh`, so the host's unit files and timers stay as they are. No receipt is needed and publish does not run. The label is `<version>-rehearsal`. The staged release directory and its dependencies stay on the host; a later real ship of the same build reuses them. It deletes nothing on the host except the rehearsal's own scratch directory, which it created |
 | `date` | today (UTC) | The release date compiled into the changelog page and `CHANGELOG.md`. The page is part of the web build, so a real ship on a later day than its dry run of the same head must pass the dry run's date, or the staged build differs and stage refuses to overwrite it |
 | `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
+| `eyes` | **laptop** | Where the browser checks (probe, walks, poster, stall) run. `laptop`: on a GPU workstation with [`ship/eyes.mjs`](#the-workstations-eyes), handed over by commit status, and ship.sh runs `--no-eyes`. `runner`: on the GitHub runner, as before; it has no GPU, so they fail there (below) |
 | `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
 
 ```sh
 gh workflow run release.yml --ref main -f version=4.17                    # dry run: nothing goes live
 gh workflow run release.yml --ref main -f version=4.17 -f dry_run=false   # the release
+# then, on the GPU workstation, with the dispatched head and run id (the run's summary prints this line):
+node tools/world-launcher/deploy/ship/eyes.mjs --sha <head, 40 hex> --run <run id> --label 4.17
 ```
 
 Its jobs:
@@ -87,6 +90,10 @@ Its jobs:
    folder from `SIM_PROBE_GOD_JSON`, and for a real ship downloads the receipts and combines them
    (see below). Then `ship.sh --label <version> --sha <head>` (with `--no-switch` for a dry run). Its output
    is filtered so no IPv4 literal is printed; the host itself is a secret, so the log masks it.
+   With `eyes=laptop` the job waits up to 20 minutes for the workstation's probe before ship.sh, and up to 45 minutes
+   for its verdict after it. Both waits fail closed: no pass, no publish. A stop once the host activation began (other than
+   the host's own refusal) is reported as "live state unknown", with the rollback command. A real ship whose browser checks then fail is
+   live; the summary prints the [rollback](#rollback-without-ssh) command.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit and creates the GitHub Release.
 
@@ -107,6 +114,52 @@ gh release create receipts-v4.17 --prerelease --title "receipts 4.17" release-re
 stay on the runner, since tools tee'd into them can name the host. The step summary shows `ship-result.json`.
 
 The historical dual-stage command (`ship-dual-stage.sh`) is no longer run by the workflow.
+
+### The workstation's eyes
+
+The GitHub runner has no GPU, so Chrome draws WebGL in SwiftShader, and the browser bars measure the emulator, not the
+release (#1438). The first 4.17 dry run on the runner drew the stall page at about 2.7 fps, with 8 gaps over 1 s; the
+laptop drew about 2300 frames with a 200 ms worst gap against the same live build. Phone arrivals took 15 to 43 s
+there against 2 to 3 s. The same laptop with `--disable-gpu` and SwiftShader fails stall the same way. So the probe,
+the walks, the poster and the stall run on a GPU workstation, over plain HTTPS, with exactly ship.sh's commands and
+`checks.mjs`'s bars. They need no ssh.
+
+`ship/eyes.mjs --sha <sha> [--run <id>]` and the ship job meet through commit statuses on the release sha
+([`ship/handover.mjs`](../tools/world-launcher/deploy/ship/handover.mjs)). Every description carries the run id, so a
+status from an earlier run or attempt never counts (`<run>` is `<run id>.<attempt>`, since a re-run keeps the id):
+
+| Who | Context | State and description | Meaning |
+|---|---|---|---|
+| job | `release/ship` | pending `run=<run> mode=<ship\|no-switch> waiting-for-eyes` | about to run ship.sh `--no-eyes` |
+| eyes | `release/eyes` | pending `run=<run> ready` | the probe is watching (expecting `we-<sha12>`, or the live build for a dry run) |
+| job | `release/ship` | success `run=<run> released`, or failure `run=<run> stopped: …` | activated (or skipped it, `--no-switch`), or stopped before |
+| eyes | `release/eyes` | success `run=<run> pass`, or failure `run=<run> fail: <checks>` | the verdict |
+
+While it waits, eyes re-posts `ready` every minute and fails at once if its probe exits. Right before the activation,
+ship.sh's `SHIP_PREACTIVATE_CMD` checks that the newest `release/eyes` status for the attempt is `ready` and under
+3 minutes old; otherwise nothing goes live. If the `released` status cannot be posted after a real
+activation, the job records it, retries once and goes on; it never reports that as "before the release". Status
+details are reduced to `[A-Za-z0-9 ()=.,:_-]`, so no path or stack trace reaches GitHub; a failed probe names the bar
+items it missed, such as `probe(noBuild=2)`.
+
+Eyes refuses a run whose head is not `--sha`, or that is not `release.yml`. It skips an earlier run's or attempt's
+waiting status and keeps looking. A failure, an interrupt or a crash posts
+`fail`, never `pass`, and lets the probe stop and remove its edits first. A ship that stops before the release fails eyes without walks. Outputs, `probe/report.json`
+included, go to `.local/ship/<label>-eyes/`, with the bar alone in `probe-bar.json`. With `eyes=runner`, the run's
+artifact carries `probe-bar.json` too.
+
+### Rollback without ssh
+
+```sh
+gh workflow run rollback.yml --ref main -f build=<we-previous> -f from=<we-live> [-f dry_run=true]
+```
+
+[`rollback.yml`](../.github/workflows/rollback.yml) runs in the `production` environment, in its own
+`rollback` concurrency group, so it never queues behind a release's verdict wait. It runs [`deploy/rollback.sh`](../tools/world-launcher/deploy/rollback.sh), which does exactly what
+ship.sh's `ROLLBACK.txt` says: the previous release's own `activate.sh production <dir> --reload`, then public healthz
+on that build with every registered world. It refuses, changing nothing (exit 80), unless the live build is `from`,
+the host's `production.previous` is `build`, and `releases/<build>` is staged. When the host is already on `build` it
+only verifies. It never touches a backup, a database, the registry, auth or host settings, and it deletes nothing.
 
 The site's public changelog page (`<base>/changelog`, currently `https://soul.game/changelog`) is `CHANGELOG.md`
 rendered into the web build (`apps/web/changelog.html`, `apps/web/src/changelog-page.ts`). So that the page shows the
@@ -145,6 +198,7 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 | `--sha <full sha>` | The commit to ship. It must be HEAD of a clean tree and an ancestor of `origin/main`. |
 | `--dry-run` | Prints every step and its commands. Nothing remote is touched and nothing is written. Exits 1 when a guard would stop a real run. |
 | `--no-switch` | Runs every step for real except the backup and the activation: snapshot, stage, rehearse, the probe (expecting the live build), healthz of the live build, walks, poster, stall and cdn-walk. Nothing goes live, so there is nothing to back up or roll back. `host-activate.sh` never runs, and stage skips `install.sh` (`SIM_RELEASE_NO_INSTALL=1`), so no unit file or timer changes. A resume keeps the mode its run started in (`STEPS.txt`). Receipts are checked when `SHIP_RECEIPTS` is set and never required. `ship-result.json` says `rehearsed` (or `rehearsed-with-failures`); exit 0 only when every step passed |
+| `--no-eyes` | Skips the browser steps (probe-start, probe-check, walks, poster, stall), recording each as `skipped-no-eyes` in `STEPS.txt`; a GPU workstation runs them with [`ship/eyes.mjs`](#the-workstations-eyes). `SHIP_PROBE_CLI` is then not required. `SHIP_PREACTIVATE_CMD`, when set, runs right before the activation (or its `--no-switch` skip) and its failure stops the run with nothing changed. `SHIP_RELEASED_CMD` runs where the probe would be told the release is done; its failure is recorded as `released-hook` and the run goes on. The mode in `STEPS.txt` gains `-no-eyes`, and a resume keeps it |
 | `--from <step>` | Resumes at `snapshot`, `stage`, `rehearse`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
 | `--out <dir>` | Output folder (default `$SHIP_OUT_ROOT/<label>`). A folder that already holds a run is refused without `--from`. |
 | `--accept-host-codes <code,...>` | The snapshot normally needs public healthz `hostOk`. With this list it passes while `hostOk` is false only if every `hostCodes` entry is listed, such as `halted` for a release that fixes a halted world. The list is printed and recorded in `snapshot.json` (`acceptedHostCodes`); any other code still refuses, and the drift checks compare `hostCodes` too. |
