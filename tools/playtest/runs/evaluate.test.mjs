@@ -89,6 +89,8 @@ test('a question reads a close without `result` as the result it replaced, just 
   assert.deepEqual(questionSteps(plain), plain, 'a run with no close reads as before');
   const both = [step('result', ['msg_c', 'done', 'Here'], {}), step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })];
   assert.deepEqual(questionSteps(both), both, 'a result already there wins');
+  const refused = [step('result', ['msg_c', 'failed', 'Replaced'], { reported: false, closed: false, why: 'its act is still going' }), step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })];
+  assert.deepEqual(questionSteps(refused).map((s) => s.verb), ['result-refused', 'act', 'result'], '#1309: a refused result closed nothing, so the later close is the result');
 });
 
 test('a completed run: separate measure families with units and denominators; observer-only measures are unavailable, not 0', async () => {
@@ -128,7 +130,7 @@ test('offline rescore writes a new version and leaves sources and earlier evalua
   const a = await evaluateRun(dir, { questions: [Q('redirect-honoured.mjs')] });
   const first = readFileSync(join(a.dir, 'evaluation.json'), 'utf8');
   const b = await evaluateRun(dir, { questions: [Q('redirect-honoured.mjs'), Q('walk-seen.mjs')] });
-  assert.deepEqual(readdirSync(join(dir, 'evaluations')), ['001-v3', '002-v3']);
+  assert.deepEqual(readdirSync(join(dir, 'evaluations')), ['001-v4', '002-v4']);
   assert.equal(readFileSync(join(a.dir, 'evaluation.json'), 'utf8'), first);
   assert.deepEqual(indexSources(dir), before, 'evaluations/ is excluded and no source changed');
   assert.equal(b.evaluation.questions.length, 2);
