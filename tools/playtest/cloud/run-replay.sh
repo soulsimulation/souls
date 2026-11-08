@@ -128,19 +128,6 @@ OVERLAY_FACT="$(node -e 'try{const m=JSON.parse(require("fs").readFileSync(proce
   awk '{printf "| %s | %s | %s |\n", $1, $2, $3}' "$TIMES"
 } > "$OUT/CLOUD.md"
 
-# --- a spec arm's results carry this machine's details: scrub and check them, and publish nothing if that fails (#1131)
-if [ -n "${PLAYTEST_SPECS:-}" ]; then
-  # not a `step`: PLAYTEST_CLOUD_SKIP must not be able to turn this off
-  node tools/playtest/cloud/publish-scrub.mjs "$OUT" >>"$LOG" 2>&1 || { say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7; }
-fi
-
-# --- secret guard: refuse to publish token-shaped strings
-# (tools/playtest/cloud/secret-guard.sh; a scan that can't run refuses too)
-if ! bash tools/playtest/cloud/secret-guard.sh "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
-  say "token-shaped strings found in $(wc -l < "$PARENT/.secret-hits") files, or the scan failed (names in $PARENT/.secret-hits); NOT committing"; exit 3
-fi
-rm -f "$PARENT/.secret-hits"
-
 # --- commit to playtest-results (existing remote branch, else orphan) and push with backoff
 if [ ! -e "$RB/.git" ]; then
   git worktree prune
@@ -159,11 +146,15 @@ else
 fi
 git -C "$RB" config user.email >/dev/null 2>&1 || git -C "$RB" config user.email "playtest-cloud@agent.invalid"
 git -C "$RB" config user.name >/dev/null 2>&1 || git -C "$RB" config user.name "playtest cloud runner"
-mkdir -p "$RB/results/$NAME"
-rsync -a --delete --exclude '.cloud-times' "$OUT/" "$RB/results/$NAME/" 2>/dev/null || { rm -rf "$RB/results/$NAME"; mkdir -p "$RB/results/$NAME"; cp -a "$OUT/." "$RB/results/$NAME/"; rm -f "$RB/results/$NAME/.cloud-times"; }
-# GitHub refuses files over 100 MB: leave those out and list them
-find "$RB/results/$NAME" -type f -size +95M -print -delete | sed "s#^$RB/##" > "$RB/results/$NAME/OMITTED-LARGE-FILES.txt" || true
-[ -s "$RB/results/$NAME/OMITTED-LARGE-FILES.txt" ] || rm -f "$RB/results/$NAME/OMITTED-LARGE-FILES.txt"
+# --- copy the results for the branch, then scrub (a spec arm's carry this machine's details, #1131) and guard the copy only:
+# the run's own folder keeps what retention says it keeps (#1311). Not a `step`: PLAYTEST_CLOUD_SKIP can't turn it off.
+mkdir -p "$RB/results"
+PC=0; bash tools/playtest/cloud/publish-copy.sh "$OUT" "$RB/results/$NAME" ${PLAYTEST_SPECS:+--scrub} > "$PARENT/.secret-hits" 2>>"$LOG" || PC=$?
+case "$PC" in
+  0) rm -f "$PARENT/.secret-hits" ;;
+  7) say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7 ;;
+  *) say "token-shaped strings found in $(grep -c . "$PARENT/.secret-hits") files, or the scan failed (names in $PARENT/.secret-hits); NOT committing; results stay in $OUT"; exit 3 ;;
+esac
 git -C "$RB" add -A
 if git -C "$RB" diff --cached --quiet; then say "results unchanged; nothing to commit"
 else git -C "$RB" commit -q -m "playtest results $NAME: $FIX @ ${FIX_SHA:0:12}, repeats $REPEATS, replay exit $RS_RC" && say "committed $(git -C "$RB" rev-parse --short HEAD)"; fi

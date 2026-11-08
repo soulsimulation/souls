@@ -93,6 +93,13 @@ const ACT_ALIASES: Record<string, string> = {'turn-on': 'switch-on', 'turn-off':
   'change-the-station': 'change-station', 'change-the-radio-station': 'change-station', 'change-radio-station': 'change-station', 'switch-the-station': 'change-station', 'switch-station': 'change-station', 'next-station': 'change-station', tune: 'change-station', retune: 'change-station', 'tune-the-radio': 'change-station',
   // #431: a record player's record (only when a put-on-record action is offered; the record itself is the `record` param)
   'put-on-a-record': 'put-on-record', 'put-a-record-on': 'put-on-record', 'put-on-the-record': 'put-on-record', 'play-a-record': 'put-on-record', 'play-the-record': 'put-on-record', 'play-record': 'put-on-record', 'play-records': 'put-on-record', 'spin-a-record': 'put-on-record', 'stop-the-record': 'switch-off'};
+/** #428: a second meaning of an everyday word, used only when its ACT_ALIASES meaning is not on offer and this one is:
+ *  "cross out" a sign-up name (unsign) or a notebook line (the pinboard faculty's unpin). */
+const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unpin', 'strike-off': 'unpin'};
+const LABEL_FILLER = new Set(['from', 'your', 'my', 'out', 'off', 'down', 'take', 'cross', 'in', 'on', 'of']), PLAIN_WORDS = new Set(['the', 'a', 'an', 'this', 'that', 'please']), SAYS_MORE = new Set(['first', 'and', 'then']), ENDS_ONLY = new Set(['and', 'then']), THING_ALIASES: Record<string, string> = {journal: 'notebook', logbook: 'notebook', noticeboard: 'board'};
+/** #428: "write in the notebook" is a notebook's line (the pinboard faculty's `pin`), only where a notebook's line is on
+ *  offer (its label says so), so "write in the study" still reaches a desk beside a pinboard. */
+const NOTEBOOK_WORDS: Record<string, string> = {'write-in': 'pin', 'write-a-line-in': 'pin'};
 // L3 (server reliability): a resolve tokenises every place's and offer's names on every call; the same few thousand names
 // repeat, so their tokens are kept (bounded; callers get their own copy, so an in-place sort never reaches the memo)
 const TOKEN_MEMO = new Map<string, string[]>(), TOKEN_MEMO_MAX = 50_000;
@@ -235,7 +242,7 @@ export function wordsFocusVerbsV1(input: string): Set<string> | null {
   for (let n = 1; n <= Math.min(4, words.length); n++) {const k = words.slice(0, n).join('-').toLowerCase().trim().replace(/[\s_]+/g, '-'); out.add(k); if (VERBS[k]) out.add(VERBS[k]);}
   for (const [re, v] of INTENTS) if (re.test(text)) out.add(v);
   if (LEISURE_LEAD.test(raw)) for (const [re, v] of LEISURE_OBJECTS) if (re.test(text)) out.add(v);
-  for (const v of [...out]) {if (ACT_ALIASES[v]) out.add(ACT_ALIASES[v]); for (const [k, a] of Object.entries(ACT_ALIASES)) if (a === v) out.add(k);}
+  for (const v of [...out]) {if (ACT_ALIASES[v]) out.add(ACT_ALIASES[v]); if (ACT_ALT[v]) out.add(ACT_ALT[v]); for (const [k, a] of Object.entries(ACT_ALIASES)) if (a === v) out.add(k); for (const [k, a] of Object.entries(ACT_ALT)) if (a === v) out.add(k);}
   if (out.has('stroll') || out.has('wander')) {out.add('stroll'); out.add('wander');}
   if (out.has('sit')) {out.add('rest'); out.add('sit-ground'); out.add('warm-by-fire');}
   if (/\b(?:fire|campfire|warm)\b/.test(text)) out.add('warm-by-fire');
@@ -329,6 +336,15 @@ export function signWords(input: string, ctx: Pick<VocabContext, 'caps'>): Vocab
 const STEER_DIRS = 'north|northeast|north-east|east|southeast|south-east|south|southwest|south-west|west|northwest|north-west|n|ne|e|se|s|sw|w|nw';
 const STEER_VEHICLE = String.raw`(?:(?:the|our|this|my)\s+)?(?:hot[- ]air\s+|red\s+|rowing\s+)?(?:balloon|punt|boat|basket|ride|it|us)`;
 const STEER_GO = String.raw`(?:fly|flying|steer|drive|sail|float|row|rowing|pilot|navigate|head|take|move|go|bring)`;
+// #1051: "stop the record" is the record player's own stop, and "turn on the record player" its record: there is no switch to
+// turn on, so the offer's schema asks which record. Only while such an offer exists.
+const RECORD_STOP = /^(?:please\s+)?stop\s+(?:the\s+)?record[.!]*$/, RECORD_START = /^(?:please\s+)?(?:turn|switch)\s+on\s+(?:the\s+)?record\s+player[.!]*$/;
+function recordWords(input: string, text: string, ctx: VocabContext): VocabResult | null {
+  const t = text.trim(), action = RECORD_STOP.test(t) ? 'switch-off' : RECORD_START.test(t) ? 'put-on-record' : null; if (!action) return null;
+  // only a record player's own offer that can happen now, and only one: anything else goes the ordinary way
+  const players = new Set(ctx.caps.filter(c => c.action === 'put-on-record').map(c => c.object)), found = ctx.caps.filter(c => c.verb === 'object' && c.action === action && c.available && players.has(c.object)), cap = found.length === 1 ? found[0] : null;
+  return cap ? {kind: 'alias', cap, note: `${input} is ${cap.id} (${cap.label}).`} : null;
+}
 function steerWords(input: string, ctx: VocabContext): VocabResult | null {
   const caps = ctx.caps.filter(c => c.verb === 'object' && c.action === 'steer' && c.available); if (!caps.length) return null;
   const t = input.toLowerCase().replace(/^(?:please\s+|let'?s\s+|now\s+|ok(?:ay)?,?\s+)+/, '').replace(/[.!?\s]+$/, '').trim(); if (!t || t.includes(':')) return null;
@@ -431,6 +447,7 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   const stow = colon < 0 ? storeWords(input, text, ctx) : null; if (stow) return stow;
   const juggling = colon < 0 ? juggleWords(input, text, ctx) : null; if (juggling) return juggling;
   const mend = colon < 0 ? repairWords(input, text, ctx) : null; if (mend) return mend;
+  const record = colon < 0 ? recordWords(input, text, ctx) : null; if (record) return record;
   const searching = colon < 0 ? searchWords(input, text, ctx) : null; if (searching) return searching;
   // RESOLVE (SOULSIM-E "find a boat": no "find" capability): find / look for / search for X is a walk to the nearest X you
   // can reach, unless the words name an activity offered here ("find somewhere quiet to read", "find a seat" keep theirs)
@@ -535,19 +552,28 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   const acts = ctx.caps.filter(c => c.verb === 'object' && c.action && /^e_/.test(c.object ?? ''));
   for (const c of acts) verbs.add(c.action!);
   for (const [k, v] of Object.entries(ACT_ALIASES)) if (verbs.has(v) && !verbs.has(k)) verbs.add(k);
+  for (const [k, v] of Object.entries(ACT_ALT)) if (verbs.has(v) && !verbs.has(k)) verbs.add(k);
+  const notebookOffered = acts.some(c => c.action === 'pin' && /\bnotebook\b/i.test(c.label));
+  if (notebookOffered) for (const k of Object.keys(NOTEBOOK_WORDS)) if (!verbs.has(k)) verbs.add(k);
   // Entry 43: a kettle's and a cup's everyday words, only where such an action is offered: "put the kettle on" (or switch /
   // turn it on, boil it) is the kettle's `boil`; "make a cup of tea" is the nearest offered cup's `brew` (an available one first)
   if (colon < 0) {
     const want = /^(?:please\s+)?(?:(?:put|switch|turn)\s+(?:the\s+|my\s+)?kettle\s+on|(?:switch|turn)\s+on\s+(?:the\s+)?kettle|boil\s+(?:the\s+)?(?:kettle|water))[.!]?$/.test(text) ? 'boil'
-      : /^(?:please\s+)?(?:make|brew)\s+(?:me\s+|us\s+)?(?:a\s+|some\s+|another\s+)?(?:(?:cup|mug)\s+of\s+)?tea[.!]?$/.test(text) ? 'brew'
+      : /^(?:please\s+)?(?:make|brew)\s+(?:me\s+|us\s+)?(?:a\s+|some\s+|another\s+)?(?:(?:cup|mug)\s+of\s+)?(?:tea|coffee)[.!]?$/.test(text) ? 'brew'
       // entry 44: "drink the tea" (drink it, finish the tea, drink up); "have a sip"; "wash the cup" (wash up, rinse the mug)
-      : /^(?:please\s+)?(?:(?:drink|finish)\s+(?:up\s+)?(?:(?:the|my|your|this|that)\s+)?(?:(?:cup|mug)\s+of\s+tea|tea|cup|mug|it)?|drink\s+up)[.!]?$/.test(text) ? 'drink'
-      : /^(?:please\s+)?(?:(?:have|take)\s+(?:a\s+)?sip(?:\s+of\s+(?:(?:the|my|your)\s+)?(?:tea|it))?|sip\s+(?:(?:the|my|your)\s+)?(?:tea|it))[.!]?$/.test(text) ? 'sip'
-      : /^(?:please\s+)?(?:(?:wash|rinse|clean)\s+(?:up|out)?\s*(?:(?:the|my|your|this|that)\s+)?(?:(?:tea\s*)?cup|mug|it)?(?:\s+(?:up|out))?|do\s+the\s+washing[- ]up|wash\s+up)[.!]?$/.test(text) ? 'wash' : null;
-    const pool = want ? acts.filter(c => c.action === want).sort((a, b) => Number(b.available) - Number(a.available) || dist(ctx.target(a).at, ctx.me) - dist(ctx.target(b).at, ctx.me) || a.id.localeCompare(b.id)) : [];
+      : /^(?:please\s+)?(?:(?:drink|finish)\s+(?:up\s+)?(?:(?:the|my|your|this|that)\s+)?(?:(?:cup|mug)\s+of\s+(?:tea|coffee)|tea|coffee|cup|mug|it)?|drink\s+up)[.!]?$/.test(text) ? 'drink'
+      : /^(?:please\s+)?(?:(?:have|take)\s+(?:a\s+)?sip(?:\s+of\s+(?:(?:the|my|your)\s+)?(?:tea|coffee|it))?|sip\s+(?:(?:the|my|your)\s+)?(?:tea|coffee|it))[.!]?$/.test(text) ? 'sip'
+      : /^(?:please\s+)?(?:(?:wash|rinse|clean)\s+(?:up|out)?\s*(?:(?:the|my|your|this|that)\s+)?(?:(?:tea\s*|coffee\s*)?cup|(?:coffee\s+)?mug|it)?(?:\s+(?:up|out))?|do\s+the\s+washing[- ]up|wash\s+up)[.!]?$/.test(text) ? 'wash' : null;
+    // #437 W078: words that name the drink ("make a cup of coffee", "wash the coffee mug") take only a mug whose offer names
+    // it (its def's labels, before the thing's name in brackets: "Make a cup of coffee", "Wash the coffee mug"); a tea mug's
+    // "Wash the cup" names no drink and is tea's. "drink it", "wash the mug" take the nearest mug of either. "the teacup"
+    // (one word) names tea as "the tea cup" does
+    const drink = /\b(tea|coffee)(?:cups?|mugs?)?\b/.exec(text)?.[1];
+    const names = (c: {label: string}, d: string) => new RegExp(`\\b${d}\\b`, 'i').test(c.label.replace(/\s*\(.*\)$/, ''));
+    const pool = want ? acts.filter(c => c.action === want && (!drink || names(c, drink) || (want === 'wash' && drink === 'tea' && !names(c, 'coffee')))).sort((a, b) => Number(b.available) - Number(a.available) || dist(ctx.target(a).at, ctx.me) - dist(ctx.target(b).at, ctx.me) || a.id.localeCompare(b.id)) : [];
     // entry 44: a bare "drink" or "wash up" near a mug nobody can use now keeps its old meaning; naming the tea or the cup
     // gets the mug's own answer (pick it up first, drink it first)
-    if (pool.length && (want === 'drink' || want === 'sip' || want === 'wash') && !pool[0].available && !/\b(?:tea|cup|mug)\b/.test(text)) pool.length = 0;
+    if (pool.length && (want === 'drink' || want === 'sip' || want === 'wash') && !pool[0].available && !/\b(?:tea|coffee|cup|mug)\b/.test(text)) pool.length = 0;
     if (pool.length) return {kind: 'alias', cap: pool[0], note: `${input} is ${pool[0].id} (${pool[0].label}).`};
     // #435: "eat the apple", "finish the apple", "have the bun", "take a bite of the bun" name a food wherever it is; "eat it"
     // and "have a bite" mean the food in her hand. Nothing in the hand and no food named keeps the word's old meaning (a table's
@@ -560,15 +586,23 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     }
     // entry 44: "offer Ben the tea", "give the cup of tea to Ben": the hand-over of the held mug to that Soul (entry 41's
     // give:<soul>, offered only while a world thing is held and the Soul is in sight)
-    const serve = /^(?:please\s+)?(?:offer|give|hand|pass|serve|bring)\s+(?:(?!the\b|my\b|this\b|that\b|your\b)([a-z][\w' -]*?)\s+(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+tea|tea|cup|mug|it)|(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+tea|tea|cup|mug|it)\s+to\s+([a-z][\w' -]*?))[.!]?$/.exec(text);
+    const serve = /^(?:please\s+)?(?:offer|give|hand|pass|serve|bring)\s+(?:(?!the\b|my\b|this\b|that\b|your\b)([a-z][\w' -]*?)\s+(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+(?:tea|coffee)|tea|coffee|cup|mug|it)|(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+(?:tea|coffee)|tea|coffee|cup|mug|it)\s+to\s+([a-z][\w' -]*?))[.!]?$/.exec(text);
     const to = serve ? (serve[1] ?? serve[2]).trim() : '';
     const give = to ? ctx.caps.filter(c => c.verb === 'give' && c.id.startsWith('give:') && c.label.toLowerCase().startsWith(`give ${to} `)) : [];
     if (give.length) return {kind: 'alias', cap: give[0], note: `${input} is ${give[0].id} (${give[0].label}).`};
     // "put the cup on the table", "set it down on the counter": while something is held, that is put-on <the surface>
-    const put = /^(?:please\s+)?(?:put|set|place|stand)\s+(?:(?:the|my|this|that|your)\s+)?(?:it|[a-z][a-z-]*(?:\s+of\s+tea)?)\s+(?:down\s+|back\s+)?(?:on|onto)\s+(?:to\s+)?(.+?)[.!]?$/.exec(text);
+    const put = /^(?:please\s+)?(?:put|set|place|stand)\s+(?:(?:the|my|this|that|your)\s+)?(?:it|[a-z][a-z-]*(?:\s+of\s+(?:tea|coffee))?)\s+(?:down\s+|back\s+)?(?:on|onto)\s+(?:to\s+)?(.+?)[.!]?$/.exec(text);
     if (put && ctx.caps.some(c => c.verb === 'put-on')) return resolveCapability(`put-on ${put[1]}`, ctx);
   }
   let {verb, rest} = parseCapability(input, verbs);
+  // #428: "write in <words>" is the notebook's line only when the words name an offered notebook ("write in the study"
+  // beside a notebook stand still means the desk): otherwise the words are read again without the notebook's words
+  if (notebookOffered && NOTEBOOK_WORDS[verb]) {
+    const said = tokens(rest), nb = acts.filter(c => c.action === 'pin' && /\bnotebook\b/i.test(c.label));
+    if (!nb.some(c => {const t = ctx.target(c); return said.some(w => tokenHit(w, [...tokens(c.label), ...(t.names ?? []).flatMap(tokens)]));})) {
+      const plain = new Set([...verbs].filter(v => !NOTEBOOK_WORDS[v])); ({verb, rest} = parseCapability(input, plain));
+    }
+  }
   const nearestRequested = /\b(?:nearest|closest|nearby|anywhere|somewhere)\b|^(?:find|look for|search for)\b|\b(?:a|an)\s/.test(input.toLowerCase());
   const nearestBuilding=verb==='walk'&&/\b(?:nearest|closest)\b/i.test(rest)&&norm(rest.replace(/\bbehind(?:\s+(?:you|me|us))?\b/ig,' ').replace(/\b(?:nearest|closest)\b/ig,' '))==='building';
   const behind = /\bbehind(?:\s+(?:you|me|us))?\b/i.test(rest);
@@ -597,7 +631,31 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     if(offered)return {kind:'alias',cap:offered,note:`${input} is ${offered.id} (${place.name}), the nearest building by its edge within the requested direction.`};
     return {kind:'unknown',code:'place.unreachable',place:place.id,verb:'walk',places:[place.id],reason:`The nearest building is ${place.name}; its exact entry must be checked on demand. No farther building was substituted.`,didYouMean:[]};
   }
-  if (ACT_ALIASES[verb] && !ctx.caps.some(c => c.verb === verb)) verb = ACT_ALIASES[verb];
+  if (notebookOffered && NOTEBOOK_WORDS[verb] && !ctx.caps.some(c => c.verb === verb)) verb = NOTEBOOK_WORDS[verb];
+  else if (ACT_ALIASES[verb] && !ctx.caps.some(c => c.verb === verb)) {
+    // the second meaning when it can happen and the first can't, or when the words name its target
+    const primary = ACT_ALIASES[verb]!, alt = ACT_ALT[verb], can = (a: string) => ctx.caps.filter(c => c.action === a && c.available), said = tokens(rest).filter(w => !LABEL_FILLER.has(w)), ws = said.map(w => THING_ALIASES[w] ?? w);
+    // what the words name decides (#990): the thing first (its names, the "in the notebook" and "(notebook)" of its label),
+    // then a label's noun ("your line"), never its "from" or "your". Words for a thing that isn't here do nothing at all. Words naming nothing take what there is to cross out, and a blocked
+    // offer answers for itself.
+    const hits = (text: string) => {const all = tokens(text).filter(w => !LABEL_FILLER.has(w)); return ws.some(w => tokenHit(w, all));};
+    const thing = (c: EdgeCapability) => [...ctx.target(c).names, ...[...c.label.matchAll(/\b(?:in|on|off|from)\s+the\s+([^()]+)|\(([^)]*)\)/g)].map(m => m[1] ?? m[2])].join(' ');
+    const name = (c: EdgeCapability) => hits(thing(c)), noun = (c: EdgeCapability) => hits(c.label);
+    const first = ctx.caps.filter(c => c.action === primary), second = alt ? ctx.caps.filter(c => c.action === alt) : [];
+    const crossing = !!alt, here = crossing ? tokens([...first, ...second].map(thing).join(' ')) : [];
+    // words about something that isn't offered do nothing: "my journal note" with only a board is not that board's note. Any
+    // word that is neither an offered name nor a label's noun stops it. Only these verbs: "take down" and "remove" are as they were.
+    // Both sides are raw words: "lost-and-found" and "first-aid-log" are names, and of the words tokens() drops only "first", "and" and "then" say something;
+    // "and" or "then" says more only when a word follows it: "cross out my note, then" is the note.
+    const rawWords = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const known = crossing ? rawWords([...first, ...second].flatMap(c => [c.label, thing(c)]).join(' ')) : [], fits = (w: string) => tokenHit(w, known) || tokenHit(THING_ALIASES[w] ?? w, known), words = rawWords(rest), stray = words.find((w, i) => !(ENDS_ONLY.has(w) && words.slice(i + 1).every(x => ENDS_ONLY.has(x))) && !PLAIN_WORDS.has(w) && !LABEL_FILLER.has(w) && !(STOP.has(w) && !SAYS_MORE.has(w)) && !fits(w));
+    if (crossing && first.length + second.length && stray) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to cross out or take down goes by "${stray}", so nothing was done.`, didYouMean: []};
+    const altFits = !!alt && (second.length
+      ? first.some(name) ? false : second.some(name) ? true : !first.length && ws.includes('name') ? false : first.some(noun) ? false : second.some(noun) ? true : !first.length
+      : !verbs.has(primary) && verbs.has(alt));
+    verb = altFits ? alt : primary;
+    if (crossing) rest = said.map(w => tokenHit(w, here) ? w : THING_ALIASES[w] ?? w).join(' ');   // no filler in the match below; a thing's own word kept
+  }
   // A real fire is a qualifier of the existing fire request, not a new seat name.
   // Keep explicit/named IDs intact and require an offered actual fire before dropping it.
   const realFire = colon < 0 && ['sit', 'warm-by-fire'].includes(verb) ? /^(?:by|near|beside)\s+(?:a|the)\s+real\s+(fire|campfire)[.!]?$/i.exec(rest) : null;
@@ -653,6 +711,8 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   const placeIdOf = (c: EdgeCapability) => c.target?.kind === 'place' ? c.target.id : info.get(c.id)?.t.around[0];
   const one0 = (cs: EdgeCapability[], note: (c: EdgeCapability) => string): VocabResult | null => {
     cs=[...new Map(cs.map(c=>[c.id,c])).values()];
+    // #428: `<verb>:here` at a spot and that spot's own `<verb>:<spot>` are one destination ("read the book on the lectern")
+    cs=cs.filter(c=>!(c.id===`${c.verb}:here`&&c.target?.kind==='spot'&&cs.some(o=>o!==c&&o.id===`${c.verb}:${c.target!.id}`)));
     if (!cs.length) return null;
     const live = cs.filter(c => c.available), list = live.length ? live : cs;
     if (list.length === 1) return {kind: 'alias', cap: list[0], note: note(list[0])};
