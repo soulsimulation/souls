@@ -723,21 +723,20 @@ test('R after a rung 3 the god side reads the engine that runs: a Soul puts down
   ok(w.god.act({ops: [{op: 'place', def: 'core/bowl@2', name: 'bowl-after', p: [x + 3, z]}]})); await w.tick(40);
   assert.doesNotThrow(() => w.bridge.contextReady()); 
 });
-test('R a repeat fault that gives a stop under way its deadline writes it, so a crash boot agrees and the body comes free', async (t) => {
+test('R a stop a Soul asked for that stays refused gives up five minutes after the last change: a crash boot agrees, and nobody calls it a glitch', async (t) => {
   quiet(t); const path = onDisk(t), w = await world(t, repair, path), h = w.f.host, {Ada} = w.souls;
-  h.lastRewindTick = h.engine.world.tick; w.control.throwAt = h.engine.world.tick + 2; await w.tick(4);
   const def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
-  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}}); def.step = () => ({status: 'running'});   // before the walk: a replay runs with these
-  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6);
+  let nudge = Infinity; def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}});
+  def.step = (rt) => { if (rt.tick === nudge) { const e = rt.world.entities[Ada.entityId]; e.pose.p = [e.pose.p[0] + 0.03, e.pose.p[1], e.pose.p[2]]; } return {status: 'running'}; };   // before the walk: a replay runs with these
+  const walk = ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6);
   const id = h.engine.programOf(Ada.entityId); void h.enqueue('edge-stop', 'world:test', {programId: id}); await w.tick(3);
-  assert.equal(h.engine.programs.get(id).stopByV1, undefined); const n = rows(w, "author='world:rewind'");
-  const told = [], {deliver} = w.comms.streams; w.comms.streams.deliver = (soul, code, ...x) => { told.push(code); return deliver.call(w.comms.streams, soul, code, ...x); }; const rewinds = h.rewinds;
-  w.control.throwAt = h.engine.world.tick + 2; await w.tick(4); assert.equal(rows(w, "author='world:rewind'"), n + 1, 'the deadline is a row'); const by = h.engine.programs.get(id).stopByV1; assert.ok(by);
-  assert.deepEqual(told.filter(c => c === 'world.rewound'), [], 'nothing ended, so nobody is told'); assert.equal(h.rewinds, rewinds, 'and it is no rewind');
-  await w.tick(20); const hash = h.engine.stateHash(), r = reboot(t, w, path);
-  assert.equal(r.engine.stateHash(), hash); assert.equal(r.engine.programs.get(id).stopByV1, by);
-  for (let i = 0; i < 450 && r.engine.programOf(Ada.entityId); i++) r.tickOnce();
-  assert.equal(r.engine.programOf(Ada.entityId), null, 'free by the deadline');
+  const quiet0 = h.engine.programs.get(id).stopQuietV1; assert.ok(quiet0); assert.equal(h.engine.programs.get(id).stopByV1, undefined, 'no fixed deadline'); nudge = quiet0.since + 3000;   // a change half way resets the five minutes
+  await w.tick(40); const hash = h.engine.stateHash(), r = reboot(t, w, path); assert.equal(r.engine.stateHash(), hash); assert.deepEqual(r.engine.programs.get(id).stopQuietV1, h.engine.programs.get(id).stopQuietV1);
+  const glitches = Object.values(r.glitches.byRule).reduce((n, x) => n + (x.refusal ?? 0), 0);
+  while (r.engine.world.tick < quiet0.since + 8900) r.tickOnce(); assert.ok(r.engine.programOf(Ada.entityId), 'still waiting: it moved three thousand ticks in');
+  for (let i = 0; i < 200 && r.engine.programOf(Ada.entityId); i++) r.tickOnce();
+  assert.equal(r.engine.programOf(Ada.entityId), null, 'given up at five minutes'); assert.equal(Object.values(r.glitches.byRule).reduce((n, x) => n + (x.refusal ?? 0), 0), glitches, 'no glitch');
+  const row = r.db.events(r.worldId).filter((e) => e.author === 'world:refusal').map((e) => e.payload.refusal.rule).at(-1); assert.equal(row, 'world.stop-gave-up');
 });
 for (const age of [50, 600]) test(`R a stop's twenty seconds start at the rewind, with a baseline ${age} ticks old: cleanup runs and nothing is abandoned`, async (t) => {
   quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls, def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
@@ -809,4 +808,25 @@ test('R a steady throw asks for a snapshot once per cooldown: rare, and never si
   quiet(t); const w = await world(t), h = w.f.host; let taken = 0; const {commitHead} = h; h.commitHead = function (...a) { taken++; return commitHead.apply(this, a); };
   w.control.midThrow = () => true; for (let i = 0; i < 2600; i++) h.tickOnce(); await setImmediate();
   assert.ok(taken >= 3 && taken <= 6, `${taken} snapshots`);
+});
+test('R a Soul stop that a rung 3 gives twenty seconds and that stays refused is engine.action-threw, counted', async (t) => {
+  quiet(t); const w = await world(t, repair), h = w.f.host, {Ada, Bo} = w.souls, def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
+  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}}); def.step = () => ({status: 'running'});
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6); const id = h.engine.programOf(Ada.entityId);
+  void h.enqueue('edge-stop', 'world:test', {programId: id}); await w.tick(3); assert.ok(h.engine.programs.get(id)?.stopQuietV1);
+  h.saveSnapshot(true); await w.tick(4); fall(w, Bo); await w.tick(3); const p = h.engine.programs.get(id);
+  const g0 = byRung(h).refusal ?? 0; await w.tick(450);
+  const rules = w.f.db.events(h.worldId).filter((e) => e.author === 'world:refusal').map((e) => e.payload.refusal.rule);
+  assert.equal(h.engine.programOf(Ada.entityId), null); assert.equal(rules.at(-1), 'engine.action-threw'); assert.equal((byRung(h).refusal ?? 0), g0 + 1);
+});
+test('R a stop whose key changes every 50 s still gives up at half an hour, and not before', async (t) => {
+  quiet(t); const w = await world(t, repair), h = w.f.host, {Ada} = w.souls, def = h.engine.rt.registry.get('walk_to'), {cancel, step} = def; t.after(() => { def.cancel = cancel; def.step = step; });
+  def.cancel = () => ({ok: false, diagnostic: {code: 'support.release-premature', message: 'not yet'}});
+  def.step = (rt) => { if (rt.tick % 1000 === 0) { const e = rt.world.entities[Ada.entityId]; e.pose.p = [e.pose.p[0] + (rt.tick % 2000 ? 0.03 : -0.03), e.pose.p[1], e.pose.p[2]]; } return {status: 'running'}; };
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(6); const id = h.engine.programOf(Ada.entityId);
+  void h.enqueue('edge-stop', 'world:test', {programId: id}); await w.tick(3); const q = h.engine.programs.get(id).stopQuietV1; assert.ok(q && q.from === q.since);
+  while (h.engine.world.tick < q.from + 35990) h.tickOnce(); assert.ok(h.engine.programOf(Ada.entityId), 'still waiting before half an hour');
+  for (let i = 0; i < 30 && h.engine.programOf(Ada.entityId); i++) h.tickOnce();
+  assert.equal(h.engine.programOf(Ada.entityId), null); await w.tick(2);
+  const row = w.f.db.events(h.worldId).filter((e) => e.author === 'world:refusal').at(-1)?.payload.refusal; assert.equal(row.rule, 'world.stop-gave-up');
 });

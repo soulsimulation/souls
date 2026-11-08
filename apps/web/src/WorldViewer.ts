@@ -56,6 +56,8 @@ export interface WorldViewerState {
   broadcastSoulId?: string | null;
   /** #892: the Soul a flyToSoul glide is on its way to (the camera is 'manual' until it arrives and follows). */
   flyingTo?: string | null;
+  /** #1316: Follow is on, but the viewer pulled the camera out: it keeps their view until they Follow again. */
+  followHeld?: boolean;
   playback: 'live' | 'playing' | 'paused';
   loading: boolean;
   assetDownloads?:AssetDownloadProgress;
@@ -148,6 +150,7 @@ export function viewerPresentation(input: {
   speechAnchors?: readonly WorldSpeechAnchor[];
   broadcastSoulId?: string | null;
   flyingTo?: string | null;
+  followHeld?: boolean;
 }): WorldViewerState {
   return {
     shownTick: input.drawnTick !== null && Number.isFinite(input.drawnTick) ? input.drawnTick : null,
@@ -155,6 +158,7 @@ export function viewerPresentation(input: {
     selection: { ...(input.soulIds?.length?{soulIds:[...input.soulIds]}:{}),soulId: input.soulId, entityId: !input.soulId && input.entityId?.startsWith('kin:') ? null : input.entityId },
     ...(input.broadcastSoulId&&input.cameraMode==='broadcast'?{broadcastSoulId:input.broadcastSoulId}:{}),
     ...(input.flyingTo?{flyingTo:input.flyingTo}:{}),
+    ...(input.followHeld&&input.cameraMode==='follow'?{followHeld:true}:{}),
     playback: input.history ? input.playing ? 'playing' : 'paused' : 'live',
     loading: input.loading, unavailableReason: input.unavailableReason,
     ...(input.assetDownloads?{assetDownloads:{...input.assetDownloads}}:{}),
