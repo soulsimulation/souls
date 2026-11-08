@@ -55,7 +55,7 @@ function setup() {
   // build, browser and manifest tools
   script(join(t, 'stubs/node'), `printf 'node\\t%s\\n' "$*" >> ${log}\nif [ -n "\${STUB_FAIL:-}" ] && [[ "$*" == *"$STUB_FAIL"* ]]; then exit 1; fi\ncase "$1" in *release-probe.mjs)\n  while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; shift; done\n  mkdir -p "$out"; touch "$out/ready"\n  for i in $(seq 1 600); do { [ -e "$out/released" ] || [ -e "$out/stop" ]; } && break; sleep 0.05; done\n  exit "\${STUB_PROBE_RC:-0}";;\nesac\nexit 0`);
   script(join(t, 'stubs/python'), `printf 'python\\t%s\\n' "$*" >> ${log}`);
-  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s\\n' "$*" "$SIM_WORLDS_BASE" >> ${log}\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
+  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s noinstall=%s\\n' "$*" "$SIM_WORLDS_BASE" "\${SIM_RELEASE_NO_INSTALL:-}" >> ${log}\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
   // the staged tree's boot-rehearsal.mjs: a world whose data dir has a halt-<dir> flag halts, a nofinish-<dir> one crashes
   writeFileSync(join(t, 'fake-boot-rehearsal.mjs'), `import { existsSync, readFileSync, appendFileSync } from 'node:fs'; import { basename, dirname } from 'node:path';
 const a = process.argv.slice(2), db = a[a.indexOf('--db') + 1], dir = basename(dirname(db)), envf = a.includes('--env-file') ? a[a.indexOf('--env-file') + 1] : null;
@@ -350,7 +350,7 @@ test('#1402 --no-switch: every step but the activation, the probe and healthz ex
   assert.match(r.stdout, /receipts \(not required with --no-switch\): SHIP_RECEIPTS is not set/);
   const calls = s.calls();
   assert.doesNotMatch(calls, /^activate\t|host-activate|systemctl\tstart/m);
-  assert.match(calls, /release\tproduction --no-activate/);
+  assert.match(calls, /release\tproduction --no-activate base=\/ noinstall=1/, 'no install.sh: unit files and timers stay as they are');
   assert.match(calls, /compact-backup\.sh pre-r416 production/);
   assert.match(calls, new RegExp(`release-probe\\.mjs .*--expect-build ${PREV}`));
   for (const tool of ['walk.mjs', 'poster.mjs', 'stall.mjs', 'cdn-walk.mjs']) assert.match(calls, new RegExp(tool.replace('.', '\\.')), tool);
@@ -370,4 +370,12 @@ test('#1402 --no-switch: a probe that sees another build is recorded, not called
   assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'rehearsed-with-failures');
   assert.match(s.calls(), /cdn-walk\.mjs/);
   assert.equal(s.run([...s.base, '--no-switch', '--dry-run']).status, 2);
+  // a no-switch run's outputs never feed a real activation, nor the reverse
+  r = s.run([...s.base, '--from', 'probe-start']);
+  assert.equal(r.status, 1); assert.match(r.stdout, /holds a run in another mode/);
+  assert.doesNotMatch(s.calls(), /^activate\t/m);
+  s = setup(); assert.equal(s.run(s.base).status, 0);
+  assert.match(s.calls(), /noinstall=0/);
+  r = s.run([...s.base, '--no-switch', '--from', 'walks']);
+  assert.equal(r.status, 1); assert.match(r.stdout, /holds a run in another mode/);
 });

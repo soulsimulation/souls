@@ -110,8 +110,11 @@ elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt
 [ -d "$TOOLS/mars/viewer" ] || pf "no mars/viewer for Playwright"
 for f in "$RELEASE" "$HERE/release-manifest.mjs" "$HERE/release-probe.mjs" "$TOOLS/tools/cdn/cdn-walk.mjs" "$SHIPD/host-rehearse.sh" "$SHIPD/compact-backup.sh" "$SHIPD/compact-copy.py" "$SHIPD/quick-check.mjs" "$SHIPD/host-snapshot.py" "$SHIPD/host-activate.sh" "$SHIPD/walk.mjs" "$SHIPD/poster.mjs" "$SHIPD/poster-count.py" "$SHIPD/stall.mjs" "$SHIPD/checks.mjs"; do
   [ -e "$f" ] || pf "missing $f"; done
+MODE=ship; [ "$NOSWITCH" = 0 ] || MODE=no-switch
 if [ -e "$OUT/STEPS.txt" ] && [ -z "$FROM" ]; then pf "$OUT already holds a run: resume it with --from <step>, or pass another --out"; fi
-if [ "$DRY" = 0 ]; then mkdir -p "$OUT" || exit 1; exec > >(tee -a "$OUT/ship.log") 2>&1; echo "$BUILD label $LABEL started $(date -u +%FT%TZ)" >> "$OUT/STEPS.txt"; rsh true || die "ssh to the host failed"; fi
+# a resume keeps the mode it started in: a no-switch run's outputs never feed a real activation, nor the reverse
+if [ -e "$OUT/STEPS.txt" ] && [ -n "$FROM" ] && ! head -1 "$OUT/STEPS.txt" | grep -q " mode $MODE "; then pf "$OUT holds a run in another mode (STEPS.txt): resume it in its own mode, or pass another --out"; fi
+if [ "$DRY" = 0 ]; then mkdir -p "$OUT" || exit 1; exec > >(tee -a "$OUT/ship.log") 2>&1; [ -e "$OUT/STEPS.txt" ] || echo "$BUILD label $LABEL mode $MODE started $(date -u +%FT%TZ)" >> "$OUT/STEPS.txt"; rsh true || die "ssh to the host failed"; fi
 # Each browser tool takes its own Chrome lease; none of these may be inherited from another run.
 unset SIM_HEAVY_SLOT EDEN_GOD_NO_LEASE PHONE WIN CPU DESK
 export PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" SHIP_PLAYWRIGHT_FROM="$TOOLS/mars/viewer" EDEN_GOD_PLAYWRIGHT_FROM="$TOOLS/mars/viewer" EDEN_GOD_NO_NPX=1 SIM_CHROME_LEASE="$TOOLS/tools/god-skill/lib/chrome-lease.mjs" CHROME_LEASE_SLOTS="${CHROME_LEASE_SLOTS:-3}"
@@ -142,7 +145,7 @@ fi
 if step stage "build and upload at base / with --no-activate; verify the manifest locally and on the host"; then
   if [ -f "$OUT/upload-receipt.json" ]; then say "   already uploaded"
   else
-    x env SIM_WORLDS_BASE=/ SIM_ASSETS_CDN_ENABLED=1 SIM_DEPLOY_USER="${SIM_DEPLOY_USER:-root}" bash "$RELEASE" production --no-activate || die "stage failed: inspect, don't rerun blindly"
+    x env SIM_WORLDS_BASE=/ SIM_ASSETS_CDN_ENABLED=1 SIM_RELEASE_NO_INSTALL="$NOSWITCH" SIM_DEPLOY_USER="${SIM_DEPLOY_USER:-root}" bash "$RELEASE" production --no-activate || die "stage failed: inspect, don't rerun blindly"
     x "$NODE" "$HERE/release-manifest.mjs" verify "$RELEASE_DIR/$BUILD" "$MANIFEST" || die "the local manifest does not verify"
     x_in "$HERE/release-manifest.mjs" rsh "node --input-type=module - verify $REL $REL/RELEASE-MANIFEST.json" || die "the host manifest does not verify"
     [ "$DRY" = 1 ] || node -e 'const fs=require("fs"),c=require("crypto");fs.writeFileSync(process.argv[1],JSON.stringify({at:new Date().toISOString(),sha:process.argv[2],build:process.argv[3],rootBase:"/",localManifestVerified:true,remoteManifestVerified:true,manifestSha256:c.createHash("sha256").update(fs.readFileSync(process.argv[4])).digest("hex")},null,2)+"\n")' "$OUT/upload-receipt.json" "$SHA" "$BUILD" "$MANIFEST" || die "cannot write the upload receipt"
@@ -203,7 +206,8 @@ if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
     node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build"
     drift
   fi
-  say "   + (host-activate.sh is not run)"; x touch "$PDIR/released"; done_step
+  say "   + (host-activate.sh is not run)"; x touch "$PDIR/released"
+  [ "$DRY" = 1 ] || printf 'activate skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
 elif [ "$STARTED" = 1 ]; then
   if [ "$DRY" = 0 ]; then
     [ -n "$PROBE_PID" ] || die "no probe is running: resume with --from probe-start"
@@ -249,7 +253,7 @@ if step healthz "public healthz reports this build, every world and hostOk"; the
   x_to "$OUT/live-health.json" "$CURL" -fsS --max-time 30 "$ORIGIN/__sim/healthz" || die "public healthz did not answer after activation"
   if [ "$DRY" = 0 ]; then
     W="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).remote.worlds" "$OUT/snapshot.json")"
-    node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong after activation"
+    node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong$([ "$NOSWITCH" = 1 ] && echo ' (the live build, no switch)' || echo ' after activation')"
   fi
   done_step
 fi

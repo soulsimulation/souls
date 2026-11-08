@@ -16,7 +16,10 @@
 # (tools/test-harness/ship-receipt.mjs) and ship.sh's preflight checks them for this exact head.
 #   gh release create receipts-v4.17 --draft --title "receipts 4.17" receipt.json v7-receipt.json
 # Dry run:  gh workflow run release.yml --ref main -f version=<next version>            (dry_run defaults to true)
-# Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f accept_host_codes=halted]
+# Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f date=<the dry run's date>]
+#           [-f accept_host_codes=halted]
+# A dry run is real work on the host: it uploads the release directory and its dependencies and makes a full
+# row-verified backup (pre-r<version>-rehearsal-production-*). Neither is pruned; mind the host's disk.
 #
 # Secrets: DEPLOY_SSH_KEY, SIM_DEPLOY_KNOWN_HOSTS, SIM_PROBE_GOD_JSON (the release-probe world's god file) in the
 #          production environment. Vars or secrets: SIM_DEPLOY_HOST, SIM_DEPLOY_USER. Optional var: SIM_ORIGIN
@@ -30,9 +33,12 @@ on:
         description: Release version for the changelog and tag (e.g. 4.0.1)
         required: true
       dry_run:
-        description: ship.sh --no-switch (every step but the activation; nothing goes live, no publish). false ships
+        description: ship.sh --no-switch (every step but the activation; the live build and the host's units stay as they are; no publish). false ships
         type: boolean
         default: true
+      date:
+        description: Release date (YYYY-MM-DD, UTC) in the changelog page and CHANGELOG.md; default today. Give a real ship the same date as its dry run of the same head, or the staged build differs and stage refuses
+        required: false
       accept_host_codes:
         description: ship.sh --accept-host-codes (comma-separated, such as halted for a release that fixes a halted world)
         required: false
@@ -62,6 +68,8 @@ jobs:
           SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
           SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
         run: |
+          # masked even when set as variables, so no log names the host
+          [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
           missing=()
           for name in SIM_DEPLOY_HOST SIM_DEPLOY_USER; do
             [ -n "${!name}" ] || missing+=("$name")
@@ -79,16 +87,19 @@ jobs:
           VERSION: ${{ inputs.version }}
           ACCEPT: ${{ inputs.accept_host_codes }}
           DRY_RUN: ${{ inputs.dry_run }}
+          DATE: ${{ inputs.date }}
         run: |
           [ "$REF" = refs/heads/main ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
           [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 4.0 or 4.0.1 (got '$VERSION')"; exit 1; }
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "::error::tag v$VERSION already exists"; exit 1; fi
           [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "::error::accept_host_codes: comma-separated host codes, such as halted"; exit 1; }
           # ship.sh's label (its output folder and backup prefix pre-r<label without dots>) is the version itself
-          LABEL="$VERSION"; [ "$DRY_RUN" = true ] && LABEL="$VERSION-rehearsal"
+          LABEL="$VERSION"; [ "$DRY_RUN" = false ] || LABEL="$VERSION-rehearsal"
+          [ -n "$DATE" ] || DATE=$(date -u +%F)
+          [[ "$DATE" =~ ^20[0-9]{2}-[01][0-9]-[0-3][0-9]$ ]] || { echo "::error::date must be YYYY-MM-DD (got '$DATE')"; exit 1; }
           node tools/changelog/compile.mjs --check
           # One release date for the page the ship job builds and the CHANGELOG.md publish commits.
-          { echo "sha=$(git rev-parse HEAD)"; echo "label=$LABEL"; echo "date=$(date -u +%F)"; } >> "$GITHUB_OUTPUT"
+          { echo "sha=$(git rev-parse HEAD)"; echo "label=$LABEL"; echo "date=$DATE"; } >> "$GITHUB_OUTPUT"
           echo "Release v$VERSION: head $(git rev-parse --short HEAD), label $LABEL, $([ "$DRY_RUN" = true ] && echo 'DRY RUN (ship.sh --no-switch, nothing goes live)' || echo 'REAL SHIP')" >> "$GITHUB_STEP_SUMMARY"
 
   ship:
@@ -97,7 +108,7 @@ jobs:
     timeout-minutes: 150
     environment: production
     # contents: write only so the receipts download can read a DRAFT release (drafts are invisible to a read token).
-    # The token is never persisted into the checkout and reaches that one step alone.
+    # The checkout does not persist the token; the pinned actions still receive it through their default inputs.
     permissions:
       contents: write
     steps:
@@ -106,7 +117,10 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
           SIM_PROBE_GOD_JSON: ${{ secrets.SIM_PROBE_GOD_JSON }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
         run: |
+          # masked even when set as a variable: release.sh prints its upload target, so ship's log would name the host
+          [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
           missing=()
           for name in DEPLOY_SSH_KEY SIM_DEPLOY_KNOWN_HOSTS SIM_PROBE_GOD_JSON; do [ -n "${!name}" ] || missing+=("$name"); done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -128,6 +142,8 @@ jobs:
           fi
       - name: Browsers for the probe and the live walks
         run: |
+          # ship/poster-count.py classifies the poster frames with Pillow
+          python3 -c 'import PIL' 2>/dev/null || python3 -m pip install --quiet --user pillow
           # ship.sh's preflight needs PLAYWRIGHT_BROWSERS_PATH to hold a Chromium executable
           echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/pw-browsers" >> "$GITHUB_ENV"
           PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers" pnpm --filter mars-campus-viewer exec playwright install --with-deps chromium
@@ -143,7 +159,7 @@ jobs:
           for e in mars/viewer/dist/client/*; do ln -sfn "$PWD/$e" "$web/${e##*/}"; done
           for e in static-manifest.json campus-manifest.json draco browser; do ln -sfn "$RUNNER_TEMP/mars-static/$e" "$web/$e"; done
           echo "MARS_WEB_SRC=$web" >> "$GITHUB_ENV"
-          git status --porcelain --untracked-files=no | grep -q . && { echo "::error::the build changed tracked files; ship.sh ships exactly HEAD"; git status --short; exit 1; } || true
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "::error::the build changed tracked files; ship.sh ships exactly HEAD"; git status --short; exit 1; fi
       - name: Receipts
         if: ${{ !inputs.dry_run }}
         env:
@@ -199,12 +215,13 @@ jobs:
         run: |
           export SHIP_ORIGIN="$SIM_ORIGIN" SHIP_OUT_ROOT="$RUNNER_TEMP/ship"
           args=(--label "$LABEL" --sha "$SHA")
-          [ "$DRY_RUN" = true ] && args+=(--no-switch)
+          # fails closed: only an explicit false ships
+          [ "$DRY_RUN" = false ] || args+=(--no-switch)
           [ -z "$ACCEPT" ] || args+=(--accept-host-codes "$ACCEPT")
           ( while sleep 300; do echo "ship still running ($(date -u +%H:%MZ))"; done ) & beat=$!
           set +e
           # The host is a secret, so the log masks it; an address ssh prints is filtered here too.
-          tools/world-launcher/deploy/ship.sh "${args[@]}" 2>&1 | sed -u -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g'
+          tools/world-launcher/deploy/ship.sh "${args[@]}" 2>&1 | sed -u -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g'
           status=${PIPESTATUS[0]}
           kill $beat
           out="$SHIP_OUT_ROOT/$LABEL"

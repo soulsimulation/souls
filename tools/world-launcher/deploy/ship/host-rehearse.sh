@@ -10,8 +10,9 @@
 #   main.ts world asleep   -> the launcher's own defaultCommand() environment for it, from the staged tree's children.mjs
 #   eden fork              -> the descriptor's worldId + the Eden core readers edge-server.mjs opens, SIM_SOULS_REPAIR=0
 #   other fork, or a data directory the registry doesn't name -> "approximate": recorded, never a verdict
-# Each rehearsal runs in a transient scope (systemd-run --scope, MemoryMax = MemAvailable - 2 GB, no swap, CPUQuota 150%)
-# so the OOM killer takes the rehearsal, never the launcher or a world; fallback prlimit --as, said so.
+# Each rehearsal runs in a transient scope (systemd-run --scope, MemoryMax = MemAvailable - 3 GB, above the launcher's
+# 2.5 GB --min-free-mb wake floor; no swap; CPUQuota 150%) with oom_score_adj 1000 (choom), so under memory pressure the
+# kernel takes the rehearsal first, never the launcher or a world; fallback prlimit --as, said so.
 # Verdict per world: pass (exit 0, running); stop (refused, halted, would not boot, out of memory or a tool failure:
 # unknown is never a pass); approximate worlds are reported, never stop. A boot over 60 s is flagged slow (activate.sh
 # allows 90 s), not stopped. Exit 0: every verdict world passed; 2: at least one stop; 1: the rehearsal could not run.
@@ -64,18 +65,20 @@ echo "plan: $(wc -l < "$W/plan.tsv") world(s)"
 if systemd-run --scope --quiet -p MemoryMax=64M -p MemorySwapMax=0 -p CPUQuota=150% -- true < /dev/null 2>/dev/null; then LIMIT=scope; echo "limits: systemd-run scope"
 elif command -v prlimit >/dev/null; then LIMIT=prlimit; echo "limits: FALLBACK prlimit --as (caps address space, not resident memory)"
 else echo "no systemd-run scope and no prlimit: refusing to rehearse without a memory cap"; exit 1; fi
+RESERVE_MB=3072; OOMFIRST=(); command -v choom >/dev/null && OOMFIRST=(choom -n 1000 --)
+[ ${#OOMFIRST[@]} -gt 0 ] || echo "no choom: the rehearsal keeps the default OOM score"
 stops=0; n=0
 while IFS=$'\t' read -r slug kind db src; do
   n=$((n + 1))
-  mem=$(awk '/MemAvailable/{print int($2/1024)}' "$MEMINFO"); cap=$(( mem - 2048 ))
+  mem=$(awk '/MemAvailable/{print int($2/1024)}' "$MEMINFO"); cap=$(( mem - RESERVE_MB ))
   if [ "$cap" -lt 1024 ]; then
-    printf '{"slug":"%s","kind":"%s","verdict":"stop","flags":["memory: MemAvailable %s MB leaves under 1 GB above the 2 GB kept for production"]}\n' "$slug" "$kind" "$mem"; stops=$((stops + 1)); continue
+    printf '{"slug":"%s","kind":"%s","verdict":"stop","flags":["memory: MemAvailable %s MB leaves under 1 GB above the %s MB kept for production"]}\n' "$slug" "$kind" "$mem" "$RESERVE_MB"; stops=$((stops + 1)); continue
   fi
   heap=""; case "$src" in --from-pid*) heap=$(tr '\0' '\n' < "/proc/${src#--from-pid }/cmdline" 2>/dev/null | sed -n 's/^--max-old-space-size=\([0-9]*\)$/\1/p' | head -1);; esac
   [ -n "$heap" ] || heap=$(( cap - 256 < 4096 ? cap - 256 : 4096 ))
   rm -rf "${W:?}/$slug"
   # shellcheck disable=SC2206
-  RUN=(nice -n 10 node --no-warnings "--max-old-space-size=$heap" tools/world-launcher/deploy/boot-rehearsal.mjs --db "$db" --scratch "$W/$slug" $src --ticks 1200)
+  RUN=(${OOMFIRST[@]+"${OOMFIRST[@]}"} nice -n 10 node --no-warnings "--max-old-space-size=$heap" tools/world-launcher/deploy/boot-rehearsal.mjs --db "$db" --scratch "$W/$slug" $src --ticks 1200)
   t0=$(date +%s)
   if [ "$LIMIT" = scope ]; then systemd-run --scope --quiet -p MemoryMax="${cap}M" -p MemorySwapMax=0 -p CPUQuota=150% -- "${RUN[@]}" > "$W/results/$slug.json" 2> "$W/results/$slug.err" < /dev/null
   else prlimit --as=$(( cap * 1048576 )) -- "${RUN[@]}" > "$W/results/$slug.json" 2> "$W/results/$slug.err" < /dev/null; fi
@@ -92,7 +95,7 @@ while IFS=$'\t' read -r slug kind db src; do
       exit === 2 ? "refused or halted" : null,
       exit === 1 && noBoot ? `would not boot (${(err.match(/snapshot\.[a-z-]+|clock-frontier\.[a-z-]+|history rules are incompatible/) ?? ["boot"])[0]})` : null,
       exit !== 0 && exit !== 2 && !noBoot && oom !== "1" ? "the rehearsal tool failed" : null].filter(Boolean);
-    const verdict = exit === 0 && o.ok !== false ? "pass" : kind.endsWith("-approximate") ? "approximate" : "stop";
+    const verdict = exit === 0 && o.ok === true && o.run?.state === "running" ? "pass" : kind.endsWith("-approximate") ? "approximate" : "stop";
     console.log(JSON.stringify({ slug, kind, verdict, exit, wallS: Number(secs), capMb: Number(cap), heapMb: Number(heap), flags,
       world: o.world && { id: o.world.id, key: o.world.key, header: o.world.header },
       boot: o.boot && { from: b.from, replayed: b.replayed, ms: b.ms, tick: b.head?.tick },
