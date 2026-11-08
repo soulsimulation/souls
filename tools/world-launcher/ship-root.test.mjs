@@ -409,3 +409,87 @@ test('#1402 rehearse: a world slug that is not a plain slug is a stop, and nothi
   assert.ok(!existsSync(join(s.t, 'host/escape.env')) && !existsSync(join(s.t, 'escape.env')));
   assert.doesNotMatch(s.calls(), /compact-backup|^activate\t/m);
 });
+
+test('#1438 --no-eyes: the browser steps are skipped and recorded, SHIP_RELEASED_CMD runs right after the activation, the rest is unchanged', () => {
+  const s = setup(), marker = join(s.t, 'released-at');
+  const r = s.run([...s.base, '--no-eyes'], { SHIP_PROBE_CLI: '', SHIP_RELEASED_CMD: `test -L ${s.root}/production && basename "$(readlink ${s.root}/production)" > ${marker}` });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(marker, 'utf8').trim(), s.build, 'the hook ran after the stage link moved');
+  const calls = s.calls();
+  for (const tool of ['release-probe.mjs', 'ship/walk.mjs', 'poster.mjs', 'stall.mjs']) assert.doesNotMatch(calls, new RegExp(tool.replace('.', '\\.')), tool);
+  assert.match(calls, /cdn-walk\.mjs/);
+  assert.equal(calls.match(/^activate\t/gm).length, 1);
+  assert.ok(calls.indexOf('compact-backup.sh pre-r416 production') < calls.indexOf('activate\t'));
+  const lines = readFileSync(join(s.out, 'STEPS.txt'), 'utf8').split('\n').filter(Boolean);
+  assert.match(lines[0], / mode ship-no-eyes /);
+  assert.deepEqual(lines.slice(1).map(l => l.split(' ').slice(0, 2).join(' ')), ['snapshot ok', 'stage ok', 'rehearse ok', 'backup ok', 'probe-start skipped-no-eyes', 'activate ok',
+    'probe-check skipped-no-eyes', 'healthz ok', 'walks skipped-no-eyes', 'poster skipped-no-eyes', 'stall skipped-no-eyes', 'cdn-walk ok']);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live');
+  assert.ok(!r.stdout.includes(HOST));
+});
+
+test('#1438 --no-eyes --no-switch: the hook runs at the skipped activation; a failing hook stops the run; without --no-eyes the probe is still required', () => {
+  let s = setup(), marker = join(s.t, 'hook');
+  let r = s.run([...s.base, '--no-switch', '--no-eyes'], { SHIP_RECEIPTS: '', SHIP_PROBE_CLI: '', SHIP_RELEASED_CMD: `touch ${marker}` });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(marker)); assert.doesNotMatch(s.calls(), /^activate\t/m);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'rehearsed');
+  // after a real activation a failed hook is recorded, never a stop: the build is live and the evidence still runs
+  s = setup(); r = s.run([...s.base, '--no-eyes'], { SHIP_RELEASED_CMD: 'exit 7' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /FAILED SHIP_RELEASED_CMD/);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^released-hook 1$/m); assert.match(s.calls(), /cdn-walk\.mjs/);
+  assert.deepEqual(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live-with-failures');
+  // before it: a refusing pre-activation check stops the run and nothing goes live, in both modes
+  s = setup(); r = s.run([...s.base, '--no-eyes'], { SHIP_PREACTIVATE_CMD: 'exit 1' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /STOPPED at step activate: SHIP_PREACTIVATE_CMD refused the activation/);
+  assert.doesNotMatch(s.calls(), /^activate\t/m); assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV));
+  s = setup(); r = s.run([...s.base, '--no-switch', '--no-eyes'], { SHIP_RECEIPTS: '', SHIP_PREACTIVATE_CMD: 'exit 1', SHIP_RELEASED_CMD: `touch ${marker}.2` });
+  assert.equal(r.status, 1); assert.ok(!existsSync(`${marker}.2`), 'no release is announced after a refusal');
+  s = setup(); r = s.run(s.base, { SHIP_PROBE_CLI: '' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /REFUSED: SHIP_PROBE_CLI is not the release-probe god folder/);
+  s = setup(); r = s.run([...s.base, '--dry-run', '--no-eyes']);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /walks: skipped \(--no-eyes/); assert.doesNotMatch(r.stdout, /release-probe\.mjs/);
+});
+
+test('#1438 rollback.sh: back to the previous build through its own activate.sh, healthz on it; any other state refuses and changes nothing', () => {
+  const s = setup(); assert.equal(s.run(s.base).status, 0);
+  const RB = join(HERE, 'deploy/rollback.sh'), rb = (args) => spawnSync('bash', [RB, ...args], { env: s.env, encoding: 'utf8', timeout: 30_000 });
+  symlinkSync(join(s.root, 'releases', PREV), join(s.root, 'production.previous'));
+  writeFileSync(join(s.root, 'releases', PREV, 'BUILD'), `${PREV}\n`);
+  const live = () => readlinkSync(join(s.root, 'production'));
+  let r = rb(['--build', 'we-111111111111', '--from', s.build]);
+  assert.equal(r.status, 80, r.stdout); assert.match(r.stdout, /previous build is we-000000000000, not we-111111111111/); assert.equal(live(), join(s.root, 'releases', s.build));
+  r = rb(['--build', PREV, '--from', 'we-222222222222']);
+  assert.equal(r.status, 80, r.stdout); assert.match(r.stdout, /live build is .*, not we-222222222222/);
+  r = rb(['--build', PREV, '--from', s.build, '--dry-run']);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /DRY RUN/); assert.equal(live(), join(s.root, 'releases', s.build));
+  const before = s.calls().match(/^activate\t/gm).length;
+  r = rb(['--build', PREV, '--from', s.build]);
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /ROLLED BACK/);
+  assert.equal(live(), join(s.root, 'releases', PREV));
+  assert.equal(s.calls().match(/^activate\t/gm).length, before + 1);
+  assert.match(s.calls(), new RegExp(`activate\\tproduction ${s.root}/releases/${PREV} --reload`));
+  assert.equal(s.calls().match(/compact-backup\.sh pre-r/g).length, 1, 'no backup: only the ship took one');
+  r = rb(['--build', PREV, '--from', s.build]);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /already on we-000000000000: verifying only/);
+  assert.ok(!r.stdout.includes(HOST));
+  assert.equal(rb(['--build', PREV, '--from', PREV]).status, 2);
+});
+
+test('#1438 B1: the real pre-activation check refuses a stale ready and a failed eyes, and passes a fresh one', () => {
+  const HANDOVER = join(HERE, 'deploy/ship/handover.mjs');
+  const check = (statuses) => {
+    const s = setup(), bin = join(s.t, 'ghbin'); writeFileSync(join(s.t, 'statuses.json'), JSON.stringify(statuses));
+    script(join(bin, 'gh'), `cat ${join(s.t, 'statuses.json')}`);
+    const r = s.run([...s.base, '--no-eyes'], { PATH: `${bin}:${process.env.PATH}`, SHIP_PREACTIVATE_CMD: `node ${HANDOVER} wait ${'a'.repeat(40)} release/eyes --run 5.1 --want ready --max-age-s 180 --timeout-min 0 --repo o/r` });
+    return { s, r, live: readlinkSync(join(s.root, 'production')) };
+  };
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  let c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(10 * 60_000) }]);
+  assert.equal(c.r.status, 1); assert.match(c.r.stdout, /SHIP_PREACTIVATE_CMD refused the activation/); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
+  assert.ok(existsSync(join(c.s.out, 'snapshot.json')) && !existsSync(join(c.s.out, 'ACTIVATING')), 'refused before the activation marker');
+  c = check([{ context: 'release/eyes', state: 'failure', description: 'run=5.1 fail: the probe exited before the release', updated_at: ago(1000) }, { context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(30_000) }]);
+  assert.equal(c.r.status, 1); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
+  c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(20_000) }]);
+  assert.equal(c.r.status, 0, c.r.stdout); assert.equal(c.live, join(c.s.root, 'releases', c.s.build)); assert.ok(existsSync(join(c.s.out, 'ACTIVATING')));
+});

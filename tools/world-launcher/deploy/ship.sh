@@ -2,13 +2,18 @@
 # One root-only Soul release, start to finish, for every release. No prompts; it stops at the first failure before the
 # release is live and says what is live, and after it is live it keeps collecting evidence and reports every failure.
 #
-#   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--from <step>] [--out <dir>]
+#   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--no-eyes] [--from <step>] [--out <dir>]
 #                                       [--accept-host-codes <code,...>]
 #     --label    the release, such as 4.16. Backups are pre-r416-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
 #     --no-switch  every step for real except the backup and the activation: stage (without install.sh), rehearse, the probe
 #                and every check run against the build that stays live; nothing to roll back, so no backup. Receipts are checked when SHIP_RECEIPTS is set, never required. Result: rehearsed
+#     --no-eyes  skip the browser steps (probe-start, probe-check, walks, poster, stall): a GPU workstation runs them over
+#                HTTPS with ship/eyes.mjs (#1438), because a GPU-less runner cannot hold their bars. SHIP_PREACTIVATE_CMD, when
+#                set, runs right before the activation (or its no-switch skip) and its failure stops the run: nothing goes live
+#                unless the workstation's probe still watches. SHIP_RELEASED_CMD runs where the probe would be told the release
+#                is done; after a real activation its failure is recorded (released-hook) and the evidence still runs
 #     --from     resume at snapshot, stage, rehearse, backup, probe-start, healthz, walks, poster, stall or cdn-walk (same --out)
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
 #     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
@@ -30,11 +35,12 @@ OUT_ROOT="${SHIP_OUT_ROOT:-$ROOT/.local/ship}"; RELEASE_DIR="${SHIP_RELEASE_DIR:
 SSH="${SHIP_SSH:-ssh}"; SCP="${SHIP_SCP:-scp}"; NODE="${SHIP_NODE:-node}"; PY="${SHIP_PYTHON:-python3}"; RELEASE="${SHIP_RELEASE_SH:-$HERE/release.sh}"; CURL="${SHIP_CURL:-curl}"
 VERDICT="$SHIPD/root-release.mjs"
 STEPS="snapshot stage rehearse backup probe-start healthz walks poster stall cdn-walk"
+EYES_STEPS="probe-start probe-check walks poster stall"
 
 usage() { sed -n '5,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-LABEL=""; SHA=""; DRY=0; NOSWITCH=0; FROM=""; OUT=""; ACCEPT=""
+LABEL=""; SHA=""; DRY=0; NOSWITCH=0; NOEYES=0; FROM=""; OUT=""; ACCEPT=""
 while [ $# -gt 0 ]; do case "$1" in
-  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
+  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --no-eyes) NOEYES=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
   *) usage;; esac; shift; done
 [ -n "$LABEL" ] && [ -n "$SHA" ] || usage
 [ "$DRY$NOSWITCH" != 11 ] || { echo "--dry-run and --no-switch: pick one"; exit 2; }
@@ -57,6 +63,11 @@ rcp() { "$SCP" -q -o BatchMode=yes "$1" "$HOST:$2"; }
 step() {
   CUR="$1"; N=$((N + 1)); [ "$CUR" = "$FROM" ] && STARTED=1
   if [ "$STARTED" = 0 ]; then say "== [$N/$NSTEPS] $CUR: skipped (--from $FROM)"; return 1; fi
+  # --no-eyes: the release owner's GPU workstation runs the browser steps (ship/eyes.mjs); recorded, never silent
+  if [ "$NOEYES" = 1 ] && case " $EYES_STEPS " in *" $CUR "*) true;; *) false;; esac; then
+    say ""; say "== [$N/$NSTEPS] $CUR: skipped (--no-eyes: ship/eyes.mjs runs it on a GPU workstation)"
+    [ "$DRY" = 1 ] || printf '%s skipped-no-eyes %s\n' "$CUR" "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"; return 1
+  fi
   say ""; say "== [$N/$NSTEPS] $CUR: $2"; T0=$(date +%s); return 0
 }
 done_step() { [ "$DRY" = 1 ] || { say "   $CUR done in $(( $(date +%s) - T0 )) s"; printf '%s ok %s\n' "$CUR" "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"; }; }
@@ -64,6 +75,17 @@ x() { say "   + $(quote "$@")"; [ "$DRY" = 1 ] || "$@"; }
 x_in() { local f="$1"; shift; if [ "$1" = x_to ]; then shift; local o="$1"; shift; say "   + $(quote "$@") < $(basename "$f") > $o"; [ "$DRY" = 1 ] || "$@" < "$f" > "$o"; else say "   + $(quote "$@") < $(basename "$f")"; [ "$DRY" = 1 ] || "$@" < "$f"; fi; }
 x_to() { local f="$1"; shift; say "   + $(quote "$@") > $f"; [ "$DRY" = 1 ] || "$@" > "$f"; }
 result() { [ "$DRY" = 1 ] || printf '{"at":"%s","label":"%s","sha":"%s","build":"%s","status":"%s","detail":"%s"}\n' "$(date -u +%FT%TZ)" "$LABEL" "$SHA" "$BUILD" "$1" "$2" > "$OUT/ship-result.json"; }
+# the probe learns the release is done (or, with --no-eyes, the workstation does, through SHIP_RELEASED_CMD)
+released() {
+  [ "$NOEYES" = 1 ] || x touch "$PDIR/released"
+  [ -z "${SHIP_RELEASED_CMD:-}" ] || { say "   + SHIP_RELEASED_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_RELEASED_CMD" \
+    || { say "   FAILED SHIP_RELEASED_CMD: $LIVE; recorded, continuing"; printf 'released-hook 1\n' >> "$OUT/POSTLIVE.txt"; FAILED="$FAILED released-hook"; }; }
+}
+# the last word before anything goes live: with --no-eyes, the workstation's probe must still be watching
+preactivate() {
+  [ -z "${SHIP_PREACTIVATE_CMD:-}" ] && return 0
+  say "   + SHIP_PREACTIVATE_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_PREACTIVATE_CMD" || die "SHIP_PREACTIVATE_CMD refused the activation (the workstation's probe is not watching); nothing changed"
+}
 stop_probe() { [ -n "$PROBE_PID" ] && kill -0 "$PROBE_PID" 2>/dev/null || return 0; say "   stopping the release probe"; touch "$PDIR/stop"; wait "$PROBE_PID" 2>/dev/null; PROBE_PID=""; }
 die() {
   say ""; say "STOPPED at step $CUR: $*"; say "   live now: $LIVE"; stop_probe
@@ -88,6 +110,7 @@ prev_build() { node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).
 drift() { collect "$OUT/check"; [ "$DRY" = 1 ] || node "$VERDICT" drift "$OUT/snapshot.json" "$OUT/check-health.json" "$OUT/check-remote.json" || die "the host changed since the snapshot"; }
 
 say "ship $BUILD (label $LABEL)$([ "$DRY" = 1 ] && echo ' -- DRY RUN: nothing remote is touched, nothing is written')$([ "$NOSWITCH" = 1 ] && echo ' -- NO SWITCH: every step but the activation; the live build stays live')"
+[ "$NOEYES" = 0 ] || say "   --no-eyes: the probe, walks, poster and stall run on a GPU workstation (ship/eyes.mjs), not here"
 say "   outputs $OUT${FROM:+; resuming at $FROM}"
 [ -z "$ACCEPT" ] || say "   accepting host codes at the snapshot: $ACCEPT (recorded in snapshot.json; any other code refuses)"
 
@@ -105,13 +128,13 @@ rf() { if [ "$NOSWITCH" = 1 ]; then say "   receipts (not required with --no-swi
 if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with release-receipt.json (or receipt.json and ship-receipt.json)"
 elif [ -f "$RECEIPTS/release-receipt.json" ]; then node "$VERDICT" receipt "$RECEIPTS/release-receipt.json" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the release receipt is not clean for this commit"
 elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt.json" "$SHA" | sed 's/^/   /'; then rf "the gate and ship receipts are not clean for this commit"; fi
-[ -n "$PROBE_CLI" ] && [ -d "$PROBE_CLI" ] || pf "SHIP_PROBE_CLI is not the release-probe god folder"
+[ "$NOEYES" = 1 ] || { [ -n "$PROBE_CLI" ] && [ -d "$PROBE_CLI" ]; } || pf "SHIP_PROBE_CLI is not the release-probe god folder"
 [ -n "$BROWSERS" ] && [ -n "$(find "$BROWSERS" -maxdepth 6 -path '*/chromium*' -type f \( -name chrome -o -name Chromium -o -name 'Google Chrome for Testing' -o -name headless_shell -o -name chrome-headless-shell \) -perm -u+x 2>/dev/null | head -1)" ] \
   || pf "PLAYWRIGHT_BROWSERS_PATH holds no Chromium (the probe and the walks need one)"
 [ -d "$TOOLS/mars/viewer" ] || pf "no mars/viewer for Playwright"
 for f in "$RELEASE" "$HERE/release-manifest.mjs" "$HERE/release-probe.mjs" "$TOOLS/tools/cdn/cdn-walk.mjs" "$SHIPD/host-rehearse.sh" "$SHIPD/compact-backup.sh" "$SHIPD/compact-copy.py" "$SHIPD/quick-check.mjs" "$SHIPD/host-snapshot.py" "$SHIPD/host-activate.sh" "$SHIPD/walk.mjs" "$SHIPD/poster.mjs" "$SHIPD/poster-count.py" "$SHIPD/stall.mjs" "$SHIPD/checks.mjs"; do
   [ -e "$f" ] || pf "missing $f"; done
-MODE=ship; [ "$NOSWITCH" = 0 ] || MODE=no-switch
+MODE=ship; [ "$NOSWITCH" = 0 ] || MODE=no-switch; [ "$NOEYES" = 0 ] || MODE="$MODE-no-eyes"
 if [ -e "$OUT/STEPS.txt" ] && [ -z "$FROM" ]; then pf "$OUT already holds a run: resume it with --from <step>, or pass another --out"; fi
 # a resume keeps the mode it started in: a no-switch run's outputs never feed a real activation, nor the reverse
 if [ -e "$OUT/STEPS.txt" ] && [ -n "$FROM" ] && ! head -1 "$OUT/STEPS.txt" | grep -q " mode $MODE "; then pf "$OUT holds a run in another mode (STEPS.txt): resume it in its own mode, or pass another --out"; fi
@@ -206,21 +229,25 @@ ACT_WHAT="one guarded --reload; a failed handover or health check rolls code bac
 [ "$NOSWITCH" = 0 ] || ACT_WHAT="NOT RUN (--no-switch): the rehearsal and drift are checked; the live build stays live"
 if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
   if [ "$DRY" = 0 ]; then
-    [ -n "$PROBE_PID" ] || die "no probe is running: resume with --from probe-start"
+    [ -n "$PROBE_PID" ] || [ "$NOEYES" = 1 ] || die "no probe is running: resume with --from probe-start"
     node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build"
     drift
   fi
-  say "   + (host-activate.sh is not run)"; x touch "$PDIR/released"
+  preactivate
+  say "   + (host-activate.sh is not run)"; released
   [ "$DRY" = 1 ] || printf 'activate skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
 elif [ "$STARTED" = 1 ]; then
   if [ "$DRY" = 0 ]; then
-    [ -n "$PROBE_PID" ] || die "no probe is running: resume with --from probe-start"
+    [ -n "$PROBE_PID" ] || [ "$NOEYES" = 1 ] || die "no probe is running: resume with --from probe-start"
     node "$VERDICT" activation "$OUT/snapshot.json" "$OUT/backup-receipt.json" "$OUT/upload-receipt.json" "$MANIFEST" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "activation preconditions failed"
     node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build: resume with --from rehearse"
     drift
     A="$(node -p 'const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.argv[1])),u=JSON.parse(fs.readFileSync(process.argv[2]));[s.previousBuild,u.manifestSha256,s.remote.worlds,s.remote.configurationSha256].join(" ")' "$OUT/snapshot.json" "$OUT/upload-receipt.json")"
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
+  preactivate
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
+  # from here a stop is not "before the release": the host may have switched (release.yml reads this marker)
+  [ "$DRY" = 1 ] || date -u +%FT%TZ > "$OUT/ACTIVATING"
   rc=0; x_in "$SHIPD/host-activate.sh" rsh "bash -s -- $(quote "$HOST_ROOT" "$HOST_DATA" "$HOST_CONF" "$HOST_UNIT" "$ORIGIN" "$BUILD") $A" || rc=$?
   # The host's exit is the only account of what happened (ship/host-activate.sh). Never claim a rollback it didn't report.
   DETAIL="exit $rc"; WAS="${A%% *}"
@@ -233,7 +260,7 @@ elif [ "$STARTED" = 1 ]; then
     91) LIVE="UNKNOWN: the stage link is neither $BUILD nor $WAS. Read it and healthz now"; die "the activation failed and the stage link is unexpected (exit 91); the host made no further change";;
     *) LIVE="UNKNOWN: read the stage link and healthz now"; die "the host's outcome is unknown (exit $rc): the connection may have dropped mid-activation, and the host may have rolled back or be rolling back";;
   esac
-  LIVE="$BUILD is live"; x touch "$PDIR/released"; done_step
+  LIVE="$BUILD is live"; released; done_step
 fi
 
 # ---- 8 probe check --------------------------------------------------------------------------------------------------
