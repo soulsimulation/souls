@@ -286,6 +286,15 @@ export function beamBays(w: WorldState, beamId: string, near = 3.5): BeamBay[] {
   return out.sort((x, y) => x.height - y.height || (x.column < y.column ? -1 : 1));
 }
 
+/** #1150, #1250: what the rule no longer supports stands on the ground instead, as a god's joined upright does: the frames and
+ *  beams of a group something has just changed, judged on the whole group. It runs where the change lands, so replay does the
+ *  same. Returns the ids it stood down. */
+export function settleFrames(rt: Runtime): string[] {
+  const ids = [...new Set(framesStand(rt).flatMap((d) => d.subjects ?? []))].filter((id) => rt.world.entities[id]).sort();
+  for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
+  return ids;
+}
+
 /** Every tick: an installed loose beam has both ends joined to standing frames, and an upright a crew let go into its beams
  *  (support `connected`, as the native release) stands in a frame that stands on its own. A god's joined upright stands on
  *  the ground by the god's authority (PC12) and is not this. */

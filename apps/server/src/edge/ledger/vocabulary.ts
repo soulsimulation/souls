@@ -44,6 +44,8 @@ export type VocabContext = {
 export type VocabResult =
   | {kind: 'exact'; cap: EdgeCapability}
   | {kind: 'alias'; cap: EdgeCapability; note: string; params?: Record<string, unknown>;
+    /** #849: words that name exactly one seat: a dry run answers with it, an act asks for its id. */
+    oneSeat?: true;
     /** RESOLVE (2026-10-21): the target words named no offered thing by its own name, only a place whose description lists
      *  them ("go to the horse": a lawn "with ... a horse"): a host may offer a walk to the nearest thing so named instead. */
     seek?: string[];
@@ -60,8 +62,8 @@ export type VocabResult =
      *  offers for them on demand: read:<place> beyond the nearest reading places). */
     verb?: string; places?: string[]};
 
-const STOP = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'at', 'by', 'on', 'into', 'near', 'with', 'my', 'some', 'through', 'thru', 'around', 'across', 'over', 'back', 'please', 'little', 'bit', 'for', 'while', 'and', 'then', 'there']);
-const VERBS: Record<string, string> = {fix: 'repair', mend: 'repair', 'pump-up': 'repair', go: 'walk', goto: 'walk', 'go-to': 'walk', 'walk-to': 'walk', visit: 'walk', 'go-inside': 'walk', 'go-into': 'walk', 'go-in': 'walk', enter: 'walk', 'step-inside': 'walk', 'step-into': 'walk', 'walk-into': 'walk', 'walk-inside': 'walk', move: 'walk', head: 'walk', travel: 'walk', 'come-back': 'walk', return: 'walk', 'go-back': 'walk', 'head-back': 'walk', 'walk-back': 'walk', running: 'run', sprint: 'run', sprinting: 'run', hurry: 'run', jogging: 'jog', 'go-over': 'walk',
+const STOP = new Set(['first', 'the', 'a', 'an', 'to', 'of', 'in', 'at', 'by', 'on', 'into', 'near', 'with', 'my', 'some', 'through', 'thru', 'around', 'across', 'over', 'back', 'please', 'little', 'bit', 'for', 'while', 'and', 'then', 'there']);
+const VERBS: Record<string, string> = {'stop-by': 'walk', 'stop-at': 'walk', 'drop-by': 'walk', 'swing-by': 'walk', 'pop-into': 'walk', 'pop-in-to': 'walk', 'pop-over-to': 'walk', 'go-on-to': 'walk', 'carry-on-to': 'walk', fix: 'repair', mend: 'repair', 'pump-up': 'repair', go: 'walk', goto: 'walk', 'go-to': 'walk', 'walk-to': 'walk', visit: 'walk', 'go-inside': 'walk', 'go-into': 'walk', 'go-in': 'walk', enter: 'walk', 'step-inside': 'walk', 'step-into': 'walk', 'walk-into': 'walk', 'walk-inside': 'walk', move: 'walk', head: 'walk', travel: 'walk', 'come-back': 'walk', return: 'walk', 'go-back': 'walk', 'head-back': 'walk', 'walk-back': 'walk', running: 'run', sprint: 'run', sprinting: 'run', hurry: 'run', jogging: 'jog', 'go-over': 'walk',
   hangout: 'hang-out', 'hang-around': 'hang-out', linger: 'hang-out', 'go-near': 'go-near', approach: 'go-near', join: 'go-near',
   'sit-on': 'sit', 'sit-at': 'sit', 'sit-down': 'sit', 'take-a-seat': 'sit', 'have-a-seat': 'sit', 'take-seat': 'sit', 'be-seated': 'sit', seat: 'sit', relax: 'rest',
   stroll: 'stroll', 'take-a-walk': 'stroll', 'take-a-stroll': 'stroll', 'go-for-a-walk': 'stroll', 'go-for-a-stroll': 'stroll', 'walk-through': 'stroll', 'stroll-through': 'stroll', wander: 'stroll', ramble: 'stroll', meander: 'stroll', explore: 'stroll',
@@ -286,6 +288,7 @@ function repairWords(input: string, text: string, ctx: VocabContext): VocabResul
 }
 
 export function resolveCapability(input: string, ctx: VocabContext): VocabResult {
+  const sign = signWords(input, ctx); if (sign) return sign;
   const r = resolveWords(input, ctx);
   // R2 stroll (longrun 2026-10-16: nobody moved for 70 minutes): a stroll named for the place the Soul is already in, whose
   // own loop is closed right now (a construction site covers one of its stops), is a wander right where it stands; never a
@@ -294,6 +297,20 @@ export function resolveCapability(input: string, ctx: VocabContext): VocabResult
   const wander = ctx.caps.find(c => c.id === 'wander:here' && c.available); if (!wander) return r;
   const name = ctx.places.find(p => p.id === r.cap.target!.id)?.name ?? r.cap.target.id;
   return {kind: 'alias', cap: wander, note: `${input}: you are in ${name} already and its loop (${r.cap.id}) is closed right now (${(r.cap.blocked?.reason ?? 'unavailable').replace(/[.\s]+$/, '')}); wandering around where you are instead (${wander.id}).`};
+}
+// #427: an Open / Closed sign goes by what it will say: "turn the sign to closed", "flip the cafe sign". Only where one is offered,
+// and only with "the sign" or the sign's own name: "turn on sign", "turn to sign" and "turn the sign" keep their meanings.
+const SIGN_WORDS = /^(?:(?:turn|set|change)\s+(?:the|my|our|this)\s+(?:([a-z0-9-]+)\s+)?sign\s+to\s+(?:say\s+)?(open|closed)|flip\s+(?:the|my|our|this)\s+(?:([a-z0-9-]+)\s+)?sign(?:\s+(?:round|around|over))?)$/;
+export function signWords(input: string, ctx: Pick<VocabContext, 'caps'>): VocabResult | null {
+  const offers = ctx.caps.filter(c => c.verb === 'object' && /^Turn the sign to /.test(c.label)); if (!offers.length) return null;
+  const t = input.toLowerCase().replace(/^(?:please\s+)+/, '').replace(/[.!?\s]+$/, '').replace(/[,\s]+please$/, '').trim();
+  const exact = offers.find(c => c.label.toLowerCase() === t); if (exact) return {kind: 'alias', cap: exact, note: `${input} is ${exact.id}.`};
+  const m = SIGN_WORDS.exec(t); if (!m) return null;
+  const name = m[1] ?? m[3], said = m[2] ? {open: 'open', closed: 'close'}[m[2]] : null, nameOf = (c: EdgeCapability) => /\(([^()]*)\)$/.exec(c.label)?.[1]?.toLowerCase();
+  const named = offers.filter(c => !name || nameOf(c) === name || nameOf(c) === `${name}-sign`); if (!named.length) return null;
+  const fit = named.filter(c => said ? c.action === said : c.available), can = fit.filter(c => c.available), pick = can.length ? can : fit.length ? fit : named;
+  if (new Set(named.map(c => c.target?.id)).size > 1 && can.length !== 1) return {kind: 'unknown', code: 'place.ambiguous', reason: 'More than one sign is here: name the one you mean.', didYouMean: []};
+  return {kind: 'alias', cap: pick[0], note: `${input} is ${pick[0].id}.`};
 }
 // VEHICLE-STEER (Gene 2026-10-23, #12): a seated rider's words to its ride. Only when a steer is offered to this Soul now
 // (it is aboard); otherwise the words fall through ("fly the balloon" from the ground is still the join).

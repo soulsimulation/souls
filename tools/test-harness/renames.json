@@ -28,6 +28,27 @@
       ],
       "reason": "Intended behaviour change: an uploaded body now travels as a reference (#795 A2). The old assertion (it stays home) is replaced by the travel tests: an unresolvable reference keeps the default look and says why; a resolvable one is pulled and worn; refused and slow sources keep the default look",
       "pr": "#835"
+    },
+    {
+      "step": "V3-mars-engine",
+      "from": "a tall body picnics on a blanket (0.2 m); a 0.2 m seat for eating still does not fit it",
+      "to": "a tall body picnics on a blanket (0.2 m), eats on a 0.1 m stool and on a 1.6 m one: no seat height is refused",
+      "reason": "Same test, reversed by the maintainer's direction that Souls sit on any seat a def declares whatever its height: the 0.2 m eating seat that did not fit now fits, and 0.1 m and 1.6 m seats are added",
+      "pr": "#1087"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "use-check: the sit capability is blocked on a seat too high for the body, from the baked seat top",
+      "to": "use-check: a seat higher than the body's comfortable range is offered and sat on (\\#1083)",
+      "reason": "Same use-check, reversed by #1083: a seat above the old comfortable range is now offered and sat on; the only remaining limit, standing reach, is covered by the new 2.05 m / 2.2 m god stool test",
+      "pr": "#1087"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "use-check: every core seat suits the shortest look, and SEAT_HEIGHTS is what the library revisions store",
+      "to": "use-check: every core seat has a real height, and SEAT_HEIGHTS is what the library revisions store",
+      "reason": "Same test: with no comfortable seat range left (#1083), each core seat is checked for a real height instead of fitting the shortest look; the SEAT_HEIGHTS check is unchanged",
+      "pr": "#1087"
     }
   ]
 }

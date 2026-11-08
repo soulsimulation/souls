@@ -208,6 +208,48 @@ context-size checks below), regression runs, and an uncut real-client recording 
   - **Invariant.** `stairsBear` is checked at every tick end: an installed flight's hook is joined to an installed beam
     and an installed tread to an installed flight, both ways (`stair.unsupported`).
   - **Rules version.** `+shared-stairs/1`, after PC15's suffix.
+- **Projects: a bay from a blueprint (PC17, [#696](https://github.com/soulsimulation/souls/issues/696); off unless `SIM_SHARED_CARRY=1`).**
+  Three things, kept apart. A **blueprint** (`rack-bay@1`, `packages/engine-mars/src/project/rack-bay.blueprint.json`) is
+  the target graph: parts by key, the defs each may be, where each goes in the site's own frame, what it rests on. A
+  **procedure** (`rack-bay-build@1`) is 32 finite maneuvers over those keys in three sections (`stock`, `frames`,
+  `deck-stairs`), each ending at a checkpoint where nobody holds anything. Neither schema can name a Soul, an entity or
+  a world. A **project** (`edge_projects_v1`, `apps/server/src/god/projects.ts`) is one site: where it is, which real
+  thing is each part, its revision and who has agreed to what. It stores no progress.
+  - **Organize.** `organize:rack-bay-build@1 {at, yaw, with}` is on the menu of a Soul within 25 m of loose stock, and
+    binds each part to the nearest loose thing of a def it may be. It moves nobody; `with` names who is told. Refusals,
+    before anyone is asked: `project.stock-short` (counted per def), `project.site-blocked`, `project.unknown-place`.
+  - **Progress** is read from the world on every read (`progressOf`): real parts, joints, support, floors and links. A
+    god's joint advances it, a removal takes it back, editing the row does nothing. Complete means all 29 joints
+    reciprocal, both frames standing on their own, a floor on the sheet and a usable stairs link.
+  - **Discovery.** `inspect <project>` gives blueprint, procedure, revision, section, counts, each ready maneuver's exact
+    offer and params, what is missing and who has agreed, within the 4 KB budget. `here` adds one line under `projects`,
+    only within 30 m of the site or to a Soul who agreed, was told or organized it. Anyone else gains nothing.
+  - **Offers it adds to.** `carry-with:<part> {to: "project:<id>"}` lays a part on its spot. `raise-with:<upright>
+    {project}` stands a frame where the blueprint says, whichever way round it came to lie (`raise_hold_v1` `baseV1`).
+    Everything else is the ordinary offer.
+  - **Volunteer.** `volunteer:<project> {revision, section, maneuvers, expires}` is bounded advance consent: one section,
+    one revision, a stated number of maneuvers and an expiry. While it holds, an invitation to that Soul for a ready
+    maneuver of that section, with that part and as the plan calls for it, is accepted through the ordinary `accept`, on
+    the Soul's own receipt, and the Soul is told. Anything else stays an ordinary invitation: a load off the plan, a
+    maneuver not ready, another section, consent spent, expired or left. A Soul with an open receipt, or too far off, is
+    not started and its invitation stays open. `leave-project:<project>` ends it at once. It holds no body.
+  - **Revise.** `revise-project:<project> {at, yaw, part, entity}` is the organizer's. Moving the site or binding a part
+    of another def revision is material: the revision bumps, every agreement lapses, each volunteer is told what changed,
+    and a `volunteer` for the old revision is refused `project.revision-changed`, naming it. A like-for-like swap is not.
+    A site with anything built on it does not move (`project.site-built`).
+  - **Across a restart.** The model can't say a frame stands on its beams, so a boot, or any re-derive of a frame, stands
+    a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
+    holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
+    later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
+    should. Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before the model has
+    heard, and one with exactly one beam in.
+  - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
+    someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
+    person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no
+    route allows it, because a lift the other way round swings the load half a turn. A crew that sets a flight steps
+    clear of it before letting go, waiting by name for whoever stands behind it, and a stop in those moments lowers it. Two crews can still hold each other up; that is a named wait, never a halted world, and
+    any member can stop. The procedure's dependencies keep neighbouring work apart so that is rare.
+  - **Rules version.** `+shared-bay/1`, after PC16's suffix.
 - **Shared proposals (PC04, [#683](https://github.com/soulsimulation/souls/issues/683); off unless `SIM_SHARED_CARRY=1`).**
   A `shared-carry` load is also offered `carry-with:<id>`, which takes `to` (a place) and `with` (who: names or ids,
   comma-separated or in words, "Bo and Cy" or "Bo, Cy and Dee"; a Soul whose whole name is the phrase, nearby, stays one
@@ -384,7 +426,7 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Family | What a Soul can do | Plain words that work |
 |---|---|---|
 | Lights and fire | Switch lamps, string lights and neon signs on and off; light and put out candles, lanterns, torches and a campfire | "turn on the reading lamp", "switch off the string lights", "light the candle", "put out the campfire", "light the torch" |
-| Doors and openings | Open and close doors, gates (a picket gate and a five-bar field gate), windows, cupboard and locker doors, fridge doors, curtains, blinds, drawers and a tent flap; doors and gates open on the way while walking somewhere; knock; the owner locks and unlocks; anyone inside can always walk out | "open the garden door", "close the window", "close the curtains", "open the blind", "open the drawer", "open the tent flap", "close the field gate", "knock on the door", "lock the door" |
+| Doors and openings | Open and close doors, gates (a picket gate and a five-bar field gate), windows, cupboard and locker doors, fridge doors, curtains, blinds, drawers and a tent flap; turn a shop's Open / Closed sign; doors and gates open on the way while walking somewhere; knock; the owner locks and unlocks; anyone inside can always walk out | "open the garden door", "close the window", "close the curtains", "turn the sign to closed", "open the blind", "open the drawer", "open the tent flap", "close the field gate", "knock on the door", "lock the door" |
 | Water and garden | Turn taps, an outdoor shower, a sprinkler and a fountain on and off; fill a watering can at the tap and water a bed; planters dry out over the days and grow in stages | "turn on the garden tap", "turn off the outdoor shower", "turn on the fountain", "water the rose bed" |
 | Carrying and things | Carry an upright load or a chair with both hands and set it down somewhere; carry a loose rack beam or plywood sheet with both hands and lay it down (a 12 ft frame is refused: it needs two carriers); pick up a lantern or a bowl and set it on a table; hand a carried thing to another Soul, who accepts or declines; put small things into a drawer or locker and take them out; leave a small thing on a swap shelf and take what someone else left; hand a found thing in at a lost-and-found, where only its owner can claim it; hide a small thing in a hollow stump or a wall niche, and search one to find what is there; stock a pantry and take things out of it; eat an apple or a bun from the hand, bite by bite | "carry the bench to the courtyard" (any place name), "carry the beam" with `{"to": "yard"}`, "pick up the lantern", "put the bowl on the table", "give the lantern to Ben" then "accept", "put the bowl in the chest", "take the bowl out of the chest", "leave the book on the swap shelf", "take the book from the swap shelf", "put the bowl in the lost and found", "take my bowl from the lost and found", "hide the book in the stump", "search the stump", "look in the niche", "search around here" |
 | Writing and boards | Write on and wipe whiteboards and chalkboards; pin and take down notes; sign a sign-up sheet; sign a guestbook with a few words; vote in a poll; put up and take down posters; post wanted and offered notes, reply to them and take one on | "write on the whiteboard: Choir practice Thursday at six", "wipe the chalkboard", "sign the sign-up sheet", "sign the guestbook" with `{"text": "Lovely garden"}`, "vote on the poll", "take down my note from the pinboard", "reply to Ben's note" |
@@ -552,14 +594,17 @@ Other known limits:
 - Picking up something at the back of a counter bends the body deeply.
 - At a hand-over the model's record of who holds the item lags the engine by a few samples.
 - The `here` frame lists at most two things of a kind (three seats); more appear only as a count under `more`.
-- Some defs are over the library's geometry budgets: triangles for the fountain, curtained window, drawer chests,
-  watering can, kettle, mug and bell pull, and draw calls for the newest door and locker revisions. They are getting
-  lighter revisions family by family (#494). The drum kit, mic stand and jukebox already have one (`@2`, in budget);
-  their `@1` keeps its bytes and its recorded hold, because published revisions are immutable.
+- Lighter revisions within the library's triangle budgets (#494): drum kit, mic stand, jukebox, garden fountain and
+  curtained window `@2`; watering can, drawer chest, bell pull, kettle and mug `@3`. The older revision keeps its bytes
+  and its recorded hold, because published revisions are immutable. The mug `@3` shows its tea level in fifths. The
+  lockable door (`@3`) draws five parts because its lock's thumb-turn, bolt and key move on their own, and the newest
+  lockers revision is over its draw budget too; those, and construction-view draw overruns, stay pinned (see #494).
 - Portable lights were rebuilt as carry-and-set-down (entry 29); the earlier version is retired. Mixed-outfit seams
   (entry 11) remain parked.
 
 ## Tests
+
+To add an action: [adding a Soul action](adding-an-action.md).
 
 Each family has a deterministic native test that runs a real server and engine in-process, with no ports and no models:
 
