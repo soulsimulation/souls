@@ -127,15 +127,17 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const close = () => { onNavigationChange(false); setCameraNote(''); document.querySelector<HTMLElement>('.camera-menu .navbar-menu-trigger')?.focus(); };
   // VF6 (Gene: "if you touch WASD you break out of that mode so it's intuitive"): a short cue when Follow starts,
   // and a shorter one when a move key (or ×) hands the camera back to you.
-  const [followCue, setFollowCue] = useState<'' | 'follow' | 'free'>('');
-  const lastKind = useRef(kind);
+  const [followCue, setFollowCue] = useState<'' | 'follow' | 'free' | 'held'>('');
+  // #1316: a pull out (zoom out, drag round) keeps the viewer's view; a cue says so once, and how to hand it back.
+  const held = kind === 'follow' && !!state?.followHeld;
+  const lastKind = useRef(kind), lastHeld = useRef(held);
   useEffect(() => {
-    const was = lastKind.current; lastKind.current = kind;
-    if (kind === was) return;
-    const cue = kind === 'follow' ? 'follow' : was === 'follow' && kind === 'yours' ? 'free' : '';
+    const was = lastKind.current, wasHeld = lastHeld.current; lastKind.current = kind; lastHeld.current = held;
+    if (kind === was && held === wasHeld) return;
+    const cue = held && !wasHeld ? 'held' : kind === was ? '' : kind === 'follow' ? 'follow' : was === 'follow' && kind === 'yours' ? 'free' : '';
     setFollowCue(cue); if (!cue) return;
-    const id = setTimeout(() => setFollowCue(''), cue === 'follow' ? 5000 : 2500); return () => clearTimeout(id);
-  }, [kind]);
+    const id = setTimeout(() => setFollowCue(''), cue === 'free' ? 2500 : 5000); return () => clearTimeout(id);
+  }, [kind, held]);
   const coarse = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
   useEffect(() => {
     if (!navigationOpen) return;
@@ -179,6 +181,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
       {dismiss=><><button type="button" aria-pressed={kind==='broadcast'} disabled={!handle||arriving} onClick={()=>{toBroadcast();dismiss();}}>Broadcast</button>
       <button type="button" aria-pressed={kind==='yours'} disabled={!handle||arriving} onClick={()=>{yourCamera();dismiss();}}>Free</button>
       {phoneSheet&&kind!=='follow'&&followable&&state?.flyingTo!==followable&&<button type="button" disabled={!handle||arriving||state?.presentation==='history'} onClick={()=>{handle?.flyToSoul?.(followable,{chip:coarse});dismiss();}}>Follow {selectedName ?? 'this Soul'}</button>}
+      {held&&followable&&<button type="button" disabled={!handle||arriving||state?.presentation==='history'} onClick={()=>{handle?.flyToSoul?.(followable,{chip:coarse});dismiss();}}>Follow {followName ?? 'this Soul'} again</button>}
       {kind==='follow'&&<button type="button" onClick={()=>{yourCamera();dismiss();}}>Stop following</button>}
       <button type="button" onClick={()=>{dismiss();onNavigationChange(true);}}>Camera controls</button><FullscreenToggle/></>}
     </NavbarMenu>
@@ -186,7 +189,9 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   return <>
     {!arriving && <TouchHints />}
     {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={worldName ?? ''} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
-    {followCue && !arriving && <div className="viewer-follow-hint" role="status" aria-live="polite" data-cue={followCue}>{followCue === 'follow'
+    {followCue && !arriving && <div className="viewer-follow-hint" role="status" aria-live="polite" data-cue={followCue}>{followCue === 'held'
+      ? <>Your view of <b>{followName ?? 'the Soul'}</b> stays put · <b>Follow</b> again to let the camera frame them</>
+      : followCue === 'follow'
       ? coarse ? <>Following <b>{followName ?? 'a Soul'}</b> · swipe for the next Soul · tap the ground to take over</> : <>Following <b>{followName ?? 'a Soul'}</b> · drag to look around, scroll to zoom · press <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to look around freely</>
       : <>Your camera · <b>Return to Broadcast</b> is top left</>}</div>}
     {navigationOpen && <div className="camera-help-scrim" onPointerDown={e => { if (e.target === e.currentTarget) close(); }}>
