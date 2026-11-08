@@ -12,6 +12,7 @@ import { handReachSeconds, handReleaseSeconds, handSwingSeconds, type HandActuat
 import { menuWorldOf, type MenuWorld } from '../split/menu-world.ts';
 import {CATALOG} from '../../../../mars/viewer/engine/world/catalog.ts';
 import {MAX_KG_PER_CARRIER} from '../../../../mars/viewer/engine/carry/formation.ts';
+import {JUGGLE} from '../../../../mars/viewer/engine/items/juggle.ts';
 import { deckRaised, railGaps, rasterOf } from '@souls/generators';
 import { applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
@@ -33,6 +34,7 @@ import { fadingIds } from '../art/art.ts';
 import { createWatering, type Watering } from './watering.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
+import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
@@ -88,6 +90,7 @@ type Part = NonNullable<WorldEditV1['set'][string]>;
 type EngineV1 = {
   world: { tick: number; entities: Record<string, any>; entityPhysicsV1?: EntityPhysicsV1 };
   applyWorldEditV1(p: WorldEditV1): { hash: string };
+  takeSettledV1?(): string[];
   bodyUsesV1(id: string): { body: string; how: 'occupied' | 'held' } | null;
   reachV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }): { ok: true; length: number; legs: number; levels: number[] } | { ok: false; code: string; message: string };
   standableNearV1(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null;
@@ -317,7 +320,7 @@ export class EngineBridge {
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
-      moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
+      moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
@@ -330,7 +333,9 @@ export class EngineBridge {
     this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     // Entry 43: the tea acts (tea.ts), the same way
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, claim: (id, soul) => this.claimRefusal(id, soul) });
+    // #438: the picking acts (harvest.ts), the same way
+    this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
+    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -346,7 +351,7 @@ export class EngineBridge {
     this.god.onBuild((e) => { if (!PERCEPTION_QUIET_BUILD.has(e.kind)) { const ids = this.layers.buildRetag(); if (ids.length) { this.perceive.noteRetag(ids); this.notePerceive([], false); } } });
     if (!R) this.host.listeners.push({
       afterTick: (tick, context) => { try { this.afterTickWork(tick, context?.startedAtMs); } catch (error) { this.failProjection(error); throw error; } },
-      onApplied: (e) => { this.projectionApplied(e); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
+      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'world-edit') this.noteSettled(); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
@@ -370,6 +375,7 @@ export class EngineBridge {
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
       navNote: (diff, said) => this.navNoteFor(diff, said),
+      framesNote: () => this.framesNote(),
     };
     // R8: residents near a visible map change hear of it once per request; a build near them, at start and at done.
     this.mapNotices = new MapNotices((soulId, text, place) => this.notices.notify(soulId, { text, tick: this.engine.world.tick, native: true, ...(place ? { place } : {}) }), () => this.god.now());
@@ -462,6 +468,8 @@ export class EngineBridge {
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
+  /** #438: the picking acts; read by perception for a basket's and a vase's compact facts. */
+  harvest?: HarvestFaculty;
   /** Entry 18: when the world day changes, gardens dry by the days passed (capped at 3; time set backwards restarts the count). */
   private gardenDay: number | null = null;
   private gardenTick(tick: number) {
@@ -1085,7 +1093,7 @@ export class EngineBridge {
    *  `[l4] …` line a minute says where the tick thread went (load lane L4 measurements; off: no clock reads). */
   private afterTickWork(tick: number, startedAtMs?: number) {
     // Soul Actions (entries 18, 34): garden drying and the watering can's per-tick moments run before the projection
-    this.gardenTick(tick); const moved = [...(this.watering?.tick() ?? []), ...(this.tea?.tick() ?? [])];
+    this.gardenTick(tick); const moved = [...(this.watering?.tick() ?? []), ...(this.tea?.tick() ?? [])]; this.harvest?.tick();
     if (!this.reconciled) { this.reconcile(); this.projectedEdits = this.godEdits; return; }
     const S = this.loadStats; let t = S ? performance.now() : 0;
     this.flush(); this.projectedEdits = this.godEdits; for (const id of moved) this.writeBackNow(id); if (S) t = S.add('flush', t);
@@ -1281,6 +1289,21 @@ export class EngineBridge {
       try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); this.navWaiting.delete(m.soulId); n++; } catch { /* clock not ready */ }
     }
     return n;
+  }
+  /** #1250: what each live edit did to frames it may not have touched: the fold stands down a frame that no longer stands on its
+   *  own, and a beam seated in frames that don't stand. Nothing here decides that. It is logged, whoever made the edit. */
+  private settled: string[] = [];
+  private noteSettled() {
+    const ids = this.engine.takeSettledV1?.() ?? []; if (!ids.length) return;
+    const named = (id: string) => { try { return this.model.pathOf(id) ?? id; } catch { return id; } };
+    const line = `frames.settled: ${ids.map(named).join(', ')} no longer stand${ids.length === 1 ? 's' : ''} on what held ${ids.length === 1 ? 'it' : 'them'} up, so ${ids.length === 1 ? 'it stands' : 'they stand'} on the ground now.`;
+    this.log(line); this.settled = [...this.settled, line].slice(-8);
+  }
+  /** Said to the god who made the edit, once it has landed. The edit is durable by now, so a clock that won't take it costs only the line. */
+  private framesNote(): string[] {
+    if (!this.edge?.sharedCarry) return [];
+    try { this.flush(); this.host.drainInputs(); } catch (error) { this.log(`frames.settled: could not read the edit back: ${String(error).slice(0, 200)}`); }
+    return this.settled.splice(0);
   }
   private navNoteFor(diff: Diff, said?: string[]): string[] {
     // buildsafe/1 already gave the god one line for these: not named twice
@@ -1912,6 +1935,7 @@ export class EngineBridge {
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
     L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply
@@ -2093,7 +2117,7 @@ export class EngineBridge {
     caps.push({ id: 'pray', verb: 'pray', label: 'Pray to the god of this world (params: {"text": "…"}); answers come back under GET /v1/god/prayers/mine', available: true, params: { text: { type: 'string', required: true, maxLength: 2000 } } });
     const ents = this.mw.world.entities as Record<string, any>, me = ents[soul.entityId]; if (!me?.human) return;
     const here: Vec2 = [me.pose.p[0], me.pose.p[2]];
-    if (named('sit', 'lie', 'sleep', 'pick-up', 'put-on', 'put-in', 'search')) {
+    if (named('sit', 'lie', 'sleep', 'pick-up', 'put-on', 'put-in', 'search', 'juggle')) {
       const held = Object.values(ents).find((x: any) => x.tags?.includes('entity-world') && x.support?.kind === 'in-hand' && x.support.by === soul.entityId) as any;
       const name = (id: string) => (this.model.entities.has(id) ? this.model.pathOf(id) : String(ents[id]?.label ?? id));
       // MARSLIVED: a thing resting on a table is reached from the table's floor (its top's height matched Mimos's 0.53 m
@@ -2112,6 +2136,18 @@ export class EngineBridge {
         return at ? [{ verb: 'mars:walk_to', params: { x: at[0], z: at[1], level } }] : [];
       };
       const stand = me.human.activity === 'sit' || me.human.baseActivity === 'sit' || me.human.berth ? [{ verb: 'stand', params: {} }] : [];
+      // #441 (W107): a held set of balls can be juggled, standing up first if seated; only while it is held
+      {
+        const inHands = held ? Object.values(ents).filter((x: any) => x.support?.kind === 'in-hand' && x.support.by === soul.entityId) as any[] : [];
+        const defOf = (x: any) => { const m = this.model.entities.get(x.id); return m && this.model.resolvedDef(m.def); }, set = inHands.find((x) => defOf(x)?.tags.includes('juggling'));
+        const jm = set && this.model.entities.get(set.id), jd = jm && this.model.resolvedDef(jm.def);
+        if (jd) {
+          const second = inHands.length > 1, id = `juggle:${set.id}`, label = `Juggle ${name(set.id)}`;
+          const palette = jd.palette as Record<string, string> | undefined, tint = (k: string) => String(jm!.params?.[k] ?? palette?.[k] ?? '').slice(0, 16), colors = ['one', 'two', 'three'].map(tint);
+          caps.push({ id, verb: 'juggle', label, target: { id: set.id, kind: 'item' }, available: !second, ...(second ? { blocked: { code: 'juggle.hand-full', reason: 'Juggling needs the other hand free; put the other thing down first.' } } : {}), params: { seconds: { type: 'integer', min: JUGGLE.MIN_SECONDS, max: JUGGLE.MAX_SECONDS, default: 20 } } });
+          if (!second) plans.set(id, { label, steps: [...stand, { verb: 'mars:juggle_v1', params: { item: set.id, seconds: 20, ...(colors.every(Boolean) ? { colors } : {}) } }], seconds: true });
+        }
+      }
       // floors (2026-10-26): a seat the body cannot use names the nearest one it can (or the ground)
       const unusable: number[] = [], usable: { id: string; label: string; d: number }[] = [];
       for (const x of near) {
@@ -2271,7 +2307,8 @@ export class EngineBridge {
           const id = `pick-up:${x.id}`, label = kept ? `Take ${name(x.id)}${note ? ` (${note})` : ''} out of ${kept.label} (${d} m)` : `Pick up ${name(x.id)} (${d} m${levelOf(x) ? `, ${this.floorWord(x)}` : ''})`;
           // PC12 (#691): a small part joined into an assembly is not picked up off its joints either
           const block = (kept ? this.storageRefusal(kept, soul) ?? this.claimRefusal(x.id, soul, d <= FACTS_NEAR) : null) ?? this.joinedRefusal(x.id);
-          caps.push({ id, verb: 'pick-up', label, target: { id: x.id, kind: 'item' }, available: !block, ...(block ? { blocked: block } : {}) });
+          const pm = this.model.entities.get(x.id), juggling = pm && this.model.resolvedDef(pm.def)?.tags.includes('juggling');
+          caps.push({ id, verb: 'pick-up', label, target: { id: x.id, kind: 'item' }, available: !block, ...(block ? { blocked: block } : {}), ...(juggling ? { aliases: ['juggling balls'] } : {}) });
           const precise=(this.physics?.assets[x.def] as {capabilities?:{recordedItemPoseV1?:boolean}})?.capabilities?.recordedItemPoseV1&&levelOf(x)===(me.human.level??0);
           // entry 43: an opted-in pick-up lets an idle gesture go before the hand reaches (entry 41's M04 finding)
           plans.set(id, { label, steps: [...stand, ...(precise?[{ verb: 'mars:let_go_v1', params: {} }]:kept?[]:approach(x)), { verb: 'mars:take_item', params: { item: x.id, hand: 'right' } }] });

@@ -11,7 +11,16 @@ import { CAPS, answerOf, consolidate, fakeMind, NoMind, nextPassIn, offerOf, own
 import { spawnSync } from 'node:child_process';
 import { openSoulMemory } from './soul/memory.mjs';
 
-const tmp = (t) => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-cons-'))); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
+// #1322: a detached `serve` this test started can still be writing in the folder after `serve --stop` returns. Wait (at most 5 s)
+// for each one to exit, by the pid in its .eden-serve.lock, then remove with bounded retries on ENOTEMPTY and EBUSY.
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+const servePids = (d) => { try { return readdirSync(d, { recursive: true }).filter((f) => String(f).endsWith('.eden-serve.lock')).map((f) => { try { return JSON.parse(readFileSync(join(d, String(f)), 'utf8')).pid; } catch { return null; } }).filter(Number.isInteger); } catch { return []; } };
+async function removeSite(d) {
+  const until = Date.now() + 5000;
+  for (const pid of servePids(d)) while (alive(pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+  rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+const tmp = (t) => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-cons-'))); t.after(() => removeSite(d)); return d; };
 const NOW = () => '2026-11-10T12:00:00.000Z';
 const big = 'x'.repeat(3000);
 /** A clock for what the Soul writes: a second a call. A note's id holds its moment, so two in one real millisecond are one note, and

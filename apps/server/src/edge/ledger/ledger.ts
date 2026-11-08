@@ -181,6 +181,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   nativeUseRefusal?: (capability: string, steps?: Program['steps']) => {code: string; reason: string} | null;
   /** #428: may this Soul not read this thing now (a private notebook of someone else's)? */
   signClosed?: (id: string, soulId: string) => boolean;
+  /** #1214: a faculty whose world change happens during an act's steps says what became of it when they end: 'done', why
+   * not, or null to leave the receipt to the programme. `finished`: the steps ran to their end. */
+  actOutcome?: (capability: string, entityId: string, finished: boolean) => 'done' | {code: string; reason: string} | null;
   /** World-engine easels only; installed alongside the existing art media routes. */
   painting?: PaintingService;
   contactActuator?: ContactActuatorService;
@@ -440,6 +443,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       CREATE INDEX IF NOT EXISTS edge_receipts_v1_soul ON edge_receipts_v1 (world_id, soul_id, phase);
       CREATE TABLE IF NOT EXISTS edge_refusals_v1 (world_id TEXT NOT NULL, at INTEGER NOT NULL, tick INTEGER NOT NULL, soul_id TEXT NOT NULL, verb TEXT NOT NULL, capability TEXT NOT NULL, code TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS edge_refusals_v1_at ON edge_refusals_v1 (world_id, at);`);
+    // #1313: the owner's card reads a Soul's newest receipt and refusal since a message's pickup on every poll
+    db.db.exec(`CREATE INDEX IF NOT EXISTS edge_receipts_v1_soul_at ON edge_receipts_v1 (world_id, soul_id, created_at);
+      CREATE INDEX IF NOT EXISTS edge_refusals_v1_soul_at ON edge_refusals_v1 (world_id, soul_id, at);`);
     db.db.exec('CREATE TABLE IF NOT EXISTS edge_owner_control_v1(world_id TEXT NOT NULL,soul_id TEXT NOT NULL,until_ms INTEGER NOT NULL,PRIMARY KEY(world_id,soul_id)) WITHOUT ROWID');
     // PM-R055: a waiting act's plan is kept with its receipt so a restart re-arms it instead of losing it.
     if (!(db.db.prepare('PRAGMA table_info(edge_receipts_v1)').all() as {name: string}[]).some(c => c.name === 'plan')) db.db.exec('ALTER TABLE edge_receipts_v1 ADD COLUMN plan TEXT');
@@ -615,9 +621,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (patch.phase && patch.phase !== cur.phase) this.emit(this.view(next));
   }
   /** Called only inside the original terminal phase transaction. Replay only reads the immutable result. */
-  private finishOutcome(row:Row){if(this.outcomes.read(row.receipt_id))return;const receipt=this.view(row),op=receiptItemOp(this,receipt.id);this.together.onReceipt(receipt);const mind=this.host.minds.get(row.soul_id);if(!mind)return;const soul={soulId:mind.soulId,entityId:mind.entityId,name:mind.name,owner:mind.owner};this.outcomes.terminal(receipt,terminalSnapshot(this,soul,row.capability.split(':')[0]),{...confirmedTogetherEffects(this,receipt,op),...this.signReadEffects(receipt),...this.searchEffects(receipt,soul),...this.repairEffects?.(receipt)});this.timeline.note(this.view(row),row.created_at,(tick)=>this.worldClock(tick));this.notifyMail();}
+  private finishOutcome(row:Row){if(this.outcomes.read(row.receipt_id))return;const receipt=this.view(row),op=receiptItemOp(this,receipt.id);this.together.onReceipt(receipt);const mind=this.host.minds.get(row.soul_id);if(!mind)return;const soul={soulId:mind.soulId,entityId:mind.entityId,name:mind.name,owner:mind.owner};this.outcomes.terminal(receipt,terminalSnapshot(this,soul,row.capability.split(':')[0]),{...confirmedTogetherEffects(this,receipt,op),...this.signReadEffects(receipt),...this.searchEffects(receipt,soul),...this.juggleEffects(receipt,soul),...this.repairEffects?.(receipt)});this.timeline.note(this.view(row),row.created_at,(tick)=>this.worldClock(tick));this.notifyMail();}
   /** #435 (W068): a finished `search:<place>` says what it came to; the offer itself never does. */
   private searchEffects(r:EdgeReceipt,soul:EdgeSoul):ConfirmedEffects{const summary=(r.phase==='completed'||r.phase==='failed')&&r.capability.startsWith('search:')?this.contactActuator?.searched(soul,r.capability.slice(7),r.phase==='failed',this.searchOverlapped(r)):null;return summary?{summary}:{};}
+  /** #441 (W107): a finished juggling run says how it went; the count is the body's own record. */
+  private juggleEffects(r:EdgeReceipt,soul:EdgeSoul):ConfirmedEffects{if(r.phase!=='completed'||!r.capability.startsWith('juggle:'))return {};const s=this.body(soul.entityId)?.human?.juggleV1;return s?.item===r.capability.slice(7)?{summary:`Juggled ${s.throws} throws in a row and caught them all; the balls are back in hand.`}:{};}
   /** A completed `read:<sign>` reports the sign's own words (a Soul's board text attributed and untrusted), never a library passage. */
   private signReadEffects(r:EdgeReceipt):ConfirmedEffects{
     if(r.phase!=='completed'||!r.capability.startsWith('read:'))return{};const sign=this.contactActuator?.sign(r.capability.slice(5));if(!sign)return{};
@@ -703,11 +711,23 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     this.dropMenus('engine-recovery');
   }
+  /** #1214: is this capability's act still open for this body? */
+  actOpen(entityId: string, capability: string) {return this.rows("capability=? AND phase IN ('waiting','started')", capability).some(r => this.host.minds.get(r.soul_id)?.entityId === entityId);}
+  /** #1214: end this body's open act, failed by name, and stop its programme with a logged stop, so replay is exact. */
+  actFail(entityId: string, capability: string, why: {code: string; reason: string}) {
+    for (const r of this.rows("capability=? AND phase IN ('waiting','started')", capability)) {
+      if (this.host.minds.get(r.soul_id)?.entityId !== entityId) continue;
+      this.update(r.receipt_id, {phase: 'failed', code: why.code, reason: why.reason});
+      if (r.program_id) try {void this.host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId, programId: r.program_id, why: why.code}).catch(() => {/* best effort */});} catch {/* clock not ready */}
+    }
+  }
   private onProgram(ev: {id: string; kind: string; code?: string; message?: string}) {
     if (ev.kind === 'step') return;
     const r = this.rows("program_id=? AND phase IN ('waiting','started')", ev.id)[0]; if (!r) return;
     // PC05: a shared operation's programme ended; every member's receipt ends with it
     if (this.together.sharedProgramEnded(r.receipt_id, ev)) return;
+    const actor = this.host.minds.get(r.soul_id)?.entityId, told = actor ? this.actOutcome?.(r.capability, actor, ev.kind === 'completed') : null;
+    if (told) { this.update(r.receipt_id, told === 'done' ? {phase: 'completed'} : {phase: 'failed', code: told.code, reason: told.reason}); return; }
     if (ev.kind === 'completed') {
       const unsupported = this.nativeUseRefusal?.(r.capability);
       if (unsupported) { this.update(r.receipt_id, {phase: 'failed', code: unsupported.code, reason: unsupported.reason}); return; }
@@ -1855,7 +1875,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // an activity's own pose takes the seconds (not the short shelf visits); otherwise the resting/strolling step does
       if (posed) {for (const s of steps) if (s.verb === 'mars:pose_v1' && s.params.activity !== 'browse') s.params.seconds = params.seconds;}
       else if (cap.verb !== 'follow') {
-        const timed = steps.filter(s => s.verb === 'rest' || s.verb === 'ambient_wander' || s.verb === 'gather' || s.verb === 'mars:body_motion_v1');
+        const timed = steps.filter(s => s.verb === 'rest' || s.verb === 'ambient_wander' || s.verb === 'gather' || s.verb === 'mars:body_motion_v1' || s.verb === 'mars:juggle_v1');
         // SOUL3: a seat plan with no rest after it (a god-built seat: one sit step) is timed by the sit step itself; its
         // seconds count once seated, so the walk to the seat does not use them up
         for (const s of timed.length ? timed : steps.filter(s => s.verb === 'sit')) s.params.seconds = params.seconds;

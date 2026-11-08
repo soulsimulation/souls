@@ -54,18 +54,21 @@ test('Follow in a narrow room with one-sided walls: the camera comes inside (any
   }
 });
 
-test('Dragging the camera out through a one-sided room wall pulls it back inside', () => {
+test('#1316: dragging the camera out through a one-sided room wall keeps it out; Follow again brings it back inside', () => {
   const root=narrowRoom(),follow=new WorldFollow(),target=new THREE.Vector3(1.1,1,-.5);
   let offset=follow.resolve(target,new THREE.Vector3(5,3,7),[root],1/60);
   for(let i=0;i<120;i++)offset=follow.resolve(target,offset,[root],1/60);
-  // The viewer orbits toward the back wall (2 m away, nearer than the 2.4 m zoom floor) and zooms out.
+  assert.ok(inRoom(target.clone().add(offset)),'following, the camera came in after the Soul');
+  // The viewer orbits toward the back wall and zooms out through it: that is pulling out, so the camera stays out.
   const dragged=new THREE.Vector3(0,.6,-6);follow.userInput(offset,dragged);
-  offset=follow.resolve(target,dragged,[root],1/60);
-  assert.ok(follow.userActive);
-  assert.ok(inRoom(target.clone().add(offset))&&seen(root,target,offset),`camera ${target.clone().add(offset).toArray()} kept inside`);
-  // After the hand leaves the camera, the search keeps it inside too.
-  for(let i=0;i<120;i++){offset=follow.resolve(target,offset,[root],1/60);
-    assert.ok(seen(root,target,offset),`frame ${i}: camera ${target.clone().add(offset).toArray()} sees the Soul`);}
+  offset=follow.resolve(target,dragged,[root],1/60);for(let i=0;i<60;i++)offset=follow.resolve(target,offset,[root],1/60);
+  const held=offset.clone();assert.ok(follow.held&&offset.angleTo(dragged)<1e-6&&!inRoom(target.clone().add(offset)),`camera ${target.clone().add(offset).toArray()} out, in the direction the viewer put it`);
+  for(let i=0;i<120;i++)offset=follow.resolve(target,offset,[root],1/60);
+  assert.ok(offset.distanceTo(held)<1e-6,'and nothing pulls it back in');
+  // Follow again: the search brings it back inside, seeing the Soul.
+  follow.reset();
+  for(let i=0;i<240;i++)offset=follow.resolve(target,offset,[root],1/60);
+  assert.ok(seen(root,target,offset),`coupled again: camera ${target.clone().add(offset).toArray()} sees the Soul`);
 });
 
 test('Follow outside a shell (Soul outside) is unchanged by the drawn-shell check', () => {
