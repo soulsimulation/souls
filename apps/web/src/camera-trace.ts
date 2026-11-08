@@ -77,6 +77,7 @@ export function startCameraTrace(canvas: HTMLElement): { trace: CameraTrace; sto
     padding: '8px 10px', borderRadius: '10px', background: 'rgba(0,0,0,.72)', color: '#fff', font: '12px/1.4 ui-monospace,monospace' });
   const head = doc.createElement('div'), list = doc.createElement('ol'), save = doc.createElement('button');
   save.type = 'button'; save.textContent = 'Download';
+  Object.assign(save.style, { marginLeft: '6px', padding: '1px 8px', border: '0', borderRadius: '6px', background: '#fff', color: '#000', font: 'inherit', cursor: 'pointer' });
   Object.assign(list.style, { margin: '6px 0 0', paddingLeft: '18px' });
   save.addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([toJsonl(trace.records)], { type: 'application/x-ndjson' })), a = doc.createElement('a');
