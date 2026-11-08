@@ -2076,6 +2076,9 @@ export class Together {
       if (!target) return {capability: verb + ':here', note: `${raw} is ${verb}:here`};
       return {capability: verb + ':here', params: verb === 'point' ? {at: target} : {to: target}, note: `${raw} is ${verb}:here (${verb === 'point' ? 'at' : 'to'} ${target})`};
     }
+    // #1381: while an act is open, "stop", "pause", "cancel", "stop what you are doing" are the explicit stop of it
+    if (/^(?:stop|halt|pause|cancel|wait|stop\s+(?:that|it|now|what\s+(?:i\s+am|i'm|you\s+are|you're)\s+doing))$/.test(t) && caps.some(c => c.id === 'stop:current'))
+      return {capability: 'stop:current', note: `${raw} is stop:current (stops the act under way where you are)`};
     // stop / unfollow: stand:here ends whatever the body is doing, a follow or walk-with included
     if (/^(?:stop|halt|stand still|unfollow(?:\s+.+)?|stop\s+(?:that|it|everything|moving|walking|what\s+(?:i\s+am|i'm|you\s+are|you're)\s+doing)|(?:stop|quit)\s+(?:following|walking\s+with|tagging\s+along\s+with|going\s+with|accompanying)(?:\s+.+)?)$/.test(t) && caps.some(c => c.id === 'stand:here'))
       return {capability: 'stand:here', note: `${raw} is stand:here (stops what you are doing, a follow included)`};

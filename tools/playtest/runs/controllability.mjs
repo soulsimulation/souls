@@ -22,7 +22,7 @@ const RESOLUTION = new Set(['params.invalid', 'place.unknown', 'place.ambiguous'
   // also covers "no free seat near", which is a judgement: a seat's being taken has its own code, seat.none-free.
   'seat.none-in-place', 'seat.none-near', 'target.not-in-sight', 'swim.not-swimmable', 'swim.unavailable',
   // Engine codes that reach an act's answer through canPerform (ledger launch): the steps the world compiled from the command.
-  'target.unknown', 'action.invalid-params', 'action.unknown-verb', 'gait.invalid', 'body.motion-unavailable']);
+  'target.unknown', 'receipt.unknown', 'action.invalid-params', 'action.unknown-verb', 'gait.invalid', 'body.motion-unavailable']);
 // The world named or accepted the place and then found no way there. Not a state change unless the world moved, and the
 // world's own offer is what failed, so it counts against M1 under its own label (the #874 geometry sample folds in here).
 const ROUTE = new Set(['place.unreachable', 'route.unreachable', 'travel.unreachable', 'place.unwalkable', 'place.unsupported-floor', 'place.no-standing-room', 'room.no-standing-room', 'carry.no-route', 'carry.search-exhausted', 'use.no-approach', 'object.out-of-reach', 'tea.cup-unreachable',
@@ -34,7 +34,7 @@ const ROUTE = new Set(['place.unreachable', 'route.unreachable', 'travel.unreach
 // The world's state answering: a seat taken, a ride gone, hands full, a game in progress. Listed one by one on purpose, so a
 // new code is unclassified and named on the card until someone decides. Left out for that reason: carry.crew-too-small,
 // carry.crew-too-large, carry.too-tall and carry.ground-only, which an agent could read before asking.
-const STATE = new Set(`action.interrupted activity.not-reached bed.attachment-unavailable bed.native-berth-required bed.taken bed.yours bike.no-dock bike.none-left
+const STATE = new Set(`act.already-ended act.none-running act.shared action.interrupted activity.not-reached bed.attachment-unavailable bed.native-berth-required bed.taken bed.yours bike.no-dock bike.none-left
 body.authority-changed body.changed body.moderated body.protected body.receipt-changed body.safe-standing-required body.source-slow body.source-unavailable body.unavailable body.withdrawn body.world-policy
 calendar.already-interested calendar.full calendar.over carry.hands-full carry.in-use carry.occupied
 chess.already-seated chess.illegal chess.in-progress chess.not-playing chess.not-your-piece chess.not-your-turn chess.seat-taken chess.seats-taken

@@ -14,6 +14,8 @@ export type ReceiptPhase = 'waiting' | 'started' | 'completed' | 'failed' | 'rep
 export type EdgeReceipt = {id: string; soulId: string; capability: string; phase: ReceiptPhase; acceptedTick: number; startedTick: number | null; endedTick: number | null; code: string | null; reason: string | null; programId: string | null;
   /** Core-A (EDGE-CONTRACT-v1 §8): body | attention | none; what an intent chose; where the body ended (terminal receipts). */
   channel?: string; chosen?: unknown; endedAt?: unknown;outcome?:EdgeOutcomeV1;
+  /** #1381: a stop:current receipt names the receipt it stopped. */
+  stopped?: string;
   /** An open paired gesture/give nobody has accepted yet: the receipt reads `waiting` until a guest accepts. */
   awaitingAnswer?: {invite: string; what: string; waitingFor: {soulId: string; name: string}[]; expiresInSeconds: number; note: string}};
 export type NearbyBody = {soulId: string; entityId: string; name: string; distance: number; placeId: string; state: string; activity: string};
