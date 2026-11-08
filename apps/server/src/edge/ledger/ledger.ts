@@ -240,7 +240,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** Server start (ms): metrics count world model calls only from here, not copied history. */
   readonly startedAt = Date.now();
   private capCache = new Map<string, {tick: number; key: string; reads: MenuReads; value: {caps: EdgeCapability[]; plans: Plans}; last?: {tick: number; sig: string; value: {caps: EdgeCapability[]; plans: Plans}}}>();
-  comms?: {streams: {headCursor(soulId: string): string;deliver?(soulId:string,kind:string,tick:number,body:Record<string,unknown>):unknown}; fading: {status(soulId: string): unknown; touch?(soulId: string): void}; objects: {isRemoved?(id:string):boolean;prepareAct?(id:string,soul:EdgeSoul,input:Record<string,unknown>):ReturnType<import('../comms/objects/framework.ts').Objects['prepareAct']>;act?(id: string, soul: EdgeSoul, input: Record<string, unknown>): unknown;get?(id:string,soul:EdgeSoul):unknown; visibleTo(soul: EdgeSoul): unknown[]; create(i: {id: string; kind: string; name: string; description?: string; placeId: string; params?: Record<string, unknown>}): {id: string}; has?(id: string): boolean; all(): {id: string; kind: string; placeId: string; state: unknown}[]}; close(): void};
+  comms?: {streams: {headCursor(soulId: string): string;deliver?(soulId:string,kind:string,tick:number,body:Record<string,unknown>):unknown}; fading: {status(soulId: string): unknown; touch?(soulId: string): void}; objects: {isRemoved?(id:string):boolean;prepareAct?(id:string,soul:EdgeSoul,input:Record<string,unknown>):ReturnType<import('../comms/objects/framework.ts').Objects['prepareAct']>;act?(id: string, soul: EdgeSoul, input: Record<string, unknown>): unknown;get?(id:string,soul:EdgeSoul):unknown; visibleTo(soul: EdgeSoul): unknown[]; create(i: {id: string; kind: string; name: string; description?: string; placeId: string; params?: Record<string, unknown>}): {id: string}; has?(id: string): boolean; objectTable?(): {get(id: string): {kind: string; state: unknown} | undefined}; all(): {id: string; kind: string; placeId: string; state: unknown}[]}; close(): void};
   attachComms(c: NonNullable<EdgeLedger['comms']>) {
     this.comms = c;this.notifyMail();
     // Re-deliver only persisted post-feature terminal projections whose event marker was not committed.
@@ -1653,8 +1653,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     let path: Set<string> | null = null;
     const inPath = (id: string) => (path ??= new Set(this.placePathOf(soul.soulId).map(p => p.id))).has(id);
     const placeAt = (id: string | undefined): Where => {const p = id ? this.places.byId.get(id) : undefined; return p?.polygon?.length ? centroid(p.polygon) : null;};
+    const table = this.objectTableOnce();
     return c => {
-      if (c.verb === 'object' && c.object) {const e = this.mw.world.entities[c.object]; if (e) return [e.pose.p[0], e.pose.p[2]]; const pl = this.objectPlaces.get(c.object); if (pl && inPath(pl)) return 'here'; return placeAt(pl) ?? FAR;}
+      if (c.verb === 'object' && c.object) {const e = this.objectBody(c.object, table); if (e) return [e.pose.p[0], e.pose.p[2]]; const pl = this.objectPlaces.get(c.object); if (pl && inPath(pl)) return 'here'; return placeAt(pl) ?? FAR;}
       const t = c.target;
       if (t?.kind === 'soul') {const m = this.host.minds.get(t.id), e = m ? this.body(m.entityId) : undefined; return e ? [e.pose.p[0], e.pose.p[2]] : null;}
       if (t) {const e = this.mw.world.entities[t.id]; if (e) return [e.pose.p[0], e.pose.p[2]]; const at = placeAt(t.id); if (at) return at;}
@@ -2470,6 +2471,19 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const leave = r.phase === 'aloft' ? undefined : caps.find(c => /^object:[^:]+:leave$/.test(c.id) && c.available);
     return {code: 'ride.seated', reason: `You are seated in ${r.label} and cannot stand up in it; nothing else is running to stop.${r.phase === 'aloft' ? ' It returns to the ground by itself and you step out then.' : leave ? ` To get out, use ${leave.id} while it is on the ground.` : ''}`};
   }
+  /** #1329 part 3: a ride object's carrier (the balloon or punt it runs), or undefined for any other object. */
+  rideCarrier(objectId: string, table = this.comms?.objects.objectTable?.()): string | undefined {
+    const o = table?.get(objectId), c = o?.kind === 'ride' ? (o.state as {carrier?: unknown} | null)?.carrier : undefined;
+    return typeof c === 'string' ? c : undefined;
+  }
+  /** #1329 part 3: where an object offer is: the object's own engine body, or for a ride its carrier as it is now (never
+   *  the ride's place centre, which a balloon in flight is far from). */
+  private objectBody(id: string, table?: () => ReturnType<NonNullable<NonNullable<EdgeLedger['comms']>['objects']['objectTable']>> | undefined) {
+    const w = this.mw.world as NativeWorld; if (w.entities[id]) return w.entities[id];
+    const c = this.rideCarrier(id, table ? table() : undefined); return c ? w.entities[c] : undefined;
+  }
+  /** One object-table read per pass (a listing or a vocabulary asks per offer): the table, fetched on the first miss. */
+  private objectTableOnce() {let t: ReturnType<NonNullable<NonNullable<EdgeLedger['comms']>['objects']['objectTable']>> | undefined, got = false; return () => {if (!got) {t = this.comms?.objects.objectTable?.(); got = true;} return t;};}
   /** #1329: a ride object's name, or null when the id is not a ride. */
   rideName(objectId: string): string | null {const o = this.comms?.objects.all().find(x => x.id === objectId); return o?.kind === 'ride' ? (o as {name?: string}).name ?? objectId : null;}
   aboard(entityId: string): {id: string; slot: string; riderPhase: string; phase: string; label: string; outInSeconds?: number} | null {
@@ -2783,6 +2797,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     let objects: Map<string, {placeId: string}> | null = null;
     const objectPlace = (id: string) => this.objectPlaces.get(id) ?? (objects ??= new Map((this.comms?.objects.all() ?? []).map(o => [o.id, o]))).get(id)?.placeId;
     const around = (x: number, z: number) => {const p = this.places.containing(x, z, 0).find(q => q.parent !== null); return p ? [p.id, p.name] : [];};
+    const table = this.objectTableOnce();
     const here: [number, number] | null = me ? [me.pose.p[0], me.pose.p[2]] : null;
     // r3 quality (23/29): the nearest spot (or bicycle dock) for a spot-based verb anywhere in this world, beyond offer reach
     const elsewhere = (verb: string) => {
@@ -2820,8 +2835,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
         }
         if (t.kind === 'soul') {const m = this.host.minds.get(t.id), e = m ? this.body(m.entityId) : undefined; return {names: m ? [m.name] : [], around: [], at: e ? [e.pose.p[0], e.pose.p[2]] : null};}
         const place = this.places.byId.get(t.id); if (place) return {names: [place.name,place.kind,...(place.semanticKind?[place.semanticKind]:[]),...(place.aliases??[])], around: [], at: centroid(place.polygon)};
-        const e = w.entities[t.id]; if (e) return {names: [], around: around(e.pose.p[0], e.pose.p[2]), at: [e.pose.p[0], e.pose.p[2]]};
-        const opl = objectPlace(t.id), op = opl ? this.places.byId.get(opl) : undefined; if (op) return {names: [], around: [op.id, op.name], at: centroid(op.polygon)};
+        // #1329 part 3: a ride is at its carrier as it is now; its words still name its own place (a punt's bank, a balloon's field)
+        const own = w.entities[t.id]; if (own) return {names: [], around: around(own.pose.p[0], own.pose.p[2]), at: [own.pose.p[0], own.pose.p[2]]};
+        const e = this.objectBody(t.id, table), opl = objectPlace(t.id), op = opl ? this.places.byId.get(opl) : undefined;
+        if (e) return {names: [], around: [...around(e.pose.p[0], e.pose.p[2]), ...(op ? [op.id, op.name] : [])], at: [e.pose.p[0], e.pose.p[2]]};
+        if (op) return {names: [], around: [op.id, op.name], at: centroid(op.polygon)};
         // RESOLVE: a named thing that is no engine body (a horse, a duck: decor), where nav says it stands
         const nt = this.thingAt?.(t.id); if (nt) return {names: [], around: around(nt[0], nt[1]), at: nt};
         const r = (w.regions as Record<string, {polygon: [number, number][]}> | undefined)?.[t.id]; return {names: [], around: [], at: r ? centroid(r.polygon) : null};

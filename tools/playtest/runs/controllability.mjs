@@ -49,7 +49,7 @@ painting.failed painting.identity-changed painting.no-easel painting.not-reached
 place.dynamic place.items-full place.marks-full pose.no-room
 presentation.already-reserved presentation.closed presentation.doors-closed presentation.ended presentation.entered presentation.full presentation.no-ticket presentation.not-open presentation.presenter presentation.standby-wait
 project.done project.unfinished receipt.lost-on-restart revision.stale
-ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.closed ride.departed ride.full ride.keeping-place ride.landing ride.not-aboard ride.not-boarding ride.on-ground ride.seated ride.steered ride.unavailable
+ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.climbing-in ride.closed ride.departed ride.full ride.keeping-place ride.landing ride.not-aboard ride.not-boarding ride.on-ground ride.seated ride.steered ride.unavailable
 seat.approach-busy seat.none-free seat.taken seat.yours shared.busy shared.full shared.left shared.not-member shared.not-ready shared.not-running shared.revision-changed shared.stop-asked shared.stop-requested shared.too-far
 site.under-construction sky.daylight sky.no-clock slot.none-free soul.faded soul.not-in-sight stall.released state.asleep state.changed state.safe-stop-timeout steer.unavailable surface.full swim.no-deep-middle
 tea.counter-blocked tea.cup-clean tea.cup-empty tea.cup-full tea.cup-not-down tea.cup-not-empty tea.hands-full tea.kettle-cold tea.kettle-empty tea.kettle-full tea.kettle-hot tea.kettle-not-down tea.kettle-on tea.no-bag tea.no-cup tea.no-kettle tea.no-tap tea.not-boiled tea.not-holding tea.tap-blocked
