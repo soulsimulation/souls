@@ -44,7 +44,7 @@ export type LiveJson = {
   boot?: {stage: BootStage; tick: number; target: number};
   loop: {lastTurnAgeMs: number; delayP99Ms: number};
   /** quietAvgMs: the tick's own average ms in quiet windows (EWMA; 0 = not measured yet), which sets the frame budget. */
-  tick?: {world: number; service5s: number; p99Ms: number; quietAvgMs: number; ageMs?: number};
+  tick?: {world: number; service5s: number; p99Ms: number; quietAvgMs: number; ageMs?: number; clockRate?: number; baseRate?: number};
   heap: {usedMb: number; limitMb: number; gcPct10s: number};
   level: Level;
   queue?: {depth: number; oldestMs: number};
@@ -97,8 +97,8 @@ export function liveOf(a: Float64Array, pid: number, now: number): LiveJson {
   if (phase.startsWith('boot:')) out.boot = {stage: (bp.boot?.stage ?? 'restore') as BootStage, tick: bp.boot?.tick ?? 0, target: bp.boot?.target ?? 0};
   if (serving) {
     const clock = clockOf(a, now);
-    out.tick = {world: a[S.worldTick], service5s: r2(a[S.service5s]), p99Ms: r1(a[S.tickP99Ms]), quietAvgMs: r1(a[S.quietTickMs]), ...(clock.tickAgeMs !== null ? {ageMs: clock.tickAgeMs} : {})};
-    if (clock.stalled) out.stalled = true;
+    out.tick = {world: a[S.worldTick], service5s: r2(a[S.service5s]), p99Ms: r1(a[S.tickP99Ms]), quietAvgMs: r1(a[S.quietTickMs]), ...(clock.tickAgeMs !== null ? {ageMs: clock.tickAgeMs} : {}), clockRate: clock.clockRate, baseRate: clock.baseRate};
+    if (clock.stalled && phase === 'serving') out.stalled = true;   // (stopping: a long final snapshot is no stall)
     if (clock.slowed) out.slowed = {clockRate: clock.clockRate, baseRate: clock.baseRate};
     out.queue = {depth: a[S.queueDepth], oldestMs: Math.round(a[S.queueOldestMs])};
     out.souls = {awake: a[S.awake], waiting: a[S.waiting], connected: a[S.connected]};

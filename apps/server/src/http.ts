@@ -68,8 +68,9 @@ import {mountSoulNow} from './soul-now-routes.ts';
 import {soulLink} from './soul-link.ts';
 import {mountOperatorSouls} from './op-souls.ts';
 import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
-/** #1326: the edge writes that wait on the clock: refused with 503 world.stalled while it is stalled. */
-const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/travel', '/v1/edge/plan']);
+/** #1326: the edge writes that wait on the clock (an act's body, a plan's acts): refused with 503 world.stalled while it is
+ *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
+const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
 
 /** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; resolve; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
@@ -122,11 +123,14 @@ export function buildApp(d: Deps) {
     await next();
     const after = clockNow();
     if (!after?.stalled || c.res.status !== 200 || !(c.res.headers.get('content-type') ?? '').includes('application/json')) return;
+    // a cacheable answer (an ETag, or a Cache-Control that isn't no-store) is left as it is: a cache must never keep the stall
+    const cache = c.res.headers.get('cache-control');
+    if (c.res.headers.has('etag') || (cache !== null && !cache.includes('no-store'))) return;
     try {
       const body = await c.res.clone().json() as Record<string, unknown> | null;
       if (!body || typeof body !== 'object' || Array.isArray(body)) return;
       const world = {...(body.world && typeof body.world === 'object' ? body.world as object : {}), ...clockBlockOf(after)};
-      const headers = new Headers(c.res.headers); headers.delete('content-length');
+      const headers = new Headers(c.res.headers); headers.delete('content-length'); headers.set('cache-control', 'no-store');
       c.res = new Response(JSON.stringify({...body, world}), {status: 200, headers});
     } catch { /* not a JSON object: left as it is */ }
   });

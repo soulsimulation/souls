@@ -204,8 +204,9 @@ export class LoadMonitor {
     a[S.lastTurnAt] = now;
     a[S.halted] = h.clockAvailable === false || h.stepFailing ? 1 : 0;
     a[S.rewinds] = h.rewinds ?? 0;
-    // #1326: a tick this sample sees that no listener noted (a host without listeners, the first sample) dates from now
-    if (h.engine.world.tick !== this.seenTick) { this.seenTick = h.engine.world.tick; if (!this.tickHook || !a[S.tickAt]) a[S.tickAt] = now; }
+    // #1326: a tick this sample sees advance dates from now at the latest: a host without listeners, the first sample, and a
+    // faulted tick (the world moves on, but afterTickComplete runs only after a clean one)
+    if (h.engine.world.tick !== this.seenTick) { this.seenTick = h.engine.world.tick; a[S.tickAt] = Math.max(a[S.tickAt], now); }
     // a clock that starts owing again (unpaused, restarted, its rate raised from 0) counts its age from now
     const stallMs = stallMsOf(h); if (stallMs > 0 && !(a[S.stallMs] > 0)) a[S.tickAt] = now;
     a[S.stallMs] = stallMs; a[S.clockRate] = h.clockRate ?? h.baseRate; a[S.baseRate] = h.baseRate;

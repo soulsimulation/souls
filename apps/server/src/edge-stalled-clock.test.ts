@@ -35,6 +35,7 @@ test('S1, S2, S6: the monitor publishes the tick age and `stalled`; a completed 
     now = 2500; m.sample(); assert.equal(m.clock().stalled, false); assert.equal(liveOf(shared, 1, now).tick!.ageMs, 1500);
     now = 4000; m.sample();
     let live = liveOf(shared, 1, now); assert.equal(live.stalled, true); assert.equal(live.tick!.ageMs, 3000);
+    assert.equal(live.tick!.clockRate, 1); assert.equal(live.tick!.baseRate, 1);
     assert.equal(liveOf(shared, 1, 9000).tick!.ageMs, 8000, 'the watchdog thread ages it with no main-thread turn');
     // S2: the next completed tick clears it, before any sample
     now = 4100; host.engine.world.tick = 1; listeners[0].afterTickComplete!(1);
@@ -65,7 +66,7 @@ test('S1, S4, S5: /healthz says stalled; edge reads carry world.stalled; an act 
   const app = buildApp({cfg: {...config, port: TEST_PORT, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT}/w/eden`, accountAuthRequired: false, webDir: '/nonexistent-stall-fixture', marsWebDir: '/nonexistent-stall-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), hub: {clients: new Map(), refreshMe() {}} as never, load: {monitor} as never});
   const req = async (path: string, body?: unknown) => {
     const r = await app.request(path, {method: body === undefined ? 'GET' : 'POST', headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
-    return {status: r.status, retry: r.headers.get('retry-after'), data: await r.json() as any};
+    return {status: r.status, retry: r.headers.get('retry-after'), data: await r.json().catch(() => null) as any};
   };
   const receipts = () => (f.db.db.prepare('SELECT COUNT(*) AS n FROM edge_receipts_v1').get() as {n: number}).n;
 
@@ -85,6 +86,12 @@ test('S1, S4, S5: /healthz says stalled; edge reads carry world.stalled; an act 
   const act = await req('/v1/edge/act', {capability: 'stand:here'});
   assert.equal(act.status, 503); assert.equal(act.data.error.code, 'world.stalled'); assert.equal(act.retry, '5'); assert.equal(act.data.world.stalled, true);
   assert.equal(receipts(), n, 'nothing written');
+  // travel isn't held by the clock (leaving is a Soul's way out); a plan is refused like an act
+  const travel = await req('/v1/edge/travel', {to: 'nowhere'}); assert.notEqual(travel.status, 503); assert.notEqual(travel.data?.error?.code, 'world.stalled');
+  assert.equal((await req('/v1/edge/plan', {steps: []})).data.error.code, 'world.stalled');
+  // a cacheable answer (ETag) is never rewritten, so no cache keeps the stall
+  const boot = await app.request('/v1/edge/boot/static', {headers: {authorization: `Bearer ${token}`}});
+  assert.equal(boot.status, 200); assert.ok(boot.headers.get('etag')); assert.equal((await boot.json() as any).world?.stalled, undefined);
   // a long-poll already stalled holds at most 5 s, then answers with the block
   let begun = performance.now();
   const w = await req(`/v1/edge/wait?after=${cursor}&timeout=30`);
@@ -99,6 +106,13 @@ test('S1, S4, S5: /healthz says stalled; edge reads carry world.stalled; an act 
   setTimeout(() => { stalled = true; }, 300);
   const ended = await waiting;
   assert.equal(ended.data.world.stalled, true); assert.ok(performance.now() - begun < 3000, `ended after ${Math.round(performance.now() - begun)} ms`);
+
+  // a Soul's listen under way ends when the clock stalls
+  stalled = false; begun = performance.now();
+  const listening = req('/v1/edge/inbox/listen?timeoutMs=30000');
+  setTimeout(() => { stalled = true; }, 300);
+  const heard = await listening;
+  assert.equal(heard.data.world.stalled, true); assert.ok(performance.now() - begun < 3000, `listen ended after ${Math.round(performance.now() - begun)} ms`);
 
   // running again: acts go through; a dilated clock says `slowed` with its speed
   stalled = false; slowed = true;
