@@ -43,8 +43,10 @@ test('--install installs exactly the expected revision with the release\'s own C
   assert.equal(again.code, 0); assert.equal(again.json.installed, undefined); assert.equal(s.calls(), 'install chromium gc=1\n');
 });
 
-test('a failed install stops with exit 1, even when an older revision could be a fallback', () => {
+test('a failed install never stops a release: exit 0, a WARN eyes: degraded line and the degraded marker', () => {
   const s = setup({ installFails: true }); mkdirSync(join(s.browsers, 'chromium-1194/chrome-linux64'), { recursive: true }); writeFileSync(join(s.browsers, 'chromium-1194/chrome-linux64/chrome'), '');
   const r = s.run('--install');
-  assert.equal(r.code, 1, r.out); assert.match(r.json.problem, /installing chromium-1248 did not give Playwright its own Chromium \(failed \(exit 1\)\)/); assert.equal(r.json.path, null);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.json.degraded, /installing chromium-1248 did not give Playwright its own Chromium .*failed .*exit 1/); assert.equal(r.json.problem, undefined); assert.equal(r.json.path, null);
+  assert.match(r.out, /^WARN eyes: degraded \([^()\n]+\)$/m, 'one line ship.sh can carry into ship-result.json');
 });

@@ -3,7 +3,8 @@
 //   node tools/world-launcher/deploy/eyes-browser.mjs [--tree <release dir, default this checkout>] [--browsers <PLAYWRIGHT_BROWSERS_PATH>] [--install]
 // --install (release.sh's stage, through ship/eyes-install.sh): when Playwright's own Chromium is missing, install exactly
 // that revision with the release's own Playwright CLI (`playwright install chromium`, PLAYWRIGHT_SKIP_BROWSER_GC=1 so no
-// other installed revision is ever removed), then check again; exit 1 unless Eyes then launches Playwright's own Chromium.
+// other installed revision is ever removed), then check again. A failed install or check never stops a release: it prints
+// `WARN eyes: degraded (<reason>)`, records `degraded`, and exits 0; the worker's own 30-min back-off handles the rest.
 // Idempotent: an installed revision is left as it is.
 // Reads the release's own Playwright (mars/viewer's @playwright/test) for the revision it expects, then applies the worker's
 // rule (apps/server/src/edge/eyes/browser-config.mjs eyesExecutable): EDGE_EYES_CHROME, else Playwright's own, else the
@@ -39,4 +40,12 @@ if (a.includes('--install') && !error && pick.source !== 'playwright' && pick.so
   pick = eyesExecutable(expected, process.env);
   if (pick.source !== 'playwright') pick = { ...pick, path: null, problem: `installing chromium-${version} did not give Playwright its own Chromium (${installed}): ${pick.problem ?? pick.note}` };
 }
-out({ revision: version, expected, browsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH ?? null, ...(installed ? { installed } : {}), ...pick });
+const result = { revision: version, expected, browsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH ?? null, ...(installed ? { installed } : {}), ...pick };
+if (a.includes('--install') && result.problem) {
+  // never fatal to a release (a download hiccup must not hold back engine fixes): say it, record it, carry on
+  const reason = result.problem.replace(/[()\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  console.error(`WARN eyes: degraded (${reason})`);
+  console.log(JSON.stringify({ ...result, problem: undefined, degraded: reason }));
+  process.exit(0);
+}
+out(result);

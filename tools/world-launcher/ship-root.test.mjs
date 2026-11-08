@@ -55,7 +55,7 @@ function setup() {
   // build, browser and manifest tools
   script(join(t, 'stubs/node'), `printf 'node\\t%s\\n' "$*" >> ${log}\nif [ -n "\${STUB_FAIL:-}" ] && [[ "$*" == *"$STUB_FAIL"* ]]; then exit 1; fi\ncase "$1" in *release-probe.mjs)\n  while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; shift; done\n  mkdir -p "$out"; touch "$out/ready"\n  for i in $(seq 1 600); do { [ -e "$out/released" ] || [ -e "$out/stop" ]; } && break; sleep 0.05; done\n  exit "\${STUB_PROBE_RC:-0}";;\nesac\nexit 0`);
   script(join(t, 'stubs/python'), `printf 'python\\t%s\\n' "$*" >> ${log}`);
-  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s\\n' "$*" "$SIM_WORLDS_BASE" >> ${log}\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh`);
+  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s\\n' "$*" "$SIM_WORLDS_BASE" >> ${log}\n[ -z "\${STUB_EYES_WARN:-}" ] || echo "WARN eyes: degraded (\$STUB_EYES_WARN)"\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh`);
   // browsers: a folder that holds Chromium
   script(join(t, 'browsers/chromium-1/chrome-linux/chrome'), '');
   script(join(t, 'no-chromium/firefox-1/firefox/firefox'), '');
@@ -306,4 +306,14 @@ test('verdicts: receipts, a backup that dropped rows or missed a database, stale
   assert.ok(activationProblems(snapshot, 's', backup, upload, 'm', Date.now() + 2 * 3_600_000).length >= 2);
   assert.ok(activationProblems(snapshot, 'other', backup, upload, 'm').length);
   assert.ok(activationProblems(snapshot, 's', backup, { ...upload, manifestSha256: 'x' }, 'm').length);
+});
+
+test('#1340 a degraded Eyes browser never stops a release: it is recorded in ship-result.json and the summary', () => {
+  let s = setup(), r = s.run(s.base, { STUB_EYES_WARN: 'installing chromium-1248 failed exit 1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const result = JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8'));
+  assert.equal(result.status, 'live'); assert.equal(result.eyes, 'degraded (installing chromium-1248 failed exit 1)');
+  assert.match(r.stdout, /eyes: degraded \(installing chromium-1248 failed exit 1\)\. The release is unaffected/);
+  s = setup(); r = s.run(s.base);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).eyes, 'ok');
 });

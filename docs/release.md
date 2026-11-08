@@ -173,8 +173,10 @@ dependencies are installed, `ship/eyes-install.sh` reads the running keeper's `E
 `EDGE_EYES_CHROME`, and only those. With Eyes on, it runs `eyes-browser.mjs --install` as the worlds' user. That installs
 exactly the expected revision when it is missing, with the release's own Playwright CLI and `PLAYWRIGHT_SKIP_BROWSER_GC=1`,
 so no installed revision is ever removed. It then checks that Eyes launches Playwright's own Chromium. A failed install
-or check stops the stage, so a release never goes live with Eyes unable to launch. The host must reach Playwright's
-download host; a release whose revision is already installed downloads nothing ([Eyes](architecture/souls.md#eyes)).
+or check never stops a release: a network hiccup must not hold back the rest of it. It prints
+`WARN eyes: degraded (<reason>)`, which ship.sh records as `eyes` in `ship-result.json` and in its closing summary. The
+Eyes worker then retries every 30 minutes on its own. A release whose revision is already installed downloads nothing
+([Eyes](architecture/souls.md#eyes)).
 
 Tests run the whole command against a fake host, with the remote block under an empty environment:
 `node --test tools/world-launcher/ship-root.test.mjs`.

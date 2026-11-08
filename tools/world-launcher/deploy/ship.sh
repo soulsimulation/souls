@@ -60,7 +60,9 @@ done_step() { [ "$DRY" = 1 ] || { say "   $CUR done in $(( $(date +%s) - T0 )) s
 x() { say "   + $(quote "$@")"; [ "$DRY" = 1 ] || "$@"; }
 x_in() { local f="$1"; shift; if [ "$1" = x_to ]; then shift; local o="$1"; shift; say "   + $(quote "$@") < $(basename "$f") > $o"; [ "$DRY" = 1 ] || "$@" < "$f" > "$o"; else say "   + $(quote "$@") < $(basename "$f")"; [ "$DRY" = 1 ] || "$@" < "$f"; fi; }
 x_to() { local f="$1"; shift; say "   + $(quote "$@") > $f"; [ "$DRY" = 1 ] || "$@" > "$f"; }
-result() { [ "$DRY" = 1 ] || printf '{"at":"%s","label":"%s","sha":"%s","build":"%s","status":"%s","detail":"%s"}\n' "$(date -u +%FT%TZ)" "$LABEL" "$SHA" "$BUILD" "$1" "$2" > "$OUT/ship-result.json"; }
+# #1340: the stage's Eyes browser step never stops a release; its `WARN eyes: degraded (...)` is carried into the result
+eyes_state() { local w; w="$(grep -ao 'WARN eyes: degraded ([^)]*)' "$OUT/ship.log" 2>/dev/null | tail -1 | sed 's/^WARN eyes: //; s/["\\]//g')"; printf '%s' "${w:-ok}"; }
+result() { [ "$DRY" = 1 ] || printf '{"at":"%s","label":"%s","sha":"%s","build":"%s","status":"%s","detail":"%s","eyes":"%s"}\n' "$(date -u +%FT%TZ)" "$LABEL" "$SHA" "$BUILD" "$1" "$2" "$(eyes_state)" > "$OUT/ship-result.json"; }
 stop_probe() { [ -n "$PROBE_PID" ] && kill -0 "$PROBE_PID" 2>/dev/null || return 0; say "   stopping the release probe"; touch "$PDIR/stop"; wait "$PROBE_PID" 2>/dev/null; PROBE_PID=""; }
 die() {
   say ""; say "STOPPED at step $CUR: $*"; say "   live now: $LIVE"; stop_probe
@@ -252,6 +254,7 @@ if step cdn-walk "every manifest asset from the CDN, desktop and phone"; then
 fi
 
 say ""
+[ "$DRY" = 1 ] || [ "$(eyes_state)" = ok ] || say "   eyes: $(eyes_state). The release is unaffected; the Eyes worker retries every 30 min (docs/release.md, Eyes' browser)"
 if [ "$DRY" = 1 ]; then
   say "DRY RUN complete: $NSTEPS steps printed, nothing ran.$([ "$PROBLEMS" = 0 ] || echo " PREFLIGHT: $PROBLEMS problem(s) above would stop a real run.")"
   [ "$PROBLEMS" = 0 ] || exit 1
