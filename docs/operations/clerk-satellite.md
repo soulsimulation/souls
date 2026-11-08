@@ -51,6 +51,17 @@ SDK synchronization parameters, world paths and pairing fragments. The page has 
 noindex headers, denies framing and supplies a CSP with a hash for its inline bootstrap and Clerk's documented
 script hosts, Clerk's blob workers and the primary edge's Cloudflare analytics script. Avoid adding a second, conflicting CSP at the proxy on this route. It never renders or logs tokens.
 
+## Session sync before the world loads
+
+Clerk JS 5 sends a satellite to the primary on load whenever its `__client_uat` cookie is missing or not above 0
+(signed out) and the address has no `__clerk_synced`. The world page does this itself, in an inline `<head>` script
+in `apps/web/index.html`, before the snapshot prefetch, so a visit boots the world once. If it left it to Clerk, the
+page would leave and boot again once Clerk mounted after the arrival card (#1385). The script runs only on the
+configured satellite origin's world pages. It never runs for a signed-in cookie, a picture page or a return from the
+sync. After a sync that did not come back, it waits a minute before trying again, so a blocked cookie never loops.
+The page's referrer is kept in `sessionStorage` across the round trip, so the visitor count still credits the site a
+visitor came from (`presyncReferrer` in `visitor-counts.ts`, origin only as for any referrer).
+
 ## Verify before release
 
 Use an isolated mirror first, then record one uncut real-speed journey on the real satellite: sign in via the
