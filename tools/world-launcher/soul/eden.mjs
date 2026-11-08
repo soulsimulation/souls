@@ -2876,7 +2876,10 @@ async function act(...argv) {
   // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
   // still going while a later step of it has ended (#1289)
   if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for, ...(body.params?.seconds !== undefined ? { timed: true } : {}) }], d.receipt.id) });
-  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) {
+    const { stalled: _was, ...before } = out;   // the wait's frames are newer: a clock running again drops the act's word
+    out = { ...before, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  }
   if (out.held) heldLinks(out.receipt?.id);
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
