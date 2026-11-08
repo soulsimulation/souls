@@ -173,6 +173,22 @@ export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arri
 export const GREEN_FIELD_WORLD:MarsWorldConfig={scene:'greenfield',arrival:[0,0],arrivalPlace:'field',reference:[2,0],grounds:{id:'grounds',name:'Green field'}};
 export const EDEN_COMMONS_WORLD:MarsWorldConfig={scene:'eden-commons',arrival:[14,4],arrivalPlace:'commons',reference:[9,5],grounds:{id:'grounds',name:'Eden commons'}};
 export const EDEN_SAFE_COMMONS_WORLD:MarsWorldConfig={...EDEN_COMMONS_WORLD,safeArrivalV1:true};
+/** #1363: the boolean flags `configureRuntimePolicy` accepts. Each is a prospective runtime policy adopted by a logged `rules`
+ *  event (`runtimePolicy`), so it may turn on after genesis without changing the rules version. A new flag goes here, or
+ *  runtime-policy-registry.test.ts fails. */
+export const RUNTIME_POLICY_FLAGS=['walkSettleWaitV1','occupiedLinkRoutingV1','concurrentLinkEgressV1','stairLandingClearanceV1',
+  'fixtureGroundGoalsV1','nativeArrivalWitnessV1','quietLandingCourtesyV1','quietStallReleaseV1','stairMakeWayV1','reflexTimeoutV1',
+  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1'] as const satisfies readonly (keyof MarsWorldConfig)[];
+export type RuntimePolicyV1={sleepBlockTicks:number;quietSeatCourtesy?:boolean}&{[K in typeof RUNTIME_POLICY_FLAGS[number]]?:boolean};
+/** #1363: every `cfg` key a world may change after genesis without changing its rules version: the runtime policy, the render
+ *  clock (`configureClock`) and ground-reclaim/1 (its own logged fact, `enableGroundReclaimV1`). Each still enters the state
+ *  hash as before. A physical-binding snapshot reader ignores exactly these (`physicalBindingCfgV1`), so adopting one on a
+ *  bound world (the Eden readers) never makes its snapshots unrestorable. */
+export const RUNTIME_POLICY_KEYS=['clock','sleepBlockTicks','quietSeatCourtesy','groundReclaimV1',...RUNTIME_POLICY_FLAGS] as const satisfies readonly (keyof MarsWorldConfig)[];
+/** #1363: a world config without its runtime-policy keys: what a physical-binding reader compares. */
+export function physicalBindingCfgV1(cfg:Partial<MarsWorldConfig>|undefined):Partial<MarsWorldConfig>{
+  const rest:Record<string,unknown>={...cfg};for(const k of RUNTIME_POLICY_KEYS)delete rest[k];return rest as Partial<MarsWorldConfig>;
+}
 const PROVING_GROUND: MarsWorldConfig = { scene: 'proving-ground', arrival: [-24, -10.5], arrivalPlace: 'lawn', reference: [-24, -8], grounds: { id: 'grounds', name: 'the grounds' } };
 
 const secs = (v: unknown, d: number) => Math.round(Math.min(3600, Math.max(0.5, typeof v === 'number' ? v : d)) * TPS);
@@ -2725,7 +2741,8 @@ export class MarsEngine implements Engine {
   /** Prospective ground-reclaim/1 reader; cfg and its state hash preserve the activation in snapshots. */
   groundReclaimEnabledV1(): boolean { return this.cfg.groundReclaimV1 === true; }
   enableGroundReclaimV1(): void { this.cfg = { ...this.cfg, groundReclaimV1: true }; }
-  configureRuntimePolicy(policy: {sleepBlockTicks:number;walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean;stairLandingClearanceV1?:boolean;quietSeatCourtesy?:boolean;fixtureGroundGoalsV1?:boolean;nativeArrivalWitnessV1?:boolean;quietLandingCourtesyV1?:boolean;quietStallReleaseV1?:boolean;stairMakeWayV1?:boolean;yieldTimeoutV1?:boolean;spreadV2?:boolean;shoreDepartV1?:boolean}) {
+  /** Every key it reads or sets is in RUNTIME_POLICY_KEYS (#1363). */
+  configureRuntimePolicy(policy: RuntimePolicyV1) {
     if(policy.walkSettleWaitV1!==undefined&&typeof policy.walkSettleWaitV1!=='boolean')throw Error('runtime-policy.walk-settle-wait');
     if(policy.occupiedLinkRoutingV1!==undefined&&typeof policy.occupiedLinkRoutingV1!=='boolean')throw Error('runtime-policy.occupied-link-routing');
     if(policy.concurrentLinkEgressV1!==undefined&&typeof policy.concurrentLinkEgressV1!=='boolean')throw Error('runtime-policy.concurrent-link-egress');
@@ -2734,11 +2751,11 @@ export class MarsEngine implements Engine {
     if(policy.quietSeatCourtesy !== undefined && typeof policy.quietSeatCourtesy !== "boolean") throw new Error("runtime-policy.quiet-seat-courtesy");
     if(policy.stairMakeWayV1===true)this.cfg={...this.cfg,stairMakeWayV1:true};
     // #1332 body-step-guard/1 (prospective): relocations, restores and stall releases stand a body only where the invariant passes it.
-    if((policy as {bodyStepGuardV1?:boolean}).bodyStepGuardV1===true)this.cfg={...this.cfg,bodyStepGuardV1:true};
-    if((policy as {reflexTimeoutV1?:boolean}).reflexTimeoutV1===true)this.cfg={...this.cfg,reflexTimeoutV1:true};
-    if((policy as {edgeMotionV1?:boolean}).edgeMotionV1===true)this.cfg={...this.cfg,edgeMotionV1:true};
+    if(policy.bodyStepGuardV1===true)this.cfg={...this.cfg,bodyStepGuardV1:true};
+    if(policy.reflexTimeoutV1===true)this.cfg={...this.cfg,reflexTimeoutV1:true};
+    if(policy.edgeMotionV1===true)this.cfg={...this.cfg,edgeMotionV1:true};
     if(policy.spreadV2===true)this.cfg={...this.cfg,spreadV2:true};
-    if((policy as {spreadClearV1?:boolean}).spreadClearV1===true)this.cfg={...this.cfg,spreadClearV1:true};
+    if(policy.spreadClearV1===true)this.cfg={...this.cfg,spreadClearV1:true};
     if(policy.yieldTimeoutV1===true)this.cfg={...this.cfg,yieldTimeoutV1:true};
     // shoreDepartV1 (prospective): shore travel may step away from a body already touching the mover (shore.ts).
     if(policy.shoreDepartV1===true){this.cfg={...this.cfg,shoreDepartV1:true};this.rt.services.shoreDepartV1=true;}
@@ -2750,7 +2767,7 @@ export class MarsEngine implements Engine {
     if(policy.occupiedLinkRoutingV1===true){this.cfg={...this.cfg,occupiedLinkRoutingV1:true};this.rt.services.occupiedLinkRoutingV1=true;}
     if(policy.concurrentLinkEgressV1===true){this.cfg={...this.cfg,concurrentLinkEgressV1:true};this.rt.services.concurrentLinkEgressV1=true;}
     // route-reach/1 (#872, prospective): far walks from upper floors and fine hops a tile window cut short are planned, not refused.
-    if((policy as {routeReachV1?:boolean}).routeReachV1===true){this.cfg={...this.cfg,routeReachV1:true};if(this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;}
+    if(policy.routeReachV1===true){this.cfg={...this.cfg,routeReachV1:true};if(this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;}
     // stairLandingClearanceV1 (prospective, #509): the last climb step refuses a landing occupied on its destination level.
     if(policy.stairLandingClearanceV1===true){this.cfg={...this.cfg,stairLandingClearanceV1:true};this.rt.services.stairLandingClearanceV1=true;}
     this.cfg.sleepBlockTicks = policy.sleepBlockTicks;
