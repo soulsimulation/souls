@@ -48,6 +48,12 @@ Optional hooks cover recorded takes and scenes (`takeChunks`, `renderScene`, `ta
 (`previewAdmission`) and a set of paired `preview*V1` / `adopt*V1` transitions that add authored content to an existing
 world as logged, replayable facts. The declarations are the reference.
 
+A runtime policy is a `cfg` key a world may turn on after genesis by a logged `rules` event without changing its rules
+version. The Mars engine keeps them in one registry, `RUNTIME_POLICY_KEYS` in `packages/engine-mars/src/engine.ts`
+(with the render clock and ground-reclaim/1); a physical-binding snapshot reader ignores exactly those keys
+(`physicalBindingCfgV1`), so adopting a policy on a bound world never makes its snapshots unrestorable (#1363). A new
+flag goes in `RUNTIME_POLICY_FLAGS`; `runtime-policy-registry.test.ts` fails until it does.
+
 - **Program** `{ actor, label, steps: {verb, params}[] }`: the verb steps one body runs. A `decision` event starts one.
   One actor runs one program.
 - **ProgramEvent** `{ tick, id, actor, kind: 'step'|'completed'|'failed'|'cancelled', step, code?, message? }`: how the

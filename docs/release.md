@@ -49,8 +49,9 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 3. **CDN first.** Any new immutable asset the web build's CDN manifest references is uploaded to `assets.eden.art`
    and verified before the release ([CDN](operations/cdn.md)). The client falls back to the origin on a CDN miss,
    but a release must not depend on that.
-4. **Staged ship.** `tools/world-launcher/deploy/ship.sh` takes a read-only snapshot, stages without activating, makes
-   row-verified backups, starts the live probe and does one guarded reload, in that order (below).
+4. **Staged ship.** `tools/world-launcher/deploy/ship.sh` takes a read-only snapshot, stages without activating, boots a
+   copy of every world's database with the staged tree (the rehearsal), makes row-verified backups, starts the live
+   probe and does one guarded reload, in that order (below).
 5. **healthz.** Each activation checks the stage's `/__sim/healthz` reports the new build and every registered world
    answers; afterwards `https://soul.game/__sim/healthz` shows `build`, `worlds`/`running` and `hostOk`.
 6. **Walks.** Real-Chrome arrivals on desktop and phone, the poster and stall checks.
@@ -60,17 +61,52 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 
 ## The release workflow
 
-This workflow runs the historical dual-stage command and is not qualified for the root-only host. Releases that use it run from [`.github/workflows/release.yml`](../.github/workflows/release.yml), started by manual dispatch with
-a `version` (for the changelog and tag) and optional `label`, `baseline` (default: the newest `v*` tag) and
-`no_probe`. A `release` concurrency group lets only one run at a time. Its jobs:
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs [`ship.sh`](#shipsh) on a GitHub runner,
+started by manual dispatch on `main`. A `release` concurrency group lets only one run (or gate) at a time. Inputs:
 
-1. **preflight**: the required secrets and variables exist (it names any that are missing), the head is `main`, and
-   the inputs are sane.
-2. **gate**: the full remote gate against the baseline release.
-3. **ship**: waits for the protected `production` environment's required reviewer, then runs `ship-dual-stage.sh` over SSH
-   and checks healthz.
-4. **publish**: compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on the shipped commit
-   and creates the GitHub Release.
+| Input | Default | Meaning |
+|---|---|---|
+| `version` | required | Release version for the changelog and tag, such as `4.17`; also ship.sh's `--label` |
+| `dry_run` | **true** | `ship.sh --no-switch`: every step for real except the backup and the activation, checked against the build that stays live. Stage skips `install.sh`, so the host's unit files and timers stay as they are. No receipt is needed and publish does not run. The label is `<version>-rehearsal`. The staged release directory and its dependencies stay on the host; a later real ship of the same build reuses them. It deletes nothing on the host except the rehearsal's own scratch directory, which it created |
+| `date` | today (UTC) | The release date compiled into the changelog page and `CHANGELOG.md`. The page is part of the web build, so a real ship on a later day than its dry run of the same head must pass the dry run's date, or the staged build differs and stage refuses to overwrite it |
+| `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
+| `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
+
+```sh
+gh workflow run release.yml --ref main -f version=4.17                    # dry run: nothing goes live
+gh workflow run release.yml --ref main -f version=4.17 -f dry_run=false   # the release
+```
+
+Its jobs:
+
+1. **preflight**: the required secrets and variables exist (it names any that are missing), the head is `main`, the
+   tag does not exist yet, the inputs are sane.
+2. **ship**: in the `production` environment (limited to `main`). It installs, pulls media, installs Chromium at a
+   known `PLAYWRIGHT_BROWSERS_PATH`, builds the Mars web overlay (`MARS_WEB_SRC`: the viewer's static site from this
+   commit plus the static manifests, Draco decoders and campus model from the public origin), writes the probe god
+   folder from `SIM_PROBE_GOD_JSON`, and for a real ship downloads the receipts and combines them
+   (see below). Then `ship.sh --label <version> --sha <head>` (with `--no-switch` for a dry run). Its output
+   is filtered so no IPv4 literal is printed; the host itself is a secret, so the log masks it.
+3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
+   the shipped commit and creates the GitHub Release.
+
+**Receipt.** The workflow runs no gate: one full gate per head runs through `gate.yml` or the laptop, and the V7 walk
+needs real Chrome on a GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
+leave the machine. The release owner derives the publishable release receipt from them. It holds only shas, the build
+id, statuses, counts, timestamps and the sha256 of each raw receipt, and `ship-receipt.mjs` refuses to write it unless
+it passes the publication check. The ship job checks it again, and ship.sh's preflight verifies it for the exact head
+(`root-release.mjs receipt`). The host is masked in every log even when `SIM_DEPLOY_HOST` is a variable.
+
+```sh
+node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
+gh release create receipts-v4.17 --prerelease --title "receipts 4.17" release-receipt.json
+```
+
+**Evidence.** The run's artifact `ship-<label>` holds only result files that pass `tools/proof/publication.mjs`
+(`STEPS.txt`, `POSTLIVE.txt`, `ship-result.json`, `rehearse.json`, the check verdicts). `ship.log` and the raw logs
+stay on the runner, since tools tee'd into them can name the host. The step summary shows `ship-result.json`.
+
+The historical dual-stage command (`ship-dual-stage.sh`) is no longer run by the workflow.
 
 The site's public changelog page (`<base>/changelog`, currently `https://soul.game/changelog`) is `CHANGELOG.md`
 rendered into the web build (`apps/web/changelog.html`, `apps/web/src/changelog-page.ts`). So that the page shows the
@@ -83,11 +119,11 @@ Configuration lives in GitHub, never in the repository; preflight names whatever
 
 | Name | Kind | Purpose |
 |---|---|---|
-| `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | repository secrets | the remote gate |
+| `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | repository secrets | the remote gate (`gate.yml`) |
 | `SIM_DEPLOY_HOST`, `SIM_DEPLOY_USER` | variables (or secrets) | SSH target of the production host |
 | `DEPLOY_SSH_KEY`, `SIM_DEPLOY_KNOWN_HOSTS` | `production` environment secrets | SSH key and the host's known-hosts entry |
-| `SIM_PROBE_GOD_JSON` | optional secret | god file of the release-probe world; without it the probe is skipped |
-| `SIM_ORIGIN` | optional variable | public origin, default `https://sim.eden.art` |
+| `SIM_PROBE_GOD_JSON` | `production` environment secret | god file of the release-probe world; the ship job refuses to run without it |
+| `SIM_ORIGIN` | optional variable | public origin, default `https://soul.game` |
 | `MODAL_CLIENT_VERSION` | optional variable | pip pin for the Modal client |
 
 Outside the workflow, the scripts read the same variables from the environment or from an untracked `deploy.env` at
@@ -97,7 +133,7 @@ the repository root (copy [`deploy.env.example`](../deploy.env.example); the env
 ## ship.sh
 
 ```sh
-tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run] [--from <step>] [--out <dir>] [--accept-host-codes <code,...>]
+tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--from <step>] [--out <dir>] [--accept-host-codes <code,...>]
 ```
 
 It asks nothing: ssh runs in batch mode, and it never prompts. Before the release is live, any failure stops the run.
@@ -108,7 +144,8 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 | `--label <version>` | The release, such as `4.16`. Names the output folder and the backups (`pre-r416-production-<time>`). |
 | `--sha <full sha>` | The commit to ship. It must be HEAD of a clean tree and an ancestor of `origin/main`. |
 | `--dry-run` | Prints every step and its commands. Nothing remote is touched and nothing is written. Exits 1 when a guard would stop a real run. |
-| `--from <step>` | Resumes at `snapshot`, `stage`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
+| `--no-switch` | Runs every step for real except the backup and the activation: snapshot, stage, rehearse, the probe (expecting the live build), healthz of the live build, walks, poster, stall and cdn-walk. Nothing goes live, so there is nothing to back up or roll back. `host-activate.sh` never runs, and stage skips `install.sh` (`SIM_RELEASE_NO_INSTALL=1`), so no unit file or timer changes. A resume keeps the mode its run started in (`STEPS.txt`). Receipts are checked when `SHIP_RECEIPTS` is set and never required. `ship-result.json` says `rehearsed` (or `rehearsed-with-failures`); exit 0 only when every step passed |
+| `--from <step>` | Resumes at `snapshot`, `stage`, `rehearse`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
 | `--out <dir>` | Output folder (default `$SHIP_OUT_ROOT/<label>`). A folder that already holds a run is refused without `--from`. |
 | `--accept-host-codes <code,...>` | The snapshot normally needs public healthz `hostOk`. With this list it passes while `hostOk` is false only if every `hostCodes` entry is listed, such as `halted` for a release that fixes a halted world. The list is printed and recorded in `snapshot.json` (`acceptedHostCodes`); any other code still refuses, and the drift checks compare `hostCodes` too. |
 
@@ -117,7 +154,7 @@ There is no host option. The host and operator paths come from the environment o
 | Variable | Default | Used for |
 |---|---|---|
 | `SIM_DEPLOY_HOST`, `SIM_DEPLOY_USER` | none / `root` | SSH target of the production host. ship.sh's own lines, the dry-run plan and `ROLLBACK.txt` never name it. Tools tee'd into `ship.log` can (`release.sh` prints its upload target, ssh its errors), so keep `ship.log` private |
-| `SHIP_RECEIPTS` | none; required | Folder holding the gate's `receipt.json` and `ship-receipt.json` for this commit |
+| `SHIP_RECEIPTS` | none; required | Folder holding the publishable `release-receipt.json` (`ship-receipt.mjs --public`), or the gate's `receipt.json` and `ship-receipt.json`, for this commit |
 | `SHIP_PROBE_CLI` | none; required | God folder of the [release-probe world](#the-release-probe-world) |
 | `PLAYWRIGHT_BROWSERS_PATH` | none; required | Browsers folder. Preflight checks that it actually holds a Chromium executable |
 | `SHIP_ORIGIN` | `https://soul.game` | Public origin |
@@ -125,6 +162,7 @@ There is no host option. The host and operator paths come from the environment o
 | `SHIP_PROBE_PAGE`, `SHIP_POSTER_PAGE` | `/w/eden/` | Pages for the probe, and for the poster and stall |
 | `SHIP_OUT_ROOT` | `.local/ship` | Parent of the output folder |
 | `SHIP_PROBE_READY_S` | `600` | How long to wait for the probe to be ready |
+| `SHIP_HOST_MEMINFO` | `/proc/meminfo` | The host's memory figures for the rehearsal's cap (a test seam) |
 | `SHIP_HOST_ROOT`, `SHIP_HOST_DATA`, `SHIP_HOST_CONF`, `SHIP_HOST_UNIT`, `SHIP_HOST_TMP` | `/srv/sim-worlds`, `/srv/sim-worlds-data/production`, `/etc/sim-worlds/production.conf`, `sim-worlds@production`, `/tmp` | Paths on the host, passed to its scripts as arguments |
 | `SIM_PREBUILT_WEB_ROOT`, `MARS_WEB_SRC` | see [release.sh](#releasesh) | Read by `release.sh` |
 
@@ -133,10 +171,11 @@ There is no host option. The host and operator paths come from the environment o
 | preflight | Local guards: the host is set, the tree is clean, HEAD is `--sha`, the commit is on `origin/main`, the gate and ship receipts are clean for it, the probe folder and Chromium exist, every tool is present | Refused; nothing remote ran |
 | snapshot | Public healthz and read-only host metadata: stage link, config hash, registry identity, every database by name (`body-collections.sqlite` too), keeper. Writes `ROLLBACK.txt` | Stops |
 | stage | `release.sh production --no-activate` at base `/`; verifies the manifest locally and on the host; compares the host with the snapshot | Stops |
+| rehearse | `ship/host-rehearse.sh` on the host: boots a copy of every world's database with the staged tree (`boot-rehearsal.mjs`, 1200 ticks, fake minds, memory-capped scope, read-only on production; no database content leaves the host). The copies live in a `mktemp -d` directory of the run's own under `SHIP_HOST_TMP`, removed with everything in it when the run ends; nothing else is deleted. The scope keeps 3 GB free (the launcher's wake floor is 2.5 GB) and the rehearsal has `oom_score_adj` 1000. Every registered world must pass (an unreadable result is a stop, never a pass); a fork other than Eden's, or an unregistered data directory, is approximate and reported only. A boot over 60 s is flagged slow. Writes `rehearse.json`; the activation requires a passing one for this build | Stops |
 | backup | Row-verified compact copy of every database, `quick_check` on each, the same filenames as the snapshot | Stops |
 | probe-start | Starts `release-probe.mjs` and waits for `<out>/probe/ready` | Stops |
 | activate | Checks that the snapshot and backup are under an hour old and that nothing drifted, then runs `ship/host-activate.sh` on the host: one `activate.sh --reload`, one refresh of host health with the timer's own oneshot (`systemctl start sim-worlds-health@<stage>.service`, so a code recorded before the activation can't fail it), and a health check | Stops and reports the host's exit (below) |
-| probe-check | Reads the probe's exit | 3 stops (the release rolled back). Anything else is recorded and the run continues |
+| probe-check | Reads the probe's exit | 3 stops (the release rolled back: a watched page ended on another build). Anything else is recorded and the run continues. A watched page that answered an error when the probe started (a world that is down until this release fixes it) is retried every 5 s and marked when it first loads; one that never loads, or never names a build, is `notLoaded` or `noBuild` in `probe/report.json`: exit 1, never a rollback. A watcher's error pages before it is watched are reported as `errorPagesBeforeReady`, not counted against the release; fresh arrivals always count |
 | healthz | Public healthz reports this build, every world and `hostOk` | Stops |
 | walks | `ship/walk.mjs` on desktop and phone at dpr 1 and 2, then `checks.mjs walks` | Recorded |
 | poster | `ship/poster.mjs` three times, `poster-count.py`, `checks.mjs poster` | Recorded |
@@ -259,6 +298,7 @@ release.sh never prunes local or remote releases. Focused check: `node --test to
 |---|---|---|
 | `SIM_DEPLOY_HOST`, `SIM_DEPLOY_USER` | none / `root` | SSH target of the production host |
 | `SIM_WORLDS_BASE` | `/worlds` | Production path prefix |
+| `SIM_RELEASE_NO_INSTALL` | `0` | `1` stages without `install.sh` (units, timers, `daemon-reload`); dependencies are still installed. `ship.sh --no-switch` sets it |
 | `SIM_ASSETS_CDN_ENABLED` | `1` | `0` builds without the asset CDN for one release; other values are refused |
 | `SIM_ASSETS_CDN_ORIGIN` | `https://assets.eden.art` | CDN origin compiled into the build |
 | `VITE_EDEN_EXPERIENCE_WORLD_IDS` | the qualified Eden world id | Worlds that get the Eden experience; empty disables the check |

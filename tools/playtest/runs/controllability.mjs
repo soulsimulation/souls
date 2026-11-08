@@ -22,7 +22,7 @@ const RESOLUTION = new Set(['params.invalid', 'place.unknown', 'place.ambiguous'
   // also covers "no free seat near", which is a judgement: a seat's being taken has its own code, seat.none-free.
   'seat.none-in-place', 'seat.none-near', 'target.not-in-sight', 'swim.not-swimmable', 'swim.unavailable',
   // Engine codes that reach an act's answer through canPerform (ledger launch): the steps the world compiled from the command.
-  'target.unknown', 'action.invalid-params', 'action.unknown-verb', 'gait.invalid', 'body.motion-unavailable']);
+  'target.unknown', 'receipt.unknown', 'action.invalid-params', 'action.unknown-verb', 'gait.invalid', 'body.motion-unavailable']);
 // The world named or accepted the place and then found no way there. Not a state change unless the world moved, and the
 // world's own offer is what failed, so it counts against M1 under its own label (the #874 geometry sample folds in here).
 const ROUTE = new Set(['place.unreachable', 'route.unreachable', 'travel.unreachable', 'place.unwalkable', 'place.unsupported-floor', 'place.no-standing-room', 'room.no-standing-room', 'carry.no-route', 'carry.search-exhausted', 'use.no-approach', 'object.out-of-reach', 'tea.cup-unreachable',
@@ -34,7 +34,7 @@ const ROUTE = new Set(['place.unreachable', 'route.unreachable', 'travel.unreach
 // The world's state answering: a seat taken, a ride gone, hands full, a game in progress. Listed one by one on purpose, so a
 // new code is unclassified and named on the card until someone decides. Left out for that reason: carry.crew-too-small,
 // carry.crew-too-large, carry.too-tall and carry.ground-only, which an agent could read before asking.
-const STATE = new Set(`action.interrupted activity.not-reached bed.attachment-unavailable bed.native-berth-required bed.taken bed.yours bike.no-dock bike.none-left
+const STATE = new Set(`act.already-ended act.none-running act.not-started act.shared action.interrupted activity.not-reached bed.attachment-unavailable bed.native-berth-required bed.taken bed.yours bike.no-dock bike.none-left
 body.authority-changed body.changed body.moderated body.protected body.receipt-changed body.safe-standing-required body.source-slow body.source-unavailable body.unavailable body.withdrawn body.world-policy
 calendar.already-interested calendar.full calendar.over carry.hands-full carry.in-use carry.occupied
 chess.already-seated chess.illegal chess.in-progress chess.not-playing chess.not-your-piece chess.not-your-turn chess.seat-taken chess.seats-taken
@@ -49,7 +49,7 @@ painting.failed painting.identity-changed painting.no-easel painting.not-reached
 place.dynamic place.items-full place.marks-full pose.no-room
 presentation.already-reserved presentation.closed presentation.doors-closed presentation.ended presentation.entered presentation.full presentation.no-ticket presentation.not-open presentation.presenter presentation.standby-wait
 project.done project.unfinished receipt.lost-on-restart revision.stale
-ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.closed ride.departed ride.full ride.keeping-place ride.landing ride.not-aboard ride.not-boarding ride.on-ground ride.seated ride.steered ride.unavailable
+ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.climbing-in ride.closed ride.departed ride.full ride.keeping-place ride.landing ride.not-aboard ride.not-boarding ride.on-ground ride.seated ride.steered ride.unavailable
 seat.approach-busy seat.none-free seat.taken seat.yours shared.busy shared.full shared.left shared.not-member shared.not-ready shared.not-running shared.revision-changed shared.stop-asked shared.stop-requested shared.too-far
 site.under-construction sky.daylight sky.no-clock slot.none-free soul.faded soul.not-in-sight stall.released state.asleep state.changed state.safe-stop-timeout steer.unavailable surface.full swim.no-deep-middle
 tea.counter-blocked tea.cup-clean tea.cup-empty tea.cup-full tea.cup-not-down tea.cup-not-empty tea.hands-full tea.kettle-cold tea.kettle-empty tea.kettle-full tea.kettle-hot tea.kettle-not-down tea.kettle-on tea.no-bag tea.no-cup tea.no-kettle tea.no-tap tea.not-boiled tea.not-holding tea.tap-blocked

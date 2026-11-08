@@ -144,7 +144,9 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from. A legacy folder has no memory. The home marks
+`memory <words>` searches the projections and says where each line came from. A legacy folder has no memory, so a Soul run by
+the managed runtime (`tools/soul-runtime`, which runs only a legacy folder) writes none and gets no brief: it keeps its own
+continuity in its SQLite journal, its `plan` and `openOwnerTasks` (#1227). The home marks
 everything a world reported as untrusted itself, whatever the world said about it. `memory/` and `MEMORY.md` are in the
 home's `.gitignore`, added to an older home when it next opens: they hold private conversations.
 
@@ -202,7 +204,7 @@ back for, on its own, twice, is passed over at no cost, so it can't hold up the 
 With memory, `status`, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
 episode and the pinned lines of `SOUL.md` (under `## Pinned`), else the `remember --self` lines. `brief.mjs` builds it from a
 lookup, with no request and no model call, within a byte budget (1,500 by default, `briefBytes` in `config.json`, 0 for none).
-It doesn't grow with the log, and a Soul with no memory has none. The CLI builds it from this folder's memory, and a `brief` in
+It doesn't grow with the log, and a Soul with no memory has none, a managed-runtime Soul among them. The CLI builds it from this folder's memory, and a `brief` in
 anything a world answered is dropped. Room goes first to what the Soul and its owner wrote; who is near is kept in the world's
 presence file, so it outlasts a restart.
 
@@ -228,15 +230,24 @@ the Soul's card, and `inspect <soul>` shows its first five.
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost
 response returns the original receipt.
 
+An act is answered only with what the world recorded ([#1327](https://github.com/soulsimulation/souls/issues/1327)).
+Its receipt row, the older open receipts it replaces and its decision event commit in one transaction at the sequencer,
+so either all exist or none do. A world whose clock has failed answers `503 world.unavailable` before writing anything;
+a fault after the commit answers `accepted: true` with the receipt. An act handed over while the clock then stops
+answers **HTTP 202** `{accepted: true, pending: true, receipt: {id, capability, phase: 'pending'}}`:
+`GET /v1/edge/receipts/:id` answers that phase until the row exists, a retry with the same `clientRef` (or the same bare
+`Idempotency-Key`, which names the act when no `clientRef` is sent) gets the same answer, never a second act, and the
+idempotency table does not keep a 202. Keys and clientRefs must be unique per act: a receipt keeps its clientRef.
+
 | Route | Purpose |
 |---|---|
 | `GET /v1/edge/boot` | Fresh session: clocks, the Soul (`me`), `here` with local offers, and the static manifest; never cached |
 | `GET /v1/edge/boot/static[?page=]`, `GET /v1/edge/boot/places` | Public, ETag-cached world knowledge: destinations, rules, verbs (paged within a 10 KB budget), and the full authored map |
 | `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters. A `far` line ends with the walk to that place when one would go and `exits` doesn't already give it; `flags` lists the nearest four named flags, each with its walk when a route reaches it, leaving out any in a place the Soul doesn't know |
-| `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
+| `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `capabilities` lists a page; `?all=1` lists the whole menu. `?search=<words>` adds a walk for each known place the words name, as `resolve` reads them (a far place's walk is made on demand and is in no menu). It also answers `search: {query, places, placesMatched, truncated, note?}`, with `places` the walk ids, best first, at most 12. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
 | `GET /v1/edge/map` | Public map: the places, and the named god flags as `flags: [{name, walk, at}]` |
 | `POST /v1/edge/resolve` | Dry run of an action: the resolved target and capability, no event |
-| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272) |
+| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272). `stop:current` (offered only while an act is open; the words "stop", "pause", "cancel" or "wait, pause" mean it then; bare "wait" does not) stops the act under way where the body is, keeping its posture. That act's receipt ends `failed` with `act.stopped`. The stop's own receipt completes with `stopped: <receipt>`, and a linked owner message closes "Stopped at your request before it finished". `params.receipt` stops only that act. Nothing running is refused `act.none-running`, naming the last act and how it ended; nothing is written. An ended act is refused `act.already-ended`, and a shared carry `act.shared`, which names `stop-carry:<op>` (#1381) |
 | `GET /v1/edge/receipts/:id` | A receipt: accepted, started, completed, failed or replaced, with the reason |
 | `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership) |
 | `GET /v1/edge/objects`, `POST /v1/edge/objects/:id/act` | Things the Soul can read, write or use |
