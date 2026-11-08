@@ -52,8 +52,15 @@ gh workflow run gate.yml -f sha=<full sha> [-f baseline=<ref>] [-f scope=auto] [
 
 It shares release.yml's `release` concurrency group (one gate at a time), refuses a non-dry run once the day's runs of
 both workflows reach `modal_gates_per_day` (PROOF-POLICY.yml), keeps the baseline cache across runs with
-`actions/cache` keyed by baseline commit and Node version, and uploads `gate.log` and `receipt.json` as the
-`gate-<sha>` artifact. It ships nothing; the ship step is tracked by #519.
+`actions/cache` keyed by baseline commit and Node version, and uploads `gate.log`, `receipt.json` and the last 80 lines
+of each driver log (Modal links and app ids cut) as the `gate-<sha>` artifact. It ships nothing; the ship step is
+tracked by #519.
+
+Two inputs the laptop takes from its own environment come from elsewhere on the runner. The pinned campus inputs
+(`tools/test-harness/campus-assets.json`) are fetched from the asset CDN by their content keys, checked against the pin
+and handed to `remote-suite.sh` as `CAMPUS_ASSETS_SRC`; without them the driver exits 2 before Modal starts. The
+Modal client is `modal==1.5.2`, the version the laptop gates ran, unless the `MODAL_CLIENT_VERSION` repository variable
+names another.
 
 ### What blocks
 

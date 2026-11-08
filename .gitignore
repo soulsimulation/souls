@@ -73,6 +73,8 @@ deploy.env
 # lived beside them is dropped, never published or committed
 /mars/viewer/public/history/
 /mars/viewer/public/2020/
+# the campus component manifest, a pinned gate input (tools/test-harness/campus-assets.json; test set)
+/mars/viewer/public/modular/components.json
 # the small own-work binaries that stay in git (tools/assets/manifest.test.mjs holds the same list)
 !/apps/web/pwa/icon-*.png
 !/apps/web/src/media/gallery-loop.mp4

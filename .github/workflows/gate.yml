@@ -102,11 +102,38 @@ jobs:
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          MODAL_CLIENT_VERSION: ${{ vars.MODAL_CLIENT_VERSION }}
+          # The client the laptop gates ran (#1303); the repository variable overrides it.
+          MODAL_CLIENT_VERSION: ${{ vars.MODAL_CLIENT_VERSION || '1.5.2' }}
         run: |
           python3 -m pip install --quiet "modal${MODAL_CLIENT_VERSION:+==$MODAL_CLIENT_VERSION}"
           profile=$(grep -oE "MODAL_PROFILE: '[^']+'" tools/test-harness/release-gate.mjs | head -1 | cut -d"'" -f2)
           modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "${profile:-default}" --activate --no-verify
+      # remote-suite.sh stages the pinned campus inputs (tools/test-harness/campus-assets.json) from CAMPUS_ASSETS_SRC and
+      # exits 2 without them (#1303). Fetch each pin from the asset CDN by its content key: the identity key
+      # assets/<sha[:2]>/<sha>.<ext>, else a world-scoped key from tools/cdn/world-scoped.json. Bytes and sha256 must match
+      # the pin; remote-suite.sh checks them again. Inline because the workspace is the candidate, not this workflow's ref.
+      - name: Campus inputs
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          [ -f tools/test-harness/campus-assets.json ] || { echo "no campus pins at this commit"; exit 0; }
+          dir="$RUNNER_TEMP/campus"; mkdir -p "$dir"
+          node --input-type=module - "$dir" <<'JS'
+          import { createHash } from 'node:crypto'; import { existsSync, readFileSync, writeFileSync } from 'node:fs'; import { join } from 'node:path';
+          const dir = process.argv[2], pins = JSON.parse(readFileSync('tools/test-harness/campus-assets.json', 'utf8')).files, cdn = 'https://assets.eden.art';
+          const scoped = existsSync('tools/cdn/world-scoped.json') ? JSON.parse(readFileSync('tools/cdn/world-scoped.json', 'utf8')).objects ?? [] : [];
+          for (const [name, pin] of Object.entries(pins)) {
+            const ext = name.split('.').at(-1), keys = [`assets/${pin.sha256.slice(0, 2)}/${pin.sha256}.${ext}`, ...scoped.filter((o) => o.sha256 === pin.sha256).map((o) => `assets${o.world}/${pin.sha256}.${ext}`)];
+            let ok = false;
+            for (const key of keys) {
+              const r = await fetch(`${cdn}/${key}`); if (!r.ok) { console.log(`${name}: ${key} ${r.status}`); continue; }
+              const bytes = Buffer.from(await r.arrayBuffer()), sha = createHash('sha256').update(bytes).digest('hex');
+              if (bytes.length !== pin.bytes || sha !== pin.sha256) { console.log(`${name}: ${key} is ${bytes.length} bytes, sha256 ${sha}`); continue; }
+              writeFileSync(join(dir, name), bytes); console.log(`${name}: ${key} ok`); ok = true; break;
+            }
+            if (!ok) { console.log(`::error::campus input ${name} (sha256 ${pin.sha256}) is not on the asset CDN`); process.exit(1); }
+          }
+          JS
+          echo "CAMPUS_ASSETS_SRC=$dir" >> "$GITHUB_ENV"
       - name: Release gate
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
@@ -127,6 +154,16 @@ jobs:
           kill $beat
           grep -E '^RELEASE_GATE ' "$RUNNER_TEMP/gate.log" | tail -1 >> "$GITHUB_STEP_SUMMARY" || true
           exit $status
+      # The last lines of each Modal driver log, so a driver failure says why (#1303). Modal app links and ids are cut:
+      # they name the workspace. The full logs stay on the runner.
+      - name: Driver log tails
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/gate-driver-tail"
+          for side in baseline candidate; do
+            f="$RUNNER_TEMP/gate/$side/gate-driver.log"; [ -f "$f" ] || continue
+            tail -n 80 "$f" | sed -E 's#https?://[^ ]*modal\.com[^ ]*#<modal-url>#g; s#(^|[^A-Za-z0-9])ap-[A-Za-z0-9]{8,}#\1<modal-app>#g' > "$RUNNER_TEMP/gate-driver-tail/$side.log"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -134,4 +171,5 @@ jobs:
           path: |
             ${{ runner.temp }}/gate.log
             ${{ runner.temp }}/gate/**/*.json
+            ${{ runner.temp }}/gate-driver-tail/*.log
           if-no-files-found: ignore
