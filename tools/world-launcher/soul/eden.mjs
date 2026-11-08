@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.23.8";
+const VERSION = "2.24.3";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2848,6 +2848,9 @@ async function act(...argv) {
       return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}) };
     }
   }
+  // #1337 (P9): a ride steer the world would refuse is answered here, in the world's words, and never sent
+  const early = await steerPreflight(parsed);
+  if (early) return early;
   const body = { ...parsed, strict: true, clientRef: randomUUID() };
   // D3: the owner message this act serves; the world writes its result line when the act ends, unless you write one first.
   // D3b (cloud fix-r3 trio tam-003: a later walk closed "walk with Mira" as Done): by default only the first act the world
@@ -2862,10 +2865,11 @@ async function act(...argv) {
   const d = ok(r, "act");
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   if (!d.accepted) {
+    noteSteerRefusal(parsed, d);
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled ? { stalled: d.world.stalled } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
@@ -2876,6 +2880,37 @@ async function act(...argv) {
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
+// GET /v1/edge/objects/<id>, whose actions carry the world's `blocked` code and reason); a failed or slow read changes
+// nothing. A steer the world refused for its target (no landing spot, no water route, out of bounds, an unknown place,
+// bad params) is not sent again with the same target for STEER_REFUSED_MS: the CLI answers with the world's own refusal.
+// Another target, another ride, or a refusal that passes (someone else steering, on the ground) is sent as usual.
+export const STEER_REFUSED_MS = 5 * 60_000;
+export const STEER_TARGET_REFUSALS = new Set(["ride.no-landing-spot", "ride.no-water-route", "ride.out-of-bounds", "ride.params", "ride.steer-params", "steer.unknown-place", "steer.params"]);
+const STEER = /^object:([^:\s]+):steer$/;
+const steerKey = (p) => `${String(p.capability).trim()} ${JSON.stringify(Object.keys(p.params ?? {}).sort().map((k) => [k, p.params[k]]))}`;
+async function steerPreflight(parsed) {
+  const m = STEER.exec(String(parsed.capability ?? "").trim());
+  if (!m) return null;
+  const key = steerKey(parsed), held = (load().refusedSteers ?? []).find((x) => x.key === key && Date.now() - x.at < STEER_REFUSED_MS);
+  if (held) return { accepted: false, code: held.code, reason: held.reason, repeat: "refused", note: "The world refused this same steer; it was not sent again. Steer somewhere else, or tell your person why." };
+  const r = await call(`/v1/edge/objects/${encodeURIComponent(m[1])}`, { retry: false, timeoutMs: 5_000 }).catch(() => null);
+  const a = r?.status === 200 ? (r.data?.object?.actions ?? []).find((x) => x?.action === "steer") : null;
+  return a && a.available === false && a.blocked?.code ? { accepted: false, code: a.blocked.code, reason: a.blocked.reason, preflight: true } : null;
+}
+function noteSteerRefusal(parsed, d) {
+  if (!STEER.test(String(parsed.capability ?? "").trim()) || !STEER_TARGET_REFUSALS.has(d.code)) return;
+  const key = steerKey(parsed), kept = (load().refusedSteers ?? []).filter((x) => x.key !== key && Date.now() - x.at < STEER_REFUSED_MS);
+  save({ refusedSteers: [...kept, { key, code: d.code, reason: d.reason, at: Date.now() }].slice(-10) });
+}
+/** The landing the world chose, in one sentence (#1324's `result.landing`: {requested, at, adjustedM, reason}). */
+export function landingSentence(l, done) {
+  const m = Number(l?.adjustedM);
+  if (!l || !(m > 0)) return null;
+  const name = (x) => typeof x === "string" ? x : x?.label ?? x?.name ?? x?.place ?? null, asked = name(l.requested), at = name(l.at);
+  return `${done ? "Landed" : "Lands"} ${Math.round(m)} m from ${asked ?? "where I asked"}${at ? `, at ${at}` : ""}${l.reason ? `: ${String(l.reason).replace(/[.\s]+$/, "")}` : ""}.`;
 }
 
 /** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
@@ -2930,7 +2965,12 @@ export function brief(out) {
     ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
-  for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
+  // #1337: where the world adjusted what was asked (a landing moved to clear ground, words read as another id), one sentence;
+  // and a world whose clock has stalled says so
+  const adjusted = landingSentence(out.landing ?? rec?.result?.landing, fin) ?? (out.resolved?.note && out.resolved.to !== out.resolved.from ? String(out.resolved.note).slice(0, 200) : null);
+  if (adjusted) o.adjusted = adjusted;
+  if (out.stalled) o.stalled = `The world's clock has not moved for ${Math.max(1, Math.round((Number(out.stalled.ageMs) || 0) / 1000))} s; what I asked may wait until it moves again.`;
+  for (const k of ["resolved", "receipt", "stalled"]) if (JSON.stringify(o).length > 600) delete o[k];
   const over = JSON.stringify(o).length - 600;
   if (over > 0 && o[key]) o[key] = o[key].slice(0, Math.max(40, o[key].length - over - 1)) + "…";
   if (out.events?.length || out.gap) {
