@@ -138,7 +138,8 @@ A listener's `enqueue` during `afterTick` lands in the next tick, except under `
 `drainInputs()` runs a second time before the frontier is persisted (`world.ts:497`).
 
 **Replay.** `fold.ts` is the single fold used live, at restart and in tests: `boot()` loads the latest row of `snapshots`
-(engine runtime + minds + kernel + `extra`, `SnapshotBody`) and re-applies later `events` rows. `replayKernel` rebuilds
+(engine runtime + minds + kernel + `extra`, `SnapshotBody`) and re-applies later `events` rows. A snapshot that won't
+restore is skipped for the next older one, then genesis, each as a `recovery` glitch `boot.snapshot-unrestorable` (#1379). `replayKernel` rebuilds
 `KState` from the log alone with the world's *pinned* vocabulary (the first `rules` event carrying `vocabulary`), never
 the code's current one (`fold.ts:20-33`). The engine replays because every body movement started from a logged
 `decision` and continues deterministically inside `Engine.step()`.

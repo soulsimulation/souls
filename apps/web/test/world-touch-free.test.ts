@@ -249,3 +249,27 @@ test('pinch zooms like the wheel toward the point between the fingers; double-ta
     assert.ok(at.y < .1, 'flew to the ground point under the second tap');
   } finally { f.rts.dispose(); }
 });
+
+// #1387: the stick's home ring shows exactly while a lower-left touch would make the stick (Free, touch screen, no stick up).
+test('the stick home ring: Free on a touch screen only, hidden while the stick is up, gone on dispose', () => {
+  const made: { hidden: boolean; removed: boolean; style: Record<string, string> }[] = [];
+  const el = () => { const e = { hidden: false, removed: false, style: {} as Record<string, string>, className: '', setAttribute() {}, append() {}, remove() { e.removed = true; } }; made.push(e); return e; };
+  const doc = Object.assign(new EventTarget(), { createElement: el, defaultView: { matchMedia: (q: string) => ({ matches: q === '(pointer: coarse)' }) } });
+  const canvas = Object.assign(new EventTarget(), { ownerDocument: doc, getBoundingClientRect: () => VIEW }) as unknown as HTMLCanvasElement;
+  const host = { ownerDocument: doc, getBoundingClientRect: () => VIEW, append() {} } as unknown as HTMLElement;
+  let free = true;
+  const camera: TouchCamera = { setStick() {}, walking: false, setTouchHeld() {}, touchLook() {}, touchLookEnd() {}, touchPinch() {}, touchRise() {}, touchFly() {} };
+  const t = new WorldTouchFree(canvas, host, { camera, free: () => free, soulAt: () => false });
+  t.sync(); assert.equal(t.state.home, true); const ring = made[0]; assert.equal(ring.hidden, false);
+  const ev = (type: string, x: number, y: number, t: number) => Object.defineProperty(Object.assign(new Event(type, { cancelable: true }), { pointerType: 'touch', pointerId: 1, clientX: x, clientY: y }), 'timeStamp', { value: t });
+  const down = (x: number, y: number) => canvas.dispatchEvent(ev('pointerdown', x, y, 0));
+  down(60, 700); t.sync(); assert.equal(t.state.stick, true); assert.equal(ring.hidden, true, 'the floating stick replaces it');
+  doc.dispatchEvent(ev('pointerup', 60, 700, 100));
+  t.sync(); assert.equal(ring.hidden, false, 'back when the thumb lifts');
+  free = false; t.sync(); assert.equal(ring.hidden, true, 'Follow or Broadcast: no stick, no ring');
+  free = true; t.sync(); assert.equal(ring.hidden, false);
+  t.dispose(); assert.equal(ring.removed, true);
+  const fine = Object.assign(new EventTarget(), { createElement: el, defaultView: { matchMedia: () => ({ matches: false }) } });
+  const t2 = new WorldTouchFree(Object.assign(new EventTarget(), { ownerDocument: fine, getBoundingClientRect: () => VIEW }) as unknown as HTMLCanvasElement, { ownerDocument: fine, getBoundingClientRect: () => VIEW, append() {} } as unknown as HTMLElement, { camera, free: () => true, soulAt: () => false });
+  t2.sync(); assert.equal(t2.state.home, false, 'a mouse never sees the ring'); t2.dispose();
+});

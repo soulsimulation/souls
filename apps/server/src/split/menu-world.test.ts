@@ -26,6 +26,8 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   'ambientChoice', 'openShared', 'commitShared',
   // #1150: they tell Souls of a rewind or a relocation, called only from onRecovery on main
   'onRelocated', 'onRewound',
+  // #1369: it tells Souls of a quarantine, called only from onRecovery on main
+  'onQuarantined',
   // #1324: the steer act's landing preview (previewSteerLandingV1), called only from the ride object's steer act on main
   'steerLanding']);
 
