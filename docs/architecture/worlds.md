@@ -30,6 +30,11 @@ The split camera control shows Broadcast, Free or Following a Soul (and loading/
 Its main segment switches Broadcast → Free or returns Free/Following → Broadcast in one click. The chevron offers
 explicit modes and Camera controls, including the existing movement guide, reset and device fullscreen option.
 Dragging, zooming and movement keys retain their existing camera behavior.
+Follow is coupled until the viewer pulls the camera out (#1316, `WorldFollow.ts`). Coupled, the camera finds a clear
+view of the Soul, coming in close or following it into a house, on eased glides (no cut except an explicit jump such as
+a new Follow). A zoom out or a drag round decouples it: it keeps the viewer's angle and distance, carried along with the
+Soul, and occlusion never pulls it back in, also around a balloon basket or other ride. Zooming in stays coupled. A
+short cue says so, and Follow again (the chevron menu or the Soul's card) couples it.
 Free has no wall near the map's edge: a lost-camera guard (`WorldRtsCamera.keepPivotInBounds`) keeps the eye within one
 far-zoom limit (320–1,400 m) of the world's ground rectangle, far beyond the map; where the pivot sits does not matter.
 On a touch screen in Free (`apps/web/src/touch/WorldTouchFree.ts`), a touch that starts in the lower-left 45 % of the
