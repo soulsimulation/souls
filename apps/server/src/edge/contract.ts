@@ -1,5 +1,6 @@
 // EDGE-CONTRACT-v1 shared surface (team/CONTRACTS/EDGE-CONTRACT-v1.md).
 // Owned by Core-Ledger; Core-Comms reads it and proposes changes via INBOX-core.
+import {AsyncLocalStorage} from 'node:async_hooks';
 import type {Context} from 'hono';
 import type {WorldHost} from '../world.ts';
 import type {Db} from '../db.ts';
@@ -67,3 +68,17 @@ export class EdgeError extends Error {readonly status: number; readonly code: st
 export const SEAT_KEPT = 'seat.kept';
 export const edgeErrorOf = (e: EdgeError) => ({code: e.code, message: e.message, ...e.extra});
 export const edgeBody = <T extends object>(body: T) => ({contract: EDGE_CONTRACT, ...body});
+
+/** #1327: the receipt an act request committed, per request (the act route runs `L.act` inside it). A fault after this
+ *  point answers with that receipt, never a 503 that reads as "not done". Set only where the request itself commits. */
+export const actCommitScope = new AsyncLocalStorage<{receipt?: string}>();
+/** #1327: an act the world was handed and has not recorded yet (its clock stopped). Answered as HTTP 202 with the
+ *  receipt id it will have; a same-key retry gets the same answer, never a second act. */
+export class ActPending extends Error {
+  readonly body: {accepted: true; pending: true; receipt: {id: string; capability: string; phase: 'pending'}; reason: string};
+  constructor(id: string, capability: string) {
+    super('act.pending');
+    this.body = {accepted: true, pending: true, receipt: {id, capability, phase: 'pending'},
+      reason: 'The world has this act but has not recorded it yet: its clock is not moving. Read its receipt by id, or send the same request with the same key; it is done at most once.'};
+  }
+}

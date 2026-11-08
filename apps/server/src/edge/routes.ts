@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {inspectFrame} from './perception/inspect.ts';
 import {freeTextAct, resolveCandidates} from './intents/strict.ts';
 import type {Context, Hono} from 'hono';
-import {EDGE_CONTRACT, EdgeError, edgeBody, type EdgeDeps, type EdgeReceipt, type EdgeSoul, edgeErrorOf} from './contract.ts';
+import {ActPending, actCommitScope, EDGE_CONTRACT, EdgeError, edgeBody, type EdgeDeps, type EdgeReceipt, type EdgeSoul, edgeErrorOf} from './contract.ts';
 import type {EdgeLedger} from './ledger/ledger.ts';
 import {registerEdgeComms} from './comms/index.ts';
 import {hereFrame,hereBodyFrame} from './perception/here.ts';
@@ -66,6 +66,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
       return c.json(lv && lv !== 'green' && !('world' in out) ? {...out, world: worldBlock(lv)} : out);}
     catch (error) {
       if (error instanceof EdgeError) return c.json({contract: EDGE_CONTRACT, error: edgeErrorOf(error)}, error.status as 400);
+      // #1327: handed to the world, not yet recorded: 202 with the receipt id it will have (never kept as the key's answer)
+      if (error instanceof ActPending) return c.json({contract: EDGE_CONTRACT, ...error.body}, 202);
       console.error('[edge] ledger fault', c.req.method, c.req.path, error instanceof Error ? (error.stack ?? error.message).split('\n').slice(0, 4).join(' | ') : String(error));
       return c.json({contract: EDGE_CONTRACT, error: {code: 'unavailable', message: 'the ledger could not answer; retry'}}, 503);
     }
@@ -77,10 +79,20 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     // CTRL-1 (#1093): a strict client (eden 2.9+) acts on offered ids only; words go through /v1/edge/resolve
     if (strict === true && !freeTextAct()) {const no = L.offerGate(s, input); if (no) return no;}
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
-    const out = await L.act(s, input) as {accepted?: boolean; receipt?: EdgeReceipt};
-    // D3c: `forDefault` = the CLI linked it by default; `open` = this act is not the message's last step (the card stays open)
-    if (forMessage !== undefined && loop && out?.accepted && out.receipt) {const {open} = loop.link(s, out.receipt, forMessage as string, forDefault === true, secondsOf(input.params)); return {...out, for: forMessage, ...(open ? {open} : {})};}
-    return out;}));
+    // #1327: once this request commits a receipt, that receipt is its answer: a fault after the commit point answers
+    // accepted with it, never a 503 (or a refusal) that reads as "not done". Faults before it keep their own answer.
+    const scope: {receipt?: string} = {};
+    try {return await actCommitScope.run(scope, async () => {
+      const out = await L.act(s, input) as {accepted?: boolean; receipt?: EdgeReceipt};
+      // D3c: `forDefault` = the CLI linked it by default; `open` = this act is not the message's last step (the card stays open)
+      if (forMessage !== undefined && loop && out?.accepted && out.receipt) {const {open} = loop.link(s, out.receipt, forMessage as string, forDefault === true, secondsOf(input.params)); return {...out, for: forMessage, ...(open ? {open} : {})};}
+      return out;});}
+    catch (error) {
+      const receipt = scope.receipt && !(error instanceof ActPending) ? L.receipt(s.soulId, scope.receipt) : null;
+      if (!receipt) throw error;
+      console.error('[edge] act committed, then its answer failed; answered with its receipt', receipt.id, error instanceof Error ? (error.stack ?? error.message).split('\n').slice(0, 3).join(' | ') : String(error));
+      return {accepted: true, receipt, note: 'The world took this act; part of its answer could not be put together. Its receipt is the record.'};
+    }}));
   // perception/1 + intents/1 (Core-A, EDGE-CONTRACT-v1 §8): a compact first-person frame, and the dry run of act.
   app.get('/v1/edge/here', wrap(c => {const s = deps.soul(c); limit(s, 'here', 240);
     const view=c.req.query('view'),include=c.req.query('include');
@@ -93,7 +105,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // knowledge/1: look around / explore — more of what is near, places close by, and secret places found (remembered).
   app.get('/v1/edge/around', wrap(c => {const s = deps.soul(c); limit(s, 'around', 30); const to = c.req.query('to'); return {tick: deps.host.engine.world.tick, around: aroundFrame(L, s), ...(to !== undefined ? {route: routeFrame(L, s, to)} : {})};}));
   app.post('/v1/edge/resolve', wrap(async c => {const s = deps.soul(c); limit(s, 'resolve', 120); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); }); if (!body || typeof body !== 'object' || (body.verb === undefined && body.capability === undefined)) throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); const resolve = L.intents.dryRun(s, body); return {tick: deps.host.engine.world.tick, resolve: {...resolve, candidates: resolveCandidates(L, s, resolve), ...(freeTextAct() ? {freeTextAct: true} : {})}};}));
-  app.get('/v1/edge/receipts/:id', wrap(c => {const s = deps.soul(c); const r = L.receipt(s.soulId, c.req.param('id') ?? ''); if (!r) throw new EdgeError(404, 'not-found', 'no such receipt for this Soul'); return {receipt: r};}));
+  app.get('/v1/edge/receipts/:id', wrap(c => {const s = deps.soul(c); const id = c.req.param('id') ?? '', r = L.receipt(s.soulId, id) ?? L.pendingReceipt(s.soulId, id); if (!r) throw new EdgeError(404, 'not-found', 'no such receipt for this Soul'); return {receipt: r};}));
   // Public and read often: it revalidates. The answer's own bytes are the tag, so a Soul that changed never reads as unchanged.
   const publicSoul = wrap(c => L.publicSoul(c.req.param('soulId') ?? ''));
   app.get('/v1/edge/public/souls/:soulId', async c => {
