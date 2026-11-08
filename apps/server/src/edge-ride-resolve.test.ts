@@ -21,25 +21,55 @@ async function setup(t: {after(fn: () => void): void}) {
   const ledger = new EdgeLedger(f.host, f.db), app = new Hono();
   const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, soul: edgeSoulResolver(f.host, f.souls, c => c.req.header('authorization')?.replace(/^Bearer\s+/i, '')), ledger});
   t.after(() => { comms.close(); f.host.stop(); f.db.close(); });
-  comms.objects.create({id: 'ride-test', kind: 'ride', name: 'Balloon', placeId: 'world', params: {carrier: 'eden-balloon'}});
+  comms.objects.create({id: 'ride-test-balloon', kind: 'ride', name: 'Balloon', placeId: 'world', params: {carrier: 'eden-balloon'}});
   const call = async (path: string, body?: unknown) => { const r = await accept(f.host, Promise.resolve(app.request(path, body === undefined ? {headers: {authorization: 'Bearer ' + token}} : {method: 'POST', headers: {authorization: 'Bearer ' + token, 'content-type': 'application/json'}, body: JSON.stringify(body)}))); return await r.json() as any; };
   const ent = () => f.host.engine.world.entities as Record<string, any>, balloon = () => ent()['eden-balloon'].carrier;
   const tick = (n: number, until?: () => boolean) => { for (let i = 0; i < n && !until?.(); i++) f.host.tickOnce(); };
   return {f, row, ledger, comms, call, balloon, tick, actor: row.entity_id};
 }
 
-test('probe', {timeout: 180000}, async t => {
+const rideIds = (r: any) => [r.resolve.would, ...(r.resolve.candidates ?? [])].filter(Boolean).filter((c: any) => (c.capability ?? c.id) === 'object:ride-test-balloon:start');
+const pos = (q: Awaited<ReturnType<typeof setup>>, id: string) => {const p = (q.f.host.engine.world.entities as Record<string, any>)[id].pose.p; return [p[0], p[2]] as [number, number];};
+
+test('I5: from lift-off on, every tick, resolve answers start not available (ride.not-boarding)', {timeout: 180000}, async t => {
   const q = await setup(t);
-  const before = await q.call('/v1/edge/resolve', {capability: 'start balloon ride'});
-  console.log('BEFORE', JSON.stringify(before.resolve).slice(0, 800));
-  const joined = await q.call('/v1/edge/act', {capability: 'object:ride-test:join', clientRef: 'join'}); assert.equal(joined.accepted, true);
+  assert.equal((await q.call('/v1/edge/act', {capability: 'object:ride-test-balloon:join', clientRef: 'join'})).accepted, true);
   q.tick(3000, () => q.ledger.aboard(q.actor)?.riderPhase === 'seated');
-  q.balloon().departAtTick = q.f.host.engine.world.tick; q.tick(200, () => q.balloon().phase === 'aloft'); assert.equal(q.balloon().phase, 'aloft');
-  q.tick(100);
-  const r = await q.call('/v1/edge/resolve', {capability: 'start balloon ride'});
-  console.log('ALOFT', JSON.stringify(r.resolve).slice(0, 1500));
-  const caps = await q.call('/v1/edge/capabilities');
-  console.log('CAPS', JSON.stringify(caps.capabilities.filter((c: any) => c.id.startsWith('object:ride-test'))).slice(0, 800));
-  const act = await q.call('/v1/edge/act', {capability: 'object:ride-test:start'});
-  console.log('ACT', JSON.stringify(act).slice(0, 300));
+  // seated, still boarding: the start is on offer
+  const seated = await q.call('/v1/edge/resolve', {capability: 'start balloon ride'});
+  assert.ok(rideIds(seated).length, JSON.stringify(seated.resolve).slice(0, 400));
+  for (const c of rideIds(seated)) assert.equal(c.available, true, JSON.stringify(c));
+  q.balloon().departAtTick = q.f.host.engine.world.tick;
+  let checked = 0;
+  for (let i = 0; i < 200 && checked < 40; i++) {
+    q.f.host.tickOnce();
+    if (q.balloon().phase === 'boarding') continue;
+    const r = await q.call('/v1/edge/resolve', {capability: 'start balloon ride'}), cs = rideIds(r);
+    assert.ok(cs.length, `tick ${i} (${q.balloon().phase}): ${JSON.stringify(r.resolve).slice(0, 400)}`);
+    for (const c of cs) {assert.equal(c.available, false, `tick ${i} (${q.balloon().phase}): ${JSON.stringify(c)}`); assert.equal(c.blocked?.code, 'ride.not-boarding');}
+    checked++;
+  }
+  assert.ok(checked >= 40, `checked ${checked} ticks after lift-off`);
+  assert.equal((await q.call('/v1/edge/act', {capability: 'object:ride-test-balloon:start'})).code, 'ride.not-boarding');
+});
+
+test('I6: a rider is 0 m from its ride; anyone else is measured to the carrier where it is now', {timeout: 180000}, async t => {
+  const q = await setup(t);
+  // on the ground: the join's distance is to the basket, not to the ride's place (here the whole world's centre)
+  const ground = await q.call('/v1/edge/resolve', {capability: 'object:ride-test-balloon:join'}), d0 = ground.resolve.would.distance;
+  const me = pos(q, q.actor), basket = pos(q, 'eden-balloon'), straight = Math.hypot(basket[0] - me[0], basket[1] - me[1]);
+  assert.ok(typeof d0 === 'number' && d0 >= straight - 3 && d0 <= straight * 1.5 + 6, `join distance ${d0} vs ${straight.toFixed(1)} m to the basket: ${JSON.stringify(ground.resolve.would)}`);
+  assert.equal((await q.call('/v1/edge/act', {capability: 'object:ride-test-balloon:join', clientRef: 'join'})).accepted, true);
+  q.tick(3000, () => q.ledger.aboard(q.actor)?.riderPhase === 'seated');
+  const check = async (tag: string) => {
+    for (const id of ['object:ride-test-balloon:start', 'object:ride-test-balloon:leave', 'object:ride-test-balloon:join']) {
+      const w = (await q.call('/v1/edge/resolve', {capability: id})).resolve.would;
+      if (!w) continue;
+      assert.equal(w.distance, 0, `${tag} ${id}: ${JSON.stringify(w)}`); assert.equal(w.route, 'aboard');
+    }
+  };
+  await check('seated');
+  q.balloon().departAtTick = q.f.host.engine.world.tick; q.tick(400, () => q.balloon().phase === 'aloft'); assert.equal(q.balloon().phase, 'aloft');
+  q.tick(200);
+  await check('aloft');
 });
