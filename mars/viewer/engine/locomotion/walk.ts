@@ -13,6 +13,7 @@ import {bodyProfile,bodySpatial} from '../bodies/navigation.ts';
 //   traffic   : single-file passages are exclusive resources per direction (yield, never oscillate)
 //   animation : consumers read pose + human.activity; they never write positions
 import { blockedWait, publishedWaitsFor } from '../runtime/waits.ts';
+import { guardBodyStep } from '../runtime/static-step.ts';
 import { z } from 'zod';
 import { pointInObb, add2, angleDelta, clamp, cross2, dist2, dot2, heading, len2, norm2, rot2, scale2, sub2, wrapAngle, type OBB2, type Vec2, hypot } from '../core/math.ts';
 import type { ActionDef, Diagnostic, StepResult } from '../actions/types.ts';
@@ -51,7 +52,6 @@ const FACE_LOOK = 0.3; // m: heading aims along the chord to the path point this
 /** Ground speed (m/s) below which a walker is not shown walking: activity 'walk' needs ≥ WALK_MIN. */
 export const WALK_MIN = 0.08;
 const LOOK_TIME = 1.5; // s of look-ahead along the corridor for standing people, loads, geometry
-const STATIC_TOL = 0.03; // m: the static-clearance invariant's tolerance (runtime/invariants.ts)
 const STOP_GAP = 0.02; // m kept before the exact contact point of a hazard when stopping for it
 const VEHICLE_GAP = 1.5; // m body gap to a vehicle being driven within which a walker slows (look-ahead included)
 const VEHICLE_WALK = 0.5; // m/s walking speed near a vehicle that is being driven
@@ -993,10 +993,11 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
   // from a start inside the radius runs its first leg straight to the nearest standable cell (spatial/path.ts snap), and
   // past a column corner that leg can cut into a beam end (chiba 2022, planned round people). The walker holds and
   // replans instead (as for a stale corridor). A step it takes here would be a collision.human-static violation.
+  // #1332: the rule is runtime/static-step.ts guardBodyStep, the one every body step goes through (on this walker's own grid and radius).
   if (p !== cur) {
-    const cn = clearanceAt(g, p);
-    if (cn < r - STATIC_TOL && cn < clearanceAt(g, cur) - 1e-9) {
-      geoBlock ??= nearestBlocker(g, p) ?? 'geometry';
+    const guard = guardBodyStep(rt, a, cur, p, { grid: g, radius: r });
+    if (guard.held) {
+      geoBlock ??= guard.blocker!;
       ex.s = prevS;
       ex.offset = bodyOff;
       ex.v = 0;
