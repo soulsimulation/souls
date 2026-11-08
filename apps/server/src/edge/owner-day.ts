@@ -58,7 +58,7 @@ export const plain = (n: string) => {
 // hours held is exhausted), then known codes by full code or by their last part, then the engine's own sentence without the code.
 const PLAIN_REASON: Record<string, string> = {
   'not-still': 'still moving: stand still first', 'no-room': 'no room there', 'hands.full': 'hands full: put something down first',
-  'hands.empty': 'nothing in hand to do that with', 'walk.stuck': 'got stuck on the way', 'walk.obstacle': 'something was in the way',
+  'hands.empty': 'nothing in hand to do that with', 'walk.stuck': 'got stuck on the way', 'swim.stuck': 'got stuck on the way', 'walk.obstacle': 'something was in the way',
   'walk.goal-occupied': 'someone was already standing there', 'slot.none-free': 'no free spot there', 'slot.none': 'no free spot there',
   'traffic.person': 'gave way to someone passing', 'traffic.vehicle': 'gave way to a vehicle',
   'traffic.yield': 'gave way to someone passing', 'soul.faded': 'it had faded', 'conversation.out-of-range': 'too far away to talk',

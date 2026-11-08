@@ -39,6 +39,10 @@ const STUCK_RADIUS = 0.34;
 /** D2: a seat this close (m) with no enclosure boundary between is "here" for sit:here: a few steps (a fire-circle log, the
  *  bench by the fountain), never the 30 m walk to a chair in another house. 3 m failed the party and activities gates. */
 export const HERE_SEAT_M = 8;
+/** #1288: a body whose swim_to the engine holds `swim.occupied` (another body in its way in the water) this long ends its swim:
+ *  30 s, as a walk with no headway does. */
+export const SWIM_HELD_TICKS = 600;
+const SWIM_STUCK_REASON = 'The swim was held up for 30 seconds by someone in the way in the water, so it stopped; choose another way or somewhere else.';
 const STUCK_REASON = 'The walk made no headway for 30 seconds, even after looking for another way from where it stood; choose another way or somewhere else.';
 import {EdgeError, SEAT_KEPT, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
 import {CATALOG} from '../../../../../mars/viewer/engine/world/catalog.ts';
@@ -793,7 +797,34 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }catch{this.contactPending.delete(id);this.update(id,{phase:'failed',code:'contact.failed',reason:'The world could not apply the bound contact.'});}
     }
   }
+  /** #1288: bodies whose swim_to is held `swim.occupied`, with the tick it was first seen held. The engine's swim waits for ever
+   *  behind a body that stays put, and a repeat answers with the act under way (#1272), so the ledger ends a swim held 30 s
+   *  with the same logged 'edge-stop' a new act would use: no engine state and no new rule, so a log replays exactly. Keyed on
+   *  the held record (a go-near from deep water lowers to a swim_to child, held the same way), never the receipt: a walk to
+   *  the shore that waits is no swim. Kept in memory: after a restart it is rebuilt from the world, so a held swim ends at
+   *  most 30 s after boot. Not paused for a quiet renewal: a held swim would keep the world from ever becoming quiet. */
+  private swimHeld = new Map<string, number>();
+  private swimWatch(tick: number) {
+    if (tick % 20) return;
+    const rt = this.host.engine.runtime as unknown as {records: Map<string, {id: string; verb: string; status?: string; diagnostic?: {code?: string}}>; liveIds(): string[]};
+    let live: Set<string> | null = null;
+    for (const m of this.host.minds.values()) {
+      const task = this.body(m.entityId)?.human?.task, rec = task ? rt.records.get(task) : undefined;
+      if (!rec || rec.verb !== 'swim_to' || rec.status !== 'blocked' || rec.diagnostic?.code !== 'swim.occupied' || !(live ??= new Set(rt.liveIds())).has(rec.id)) {this.swimHeld.delete(m.entityId); continue;}
+      const since = this.swimHeld.get(m.entityId);
+      if (since === undefined) {this.swimHeld.set(m.entityId, tick); continue;}
+      if (tick - since < SWIM_HELD_TICKS) continue;
+      this.swimHeld.delete(m.entityId);
+      // the open receipt that owns the body: the one running its program, else its newest open one
+      const program = this.host.engine.programOf(m.entityId), open = this.rows("soul_id=? AND phase IN ('waiting','started') ORDER BY created_at", m.soulId);
+      const r = open.find(x => program && x.program_id === program) ?? open.at(-1);
+      try {void this.host.enqueue('edge-stop', `edge:${m.soulId}`, {soulId: m.soulId, entityId: m.entityId, ...(r ? {receipt: r.receipt_id} : {})}).catch(() => {/* best effort: seen again next time */});}
+      catch {continue;}   // the clock isn't taking inputs: nothing was stopped, so nothing is said
+      if (r) this.update(r.receipt_id, {phase: 'failed', code: 'swim.stuck', reason: SWIM_STUCK_REASON});
+    }
+  }
   private afterTick(tick: number) {
+    try {this.swimWatch(tick);} catch (e) {console.error('[edge] swim watch', e instanceof Error ? e.message : e);}
     if(this.contactPending.size)this.contactTicks(tick);
     for (const [soulId, p] of this.pending) {
       if (this.host.quietBarrier) {p.deadline = Math.max(p.deadline, tick + WAIT_LIMIT_TICKS); continue;}   // the wait clock pauses during renewal
