@@ -25,7 +25,9 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   'syncCarrierPlaces', 'boardingIssue', 'steerTarget', 'steerCheck', 'rideFrames', 'godInterrupted', 'setDetail', 'stallGuard', 'conversationPartners', 'posture',
   'ambientChoice', 'openShared', 'commitShared',
   // #1150: they tell Souls of a rewind or a relocation, called only from onRecovery on main
-  'onRelocated', 'onRewound']);
+  'onRelocated', 'onRewound',
+  // #1324: the steer act's landing preview (previewSteerLandingV1), called only from the ride object's steer act on main
+  'steerLanding']);
 
 test('grep: no engine reach in the read code (ledger read methods, perception, together, god-nav, human capabilities, deck)', () => {
   const ledger = [...reaches('edge/ledger/ledger.ts', /host\.engine/g)].filter(([m]) => !LEDGER_MAIN_ONLY.has(m));

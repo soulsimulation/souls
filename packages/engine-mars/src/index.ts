@@ -1,6 +1,7 @@
 export * from './load.ts';
 export * from './engine.ts';
 export * from './crew-removal-engine.ts';
+export * from './souls-repair-reader.ts';
 export * from './commons-provisions-engine.ts';
 export * from './commons-provisions.ts';
 export * from './terrain.ts';

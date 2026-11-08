@@ -72,6 +72,24 @@ This matters on paged ground, where a long walk's plan checks only its first fin
 ride's own collider used to pass the plan. A step without the marker keeps the goal it always chose, so recorded
 programmes replay unchanged.
 
+A ride's `carrier_steer` with `land` may carry `landing: 'clear/1'` (#1324), and the ride object always sends it. The spot must
+be clear on the fine clearance raster over a 2.6 m disc: the basket, its door and both seat exits, plus a body radius. That raster
+holds the thin wall segments and closed doors the coarse solids drop, and it also holds benches, water edges and steep cells. Nothing
+in the raw scene may stand over the disc either, so no wall, lintel, roof or god-built floor: the descent column is open sky. The ride
+lands on the nearest such spot within 30 m, in rings of 2 m, and the plan returns `landing: {requested, at, adjustedM, reason}`.
+With no spot it is refused `carrier.no-landing-spot`, naming how far the nearest clear ground is. The spot is read again through
+the second half of the flight and on the touchdown tick. When the spot is no longer clear, the landing moves to the nearest clear
+spot to the asked point: the ride climbs back to cruise height (35 m), flies across, then comes down. After a third move it
+flies home. With no clear spot it hovers and looks again every
+2 s, and flies home after the 2-minute hover. The ride state's `landNote` says which happened. A ride's own home is never
+re-checked; a home that no longer reads clear is only reported, as a `carrier.home-not-clear` mark. A steer without the marker
+keeps the landing it always chose, so recorded programmes replay unchanged.
+A `carrier_ride` boarded with `clear: 'step-out/1'` (the ride object's join sends it) steps out only onto ground the body can stand
+on. The leg to the door waits while the door spot isn't clear. The last leg goes to the exit, or to the nearest clear spot round it
+that a straight step from the door reaches. The rider stands at the ground's height there. A 12 s set-down uses the same check,
+searching up to 12 m round the exit, and a rider with nowhere clear stays aboard instead
+of being placed in a wall. God edits never walk out a rider whose ride is in the air (#1339).
+
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another
 venue. A seated Soul still stands first; active movement and occupied support keep their native admission rules.
 Direct `pose_v1` admission reads clearance at the actor's position, independently of the last paged ground window
@@ -88,9 +106,18 @@ A door's gap turns solid only at the close's contact, so the plan reads that gap
 
 ## Refusal
 
-With the `souls-repair/1` rules (`soulsRepairV1`: on with `SIM_SOULS_REPAIR=1` or with `SIM_SHARED_CARRY=1`, and `SIM_SOULS_REPAIR=0`
-turns it off under either; new worlds only for now: a world whose history lacks it refuses to boot with it on), a move that
-would break a rule is not applied ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+With the `souls-repair/1` rules (`soulsRepairV1`), a move that would break a rule is not applied
+([#1150](https://github.com/soulsimulation/souls/issues/1150)). Every world the server runs has them by default
+([#1323](https://github.com/soulsimulation/souls/issues/1323)). The server reads a world's history with
+`soulsRepairReaderV1` over its own reader: the history replays and restores under the rules it was written with, and a world
+whose history began without them adopts them in one logged `rules` event at its head, after replay and the clock check
+(`{soulsRepairAdoptV1: {contract: 'souls-repair-adoption/1', tick, fromRulesVersion, toRulesVersion, fromStateHash}}`). Its
+fold turns the rules on, and the world header's `rules_version` follows in the same acceptance. A new world is born without
+them and adopts at tick 0. A snapshot restores under the policy it was taken with; the state hash never names the rules
+(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (4.16,
+or `marsFactory` alone) refuses an adopted history. `SIM_SOULS_REPAIR=0` adopts nothing, still replays a logged adoption, and
+is ignored for a world that has adopted. A factory that already has the rules (`SIM_SOULS_REPAIR=1`, `SIM_SHARED_CARRY=1`, or
+`soulsRepairV1: true`) is used as it is: an old history refuses it, as before.
 
 - `Engine.step` leaves no refusable violation standing. The bodies that moved go back to their pose before the tick, and
   their programmes end `failed` with `world.refused:<rule>` and a plain reason, in that tick.
@@ -142,8 +169,8 @@ whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that n
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
 started what it stopped. A body inside something is relocated once.
 
-`SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
-ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
+The ladder comes with the rules, so every world the server runs has it by default (see Refusal for adoption). A world made
+with the ladder, or that adopted it, can't go back: it needs these rules to replay. Under these rules an invariant that
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
 a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
@@ -178,6 +205,9 @@ placed clears it, and a rung 3 keeps god edits, so it survives a restart until t
 
 **What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+A periodic snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt:
+it is skipped and counted at rung `contained` as `durability.snapshot-skipped`, the clock runs on, and the next due
+snapshot is tried (#1368).
 
 ## Conformance
 

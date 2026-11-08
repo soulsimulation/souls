@@ -2,7 +2,7 @@
 // Verdicts for ship.sh's root-only release: the receipts, the host snapshot and its drift, the row-verified backup and
 // the activation preconditions. Each command reads local files, prints what it found and exits 1 with the reason.
 //   node root-release.mjs receipts <gate receipt> <ship receipt> <sha>
-//   node root-release.mjs snapshot <healthz.json> <remote.json> <label sha> <out.json>
+//   node root-release.mjs snapshot <healthz.json> <remote.json> <label sha> <out.json> [accepted host codes, comma-separated]
 //   node root-release.mjs drift <snapshot.json> <healthz.json> <remote.json>
 //   node root-release.mjs backup <backup.log> <quick-check.log> <snapshot.json> <label> <out.json>
 //   node root-release.mjs activation <snapshot.json> <backup-receipt.json> <upload-receipt.json> <manifest>
@@ -16,7 +16,7 @@ const digest = f => createHash('sha256').update(readFileSync(f)).digest('hex');
 const HOUR_MS = 3_600_000;
 export const IDLE_HANDOVERS = [null, undefined, 'done', 'failed', 'rolled-back'];
 export const DRIFT_KEYS = ['productionTarget', 'configurationSha256', 'worlds', 'registryIdentitySha256', 'databasePaths', 'databases', 'keeperPid', 'servicePid', 'keeperSha', 'activeBuild', 'deployedKeeperSha'];
-export const HEALTH_KEYS = ['ok', 'build', 'worlds', 'hostOk', 'auth', 'maxWorlds', 'maxRunning'];
+export const HEALTH_KEYS = ['ok', 'build', 'worlds', 'hostOk', 'hostCodes', 'auth', 'maxWorlds', 'maxRunning'];
 
 /** A clean gate receipt and ship receipt for exactly this commit (docs/testing/remote-gate.md). */
 export function receiptProblems(gate, ship, sha, gateSha256) {
@@ -33,10 +33,15 @@ export function receiptProblems(gate, ship, sha, gateSha256) {
   return out;
 }
 
-export function snapshotProblems(health, remote, sha = '') {
+export function snapshotProblems(health, remote, sha = '', accepted = []) {
   const out = [], previous = remote.productionTarget.split('/').pop();
   if (sha && previous === `we-${sha.slice(0, 12)}`) out.push('this commit is already live: a new snapshot would name it as the previous build');
-  if (!health.ok || !health.hostOk) out.push('public healthz is not ok');
+  if (!health.ok || (!health.hostOk && !accepted.length)) out.push('public healthz is not ok');
+  else if (!health.hostOk) {
+    // #1356: a release that fixes a halted world may pass only the codes it names; an unnamed or missing code still refuses
+    const codes = Array.isArray(health.hostCodes) ? health.hostCodes : [], other = codes.filter(c => !accepted.includes(c));
+    if (!codes.length || other.length) out.push(`public healthz is not ok: host codes ${codes.join(',') || 'none'}, accepted only ${accepted.join(',')}`);
+  }
   if (health.build !== previous || remote.activeBuild !== previous) out.push(`stage link ${previous}, healthz ${health.build}, keeper ${remote.activeBuild} disagree`);
   if (health.worlds !== remote.worlds) out.push(`healthz has ${health.worlds} worlds, the registry ${remote.worlds}`);
   if (!(remote.databases >= remote.worlds)) out.push(`${remote.databases} databases for ${remote.worlds} worlds`);
@@ -83,10 +88,11 @@ export function main(argv) {
   const [cmd, ...a] = argv;
   if (cmd === 'receipts') { const p = receiptProblems(read(a[0]), read(a[1]), a[2], digest(a[0])); if (p.length) fail(p); console.log('gate and ship receipts are clean for this commit'); }
   else if (cmd === 'snapshot') {
-    const health = read(a[0]), remote = read(a[1]), p = snapshotProblems(health, remote, a[2]); if (p.length) fail(p);
+    const accepted = (a[4] ?? '').split(',').filter(Boolean), health = read(a[0]), remote = read(a[1]), p = snapshotProblems(health, remote, a[2], accepted); if (p.length) fail(p);
     if (existsSync(a[3])) { const aside = `${a[3]}.${Date.now()}`; renameSync(a[3], aside); console.log(`kept the earlier snapshot as ${aside.split('/').pop()}`); }
     const publicHealth = Object.fromEntries(HEALTH_KEYS.map(k => [k, health[k]]));
-    writeFileSync(a[3], JSON.stringify({ schema: 'ship-snapshot/1', at: new Date().toISOString(), candidate: a[2], previousBuild: remote.productionTarget.split('/').pop(), publicHealth, remote, databaseContentsRead: false }, null, 2) + '\n', { flag: 'wx' });
+    writeFileSync(a[3], JSON.stringify({ schema: 'ship-snapshot/1', at: new Date().toISOString(), candidate: a[2], previousBuild: remote.productionTarget.split('/').pop(), publicHealth, ...(accepted.length ? { acceptedHostCodes: accepted } : {}), remote, databaseContentsRead: false }, null, 2) + '\n', { flag: 'wx' });
+    if (!health.hostOk) console.log(`hostOk is false; accepted host codes ${health.hostCodes.join(',')} (--accept-host-codes ${accepted.join(',')})`);
     console.log(`${remote.worlds} worlds, ${remote.databases} databases, previous ${remote.productionTarget.split('/').pop()}`);
   } else if (cmd === 'drift') { const p = driftProblems(read(a[0]), read(a[1]), read(a[2])); if (p.length) fail(p); console.log('live metadata equals the snapshot'); }
   else if (cmd === 'backup') {
