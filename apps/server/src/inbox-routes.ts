@@ -3,7 +3,7 @@ import {bodyLimit} from 'hono/body-limit';
 import type {Db, UserRow} from './db.ts';
 import type {GodMode} from './god/god.ts';
 import {ApiError, type Souls} from './souls.ts';
-import {AgentInbox, type InboxScope, type TicketFocus} from './inbox.ts';
+import {AgentInbox, type InboxScope, type InboxView, type TicketFocus} from './inbox.ts';
 import {soulLink} from './soul-link.ts';
 import type {WorldModel} from '@souls/world-compiler';
 
@@ -92,14 +92,17 @@ export function mountAgentInbox(app: Hono, d: Deps) {
     return {scope: `soul:${soul.id}`, owner: soul.owner};
   };
   /** LINK (COMMON-LINK §2): a Soul owner's view also carries the one link state and the agent's public `now` line. */
-  const linkFields = async (c: Context, s: InboxScope) => {
+  const linkFields = async (c: Context, s: InboxScope, v: InboxView) => {
     if (!s.scope.startsWith('soul:')) return {};
     const row = d.db.soul(s.scope.slice(5)); if (!row) return {};
     const u = await d.requireUser(c);
-    return {link: soulLink(d.souls, inbox, row, u.id), now: d.souls.host.nowOf(row.id)};
+    // #1313: the act under way for the newest message, or thinking; never a guess (a fault shows nothing)
+    let doing: unknown = null;
+    try {doing = inbox.doingOf?.(row.id, v.latest, v.presence === 'away') ?? null;} catch {/* nothing on record */}
+    return {link: soulLink(d.souls, inbox, row, u.id), now: d.souls.host.nowOf(row.id), ...(doing ? {doing} : {})};
   };
   const ownerRoutes = (path: string, owner: (c: Context) => Promise<InboxScope>, bucket: 'god-inbox' | 'cmd', command = false) => {
-    if (!command) app.get(path, async c => { const s = await owner(c); return c.json({inbox: {...inbox.ownerView(s), ...await linkFields(c, s)}}); });
+    if (!command) app.get(path, async c => { const s = await owner(c), v = inbox.ownerView(s); return c.json({inbox: {...v, ...await linkFields(c, s, v)}}); });
     app.post(path, async c => {
       const s = await owner(c), b = await json(c);
       if (command && (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 280)) throw new ApiError(400, 'invalid', 'text is required (1–280 characters)');
@@ -108,7 +111,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
       const current = await owner(c);
       if (current.owner !== s.owner || current.scope !== s.scope) throw new ApiError(403, 'forbidden', 'owner authority changed');
       const sent = inbox.send(s, b.text);
-      return c.json({ok: true, inbox: command ? sent : {...sent, ...await linkFields(c, s)}});
+      return c.json({ok: true, inbox: command ? sent : {...sent, ...await linkFields(c, s, sent)}});
     });
   };
   if (d.god) {

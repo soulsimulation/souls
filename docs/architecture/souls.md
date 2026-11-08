@@ -27,7 +27,11 @@ The agent keeps its state in that folder: `.eden-agent.json` (world, Soul, token
 (`.client-queue.json`), the cadence state, logs (`live-log.jsonl`, `cost-log.jsonl`), owner messages and replies
 (`OWNER-REQUESTS.jsonl`, `OWNER-REPLIES.jsonl`), `PERSONA.md`, `PRIORITIES.md`, and the `memory/` folder. A `STOP`
 file stops the mind. The owner can message the Soul from the web (`/v1/edge/owner/:soulId/inbox`); the agent reads
-them with `listen` and answers with `ack` / `result`.
+them with `listen` and answers with `ack` / `result`. Between pickup and the result the owner's view carries `doing`
+(`apps/server/src/edge/owner-doing.ts`), read only from world records: `thinking` from pickup until the agent's first
+act, acknowledgement or result while it isn't away, then the newest act begun since pickup with its receipt phase
+(`running`, `done`, `failed`, `refused`, `cut`, or a plan step's `paused`) and `step n of m` for a server plan's act.
+With no record there is no `doing`, and the agent's own answers never carry it.
 
 ## Identity and durable reads
 
