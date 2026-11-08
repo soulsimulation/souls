@@ -119,6 +119,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     : lost ? 'Reconnecting…'
     : settledReason ? heldLabel(settledReason)
     : state!.presentation === 'history' ? 'Recorded' : 'Live';
+  const pill = !!live && !settledReason && !arriving && !!worldTime;
   const statusClass = arriving || state?.loading ? 'loading' : !lost && !settledReason && current && connected ? 'ok' : 'warn';
   // #892: a glide to a Soul (flyToSoul) is Follow on its way, not your camera (no "Free" flash between two Souls)
   const kind = state?.cameraMode === 'follow' || state?.flyingTo ? 'follow' : state?.cameraMode === 'manual' ? 'yours' : 'broadcast';
@@ -151,9 +152,14 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // (Shell's slots); nothing sits at the bottom of the screen.
   const statusBlock = <div className="viewer-history" data-viewer-navigation={state?.manualNavigation ?? ''} data-viewer-input={state?.inputOwned ?? false} data-viewer-mode={state?.cameraMode ?? ''} data-viewer-presentation={state?.presentation ?? ''} data-viewer-tick={state?.shownTick ?? ''} data-viewer-selection={state?.selection.soulId ?? state?.selection.entityId ?? ''} data-viewer-ready={!!handle}>
       <div className="row viewer-status">
-        <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>
-        {state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
+        {/* #1392 (Gene): at the present time the element is one "● Live" pill; the day and time are in the panel it opens.
+            A previewed hour turns the circle orange and the pill shows that hour; Back to now restores Live. */}
+        {pill ? <button ref={hourButton} type="button" className="world-time-button live-pill" aria-expanded={hourOpen} aria-label={previewHour != null ? `Previewing ${hourLabel(previewHour)}: change the time of day` : `Live, ${worldTime}: preview the time of day`} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>
+          <span className={previewHour != null ? 'preview' : statusClass} data-viewer-status data-viewer-live={live} data-viewer-preview={previewHour != null || undefined}>{previewHour != null ? hourLabel(previewHour) : status}</span>
+        </button> : <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>}
+        {!pill && state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
         {hourOpen && !arriving && createPortal(<div className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 12) }; })()}>
+          {pill && <span className="time-preview-now" data-world-time>{worldTime}</span>}
           <label>Time of day <b>{previewHour != null ? hourLabel(previewHour) : 'now'}</b>
             <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} /></label>
           <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>
