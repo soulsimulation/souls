@@ -44,7 +44,9 @@ test('sayFlags reads --to, --gesture and --stand-ok only among the trailing flag
   assert.deepEqual(sayFlags(['Hello Bo', '--to', 'Bo', '--gesture', 'nod']), {to: 'Bo', gesture: 'nod', words: ['Hello Bo']});
   assert.deepEqual(sayFlags(['Hi', '--to', 'Bo', '--for', 'msg_1', '--stand-ok']), {to: 'Bo', standOk: true, words: ['Hi', '--for', 'msg_1']});
   assert.deepEqual(sayFlags(['tell', '--to', 'Bo', 'hi']), {words: ['tell', '--to', 'Bo', 'hi']}, 'mid-speech --to is speech');
-  assert.deepEqual(sayFlags(['send', 'it', '--to']), {words: ['send', 'it', '--to']}, 'a bare trailing --to is speech');
+  assert.throws(() => sayFlags(['send', 'it', '--to']), /--to needs a value/);
+  assert.throws(() => sayFlags(['hi', '--to', 'Bo', '--gesture']), /--gesture needs a value/);
+  assert.throws(() => sayFlags(['hi', '--to', 'A', '--to', 'B']), /--to is given twice/);
   assert.deepEqual(sayFlags(['Hello']), {words: ['Hello']});
 });
 
@@ -70,6 +72,9 @@ test('A1: a refused or unoffered face still speaks, and says so; nothing is retr
   const two = await world(t, {caps: [...FACES, {id: 'face:s_bo2', verb: 'face', label: 'Turn towards Bo', target: {id: 's_bo2', kind: 'soul'}, available: true}]});
   const amb = await two.cli('say', 'Hello', '--to', 'Bo');
   assert.equal(amb.json.faced.code, 'face.ambiguous'); assert.match(amb.json.faced.reason, /s_bo, s_bo2/); assert.deepEqual(writes(two.seen), [['say', 'Hello']]);
+  const ambNod = await two.cli('say', 'Hello', '--to', 'Bo', '--gesture', 'nod');
+  assert.equal(ambNod.json.gestured.sent, false, 'an ambiguous name could aim the nod at the other Bo'); assert.match(ambNod.json.gestured.reason, /soulId/);
+  assert.deepEqual(writes(two.seen).slice(1), [['say', 'Hello']]);
 });
 
 test('A2: a refused gesture is reported once; a bow that would stand a seated Soul waits for --stand-ok', async t => {
@@ -83,8 +88,12 @@ test('A2: a refused gesture is reported once; a bow that would stand a seated So
   assert.equal(ok.json.gestured.accepted, true); assert.deepEqual(writes(seated.seen).at(-1), ['bow:here', {to: 's_bo'}, true]);
   const nod = await seated.cli('say', 'Yes', '--to', 'Bo', '--gesture', 'nod');
   assert.equal(nod.json.gestured.accepted, true, 'a nod keeps you seated, so it needs no --stand-ok');
-  const standing = await world(t), s = await standing.cli('say', 'Welcome', '--to', 'Bo', '--gesture', 'bow');
-  assert.equal(s.json.gestured.accepted, true, 'a standing bow goes as asked');
+  for (const posture of ['standing', 'busy', 'walking', 'waiting']) {
+    const up = await world(t, {posture}), s = await up.cli('say', 'Welcome', '--to', 'Bo', '--gesture', 'bow');
+    assert.equal(s.json.gestured.accepted, true, `a ${posture} bow goes as asked: only seated or lying waits`);
+  }
+  const lying = await world(t, {posture: 'lying'}), l = await lying.cli('say', 'Welcome', '--to', 'Bo', '--gesture', 'bow');
+  assert.equal(l.json.gestured.sent, false);
 });
 
 test('A3: plain say sends exactly what it did; flags in the middle are speech; bad flags send nothing', async t => {
@@ -93,7 +102,7 @@ test('A3: plain say sends exactly what it did; flags in the middle are speech; b
   assert.deepEqual(w.seen.map(([m, u, b]) => [m, u, b]), [['POST', '/v1/edge/say', {text: 'Hello'}]], 'no offers read, no act');
   await w.cli('say', 'tell', '--to', 'Bo', 'hi'); assert.deepEqual(writes(w.seen).at(-1), ['say', 'tell --to Bo hi']);
   const n = w.seen.length;
-  for (const bad of [['Hi', '--to', 'Bo', '--gesture', 'dance'], ['Hi', '--gesture', 'nod'], ['--to', 'Bo']]) {
+  for (const bad of [['Hi', '--to', 'Bo', '--gesture', 'dance'], ['Hi', '--gesture', 'nod'], ['--to', 'Bo'], ['Hi', '--to'], ['Hi', '--to', 'A', '--to', 'B']]) {
     const e = await w.cli('say', ...bad); assert.notEqual(e.code, 0, bad.join(' ')); assert.match(e.err, /usage: say/);
   }
   assert.equal(w.seen.length, n, 'a usage error sends nothing');

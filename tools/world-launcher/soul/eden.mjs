@@ -3031,16 +3031,22 @@ const SAY_GESTURES = ["nod", "bow", "clap", "cheer", "shake-head", "point"], STA
 export function sayFlags(words) {
   // only among the trailing flags: "tell her --to the letter" said unquoted is speech, as "what --for means" is
   const flags = {}, drop = new Set();
+  if (["--to", "--gesture"].includes(words.at(-1))) throw new Error(`${words.at(-1)} needs a value`);
   for (let i = words.length - 1; i >= 0;) {
     if (words[i] === "--stand-ok") { flags.standOk = true; drop.add(i); i -= 1; }
-    else if (["--to", "--gesture"].includes(words[i - 1]) && flags[words[i - 1].slice(2)] === undefined) { flags[words[i - 1].slice(2)] = words[i]; drop.add(i).add(i - 1); i -= 2; }
+    else if (["--to", "--gesture"].includes(words[i - 1])) {
+      if (flags[words[i - 1].slice(2)] !== undefined) throw new Error(`${words[i - 1]} is given twice`);
+      flags[words[i - 1].slice(2)] = words[i]; drop.add(i).add(i - 1); i -= 2;
+    }
     else if (words[i - 1] === "--for" && /^(msg_|none$)/.test(words[i])) i -= 2;
     else break;
   }
   return { ...flags, words: words.filter((_, i) => !drop.has(i)) };
 }
 async function say(...all) {
-  const { to, gesture, standOk, words } = sayFlags(all);
+  let flags;
+  try { flags = sayFlags(all); } catch (e) { throw new Error(`${e.message}. usage: say "<text>" [--to <name|soulId> [--gesture <g>] [--stand-ok]] [--for <message-id>]`); }
+  const { to, gesture, standOk, words } = flags;
   const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
   const usage = 'usage: say "<text>" [--to <name|soulId> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for <message-id>]';
@@ -3072,12 +3078,15 @@ async function sayPart(capability, params, target) {
     return d.accepted ? { id: capability, to: target.name, accepted: true, ...(d.receipt?.id ? { receipt: d.receipt.id } : {}) } : { id: capability, to: target.name, accepted: false, code: d.code, reason: d.reason };
   } catch (e) { return { id: capability, to: target.name, accepted: false, code: "act.error", reason: e.message }; }
 }
-/** The gesture after the speech, toward them. A bow stands a seated or lying Soul up, so it goes only with --stand-ok. */
+/** The gesture after the speech, toward them. A bow stands a seated or lying Soul up, so it goes only with --stand-ok. A
+ *  name that two Souls near you share would let the world pick either, so then nothing is sent. */
+const DOWN = new Set(["seated", "lying", "sleeping"]);
 async function sayGesture(g, target, standOk) {
   const id = `${g}:here`;
+  if (target.code === "face.ambiguous") return { id, to: target.name, sent: false, reason: target.reason };
   if (STANDS_UP.has(g) && !standOk) {
     const r = await call("/v1/edge/here").catch(() => null), posture = r?.status === 200 ? (r.data?.here ?? r.data)?.me?.posture : undefined;
-    if (posture !== "standing") return { id, to: target.name, sent: false, reason: posture ? `A ${g} would stand you up (you are ${posture}). Add --stand-ok to ${g} anyway.` : `Could not read your posture, and a ${g} stands a seated Soul up. Add --stand-ok to ${g} anyway.` };
+    if (!posture || DOWN.has(posture)) return { id, to: target.name, sent: false, reason: posture ? `A ${g} would stand you up (you are ${posture}). Add --stand-ok to ${g} anyway.` : `Could not read your posture, and a ${g} stands a seated Soul up. Add --stand-ok to ${g} anyway.` };
   }
   return sayPart(id, { [g === "point" ? "at" : "to"]: target.id ?? target.name }, target);
 }
