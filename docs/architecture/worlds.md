@@ -50,7 +50,9 @@ or previous (right) Soul here; slower drags still orbit. The order is a ring mad
 then the others by the director's interest score, then by distance. A tap on the ground while following hands you the
 camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Broadcast a touch screen's chip reads
 "Now showing <name>" with a Follow button. Mouse clicks keep the card-and-button flow.
-The first touch of a page on a touch screen shows three glyphs (stick, drag, pinch; `touch/hints.tsx`) that fade on
+A press, long-press, double-tap or drag anywhere on a world page never selects text or shows a tap highlight. The
+selection, callout and highlight are off on the page, its menus, its modal dialogs and the boot arrival (#1386). Fields,
+code and the copyable start prompt keep their text. The first touch of a page on a touch screen shows three glyphs (stick, drag, pinch; `touch/hints.tsx`) that fade on
 the first drag, a second finger or after 3 s. The device remembers it in `localStorage` (`sim.touch-hints`). `?shot`
 and automation (`navigator.webdriver`) never show it. `?hints=1` overrides `navigator.webdriver` only, for recording
 proof of the hint. Phones get the camera menu as a bottom sheet (Broadcast, Free, Follow for a selected Soul or Stop
