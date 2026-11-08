@@ -7,7 +7,9 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 
 async function scenario(t,{providerHoldMs=0}={}){
- const root=mkdtempSync(join(realpathSync(tmpdir()),'eden-poll-fixture-'));t.after(()=>rmSync(root,{recursive:true,force:true}));mkdirSync(join(root,'bin'));
+ // after hooks run in order and a throwing one skips the rest: stop what keeps this process alive first, remove the folder last (#1258)
+ let stop=()=>{};t.after(()=>stop());
+ const root=mkdtempSync(join(realpathSync(tmpdir()),'eden-poll-fixture-'));mkdirSync(join(root,'bin'));
  const sdk=join(root,'bin','claude');writeFileSync(sdk,`#!${process.execPath}\nlet b='',n=0;process.stdin.on('data',d=>{b+=d;let cut;while((cut=b.indexOf('\\n'))>=0){b=b.slice(cut+1);n++;const result=n===1?{do:[{act:'read:field',params:{seconds:360},protected:true}],owner:'A new reading was requested.'}:n===2?{do:[{act:'walk:tea',protected:true}],owner:'Replace the read.'}:{do:[],owner:'The new walk is still underway.'};const delay=n===3?${providerHoldMs}:0;setTimeout(()=>console.log(JSON.stringify({type:'result',result:JSON.stringify(result),usage:{input_tokens:10,output_tokens:2}})),delay);}});`);chmodSync(sdk,0o700);
  const waits=[],reads=[],acts=[];let readAt=null,walkAt=null,completedAt=null,ownerAt=null,questionAt=null;const timers=[];
  const request=(id,text)=>appendFileSync(join(root,'OWNER-REQUESTS.jsonl'),JSON.stringify({id,t:new Date().toISOString(),text,force:false})+'\n');
@@ -37,14 +39,16 @@ async function scenario(t,{providerHoldMs=0}={}){
   }
   return json({error:{code:'not-found'}},404);
  });
- await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{for(const timer of timers)clearTimeout(timer);server.closeAllConnections();await new Promise(r=>server.close(r));});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{for(const timer of timers)clearTimeout(timer);server.closeAllConnections();await new Promise(r=>server.close(r));});t.after(()=>rmSync(root,{recursive:true,force:true}));
  writeFileSync(join(root,'.eden-agent.json'),JSON.stringify({world:'http://127.0.0.1:'+server.address().port,soul:'s_probe',identity:'synthetic-owner',token:'synthetic-token',cursor:'c_0'}));
  const cli=process.env.EDEN_POLL_ORIGINAL_CLI??resolve('tools/edge-skill/eden-agent.mjs');
- const child=spawn(process.execPath,[cli,'live','--engine','claude','--run-seconds','45'],{cwd:root,env:{...process.env,PATH:join(root,'bin')+':'+process.env.PATH},stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);t.after(()=>child.kill());
- const rows=()=>existsSync(join(root,'live-log.jsonl'))?readFileSync(join(root,'live-log.jsonl'),'utf8').trim().split('\n').filter(Boolean).map(JSON.parse):[];
+ const child=spawn(process.execPath,[cli,'live','--engine','claude','--run-seconds','45'],{cwd:root,env:{...process.env,PATH:join(root,'bin')+':'+process.env.PATH},stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const gone=new Promise(r=>child.once('exit',r));
+ // the CLI may be appending as this reads: only whole lines, and a half-written last one waits for the next read (#1258)
+ const rows=()=>{if(!existsSync(join(root,'live-log.jsonl')))return[];const text=readFileSync(join(root,'live-log.jsonl'),'utf8');return text.slice(0,text.lastIndexOf('\n')+1).split('\n').filter(Boolean).map(l=>JSON.parse(l));};
  // OWNER-FIRST: the walk replaces the protected read; stop once that walk completed AND the owner question was answered: with a provider-held turn both become due together and
  // stopping at the first one raced the question's reply (a 30 s Modal flake); a question never answered still fails below
- let stopped=false;const stopper=setInterval(()=>{const log=rows();if(!stopped&&log.some(r=>r.queueComplete?.id==='owner-replace')&&log.some(r=>r.owner?.id==='owner-question')){stopped=true;writeFileSync(join(root,'STOP'),'fixture completion');child.kill('SIGINT');}},100);t.after(()=>clearInterval(stopper));
+ let stopped=false;const stopper=setInterval(()=>{const log=rows();if(!stopped&&log.some(r=>r.queueComplete?.id==='owner-replace')&&log.some(r=>r.owner?.id==='owner-question')){stopped=true;writeFileSync(join(root,'STOP'),'fixture completion');child.kill('SIGINT');}},100);stopper.unref();
+ stop=async()=>{clearInterval(stopper);child.kill('SIGKILL');await gone;};
  const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(Error('bounded polling fixture deadline '+output));},55000);child.on('exit',code=>{clearTimeout(timer);resolve(code);});});
  const log=rows(),terminal=log.find(r=>r.terminalReceive?.receiptId==='r_walk'),replace=log.find(r=>r.owner?.id==='owner-replace'),question=log.find(r=>r.owner?.id==='owner-question'),stableWaits=waits.filter(w=>w.at+w.seconds*1000>=readAt+10000&&w.at<(completedAt??Infinity));
  const measured={scriptedFakeSDK:true,providerHoldMs,code,acts:acts.map(a=>a.body.capability),waits,reads,ownerNoticeToDispatchMs:walkAt-ownerAt,ownerNoticeToReplyMs:replace?Date.parse(replace.t)-ownerAt:null,questionNoticeToReplyMs:question?Date.parse(question.t)-questionAt:null,terminalObservationMs:terminal?Date.parse(terminal.t)-completedAt:null,providerHeldNotUniversalLatencyProof:providerHoldMs>0};t.diagnostic(JSON.stringify(measured));
@@ -53,5 +57,6 @@ async function scenario(t,{providerHoldMs=0}={}){
  else{assert.ok(measured.questionNoticeToReplyMs>=providerHoldMs,'provider-held question response delay is disclosed, not a blanket10s promise');assert.ok(measured.terminalObservationMs>10000,'provider-held terminal gap is recorded, not hidden as a10s PASS');}
  return measured;
 }
-test('actual CLI stable protected wait reduces redundant HTTP polls while owner replan/question and lost terminal stay prompt',async t=>scenario(t));
-test('provider-held turn retains one queue writer; canonical backup survives without asynchronous body dispatch',async t=>scenario(t,{providerHoldMs:25000}));
+const LIMIT={timeout:90_000}; // the fixture's own deadline is 55 s: a hang fails here, not at the job's 60 minutes
+test('actual CLI stable protected wait reduces redundant HTTP polls while owner replan/question and lost terminal stay prompt',LIMIT,async t=>scenario(t));
+test('provider-held turn retains one queue writer; canonical backup survives without asynchronous body dispatch',LIMIT,async t=>scenario(t,{providerHoldMs:25000}));

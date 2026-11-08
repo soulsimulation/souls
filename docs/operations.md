@@ -53,7 +53,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   the world's log and one row to its store, with the bodies, the tick and the evidence: `op.mjs glitches --port <port>
   --base / [--world <slug>]` reads those, for sleeping worlds too. The health page shows the counts. A halted world is the
   `halted` problem code, so `hostOk` goes false and `host-health.log` gets its ALERT line; a refusal or recovery raises no alert
-  until real numbers set a rate threshold ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+  until real numbers set a rate threshold ([#1150](https://github.com/soulsimulation/souls/issues/1150)). A rewind (rung 3), or a stop on the spot that stopped something, is the
+  `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
+  count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
+  its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
+- `SIM_SOULS_REPAIR=1` is read per process and isn't a live switch: on a running server it stops every existing world
+  booting, because a world without `souls-repair/` refuses that build until the boot repair lands
+  ([#1150](https://github.com/soulsimulation/souls/issues/1150)). Keep it off outside a test world. `SIM_SHARED_CARRY=1` brings
+  repair with it, so a shared world made before that needs `SIM_SOULS_REPAIR=0` to boot; `0` turns repair off under either flag.
+  A world made with repair on can't go back: it won't boot with `0`.
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor

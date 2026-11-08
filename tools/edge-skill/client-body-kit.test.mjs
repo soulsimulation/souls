@@ -25,8 +25,23 @@ function world({types=['humanoid','ceramic','floater'],humanoid=null,pip=null}={
   const body=KIT_FILES.includes(file)?served(file):path===HUMANOID_SOURCE&&humanoid?humanoid:path==='/w/test/v1/edge/body/assets/pip.glb'&&pip?pip:null;
   return body?{ok:true,status:200,arrayBuffer:async()=>body.buffer.slice(body.byteOffset,body.byteOffset+body.length)}:{ok:false,status:404};};
  const call=async path=>{assert.equal(path,'/v1/edge/body');return {status:200,data:{available:true,types,presets:pip?[{id:'pip',body:{modelUrl:'/v1/edge/body/assets/pip.glb'}}]:[],body:null,uploads:[{assetId:'body_'+'a'.repeat(64),name:'Earlier',type:'ceramic'}],authoring:{skill:'/w/test/body-authoring/SKILL.md'}}};};
- return {fetchImpl,call,seen,load:()=>({world:'http://127.0.0.1:4199/w/test',token:TOKEN,soul:'s1'})};
+ return {fetchImpl,call,seen,runValidate:repoValidate,load:()=>({world:'http://127.0.0.1:4199/w/test',token:TOKEN,soul:'s1'})};
 }
+/** These tests serve this repo's own validate.mjs, so they may run it. bodyKit never does unless told to. */
+function repoValidate(dir){
+ const r=spawnSync(process.execPath,['validate.mjs','body.glb','manifest.json'],{cwd:dir,encoding:'utf8',timeout:60_000}),text=(r.status===0?r.stdout:r.stderr).trim();
+ let out;try{out=JSON.parse(text);}catch{out={valid:false,error:{code:'kit.validate',message:text.slice(0,300)}};}
+ return out.valid?{valid:true}:out;
+}
+
+test('#591: left to its default, the kit runs nothing a world served', async ()=>{
+ const dir=mkdtempSync(join(tmpdir(),'kit-safe-')),{runValidate:_,...w}=world();
+ try{
+  const out=await bodyKit([join(dir,'k')],w);
+  assert.match(out.validation.skipped,/world's code/);assert.equal(out.next.some(n=>n.includes('validate.mjs')),false);
+  assert.equal(readFileSync(new URL('./client-body-kit.mjs',import.meta.url),'utf8').includes('spawnSync'),false,'no way to run it here');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
 
 test('kit args: dir, starter, seed and force', ()=>{
  assert.deepEqual(parseKitArgs(['k','--starter','rolling','--force']),{dir:'k',starter:'rolling',seed:1,force:true});

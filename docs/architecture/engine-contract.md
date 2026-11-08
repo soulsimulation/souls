@@ -81,12 +81,15 @@ A reach's lean into a container and a stroke's step to a board go through `runti
 a step that would put the body below the `collision.human-static` limit, and worse than where it stands, is not taken,
 and the hand works from where the body is. A stroke stays held for the rest of the stroke; a lean follows its path back
 out. Invariants run at the end of every tick, so a held step would have been a violation on that same tick (unless something
-later in that tick moved the obstacle), and every earlier step moves as it did. Other body steps owned by actions, such as a door handle's reach, do not go through it yet.
+later in that tick moved the obstacle), and every earlier step moves as it did.
+An opening or a slide can't stop short, because its body follows the handle: where the next step would trip the same rule, the
+rest of its path shifts aside by the smallest step with room, at most 0.18 m in all, easing back once there is room, and with no such step it fails `step-blocked`.
+A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra. Other body steps owned by actions do not go through it yet.
 
 ## Refusal
 
-With the `souls-repair/1` rules (`soulsRepairV1`, off unless `SIM_SOULS_REPAIR=1`; new worlds only for now: a world whose history lacks it
-refuses to boot under the flag), a move that
+With the `souls-repair/1` rules (`soulsRepairV1`: on with `SIM_SOULS_REPAIR=1` or with `SIM_SHARED_CARRY=1`, and `SIM_SOULS_REPAIR=0`
+turns it off under either; new worlds only for now: a world whose history lacks it refuses to boot with it on), a move that
 would break a rule is not applied ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
 
 - `Engine.step` leaves no refusable violation standing. The bodies that moved go back to their pose before the tick, and
@@ -104,8 +107,75 @@ would break a rule is not applied ([#1150](https://github.com/soulsimulation/sou
   outside the snapshot, and would otherwise miss a jump on its first tick.
 - A body that only turned did not move. Observers run in the end-of-tick pass, before the undo, so a take can show the
   refused pose for that one tick.
+- **The one relocation exception.** A `collision.human-static` naming a body that did not move means the world landed on it
+  (a god edit past the bridge's own walk-out). There is no pose to go back to, so it stands at the nearest free spot,
+  logged and told to the Soul. Apart from a body a rung 3 finds inside something, below, this is the only time a body
+  changes place without moving there.
 - `step().refusals` reports each one. The host logs it as a `rules` event from `world:refusal`. Replay reads those only to
   compare the count, and a difference is reported, not fatal.
+
+### The ladder
+
+1. **Refuse** (above), inside `Engine.step`.
+2. **Narrow replay:** the host's recovery plans, unchanged, each kept only if its replay is clean.
+3. **Last rung,** when rung 2 fails or has no plan: restore the last clean baseline, stop every programme, re-apply
+   everything since it except decisions and what only they explain (`decision`, `play`, `edge-stop`, intent admissions,
+   arrivals and sleep stops), and set the clock to the fault's tick. This takes no engine step,
+   so no rule can fire. It's logged as a recovery recipe with `lastRung`. Open receipts end `world.rewound`.
+   With no baseline, or within a minute of the last one, it stays on the head, and rung 2 isn't tried: stop, contain, logged
+   as `lastRungInPlace`, whenever it stopped something or the fault named something off the list, and otherwise once per
+   rule per minute. A replay makes the same stops from that event. An event that won't re-apply costs only itself, and
+   the recipe lists it. A Soul is told `world.rewound` only when something of its world ended: a stop in place that
+   stopped nothing tells nobody.
+
+**`containedV1`** is part of world state, absent when empty: what rung 3 could not repair. It holds what the fault itself
+named, and the row or recipe carries those keys, so a replay applies them and nothing reads the invariants outside a step:
+a read there would move the step check's memory where a replay's doesn't, and the boot would differ. A rule the step check
+can only see across ticks, like `motion.teleport`, is contained the same way.
+
+An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
+once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
+of it, never further in: a move that takes a body nearer the solid thing, inside its own width, or nearer the other body or
+load, goes to rung 1 as any move would. A carried load's own `carry.load-static` names only the load, so that one isn't judged. A `motion.*` key never counts as standing. Anything else on the list only absorbs what has no plan:
+a body that moves into forbidden geometry under a held key is refused by rung 1 as it would be with nothing held. The list keeps eight subjects of a rule; past that the rule goes on
+whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that names someone new each tick writes a few rows
+and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
+started what it stopped. A body inside something is relocated once.
+
+`SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
+ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
+throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
+survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
+a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
+`clock-frontier.replay-differs`. What ran since the last snapshot can be lost that way, so a throw asks for a snapshot, at most
+once per cooldown in a stretch of them.
+
+**An action whose step or stop throws ends alone** (`engine.action-threw`, logged and counted as a refusal). Its whole tree ends,
+its Soul is told, and whatever it held is set down where it is, on the bearer's level: the one time a load is let go without its
+set-down, because the action that would have done it is what broke. A part joined to others stays where it is and stands by
+itself, as a god's joined upright does, and the frames and beams of its group stand down with it (`settleFrames`), because laying
+it flat would keep the joints and the crew at the other end could never let go. Crews holding the rest of that frame are let go
+in the same way, since nobody can finish it with them now. What a part does to a rule after that is the ladder's like anything else.
+
+**A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
+that long, counted from the fault's tick, and is then abandoned the same way. So a stop that is refused
+(`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for gets the same
+deadline the next time the ladder fires, and that deadline is written in a stop-in-place row that tells nobody, so a replay has
+it. Until then it isn't bounded here.
+
+Going back doesn't answer a rule twice: a rule a rung 3 has gone back for stays on the head after that, a thrown step counting as
+one rule, so what returns past the hold writes a small row, not a whole world. A restart allows it one more.
+
+**A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
+coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get
+anywhere, so acts are refused with `world.step-failing`, nothing rewinds, the launcher alerts as for a halt, and a due
+snapshot is taken at once on a faulted tick. That snapshot is marked: it serves a boot, never a rewind, and one that won't
+capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below three quarters of that, and a clean snapshot follows at once. While it lasts a faulted tick keeps the ordinary beat of batches and heartbeats. What still reaches it is a throw outside
+any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
+placed clears it, and a rung 3 keeps god edits, so it survives a restart until then.
+
+**What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
+persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
 
 ## Conformance
 

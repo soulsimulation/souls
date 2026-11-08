@@ -24,6 +24,7 @@ export type Resolution =
   | {ok: true; kind: 'setting'; capability: string; apply: () => void; chosen: Chosen}
   | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
 import {classWords} from './class-words.ts';
+import {signWords} from '../ledger/vocabulary.ts';
 export type IntentInput = {verb?: unknown; target?: unknown; params?: unknown; clientRef?: unknown; [k: string]: unknown};
 type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
 
@@ -284,7 +285,7 @@ export class Intents {
 
   // ------------------------------------------------------------------ acting
   /** act {verb, target}: resolve now (the step starts now) and act on the concrete choice; the receipt says what it chose. */
-  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string} | Refused> {
+  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string; repeat?: true} | Refused> {
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
     if (clientRef) {const old = this.L.coreA.byClientRef(soul.soulId, clientRef); if (old) return {accepted: true, receipt: old, chosen: (old as {chosen?: Chosen}).chosen ?? {}, channel: (old as {channel?: string}).channel ?? 'body'};}
     await this.L.coreA.reclaim(soul);
@@ -294,6 +295,8 @@ export class Intents {
     if (r.kind === 'capability') {
       const out = await this.L.act(soul, {capability: r.capability, params: {...extra, ...(r.params ?? {})}, ...(clientRef ? {clientRef} : {})});
       if (!out.accepted) return {...out, ...(r.chosen.seat ? {} : {})} as Refused;
+      // #1272: the act under way answered: it stays as it was chosen
+      if (out.repeat) return {accepted: true, receipt: out.receipt, chosen: (out.receipt.chosen as Chosen) ?? {}, channel: out.receipt.channel ?? 'body', repeat: true};
       const chosen={...r.chosen,...(out.receipt.chosen as Chosen??{})};
       const receipt = this.L.coreA.setDetail(out.receipt.id, {chosen, intent: intentOf(input)}) ?? out.receipt;
       return {accepted: true, receipt, chosen, channel: (receipt as {channel?: string}).channel ?? 'body', ...(out.resolved ? {resolved: out.resolved} : {})};
@@ -389,7 +392,7 @@ export class Intents {
       const place=explicitPlaceCapability(this.L,soul,asked),onDemand=!!place&&!place.ok&&place.code==='place.unwalkable'&&this.L.onDemandId(soul,asked);if(place&&!onDemand){if(!place.ok)return place;return {ok:true,would:{capability:place.chosen.capability,channel:'body',chosen:place.chosen,...resolvedParts(this.L,soul,place.chosen.capability,asked)}};}
       const bodyIssue=asked.startsWith('object:')?null:this.L.bodyVerbProblem(soul,asked.split(/[:\s]/)[0]!);if(bodyIssue)return {ok:false,...bodyIssue};
       if (!asked || asked.length > 200) return {ok: false, code: 'capability.params', reason: 'capability must be 1..200 characters.'};
-      const plain = offeredAttention(caps, asked) ? null : attentionWords(asked); if (plain) return this.dryRun(soul, plain);
+      const plain = offeredAttention(caps, asked) || signWords(asked, {caps}) ? null : attentionWords(asked); if (plain) return this.dryRun(soul, plain);
       const cls = classWords(asked, this.L.places.byId.values()); if (cls) return this.dryRun(soul, cls);
       const strict = strictCheck(this.L, soul, asked, caps); if (strict && !this.L.onDemandId(soul, asked)) return {ok: false, ...strict};
       // quality cases 21/28: resolve reads social phrasing exactly as act does ("ride the balloon with X" invites X; "hug X")

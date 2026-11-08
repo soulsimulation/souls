@@ -9,7 +9,7 @@ import {LivingWorld} from './living.ts';
 import {hashToken} from './auth.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
-import {secretMatcher,withoutSecrets} from './edge/perception/public-scrub.ts';
+import {secretMatcher,withoutSecrets,withoutSecretsBut} from './edge/perception/public-scrub.ts';
 
 const factory=nativeSleepSnapshotFactoryV1(await retainedCommonsShoreFactory());
 async function world(t:TestContext){
@@ -115,4 +115,24 @@ test('A1: a new field can\'t bring one back: the scrub works on the answer, not 
  const s=secretMatcher(['hut-1'],['Hidden Cove'])!,gone=withoutSecrets({a:{later:{where:'hut-1',ok:1}},list:[{deep:[{x:'At the hidden cove.'}]},{y:'hut-12 and chutney'}],k:'Hidden Cove',n:3},s);
  assert.deepEqual(gone,{a:{later:{ok:1}},list:[{y:'hut-12 and chutney'}],n:3},'whole words only; an entry goes whole, a field alone');
  assert.equal(secretMatcher([]),null);const v={a:1};assert.equal(withoutSecrets(v,null),v,'no secret place, nothing touched');
+});
+
+test('#1141: a timeline field added later carries no secret place; a title is the Soul\'s own words and stays', () => {
+ const s=secretMatcher(['cove'],['Hidden Cove']),at={real:'2026-11-07T10:00:00.000Z',tick:1,worldDay:1,time:'09:00'},none={id:null,name:null};
+ const entry=(extra:object)=>({kind:'produced',when:at,place:none,title:'A song',...extra});
+ const out=withoutSecretsBut<any>([entry({}),entry({title:'Dawn at Hidden Cove'}),entry({near:{id:'cove',name:'The Bay'}}),entry({route:['cove']}),entry({place:{id:'cove',name:'The Bay'}}),entry({note:'seen at cove'}),entry({world:'Hidden Cove'}),{kind:'arrival',when:at,place:none}],'title',s);
+ assert.deepEqual(out.map((e:any)=>e.title),['A song','Dawn at Hidden Cove',undefined],'the title alone is left; every field holding the place takes its entry with it');
+ assert.equal(out.length,3);assert.doesNotMatch(JSON.stringify(out.filter((e:any)=>!e.title?.includes('Cove'))),/cove/i);
+ const list=[entry({near:{id:'cove',name:'The Bay'}})];assert.equal(withoutSecretsBut(list,'title',null),list,'no secret place, nothing is touched');
+});
+
+test('#1141: on the real record, a journey\'s fields pass the scrub and a title doesn\'t', async t => {
+ const f=await world(t),before=(await f.pub()).j,target=places(before)[0]!,day={worldDay:1,time:'09:00'},now=Date.now();
+ f.ledger.timeline.travelled(f.row.id,1,now+1000,day,null,target.name);f.ledger.timeline.travelled(f.row.id,1,now+2000,day,null,'Elsewhere');
+ f.db.db.prepare("INSERT INTO edge_timeline_v1(world_id,receipt_id,soul_id,kind,tick,at,title) VALUES(?,?,?,?,?,?,?)").run(f.host.worldId,'r_made',f.row.id,'produced',1,now+3000,`Dawn at ${target.name}`);
+ assert.equal((await f.pub()).j.timeline.filter((e:any)=>e.world===target.name).length,1,'the control: a public place is left alone');
+ assert.ok(f.ledger.knowledge.setSecret(target.id,true));
+ const after=(await f.pub()).j,told=after.timeline as any[];
+ assert.ok(!told.some((e)=>e.world===target.name),'gone with its entry');assert.ok(told.some((e)=>e.world==='Elsewhere'));
+ assert.equal(told.find((e)=>e.kind==='produced')?.title,`Dawn at ${target.name}`,'a Soul\'s own words');
 });

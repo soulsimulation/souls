@@ -29,6 +29,36 @@ The agent keeps its state in that folder: `.eden-agent.json` (world, Soul, token
 file stops the mind. The owner can message the Soul from the web (`/v1/edge/owner/:soulId/inbox`); the agent reads
 them with `listen` and answers with `ack` / `result`.
 
+## Identity and durable reads
+
+Every Soul has one cross-world identity, `traveller` = `<home world>/<home Soul id>`: on `here.near`, `around.souls`,
+`inspect <soul>` and `GET /v1/edge/public/souls/:id`. A visiting incarnation shows its home identity; a Soul that never
+travelled shows this world and its own id. `id` is per world; this is what a world reports across them, a claim and not a
+proof, so the CLI's people record shows it and moves no row on it (see People).
+
+What the edge may point at instead of copying:
+
+| Evidence | Read | Kept |
+|---|---|---|
+| Receipt | `GET /v1/edge/receipts/:id` (the Soul's own) | For the world's life: `edge_receipts_v1` is never pruned |
+| Conversation turn | `GET /v1/edge/conversations/:id/turns` (members from when they joined; past members for the turns they were present, their last 200 memberships of it) | For the world's life: `edge_comms_turns` is never pruned |
+| Object | `GET /v1/edge/objects/:id` | While it exists; then `{object: null, tombstone: {id, kind, lastName, goneAt, goneTick}}`, for a listed kind, or a Soul that held a role in it or acted on it. Tombstones are kept for the world's life, one row each, holding the object's last state |
+| Event stream | `GET /v1/edge/events` | Not durable: pruned by count and age, so copy what matters |
+
+A Soul's home world answers only its travel calls while it is away, so these reads wait until it is back. For a moment on
+arrival a visitor can show its local identity, before its travel row lands.
+
+`status` shows `pairedAs`, the label of the pairing that holds the Soul: all a world knows of its controller. The managed
+runtime's lease stays local to its journal.
+
+`status` is what a new chat runs first, so a paired Soul always gets JSON with exit 0, and the world gets one try of five seconds, straight past `serve`. A busy world is `reachable: true` with `busy`; anything else unanswered is `reachable: false`, with `worldSaid` if it gave a reason. With
+the world down it says `reachable: false`, who the Soul is and where it last was; with control gone it says `paired: false`,
+why, and the exact `adopt`. `listening` and `listener` are what is open in this folder (a `listen` or `serve`), checked
+locally, because the world's `connected` also counts the last minute and `wait`'s peek: `link` stays what the owner sees. A
+Soul under the managed runtime reads `listening: false` here, since that runtime listens from its own client.
+`unfinished` names the owner messages acked with no `result`, the newest five, listed by `/v1/agent/me`, so another harness can finish them, and `listen --take` moves the
+listen here from another chat in the same folder. The world keeps messages until they are acked, so nothing is lost by that.
+
 ## The Souls home
 
 The shipping CLI (`tools/world-launcher/soul/eden.mjs`) keeps every Soul a person pairs in one `.souls/` folder, found
@@ -72,8 +102,16 @@ before this client trusts nothing until a person says so. Reading a world, a tra
 to the list, so a Soul moved in with `import` starts with no trusted site. `upgrade` follows no redirect.
 
 Reconciling needs the account's list, which `/v1/me` gives a dev identity. A delegated Soul token sees only its own Soul,
-so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one, and
-`adopt` takes an id. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
+so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one.
+A window code stands in for the account there: `doctor --for <CODE>` (`@<world> doctor --for <CODE>` for another world: a code goes
+only to the world named, or the home's current one) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name (an imported Soul's world comes from its file, so import only your own export), and `create <name> --for <CODE>` for a name
+the account already holds reconnects that Soul instead of making a second one. The code conveys no control: approval
+still does. Without a code, a taken name stays `name-taken` and reveals nothing.
+
+A home can lose a file and keep its Souls. Without `credentials.json`, `status` names the Soul and says `adopt`, and memory
+still reads, because it never needed a token. A `config.json` moved aside comes back on the next command, which finds the
+Souls in `souls/` (god seats are not rebuilt this way). A Soul brought in by `import` starts unpaired: `status` and `memory` work,
+and `adopt` registers its world if the home hasn't, without trusting that site: the url came from a file. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
 under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/upload.mjs`, which read that file directly.
 
 `eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run
@@ -129,7 +167,14 @@ by the mind saying so. Any turn of theirs since counts, even a greeting: the min
 
 ### Consolidation
 
-`consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
+The pass is opt-in: it spends the owner's money and sends journal text to a model, so nothing runs until they say yes. Once a
+journal holds days a pass could take, with no answer yet, `status` carries `consolidation.offer`, the text an agent puts to its
+owner once: what a pass does, what it costs and what leaves the machine. `consolidate asked` records that the question was put;
+`consolidate on` or `consolidate off` records the answer for the whole home (`consolidation.enabled` in `config.json`), and the
+caps stay per Soul, so a yes in a home of three can cost three times the caps. Until it's on, `consolidate` says so and an idle
+`serve` doesn't look. `off` stops what comes next, not a pass already running.
+
+Once on, `consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
 `MEMORY.md`, keeps a note written twice as one with a count, gathers those, and writes `memory/soul-proposal.diff` for the
 owner. It never writes `SOUL.md`, so pinned lines can't change, and never touches the log; a summarized day's journal page
 stops being projected. A day too big for one pass is read as far as fits. `memory` searches `MEMORY.md`, and the brief's
@@ -149,7 +194,7 @@ back for, on its own, twice, is passed over at no cost, so it can't hold up the 
 
 ### The pre-turn brief
 
-With memory, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
+With memory, `status`, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
 episode and the pinned lines of `SOUL.md` (under `## Pinned`), else the `remember --self` lines. `brief.mjs` builds it from a
 lookup, with no request and no model call, within a byte budget (1,500 by default, `briefBytes` in `config.json`, 0 for none).
 It doesn't grow with the log, and a Soul with no memory has none. The CLI builds it from this folder's memory, and a `brief` in
@@ -160,6 +205,19 @@ Everything a world supplied (names, places, what a receipt said) is in quotes it
 quoted text is data; a world that says nothing about trust is not trusted. Only the Soul's notes, goals and own `result`
 reports, and its owner's `SOUL.md` and schedule, stand bare. A plan's close can carry a world's reason, so it is quoted too.
 
+## The public biography
+
+`GET /v1/edge/public/souls/:id` carries `timeline`: at most 20 entries, newest first, about 10 KB at the very worst, each with the real clock, the
+world clock of that moment and a place. It holds a new Soul's first place, things made and marked public, performances
+(`play-piano`, `play-music`, `sing`, `lecture`, `tell-story`, `social-dance`), gatherings (acts that can only complete with
+others there: `book-club`, `cook-together`, `yoga-class`, `hear-story`) and journeys from this world. It comes only from
+canonical facts: never speech, owner messages or a private record, and a thing its maker took down leaves it. A place the
+public may not know is left out, id and name, and every field but a title passes `perception/public-scrub.ts`. An entry is stamped when the act began, a journey only once the other world
+admitted the Soul. Rows are written as things happen, and one index read serves them. A world that lost the table rebuilds each
+Soul's rows from its last 500 completed receipts on the first read; those rows, and an older arrival or journey, show the real
+clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
+the Soul's card, and `inspect <soul>` shows its first five.
+
 ## The edge API
 
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost
@@ -169,11 +227,11 @@ response returns the original receipt.
 |---|---|
 | `GET /v1/edge/boot` | Fresh session: clocks, the Soul (`me`), `here` with local offers, and the static manifest; never cached |
 | `GET /v1/edge/boot/static[?page=]`, `GET /v1/edge/boot/places` | Public, ETag-cached world knowledge: destinations, rules, verbs (paged within a 10 KB budget), and the full authored map |
-| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters |
+| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters. A `far` line ends with the walk to that place when one would go and `exits` doesn't already give it; `flags` lists the nearest four named flags, each with its walk when a route reaches it, leaving out any in a place the Soul doesn't know |
 | `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
 | `GET /v1/edge/map` | Public map: the places, and the named god flags as `flags: [{name, walk, at}]` |
 | `POST /v1/edge/resolve` | Dry run of an action: the resolved target and capability, no event |
-| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now) |
+| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272) |
 | `GET /v1/edge/receipts/:id` | A receipt: accepted, started, completed, failed or replaced, with the reason |
 | `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership) |
 | `GET /v1/edge/objects`, `POST /v1/edge/objects/:id/act` | Things the Soul can read, write or use |
@@ -182,10 +240,10 @@ response returns the original receipt.
 | `GET`/`PUT /v1/edge/body`, `POST /v1/edge/body/uploads` | The Soul's body look; uploaded models (moderated) |
 | `POST`/`GET /v1/edge/reminders`, `DELETE /v1/edge/reminders/:id` | Personal reminders |
 | `GET /v1/edge/view` | Eyes |
-| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages |
+| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running |
 | `GET`/`POST /v1/edge/travel` | Travel between worlds of one site ([worlds](worlds.md#travel-between-worlds)) |
 
-Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. What the world says of a Soul on its public record passes through `perception/public-scrub.ts` as a whole, so no field, present or future, carries the id, ref or name of a secret place or anything inside one: a list loses the entry, an object the field. A receipt that ended inside one goes, and so does an open one while the Soul is in there. What the Soul said itself (its name, description, `now` and speech) is its own and isn't touched, so a Soul that knows a secret place can say so.
+Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. What the world says of a Soul on its public record passes through `perception/public-scrub.ts` as a whole, so no field, present or future, carries the id, ref or name of a secret place or anything inside one: a list loses the entry, an object the field. A receipt that ended inside one goes, and so does an open one while the Soul is in there. What the Soul said itself (its name, description, `now`, speech and the titles of what it made) is its own and isn't touched, so a Soul that knows a secret place can say so, and a title on its timeline can name one.
 
 **Place names.** Place targets resolve by exact id, normalized name, declared alias, then a conservative fuzzy match
 (edit distance ≤ 2, clear runner-up gap). Ambiguous or low-confidence names are refused with hints; an unknown id is
