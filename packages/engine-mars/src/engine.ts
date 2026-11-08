@@ -578,10 +578,13 @@ export class MarsEngine implements Engine {
     return v => known.has(containedKey(v)) || known.has(containedByRule(v.code));
   }
   /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
-  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } {
+  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { return this.stopWhereV1(() => true, why, from); }
+  /** #1369 quarantine/1: as `stopAllV1`, for the programmes of these bodies alone. Everyone else's go on. */
+  stopBodiesV1(bodies: string[], why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { const ids = new Set(bodies); return this.stopWhereV1(p => ids.has(p.actor), why, from); }
+  private stopWhereV1(which: (p: Prog) => boolean, why: { code: string; message: string }, from: number): { stopped: number; deadlines: number } {
     let stopped = 0, deadlines = 0;   // what this call changed, so a host knows if a replay has to make the same stops. A deadline ends nothing yet.
     const cancel = (id: string) => { try { this.cancelOrAbandonV1(id, why); } catch (e) { console.error('[engine] a stop could not end its action:', String(e).slice(0, 200)); } };   // this rung can't fail
-    for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    for (const p of [...this.programs.values()].filter(which).sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (p.stopping && p.action && this.rt.isActive(p.action)) { if (p.stopByV1 === undefined) { p.stopByV1 = from + LADDER_STOP_TICKS; deadlines++; } continue; }   // already on its way down: its own reason and cleanup stand, for a while
       if (p.action && this.rt.isActive(p.action)) cancel(p.action);
       if (p.action && this.rt.isActive(p.action)) { stopped++; p.stopping = why; p.refusalsV1 ??= []; p.stopByV1 = from + LADDER_STOP_TICKS; continue; }

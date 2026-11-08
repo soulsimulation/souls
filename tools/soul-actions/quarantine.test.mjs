@@ -1,0 +1,160 @@
+// #1369 quarantine/1: the repair ladder's end never halts the world. When rung 3 can't go back (its baseline won't restore, as
+// #1368's make-way wait wouldn't), the bodies the fault named stop where they stand and are contained, and the clock and
+// everyone else go on. The fault is real in every replay (a factory wrapper puts it in each runtime at a fixed tick), and every
+// restore the ladder tries is refused, as the reader refused the stair baseline in both #1369 runs.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture, invite, accept, seed, worldId} from '../../apps/server/test/native-owner-fixture.ts';
+import {Db} from '../../apps/server/src/db.ts';
+import {WorldHost} from '../../apps/server/src/world.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {marsFactory, GREEN_FIELD_WORLD} from '../../packages/engine-mars/src/engine.ts';
+import {forgetMotion} from '../../mars/viewer/engine/runtime/invariants.ts';
+import {rowsOf as glitchRows} from '../../apps/server/test/glitch-rows.ts';
+import {SnapshotError} from '../../mars/viewer/engine/runtime/snapshot.ts';
+
+const repair = await marsFactory({...GREEN_FIELD_WORLD, sharedCarryV1: true, soulsRepairV1: true});
+const REFUSED = 'fixture.restore-refused: waiting directive a16 has invalid graph provenance';
+function faulted(base, control) {
+  const wrap = (e) => {
+    const rt = e.rt, fired = new WeakSet(), step = e.step.bind(e);
+    rt.invariants = [(r) => { if (r.tick === control.at && !fired.has(r)) { fired.add(r); return control.fault(r) ?? []; } if (control.every) return control.every(r) ?? []; return []; }, ...rt.invariants];
+    e.step = () => { const o = step(); if (control.throwEvery) throw new Error('fixture.engine-bug'); return o; };
+    return e;
+  };
+  return {...base, create: (w) => wrap(base.create(w)), restore: (s) => { if (control.restoreFails) throw new Error(REFUSED); return wrap(base.restore(s)); }};
+}
+async function world(t, {quarantine = true, path = ':memory:'} = {}) {
+  const control = {at: -1, fault() {}}, factory = faulted(repair, control), f = fixture(path, factory, {durableClockV1: true}); f.brain.quiesce();
+  const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false, sharedCarry: true}), app = new Hono();
+  const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: edge, soul: () => null});
+  t.after(() => { try { comms.close(); f.host.stop(); f.db.close(); } catch { /* a restart test closed them itself */ } });
+  const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit() {}});
+  installEngineBridge({host: f.host, god, edge, log() {}, worldLore: false, worldClock: false});
+  const tick = async (n = 5) => { for (let i = 0; i < n && !f.host.paused; i++) { f.host.tickOnce(); await setImmediate(); if (!f.host.paused) f.host.drainInputs(); } };
+  await tick();
+  if (quarantine) await accept(f.host, f.host.enableQuarantineV1('test'));
+  const souls = {};
+  for (const name of ['Ada', 'Bo', 'Cy']) {
+    await invite(f, name.toLowerCase());
+    const row = await accept(f.host, f.souls.create(`dev:${name.toLowerCase()}`, {name, description: 'Quarantine test'}));
+    souls[name] = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner};
+  }
+  await tick();
+  const [ax, , az] = f.host.engine.world.entities[souls.Ada.entityId].pose.p;
+  assert.notEqual(god.act({ops: [
+    {op: 'place', def: 'core/zone@1', name: 'shed', shape: {area: [[ax + 7, az - 2], [ax + 10, az - 2], [ax + 10, az + 2], [ax + 7, az + 2]]}},
+    {op: 'place', def: 'core/zone@1', name: 'yard', shape: {area: [[ax - 10, az - 2], [ax - 7, az - 2], [ax - 7, az + 2], [ax - 10, az + 2]]}},
+  ]}).accepted, false);
+  await tick(30);
+  return {f, edge, god, comms, tick, souls, control, factory};
+}
+const quiet = (t) => { t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {}); };
+const onDisk = (t) => { const dir = mkdtempSync(join(tmpdir(), 'quarantine-')); t.after(() => rmSync(dir, {recursive: true, force: true})); return join(dir, 'world.db'); };
+const ok = (r) => { assert.notEqual(r.accepted, false, JSON.stringify(r)); return r; };
+const act = (w, s, input) => accept(w.f.host, w.edge.act(s, input));
+const read = (w, s, r) => w.edge.receipt(s.soulId, r.receipt?.id ?? r.id);
+const byRung = (h) => Object.values(h.glitches.byRule).reduce((n, r) => { for (const [k, v] of Object.entries(r)) n[k] = (n[k] ?? 0) + v; return n; }, {});
+const rowsOf = (w) => glitchRows(w.f.db);
+const running = (h) => h.clockAvailable && !h.paused && !h.engineFault;
+// every boot of the log, from its snapshot and from genesis, reaches the live head (restores work again: the reader was fixed)
+const bootsAgree = (w, path) => {
+  const h = w.f.host, hash = h.engine.stateHash(), tick = h.engine.world.tick; w.control.restoreFails = false; w.comms.close(); h.stop(); w.f.db.close();
+  for (const from of ['snapshot', 'genesis']) {
+    const db = new Db(path); if (from === 'genesis') db.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(worldId);
+    const b = new WorldHost(db, w.factory, seed, 1e9, worldId, {durableClockV1: true}), booted = b.boot();
+    if (from === 'genesis') assert.equal(booted.from, 'genesis');
+    assert.equal(b.engine.world.tick, tick, from); assert.equal(b.engine.stateHash(), hash, from); b.stop(); db.close();
+  }
+};
+// rung 1 has no answer for a floating body (nothing moved it), rung 2's replays fault the same way, and rung 3's restore is refused
+async function unrestorable(w, s, rule = 'support.floating') {
+  const h = w.f.host; w.control.restoreFails = true; w.control.fault = () => [{code: rule, message: 'forced', subjects: [s.entityId]}]; w.control.at = h.engine.world.tick + 3;
+  await w.tick(8); return h.engine.world.tick;
+}
+
+test('without quarantine/1 a refused rung 3 restore halts the world (the #1369 shape)', async (t) => {
+  quiet(t); const w = await world(t, {quarantine: false}), h = w.f.host;
+  ok(await act(w, w.souls.Ada, {capability: 'walk:shed'})); await w.tick(10);
+  await unrestorable(w, w.souls.Ada);
+  assert.equal(running(h), false, 'halted'); assert.deepEqual(h.glitches.byRule['durability.checkpoint'], {halt: 1});
+});
+
+test('Q1 a refused rung 3 restore quarantines the one body: no halt, a contained row, the others walk on, the clock runs 600 ticks, and every boot agrees', {timeout: 300000}, async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, {path}), h = w.f.host, {Ada, Bo, Cy} = w.souls;
+  const walk = ok(await act(w, Ada, {capability: 'walk:shed'})), far = ok(await act(w, Bo, {capability: 'walk:yard'})); await w.tick(10);
+  const seq0 = h.seq, at = await unrestorable(w, Ada);
+  assert.ok(running(h), 'the clock is available'); assert.equal(byRung(h).halt ?? 0, 0, JSON.stringify(h.glitches));
+  const rows = rowsOf(w).filter((r) => r.evidence?.quarantine);
+  assert.equal(rows.length, 1, JSON.stringify(rowsOf(w))); assert.equal(rows[0].rung, 'contained'); assert.equal(rows[0].rule, 'support.floating'); assert.deepEqual(rows[0].bodies, [Ada.entityId]);
+  assert.match(String(rows[0].evidence.restore), /fixture\.restore-refused/, 'the restore error is the evidence');
+  const ev = w.f.db.events(worldId, seq0).filter((e) => e.payload?.quarantineV1);
+  assert.equal(ev.length, 1); assert.deepEqual(ev[0].payload.quarantineV1.bodies, [Ada.entityId]); assert.deepEqual(ev[0].payload.quarantineV1.souls, [Ada.soulId]);
+  const x = read(w, Ada, walk); assert.equal(x.phase, 'failed', JSON.stringify(x)); assert.equal(x.code, 'world.quarantined');
+  assert.equal(read(w, Bo, far).phase, 'started', 'Bo was not stopped');
+  assert.ok(w.comms.streams.read(Ada.soulId, 0).events.some((e) => e.kind === 'world.quarantined'), 'Ada hears it');
+  assert.ok(!w.comms.streams.read(Bo.soulId, 0).events.some((e) => e.kind === 'world.quarantined' || e.kind === 'world.rewound'), 'Bo hears nothing');
+  w.control.fault = () => []; await w.tick(600);
+  assert.ok(h.engine.world.tick >= at + 590, `600 ticks on (${h.engine.world.tick - at})`); assert.ok(running(h));
+  assert.equal(read(w, Bo, far).phase, 'completed', 'Bo arrives');
+  const again = ok(await act(w, Ada, {capability: 'walk:yard'})), cy = ok(await act(w, Cy, {capability: 'walk:shed'})); await w.tick(500);
+  assert.equal(read(w, Ada, again).phase, 'completed', 'Ada acts again'); assert.equal(read(w, Cy, cy).phase, 'completed');
+  assert.equal(byRung(h).halt ?? 0, 0);
+  h.drainInputs(); h.saveSnapshot(true); bootsAgree(w, path);
+});
+
+test('Q1 the same fault coming back on the head is quarantined again, never rewound world-wide or halted', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls;
+  const far = ok(await act(w, Bo, {capability: 'walk:yard'})); await unrestorable(w, Ada); w.control.fault = () => [];
+  await w.tick(20); ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
+  const at2 = h.engine.world.tick + 3; w.control.every = (r) => (r.tick === at2 ? [{code: 'stair.unsupported', message: 'forced', subjects: [Ada.entityId]}] : []); await w.tick(8);   // the wrapper fires `fault` once per runtime
+  assert.ok(running(h)); assert.equal(byRung(h).halt ?? 0, 0); assert.equal(byRung(h).rewind ?? 0, 0, JSON.stringify(h.glitches));
+  assert.equal(rowsOf(w).filter((r) => r.evidence?.quarantine).length, 2, JSON.stringify(rowsOf(w).map((r) => [r.rung, r.rule, r.tick, r.evidence.quarantine, String(r.evidence.reason).slice(0, 80)]))); assert.notEqual(read(w, Bo, far).code, 'world.rewound');
+});
+
+test('Q1 a baseline that will not materialize is no halt either', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada} = w.souls;
+  h.recoveryCapture = () => { throw new Error('fixture.checkpoint-iterator-broke'); };
+  w.control.fault = () => [{code: 'support.floating', message: 'forced', subjects: [Ada.entityId]}]; w.control.at = h.engine.world.tick + 2; await w.tick(6);
+  assert.ok(running(h)); assert.equal(byRung(h).halt ?? 0, 0); assert.match(String(rowsOf(w).find((r) => r.evidence?.quarantine)?.evidence.restore), /checkpoint-iterator-broke/);
+});
+
+test('Q2 a failed write is still the one halt', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, append = w.f.db.appendEvent.bind(w.f.db);
+  w.f.db.appendEvent = (id, e) => { if (e.payload?.quarantineV1) throw new Error('fixture.disk-full'); return append(id, e); };
+  await unrestorable(w, w.souls.Ada);
+  assert.equal(running(h), false); assert.deepEqual(h.glitches.byRule['durability.repair'], {halt: 1});
+});
+
+test('Q4 quarantine/1 is one logged rule, adopted once', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host; await accept(h, h.enableQuarantineV1('again'));
+  const rows = w.f.db.db.prepare("SELECT payload FROM events WHERE kind='rules' AND payload LIKE '%quarantineV1%'").all();
+  assert.equal(rows.length, 1); assert.equal(JSON.parse(rows[0].payload).runtimePolicy.quarantineV1, true);
+});
+
+// #1376: the manual and the repair snapshot, as #1375 made the periodic one
+test('Q5 a refused manual snapshot is named and contained: the caller hears pending, and the world ticks on', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, before = w.f.db.latestSnapshot(worldId)?.tick ?? -1;
+  const mock = t.mock.method(h.engine, 'snapshot', () => { throw new SnapshotError('snapshot.unencodable', 'fixture: a function in the state'); });
+  const r = h.saveSnapshot(true); assert.equal(r.pending, true); mock.mock.restore();
+  assert.ok(running(h)); assert.deepEqual(h.glitches.byRule['durability.snapshot-skipped'], {contained: 1});
+  assert.equal(w.f.db.latestSnapshot(worldId)?.tick ?? -1, before, 'nothing written');
+  const t0 = h.engine.world.tick; await w.tick(30); assert.equal(h.engine.world.tick, t0 + 30);
+  assert.throws(() => { t.mock.method(h.engine, 'snapshot', () => { throw new Error('fixture.corrupt'); }); h.saveSnapshot(true); }, /fixture\.corrupt/, 'other capture faults still propagate');
+});
+
+test('Q5 a refused repair snapshot leaves the repair standing and the world running', async (t) => {
+  quiet(t); const w = await world(t), h = w.f.host, {Ada} = w.souls;
+  t.mock.method(h, 'captureHead', () => { throw new SnapshotError('snapshot.unencodable', 'fixture: a function in the state'); });
+  ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
+  w.control.fault = () => [{code: 'support.floating', message: 'forced', subjects: [Ada.entityId]}]; w.control.at = h.engine.world.tick + 2; await w.tick(10);
+  assert.ok(running(h)); assert.equal(byRung(h).halt ?? 0, 0, JSON.stringify(h.glitches)); assert.ok((h.glitches.byRule['durability.snapshot-skipped']?.contained ?? 0) >= 1, JSON.stringify(h.glitches));
+});
