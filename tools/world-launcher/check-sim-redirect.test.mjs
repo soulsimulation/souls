@@ -45,9 +45,10 @@ test('a redirected sign-in, a dropped query, a wrong status or another host fail
   }
 });
 
-test('the site file keeps /sign-in on the origin, proxies it to the bridge, and redirects the rest 301/308 with the uri', () => {
+test('the site file keeps /sign-in on the origin, serves it from the production launcher\'s own bridge, and redirects the rest 301/308 with the uri', () => {
   const f = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'deploy/caddy/sim-eden-art.caddy'), 'utf8').replace(/^\s*#.*$/gm, '');
-  assert.match(f, /handle \/sign-in \{\s*rewrite \* \/__sim\/clerk-sign-in\s*reverse_proxy https:\/\/soul\.game \{\s*header_up Host soul\.game/);
+  assert.match(f, /handle \/sign-in \{\s*rewrite \* \/__sim\/clerk-sign-in\s*reverse_proxy localhost:@@PRODUCTION_PORT@@\s*\}/);
+  assert.doesNotMatch(f, /localhost:\d|127\.0\.0\.1|\b\d{1,3}(\.\d{1,3}){3}\b/, 'no port or address in the repository: the placeholder only');
   assert.match(f, /@read method GET HEAD\s*handle @read \{\s*redir https:\/\/soul\.game\{uri\} 301/);
   assert.match(f, /handle \{\s*redir https:\/\/soul\.game\{uri\} 308/);
   assert.ok(f.indexOf('handle /sign-in') < f.indexOf('@read'), 'sign-in is handled before the redirects');

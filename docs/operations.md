@@ -32,11 +32,12 @@ origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
 
 Caddy terminates TLS and sends the canonical root site to production; `souls.game` redirects to `soul.game`.
-`sim.eden.art`, the former origin and still the Clerk primary origin, redirects to `soul.game` with the same path and
-query (301 for GET and HEAD, 308 otherwise), except `/sign-in`, the primary sign-in bridge. Its site file is
-[`deploy/caddy/sim-eden-art.caddy`](../tools/world-launcher/deploy/caddy/sim-eden-art.caddy) on the host that serves
-that name; `node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs` checks it from anywhere
-([Clerk satellite](operations/clerk-satellite.md#the-primary-origin-redirects-everything-else)).
+`sim.eden.art`, the former origin and still the Clerk primary origin, moves to the production host. There it
+redirects to `soul.game` with the same path and query (301 for GET and HEAD, 308 otherwise), except `/sign-in`, which
+is the launcher's own primary sign-in bridge. Its site file is
+[`deploy/caddy/sim-eden-art.caddy`](../tools/world-launcher/deploy/caddy/sim-eden-art.caddy), installed once at cutover;
+the release never writes Caddy's configuration. `node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs` checks
+it from anywhere ([Clerk satellite](operations/clerk-satellite.md#simedenart-on-the-production-host)).
 The canonical worlds are `/w/eden/`, `/w/mars-college-2026/` and `/w/mars-college-2027/`.
 Keep the configured asset-serving rules and old world URL aliases intact. The Clerk primary remains on the
 eden.art instance: old identity-provider URLs are intentional, not blanket rename targets. After a host reboot,

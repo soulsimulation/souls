@@ -1,24 +1,24 @@
-# sim.eden.art, the former public origin and still the Clerk PRIMARY origin (#1416). Everything goes to soul.game with the
-# same path and query, except the primary sign-in bridge, which must keep answering on this origin: the satellite's sign-in
-# URL is https://sim.eden.art/sign-in (docs/operations/clerk-satellite.md), and Clerk makes primary sessions here.
+# sim.eden.art on the PRODUCTION host (#1416): the former public origin, and still the Clerk PRIMARY origin. Everything goes
+# to soul.game with the same path and query, except the primary sign-in bridge, which must keep answering on this origin:
+# the satellite's sign-in URL is https://sim.eden.art/sign-in (docs/operations/clerk-satellite.md), and Clerk makes the
+# primary session here. The bridge is the production launcher's own /__sim/clerk-sign-in, so there is no proxy hop to
+# another site.
 #
-# Install on the host that serves sim.eden.art, in place of its old sim.eden.art site block (/etc/caddy/sites/sim.caddy;
-# leave every other site on that host alone), then:
-#   caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
-#   node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs        # from anywhere: must print PASS
+# @@PRODUCTION_PORT@@ is a placeholder, never a real value in this repository: the production launcher's loopback port,
+# the --port of SIM_WORLDS_ARGS in /etc/sim-worlds/production.conf. The cutover (docs/operations/clerk-satellite.md,
+# "sim.eden.art on the production host") substitutes it while installing this file as /etc/caddy/sites/sim-eden-art.caddy.
+# It touches no other site. Before sim.eden.art's DNS points at this host the block is inert: Caddy cannot get a
+# certificate for the name yet and retries with back-off; soul.game and every other site are unaffected.
+#
 # GET and HEAD get 301. Other methods get 308, so an old client's POST stays a POST instead of turning into a GET.
-# A WebSocket cannot follow a redirect: old pages reach soul.game through the page redirect first.
 https://sim.eden.art {
 	header X-Robots-Tag "noindex"
 
-	# The launcher's standalone Clerk bridge, from the canonical site. The query (redirect_url and Clerk's own
-	# parameters) survives the rewrite; Clerk routes by hash, so there is no /sign-in/* subpath. Its own no-store,
-	# no-referrer and CSP headers come through unchanged: add no second CSP here.
+	# The query (redirect_url and Clerk's own parameters) survives the rewrite; Clerk routes by hash, so there is no
+	# /sign-in/* subpath. The bridge's own no-store, no-referrer, frame and CSP headers come through: add none here.
 	handle /sign-in {
 		rewrite * /__sim/clerk-sign-in
-		reverse_proxy https://soul.game {
-			header_up Host soul.game
-		}
+		reverse_proxy localhost:@@PRODUCTION_PORT@@
 	}
 
 	@read method GET HEAD

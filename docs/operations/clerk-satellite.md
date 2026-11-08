@@ -51,21 +51,50 @@ SDK synchronization parameters, world paths and pairing fragments. The page has 
 noindex headers, denies framing and supplies a CSP with a hash for its inline bootstrap and Clerk's documented
 script hosts, Clerk's blob workers and the primary edge's Cloudflare analytics script. Avoid adding a second, conflicting CSP at the proxy on this route. It never renders or logs tokens.
 
-## The primary origin redirects everything else
+## sim.eden.art on the production host
 
-`https://sim.eden.art` serves only the sign-in bridge now (#1416). Every other request goes permanently to
-`https://soul.game` with the same path and query: 301 for GET and HEAD, and 308 for other methods, so an old client's
-POST stays a POST. The site file is
+The old sim.eden.art app is being retired (#1416). Its name moves to the production host, which serves only the
+sign-in bridge there and sends everything else permanently to `https://soul.game`, with the same path and query: 301
+for GET and HEAD, 308 for other methods, so an old client's POST stays a POST. The site file is
 [`tools/world-launcher/deploy/caddy/sim-eden-art.caddy`](../../tools/world-launcher/deploy/caddy/sim-eden-art.caddy).
-Its `/sign-in` handler is the one above, pointed at `soul.game`. Install it in place of the old sim.eden.art site block
-on the host that serves that name, and leave every other site on that host alone. Then:
+`/sign-in` is rewritten to the production launcher's own `/__sim/clerk-sign-in`, with the query and the bridge's own
+headers intact. The launcher's loopback port is the placeholder `@@PRODUCTION_PORT@@`, never a value in the repository.
+It is the `--port` in `/etc/sim-worlds/production.conf`, which the install substitutes.
 
-```sh
-caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
-node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs   # PASS: the redirects, the bridge, the canonical pages
-```
+The release never writes Caddy's configuration. The site file goes in once, at cutover, after a release that carries
+it is live:
 
-Then walk sign-in on the real URL: signed out on `soul.game`, sign in, return to the same world, reload.
+1. On the production host, as root, install it. Until DNS moves, the site is inert: Caddy can't get a certificate
+   for the name yet and retries with back-off, and soul.game and every other site are unaffected.
+
+   ```bash
+   set -euo pipefail
+   REL=/srv/sim-worlds/production                     # the live release (4.17 or later)
+   SRC="$REL/tools/world-launcher/deploy/caddy/sim-eden-art.caddy"
+   SITE=/etc/caddy/sites/sim-eden-art.caddy
+   PORT="$(sed -n 's/.*--port \([0-9][0-9]*\).*/\1/p' /etc/sim-worlds/production.conf)"
+   [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "no --port in production.conf: stopping, nothing changed"; exit 1; }
+   grep -q '^https://sim\.eden\.art {' "$SRC" || { echo "the live release has no sim-eden-art.caddy: ship 4.17 first"; exit 1; }
+   grep -qE '^\s*import sites/\*\.caddy' /etc/caddy/Caddyfile || { echo "the Caddyfile does not import sites/*.caddy: stopping, nothing changed"; exit 1; }
+   BAK=""; [ ! -e "$SITE" ] || { BAK="$SITE.bak.$(date +%s)"; cp -a "$SITE" "$BAK"; }
+   sed "s/@@PRODUCTION_PORT@@/$PORT/" "$SRC" > "$SITE.new" && mv "$SITE.new" "$SITE"
+   if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+     systemctl reload caddy && echo "sim.eden.art site installed; Caddy reloaded"
+   else
+     if [ -n "$BAK" ]; then mv "$BAK" "$SITE"; else rm -f "$SITE"; fi
+     echo "caddy validate failed: the previous state is back and Caddy was NOT reloaded"; caddy validate --config /etc/caddy/Caddyfile || true; exit 1
+   fi
+   LOOPBACK=localhost; code="$(curl -s -o /dev/null -w '%{http_code}' "http://$LOOPBACK:$PORT/__sim/clerk-sign-in?redirect_url=https%3A%2F%2Fsoul.game%2F")"
+   echo "the launcher's sign-in bridge answers locally: $code (want 200)"
+   ```
+
+2. Point `sim.eden.art`'s DNS at the production host: the same record type and Cloudflare proxy and SSL mode as
+   `soul.game`, or a CNAME to `soul.game`. Caddy then gets the certificate on the first request.
+3. From anywhere, run `node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs` until it prints PASS. It checks
+   the redirects (same path and query, 301 or 308), the bridge on `/sign-in` (200, no-store, its own CSP) and the
+   canonical pages.
+4. Walk sign-in on the real URL: signed out on `soul.game`, sign in, return to the same world, reload.
+5. Only then back up the old host and shut it down.
 
 `https://sim.eden.art` stays in `CLERK_AUTHORIZED_PARTIES` and in the CDN's CORS origins. Clerk makes the primary
 session on this origin, and the bridge runs here. Removing it would break sign-in for every satellite.
