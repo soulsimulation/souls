@@ -228,6 +228,15 @@ the Soul's card, and `inspect <soul>` shows its first five.
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost
 response returns the original receipt.
 
+An act is answered only with what the world recorded ([#1327](https://github.com/soulsimulation/souls/issues/1327)).
+Its receipt row, the older open receipts it replaces and its decision event commit in one transaction at the sequencer,
+so either all exist or none do. A world whose clock has failed answers `503 world.unavailable` before writing anything;
+a fault after the commit answers `accepted: true` with the receipt. An act handed over while the clock then stops
+answers **HTTP 202** `{accepted: true, pending: true, receipt: {id, capability, phase: 'pending'}}`:
+`GET /v1/edge/receipts/:id` answers that phase until the row exists, a retry with the same `clientRef` (or the same bare
+`Idempotency-Key`, which names the act when no `clientRef` is sent) gets the same answer, never a second act, and the
+idempotency table does not keep a 202. Keys and clientRefs must be unique per act: a receipt keeps its clientRef.
+
 | Route | Purpose |
 |---|---|
 | `GET /v1/edge/boot` | Fresh session: clocks, the Soul (`me`), `here` with local offers, and the static manifest; never cached |

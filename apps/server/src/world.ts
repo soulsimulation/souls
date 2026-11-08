@@ -773,6 +773,14 @@ export class WorldHost {
     return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard:current, journal, resolve, reject }));
   }
 
+  /** #1327: an input whose own records (an edge act's receipt, the receipts it replaces) are written by `journal` in the
+   * event's acceptance transaction: both exist or neither does. No guard beyond the journal itself; a journal that throws
+   * refuses the input and the promise rejects. Rejects, never hangs, when the clock fails before or at its drain. */
+  enqueueJournaled(kind: EventKind, author: string, payload: unknown, journal: AcceptanceJournal): Promise<LogEvent> {
+    this.assertClockReady();
+    return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard: () => true, journal, resolve, reject }));
+  }
+
   /** Atomic object/body producer: commit its side effects only after the real
    * decision fold succeeds; restore the exact captured native/kernel head on failure. */
   enqueueObjectDecision(author:string,payload:unknown,guard:AcceptanceGuard,journal:AcceptanceJournal):Promise<LogEvent>{
