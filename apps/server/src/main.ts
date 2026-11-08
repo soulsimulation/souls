@@ -161,8 +161,10 @@ hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPers
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
 const edge = config.mindDriver === 'edge' ? new EdgeLedger(host, db, process.env.PLACE_DATA ? JSON.parse(readFileSync(process.env.PLACE_DATA, 'utf8')) : undefined) : undefined;
-// Boot runtime policies one after another (edge-runtime-rules.ts): the edge rules after the courtesy event, then #1332 body-step-guard/1
-if (host.engine.configureRuntimePolicy) void adoptBootRuntimePoliciesV1(host, { after: courtesy, edge: !!edge, worldKey: config.worldKey }).catch((e) => console.error('[world] a boot runtime policy could not be adopted:', String(e).slice(0, 300)));
+// Boot runtime policies one after another (edge-runtime-rules.ts): the edge rules after the courtesy event, then #1332 body-step-guard/1.
+// Not on an Eden core world: its lifecycle admission stopped admitting births with the guard event logged at boot (normal-main
+// cohort tests), so Eden core adopts the guard by an operator call once that is understood (WorldHost.enableBodyStepGuardV1).
+if (host.engine.configureRuntimePolicy && !edenCore) void adoptBootRuntimePoliciesV1(host, { after: courtesy, edge: !!edge, worldKey: config.worldKey }).catch((e) => console.error('[world] a boot runtime policy could not be adopted:', String(e).slice(0, 300)));
 // God mode + entity world (spec eden4/28): the owner's edge agent builds the world; viewers get diffs over the hub.
 const genesis = process.env.GENESIS_FILE ? JSON.parse(readFileSync(process.env.GENESIS_FILE, 'utf8')) : undefined;
 const god = config.worldEngine ? new GodMode(db, { genesis, worldId: host.worldId, ownerId: process.env.WORLD_OWNER_ID || null /* explicit only: on a fresh world the first person to claim it becomes its god */, tick: () => host.engine.world.tick, emit: (m) => hub.broadcast(m as never), cobuilders: process.env.SIM_COBUILDERS === '1' /* off: one god per world (Gene 2026-10-16) */ }) : undefined;

@@ -90,7 +90,7 @@ One guard decides all of these (#1332): `guardBodyStep` in `runtime/static-step.
 limit and worse than where the body stands, and names the nearest blocker; it reads what the invariant reads (the grid of
 the body's level at that point, the body's own radius, deep water exempt). The walker's hard static layer calls it on its
 own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a logged runtime-policy `rules` event every world
-adopts once at boot (history before it replays as recorded), every placement the engine writes outside a step also passes
+adopts once at boot except an Eden core world, which adopts it by an operator call (history before it replays as recorded), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
 stall release with nothing clear near leaves the body where it stands. Births keep their own arrival check. A carrier's rider
