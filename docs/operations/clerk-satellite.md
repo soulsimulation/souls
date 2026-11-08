@@ -68,7 +68,8 @@ it is live:
    for the name yet and retries with back-off, and soul.game and every other site are unaffected.
 
    ```bash
-   set -euo pipefail
+   bash -s <<'CUTOVER'
+   set -uo pipefail
    REL=/srv/sim-worlds/production                     # the live release (4.17 or later)
    SRC="$REL/tools/world-launcher/deploy/caddy/sim-eden-art.caddy"
    SITE=/etc/caddy/sites/sim-eden-art.caddy
@@ -76,16 +77,21 @@ it is live:
    [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "no --port in production.conf: stopping, nothing changed"; exit 1; }
    grep -q '^https://sim\.eden\.art {' "$SRC" || { echo "the live release has no sim-eden-art.caddy: ship 4.17 first"; exit 1; }
    grep -qE '^\s*import sites/\*\.caddy' /etc/caddy/Caddyfile || { echo "the Caddyfile does not import sites/*.caddy: stopping, nothing changed"; exit 1; }
-   BAK=""; [ ! -e "$SITE" ] || { BAK="$SITE.bak.$(date +%s)"; cp -a "$SITE" "$BAK"; }
-   sed "s/@@PRODUCTION_PORT@@/$PORT/" "$SRC" > "$SITE.new" && mv "$SITE.new" "$SITE"
-   if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
-     systemctl reload caddy && echo "sim.eden.art site installed; Caddy reloaded"
-   else
-     if [ -n "$BAK" ]; then mv "$BAK" "$SITE"; else rm -f "$SITE"; fi
-     echo "caddy validate failed: the previous state is back and Caddy was NOT reloaded"; caddy validate --config /etc/caddy/Caddyfile || true; exit 1
+   BAK=""
+   if [ -e "$SITE" ]; then BAK="$SITE.bak.$(date +%s)"; cp -a "$SITE" "$BAK" || { echo "cannot back up $SITE: stopping, nothing changed"; exit 1; }; fi
+   restore() { if [ -n "$BAK" ]; then mv "$BAK" "$SITE"; else rm -f "$SITE"; fi; }
+   sed "s/@@PRODUCTION_PORT@@/$PORT/" "$SRC" > "$SITE.new" || { rm -f "$SITE.new"; echo "cannot write the site file: stopping, nothing changed"; exit 1; }
+   mv "$SITE.new" "$SITE" || { rm -f "$SITE.new"; echo "cannot install the site file: stopping, nothing changed"; exit 1; }
+   if ! caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+     restore; echo "caddy validate failed: the previous state is back and Caddy was NOT reloaded"; caddy validate --config /etc/caddy/Caddyfile; exit 1
    fi
-   LOOPBACK=localhost; code="$(curl -s -o /dev/null -w '%{http_code}' "http://$LOOPBACK:$PORT/__sim/clerk-sign-in?redirect_url=https%3A%2F%2Fsoul.game%2F")"
+   if ! systemctl reload caddy; then
+     restore; echo "caddy reload failed: the previous file is back; run 'systemctl status caddy' and reload again"; exit 1
+   fi
+   echo "sim.eden.art site installed; Caddy reloaded"
+   LOOPBACK=localhost; code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: sim.eden.art' -H 'X-Forwarded-Proto: https' "http://$LOOPBACK:$PORT/__sim/clerk-sign-in?redirect_url=https%3A%2F%2Fsoul.game%2F" || true)"
    echo "the launcher's sign-in bridge answers locally: $code (want 200)"
+   CUTOVER
    ```
 
 2. Point `sim.eden.art`'s DNS at the production host: the same record type and Cloudflare proxy and SSL mode as
