@@ -88,6 +88,7 @@ type Part = NonNullable<WorldEditV1['set'][string]>;
 type EngineV1 = {
   world: { tick: number; entities: Record<string, any>; entityPhysicsV1?: EntityPhysicsV1 };
   applyWorldEditV1(p: WorldEditV1): { hash: string };
+  takeSettledV1?(): string[];
   bodyUsesV1(id: string): { body: string; how: 'occupied' | 'held' } | null;
   reachV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }): { ok: true; length: number; legs: number; levels: number[] } | { ok: false; code: string; message: string };
   standableNearV1(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null;
@@ -346,7 +347,7 @@ export class EngineBridge {
     this.god.onBuild((e) => { if (!PERCEPTION_QUIET_BUILD.has(e.kind)) { const ids = this.layers.buildRetag(); if (ids.length) { this.perceive.noteRetag(ids); this.notePerceive([], false); } } });
     if (!R) this.host.listeners.push({
       afterTick: (tick, context) => { try { this.afterTickWork(tick, context?.startedAtMs); } catch (error) { this.failProjection(error); throw error; } },
-      onApplied: (e) => { this.projectionApplied(e); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
+      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'world-edit') this.noteSettled(); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
@@ -370,6 +371,7 @@ export class EngineBridge {
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
       navNote: (diff, said) => this.navNoteFor(diff, said),
+      framesNote: () => this.framesNote(),
     };
     // R8: residents near a visible map change hear of it once per request; a build near them, at start and at done.
     this.mapNotices = new MapNotices((soulId, text, place) => this.notices.notify(soulId, { text, tick: this.engine.world.tick, native: true, ...(place ? { place } : {}) }), () => this.god.now());
@@ -1281,6 +1283,21 @@ export class EngineBridge {
       try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); this.navWaiting.delete(m.soulId); n++; } catch { /* clock not ready */ }
     }
     return n;
+  }
+  /** #1250: what each live edit did to frames it may not have touched: the fold stands down a frame that no longer stands on its
+   *  own, and a beam seated in frames that don't stand. Nothing here decides that. It is logged, whoever made the edit. */
+  private settled: string[] = [];
+  private noteSettled() {
+    const ids = this.engine.takeSettledV1?.() ?? []; if (!ids.length) return;
+    const named = (id: string) => { try { return this.model.pathOf(id) ?? id; } catch { return id; } };
+    const line = `frames.settled: ${ids.map(named).join(', ')} no longer stand${ids.length === 1 ? 's' : ''} on what held ${ids.length === 1 ? 'it' : 'them'} up, so ${ids.length === 1 ? 'it stands' : 'they stand'} on the ground now.`;
+    this.log(line); this.settled = [...this.settled, line].slice(-8);
+  }
+  /** Said to the god who made the edit, once it has landed. The edit is durable by now, so a clock that won't take it costs only the line. */
+  private framesNote(): string[] {
+    if (!this.edge?.sharedCarry) return [];
+    try { this.flush(); this.host.drainInputs(); } catch (error) { this.log(`frames.settled: could not read the edit back: ${String(error).slice(0, 200)}`); }
+    return this.settled.splice(0);
   }
   private navNoteFor(diff: Diff, said?: string[]): string[] {
     // buildsafe/1 already gave the god one line for these: not named twice

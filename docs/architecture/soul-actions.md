@@ -241,8 +241,26 @@ context-size checks below), regression runs, and an uncut real-client recording 
     a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
     holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
     later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
-    should. Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before the model has
-    heard, and one with exactly one beam in.
+    should.
+  - **Extending a bay doesn't rewind the world.** `framesStand` judges a whole group, so an edit can change what a frame it
+    never touched is judged on. The world-edit fold settles that where it lands (`settleFrames`): whatever the rule no longer
+    supports stands on the ground, in the same application as the edit and before any invariant looks, and replay does the
+    same. A frame the edit didn't touch and that still stands keeps what it had; one it touched is re-derived to the ground, as
+    any god's joined upright is. The log and the god's reply, on an undo or redo too, name every frame that stopped standing
+    (`frames.settled`). Nothing is refused, so a god can extend a bay: a new upright with too few beams stands the group down
+    until it has them. This covers frames and beams at the edit only. A state that reaches the invariants any other way,
+    a restored snapshot or a stair or deck a god's edit leaves unsupported, is the repair ladder's
+    ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+  - **No crew waits for good.** A crew's stop waits while the frame they hold can't stand, in case someone finishes it, and as
+    long as the build goes on. Under the repair rules, a stop a Soul asked for whose body, load and frame joins don't change
+    for five minutes, or half an hour whatever changes, gives up (`world.stop-gave-up`): the crew lets go, the part stands
+    where it is as a god's joined upright does, and crews on the rest of that frame are let go with them
+    (`world.frame-let-go`). That answers a frame nobody can finish now, such as after a god extends its group, or a beam
+    removed from under a held upright. A member who fades, or whose owner retires them, mid-hold is a stop the same way:
+    a retired body stays until the crew lets go, then leaves the world. It is no glitch. The crew hears that the part stands where it was and its frame isn't
+    finished. Only joins seated count as progress: a beam on its way doesn't, so a slow build can still lose its waiting crew.
+  - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
+    the model has heard, and one with exactly one beam in.
   - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
     someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
     person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no
