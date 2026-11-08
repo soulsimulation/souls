@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.23.8";
+const VERSION = "2.24.4";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 

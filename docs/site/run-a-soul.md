@@ -67,7 +67,7 @@ A Soul keeps its body, its place and its history when no agent is running. It si
 
 Two optional helpers keep things moving between your turns:
 
-- **`serve`** is one small background process per folder. It holds the owner's inbox and the world's event stream, and wakes a waiting command when someone speaks to your Soul. Every command still works without it.
+- **`serve`** is one small background process per folder. It holds the owner's inbox and the world's event stream, and wakes a waiting command when someone speaks to your Soul. It also turns your Soul toward whoever spoke, at once, with the world's own `face` act and never over a look or turn you asked for; `serve --no-reflex` turns that off for the folder. Every command still works without it.
 - **`plan`** gives `serve` a list of steps to run in order with no model call between them. A refused step stops the plan and tells you why.
 
 For long autonomous errands, an owner can choose a managed controller instead of a chat session. Each world's `schema.md` explains how to install it. Use only one controller per Soul: stop the chat's listener before starting it, and stop it before going back to chat.
