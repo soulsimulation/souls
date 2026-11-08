@@ -167,6 +167,15 @@ const ASKED_STOP_QUIET_TICKS = 6000;
 /** And half an hour whatever moves, so nothing that keeps a stop's key changing can hold it for good. */
 const ASKED_STOP_MAX_TICKS = 36000;
 const containedByRule = (code: string) => `${code}|${ANY_SUBJECT}`;
+/** #1378: a body held whole. quarantine/1 contains every rule on a body it holds again within its cooldown (`{code: '*',
+ *  subjects: [body]}`), so a body that faults under a new rule each tick is absorbed, not a fault a tick. Only a violation
+ *  whose every subject is held this way is covered: one naming a free body as well still faults. */
+const ANY_RULE = '*', containedBodyKey = (id: string) => `${ANY_RULE}|${id}`;
+const bodyEntriesV1 = <T,>(entries: Map<string, T>, v: { subjects?: string[] }): T[] => {
+  const ids = v.subjects ?? [], out: T[] = [];
+  for (const id of ids) { const e = entries.get(containedBodyKey(id)); if (!e) return []; out.push(e); }
+  return out;
+};
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
 export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
 export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arrival:[0,18],arrivalPlace:'garden',reference:[0,16],grounds:{id:'grounds',name:'Ceramic garden'}};
@@ -609,9 +618,10 @@ export class MarsEngine implements Engine {
     const rt = this.rt, key = containedKey, list = this.world.containedV1!, tick: number = rt.tick, entries = new Map(list.map(c => [key(c), c]));
     const fresh = rt.violations.splice(seen) as (Diag & { subjects?: string[] })[], firing = new Set<string>();
     for (const v of fresh) {
-      const own = entries.get(key(v)), entry = own ?? entries.get(containedByRule(v.code)), standing = own?.until === tick - 1 + CONTAINED_HOLD_TICKS && !v.code.startsWith('motion.') && !this.pressesInV1(v, copy);
+      const held = entries.has(key(v)) || entries.has(containedByRule(v.code)) ? [] : bodyEntriesV1(entries, v);
+      const own = entries.get(key(v)), entry = own ?? entries.get(containedByRule(v.code)) ?? held[0], standing = own?.until === tick - 1 + CONTAINED_HOLD_TICKS && !v.code.startsWith('motion.') && !this.pressesInV1(v, copy);
       const plan = entry && !standing ? this.refusalPlanV1(v, copy, tick) : null;
-      if (entry && (!plan || plan.relocate)) firing.add(key(entry));   // a relocation that can't answer it is still this break firing
+      if (entry && (!plan || plan.relocate)) { firing.add(key(entry)); for (const h of held) firing.add(key(h)); }   // a relocation that can't answer it is still this break firing
       if (!entry || plan) rt.violations.push(v as any);
     }
     const left = list.flatMap(c => firing.has(key(c)) ? [{ ...c, until: tick + CONTAINED_HOLD_TICKS }] : tick < (c.until ?? 0) ? [c] : []);
@@ -662,7 +672,7 @@ export class MarsEngine implements Engine {
   /** Is this violation on the list, by name or by its rule? */
   private coveredV1(): (v: { code: string; subjects?: string[] }) => boolean {
     const known = new Set((this.world.containedV1 ?? []).map(containedKey));
-    return v => known.has(containedKey(v)) || known.has(containedByRule(v.code));
+    return v => known.has(containedKey(v)) || known.has(containedByRule(v.code)) || (!!v.subjects?.length && v.subjects.every(id => known.has(containedBodyKey(id))));
   }
   /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
   stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { return this.stopWhereV1(() => true, why, from); }
@@ -735,7 +745,7 @@ export class MarsEngine implements Engine {
     const named = (code: string) => [...list.values()].filter(c => c.code === code && c.subjects[0] !== ANY_SUBJECT).length;
     const kept = new Map<string, ContainedKeyV1>(), put = (code: string, subjects: string[]) => { const c = { code, subjects }, k = containedKey(c); kept.set(k, c); list.set(k, { ...c, until: tick + CONTAINED_HOLD_TICKS }); };
     for (const { code, subjects } of keys.map(c => ({ code: c.code, subjects: [...c.subjects].sort() })).sort((a, b) => (containedKey(a) < containedKey(b) ? -1 : 1))) {
-      if (subjects[0] === ANY_SUBJECT || list.has(containedKey({ code, subjects })) || named(code) < CONTAINED_KEYS_PER_RULE) put(code, subjects); else put(code, [ANY_SUBJECT]);
+      if (code === ANY_RULE || subjects[0] === ANY_SUBJECT || list.has(containedKey({ code, subjects })) || named(code) < CONTAINED_KEYS_PER_RULE) put(code, subjects); else put(code, [ANY_SUBJECT]);
     }
     const relocated: string[] = [];
     // only a body inside something: a floating load's bearer has nowhere better to stand
