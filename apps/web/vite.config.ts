@@ -62,7 +62,13 @@ function phasedEntry(): Plugin {
       const imports: string[] = [], seen = new Set<string>();
       const walk = (f: string) => { for (const i of byFile.get(f)?.imports ?? []) if (!seen.has(i)) { seen.add(i); walk(i); imports.push(i); } };
       walk(early.fileName);
-      return rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports);
+      // #1266: the bytes of every file the page names (its code and style), for the boot light's first share of the bar
+      const out = rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports), sizes: Record<string, number> = {};
+      for (const [, url, file] of out.matchAll(/["'(]((?:[^"'()]*\/)?(assets\/[\w.-]+\.(?:js|css)))["')]/g)) {
+        const item = ctx.bundle?.[file]; if (!item) continue;
+        sizes[url.startsWith('/') ? url : '/' + url] = Buffer.byteLength(item.type === 'chunk' ? item.code : typeof item.source === 'string' ? item.source : Buffer.from(item.source));
+      }
+      return out.replace('</head>', `    <script>window.__simCodeBytes=${JSON.stringify(sizes)}</script>\n  </head>`);
     } },
   };
 }

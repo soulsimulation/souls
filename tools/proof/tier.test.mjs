@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { globToRegExp, loadPolicy, tierFor, tierForFile } from './tier.mjs';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { POLICY_PATH, globToRegExp, loadPolicy, tierFor, tierForFile } from './tier.mjs';
 import { SCOPE_RULES } from '../test-harness/release-gate.mjs';
 
 const policy = loadPolicy();
@@ -9,6 +11,12 @@ const tier = (files, labels) => tierFor(files, policy, labels).tier;
 test('docs, process and CI changes are T0', () => {
   assert.equal(tier(['README.md', 'docs/TESTING.md', '.github/workflows/ci.yml', 'changes/x.md', 'tools/playtest/a.mjs']), 'T0');
   assert.equal(tier([]), 'T0');
+});
+
+test('body-authoring source of the pinned presets is T1; other tools stay T0', () => {
+  assert.deepEqual(tierForFile('tools/body-authoring/pip/robot.mjs', policy), { tier: 'T1', rule: 'tools/body-authoring/' });
+  assert.equal(tier(['tools/body-authoring/centaur/centaur.test.mjs', 'docs/a.md']), 'T1');
+  assert.equal(tier(['tools/body-authoring-notes/x.md']), 'T0');
 });
 
 test('server and package logic is T1; visible UI is T2; Soul/engine is T3', () => {
@@ -38,6 +46,17 @@ test('shared god navigation/perception and split read-facade code require T3', (
   ]) assert.equal(tier([file]), 'T3', file);
   for (const file of ['apps/server/src/account-auth.ts', 'apps/server/src/god/assets.ts', 'apps/server/src/http.ts']) {
     assert.deepEqual(tierForFile(file, policy), { tier: 'T1', rule: 'apps/server/' }, file);
+  }
+});
+
+test('a change to the proof policy itself is T3, and only the policy file', () => {
+  const self = relative(fileURLToPath(new URL('../../', import.meta.url)), POLICY_PATH);
+  assert.deepEqual(tierForFile(self, policy), { tier: 'T3', rule: self }, 'the rule names the file loadPolicy reads');
+  assert.deepEqual(tierForFile('docs/process/PROOF-POLICY.yml', policy), { tier: 'T3', rule: 'docs/process/PROOF-POLICY.yml' });
+  assert.equal(tier(['docs/process/PROOF-POLICY.yml', 'changes/x.md', 'docs/process/agent-workflow.md']), 'T3');
+  assert.equal(tier(['docs/process/PROOF-POLICY.yml'], ['tier:T0']), 'T3', 'labels never lower it');
+  for (const file of ['docs/process/agent-workflow.md', 'docs/process/PROOF-POLICY.md', 'docs/process/PROOF-POLICY.yml.bak']) {
+    assert.deepEqual(tierForFile(file, policy), { tier: 'T0', rule: 'docs/' }, file);
   }
 });
 

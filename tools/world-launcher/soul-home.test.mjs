@@ -386,7 +386,8 @@ test('#1137: a Soul\'s memory can\'t be committed by accident, in a new home or 
   assert.equal(readFileSync(join(home, '.gitignore'), 'utf8').split('\n').filter((l) => l === 'memory/').length, 1);
 });
 
-test('#1137: a home opens whatever its .gitignore is, and an owner\'s bytes stay theirs', { skip: process.getuid?.() === 0 }, (t) => {
+// Not skipped for root (the gate's containers): root writes through the locked folder, and opening it must still not throw.
+test('#1137: a home opens whatever its .gitignore is, and an owner\'s bytes stay theirs', (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'souls-git-'))); t.after(() => { chmodSync(join(root, 'locked'), 0o700); rmSync(root, { recursive: true, force: true }); });
   const dir = join(root, 'dir'), locked = join(root, 'locked'), bytes = join(root, 'bytes');
   createHome(dir, {}); rmSync(join(dir, '.gitignore')); mkdirSync(join(dir, '.gitignore'));
