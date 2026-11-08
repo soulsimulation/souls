@@ -19,8 +19,8 @@ async function world(t: {after(fn: () => void): void}) {
   const token = f.souls.pairExchange(f.souls.pairCode(a, `http://127.0.0.1:${TEST_PORT}`).code, 'scripted').token;
   const ledger = new EdgeLedger(f.host, f.db);
   const app = buildApp({cfg: {...config, port: TEST_PORT, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT}/w/eden`, accountAuthRequired: false, webDir: '/nonexistent-commit-fixture', marsWebDir: '/nonexistent-commit-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: ledger, hub: {clients: new Map(), refreshMe() {}} as never});
-  const send = (path: string, body?: unknown, key?: string) => app.request(path, {method: body === undefined ? 'GET' : 'POST', headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(key ? {'idempotency-key': key} : {})}, ...(body === undefined ? {} : {body: JSON.stringify(body)})})
-    .then(async r => ({status: r.status, data: await r.json().catch(() => null) as any}));
+  const send = (path: string, body?: unknown, key?: string) => Promise.resolve(app.request(path, {method: body === undefined ? 'GET' : 'POST', headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(key ? {'idempotency-key': key} : {})}, ...(body === undefined ? {} : {body: JSON.stringify(body)})})
+    ).then(async r => ({status: r.status, data: await r.json().catch(() => null) as any}));
   // drive the sequencer while a request is out, as the tick loop does
   const req = (path: string, body?: unknown, key?: string) => accept(f.host, send(path, body, key));
   const rows = () => f.db.db.prepare('SELECT receipt_id AS id, phase, capability, client_ref AS ref FROM edge_receipts_v1 ORDER BY created_at').all() as {id: string; phase: string; capability: string; ref: string | null}[];
@@ -94,13 +94,18 @@ test('T4: a clock that stops after the hand-off: 202 pending with the receipt id
   const seen = await w.send(`/v1/edge/receipts/${id}`); assert.equal(seen.status, 200); assert.equal(seen.data.receipt.phase, 'pending');
   const again = await w.send('/v1/edge/act', body, key);
   assert.equal(again.status, 202); assert.equal(again.data.receipt.id, id, 'the same act');
-  // the clock moves again: one receipt, under that id
+  // a key alone (no clientRef) names the act as well
+  const k2 = 'k-1327-key-only', alone = await w.send('/v1/edge/act', {capability: 'dance:here'}, k2);
+  assert.equal(alone.status, 202); const id2 = alone.data.receipt.id;
+  assert.equal((await w.send('/v1/edge/act', {capability: 'dance:here'}, k2)).data.receipt.id, id2, 'the same act');
+  // the clock moves again: one receipt per act, under its id
   for (let i = 0; i < 5; i++) { w.f.host.drainInputs(); await turn(); }
-  const rows = w.rows(); assert.equal(rows.length, 1, JSON.stringify(rows)); assert.equal(rows[0].id, id); assert.equal(rows[0].ref, key);
-  const now = await w.send(`/v1/edge/receipts/${id}`); assert.equal(now.status, 200); assert.ok(open(now.data.receipt.phase) || now.data.receipt.phase === 'completed', now.data.receipt.phase);
+  const rows = w.rows(); assert.equal(rows.length, 2, JSON.stringify(rows)); assert.equal(rows[0].id, id); assert.equal(rows[0].ref, key);
+  assert.equal(rows[1].id, id2); assert.equal(rows[1].ref, k2); assert.equal(rows[0].phase, 'replaced', 'the later act replaced it, in order');
+  const now = await w.send(`/v1/edge/receipts/${id}`); assert.equal(now.status, 200); assert.notEqual(now.data.receipt.phase, 'pending');
   const third = await w.req('/v1/edge/act', body, key);
   assert.equal(third.status, 200); assert.equal(third.data.accepted, true); assert.equal(third.data.receipt.id, id);
-  assert.equal(w.rows().length, 1, 'still one receipt');
+  assert.equal(w.rows().length, 2, 'no new receipt');
 });
 
 test('an ordinary act is unchanged: accepted, one receipt, a newer act replaces it', async t => {

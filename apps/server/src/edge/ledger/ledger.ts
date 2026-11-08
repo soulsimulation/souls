@@ -996,7 +996,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private clockGate() {if ((this.host as {clockAvailable?: boolean}).clockAvailable === false) throw new EdgeError(503, 'world.unavailable', 'The world\'s clock is not running; nothing was done. Try again shortly.');}
   /** #1327: a stop queued after an act's receipt committed (the act waits on it, armed). Bounded: a clock that stops after
    *  the receipt exists leaves the receipt to its own deadline instead of hanging the answer or turning it into a 503. */
-  private async afterCommit(soulId: string, payload: Record<string, unknown>, then?: () => void): Promise<void> {
+  private async stopAfterAccept(soulId: string, payload: Record<string, unknown>, then?: () => void): Promise<void> {
     let queued: Promise<unknown>;
     try {queued = this.host.enqueue('edge-stop', `edge:${soulId}`, payload).then(() => then?.());}
     catch (error) {console.error('[edge] stop after an accepted act could not be queued', soulId, error instanceof Error ? error.message : String(error)); return;}
@@ -2015,7 +2015,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // C9: any accepted action resets the idle clock and reclaims a faded Soul (an immediate stand:here never reached comms' touch)
       if (!program) this.comms?.fading.touch?.(soul.soulId);
       // #1327: the receipt is the answer once written; the stop completes it, bounded so a stopped clock can't hang it
-      if (program) await this.afterCommit(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id}, () => this.update(r.id, {phase: 'completed'}));
+      if (program) await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id}, () => this.update(r.id, {phase: 'completed'}));
       return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
     // PC08: a stop offer reached through words or a bare verb is the same stop (never an ordinary body act)
@@ -2182,7 +2182,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.clockGate();
       const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams); commit?.(r.id); remember(r.id);
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
-      if (issue.code === 'program.safe-stop-required') await this.afterCommit(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
+      if (issue.code === 'program.safe-stop-required') await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
       return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
     // #1327: the receipt, the replaced marks, this act's own commit and the decision event: one acceptance
@@ -2243,7 +2243,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (this.host.engine.programOf(soul.entityId)) this.clockGate();   // #1327: its stop must be queueable before the receipt is written
     const r = tx(this.db.db, () => {const r = this.insert(soul, capability, 'waiting', clientRef, false, prep.detail ?? {}); prep.commit?.(r.id); return r;});
     this.comms?.fading.touch?.(soul.soulId);
-    if (this.host.engine.programOf(soul.entityId)) await this.afterCommit(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});   // #1327: bounded, after the receipt
+    if (this.host.engine.programOf(soul.entityId)) await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});   // #1327: bounded, after the receipt
     return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
   }
   /** together/1: where a Soul, place, object or ride named in plain words is (for facing / pointing). */
@@ -2281,7 +2281,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (issue) {
       const r = this.insert(soul, capability, 'waiting', clientRef,false,{...(effects?{confirmedEffects:effects}:{})});
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
-      if (issue.code === 'program.safe-stop-required') await this.afterCommit(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
+      if (issue.code === 'program.safe-stop-required') await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
       return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!};
     }
     // #1327: one acceptance, as in launch
@@ -2388,7 +2388,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
         // A later start can fail or be replaced; that terminal receipt is authoritative.
         // Ride apply() adds no member: riders/custody are projected from native state.
         tx(this.db.db,()=>{authority();const fresh=this.host.engine.canPerform({actor:soul.entityId,label,steps});if(fresh&&!WAIT_CODES.has(fresh.code))throw new EdgeError(409,fresh.code,fresh.code.startsWith('carrier.')?fresh.message:humanBlockedExplanationV1(fresh.code,label));const detail=admission.commit(id)??{};this.insert(soul,capability,'waiting',clientRef,false,detail,{},id);afterCommit(this.db.db,()=>this.arm({receipt:id,soul,steps,label,deadline:this.host.engine.world.tick+WAIT_LIMIT_TICKS,capability}));},{immediate:true});
-        if(issue?.code==='program.safe-stop-required')await this.host.enqueue('edge-stop',`edge:${soul.soulId}`,{soulId:soul.soulId,entityId:soul.entityId,receipt:id});
+        // #1327: the receipt committed above; its stop is bounded, so a clock that stops now can't hang the answer
+        if(issue?.code==='program.safe-stop-required')await this.stopAfterAccept(soul.soulId,{soulId:soul.soulId,entityId:soul.entityId,receipt:id});
       }else{
         const guard=():true=>{authority();if(this.host.quietBarrier)throw new EdgeError(409,'state.changed','The world entered a quiet barrier; retry.');const fresh=this.host.engine.canPerform({actor:soul.entityId,label,steps});if(fresh)throw new EdgeError(409,fresh.code,fresh.code.startsWith('carrier.')?fresh.message:humanBlockedExplanationV1(fresh.code,label));return true;};
         this.planFor(id,capability,label,steps);

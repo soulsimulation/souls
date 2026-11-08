@@ -4,7 +4,7 @@
 // cancel. Plans are durable (SQLite) and replay-safe: every act a plan makes carries clientRef `pl:<plan>:<step>:<attempt>`,
 // so re-running a step after a restart returns the receipt the first try created instead of acting twice.
 import {randomBytes} from 'node:crypto';
-import {EdgeError, SEAT_KEPT, type EdgeReceipt, type EdgeSoul} from '../contract.ts';
+import {ActPending, EdgeError, SEAT_KEPT, type EdgeReceipt, type EdgeSoul} from '../contract.ts';
 import type {EventStreams, StreamEvent} from '../comms/stream.ts';
 import {EVENT_KINDS, kindMatches, oneLine, type Envelope} from '../events/envelope.ts';
 
@@ -249,11 +249,13 @@ export class Plans {
       let out: Record<string, unknown>;
       try { out = await this.actor.act(soul, input); }
       catch (e) {
+        // #1327: handed to the world, not recorded yet: the step runs on that receipt id (a retry would be the same act)
+        if (e instanceof ActPending) out = e.body as unknown as Record<string, unknown>; else {
         if (e instanceof EdgeError && e.status < 500 && e.status !== 429) { this.busy.delete(p.id); return this.stepFailed(p, e.code, e.message); }
         s.state.transient++; s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p);
         if (s.state.transient > TRANSIENT_MAX) { this.busy.delete(p.id); return this.stepFailed(p, 'plan.unavailable', 'The world could not take this step after repeated tries.'); }
         return;
-      }
+      }}
       if (p.state !== 'running' || p.steps[p.current] !== s) return;          // the plan changed while acting
       if (out.accepted !== true) {
         const code = String(out.code ?? 'refused'), reason = String(out.reason ?? '');

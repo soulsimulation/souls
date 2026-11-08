@@ -11,7 +11,8 @@ export const EDGE_CONTRACT = 'eden-edge/1' as const;
 export type ObjectBodyAdmission={guard:()=>true;commit:(receiptId:string)=>Record<string,unknown>|void};
 export type PlaceRef = {id: string; name: string; kind: string};
 export type EdgeSoul = {soulId: string; entityId: string; name: string; owner: string};
-export type ReceiptPhase = 'waiting' | 'started' | 'completed' | 'failed' | 'replaced';
+/** `pending` (#1327) is never stored: an act handed to the world whose row isn't written yet (HTTP 202, its receipt route). */
+export type ReceiptPhase = 'pending' | 'waiting' | 'started' | 'completed' | 'failed' | 'replaced';
 export type EdgeReceipt = {id: string; soulId: string; capability: string; phase: ReceiptPhase; acceptedTick: number; startedTick: number | null; endedTick: number | null; code: string | null; reason: string | null; programId: string | null;
   /** Core-A (EDGE-CONTRACT-v1 §8): body | attention | none; what an intent chose; where the body ended (terminal receipts). */
   channel?: string; chosen?: unknown; endedAt?: unknown;outcome?:EdgeOutcomeV1;
