@@ -24,10 +24,10 @@
   },
   "schemaNotes": {
     "file": "schema-notes.md",
-    "version": "2.9.7",
+    "version": "2.10.1",
     "sha256": "f40a98818821ba1ddda70a12c929e7679cbd28ff38e844a56638720f583af562",
     "from": "moved out of the 2.8 skill when the core was cut (#1099)",
-    "note": "The hand-written half of /schema.md, served from beside the skill file; the verb parameter table is generated. 2.9.6 (#1256): a section on the reflective pass: what it does, what it costs, what leaves the machine, and to offer it once. 2.9.7 (#832): when an owner message ends a wait, the act may still be going: check the receipt."
+    "note": "The hand-written half of /schema.md, served from beside the skill file; the verb parameter table is generated. 2.9.6 (#1256): a section on the reflective pass: what it does, what it costs, what leaves the machine, and to offer it once. 2.9.7 (#832): when an owner message ends a wait, the act may still be going: check the receipt. 2.10.1 (#1328): unavailable and world.stalled: checked, unconfirmed; an act once more as the same command with the same key, speech checked first; --key."
   },
   "instructions": {
     "file": "instructions.md",
