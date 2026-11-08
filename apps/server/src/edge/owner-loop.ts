@@ -109,6 +109,8 @@ export function reachedTarget(r: EdgeReceipt, t: StepTarget, world: Pick<OwnerLo
 /** The one line the owner's card shows when the linked act ends: the receipt's outcome summary, else its phase. */
 export function resultLine(r: EdgeReceipt & {outcome?: {summary?: string}; done?: string}): {text: string; outcome: 'done' | 'failed'} | null {
   if (r.phase !== 'completed' && r.phase !== 'failed') return null;   // replaced: the act that replaced it closes the message
+  // #1381: stopped at the Soul's own request: not done, and not a failure of the world (the inbox has done | failed)
+  if (r.phase === 'failed' && r.code === 'act.stopped') return {text: `Stopped at your request before it finished: ${r.capability}.`, outcome: 'failed'};
   const text = r.done ?? r.outcome?.summary ?? (r.phase === 'completed' ? `${r.capability} done.` : `${r.capability} failed${r.reason ? `: ${r.reason}` : '.'}`);
   return {text, outcome: r.phase === 'completed' ? 'done' : 'failed'};
 }

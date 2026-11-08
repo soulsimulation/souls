@@ -136,3 +136,19 @@ test('T5: a plan step whose act is pending waits to start again; a hand-off lost
   assert.equal(rows.length, 1, JSON.stringify(rows)); assert.equal(plan.steps[0].status, 'running', JSON.stringify(plan));
   assert.equal(rows[0].capability, 'read:here');
 });
+
+test('#1382 follow-up: the clock fails after the hand-off and before any drain: the hand-off is refused, not left pending until a restart', async t => {
+  const w = await world(t), was = process.env.SIM_ACT_COMMIT_WAIT_MS;
+  process.env.SIM_ACT_COMMIT_WAIT_MS = '150'; t.after(() => { if (was === undefined) delete process.env.SIM_ACT_COMMIT_WAIT_MS; else process.env.SIM_ACT_COMMIT_WAIT_MS = was; });
+  const first = await w.send('/v1/edge/act', {capability: 'read:here', clientRef: 'k-1382-halt'}, 'k-1382-halt');
+  assert.equal(first.status, 202, JSON.stringify(first.data)); const id = first.data.receipt.id;
+  // the engine halts with the decision still queued (haltOnFault: the clock fails, nothing more is written from this head)
+  (w.f.host as unknown as {haltOnFault(e: unknown, why: string): void}).haltOnFault(new Error('halt (test)'), 'test');
+  t.after(() => { (w.f.host as unknown as {clockFailure?: unknown}).clockFailure = undefined; });
+  for (let i = 0; i < 5; i++) await turn();
+  const seen = await w.send(`/v1/edge/receipts/${id}`);
+  assert.equal(seen.status, 404, `no longer pending: ${JSON.stringify(seen)}`); assert.equal(seen.data?.error?.code ?? seen.data?.code, 'not-found');
+  const retry = await w.send('/v1/edge/act', {capability: 'read:here', clientRef: 'k-1382-halt'}, 'k-1382-halt');
+  assert.equal(retry.status, 503, JSON.stringify(retry.data)); assert.equal(retry.data?.error?.code ?? retry.data?.code, 'world.unavailable');
+  assert.equal(w.rows().length, 0, 'nothing was written');
+});
