@@ -108,6 +108,9 @@ test('notebook words resolve only where a notebook is offered', () => {
   for (const w of ['cross out my note and sign the sheet', 'cross out my note and my name']) assert.equal(resolve(w, [pin, unpin, sign, unsign]), 'capability.unknown', w);
   // review of b44e730bd: "then" asks for a second step too, in the forms clause splitting never sees
   for (const w of ['cross-out: my note then sign the sheet', 'cross out my note—then sign the sheet', 'cross out my note (then sign the sheet)']) assert.equal(resolve(w, [pin, unpin, sign, unsign]), 'capability.unknown', w);
+  // review of ab53f033f: a trailing "then" or "and" asks for nothing more, so the act goes ahead as on main
+  for (const w of ['cross out my note then', 'cross out my note, then', 'cross out my note, and then']) assert.equal(resolve(w, [pin, unpin]), unpin.id, w);
+  assert.equal(resolve('cross out my name then', [sign, unsign]), unsign.id);
   for (const w of ['Cross out my note at the Board', 'cross out my note, at the board', 'cross out "my note" at the board']) assert.equal(resolve(w, [pin, unpin]), unpin.id, w);
   // a thing's own name keeps its plain words
   const found = mk('e_aaaa0005', 'unpin', 'Take down your note from the notice board (lost-and-found)', ''), aid = mk('e_cccc0006', 'unpin', 'Cross out your line in the notebook (first-aid-log)', '');
