@@ -1311,7 +1311,7 @@ export function makeWay(rt: Runtime, who: string, keepClear: Vec2, clearOf?: { b
   if (!o?.human || o.human.grip) return;
   let ex: Exec | undefined;
   if (o.human.task) {
-    if (!clearOf) return;
+    if (!clearOf || (!clearOf.test && !clearOf.landing)) return;
     const rec = rt.records.get(o.human.task);
     ex = walkExecs(rt).get(o.human.task);
     const settledFloater=o.body?.family==='floater' && !!clearOf.landing && (o.human.speed??0)<WALK_MIN && ex?.phase==='walk' && ex.s>=ex.total-1e-6;

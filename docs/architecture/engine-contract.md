@@ -187,6 +187,9 @@ placed clears it, and a rung 3 keeps god edits, so it survives a restart until t
 
 **What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+A periodic snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt:
+it is skipped and counted at rung `contained` as `durability.snapshot-skipped`, the clock runs on, and the next due
+snapshot is tried (#1368).
 
 ## Conformance
 
