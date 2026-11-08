@@ -261,7 +261,8 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
       return { ok: false, diagnostic: { code: 'actor.holding', message: `${p.actor} is holding ${a.human!.grip.entity} and cannot walk away until it is set down or stable`, subjects: [p.actor, a.human!.grip.entity] } };
     const sleeper = occupant(rt, a, [p.x, p.z], bodyProfile(a).radius, true, p.level ?? a.human!.level);
     if (sleeper) return { ok: false, diagnostic: { code: 'walk.goal-occupied', message: `${p.actor}'s destination overlaps ${sleeper}'s supported sleep space`, subjects: [p.actor, sleeper] } };
-    const r = planWalk(rt, a, { level: p.level ?? a.human!.level, p: [p.x, p.z] });
+    const goal = { level: p.level ?? a.human!.level, p: [p.x, p.z] as Vec2 }, flight = strandedOnFlight(rt, a);   // #1367
+    const r = flight ? planFromFlight(rt, a, flight, goal) : planWalk(rt, a, goal);
     if (!r.ok) return { ok: false, diagnostic: { ...r.diagnostic, subjects: [p.actor, ...(r.diagnostic.subjects ?? [])] } };
     // Faster gaits are dry-ground activities. Never relabel wading as running.
     const ground = spatial(rt, p.actor).ground;
@@ -283,8 +284,9 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
       offset: 0, narrows: [], held: new Set(), climbT: 0, epoch: spatial(rt,p.actor).epoch, replans: 0, phase: 'walk', side: 0, stuck: 0, turning: false, plannedAround: {}, peopleReplans: 0, pushes: 0,
     };
     // paged ground: the walk is registered first, so the window covering its chunk is there when the leg is smoothed
-    if (spatial(rt, p.actor).ground?.paged) { walkExecs(rt).set(id, ex); enterLeg(rt, ex); return ex; }
+    if (spatial(rt, p.actor).ground?.paged) { walkExecs(rt).set(id, ex); enterLeg(rt, ex); resumeFlight(rt, ex, a); return ex; }
     enterLeg(rt, ex);
+    resumeFlight(rt, ex, a);
     walkExecs(rt).set(id, ex);
     return ex;
   },
@@ -1791,6 +1793,63 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   // The existing faceoff detour leaves the contended passage without queuing
   // on it; static and body collision checks still apply to every actual step.
   walker.detour={spot,level,by:a.id,blockers:[a.id],landing:{y:floorY,radius:need},stage:'pending',faceoff:true,egress:true,planned:{epoch:sp.epoch,route:route.route,around}};
+}
+
+/** #1367 flight-resume/1: the flight a body stands on between its landings (left there by a climb that was force-ended, as
+ *  stall-guard/1 does when both landings stay blocked), and how far along its ascending path. Such a body's level is a landing's,
+ *  but it is not on that floor: a walk planned from the floor drops it to the floor in one tick (`motion.teleport`, refused, every
+ *  walk). Null without the policy, or for a body at the height of its own level's landing (on that floor). Reads the world only. */
+function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: number; total: number } | null {
+  if (rt.services.flightResumeV1 !== true || !a.human || a.human.riding || a.human.carrier) return null;
+  const lv = a.human.level, p = a.pose.p, sp = spatial(rt, a.id);
+  sp.sync(rt.world);
+  for (const link of sp.scene.links) {
+    if (link.from.level !== lv && link.to.level !== lv) continue;
+    if ((link.from.level === lv && Math.abs(p[1] - link.from.y) < 0.05) || (link.to.level === lv && Math.abs(p[1] - link.to.y) < 0.05)) continue;   // on its own floor
+    const g = linkGeometry({ kind: 'link', link, ascending: true });
+    let best = Infinity, at = 0, acc = 0;
+    for (let i = 0; i < g.lens.length; i++) {
+      const P = g.path[i], Q = g.path[i + 1], L = g.lens[i];
+      const u = L > 1e-9 ? clamp(((p[0] - P[0]) * (Q[0] - P[0]) + (p[1] - P[1]) * (Q[1] - P[1]) + (p[2] - P[2]) * (Q[2] - P[2])) / (L * L), 0, 1) : 0;
+      const d = hypot(p[0] - (P[0] + (Q[0] - P[0]) * u), p[1] - (P[1] + (Q[1] - P[1]) * u), p[2] - (P[2] + (Q[2] - P[2]) * u));
+      if (d < best) { best = d; at = acc + u * L; }
+      acc += L;
+    }
+    if (best <= 0.1 && at > 1e-6 && at < g.total - 1e-6) return { link, t: at, total: g.total };
+  }
+  return null;
+}
+
+/** #1367: a route from a body on a flight: the flight from where it stands to one landing, then the route on from that landing.
+ *  Up first, then down; the shorter of those that reach the goal. */
+function planFromFlight(rt: Runtime, a: Entity, f: { link: LinkLeg['link']; t: number; total: number }, goal: { level: number; p: Vec2 }) {
+  const sp = spatial(rt, a.id), profile = bodyProfile(a);
+  let best: { ok: true; route: Route } | null = null, first: ReturnType<typeof planWalk> | null = null;
+  for (const ascending of [true, false]) {
+    const end = ascending ? f.link.to : f.link.from, left = ascending ? f.total - f.t : f.t;
+    const r = sp.route(rt.world, profile, { level: end.level, p: end.p }, goal, a.body?.family === 'floater' ? { planner: 'corridor' } : undefined);
+    first ??= r;
+    if (!r.ok) continue;
+    const route: Route = { ...r.route, legs: [{ kind: 'link', link: f.link, ascending }, ...r.route.legs], length: left + r.route.length };
+    if (!best || route.length < best.route.length) best = { ok: true, route };
+  }
+  return best ?? first!;
+}
+
+/** #1367: a walk whose first leg is the flight its body stands on starts climbing from where the body is (never from the
+ *  entry), holding the flight's single-file traffic as a climber does. */
+function resumeFlight(rt: Runtime, ex: Exec, a: Entity): void {
+  const leg = ex.route.legs[0], f = leg?.kind === 'link' ? strandedOnFlight(rt, a) : null;
+  if (!f || leg.kind !== 'link' || f.link.id !== leg.link.id) return;
+  const geo = linkGeometry(leg), link = leg.link;
+  ex.climbT = leg.ascending ? f.t : f.total - f.t;
+  ex.phase = 'climb';
+  a.human!.activity = leg.ascending ? 'climb-up' : 'climb-down';   // a climber again from this tick, as the climb step sets it
+  const face = link.faceAlong ? alongYaw(geo, ex.climbT, a.pose.yaw) : leg.ascending ? link.heading : wrapAngle(link.heading + Math.PI);
+  const res = `link:${link.id}`, t = traffic(rt).get(res);
+  if (!t) traffic(rt).set(res, { actors: new Set([ex.actor]), entry: leg.ascending ? link.from.p : link.to.p, dir: rot2([1, 0], face) });
+  else t.actors.add(ex.actor);
+  ex.held.add(res);
 }
 
 type LinkGeometry = { entry: LinkLeg['link']['from']; exit: LinkLeg['link']['from']; path: [number, number, number][]; lens: number[]; total: number };

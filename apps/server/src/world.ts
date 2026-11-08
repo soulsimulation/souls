@@ -1308,6 +1308,10 @@ export class WorldHost {
   /** #1332 body-step-guard/1, one logged rules event (prospective): every placement the engine writes for a body (edge relocation,
    *  recovery restore, stall release) stands it only where the static invariant passes it, at its own radius and apart from other
    *  bodies. History before the event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
+  /** #1367 flight-resume/1, one logged rules event (prospective): a walk that starts from a body standing on a flight (left there
+   *  by a force-ended climb) resumes the flight from where it stands, so it never drops to a floor in one tick. History before the
+   *  event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
+  enableFlightResumeV1(author='operator:flight-resume'){if((this.extra.runtimePolicy as {flightResumeV1?:boolean}|undefined)?.flightResumeV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,flightResumeV1:true},why:'flight-resume/1 (#1367): a walk from a body standing on a flight resumes that flight from where it stands; retain historical replay before this event'});}
   enableBodyStepGuardV1(author='operator:body-step-guard'){if((this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,bodyStepGuardV1:true},why:'body-step-guard/1 (#1332): a relocation, restore or stall release stands a body only where the static-clearance invariant passes it, at its own radius and apart from other bodies; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and

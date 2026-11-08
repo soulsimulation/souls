@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `flight-resume/1` (#1367), adopted at boot after quarantine/1, a walk that starts from a body left standing on a flight (between its landings, not at its own level's landing) resumes that flight from where the body stands, towards the landing that gives the shorter route, instead of being planned from the floor (a drop the step check refuses as `motion.teleport`, on every walk). Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
