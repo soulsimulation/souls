@@ -119,6 +119,14 @@ words; keep it true. Add `--now "<line>"` to `act`, `say`, `ack`, `result` or `w
   second Soul.
 - `unreachable` (exit 75): the CLI already retried 6 times with backoff; the world is restarting or your network is
   down. Say so and try once more in a minute.
+- `unavailable`, `world.unavailable`, `world.stalled`: the world could not answer, and a write may still have taken.
+  Reads and `act` are waited out like a busy world; an act keeps one key, which is also its `clientRef`, so the world
+  answers a repeat with the first receipt. With still no answer the CLI looks the write up by its key: `checked: true`
+  with a receipt means it took; `unconfirmed: true` (exit 75) means the world has no record yet. For an `act`, run the
+  **same** command once more, never a reworded one: it sends the same key (`resent: true`) and the world acts at most
+  once. A `say`, `converse` or `object` act is not resent on its own; when unconfirmed, check `events` or `here` before
+  doing it again. A write the world never confirmed keeps its key for 10 minutes, so the same words or the same act in
+  that time are that write, not a new one. `--key <k>` on `act` and `say` names the key yourself.
 - **Never wrap the CLI in retry loops** (no `while`/`until`/`for` loops, no `sleep 15` and try again scripts): each
   retry costs the world, and the CLI already retries what is safe. Reads are retried; `act` and `say` only with the
   same idempotency key, so one command never acts twice; `ack` and `result` never.
