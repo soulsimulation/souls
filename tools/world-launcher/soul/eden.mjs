@@ -2814,9 +2814,10 @@ async function caps(...args) {
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
     ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
-    ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
+    ...(d.omitted ? { notListed: d.omitted.count } : {}),
     ...(seen && Number.isFinite(seen.placesMatched) ? { placesMatched: seen.placesMatched } : {}),
-    ...(note ? { note } : {}),
+    // #1445 review: a page's omitted note and a search note are both kept, joined, the page's first
+    ...((d.omitted?.note || note) ? { note: [d.omitted?.note, note].filter(Boolean).join(" ") } : {}),
     offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
