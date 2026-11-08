@@ -11,7 +11,7 @@ The specs behind #1098's arms, kept so anyone can run one from main. The declara
 
 Entries: `steer-refuse`, `reasonable-actions`, `sustained-intent`.
 
-**Scorer pin.** The arms so far were scored by `tools/playtest/runs/controllability.mjs` at sha256 `c1ed74affb40a5656275492d1d99e653b4419ad270dbaea643aafbc3cea4cde6`. A run stamps the hash it was started with, and its card says `predeclared: true` only if that hash still matches at evaluation. A scorer change means a new version and a new arm: don't compare a card across hashes. Those arms stay at version 3; version 4 (#1276) supersedes it for later arms, and a card re-evaluated across versions reads `predeclared: false`.
+**Scorer pin.** The arms so far were scored by `tools/playtest/runs/controllability.mjs` at sha256 `c1ed74affb40a5656275492d1d99e653b4419ad270dbaea643aafbc3cea4cde6`. A run stamps the hash it was started with, and its card says `predeclared: true` only if that hash still matches at evaluation. A scorer change means a new version and a new arm: don't compare a card across hashes. Those arms stay at version 3; version 4 (#1276) and version 5 (#1309: the world's record at run end, and a refused `result` is no close) supersede it for later arms, and a card re-evaluated across versions reads `predeclared: false`.
 
 **Run one, no model:**
 
