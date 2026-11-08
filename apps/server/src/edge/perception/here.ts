@@ -249,7 +249,7 @@ export function groupedOffers(caps: readonly EdgeCapability[], localTargets: Rea
  for (const c of caps) {
   if (!c.available || c.verb === 'walk' || c.verb === 'stroll') continue;
   if (c.id === c.verb + ':here') {solo.push(c.verb); continue;}
-  if (!(c.id.endsWith(':here') || c.verb === 'accept' || c.verb === 'decline' || (!!c.target && localTargets.has(c.target.id)))) continue;
+  if (!(c.id.endsWith(':here') || c.id === 'stop:current' || c.verb === 'accept' || c.verb === 'decline' || (!!c.target && localTargets.has(c.target.id)))) continue;
   const g = by.get(c.verb) ?? {count: 0, nearest: []}; g.count++; if (g.nearest.length < nearest) g.nearest.push(c.id); by.set(c.verb, g);
  }
  const out = {...(exits ? {walk: exits} : {}), ...(solo.length ? {here: solo} : {}), ...Object.fromEntries(by)};
@@ -261,7 +261,7 @@ export function groupedOffers(caps: readonly EdgeCapability[], localTargets: Rea
 }
 
 export function compactDoHere(caps:readonly EdgeCapability[],localTargets:ReadonlySet<string>,byteBudget=1800){
- const eligible=caps.filter(c=>c.available&&c.verb!=='walk'&&c.verb!=='stroll'&&(c.id.endsWith(':here')||c.verb==='accept'||c.verb==='decline'||!!c.target&&localTargets.has(c.target.id)));
+ const eligible=caps.filter(c=>c.available&&c.verb!=='walk'&&c.verb!=='stroll'&&(c.id.endsWith(':here')||c.id==='stop:current'||c.verb==='accept'||c.verb==='decline'||!!c.target&&localTargets.has(c.target.id)));
  const selected:{id:string;verb:string;label:string;available:true;params?:Record<string,unknown>}[]=[];
  // CTRL-1 (#1093): the verbs' shared parameters once, counted in the budget; an offer's own stay on it
  const verbs=new Set<string>(),shared=()=>compactParams(paramsByVerb(verbs));
