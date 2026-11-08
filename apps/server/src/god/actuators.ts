@@ -4,7 +4,7 @@
 // `object:<entity>:switch-off`, walks up to it, reaches out, and the lamp's state changes in the world (an engine edit:
 // in the ledger, broadcast to viewers, never the god's to undo). Nothing in the edge changes: the object framework's own
 // capabilities, admission, receipts and body plans carry it.
-import { PIN_NOTES_MAX, PIN_PER_SOUL, PIN_TEXT_MAX, SIGNUP_MAX, signupCapacity, signupNoun, checkersMoveProblem, checkersPlay, checkersStatus, gameSquareOf, gameStatus, pollOptions, containerInside, containerOpen, containerHidden, type Entity, type StoredDef, type WorldModel } from '@souls/world-compiler';
+import { NOTEBOOK_LINES_MAX, NOTEBOOK_PER_SOUL, NOTEBOOK_TEXT_MAX, PIN_NOTES_MAX, PIN_PER_SOUL, PIN_TEXT_MAX, SIGNUP_MAX, signupCapacity, signupNoun, checkersMoveProblem, checkersPlay, checkersStatus, gameSquareOf, gameStatus, pollOptions, containerInside, containerOpen, containerHidden, type Entity, type StoredDef, type WorldModel } from '@souls/world-compiler';
 import type { EdgeSoul } from '../edge/contract.ts';
 import { isContactActuator, CONTACT_REACH } from './contact-actuator.ts';
 import { isPosterAction, isWantedAction, posterProblem, posterPatch, wantedProblem, wantedPatch } from './poster-boards.ts';
@@ -103,6 +103,9 @@ export type ActuatorHost = {
   /** Entry 43 (tea.ts): "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea" as acts of native steps. */
   tea?(soul: EdgeSoul, thing: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   teaBegun?(soul: EdgeSoul): void;
+  /** #438 (harvest.ts): "pick the tomatoes", "pick flowers for the vase" as acts of native steps. */
+  harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
+  harvestBegun?(soul: EdgeSoul): void;
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, as native steps; the world changes when the receipt completes. */
   repair?(soul: EdgeSoul, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
 };
@@ -197,14 +200,18 @@ export function pinNotes(state: Record<string, unknown>): { text: string; by: st
   const lines = typeof state.text === 'string' && state.text ? state.text.split('\n') : [], by = typeof state.textBy === 'string' && state.textBy ? state.textBy.split(',') : [];
   return lines.map((text, i) => ({ text, by: by[i] ?? '' }));
 }
+/** #428: the same faculty's limits and words on a notebook (its lines) and on a pinboard (its notes). */
+const pinLimits = (def?: StoredDef) => def?.tags?.includes('notebook')
+  ? { max: NOTEBOOK_LINES_MAX, per: NOTEBOOK_PER_SOUL, text: NOTEBOOK_TEXT_MAX, none: 'You have no line in this notebook; only its writer crosses a line out.', full: `The notebook is full (${NOTEBOOK_LINES_MAX} lines); a line goes only when its writer crosses it out.`, mine: `You already have ${NOTEBOOK_PER_SOUL} lines in this notebook; cross one out first.`, one: 'A line in the notebook is one line.' }
+  : { max: PIN_NOTES_MAX, per: PIN_PER_SOUL, text: PIN_TEXT_MAX, none: 'You have no note on this board; only its author takes a note down.', full: `The board is full (${PIN_NOTES_MAX} notes); a note comes down only when its author takes it down.`, mine: `You already have ${PIN_PER_SOUL} notes on this board; take one down first.`, one: 'A note is one line.' };
 /** Why this Soul cannot pin (with these words) or take down a note here now; null = it can. `text` undefined = availability only. */
-export function pinProblem(a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, text?: unknown): Refusal | null {
-  const notes = pinNotes(state), mine = notes.filter(n => n.by === soul.soulId).length;
-  if (a.name === 'unpin') return mine ? null : { code: 'object.not-yours', reason: 'You have no note on this board; only its author takes a note down.' };
-  if (notes.length >= PIN_NOTES_MAX) return { code: 'object.state', reason: `The board is full (${PIN_NOTES_MAX} notes); a note comes down only when its author takes it down.` };
-  if (mine >= PIN_PER_SOUL) return { code: 'object.state', reason: `You already have ${PIN_PER_SOUL} notes on this board; take one down first.` };
+export function pinProblem(a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, text?: unknown, def?: StoredDef): Refusal | null {
+  const notes = pinNotes(state), mine = notes.filter(n => n.by === soul.soulId).length, l = pinLimits(def);
+  if (a.name === 'unpin') return mine ? null : { code: 'object.not-yours', reason: l.none };
+  if (notes.length >= l.max) return { code: 'object.state', reason: l.full };
+  if (mine >= l.per) return { code: 'object.state', reason: l.mine };
   if (text === undefined) return null;
-  const bad = boardTextProblem(text, PIN_TEXT_MAX, 1); if (bad) return bad.reason.startsWith('At most') ? { ...bad, reason: 'A note is one line.' } : bad;
+  const bad = boardTextProblem(text, l.text, 1); if (bad) return bad.reason.startsWith('At most') ? { ...bad, reason: l.one } : bad;
   return null;
 }
 /** The pinboard's next `text`/`textBy` after this Soul pins a signed note or takes down its latest one. */
@@ -238,7 +245,7 @@ export const pollLines = (state: Record<string, unknown>, votes = pollVotes(stat
 export function listProblem(def: StoredDef, a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params?: Record<string, unknown>): Refusal | null {
   if (isPosterAction(def, a)) return posterProblem(a, state, soul, params);   // entry 38
   if (isWantedAction(def, a)) return wantedProblem(a, state, soul, params);
-  if (isPinAction(def, a)) return pinProblem(a, state, soul, a.name === 'pin' ? params?.text : undefined);
+  if (isPinAction(def, a)) return pinProblem(a, state, soul, a.name === 'pin' ? params?.text : undefined, def);
   if (isSignupAction(def, a)) {
     // #429: capacity, noun and page turning come from the def (signupCapacity / signupNoun / `keeps-newest`); the sheet's words stay
     const names = pinNotes(state), mine = names.some(n => n.by === soul.soulId), noun = signupNoun(def), cap = signupCapacity(def);
@@ -330,7 +337,8 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
   const out: Record<string, any> = {};
   for (const a of actionsOf(def)) {
     if (!/^[a-z][a-z0-9_-]{0,39}$/.test(a.name)) continue;
-    const check = (s: BuiltLike, ctx: { soul: EdgeSoul }): Refusal | null => {
+    // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
+    const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
       if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
@@ -343,6 +351,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
+      const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
       return whenRefusal(a, state, nameOf(s)) ?? (isListAction(def, a) ? listProblem(def, a, state, ctx.soul) : isGameAction(def, a) ? gameProblem(def, a, state, ctx.soul) : null);
@@ -355,7 +364,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     out[a.name] = {
       label: a.label, ...(mineLabel ? { labelFor: mineLabel } : {}), roles: 'anyone', reach: 'anywhere', params: actionParams(a), movesBody: true,
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
-      validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
+      validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
@@ -363,10 +372,12 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
+        const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
+        if (pick && !('code' in pick)) return { state: s, result: { action: a.name, summary: pick.summary }, bodies: [{ label: a.label, steps: pick.steps }] };
         const contact = host.deferContacts && isContactActuator(def, a);
         const motion=contact&&s.key?host.contactPlan?.(ctx.soul,s.key,a.name,params):null;
         if(motion){const me=host.bodyAt(ctx.soul)!,far=(motion.level??0)>0||Math.hypot(me[0]-motion.root[0],me[1]-motion.root[2])>.1;
-          return {state:s,result:{action:a.name,set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
+          return {state:s,result:{action:a.name,...(def.tags?.includes('notebook')?{}:{set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul)}),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
 
         const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
         const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null;
@@ -378,7 +389,8 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
           ? [2*s.at[0]-s.front[0],2*s.at[1]-s.front[1]] as Vec2 : s.front??null;
         const ap = far && s.key ? host.approach?.(s.key, ctx.soul, front, contact ? .75 : undefined) : null;
         const walk = !far ? [] : ap ? [ap.level === 0 ? { verb: 'walk_to', params: { to: ap.p, standoff: 0 } } : { verb: 'mars:walk_to', params: { x: ap.p[0], z: ap.p[1], level: ap.level } }] : [{ verb: 'walk_to', params: { to, standoff: 0.5 } }];
-        return { state: s, result: { action: a.name, set: patch, ...(water && !isRefusal(water) ? { summary: water.summary } : {}) }, bodies: [{ label: `${a.label}`, steps: contact ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'operate',seconds:1.2,face:s.at!}}] : [...walk, { verb: 'wave', params: { at: s.key, seconds: 1 } }] }] };
+        // #428: a notebook's lines come with a read, not with the answer to writing one
+        return { state: s, result: { action: a.name, ...(def.tags?.includes('notebook') ? {} : { set: patch }), ...(water && !isRefusal(water) ? { summary: water.summary } : {}) }, bodies: [{ label: `${a.label}`, steps: contact ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'operate',seconds:1.2,face:s.at!}}] : [...walk, { verb: 'wave', params: { at: s.key, seconds: 1 } }] }] };
       },
     };
   }
@@ -399,6 +411,9 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
     if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
+    // #438: and a picking act (harvest.ts)
+    const pick = host.harvest?.(soul, id, a.name, (input.params ?? {}) as Record<string, unknown>);
+    if (pick) { if (!('code' in pick)) host.harvestBegun?.(soul); return out; }
     // W5: water moves between two things (tank → can, can → planter) in one commit, planned again at commit time
     const water = waterPlan(a, id, soul, host);
     if (water) {

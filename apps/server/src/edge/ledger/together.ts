@@ -1214,7 +1214,7 @@ export class Together {
   /** PC14 (#693): a raised upright joined by beams is never lowered; its crew lets go once its frame stands on its own. */
   private holdStopLabel(inv: Invite): string {
     const s = inv.shared!, x = this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined;
-    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
+    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding, unless nothing on the frame changes for five minutes)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
   }
   /** Who stopped the operation, in words: a member's own stop, or (PC09) a member who went away. */
   stopWords(st: {name: string; away?: true}): string {return st.away ? `${st.name} went away (their mind left the world)` : `${st.name} asked to stop`;}
@@ -1265,7 +1265,7 @@ export class Together {
     if (raises(s)) {
       const before = !st.phase || st.phase === 'approach' || st.phase === 'grip';
       const joined = !!(this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined)?.connections?.length;
-      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, and it is never lowered`
+      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, or if nothing on the frame changes for five minutes, and it is never lowered`
         : joined ? `beams join ${load} into a frame that stands on its own, so ${crew} let go and it stands there`
         : st.unsafe !== undefined ? `${load} cannot come down yet (${st.unsafe}), so ${crew} keep holding it and lower it as soon as it is clear` : before ? `${load} has not been lifted, so ${crew} let go of it where it lies` : `${crew} lower ${load} back where it lay, along the way it came up`;
       return `${this.stopWords(st)} (${op.id}): ${how}. Your hands and walking stay committed until ${joined ? 'it stands on its own' : 'it is down'}; you can still talk and look around.`;
@@ -1297,8 +1297,8 @@ export class Together {
   private sharedStopped(inv: Invite) {
     const s = inv.shared!, op = s.op!, st = op.stop!, x = this.w.entities[s.load.entity], crew = listed(this.sharedMembers(inv).map(m => m.name));
     if (raises(s)) {
-      const installed = (x as {phase?: string} | undefined)?.phase === 'installed';
-      const where = installed ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
+      const installed = (x as {phase?: string} | undefined)?.phase === 'installed', alone = (x as {support?: {kind: string}} | undefined)?.support?.kind === 'connected';
+      const where = installed ? alone ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : `${s.load.name} stands where it was, though its frame isn't finished; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
       this.sharedEnd(inv, 'stopped', 'shared.stopped', `${st.away ? `Stopped because ${st.name} went away` : `Stopped at ${st.name}'s request`} (${op.id}): ${where}. ${crew} have let go and are free again; nothing is resumed on its own.`);
       return;
     }
@@ -2128,14 +2128,18 @@ export class Together {
       if (kind) {
         if (held) return {code: 'hands.full', reason: `You are holding ${held.name}; put it down or give it away first.`, did_you_mean: caps.filter(c => c.id === 'put-down:here' || c.verb === 'give').slice(0, 4).map(c => ({id: c.id, label: c.label}))};
         const lying = caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && this.item(c.target.id)?.kind === kind)[0];
-        const c = lying ?? caps.find(c => c.id === 'pick-up:' + kind);
-        // entry 43: a world thing of that word lying near (a god-built mug) when no prop of the kind is: the one called
-        // exactly that first, then one whose name has the word, nearest first (labels end "(N m)"). #435: a real thing called
-        // that, free to take and within REAL_THING_NEAR, also comes before a place's prop of the kind ("pick up the apple" is
-        // the apple on the table); one further off or not hers does not take a Soul away from the prop beside her
-        const named = !lying ? caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && /^e_/.test(c.target.id)).map(c => {const n = (c.label.replace(/^Pick up\s+/, '').replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() ?? '').toLowerCase(), d = Number(/\(([\d.]+) m/.exec(c.label)?.[1] ?? 99);
-          const w = what.replace(/^(?:the|a|an|my|that|this)\s+/, '').trim(); return {c, rank: n === w ? 0 : new RegExp(`(^|[^a-z])${w.replace(/[^a-z ]/g, '')}([^a-z]|$)`).test(n) ? 1 : 9, d};}).filter(x => x.rank < 9 && (!c || (x.c.available && x.d <= REAL_THING_NEAR))).sort((a, b) => a.rank - b.rank || a.d - b.d)[0]?.c : undefined;
+        // entry 43: a world thing of that word lying near (a god-built mug): the one called exactly that first, then one whose
+        // name has the words, nearest first (labels end "(N m)"); a space in the words matches a name's hyphen or underscore.
+        // With a place's prop of the kind on offer, a real thing must be free to take, and then: #435: one word wins within
+        // REAL_THING_NEAR ("pick up the apple" is the apple on the table; one further off does not take a Soul away from the prop
+        // beside her). #437: a name of more than one word wins wherever it is ("the coffee mug" by a tea room is the god-built
+        // coffee-mug). A lying prop still comes first.
+        const source = caps.find(c => c.id === 'pick-up:' + kind);
+        const w = what.replace(/^(?:the|a|an|my|that|this)\s+/, '').trim(), wre = w.replace(/[-_]+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim().split(/\s+/).join('[^a-z0-9]+'), wordEnd = /\d$/.test(wre) ? '[^a-z0-9]' : '[^a-z]';
+        const named = !lying ? caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && /^e_/.test(c.target.id)).map(c => {const n = (c.label.replace(/^(?:Pick up|Take)\s+/, '').replace(/(?:\s+\([^)]*\))?\s+out of\s.*$/, '').replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() ?? '').toLowerCase(), d = Number(/\(([\d.]+) m/.exec(c.label)?.[1] ?? 99);
+          return {c, rank: n === w || n.replace(/[-_]+/g, ' ') === w ? 0 : wre && new RegExp(`(^|[^a-z])${wre}(${wordEnd}|$)`).test(n) ? 1 : 9, d};}).filter(x => x.rank < 9 && (!source || (x.c.available && (/[\s_-]/.test(w) || x.d <= REAL_THING_NEAR)))).sort((a, b) => a.rank - b.rank || a.d - b.d)[0]?.c : undefined;
         if (named) return {capability: named.id, note: `${raw} is ${named.id} (${named.label})`};
+        const c = lying ?? source;
         if (!c) {
           const me = this.posOf(soul.soulId), far = me ? this.sources().filter(s => s.kind === kind && s.place).map(s => ({s, d: Math.hypot(s.at[0] - me[0], s.at[1] - me[1])})).sort((a, b) => a.d - b.d) : [];
           const hit = far.map(f => ({f, w: caps.find(c => c.verb === 'walk' && c.target && (c.target.id === f.s.place || this.p.places.byId.get(f.s.place!)?.parent === c.target.id))})).find(x => x.w), walk = hit?.w;

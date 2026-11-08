@@ -108,7 +108,7 @@ export class GodMode {
    *  G1 "god rules": `prepare` plans, on the would-be world, the residents an accepted edit/undo/redo walks out of its
    *  way (listed as `moved` in the durable receipt), and `apply` moves them after the SQL commit in the same request.
    *  Null in worlds without the engine. */
-  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; navNote?: (diff: Diff, said?: string[]) => string[] } | null = null;
+  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[] } | null = null;
   /** Bridge admission/decoration must run before the accepted receipt is persisted, and never on replay. */
   actGuard: ((batch: unknown) => Result | null) | null = null;
   finalizeAct: ((result: Result, after: WorldModel) => Result) | null = null;
@@ -474,7 +474,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const arrival = this.bodies?.arrivalNote?.(r.diff!) ?? [];
     // nav-connect/1 (lane NAV): an edit that cuts Souls off from the walkable world steps them to open ground (logged);
     // things it leaves with no walk to them are named in one line
-    const nav = this.bodies?.navNote?.(r.diff!, repair?.named) ?? [];
+    const nav = [...this.bodies?.navNote?.(r.diff!, repair?.named) ?? [], ...this.bodies?.framesNote?.() ?? []];
     if (arrival.length || nav.length) { result.warnings.push(...arrival, ...nav); if (clientRef !== undefined) this.store.amendReceipt(clientRef, result); }
     return result;
   }
@@ -556,6 +556,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     this.notify(r.result.seq, r.diff!, kind, target.grp ?? undefined);
     this.publish(r.result.seq, tick, r.diff!, kind, deltas);
     this.builds.announceCommitted(updates.writes);
+    r.result.warnings.push(...this.bodies?.framesNote?.() ?? []);
     return { ...r.result, reverted: target.seq };
   }
 
