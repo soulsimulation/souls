@@ -1,6 +1,6 @@
 // #1166: the light a world arrives through. Plain WebGL2, no library: download progress drives the size of the light, and
 // time only keeps its rays alive. It runs beside the world's own first load, so it draws small and slow, and it stops
-// for good the moment the screen is white. Without WebGL2 the caller's CSS disc does the same job (`startLight` is null).
+// drawing for good once the last of it has grown. Without WebGL2 the caller's CSS disc does the same job (`startLight` is null).
 
 export const DISSOLVE_MS = 2000;
 /** The last of the light, as a compositor transition (world-chrome.css `data-fill`). */
@@ -18,9 +18,12 @@ const RATE = 0.6, TAU = 0.35;
 const MAX_SIDE = 480;
 export const FRAME_MS = 1000 / 24;
 
-/** The radius from just covering the text to reaching the corners, in CSS pixels. */
+/** #1318: the light starts at this share of the radius that just covers the text (its grey halo sets the text off), and
+ *  at 100% its solid part reaches this share of the way to the corners, so they stay light grey; it never whites out. */
+export const START = 0.55, PEAK = 0.6;
+/** The solid radius for a loaded `fraction`, in CSS pixels. */
 export const lightRadius = (fraction: number, width: number, height: number, textHalf: number) =>
-  textHalf + (Math.hypot(width, height) / 2 - textHalf) * fraction;
+  START * textHalf + (PEAK * Math.hypot(width, height) / 2 - START * textHalf) * fraction;
 /** The shader's scale for a solid-white radius of `radius` CSS pixels. */
 export const lightScale = (radius: number, width: number, height: number) => radius / (SOLID * Math.min(width, height));
 
