@@ -540,13 +540,21 @@ export class MarsEngine implements Engine {
    *  action-threw rule), its seat and ride mark are freed, and it stands at the nearest legal pose. One row, with the poses. */
   private settleV1<V>(plan: { violation: V; rule: string; settle?: string[]; programs: Map<string, Prog> }, stuck: V[], done: Map<string, EngineRefusalV1>, tick: number) {
     const ents = this.ents, why = settleDiag(plan.rule), poses: EngineRefusalV1['poses'] = {}, subjects = (plan.violation as { subjects?: string[] }).subjects ?? [];
+    // #1334 review: every body's spot is found before anything changes, so a settle places all its bodies or touches none
+    // (one that can't be placed goes to the host's repair as it was, and no body is moved untold)
+    const spots = new Map<string, { p: [number, number, number]; level: number }>(), taken: [number, number, number][] = [];
+    for (const id of plan.settle!) {
+      const e = ents[id], at = this.nearestStandV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: e.human.level }, this.bodyRadiusV1(e), taken);
+      if (!at) { stuck.push(plan.violation); return; }
+      spots.set(id, at); taken.push([at.p[0], at.p[2], at.level]);
+    }
     for (const id of plan.settle!) for (const h of this.holders(id)) if (this.rt.isActive(h)) this.abandonV1(h, why.message, why, false);
     for (const p of [...plan.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (this.programs.has(p.id)) this.end(p, 'failed', why);
     for (const id of plan.settle!) {
       const e = ents[id], h = e.human, b = h.carrier as { id: string; slot: string } | undefined;
       for (const rid of new Set([...(b ? [b.id] : []), ...subjects])) { const c = ents[rid]?.carrier; if (!c) continue; for (const [slot, a] of Object.entries(c.seats as Record<string, string | null>)) if (a === id) c.seats[slot] = null; if (c.doorBy === id) c.doorBy = null; }
       delete h.carrier; delete h.task; h.activity = 'idle'; h.speed = 0;
-      if (!this.standNearestV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: h.level }, this.bodyRadiusV1(e))) { stuck.push(plan.violation); return; }
+      this.landV1(id, spots.get(id)!, e.pose.yaw);
       poses[id] = { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: h.level };
     }
     done.set(`settled|${plan.rule}|${plan.settle!.join()}`, { tick, rule: plan.rule, bodies: plan.settle!, programs: [...plan.programs.keys()].sort(), poses, relocated: true });
@@ -1673,15 +1681,24 @@ export class MarsEngine implements Engine {
   }
   /** The search restoreHumanPoseV1 runs once the body is free: its floor near the pose, else the nearest free ground. */
   private standNearestV1(id: string, pose: { p: [number, number, number]; yaw?: number; level?: number }, radius: number): boolean {
+    const at = this.nearestStandV1(id, pose, radius);
+    return at ? this.landV1(id, at, pose.yaw) : false;
+  }
+  /** Stand a body at a spot nearestStandV1 found. */
+  private landV1(id: string, at: { p: [number, number, number]; level: number }, yaw?: number): true {
     const e = this.ents[id];
-    if (!Array.isArray(pose?.p) || pose.p.length !== 3 || !pose.p.every(Number.isFinite)) return false;
+    e.pose.p = at.p; if (typeof yaw === 'number' && Number.isFinite(yaw)) e.pose.yaw = r3(yaw);
+    e.human.level = at.level; e.human.activity = 'idle'; e.human.speed = 0; delete e.human.shore; acknowledgeRelocation(this.rt, id); return true;
+  }
+  /** The search alone, changing nothing: its floor near the pose, else the nearest free ground. `taken` are spots already
+   *  promised to other bodies in the same settle (#1334 review: a settle places all its bodies or none). */
+  private nearestStandV1(id: string, pose: { p: [number, number, number]; yaw?: number; level?: number }, radius: number, taken: [number, number, number][] = []): { p: [number, number, number]; level: number } | null {
+    const e = this.ents[id];
+    if (!Array.isArray(pose?.p) || pose.p.length !== 3 || !pose.p.every(Number.isFinite)) return null;
     const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
-    const people = listEntities(this.ents).filter((o: any) => o.kind === 'human' && o.id !== id).map((o: any) => [o.pose.p[0], o.pose.p[2], o.human?.level ?? 0] as [number, number, number]);
+    const people = [...listEntities(this.ents).filter((o: any) => o.kind === 'human' && o.id !== id).map((o: any) => [o.pose.p[0], o.pose.p[2], o.human?.level ?? 0] as [number, number, number]), ...taken];
     const bodies = this.guardBodiesV1(), free = (x: number, z: number, level: number) => !people.some(([px, pz, pl]) => pl === level && hypot(px - x, pz - z) < 0.8);
-    const land = (p: [number, number, number], level: number) => {
-      e.pose.p = p; if (typeof pose.yaw === 'number' && Number.isFinite(pose.yaw)) e.pose.yaw = r3(pose.yaw);
-      e.human.level = level; e.human.activity = 'idle'; e.human.speed = 0; delete e.human.shore; acknowledgeRelocation(this.rt, id); return true;
-    };
+    const land = (p: [number, number, number], level: number) => ({ p, level });
     const [x0, y0, z0] = pose.p, level = Number.isInteger(pose.level) ? pose.level! : 0;
     if (level > 0) {
       const g = spatial.levelAt(level, [x0, z0]); if (g && clearanceAt(g, [x0, z0]) >= radius && free(x0, z0, level) && this.placeClearV1(e, r3(x0), r3(z0), level, bodies)) return land([r3(x0), r3(y0), r3(z0)], level);
@@ -1692,14 +1709,14 @@ export class MarsEngine implements Engine {
         if (gg && clearanceAt(gg, [x, z]) >= radius && free(x, z, level) && this.placeClearV1(e, x, z, level, bodies)) return land([x, r3(y0), z], level);
       }
     }
-    const grid = spatial.levelAt(0, [x0, z0]); if (!grid) return false;
+    const grid = spatial.levelAt(0, [x0, z0]); if (!grid) return null;
     const f = this.rt.world.groundV1 ? spatial.ground?.field : undefined;
     const ok = (x: number, z: number) => clearanceAt(grid, [x, z]) >= radius && free(x, z, 0) && (!f || f.medium(x, z) <= 1) && this.placeClearV1(e, x, z, 0, bodies);
     for (let ring = 0; ring <= 80; ring++) { const n = Math.max(1, ring * 8); for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2, x = r3(x0 + dcos(ang) * ring * 0.5), z = r3(z0 + dsin(ang) * ring * 0.5);
       if (ok(x, z)) return land([x, f ? r3(standOn(spatial.ground!, x, z)) : 0, z], 0);
     } }
-    return false;
+    return null;
   }
   /** attention/1 (logged 'edge-attention'): set or clear a body's gaze (head target: a body/fixture id or a point, until a tick),
    * and with `yaw` also turn a free standing body (no program, nothing holding it, awake, not seated/riding). Never cancels

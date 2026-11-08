@@ -178,12 +178,16 @@ replays as it was recorded. Under it, rung 1 answers each violation on its own:
   2. whatever action holds it is force-finished, and a held load is set down where it is (the `engine.action-threw`
      rule);
   3. its seat, door turn and ride mark are freed;
-  4. it stands at the nearest pose the ring search accepts.
+  4. it stands at the nearest pose the ring search accepts. That search uses body-step-guard/1's validator
+     (`bodyStandsClear`, and keeping apart from other bodies), which is why the policy is adopted after the guard.
+
+  Every body's spot is found before anything changes, so a settle places all its bodies or none. If one can't be
+  placed, nothing is moved or ended, and the violation goes to the host as it was.
 
   The row has `relocated: true` and the poses, so the Soul is told. Settle replaces the relocation exception above: it
   is the one way the world moves a body without the body walking there.
 - **Still for the host, alone:** a rule outside these classes, a body on a build programme, `human.riding`, `human.on`,
-  a sleeping body, and a body no ring search can place. These are no longer a reason to send the whole tick: every
+  a sleeping body, and a settle with any body no ring search can place. These are no longer a reason to send the whole tick: every
   other violation of that tick is still held, failed or settled.
 
 ### The ladder

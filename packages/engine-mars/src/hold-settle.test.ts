@@ -4,12 +4,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { marsFactory, GREEN_FIELD_WORLD, MarsEngine } from './engine.ts';
+import { bodyStandsClear } from '../../../mars/viewer/engine/runtime/static-step.ts';
 
 const on = await marsFactory({ ...GREEN_FIELD_WORLD, soulsRepairV1: true });
 type Fn = (rt: any) => { code: string; message: string; subjects: string[] }[] | void;
 function world(settle = true, seed = 'hold-settle') {
   const e = on.create(on.genesis(seed)) as MarsEngine;
-  if (settle) e.configureRuntimePolicy({ sleepBlockTicks: 1200, refusalSettleV1: true } as never);
+  // as worlds adopt it at boot: body-step-guard/1 first, so every settle lands through its validator (#1334 review)
+  if (settle) e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true, refusalSettleV1: true } as never);
   e.spawnHuman({ id: 'a', label: 'Ada', soul: 's_a', at: [0, 0] } as any); e.spawnHuman({ id: 'b', label: 'Bo', soul: 's_b', at: [6, 6] } as any);
   e.spawnHuman({ id: 'c', label: 'Cy', soul: 's_c', at: [-8, -8] } as any);
   const rt = (e as any).rt, ends: any[] = [], rows: any[] = [];
@@ -19,6 +21,13 @@ function world(settle = true, seed = 'hold-settle') {
   const walk = (id: string, to: [number, number]) => { const r = e.perform({ actor: id, label: 'walk', steps: [{ verb: 'walk_to', params: { to } }] }); assert.equal(r.ok, true, JSON.stringify(r)); };
   const go = (n: number) => { for (let i = 0; i < n; i++) step(); };
   return { e, rt, ends, rows, step, times, inject, walk, go, pose: (id: string) => [...e.world.entities[id].pose.p], prog: (id: string) => e.programOf(id) };
+}
+/** A settled body stands where the guard's validator passes it, apart from every other body. */
+function standsLegal(w: ReturnType<typeof world>, id: string) {
+  const e = w.e.world.entities[id] as any, rt = w.rt;
+  assert.ok(bodyStandsClear(rt, e, [e.pose.p[0], e.pose.p[2]], e.human.level ?? 0), `${id} stands clear of static geometry at ${e.pose.p}`);
+  for (const o of Object.values(w.e.world.entities) as any[]) if (o.kind === 'human' && o.id !== id && (o.human?.level ?? 0) === (e.human.level ?? 0))
+    assert.ok(Math.hypot(o.pose.p[0] - e.pose.p[0], o.pose.p[2] - e.pose.p[2]) >= 0.6, `${id} stands apart from ${o.id}`);
 }
 const shove = (id: string, dx: number) => (rt: any) => { rt.world.entities[id].pose.p[0] += dx; };
 
@@ -63,7 +72,7 @@ test('A2 settle: two bodies the world put together (neither moved): the second b
   assert.deepEqual(w.e.runtime.violations, []); assert.deepEqual(w.pose('a'), a0, 'the first stays');
   const row = w.rows.at(-1); assert.equal(row.relocated, true); assert.deepEqual(row.bodies, ['b']); assert.ok(row.poses.b);
   assert.equal(w.prog('b'), null); assert.equal(w.ends.find(x => x.actor === 'b').code, 'world.settled:collision.human-human');
-  assert.equal(w.prog('c'), pc);
+  assert.equal(w.prog('c'), pc); standsLegal(w, 'b'); assert.deepEqual(row.poses.b.p, w.pose('b'), 'the row carries where it stands');
 });
 
 test('A2 settle: an unmoved busy body inside something is stood at the nearest clear spot', () => {
@@ -72,6 +81,47 @@ test('A2 settle: an unmoved busy body inside something is stood at the nearest c
   w.times(1, () => [{ code: 'collision.human-static', message: 'forced: built over', subjects: ['a'] }]);
   w.step(); assert.deepEqual(w.e.runtime.violations, []);
   assert.equal(w.rows.at(-1).relocated, true); assert.equal(w.prog('a'), null); assert.equal(w.ends.at(-1).code, 'world.settled:collision.human-static');
+  standsLegal(w, 'a'); assert.deepEqual(w.rows.at(-1).poses.a.p, w.pose('a'));
+});
+
+test('#1334 review: a settle places all its bodies or none; with the second unplaceable, nobody moves and both go to the host as they were', () => {
+  const w = world();
+  for (const id of ['a', 'b']) assert.equal(w.e.perform({ actor: id, label: 'rest', steps: [{ verb: 'rest', params: { seconds: 60 } }] }).ok, true);
+  w.go(5);
+  const pa = w.prog('a'), pb = w.prog('b'), a0 = w.pose('a'), b0 = w.pose('b'), rows0 = w.rows.length;
+  (w.e as any).standsClearV1 = (id: string) => id !== 'a' && id !== 'b';
+  const find = (w.e as any).nearestStandV1.bind(w.e); (w.e as any).nearestStandV1 = (id: string, ...rest: any[]) => id === 'b' ? null : find(id, ...rest);
+  w.times(1, () => [{ code: 'collision.human-static', message: 'forced: built over both', subjects: ['a', 'b'] }]);
+  w.step();
+  assert.deepEqual(w.pose('a'), a0, 'the placeable one is not moved untold'); assert.deepEqual(w.pose('b'), b0);
+  assert.equal(w.prog('a'), pa, 'programmes untouched'); assert.equal(w.prog('b'), pb);
+  assert.ok(!w.rows.slice(rows0).some(r => r.relocated), 'no settle row'); assert.ok(w.e.runtime.violations.some((v: any) => v.code === 'collision.human-static'), 'left for the host');
+});
+
+for (const [name, mark] of [
+  ['riding a vehicle', (h: any) => { h.riding = 'cart-1'; }],
+  ['asleep', (h: any) => { h.sleepPose = { at: [0, 0], yaw: 0 }; }],
+  ['on a structure', (h: any) => { h.on = 'beam'; }],
+] as const)
+  test(`A3 carve-out: a body ${name} is never settled; it goes to the host alone and the others are still answered`, () => {
+    const w = world(); w.walk('b', [6, 16]); w.go(5);
+    const a0 = w.pose('a'), pb = w.prog('b'), b0 = w.pose('b');
+    mark(w.e.world.entities.a.human as any); (w.e as any).standsClearV1 = (id: string) => id !== 'a';
+    w.times(1, rt => { shove('b', 1)(rt); return [{ code: 'collision.human-static', message: 'forced', subjects: ['a'] }]; });
+    w.step();
+    assert.deepEqual(w.pose('a'), a0, 'not moved'); assert.ok(!w.rows.some(r => r.relocated && r.bodies.includes('a')));
+    // what is left for the host is about a (and whatever a forced mark itself breaks), never b
+    const left = w.e.runtime.violations.map((v: any) => (v.subjects ?? []) as string[]); assert.ok(left.some(s => s.includes('a')) && !left.some(s => s.includes('b')), 'a alone: ' + JSON.stringify(left));
+    assert.deepEqual(w.pose('b'), b0, 'b held'); assert.equal(w.prog('b'), pb);
+  });
+
+test('A3 carve-out: a body no ring search can place goes to the host alone, unmoved', () => {
+  const w = world(); assert.equal(w.e.perform({ actor: 'a', label: 'rest', steps: [{ verb: 'rest', params: { seconds: 60 } }] }).ok, true); w.go(5);
+  const a0 = w.pose('a'), pa = w.prog('a');
+  (w.e as any).standsClearV1 = (id: string) => id !== 'a'; (w.e as any).nearestStandV1 = () => null;
+  w.times(1, () => [{ code: 'collision.human-static', message: 'forced', subjects: ['a'] }]);
+  w.step();
+  assert.deepEqual(w.pose('a'), a0); assert.equal(w.prog('a'), pa); assert.ok(w.e.runtime.violations.some((v: any) => v.subjects?.includes('a')));
 });
 
 test('A2 settle: a carrier rule frees the rider and stands it on the ground; a restart reaches the same hash', () => {
