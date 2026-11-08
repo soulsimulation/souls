@@ -23,5 +23,5 @@ test('Eden 2026: go --place <far place> walks there on demand, as "walk to <plac
   // a place that names nothing is still an honest refusal (no throw)
   const none = await w.edge.act(w.soul, { verb: 'go', target: { place: 'no-such-place-zz' } }) as Act;
   assert.equal(none.accepted, false); assert.ok(none.code && none.code !== 'ledger.fault', `refusal code: ${none.code}`);
-  assert.deepEqual(new Set(w.edge.capabilities(w.soul).map((c) => c.id)), listed, 'the listing is unchanged');
+  assert.deepEqual(new Set(w.edge.capabilities(w.soul).map((c) => c.id)), new Set([...listed, 'stop:current']), 'the listing is unchanged but for the stop of the walk now under way (#1381)');
 });
