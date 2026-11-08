@@ -64,6 +64,11 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `SIM_SOULS_REPAIR=0` stops adoption for worlds that haven't adopted, and is ignored, with a warning, for one that has.
   `SIM_SOULS_REPAIR=1` (or `SIM_SHARED_CARRY=1`, which brings repair) bypasses adoption: an old world then refuses to boot, as
   in 4.16, so don't set it on a server with existing worlds.
+  Before a release that changes what a first boot adopts, rehearse each world on the host:
+  `node tools/world-launcher/deploy/boot-rehearsal.mjs --db <world data>/sim.db --scratch <new empty dir outside it>
+  --from-pid <the world's process>` (or `--env-file`/`--env` with the world's settings) boots an online-backup copy with
+  this tree's code, adopts, runs `--ticks` (default 1200) and prints one JSON line: adopted or refused and why, running or
+  halted, the hashes before and after. The original is opened read-only and the copy is deleted afterwards.
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor

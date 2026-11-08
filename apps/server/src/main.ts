@@ -8,10 +8,9 @@ import { createServer } from 'node:http';
 import { existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getRequestListener } from '@hono/node-server';
-import { recordedToyFactory } from './toy-takes.ts';
 import { Auth } from './auth.ts';
 import { Brain } from './brain.ts';
-import { config, KNOWN_WORLD_KEYS } from './config.ts';
+import { config } from './config.ts';
 import { Db } from './db.ts';
 import { buildApp } from './http.ts';
 import { Hub } from './hub.ts';
@@ -30,7 +29,8 @@ import { installLightning } from './god/lightning.ts';
 import { installGovernance } from './god/governance-edge.ts';
 import { GroundHost, installGroundCapabilities, loadGroundRecipes, registerGroundRecipes } from './god/ground-host.ts';
 import { stripWorldRequestPath } from './world-request-path.ts';
-import {edenCoreRequested,edenHistoryFactory,installEdenCore,settleEmptyEden,drainEdenThought,installEdenLifeV1,installEdenExpansionV1} from './eden-bootstrap.ts';
+import {worldFactory,plainWorldFactory} from './world-factory.ts';
+import {edenCoreRequested,installEdenCore,settleEmptyEden,drainEdenThought,installEdenLifeV1,installEdenExpansionV1} from './eden-bootstrap.ts';
 import {IntentControlV2} from './intent-control.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {installPuntActivities} from './punt-install.ts';
@@ -97,20 +97,10 @@ if(applyExpansion&&(!edenLife||!newcomerResources||!sleepSnapshot||!lecture||!ex
 // Launcher (entity) worlds opt into native Soul arrivals and removal (SOUL_LIFECYCLE=1), so account approvals create Souls as live does. Lane P2.
 const accountLifecycle=config.worldEngine&&!edenCore&&process.env.SOUL_LIFECYCLE==='1';
 // #1323: the repair rules are on by default; a world whose history began without them adopts them at its head (one way)
-const factory=edenCore?await repairReader(await edenHistoryFactory(db,config.worldId,{lifeV1:edenLife,newcomerResourcesV1:newcomerResources,sleepSnapshotV1:sleepSnapshot,lectureV1:lecture,groundV1:expansionGround})):warmFactory??await plainFactory();
-/** #1323: every Mars world reads its history with and without the repair rules; `SIM_SOULS_REPAIR=0` adopts nothing. */
-async function repairReader(inner:Awaited<ReturnType<typeof edenHistoryFactory>>) {
-  if (config.engine !== 'mars') return inner;
-  const mars = await import('@souls/engine-mars');
-  return mars.soulsRepairReaderV1(inner, { adopt: process.env.SIM_SOULS_REPAIR !== '0' });
-}
+const factory=edenCore?await worldFactory(db,config,process.env):warmFactory??await plainFactory();
 /** A world's engine factory when it is not Eden core (that one reads its history from the database). Each process owns
  *  one world and imports its engine from this release. */
-async function plainFactory() {
-  const mars = config.engine === 'mars' ? await import('@souls/engine-mars') : null;
-  const accountLifecycle = config.worldEngine && !edenCoreRequested(config, process.env) && process.env.SOUL_LIFECYCLE === '1';
-  return mars?await repairReader(await mars.marsFactory(config.worldKey==='littlemartians'?mars.LITTLE_MARTIANS_WORLD:config.worldKey==='eden'||!KNOWN_WORLD_KEYS.includes(config.worldKey as never)?(accountLifecycle?{...mars.GREEN_FIELD_WORLD,safeCrewRemoval:true}:mars.GREEN_FIELD_WORLD):undefined)):recordedToyFactory;
-}
+function plainFactory() { return plainWorldFactory(config, process.env); }
 // ground/1 (lane L8): every terrain recipe this entity world logged resolves by hash before the engine replays
 if (config.worldEngine) loadGroundRecipes(db, config.worldId);
 const host = new WorldHost(db, factory, config.worldSeed, config.snapshotEveryTicks, config.worldId,edenCore?{durableClockV1:true}:undefined);
