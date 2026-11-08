@@ -251,6 +251,9 @@ export class WorldHost {
       from = 'snapshot';
     } else {
       this.engine = this.factory.create(this.factory.genesis(w.seed));
+      // #1323: a history that began under the repair rules, with no adoption in its log, ran them from genesis
+      if(w.rules_version.includes('+souls-repair/')&&!this.engine.rulesVersion.includes('+souls-repair/')&&this.engine.bornUnderSoulsRepairV1
+        &&!this.db.db.prepare("SELECT 1 FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.soulsRepairAdoptV1.contract') IS NOT NULL LIMIT 1").get(this.worldId))this.engine.bornUnderSoulsRepairV1();
       this.kernel = initKernel(this.engine, pinnedVocabulary(this.db.rulesEvents(this.worldId)));
     }
     // fast-forward: replay events logged after the snapshot, stepping the engine to their ticks
@@ -391,6 +394,34 @@ export class WorldHost {
       if(r.changes!==1)throw Error('crew-removal-transition.header-moved');return true;
     };
     return new Promise((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{crewRemovalTransition:expected},guard,journal,resolve,reject}));
+  }
+  /** #1323: the repair rules for a history that began without them: one logged fact at the head, the header in the same
+   *  acceptance (the clock frontier that follows names the new rules, and a boot replays this fact before checking it).
+   *  Resolves null when there is nothing to adopt: already adopted, or a reader that doesn't adopt. One way. */
+  adoptSoulsRepairV1(author:string):Promise<LogEvent|null>{
+    const preview=this.engine.previewSoulsRepairAdoptionV1?.();
+    if(!preview?.ok)return Promise.resolve(null);
+    if(this.stationHistoryV1())return Promise.reject(Error('souls-repair-adoption.station-carry-required'));
+    // the header names the engine's version (Eden), or an older one this reader still replays (a launcher world's first rules)
+    const expected=preview.transition,header=this.db.world(this.worldId)?.rules_version;
+    if(!header||header.includes('+souls-repair/')||this.factory.canReplayHistory?.(header)===false)return Promise.reject(Error('souls-repair-adoption.header-unreadable'));
+    const guard:AcceptanceGuard=()=>{
+      if(this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
+      const row=this.db.world(this.worldId);
+      if(row?.dt!==this.engine.dt||row.rules_version!==header)throw Error('souls-repair-adoption.header-moved');
+      const current=this.engine.previewSoulsRepairAdoptionV1?.();
+      if(!current?.ok||hashOf(current.transition)!==hashOf(expected))throw Error('souls-repair-adoption.source-moved');
+      if(this.factory.canReplayHistory?.(expected.toRulesVersion)===false||this.factory.canRestoreSnapshot?.(expected.toRulesVersion)!==true)throw Error('souls-repair-adoption.reader-unavailable');
+      return true;
+    };
+    const journal:AcceptanceJournal=()=>{
+      const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(expected.toRulesVersion,this.worldId,header);
+      if(r.changes!==1)throw Error('souls-repair-adoption.header-moved');return true;
+    };
+    // A rung 2 or 3 before the next snapshot re-applies this fact over the older baseline, which its fold allows. No eager copy
+    // of the head is taken here: boot keeps one world in memory (the snapshot's text serves as the baseline), and so does this.
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{soulsRepairAdoptV1:expected},guard,journal,
+      resolve:e=>{this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
   }
   private stationEraEvent(source:LogEvent):LogEvent|undefined {
     const old=this.stationHistoryV1();if(!old)return undefined;
@@ -666,7 +697,7 @@ export class WorldHost {
         if(stationEra)this.apply(stationEra,false);
         if(arrival)this.apply(arrival,false);
       } catch (error) {
-        if(arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark){
+        if(arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.soulsRepairAdoptV1||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark){
           // A committed structural pair cannot be attributed to an unrelated
           // card or filtered out by card-fault recovery. Restore exact history.
           try{
@@ -677,7 +708,7 @@ export class WorldHost {
       }
       if (this.repairRules && !this.clockAvailable) { for (const q of pending.slice(pending.indexOf(p))) q.reject?.(this.clockFailure); return; }   // nothing more may be written from this head
       const accepted=[e,...(admission?[admission]:[]),...(stationEra?[stationEra]:[]),...(arrival?[arrival]:[])];
-      if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
+      if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.soulsRepairAdoptV1||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
       // No listener can observe a physical event before its committed era fold.
       for (const fact of accepted) for (const l of this.listeners) l.onApplied?.(fact);
       if (admission && recovered) { p.reject?.(new PersistedIntentAdmissionFault(e.seq)); continue; }
@@ -928,6 +959,7 @@ export class WorldHost {
     const matchedStep = pm ? stepIndex(this, pm, (e.payload as PlayPayload).card, (e.payload as PlayPayload).target) : -1;
     if (e.kind === 'rules' && e.payload?.recovery) { this.restoreRecovery(e.payload.recovery as RecoveryRecipe); this.seq = e.seq; return; }
     if(e.kind==='rules'&&e.payload?.crewRemovalTransition&&this.stationHistoryV1())throw Error('crew-removal-transition.station-carry-required');
+    if(e.kind==='rules'&&e.payload?.soulsRepairAdoptV1&&this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
     if(e.kind==='rules'&&e.payload?.existingGreenLandmark&&this.stationHistoryV1())throw Error('green-landmark.station-carry-required');
     if(e.kind==='rules'&&e.payload?.edenGround&&this.stationHistoryV1())throw Error('eden-ground.station-carry-required');
     if(e.kind==='rules'&&e.payload?.edenLecture&&this.stationHistoryV1())throw Error('eden-lecture.station-carry-required');

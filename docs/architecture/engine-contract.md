@@ -106,9 +106,18 @@ A door's gap turns solid only at the close's contact, so the plan reads that gap
 
 ## Refusal
 
-With the `souls-repair/1` rules (`soulsRepairV1`: on with `SIM_SOULS_REPAIR=1` or with `SIM_SHARED_CARRY=1`, and `SIM_SOULS_REPAIR=0`
-turns it off under either; new worlds only for now: a world whose history lacks it refuses to boot with it on), a move that
-would break a rule is not applied ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+With the `souls-repair/1` rules (`soulsRepairV1`), a move that would break a rule is not applied
+([#1150](https://github.com/soulsimulation/souls/issues/1150)). Every world the server runs has them by default
+([#1323](https://github.com/soulsimulation/souls/issues/1323)). The server reads a world's history with
+`soulsRepairReaderV1` over its own reader: the history replays and restores under the rules it was written with, and a world
+whose history began without them adopts them in one logged `rules` event at its head, after replay and the clock check
+(`{soulsRepairAdoptV1: {contract: 'souls-repair-adoption/1', tick, fromRulesVersion, toRulesVersion, fromStateHash}}`). Its
+fold turns the rules on, and the world header's `rules_version` follows in the same acceptance. A new world is born without
+them and adopts at tick 0. A snapshot restores under the policy it was taken with; the state hash never names the rules
+(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (4.16,
+or `marsFactory` alone) refuses an adopted history. `SIM_SOULS_REPAIR=0` adopts nothing, still replays a logged adoption, and
+is ignored for a world that has adopted. A factory that already has the rules (`SIM_SOULS_REPAIR=1`, `SIM_SHARED_CARRY=1`, or
+`soulsRepairV1: true`) is used as it is: an old history refuses it, as before.
 
 - `Engine.step` leaves no refusable violation standing. The bodies that moved go back to their pose before the tick, and
   their programmes end `failed` with `world.refused:<rule>` and a plain reason, in that tick.
@@ -160,8 +169,8 @@ whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that n
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
 started what it stopped. A body inside something is relocated once.
 
-`SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
-ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
+The ladder comes with the rules, so every world the server runs has it by default (see Refusal for adoption). A world made
+with the ladder, or that adopted it, can't go back: it needs these rules to replay. Under these rules an invariant that
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
 a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
