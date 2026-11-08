@@ -343,6 +343,8 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
     if (t.kind === 'object' && picked.some(p => p.kind === 'seat' && p.id === t.id) && ledger.contactActuator?.facts(t.id)?.broken) continue;
     const k = kindOf(t), n = taken.get(k) ?? 0; if (n < (k === 'seat' ? LIMITS.seats : 2) && picked.length < LIMITS.objects) {picked.push(t); taken.set(k, n + 1);} else more[k] = (more[k] ?? 0) + 1;
   }
+  // #427: under an open parasol outdoors, unless it is night (a world without a clock has none); `all` is nearest first
+  const shade = P.enclosure === null && (!c || lightOf(c.hour, c.minute) !== 'night') ? all.find(t => {const r = t.kind === 'object' ? ledger.contactActuator?.shade(t.id, soul) ?? 0 : 0; return r > 0 && t.distance <= r && P.sees(t.at, t.id);}) : undefined;
   // Only six selected objects, at most 4 m away and in sight. No stored-state dump.
   const objects = picked.map(t => {
     // M01: the few facts first; enclosure and sightline (entity-world walls) only for a thing that has some.
@@ -389,7 +391,7 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
     ...(c ? {now: worldNow(c)} : {}), tick, ...(c ? {clock: `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}`, day: WEEKDAYS[new Date(c.datetime).getUTCDay()], light: lightOf(c.hour, c.minute)} : {}),
     ...(weather ? {weather: (() => {const l = P.pos ? ledger.lightningNear?.(P.pos[0], P.pos[1]) : null; return l ? {...weather, lightning: l} : weather;})()} : {}),
     ...(where?{where}:{}),
-    me: ownMe,
+    me: shade ? {...ownMe, shade: shade.name} : ownMe,
     near, objects, ...(Object.keys(more).length ? {more} : {}), conversations_in_earshot: conversations, exits, ...(() => {const f = floorLines(ledger, P); return f.length ? {floors: f} : {};})(),
     ...(() => {const l = ledger.projects?.hereLines(soul) ?? []; return l.length ? {projects: l} : {};})(),
     // knowledge/1: the district summarised, far districts as names and directions (more once visited)
