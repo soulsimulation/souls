@@ -48,6 +48,12 @@ Optional hooks cover recorded takes and scenes (`takeChunks`, `renderScene`, `ta
 (`previewAdmission`) and a set of paired `preview*V1` / `adopt*V1` transitions that add authored content to an existing
 world as logged, replayable facts. The declarations are the reference.
 
+A runtime policy is a `cfg` key a world may turn on after genesis by a logged `rules` event without changing its rules
+version. The Mars engine keeps them in one registry, `RUNTIME_POLICY_KEYS` in `packages/engine-mars/src/engine.ts`
+(with the render clock and ground-reclaim/1); a physical-binding snapshot reader ignores exactly those keys
+(`physicalBindingCfgV1`), so adopting a policy on a bound world never makes its snapshots unrestorable (#1363). A new
+flag goes in `RUNTIME_POLICY_FLAGS`; `runtime-policy-registry.test.ts` fails until it does.
+
 - **Program** `{ actor, label, steps: {verb, params}[] }`: the verb steps one body runs. A `decision` event starts one.
   One actor runs one program.
 - **ProgramEvent** `{ tick, id, actor, kind: 'step'|'completed'|'failed'|'cancelled', step, code?, message? }`: how the
@@ -71,6 +77,24 @@ planned. When no turn has both room and a route, the step takes a point with roo
 This matters on paged ground, where a long walk's plan checks only its first fine hop, so a standoff point inside a
 ride's own collider used to pass the plan. A step without the marker keeps the goal it always chose, so recorded
 programmes replay unchanged.
+
+A ride's `carrier_steer` with `land` may carry `landing: 'clear/1'` (#1324), and the ride object always sends it. The spot must
+be clear on the fine clearance raster over a 2.6 m disc: the basket, its door and both seat exits, plus a body radius. That raster
+holds the thin wall segments and closed doors the coarse solids drop, and it also holds benches, water edges and steep cells. Nothing
+in the raw scene may stand over the disc either, so no wall, lintel, roof or god-built floor: the descent column is open sky. The ride
+lands on the nearest such spot within 30 m, in rings of 2 m, and the plan returns `landing: {requested, at, adjustedM, reason}`.
+With no spot it is refused `carrier.no-landing-spot`, naming how far the nearest clear ground is. The spot is read again through
+the second half of the flight and on the touchdown tick. When the spot is no longer clear, the landing moves to the nearest clear
+spot to the asked point: the ride climbs back to cruise height (35 m), flies across, then comes down. After a third move it
+flies home. With no clear spot it hovers and looks again every
+2 s, and flies home after the 2-minute hover. The ride state's `landNote` says which happened. A ride's own home is never
+re-checked; a home that no longer reads clear is only reported, as a `carrier.home-not-clear` mark. A steer without the marker
+keeps the landing it always chose, so recorded programmes replay unchanged.
+A `carrier_ride` boarded with `clear: 'step-out/1'` (the ride object's join sends it) steps out only onto ground the body can stand
+on. The leg to the door waits while the door spot isn't clear. The last leg goes to the exit, or to the nearest clear spot round it
+that a straight step from the door reaches. The rider stands at the ground's height there. A 12 s set-down uses the same check,
+searching up to 12 m round the exit, and a rider with nowhere clear stays aboard instead
+of being placed in a wall. God edits never walk out a rider whose ride is in the air (#1339).
 
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another
 venue. A seated Soul still stands first; active movement and occupied support keep their native admission rules.
@@ -226,6 +250,9 @@ placed clears it, and a rung 3 keeps god edits, so it survives a restart until t
 
 **What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+A periodic snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt:
+it is skipped and counted at rung `contained` as `durability.snapshot-skipped`, the clock runs on, and the next due
+snapshot is tried (#1368).
 
 ## Conformance
 

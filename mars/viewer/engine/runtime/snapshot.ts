@@ -284,13 +284,17 @@ export function applySnapshot(rt: Runtime, int: RuntimeInternals, snap: RuntimeS
     const rec = rt.records.get(w.id);
     const invalid = () => new SnapshotError('snapshot.waiting-invalid', `waiting directive ${w.id} has invalid graph provenance`, [w.id]);
     if (!rec || seenWaiting.has(w.id) || int.live.has(w.id) || g.dropped.some((d) => d.id === w.id) ||
-      rec.status !== 'requested' || rec.phase !== 'pre-empting' || rec.parent !== w.parent ||
+      rec.status !== 'requested' || (rec.phase !== 'pre-empting' && rec.phase !== 'make-way') || rec.parent !== w.parent ||
       hashOf(rec.params) !== hashOf(w.params) || !Array.isArray(w.holds) || !w.holds.length ||
       new Set(w.holds).size !== w.holds.length || w.holds.some((id) => id === w.id || !rt.records.has(id) || g.dropped.some((d) => d.id === id)) ||
       g.owners.some(([, owners]) => owners.some((o) => o.action === w.id))) throw invalid();
+    // Two kinds of wait (runtime.ts submit). `pre-empting`: the holds were asked to release and are stopping (cancelling).
+    // `make-way` (M03, Soul Actions entry 28/31): the holds are short transient nudges left to run out by themselves (a
+    // `…:make-way:N` courtesy step-aside, or another body's hand on the same door), so a live one is not cancelling.
+    const nudge = (id: string) => /:make-way:\d+$/.test(id) || rt.records.get(id)!.verb === 'hand_actuator_v1';
     for (const id of w.holds) {
       const held = int.live.get(id), record = rt.records.get(id)!;
-      if (held ? !held.cancelling : !['completed', 'cancelled', 'failed'].includes(record.status)) throw invalid();
+      if (held ? (rec.phase === 'make-way' ? !nudge(id) : !held.cancelling) : !['completed', 'cancelled', 'failed'].includes(record.status)) throw invalid();
     }
     const ancestors = new Set([w.id]);
     for (let parent = w.parent; parent; parent = rt.records.get(parent)?.parent) {
@@ -304,8 +308,8 @@ export function applySnapshot(rt: Runtime, int: RuntimeInternals, snap: RuntimeS
     int.waiting.set(w.id, { rec, def, params: w.params, parent: w.parent, holds: w.holds });
   }
   for (const rec of rt.records.values())
-    if (rec.status === 'requested' && rec.phase === 'pre-empting' && !seenWaiting.has(rec.id))
-      throw new SnapshotError('snapshot.waiting-invalid', `pre-empting directive ${rec.id} is missing its waiting intent`, [rec.id]);
+    if (rec.status === 'requested' && (rec.phase === 'pre-empting' || rec.phase === 'make-way') && !seenWaiting.has(rec.id))
+      throw new SnapshotError('snapshot.waiting-invalid', `${rec.phase} directive ${rec.id} is missing its waiting intent`, [rec.id]);
   // Return intents are restricted to the original standalone seat action. They are
   // not a general deferred command queue, even if a supplied registry has more verbs.
   const returns = g.services.socialReturns;

@@ -1,7 +1,7 @@
 import {hashOf,type EngineFactory,type EngineSnapshot} from '@souls/engine-contract';
 import {decodeSnapshot} from '../../../mars/viewer/engine/runtime/snapshot.ts';
 import {loadMars} from './load.ts';
-import {marsFactory,MarsEngine,type MarsWorldConfig} from './engine.ts';
+import {marsFactory,MarsEngine,physicalBindingCfgV1,type MarsWorldConfig} from './engine.ts';
 import {createCampExpansion} from './camp-expansion.ts';
 import {disassemblyRegistry} from '../../../mars/viewer/engine/construction/disassembly.ts';
 
@@ -17,14 +17,13 @@ export async function marsCampExpansionFactory(cfg?:MarsWorldConfig):Promise<Eng
   const next=old.rulesVersion.replace('sim-mars/1+'+m.rulesVersion,'sim-mars/1+'+rulesVersion);
   const allowed=(v:string)=>old.canReplayHistory?.(v)===true||v===next;
   const install=(engine:MarsEngine)=>{engine.installCampExpansionReader(reader);return engine;};
-  const physicalCfg=({clock,sleepBlockTicks,quietSeatCourtesy,bodyStepGuardV1,refusalSettleV1,...rest}:MarsWorldConfig)=>rest;   // #1362: body-step-guard/1 is a logged runtime policy
   return {rulesVersion:old.rulesVersion,canReplayHistory:allowed,canRestoreSnapshot:v=>old.canRestoreSnapshot?.(v)===true||v===next,
     genesis:old.genesis,
     create(world){if(hashOf(world.base)!==hashOf(old.genesis('base').base))throw new Error('camp-expansion.genesis-base');return install(old.create(world) as MarsEngine);},
     restore(raw:EngineSnapshot){
       if(!('physicalBinding' in raw))return install(old.restore(raw) as MarsEngine);
       const s=structuredClone(raw) as EngineSnapshot&{physicalBinding?:string;mars:any;cfg:MarsWorldConfig;programs:any[];nextProg:number;leaving:string[];quiet?:boolean};
-      if(s.format!=='sim-mars-snapshot/1'||s.physicalBinding!==rulesVersion||hashOf(physicalCfg(s.cfg))!==hashOf(physicalCfg(camp)))throw new Error('camp-expansion.snapshot-binding');
+      if(s.format!=='sim-mars-snapshot/1'||s.physicalBinding!==rulesVersion||hashOf(physicalBindingCfgV1(s.cfg))!==hashOf(physicalBindingCfgV1(camp)))throw new Error('camp-expansion.snapshot-binding');
       if(hashOf(decodeSnapshot(s.mars).world.base)!==hashOf(native.base))throw new Error('camp-expansion.snapshot-base');
       const engine=install(new MarsEngine(m,native.restore(s.mars),s.cfg,{programs:s.programs,nextProg:s.nextProg,leaving:s.leaving,renderPlatformsV1:(s as any).renderPlatformsV1},reader));
       if(s.quiet)engine.beginQuiet();

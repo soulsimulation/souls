@@ -74,22 +74,42 @@ test('#1150 rewound: each new rung 3 is a `rewound` problem, the world keeps run
   await p.stop('wr');
 });
 
-test('#1150 halted: live.json says the clock stopped; a `halted` problem and status, not wedged and not restarted, gone once a restart boots it', async () => {
+test('#1150, #1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator', async () => {
   const p = pool([P0, P0 + 2], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
-  const port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
+  let port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
   p.startGuard();
   await sleep(250);
   assert.deepEqual(p.problems(), []); assert.equal(p.status('wh').halted, undefined);
   await get(port, 'wh', '/halt');
-  await until(() => p.problems().some((x) => x.code === 'halted'), 2000, 'halted in problems');
-  assert.equal(p.status('wh').halted, true);
-  await sleep(800);   // past liveStaleMs: still answering, so not judged wedged
-  assert.deepEqual(p.problems().map((x) => x.code), ['halted']); assert.equal(p.status('wh').pid, pid, 'the guard leaves it: its process and evidence stay up');
-  await p.stop('wh');
-  assert.deepEqual(p.problems(), [], 'stopped: nothing is halted now');
-  const again = await p.ensure(world('wh'));
+  await until(() => p.lines.some((l) => /world wh halted: its clock has stopped; restarting it/.test(l)), 2000, 'the guard restarts it');
+  await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid, 3000, 'running again in a new process');
+  assert.ok(p.lines.some((l) => /world wh exited .* after it halted/.test(l)), p.lines.join('\n'));
+  assert.deepEqual(p.problems().map((x) => x.code), ['halted'], 'shown for wedgeShownMs after the restart, as a wedge is');
+  assert.match(p.problems()[0].text, /halted .* ago and was restarted/);
+  // a second halt inside the window: left halted, its process and evidence up
+  const pid2 = p.state('wh').child.pid; port = p.state('wh').port ?? port;
+  await sleep(300); await get(port, 'wh', '/halt');
+  await until(() => p.status('wh').halted === true, 2000, 'halted again');
+  await sleep(800);
+  assert.equal(p.state('wh').child.pid, pid2, 'not restarted twice in one window');
+  assert.deepEqual(p.problems().map((x) => x.code), ['halted']);
+  assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 1);
+  await p.closeAll();
+});
+
+test('#1326 stalled: live.json says the clock owes ticks and has none; a `stalled` problem with the tick age, gone once it ticks again; never restarted for it', async () => {
+  const p = pool([P0, P0 + 2], { FAKE_LIVE: '1' });
+  const port = await p.ensure(world('ws')); const pid = p.state('ws').child.pid;
+  p.startGuard();
   await sleep(250);
-  assert.ok(again); assert.deepEqual(p.problems(), [], 'the restarted process has its own live.json');
+  assert.deepEqual(p.problems(), []);
+  await get(port, 'ws', '/stall');
+  await until(() => p.problems().some((x) => x.code === 'stalled'), 2000, 'stalled in problems');
+  assert.match(p.problems().find((x) => x.code === 'stalled').text, /ws stalled: its clock has not ticked for \d+ s/);
+  await sleep(800);
+  assert.equal(p.state('ws').child.pid, pid, 'a stall is reported, not restarted');
+  await get(port, 'ws', '/unstall');
+  await until(() => !p.problems().length, 2000, 'cleared once it ticks');
   await p.closeAll();
 });
 

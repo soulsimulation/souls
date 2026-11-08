@@ -2038,18 +2038,35 @@ export class WorldHost {
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
     this.snapshotGeneration++;
     const t0 = performance.now(), engine = this.engine;
-    const captured = engine.captureCheckpoint?.();
-    const checkpoint = captured && !('stateHash' in captured) ? captured : undefined;
-    const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
-    const fields = this.captureHostState();
-    const physicalHash = checkpoint ? undefined : engine.physicalHash();
+    const capture = () => {
+      const captured = engine.captureCheckpoint?.();
+      const checkpoint = captured && !('stateHash' in captured) ? captured : undefined;
+      const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
+      const fields = this.captureHostState();
+      const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
+      const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
+        return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
+      })();
+      return { checkpoint, legacy, fields, steps };
+    };
+    // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
+    // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
+    // try again when the next one is due. Durable state is the event log and the last good snapshot; nothing was
+    // published for this one. Any other capture fault (corrupt state, a broken iterator) still propagates as before.
+    let parts: ReturnType<typeof capture>;
+    try { parts = capture(); }
+    catch (error) {
+      const code = (error as {code?: unknown} | null)?.code;
+      if (typeof code !== 'string' || !code.startsWith('snapshot.')) throw error;
+      this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
+      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code}});
+      return;
+    }
+    const { checkpoint, legacy, fields, steps } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
-    const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
-    const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
-      return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
-    })();
     const job = { engine, previousTick: this.lastSnapshotTick, previousDebt: { ms: this.replayDebtMs, wall: this.lastSnapshotWall, soon: this.snapshotSoon }, immediate: null as NodeJS.Immediate | null };
     this.periodicSnapshot = job;
     // Keep at most the preceding completed body while hashes are pending. It is

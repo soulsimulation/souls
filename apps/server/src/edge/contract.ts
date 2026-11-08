@@ -41,7 +41,9 @@ export interface EdgeLedgerHooks {
   /** VEHICLE-STEER: a steer destination (a known place or compass direction + distance) as ground (x, z). */
   steerTarget?(soulId: string, entityId: string, spec: {to?: string; direction?: string; distance?: number}): {ok: true; x: number; z: number; label: string} | {ok: false; code: string; reason: string; did_you_mean?: unknown};
   /** VEHICLE-STEER: the engine's refusal for a steer step now, or null. */
-  steerCheck?(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean}): {code: string; reason: string} | null;
+  steerCheck?(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {code: string; reason: string} | null;
+  /** landing/1 (#1324): where the engine would set a steered ride down now (the nearest clear outdoor spot), or null. */
+  steerLanding?(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {requested: [number, number]; at: [number, number]; adjustedM: number; reason?: string} | null;
   /** OBJECT-CONTRACT §7: perform an object action's body steps as a logged decision with a normal receipt. */
   /** EVENTS-v1: a Soul's body position and heading yaw (facing = (cos yaw, sin yaw)), for bearings in event envelopes. */
   poseOf?(soulId: string): {x: number; z: number; yaw: number} | null;
