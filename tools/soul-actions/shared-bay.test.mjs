@@ -560,6 +560,134 @@ test('R11: after a restart, a whole third frame and then one of its beams taken 
   assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
 });
 
+test('#1250: a god joining a third upright to released frames, live: the clock runs, a reboot runs, and the god is told', {timeout: 900000}, async (t) => {
+  const {w, pj, frames, bays} = await released(t);
+  const r = ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground'], 'the frame the batch never touched too');
+  const line = r.warnings.find((x) => /frames\.settled/.test(x)) ?? ''; for (const id of frames) assert.ok(line.includes(w.god.model.pathOf(id) ?? id), `${id} in ${JSON.stringify(r.warnings)}`);
+  assert.notEqual(see(w, w.souls.Ada, pj).state.checkpoint, 'frames'); assert.equal(glitches(w), 0);
+  await reboot(w);
+  assert.equal(w.host.clockFailure, undefined); assert.deepEqual(kinds(w, frames), ['ground', 'ground']); assert.equal(glitches(w), 0);
+});
+
+test('#1250: removing a beam from released frames says both stopped standing, though the edit touched them', {timeout: 900000}, async (t) => {
+  const {w, frames} = await released(t), beam = Object.values(w.E()).find((e) => e.def?.includes('rack-beam') && e.phase === 'installed' && e.connections?.length).id;
+  const r = ok(w.god.act({ops: [{op: 'remove', id: beam}]})); await w.tick(30); assert.deepEqual(kinds(w, frames), ['ground', 'ground']);
+  const line = r.warnings.find((x) => /frames\.settled/.test(x)) ?? ''; for (const id of frames) assert.ok(line.includes(w.god.model.pathOf(id) ?? id), `${id} in ${JSON.stringify(r.warnings)}`);
+});
+
+/** A crew holds one frame of the pair while its released partner is extended by a god into a group with a third upright. */
+async function heldWhileExtended(t) {
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, crew = [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {P} = await yard(w);
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-beam@5', name: 'beam5', p: P(-9, 9), r: 0}]})); await w.tick(20);
+  let frames;
+  await assert.rejects(build(w, Ada, crew, {each: async (st, id) => {
+    const {bound} = w.bridge.projects.rows.get(id); frames = [bound['upright-a'], bound['upright-b']];
+    const rel = st.ready.filter((r) => r.offer?.startsWith('stop-carry:')), r = rel.find((x) => x.part === 'upright-b') ?? rel[0]; if (!r) return;
+    for (const s of Object.values(w.souls)) if ((await act(w, s, {capability: r.offer, params: r.params})).accepted !== false) break;
+    throw new Error('mid');
+  }}), /mid/);
+  await until(w, () => frames.some((f) => w.E()[f].support.kind === 'connected'), 200);
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: P(0, 2.9), r: 0}]})); await w.tick(30);
+  const rel = frames.find((f) => w.E()[f].support.kind === 'connected'), held = frames.find((f) => f !== rel), holders = Object.values(w.souls).filter((s) => w.E()[s.entityId].human.grip?.entity === held);
+  assert.equal(holders.length, 2, 'a crew still holds the other frame');
+  const bays = beamBays(w.host.engine.world, w.idOf('beam5'), 3.5), bay = bays.filter((b) => b.a === rel || b.b === rel)[6] ?? bays.at(-1);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, rel, bay.a === rel ? bay.seats[0] : bay.seats[1], 'beam5')})); await w.tick(40);
+  return {w, held, holders};
+}
+test('#1250: a crew holding one frame while a god extends its released partner asks to stop, and is free once nothing changes for five minutes', {timeout: 900000}, async (t) => {
+  const {w, held, holders} = await heldWhileExtended(t);
+  const op = open(w, holders[0]).map((x) => x.shared?.op).find(Boolean), asked = w.host.engine.world.tick; ok(await act(w, holders[0], {capability: `stop-carry:${op}`}));
+  await w.tick(5800); assert.ok(w.E()[holders[0].entityId].human.grip, 'it waits, in case someone finishes it');
+  await until(w, () => holders.every((s) => !w.E()[s.entityId].human.grip), 400); assert.ok(w.host.engine.world.tick - asked <= 6100, 'free once nothing has changed for five minutes');
+  assert.ok(holders.every((s) => !w.E()[s.entityId].human.grip)); assert.equal(w.E()[held].support.kind, 'ground'); ok(await act(w, holders[0], {capability: 'wave:here'})); assert.equal(w.host.stepFailing, null);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined);
+});
+
+// R7: the Soul-only route. A holder of a frame joined into the group goes away mid-hold, by a fade or by its owner retiring it;
+// nobody asked to stop. The clock runs throughout, the crew is free in the end, and a reboot boots.
+const HOUR = 3600e3;
+for (const [how, which] of [['fades', 0], ['is retired', 0], ['is retired', 1]]) test(`#1250 R7: a holder of a frame in a group with a third upright ${how} mid-hold (${which ? 'a borrowed member' : 'the one whose programme it is'}): the clock runs and the crew is let go`, {timeout: 900000}, async (t) => {
+  const {w, held, holders} = await heldWhileExtended(t), owner = holders.findIndex((s) => w.host.engine.programOf(s.entityId)); assert.ok(owner >= 0, "one holder runs the programme");
+  const gone = holders[which ? 1 - owner : owner], stays = holders.find((s) => s !== gone), others = Object.values(w.souls).filter((s) => s !== gone);
+  if (how === 'fades') {w.clock.now += 13 * HOUR; for (const s of others) w.comms.fading.touch(s.soulId); w.comms.sweep(); assert.ok(w.edge.faded.has(gone.soulId), 'it faded');}
+  else await accept(w.host, w.f.souls.retire(w.db.soul(gone.soulId)));
+  const from = w.host.engine.world.tick;
+  await w.tick(200); assert.ok(w.E()[stays.entityId].human.grip, 'the frame is not let fall: the crew waits, in case someone finishes it');
+  await until(w, () => holders.every((s) => !w.E()[s.entityId]?.human.grip), 6_200);
+  assert.ok(holders.every((s) => !w.E()[s.entityId]?.human.grip), `let go once nothing has changed for five minutes, ${w.host.engine.world.tick - from} ticks`);
+  if (how === 'is retired') assert.equal(w.E()[gone.entityId], undefined, 'and the retired body leaves the world');
+  assert.equal(w.E()[held].support.kind, 'ground'); assert.deepEqual(framesStand({world: w.host.engine.world}), []);
+  assert.equal(w.host.clockFailure, undefined); assert.equal(w.host.stepFailing, null); assert.equal(w.host.paused, false);
+  ok(await act(w, stays, {capability: 'wave:here'}));
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); await w.tick(20); assert.equal(w.host.clockFailure, undefined);
+});
+
+test('#1250: each edit says only what it settled, and a reboot says nothing stale', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t), lines = (r) => r.warnings.filter((x) => /frames\.settled/.test(x));
+  const first = ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40); assert.equal(lines(first).length, 1);
+  const plain = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'clean', p: [w.ax + 20, w.az + 12]}]})); await w.tick(10); assert.deepEqual(lines(plain), [], 'nothing left over from the last edit');
+  await reboot(w);
+  const after = ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'clean2', p: [w.ax + 22, w.az + 12]}]})); await w.tick(10); assert.deepEqual(lines(after), [], 'and nothing from the replay');
+  assert.equal(glitches(w), 0);
+});
+
+test('#1250: an undo and a redo say what they settled', {timeout: 900000}, async (t) => {
+  const {w, frames} = await released(t), take = w.host.engine.takeSettledV1.bind(w.host.engine); let say = [];
+  w.host.engine.takeSettledV1 = () => { const ids = [...say, ...take()]; say = []; return ids; };
+  ok(w.god.act({ops: [{op: 'place', def: 'core/table@1', name: 'clean', p: [w.ax + 20, w.az + 12]}]})); await w.tick(5);
+  say = [frames[0]]; const undone = ok(w.god.undo()); assert.ok(undone.warnings.some((x) => /frames\.settled/.test(x)), JSON.stringify(undone.warnings)); await w.tick(5);
+  say = [frames[0]]; const redone = ok(w.god.redo()); assert.ok(redone.warnings.some((x) => /frames\.settled/.test(x)), JSON.stringify(redone.warnings));
+});
+
+test('#1250: a reply on a clock that has stopped still answers: the edit is durable, and the note is all it costs', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  t.mock.method(w.host, 'drainInputs', () => { throw new Error('fixture.clock-stopped'); });
+  const r = w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')});
+  assert.notEqual(r.accepted, false, JSON.stringify(r));
+});
+
+test('#1250: a world that settled replays to the same state from its log alone', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  w.comms.close(); w.host.stop(); w.host.drainInputs(); w.host.saveSnapshot(true);
+  const live = {tick: w.host.engine.world.tick, hash: w.host.engine.stateHash()}, id = w.host.worldId;
+  w.db.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(id); w.db.close();
+  const db = new Db(w.path), h = new WorldHost(db, factory, seed, 1e9, worldId, w.opts); h.boot(); h.drainInputs(); mount(w, h, db);
+  assert.deepEqual({tick: h.engine.world.tick, hash: h.engine.stateHash()}, live, 'the fold settles the same way on replay');
+  assert.deepEqual(kinds(w, frames), ['ground', 'ground']);
+  await w.tick(20); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a finished bay takes a third upright: the clock runs and the project says what the frames now are', {timeout: 900000}, async (t) => {
+  const {w, pj, frames, bays} = await released(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls, b5 = w.god.model.get('beam5');
+  ok(w.god.act({ops: [{op: 'move', id: 'beam5', p: [w.ax + 30, w.az + 12], r: 0}]})); await w.tick(20);
+  await build(w, Ada, [[Ada, Bo], [Cy, Dee], [Eve, Fay]], {project: pj});
+  assert.equal(see(w, Ada, pj).state.complete, true); assert.ok(b5);
+  ok(w.god.act({ops: thirdFrameOps(w, frames, frames[1], bays[6].seats[1], 'beam5')})); await w.tick(40);
+  assert.equal(see(w, Ada, pj).state.complete, false); assert.equal(glitches(w), 0);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a whole third frame leaves a standing frame as it was, and taking a beam of it stands them down', {timeout: 900000}, async (t) => {
+  const {w, frames, bays} = await released(t);
+  const seats = [bays.find((b) => b.column === 'l' && b.height > 1), bays.find((b) => b.column === 'r' && b.height > 1), bays.filter((b) => b.column === 'l').at(-1), bays.filter((b) => b.column === 'r').at(-1)];
+  ok(w.god.act({ops: [1, 2, 3].map((i) => ({op: 'place', def: 'core/rack-beam@5', name: `extra${i}`, p: [w.ax + 30, w.az + 12 + i], r: 0}))})); await w.tick(10);
+  ok(w.god.act({ops: ['beam5', 'extra1', 'extra2', 'extra3'].flatMap((name, i) => thirdFrameOps(w, frames, frames[1], seats[i].seats[1], name).slice(i ? 1 : 0))})); await w.tick(30);
+  assert.equal(w.E()[frames[0]].support.kind, 'connected', 'the frame the batch never touched still stands, and keeps what it had');
+  ok(w.god.act({ops: [{op: 'remove', id: 'extra3'}]})); await w.tick(30);
+  assert.equal(w.E()[frames[0]].support.kind, 'ground'); assert.equal(glitches(w), 0);
+});
+
+test('#1250: a beam joined between uprights lying flat leaves the clock running, live and after a reboot', {timeout: 240000}, async (t) => {
+  const w = await world(t, {names: ['Ada']}), x = w.ax + 11, z = w.az + 8, seat = 'front-l-5';
+  ok(w.god.act({ops: [{op: 'place', def: 'core/rack-upright@2', name: 'fa', p: [x, z], r: 0}, {op: 'place', def: 'core/rack-upright@2', name: 'fb', p: [x + BEAM_L, z], r: 0}, {op: 'place', def: 'core/rack-beam@5', name: 'bm', p: [x + 8, z + 5], r: 0}]})); await w.tick(20);
+  const m = mid(seatAt(w, w.idOf('fa'), seat), seatAt(w, w.idOf('fb'), seat));
+  ok(w.god.act({ops: [{op: 'move', id: 'bm', in: {parent: 'world'}, p: [m[0], m[1] - 0.0508, m[2]], r: 0}, {op: 'connect', a: {id: 'bm', connector: 'end-l'}, b: {id: 'fa', connector: seat}}, {op: 'connect', a: {id: 'bm', connector: 'end-r'}, b: {id: 'fb', connector: seat}}]})); await w.tick(40);
+  assert.equal(w.E()[w.idOf('bm')].support.kind, 'ground'); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(glitches(w), 0);
+  await reboot(w); assert.equal(w.host.clockFailure, undefined); assert.equal(glitches(w), 0);
+});
+
 // #1150 on shared building: whatever a god's batch or a late verb leaves, the world goes on, a Soul can act, and a crash reboot boots
 const goesOn = async (w, ticks = 60) => {
   await w.tick(ticks); assert.equal(w.host.clockFailure, undefined); assert.equal(w.host.paused, false); assert.equal(w.host.stepFailing, null);
@@ -619,4 +747,6 @@ test('R12: with the flag off, nothing is offered and no project exists', {timeou
   assert.equal(w.edge.projects, undefined);
   assert.equal(w.db.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name='edge_projects_v1'").get().n, 0);
   assert.equal(hereFrame(w.edge, Ada).projects, undefined);
+  let drained = 0; const {drainInputs} = w.host; w.host.drainInputs = function (...x) { drained++; return drainInputs.apply(this, x); };
+  assert.deepEqual(w.god.bodies.framesNote(), [], '#1250: nothing to say'); assert.equal(drained, 0, 'and a god reply drains nothing for it');
 });

@@ -236,6 +236,8 @@ test('#1150 a raise whose action throws while its upright is joined: both crews 
   await frames(w); await seat(w, 'beam1', 'l', 0.76); await w.tick(10); w.host.saveSnapshot(true); await w.tick(5);
   const def = w.host.engine.rt.registry.get('raise_hold_v1'), {step} = def; t.after(() => { def.step = step; }); def.step = (rt, ex, dt) => { if (ex.p.item === fa) throw new Error('fixture.action-bug'); return step(rt, ex, dt); };
   await w.tick(10); await freed(w, [Ada, Bo, Cy, Dee], ids); assert.equal(w.E()[fa].support.kind, 'ground');
+  const rules = w.host.db.events(w.host.worldId).filter((e) => e.author === 'world:refusal').map((e) => e.payload.refusal.rule);
+  assert.ok(rules.includes('engine.action-threw') && rules.includes('world.frame-let-go'), `the other crew hears its own reason: ${rules}`);
   const r = ok(await act(w, Cy, {capability: 'walk:field'})); await w.tick(20); assert.ok(['started', 'completed'].includes(read(w, Cy, r).phase), JSON.stringify(read(w, Cy, r)));
   await restart(w, false); await w.tick(5); assert.deepEqual(framesStand({world: w.host.engine.world}), []); assert.equal(w.host.stepFailing, null);
 });
