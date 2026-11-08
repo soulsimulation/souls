@@ -24,6 +24,7 @@ export type Resolution =
   | {ok: true; kind: 'setting'; capability: string; apply: () => void; chosen: Chosen}
   | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
 import {classWords} from './class-words.ts';
+import {signWords} from '../ledger/vocabulary.ts';
 export type IntentInput = {verb?: unknown; target?: unknown; params?: unknown; clientRef?: unknown; [k: string]: unknown};
 type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
 
@@ -284,7 +285,7 @@ export class Intents {
 
   // ------------------------------------------------------------------ acting
   /** act {verb, target}: resolve now (the step starts now) and act on the concrete choice; the receipt says what it chose. */
-  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string} | Refused> {
+  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string; repeat?: true} | Refused> {
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
     if (clientRef) {const old = this.L.coreA.byClientRef(soul.soulId, clientRef); if (old) return {accepted: true, receipt: old, chosen: (old as {chosen?: Chosen}).chosen ?? {}, channel: (old as {channel?: string}).channel ?? 'body'};}
     await this.L.coreA.reclaim(soul);
@@ -294,6 +295,8 @@ export class Intents {
     if (r.kind === 'capability') {
       const out = await this.L.act(soul, {capability: r.capability, params: {...extra, ...(r.params ?? {})}, ...(clientRef ? {clientRef} : {})});
       if (!out.accepted) return {...out, ...(r.chosen.seat ? {} : {})} as Refused;
+      // #1272: the act under way answered: it stays as it was chosen
+      if (out.repeat) return {accepted: true, receipt: out.receipt, chosen: (out.receipt.chosen as Chosen) ?? {}, channel: out.receipt.channel ?? 'body', repeat: true};
       const chosen={...r.chosen,...(out.receipt.chosen as Chosen??{})};
       const receipt = this.L.coreA.setDetail(out.receipt.id, {chosen, intent: intentOf(input)}) ?? out.receipt;
       return {accepted: true, receipt, chosen, channel: (receipt as {channel?: string}).channel ?? 'body', ...(out.resolved ? {resolved: out.resolved} : {})};
@@ -363,8 +366,20 @@ export class Intents {
     return this.capabilityWould(soul, v.cap, asked, {}, '');
   }
 
+  /** #1152: the walk that `asked` names by itself, or null. Every word of it is in the walk's id or label. */
+  private namedPlaceWalk(soul: EdgeSoul, asked: string): Record<string, unknown> | null {
+    const words = asked.toLowerCase().replace(/[.!?]+$/, '').split(/[^a-z0-9-]+/).filter(w => w && !['the', 'a', 'an', 'to', 'please'].includes(w));
+    if (!words.length || words.length > 5) return null;
+    const out = this.dryRun(soul, {capability: `walk to ${words.join(' ')}`}), would = out.would as {capability?: string; label?: string} | undefined;
+    if (out.ok === false || !would?.capability?.startsWith('walk:')) return null;
+    const held = new Set(`${would.capability} ${would.label ?? ''}`.toLowerCase().split(/[^a-z0-9]+/));
+    return words.flatMap(w => w.split('-')).every(w => held.has(w)) ? {...out, would: {...would, resolved: `${asked} names ${would.capability}`}} : null;
+  }
+
   /** POST /v1/edge/resolve: what act would do, without doing anything. */
   dryRun(soul: EdgeSoul, input: IntentInput & {capability?: unknown}): Record<string, unknown> {
+    // #1152: how an owner asks ("could you ...?") is not what is asked
+    if (typeof input.capability === 'string' && input.verb === undefined && !input.capability.includes(':')) input = {...input, capability: input.capability.replace(/^\s*(?:(?:that'?s\s+all|ok(?:ay)?|alright|now|then|next)[,\s]+)*(?:(?:could|can|would|will)\s+you\s+)?(?:please\s+)?(?:go\s+and\s+)?/i, '').replace(/[\s,]*(?:please)?[\s.?!]*$/i, '')};
     if (typeof input.capability === 'string' && input.verb === undefined) {
       const walk=walkWithDestinationWords(input.capability,[...this.L.host.minds.values()].map(m=>m.name));if(walk){const out=this.dryRun(soul,{...walk,...(input.params?{params:input.params}:{})});if(out.ok!==false)return out;
         // quality case 27: an ambiguous destination name ("the library") falls back to the walk the plain words resolve to, still inviting the companions
@@ -377,7 +392,7 @@ export class Intents {
       const place=explicitPlaceCapability(this.L,soul,asked),onDemand=!!place&&!place.ok&&place.code==='place.unwalkable'&&this.L.onDemandId(soul,asked);if(place&&!onDemand){if(!place.ok)return place;return {ok:true,would:{capability:place.chosen.capability,channel:'body',chosen:place.chosen,...resolvedParts(this.L,soul,place.chosen.capability,asked)}};}
       const bodyIssue=asked.startsWith('object:')?null:this.L.bodyVerbProblem(soul,asked.split(/[:\s]/)[0]!);if(bodyIssue)return {ok:false,...bodyIssue};
       if (!asked || asked.length > 200) return {ok: false, code: 'capability.params', reason: 'capability must be 1..200 characters.'};
-      const plain = offeredAttention(caps, asked) ? null : attentionWords(asked); if (plain) return this.dryRun(soul, plain);
+      const plain = offeredAttention(caps, asked) || signWords(asked, {caps}) ? null : attentionWords(asked); if (plain) return this.dryRun(soul, plain);
       const cls = classWords(asked, this.L.places.byId.values()); if (cls) return this.dryRun(soul, cls);
       const strict = strictCheck(this.L, soul, asked, caps); if (strict && !this.L.onDemandId(soul, asked)) return {ok: false, ...strict};
       // quality cases 21/28: resolve reads social phrasing exactly as act does ("ride the balloon with X" invites X; "hug X")
@@ -385,7 +400,12 @@ export class Intents {
       if (social && 'code' in social) return {ok: false, code: social.code, reason: social.reason, did_you_mean: social.did_you_mean};
       const text = social ? social.capability || social.rest || asked : asked, extra = social?.params;
       const r = text === asked ? this.L.coreA.resolveText(soul, asked, caps) : caps.some(c => c.id === text) ? this.L.coreA.exactWords(soul, bound, text, {kind: 'exact' as const, cap: caps.find(c => c.id === text)!}) : this.L.coreA.resolveText(soul, text, caps);
-      if (r.kind === 'unknown') return {ok: false, code: (r as {code?: string}).code ?? 'capability.unknown', reason: r.reason, did_you_mean: r.didYouMean,...(r.discovery?{discovery:r.discovery}:{})};
+      // #1152: words that only name a place ("orchard", "the pond hall", "reading room") are the walk there. A dry run, so nothing is chosen
+      // for the Soul, and only when the walk's own id and label hold every word: a word it merely resembles stays refused.
+      // One word that is a verb here ("dance") stays that verb, even in a world with a Dance Floor.
+      if (!social && !/^walk\s+to\b/i.test(asked) && (r.kind === 'unknown' ? !(r as {code?: string}).code : r.cap.id.endsWith(':here') && /\s/.test(asked))) {const walk = this.namedPlaceWalk(soul, asked); if (walk) return walk;}
+      // #1152: a refusal names what can be done instead here as well as on act: on the strict contract this is where an agent meets it
+      if (r.kind === 'unknown') {const no = {ok: false, code: (r as {code?: string}).code ?? 'capability.unknown', reason: r.reason, did_you_mean: r.didYouMean, ...(r.discovery ? {discovery: r.discovery} : {})}; return r.discovery ? no : this.L.withAlternatives(soul, asked, no, caps);}
       const params = {...(r.kind === 'alias' && r.params ? r.params : {}), ...(extra ?? {})};
       return this.capabilityWould(soul, r.cap, asked, params, [social?.note, r.kind === 'alias' ? r.note : null].filter(Boolean).join('; '), extra);
     }

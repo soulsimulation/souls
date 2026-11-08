@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-07 #427 an Open / Closed sign. core-open-sign@1 is a new immutable revision: a board on a post, turned by hand at a knob on the drawn-covering contact, with a new kit role `flip`. No existing def's bytes changed (hand-coverings.ts only appends it). A narrow run (`conformance.mjs --k 2 --filter core-open-sign`) baked, placed and rendered all 5 samples with 0 findings and 0 qualification gaps, so this supplement adds no findings.",
+  "findings": []
+}
