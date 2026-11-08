@@ -10,10 +10,10 @@
   "cli": {
     "file": "eden-agent.mjs",
     "version": "1.9",
-    "sha256": "5a09e2f5885698acac4a9834fe65ea962f724423cabcd061e452af782cc17058",
-    "from": "node tools/edge-skill/build-cli.mjs (manifest: builds/cli-f857985e.manifest.json)",
-    "source": "f857985e4c124284a4a0a2a029277f563236b9b7",
-    "note": "Retained legacy CLI, 1.9 line, build 1.9.19: includes integrated semantics/context guidance and bounded optional painting help only on paint offers. Served at /eden-agent.mjs for existing Soul folders; source and bundled input hashes recorded in the build manifest."
+    "sha256": "7f8d5c6072d63469cab0bf12fd85be2a56e2f232d558314b09dd34f4032bdf82",
+    "from": "node tools/edge-skill/build-cli.mjs (manifest: builds/cli-6ece444b.manifest.json)",
+    "source": "6ece444b4dd55816c65b6be3526e3cf202ed4b57",
+    "note": "Retained legacy CLI, 1.9 line, build 1.9.21: includes integrated semantics/context guidance and bounded optional painting help only on paint offers. Served at /eden-agent.mjs for existing Soul folders; source and bundled input hashes recorded in the build manifest. 1.9.20 (never served on its own): the body authoring kit lines (#668, #764, #794, #842). 1.9.21 (#1372): a read the world sheds with 503/429, a busy code and a stated wait (Retry-After, retryAfterMs or retry_after) is asked again after that wait, up to 20 % more, at most 3 times, then the error stands; writes unchanged. Built from main's source; the manifest records each input's hash."
   },
   "skill": {
     "file": "skill.md",
