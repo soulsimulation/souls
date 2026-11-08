@@ -47,6 +47,8 @@ test('P2: a refusal after pickup reads refused with the plain reason; a newer ac
   assert.deepEqual(ownerDoing(w.src, SOUL, delivered(1000), false), {phase: 'refused', text: 'sit down', reason: 'no room there'});
   w.receipt('r2', 'rest:here', 'started', 1020);
   assert.equal(ownerDoing(w.src, SOUL, delivered(1000), false)?.phase, 'running');
+  w.refusal('fly:the-moon', 'capability.unknown', '"fly:the-moon" is not an offer on this Soul right now, so nothing was done. Send an offered id; did_you_mean lists the closest.', 1030);
+  assert.deepEqual(ownerDoing(w.src, SOUL, delivered(1000), false), {phase: 'refused', text: 'fly to the moon', reason: 'not something it can do here'}, 'a sentence for the agent reads in owner words');
 });
 
 test('P3: a plan step shows step n of m and its own phase, refused and paused included', () => {

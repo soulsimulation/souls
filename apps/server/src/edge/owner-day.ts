@@ -72,7 +72,8 @@ const TIRED = /\b(energy|tired|exhaust\w*|fatigue\w*)\b/i;
 export function plainReason(code: string | null | undefined, reason: string | null | undefined): string {
   const c = code ?? '', r = (reason ?? '').trim();
   if (TIRED.test(c.replace(/[.-]/g, ' ')) || TIRED.test(r)) return 'too tired: rest first';
-  const jargon = !r || (c && r.includes(c)) || /\bis supported, but\b/.test(r) || /\([a-z]+\.[a-z.-]+\)/.test(r);
+  // #1313: a sentence written for the agent ("Send an offered id; did_you_mean lists…") is jargon to an owner too
+  const jargon = !r || (c && r.includes(c)) || /\bis supported, but\b/.test(r) || /\([a-z]+\.[a-z.-]+\)/.test(r) || /\bdid_you_mean\b|\boffered id\b/.test(r);
   const mapped = PLAIN_REASON[c] ?? PLAIN_REASON[c.slice(c.lastIndexOf('.') + 1)];
   if (mapped && jargon) return mapped;
   const cleaned = r.replace(/\s*\([a-z]+\.[a-z.-]+\)/g, '').replace(/^.{1,120}? is supported, but /, '').trim();
