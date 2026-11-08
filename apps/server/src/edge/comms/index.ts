@@ -5,7 +5,7 @@ import {stalledNow, whenStalled} from '../../load/clock-source.ts';
 import type {Context, Hono} from 'hono';
 import type {ContentfulStatusCode} from 'hono/utils/http-status';
 import type {EdgeDeps, EdgeReceipt, EdgeSoul} from '../contract.ts';
-import {EdgeError, edgeBody, edgeErrorOf} from '../contract.ts';
+import {ActPending, EdgeError, edgeBody, edgeErrorOf} from '../contract.ts';
 import {Conversations} from './converse.ts';
 import {chessKind} from './objects/chess.ts';
 import {Objects} from './objects/framework.ts';
@@ -117,6 +117,8 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
   // EdgeError → its status; any other fault → 503 `unavailable` (same mapping as Ledger's routes).
   const failure = (c: Context, error: unknown) => {
     if (error instanceof EdgeError) return c.json(edgeBody({error: edgeErrorOf(error)}), error.status as ContentfulStatusCode);
+    // #1327: an object act's body handed to the world and not yet recorded: 202 with the receipt id it will have
+    if (error instanceof ActPending) return c.json(edgeBody({...error.body}), 202);
     console.error('[edge] comms fault', c.req.method, c.req.path, error instanceof Error ? (error.stack ?? error.message).split('\n').slice(0, 4).join(' | ') : String(error));
     return c.json(edgeBody({error: {code: 'unavailable', message: 'the world could not answer; retry'}}), 503);
   };

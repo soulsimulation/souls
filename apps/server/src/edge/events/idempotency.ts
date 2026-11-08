@@ -1,6 +1,6 @@
 // EVENTS-v1 robustness: idempotency keys on act / say / converse / plan writes. A retry after a 502 with the same
 // `Idempotency-Key` header (or `idempotencyKey` body field) returns the original response instead of acting twice.
-// Responses are kept 24 h per Soul and route; 5xx/429 answers are not kept (a retry should really retry).
+// Responses are kept 24 h per Soul and route; 5xx/429 answers are not kept (a retry should really retry), nor a 202.
 import {createHash} from 'node:crypto';
 import type {Context, Hono, MiddlewareHandler} from 'hono';
 import {EDGE_CONTRACT, EdgeError, type EdgeDeps} from '../contract.ts';
@@ -41,7 +41,8 @@ export function idempotency(deps: EdgeDeps, now: () => number = Date.now): Middl
     try {
       await next();
       const res = c.res;
-      if (res && res.status < 500 && res.status !== 429) {
+      // #1327: a 202 (`pending`: handed over, not yet recorded) is not the key's answer; a retry reads the act as it is then
+      if (res && res.status < 500 && res.status !== 429 && res.status !== 202) {
         const out = await res.clone().text();
         db.prepare('INSERT OR REPLACE INTO edge_idempotency_v1 (world_id, soul_id, route, key, hash, status, body, at) VALUES (?,?,?,?,?,?,?,?)').run(world, soulId, route, key, hash, res.status, out, now());
         if (++writes % 200 === 0) db.prepare('DELETE FROM edge_idempotency_v1 WHERE world_id = ? AND at < ?').run(world, now() - IDEMPOTENCY_TTL_MS);

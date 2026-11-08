@@ -52,8 +52,10 @@ camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Bro
 "Now showing <name>" with a Follow button. Mouse clicks keep the card-and-button flow.
 A press, long-press, double-tap or drag anywhere on a world page never selects text or shows a tap highlight. The
 selection, callout and highlight are off on the page, its menus, its modal dialogs and the boot arrival (#1386). Fields,
-code and the copyable start prompt keep their text. The first touch of a page on a touch screen shows three glyphs (stick, drag, pinch; `touch/hints.tsx`) that fade on
-the first drag, a second finger or after 3 s. The device remembers it in `localStorage` (`sim.touch-hints`). `?shot`
+code and the copyable start prompt keep their text. The first touch of a page on a touch screen shows three glyphs
+(stick, drag, pinch; `touch/hints.tsx`). They stay up for at least 4 s whatever the person does, then fade on the next
+drag, second finger or tap, or by themselves at 10 s (#1388). Once they have been up for 4 s, the device remembers them
+in `localStorage` (`sim.touch-hints`). `?shot`
 and automation (`navigator.webdriver`) never show it. `?hints=1` overrides `navigator.webdriver` only, for recording
 proof of the hint. Phones get the camera menu as a bottom sheet (Broadcast, Free, Follow for a selected Soul or Stop
 following, Camera controls, Fullscreen) clear of `env(safe-area-inset-*)`. A device with `navigator.vibrate` ticks for
@@ -61,7 +63,12 @@ following, Camera controls, Fullscreen) clear of `env(safe-area-inset-*)`. A dev
 
 Audio opens independent Sound effects and Music switches plus a radio station selector. Stations curate the existing
 score playlist: All music, Quiet & ambient, Electronic and Upbeat. Choosing a station while music is off remembers
-it without starting playback. Preferences persist in the browser; the existing file/synthesis playback, positional
+it without starting playback. Previous and next buttons around the track's name change the piece. With music on,
+the new piece plays from its start; with music off, it is only selected and plays when music is turned on (#1393). The
+Music switch shows what is actually sounding: Off, Starting…, On, or **Tap to play** when the browser held the music
+back. That happens when `play()` was refused or a context stayed suspended or interrupted, as on iOS after the page was
+in the background. The speaker button then carries an amber dot. Any tap resumes the contexts and retries from the same
+place. A held-back piece is never counted as a broken file (#1389). Preferences persist in the browser; the existing file/synthesis playback, positional
 world sounds, ducking and tab audio focus remain in use. Muting effects silences world sounds while leaving music's
 switch independent. A previously saved master mute migrates to both switches off, preserving silence. Menus support Tab, arrow keys, Escape, outside clicks and touch.
 

@@ -192,8 +192,8 @@ export class Db {
     return r ? { tick: r.tick, seq: r.seq, stateHash: r.stateHash, rulesVersion: r.rulesVersion, body: JSON.parse(r.text) } : null;
   }
   /** The latest snapshot with its stored JSON text undecoded (a boot keeps the text, not a second decoded copy). */
-  latestSnapshotText(worldId: string) {
-    const r = this.db.prepare('SELECT tick, seq, state_hash, rules_version, snapshot FROM snapshots WHERE world_id = ? ORDER BY tick DESC LIMIT 1').get(worldId) as any;
+  latestSnapshotText(worldId: string, beforeTick = Infinity) {   // #1379: beforeTick reads the next older one, for a boot fallback
+    const r = this.db.prepare('SELECT tick, seq, state_hash, rules_version, snapshot FROM snapshots WHERE world_id = ? AND tick < ? ORDER BY tick DESC LIMIT 1').get(worldId, Number.isFinite(beforeTick) ? beforeTick : Number.MAX_SAFE_INTEGER) as any;
     return r ? { tick: r.tick as number, seq: r.seq as number, stateHash: r.state_hash as string, rulesVersion: r.rules_version as string, text: r.snapshot as string } : null;
   }
 
