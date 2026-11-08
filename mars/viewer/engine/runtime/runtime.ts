@@ -412,6 +412,10 @@ export class Runtime {
   isActive(id: string) {
     return this.live.has(id) || this.waiting.has(id);
   }
+  /** The exec of a live action (undefined once it ends or while it waits): a module reads its own action's state by id. */
+  execOf(id: string): unknown {
+    return this.live.get(id)?.exec;
+  }
   /** stall-guard/1: true while a live action is in a deferred (controlled) stop. */
   isCancelling(id: string) {
     return !!this.live.get(id)?.cancelling;

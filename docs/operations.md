@@ -57,6 +57,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
   count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
+  The launcher restarts a halted world once per breaker window (30 min), since a restart boots from the log; a second halt
+  in the same window stays halted for an operator ([#1326](https://github.com/soulsimulation/souls/issues/1326)).
+- `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
+  `stalled` and, while the clock is dilated, `slowed`. A world is `stalled` when its clock owes ticks and the last one is
+  older than 2 s, or 10 of its expected tick intervals when it runs at a reduced pace; paused, halted and rate-0 worlds
+  never are. `live.json` carries the same as `tick.ageMs`, `stalled` and `slowed`, written by the watchdog thread, so a
+  stuck main thread still shows. A stalled world is the `stalled` problem code: `hostOk` goes false and `host-health.log`
+  gets its ALERT line, then RECOVERED once it ticks again. It isn't restarted for it. Edge reads say `world.stalled`
+  meanwhile and acts are refused with `503 world.stalled` (`docs/architecture/load.md` §3).
 - The repair rules are on by default ([#1323](https://github.com/soulsimulation/souls/issues/1323)): a world whose history
   began without them adopts them at its first boot on 4.16.1 or later, logged as one `rules` event, with the line
   `[world] adopted the repair rules at tick <n> (one way)`. **That is one way: once adopted, a world can't boot on 4.16 or

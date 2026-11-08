@@ -78,6 +78,24 @@ This matters on paged ground, where a long walk's plan checks only its first fin
 ride's own collider used to pass the plan. A step without the marker keeps the goal it always chose, so recorded
 programmes replay unchanged.
 
+A ride's `carrier_steer` with `land` may carry `landing: 'clear/1'` (#1324), and the ride object always sends it. The spot must
+be clear on the fine clearance raster over a 2.6 m disc: the basket, its door and both seat exits, plus a body radius. That raster
+holds the thin wall segments and closed doors the coarse solids drop, and it also holds benches, water edges and steep cells. Nothing
+in the raw scene may stand over the disc either, so no wall, lintel, roof or god-built floor: the descent column is open sky. The ride
+lands on the nearest such spot within 30 m, in rings of 2 m, and the plan returns `landing: {requested, at, adjustedM, reason}`.
+With no spot it is refused `carrier.no-landing-spot`, naming how far the nearest clear ground is. The spot is read again through
+the second half of the flight and on the touchdown tick. When the spot is no longer clear, the landing moves to the nearest clear
+spot to the asked point: the ride climbs back to cruise height (35 m), flies across, then comes down. After a third move it
+flies home. With no clear spot it hovers and looks again every
+2 s, and flies home after the 2-minute hover. The ride state's `landNote` says which happened. A ride's own home is never
+re-checked; a home that no longer reads clear is only reported, as a `carrier.home-not-clear` mark. A steer without the marker
+keeps the landing it always chose, so recorded programmes replay unchanged.
+A `carrier_ride` boarded with `clear: 'step-out/1'` (the ride object's join sends it) steps out only onto ground the body can stand
+on. The leg to the door waits while the door spot isn't clear. The last leg goes to the exit, or to the nearest clear spot round it
+that a straight step from the door reaches. The rider stands at the ground's height there. A 12 s set-down uses the same check,
+searching up to 12 m round the exit, and a rider with nowhere clear stays aboard instead
+of being placed in a wall. God edits never walk out a rider whose ride is in the air (#1339).
+
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another
 venue. A seated Soul still stands first; active movement and occupied support keep their native admission rules.
 Direct `pose_v1` admission reads clearance at the actor's position, independently of the last paged ground window
@@ -90,7 +108,18 @@ out. Invariants run at the end of every tick, so a held step would have been a v
 later in that tick moved the obstacle), and every earlier step moves as it did.
 An opening or a slide can't stop short, because its body follows the handle: where the next step would trip the same rule, the
 rest of its path shifts aside by the smallest step with room, at most 0.18 m in all, easing back once there is room, and with no such step it fails `step-blocked`.
-A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra. Other body steps owned by actions do not go through it yet.
+A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra.
+
+One guard decides all of these (#1332): `guardBodyStep` in `runtime/static-step.ts` holds a step whose end is below the
+limit and worse than where the body stands, and names the nearest blocker; it reads what the invariant reads (the grid of
+the body's level at that point, the body's own radius, deep water exempt). The walker's hard static layer calls it on its
+own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a logged runtime-policy `rules` event every world
+adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
+it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
+stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
+stall release with nothing clear near leaves the body where it stands. Births keep their own arrival check. A carrier's rider
+legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
+handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
 ## Refusal
 
@@ -193,6 +222,9 @@ placed clears it, and a rung 3 keeps god edits, so it survives a restart until t
 
 **What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+A periodic snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt:
+it is skipped and counted at rung `contained` as `durability.snapshot-skipped`, the clock runs on, and the next due
+snapshot is tried (#1368).
 
 ## Conformance
 

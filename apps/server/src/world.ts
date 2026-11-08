@@ -1268,6 +1268,10 @@ export class WorldHost {
    *  window cut short is retried one tile wider, and a place is reported full only when people fill it. Prospective. */
   enableRouteReachV1(){if((this.extra.runtimePolicy as {routeReachV1?:boolean}|undefined)?.routeReachV1)return Promise.resolve();return this.enqueue('rules','operator:route-reach',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,routeReachV1:true},why:'route-reach/1 (#872): reachable places are planned, not refused route.unreachable or ground.too-far'});}
   enableSpreadClearV1(){if((this.extra.runtimePolicy as {spreadClearV1?:boolean}|undefined)?.spreadClearV1)return Promise.resolve();return this.enqueue('rules','operator:spread-clear',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,spreadClearV1:true},why:'walking to a place picks a free spot on clear ground inside it (a plaza round a fountain, a park round its pond), not a spot inside an obstacle, so arrivals stand in the place; retain historical replay before this event'});}
+  /** #1332 body-step-guard/1, one logged rules event (prospective): every placement the engine writes for a body (edge relocation,
+   *  recovery restore, stall release) stands it only where the static invariant passes it, at its own radius and apart from other
+   *  bodies. History before the event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
+  enableBodyStepGuardV1(author='operator:body-step-guard'){if((this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,bodyStepGuardV1:true},why:'body-step-guard/1 (#1332): a relocation, restore or stall release stands a body only where the static-clearance invariant passes it, at its own radius and apart from other bodies; retain historical replay before this event'});}
   enableReflexTimeoutV1(){if((this.extra.runtimePolicy as {reflexTimeoutV1?:boolean}|undefined)?.reflexTimeoutV1)return Promise.resolve();return this.enqueue('rules','operator:reflex-timeout',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,reflexTimeoutV1:true},why:'every reflex the runtime reports stalled on other people for 60 s (walk, seat, stair, swim, courtesy step, yield) is natively cancelled in every state, so no single body can hold another or the world; retain historical replay before this event'});}
   /** placeRegionsV1: admit W1 places (id, label, polygon) as native destination regions in one logged prospective rules fact.
    *  Only new, admissible places are written; returns what was admitted and why the rest were not. */
@@ -2031,18 +2035,35 @@ export class WorldHost {
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
     this.snapshotGeneration++;
     const t0 = performance.now(), engine = this.engine;
-    const captured = engine.captureCheckpoint?.();
-    const checkpoint = captured && !('stateHash' in captured) ? captured : undefined;
-    const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
-    const fields = this.captureHostState();
-    const physicalHash = checkpoint ? undefined : engine.physicalHash();
+    const capture = () => {
+      const captured = engine.captureCheckpoint?.();
+      const checkpoint = captured && !('stateHash' in captured) ? captured : undefined;
+      const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
+      const fields = this.captureHostState();
+      const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
+      const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
+        return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
+      })();
+      return { checkpoint, legacy, fields, steps };
+    };
+    // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
+    // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
+    // try again when the next one is due. Durable state is the event log and the last good snapshot; nothing was
+    // published for this one. Any other capture fault (corrupt state, a broken iterator) still propagates as before.
+    let parts: ReturnType<typeof capture>;
+    try { parts = capture(); }
+    catch (error) {
+      const code = (error as {code?: unknown} | null)?.code;
+      if (typeof code !== 'string' || !code.startsWith('snapshot.')) throw error;
+      this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
+      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code}});
+      return;
+    }
+    const { checkpoint, legacy, fields, steps } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
-    const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
-    const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
-      return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
-    })();
     const job = { engine, previousTick: this.lastSnapshotTick, previousDebt: { ms: this.replayDebtMs, wall: this.lastSnapshotWall, soon: this.snapshotSoon }, immediate: null as NodeJS.Immediate | null };
     this.periodicSnapshot = job;
     // Keep at most the preceding completed body while hashes are pending. It is
