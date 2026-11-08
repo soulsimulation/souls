@@ -101,5 +101,7 @@ test('#1412: caps --search leads with the places the world names, prints its not
   assert.deepEqual(Object.keys(nothing).sort(), ['matching', 'offers', 'shown', 'total'], 'no new fields from an old world');
 
   old = false;
-  assert.deepEqual((await run('caps', '--search', 'library', '--verb', 'sit')).offers, [], '--verb still filters the places out');
+  const sit = await run('caps', '--search', 'library', '--verb', 'sit');
+  assert.deepEqual(sit.offers, [], '--verb still filters the places out');
+  assert.equal(sit.placesMatched, 1); assert.match(sit.note, /knows a place named "library", but none is among --verb sit/, 'never "nothing matches" beside placesMatched 1');
 });

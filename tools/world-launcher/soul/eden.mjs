@@ -2806,7 +2806,11 @@ async function caps(...args) {
   if (verb) list = list.filter((c) => c.verb === verb);
   if (search) list = searchOrder(list, search, d.search);
   const seen = search && d.search && typeof d.search === "object" ? d.search : null;
-  const note = seen?.note ?? (seen && !list.length ? `Nothing here or on the menu matches "${search}". Try other words, or resolve "walk to ${search}".` : undefined);
+  // the world's own note first; with none and nothing listed, say why: the world knew the place but a filter left it out, or nothing matched
+  const filtered = verb ? `--verb ${verb}` : "available offers (--all lists the rest)";
+  const note = seen?.note ?? (seen && !list.length ? (seen.placesMatched > 0
+    ? `The world knows ${seen.placesMatched === 1 ? "a place" : `${seen.placesMatched} places`} named "${search}", but none is among ${filtered}.`
+    : `Nothing here or on the menu matches "${search}". Try other words, or resolve "walk to ${search}".`) : undefined);
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
     ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),

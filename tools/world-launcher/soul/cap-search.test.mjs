@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {rankCapabilities,refusalList,shortLabel} from './eden.mjs';
+import {rankCapabilities,refusalList,shortLabel,searchOrder} from './eden.mjs';
 test('phrase and all terms beat unrelated west noise before truncation, retaining partial fallback',()=>{
  const noise=Array.from({length:90},(_,i)=>({id:`sit:west-library-${i}`,verb:'sit',label:'West library chair'}));
  const bound={id:'sit:land-harbour-west-pier/part-sea-view-seat',verb:'sit',label:'Sit at Sea-View Bench'};
@@ -43,4 +43,17 @@ test('#1268: a refusal is one list: the ids once, the world\'s label, parameter 
  // a choice carries availability on its own entry, and the candidate beside it can say otherwise
  assert.deepEqual(refusalList({code:'capability.choose',did_you_mean:[{id:'walk:far',label:'Far',available:false,reason:'Too far.'}],candidates:[{id:'walk:far',available:true}]}).did_you_mean,[{id:'walk:far',label:'Far',available:false,blocked:{reason:'Too far.'}}]);
  assert.deepEqual(refusalList({code:'capability.choose',did_you_mean:[{id:'walk:far',label:'Far',available:false,reason:'Too far.'}]}).did_you_mean[0].blocked,{reason:'Too far.'},'an act\'s choice has no candidates');
+});
+
+test('#1412: the places the world names lead in its order, over a better local match, each once; no places: the local ranking',()=>{
+ const a={id:'walk:library-annex',verb:'walk',label:'Walk to the Library Annex'},b={id:'walk:eden-stacks',verb:'walk',label:'Walk to the Stacks, a quiet library room'};
+ const far={id:'walk:region-reading-hall',verb:'walk',label:'Walk to Reading Hall (300 m)',aliases:['Reading Hall']},other={id:'sit:library-annex/part-chair',verb:'sit',label:'Sit at Library Annex Chair'};
+ const list=[other,a,b,far];
+ const local=rankCapabilities(list,'library').map(c=>c.id);
+ assert.ok(local.indexOf('walk:library-annex')<local.indexOf('walk:eden-stacks')&&!local.includes('walk:region-reading-hall'),'locally the annex outranks the stacks, and the hall does not match');
+ assert.deepEqual(searchOrder(list,'library',{places:['walk:region-reading-hall','walk:eden-stacks','walk:library-annex']}).map(c=>c.id),
+  ['walk:region-reading-hall','walk:eden-stacks','walk:library-annex','sit:library-annex/part-chair'],'the world\'s order first, a place with no local match included, then the rest once');
+ assert.deepEqual(searchOrder(list,'library',{places:['walk:gone',...['walk:eden-stacks']]}).map(c=>c.id)[0],'walk:eden-stacks','an id not in the list is skipped');
+ assert.deepEqual(searchOrder(list,'library',undefined),rankCapabilities(list,'library'),'an old world: the local ranking');
+ assert.deepEqual(searchOrder(list,'library',{places:[]}),rankCapabilities(list,'library'));
 });
