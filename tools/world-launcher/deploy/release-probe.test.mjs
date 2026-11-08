@@ -18,26 +18,26 @@ const PAGE = `<!doctype html><title>eden</title><body>Eden<script>
 const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/w/eden/ws');
 </script></body>`;
 
-function origin({ upAfterMs }) {
+function origin({ upAfterMs, builds = {} }) {
   const t0 = Date.now(), sockets = new Set();
   const server = createServer((req, res) => {
-    const up = upAfterMs !== null && Date.now() - t0 >= upAfterMs;
+    const path = new URL(req.url, 'http://x').pathname, up = path !== '/w/down/' && upAfterMs !== null && Date.now() - t0 >= upAfterMs;
     if (!up) { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('world unavailable'); return; }
-    res.writeHead(200, { 'content-type': 'text/html' }); res.end(PAGE);
+    res.writeHead(200, { 'content-type': 'text/html' }); res.end(PAGE.replace("'/w/eden/ws'", `'${path}ws'`));
   });
   server.on('upgrade', (req, socket) => {
     const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    const msg = Buffer.from(JSON.stringify({ t: 'welcome', build: BUILD }));
+    const msg = Buffer.from(JSON.stringify({ t: 'welcome', build: builds[new URL(req.url, 'http://x').pathname] ?? BUILD }));
     socket.write(Buffer.concat([Buffer.from([0x81, msg.length]), msg]));
     socket.on('data', () => {}); socket.on('error', () => {}); sockets.add(socket);
   });
   return new Promise((yes) => server.listen(0, '127.0.0.1', () => yes({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const s of sockets) s.destroy(); server.close(); } })));
 }
 
-async function probe(upAfterMs) {
-  const o = await origin({ upAfterMs }), out = mkdtempSync(join(tmpdir(), 'release-probe-'));
-  const child = spawn(process.execPath, [PROBE, '--origin', o.url, '--pages', '/w/eden/', '--phone-pages', '/w/eden/', '--out', out,
+async function probe(upAfterMs, { pages = '/w/eden/', phonePages = '/w/eden/', builds } = {}) {
+  const o = await origin({ upAfterMs, builds }), out = mkdtempSync(join(tmpdir(), 'release-probe-'));
+  const child = spawn(process.execPath, [PROBE, '--origin', o.url, '--pages', pages, '--phone-pages', phonePages, '--out', out,
     '--expect-build', BUILD, '--settle-s', '1', '--after-s', '4', '--arrive-every', '2', '--retry-s', '1', '--max-min', '2'], { env: { ...process.env, SIM_CHROME_LEASE: '' } });
   let log = ''; child.stdout.on('data', (d) => { log += d; }); child.stderr.on('data', (d) => { log += d; });
   // release right after READY, as ship.sh does once the activation returns
@@ -66,4 +66,12 @@ test('a page that never loads is notLoaded (exit 1), never a rollback (exit 3)',
   assert.equal(r.bar.notLoaded.length, 2);
   assert.match(r.bar.notLoaded[0], /never loaded \(first 503, last 503/);
   assert.doesNotMatch(r.log, /ROLLED BACK/);
+});
+
+test('a page that ended on another build is a rollback (exit 3) even while another page never loaded', { timeout: 120_000 }, async () => {
+  const r = await probe(0, { pages: '/w/eden/', phonePages: '/w/down/', builds: { '/w/eden/ws': 'we-bbbbbbbbbbbb' } });
+  assert.equal(r.code, 3, r.log);
+  assert.deepEqual(r.bar.rolledBack, [`desktop /w/eden/: serves we-bbbbbbbbbbbb, not ${BUILD}`]);
+  assert.equal(r.bar.notLoaded.length, 1);
+  assert.match(r.log, /ROLLED BACK/);
 });

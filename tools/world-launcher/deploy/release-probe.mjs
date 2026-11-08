@@ -59,8 +59,8 @@ const settleMs = Number(flag('settle-s', 20)) * 1000;
 const afterMs = Number(flag('after-s', 60)) * 1000;   // watch this long after <dir>/released: late drops show up here
 const expectBuild = flag('expect-build', null);
 const keepEdits = argv.includes('--keep-edits');
-const cliEvery = Number(flag('cli-every', 1)) * 1000;
-const retryMs = Number(flag('retry-s', 5)) * 1000;   // a watched page that did not load is retried this often   // one edit per second per god, under the world's edit rate limit
+const cliEvery = Number(flag('cli-every', 1)) * 1000;   // one edit per second per god, under the world's edit rate limit
+const retryMs = Number(flag('retry-s', 5)) * 1000;   // a watched page that did not load is retried this often
 const sharedLease = process.env.SIM_CHROME_LEASE;   // optional machine-wide lease module (see ship/browser.mjs)
 const leasePath = flag('lease', sharedLease && existsSync(sharedLease) ? sharedLease : null);
 if (!origin || !pages.length || !out) { console.error('usage: release-probe.mjs --origin <url> --pages <path,…> --out <dir> [--phone-pages …] [--cli <dir,…>]'); process.exit(2); }
@@ -311,4 +311,5 @@ else if (b.watchedAfterReleaseMs < afterMs) console.log(`  watched only ${b.watc
 for (const r of [...b.notLoaded, ...b.noBuild]) console.log(`  UNKNOWN BUILD: ${r}`);
 if (b.rolledBack.length) { console.log('  ROLLED BACK: the release did not land on every page'); for (const r of b.rolledBack) console.log(`    ${r}`); }
 say(`${b.pass ? 'PASS' : 'FAIL'}${b.rolledBack.length ? ' (visitors), but the release ROLLED BACK' : ''}`);
-process.exit(!b.pass ? 1 : b.rolledBack.length ? 3 : 0);
+// a rollback wins over any visitor failure: ship.sh stops on 3, and records 1 as "the release is live"
+process.exit(b.rolledBack.length ? 3 : !b.pass ? 1 : 0);
