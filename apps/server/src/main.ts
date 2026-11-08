@@ -124,9 +124,13 @@ const living = config.worldKey !== 'toy' && config.livingWorld ? new LivingWorld
 if(edenCore)await settleEmptyEden(host,living,definition.customs);
 else if (living) { living.camp = config.worldKey === 'mars'; void living.install(definition.customs); }
 const runtimePolicy = host.extra.runtimePolicy as { sleepBlockTicks: number; quietSeatCourtesy?: boolean } | undefined;
+let courtesy: Promise<unknown> = Promise.resolve();
 if (living && host.engine.configureRuntimePolicy && !runtimePolicy?.quietSeatCourtesy) {
-  void host.enqueue('rules','world',{runtimePolicy:{sleepBlockTicks:1200,...host.extra.runtimePolicy as object,quietSeatCourtesy:true},why:'enable ordinary idle-bystander courtesy at quiet seat exits prospectively; retain historical replay before this event'});
+  courtesy = host.enqueue('rules','world',{runtimePolicy:{sleepBlockTicks:1200,...host.extra.runtimePolicy as object,quietSeatCourtesy:true},why:'enable ordinary idle-bystander courtesy at quiet seat exits prospectively; retain historical replay before this event'});
 }
+// #1332 body-step-guard/1: every world with runtime policies adopts it once, prospectively (its history replays as recorded); after
+// the courtesy event, so each policy event carries the one before it
+if (host.engine.configureRuntimePolicy) void courtesy.then((): Promise<unknown> => host.enableBodyStepGuardV1('world')).catch((e) => console.error('[world] body-step-guard/1 could not be adopted; placements keep their old checks:', String(e).slice(0, 300)));
 const campCards = living?.camp ? new CampCards(host) : null;
 if(config.worldKey==='littlemartians')new FloaterCards(host);
 void campCards;

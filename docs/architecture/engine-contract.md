@@ -84,7 +84,18 @@ out. Invariants run at the end of every tick, so a held step would have been a v
 later in that tick moved the obstacle), and every earlier step moves as it did.
 An opening or a slide can't stop short, because its body follows the handle: where the next step would trip the same rule, the
 rest of its path shifts aside by the smallest step with room, at most 0.18 m in all, easing back once there is room, and with no such step it fails `step-blocked`.
-A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra. Other body steps owned by actions do not go through it yet.
+A door's gap turns solid only at the close's contact, so the plan reads that gap's raster at the close's end (`settleBeside`): a close that would end under the limit eases clear over the reach and swing (`opening.settle`, at most 0.18 m), and with no such place it is refused `contact.no-room`. A close that ends clear carries nothing extra.
+
+One guard decides all of these (#1332): `guardBodyStep` in `runtime/static-step.ts` holds a step whose end is below the
+limit and worse than where the body stands, and names the nearest blocker; it reads what the invariant reads (the grid of
+the body's level at that point, the body's own radius, deep water exempt). The walker's hard static layer calls it on its
+own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a logged runtime-policy `rules` event every world
+adopts once at boot (history before it replays as recorded), every placement the engine writes outside a step also passes
+it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
+stand a body only where its own radius fits (a floater's 0.35 m, a larger build's), and an upper-floor stall release with
+nothing clear near leaves the body where it stands. A carrier's rider legs and set-downs check the same fine raster under
+the ride's own `step-out/1` marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
+handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
 ## Refusal
 
