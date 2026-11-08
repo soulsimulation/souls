@@ -50,6 +50,8 @@ test('#1381 S1 S6: a walk under way stops where it is; the walk ends act.stopped
   assert.ok(moved < 3, `stops where it is (moved ${moved.toFixed(2)} m after the stop, no teleport)`);
   assert.equal(rec(walk.receipt.id).phase, 'failed', 'stays stopped');
   assert.ok(['stand', 'walk', 'idle', undefined].includes(body().human?.activity) && body().human?.activity !== 'sit', `posture unchanged in kind (${posture} -> ${body().human?.activity})`);
+  const again = await act('stop:current'); assert.equal(again.code, 'act.none-running');
+  assert.ok(again.reason.includes(FAR) && again.reason.includes('was already stopped'), `names the stopped walk, not the stop: ${again.reason}`);
   assert.ok(!(await caps()).some(c => c.id === 'stop:current'), 'not offered once nothing runs');
   assert.ok(!(await here()).some(c => c.id === 'stop:current'), 'nor in here');
   // with nothing open, "stop" means what it meant (stand:here)

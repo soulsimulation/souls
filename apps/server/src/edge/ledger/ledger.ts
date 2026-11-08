@@ -2259,8 +2259,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       target = r;
     } else target = open.at(-1);
     if (!target) {
-      const last = this.rows('soul_id=? ORDER BY accepted_tick DESC, rowid DESC LIMIT 1', soul.soulId)[0];
-      return stopRefuse('act.none-running', last ? `Nothing to stop: ${last.capability} (${last.receipt_id}) already ${last.phase}${last.ended_tick !== null ? ` at tick ${last.ended_tick}` : ''}.` : 'Nothing to stop: this Soul has not acted yet.');
+      // the last act itself, never an earlier stop's own receipt
+      const last = this.rows('soul_id=? AND capability<>? ORDER BY accepted_tick DESC, rowid DESC LIMIT 1', soul.soulId, STOP_CURRENT)[0];
+      return stopRefuse('act.none-running', last ? `Nothing to stop: ${last.capability} (${last.receipt_id}) ${last.code === 'act.stopped' ? 'was already stopped' : `already ${last.phase}`}${last.ended_tick !== null ? ` at tick ${last.ended_tick}` : ''}.` : 'Nothing to stop: this Soul has not acted yet.');
     }
     // a shared carry under way (its own receipt, or the stop-carry asked of it): only the shared stop ends it safely
     const shared = this.together.sharedRunning(soul.soulId);
