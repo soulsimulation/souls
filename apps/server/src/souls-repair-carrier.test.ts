@@ -15,6 +15,7 @@ import {installEngineBridge} from './god/engine-bridge.ts';
 import {coreRef} from '@souls/world-compiler';
 import {rot2} from '../../../mars/viewer/engine/core/math.ts';
 import {carrierDef} from '../../../mars/viewer/engine/vehicles/carrier.ts';
+import {rideKind} from './edge/comms/objects/ride.ts';
 
 const old=await marsFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true});
 const quiet=(t:any)=>{t.mock.method(console,'warn',()=>{});t.mock.method(console,'error',()=>{});t.mock.method(console,'log',()=>{});};
@@ -48,6 +49,9 @@ const COTTAGE={w:8,d:6,floors:1,floorHeight:2.8,style:'cottage',roof:'gable',roo
 for(const obstacle of ['table','walls'] as const)for(const repair of [false,true])
 test(`a real balloon landing steps its rider out into ${obstacle==='table'?'a god-placed table':'the east wall of a god-built cottage it landed inside'}: ${repair?'B repair rules adopted':'A 4.16 rules'}`,{timeout:600000},async t=>{
   quiet(t);
+  // both arms board as before #1324: no `clear: 'step-out/1'` (a rider who boarded before it, as Eden's did), so the
+  // step-out goes into the wall; A shows 4.16 halting on it, B the repair rules handling it. #1324's clear step-out is ride-landing.test.ts's
+  {const join=rideKind.actions.join,orig=join.apply.bind(join);t.mock.method(join,'apply',(s:any,p:any,ctx:any)=>{const out:any=orig(s,p,ctx);for(const b of out.bodies??[])for(const st of b.steps)if(st.verb==='mars:carrier_ride')delete st.params.clear;return out;});}
   const w=await world(t,repair),{host,edge,god,run,halted,E,Kino,Ada}=w,act=(s:any,name:string,owner:string,cap:string)=>accept(host,edge.act({...s,name,owner} as any,{capability:cap}) as Promise<any>);
   const j=await act(Kino,'Kino','dev:kino','object:ride-eden-balloon:join');assert.notEqual(j.accepted,false,JSON.stringify(j));
   assert.ok(await run(3000,()=>E()[Kino.entityId].human?.carrier?.phase==='seated'),'Kino seated: '+JSON.stringify(E()[Kino.entityId].human?.carrier));

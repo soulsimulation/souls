@@ -23,7 +23,9 @@ export type ActionCtx = {soul: EdgeSoul; roles: string[]; tick: number; now: num
   /** VEHICLE-STEER: resolve a ride's steer destination for this Soul (a known place, or a direction + distance). */
   steerTarget?(entityId: string, spec: {to?: string; direction?: string; distance?: number}): {ok: true; x: number; z: number; label: string} | {ok: false; code: string; reason: string; did_you_mean?: unknown};
   /** VEHICLE-STEER: the engine's own refusal for this steer step now (null = it would be taken). */
-  steerCheck?(carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean}): {code: string; reason: string} | null};
+  steerCheck?(carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {code: string; reason: string} | null;
+  /** landing/1 (#1324): where the ride would set down for this steer now (nearest clear outdoor spot), or null. */
+  steerLanding?(carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {requested: [number, number]; at: [number, number]; adjustedM: number; reason?: string} | null};
 export type TimeCtx = {tick: number; now: number; nameOf(soulId: string): string; carrier?(entityId: string): CarrierView | null};
 /** Body steps for the acting Soul (OBJECT-CONTRACT §7): the Ledger performs them as a logged decision with a normal receipt. */
 export type BodyRequest = {label: string; steps: {verb: string; params: Record<string, unknown>}[]};
