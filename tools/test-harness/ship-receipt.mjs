@@ -4,7 +4,7 @@
 //        [--public <release-receipt.json>]
 // --public also writes the release receipt (#1402): only what ship.sh checks (shas, build id, statuses, counts,
 // timestamps, sha256 of each raw receipt), with no path, host or name. It must pass tools/proof/publication.mjs, or it is
-// not written. It is the receipt that may travel: the release workflow reads it from a draft release.
+// not written. It is the receipt that may travel: the release workflow reads it from a prerelease.
 // The CPU gate (release-gate.sh, Modal) excludes V7; the V7 walk (v7-walks.sh, real Chrome on 5870-5879) covers it.
 // They combine only when both judged the SAME candidate commit: the V7 source sha must equal the gate's candidate sha,
 // the V7 checkout must have been clean, the V7 walk must pass and the gate must not be blocked. Anything else is blocked.

@@ -42,7 +42,8 @@ const worlds = JSON.parse(readFileSync(join(data, 'worlds.json'), 'utf8')).world
 const kids = existsSync(join(data, 'children.json')) ? JSON.parse(readFileSync(join(data, 'children.json'), 'utf8')) : {};
 const cmdline = (pid) => { try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' '); } catch { return ''; } };
 // secrets never reach the env files: the rehearsal runs fake minds and opens no provider
-const envFile = (slug, env) => { const f = join(envDir, `${slug}.env`); writeFileSync(f, Object.entries(env).filter(([k, v]) => v != null && k !== 'PATH' && k !== 'HOME' && !/_API_KEY$|SECRET|TOKEN|SITE_KEY|PASSWORD/.test(k)).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 }); return f; };
+const SLUG = /^[a-z0-9][a-z0-9_-]*$/;   // a slug names a file below; anything else is written nowhere (the loop stops it)
+const envFile = (slug, env) => { if (!SLUG.test(slug)) return '/dev/null'; const f = join(envDir, `${slug}.env`); writeFileSync(f, Object.entries(env).filter(([k, v]) => v != null && k !== 'PATH' && k !== 'HOME' && !/_API_KEY$|SECRET|TOKEN|SITE_KEY|PASSWORD/.test(k)).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 }); return f; };
 const rows = [], seen = new Set();
 for (const w of [...worlds].sort((a, b) => (b.slug === 'eden') - (a.slug === 'eden'))) {
   const dataSlug = w.dataSlug ?? w.slug, db = join(data, 'worlds', dataSlug, 'sim.db'); seen.add(dataSlug);
@@ -73,6 +74,8 @@ RESERVE_MB=3072; OOMFIRST=(); command -v choom >/dev/null && OOMFIRST=(choom -n 
 stops=0; n=0
 while IFS=$'\t' read -r slug kind db src; do
   n=$((n + 1))
+  # the slug names files in the scratch dir: anything but a plain slug is a stop, never a path
+  if ! [[ "$slug" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then printf '{"slug":"invalid-%s","kind":"invalid","verdict":"stop","flags":["a world slug that is not ^[a-z0-9][a-z0-9_-]*$"]}\n' "$n"; stops=$((stops + 1)); continue; fi
   mem=$(awk '/MemAvailable/{print int($2/1024)}' "$MEMINFO"); cap=$(( mem - RESERVE_MB ))
   if [ "$cap" -lt 1024 ]; then
     printf '{"slug":"%s","kind":"%s","verdict":"stop","flags":["memory: MemAvailable %s MB leaves under 1 GB above the %s MB kept for production"]}\n' "$slug" "$kind" "$mem" "$RESERVE_MB"; stops=$((stops + 1)); continue

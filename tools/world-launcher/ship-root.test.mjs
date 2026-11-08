@@ -398,3 +398,14 @@ test('#1402 the publishable release receipt: ship.sh accepts a clean one for thi
     assert.equal(r.status, 1); assert.match(r.stdout, /release receipt is not clean/);
   }
 });
+
+test('#1402 rehearse: a world slug that is not a plain slug is a stop, and nothing is written for it', () => {
+  const s = setup(), data = join(s.t, 'host/data');
+  writeFileSync(join(data, 'worlds.json'), JSON.stringify({ worlds: [{ slug: 'eden' }, { slug: '../escape' }] }));
+  const r = s.run(s.base);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /STOPPED at step rehearse/);
+  assert.match(r.stdout, /a world slug that is not/);
+  assert.ok(!existsSync(join(s.t, 'host/escape.env')) && !existsSync(join(s.t, 'escape.env')));
+  assert.doesNotMatch(s.calls(), /compact-backup|^activate\t/m);
+});

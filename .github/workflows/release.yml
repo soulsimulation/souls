@@ -225,7 +225,11 @@ jobs:
           status=${PIPESTATUS[0]}
           kill $beat
           out="$SHIP_OUT_ROOT/$LABEL"
-          [ -f "$out/ship-result.json" ] && { echo '```json'; cat "$out/ship-result.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # the summary is public: only the status word, and only the whole result once it passes the publication check
+          if [ -f "$out/ship-result.json" ]; then
+            echo "ship.sh: $(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).status.replace(/[^a-z-]/g, '')" "$out/ship-result.json")" >> "$GITHUB_STEP_SUMMARY"
+            if node tools/proof/publication.mjs "$out/ship-result.json" > /dev/null 2>&1; then { echo '```json'; cat "$out/ship-result.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
+          fi
           exit $status
       - name: Public evidence
         if: always()
