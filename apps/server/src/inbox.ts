@@ -55,6 +55,9 @@ export class AgentInbox {
     try {h = this.god(s) ? null : this.closeHold?.(s, id);} catch {/* a guard that can't answer holds nothing */}
     if (h) throw new ApiError(409, 'message.act-running', `not closed: ${h.capability} is still going (receipt ${h.receipt}); the world closes this message with that act's outcome when it ends, so there is nothing to send`, {receipt: h.receipt, capability: h.capability});
   }
+  /** #1313: set by the edge: what the owner's card says between pickup and the result (the act under way, its phase, or
+   *  thinking), from world records only; null = nothing on record. Owner view only. */
+  doingOf: ((soulId: string, latest: InboxMessage | null, away: boolean) => unknown) | null = null;
   /** Set by the routes: where a ticket's touched entities are now (null when none is left in the world). */
   focusOf: (ids: string[]) => TicketFocus | null = () => null;
   private waiters = new Map<string, Set<() => void>>();

@@ -2875,11 +2875,9 @@ async function act(...argv) {
   // wait once the body holds the pose.
   // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
   // still going while a later step of it has ended (#1289)
-  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for }], d.receipt.id) });
-  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) {
-    const { stalled: _was, ...before } = out;   // the wait's frames are newer: a clock running again drops the act's word
-    out = { ...before, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
-  }
+  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for, ...(body.params?.seconds !== undefined ? { timed: true } : {}) }], d.receipt.id) });
+  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  if (out.held) heldLinks(out.receipt?.id);
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
@@ -2928,6 +2926,12 @@ export function keepLinks(links, open, max = 64) {
   return out;
 }
 
+/** #1314: an open-ended sit or lie this client saw held has done what it was asked, so its message has nothing running for it.
+ *  One that asked for its own `seconds` is still running while it holds, as in the world (#1295). */
+function heldLinks(receipt) {
+  const links = load().links ?? [], mark = (l) => l.receipt === receipt && !l.held && !l.timed;
+  if (receipt && links.some(mark)) save({ links: links.map((l) => (mark(l) ? { ...l, held: true } : l)) });
+}
 /** A receipt that has ended guards nothing, so its links make room: the list must never lose one that may still be open. */
 function forgetLinks(receipt) {
   const links = load().links ?? [];
@@ -3022,6 +3026,7 @@ async function resolve(...args) {
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
   let out = await waitRaw(secArg, idArg);
+  if (out.held) heldLinks(out.receipt?.id);
   const link = (load().links ?? []).findLast((l) => l.receipt === out.receipt?.id);
   if (link?.receipt && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
   forgetLinks(out.receipt);
@@ -3073,6 +3078,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   if (ownerWrote) {
     const inbox = await call("/v1/edge/inbox/listen?timeoutMs=0");
     out.ownerMessages = messagesOf(inbox.data);
+    heard(out.ownerMessages);
     process.stderr.write(`OWNER MESSAGE: ${JSON.stringify(out.ownerMessages)}\n`);
   }
   return out;
@@ -3219,10 +3225,12 @@ async function listen(...args) {
     const d = ok(r, "listen");
     attempt = 0; lastCode = undefined;
     const messages = messagesOf(d).filter((m) => m.id !== after), brief = messages.length || d.addressed?.length || d.plan ? briefNow() : {};
-    if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), next: d.plan.next ?? `${CLI} pending shows the plan.` };
+    heard(messages);
+    const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
+    if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
+      return { messages, ...brief, ...older, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
     }
     await sleep(50);
   }
@@ -3242,12 +3250,79 @@ async function ack(id, ...rest) {
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
-  const seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
-  if (shut.closed) return { ...said, closed: true };
-  if (seen.acked || shut.already) return { acked: id, ...shut };   // acked already: the first reply stands, so this text reached nothing
+  const before = load().heard, seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
+  if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id], { before, closed: true })) };
+  if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id], { before, closed: !!shut.already })) };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
-  return { ...said, ...d, ...shut };
+  return { ...said, ...d, ...shut, ...(await stillOpen([id])) };
+}
+
+// #1314: the owner's messages this folder was handed, newest last, so a new one can say which older ones are still open with
+// nothing running for them. Only the agent closes them: the CLI lists, and the world makes no close it wouldn't have made.
+const HEARD_MAX = 8;
+/** The first words of a message, at most `max` characters. */
+export function firstWords(text, max = 40) {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1), space = cut.lastIndexOf(" ");
+  return (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.]+$/, "") + "…";
+}
+/** Pure: messages one answer handed over join the record as one batch; one already there keeps its place. */
+export function heardWith(record, messages, max = HEARD_MAX) {
+  const out = [...(record ?? [])], batch = messages?.[0]?.id;
+  for (const m of messages ?? []) if (m?.id && !out.some((h) => h.id === m.id)) out.push({ id: m.id, text: firstWords(m.text), batch });
+  return out.slice(-max);
+}
+function heard(messages) { if (messages?.length) save({ heard: heardWith(load().heard, messages) }); }
+function unheard(ids) { const h = load().heard ?? [], keep = h.filter((x) => !ids.includes(x.id)); if (keep.length !== h.length) save({ heard: keep }); }
+const STILL_OPEN_NEXT = 'older, still open, nothing running for them: once each is finished or dropped, result <id> done|failed "…"';
+/** Pure: which recorded messages to ask about: older than the newest of `now` (the messages this answer is about, by id), not
+ *  in its batch, and not one of them. A message `now` names that isn't recorded yet counts as the newest. */
+export function olderThan(record, now) {
+  const at = Math.min(...now.map((id) => record.findIndex((h) => h.id === id)).filter((i) => i >= 0)), batches = new Set(now.map((id) => record.find((h) => h.id === id)?.batch).filter(Boolean));
+  return record.slice(0, Number.isFinite(at) ? at : record.length).filter((h) => !now.includes(h.id) && !batches.has(h.batch));
+}
+/** Pure: whether a recorded message is an orphan, from the world's reads. `message`: GET inbox/<id> ({status, data}); `receipts`:
+ *  its links' receipts ({status, data, held}); `plan`: a plan serving it; `nextAct`: the next act serves it by default.
+ *  "drop": closed or gone, forget it; "list"; "keep": open, but something runs for it, or a read failed. */
+export function orphanState({ message, receipts = [], plan = false, nextAct = false }) {
+  if (message?.status === 404) return "drop";
+  if (message?.status !== 200 || !message.data?.message) return "keep";
+  if (message.data.message.result !== undefined) return "drop";
+  if (plan || nextAct) return "keep";
+  for (const r of receipts) {
+    if (r.status === 404) continue;   // too old to hold a receipt: ended long ago
+    const phase = r.status === 200 ? r.data?.receipt?.phase : null;
+    if (!phase) return "keep";
+    if (phase === "replaced") return "keep";   // the world's sweep closes it, unless a newer act serves it
+    if (!TERMINAL.has(phase) && !r.held) return "keep";   // still going; a held open-ended sit or lie isn't (#1295)
+  }
+  return "list";
+}
+/** `stillOpen` for an answer about the messages `now`: older recorded ones the world reads as open, with nothing running.
+ *  `before`: the record as it was before this command closed one of them (`closed`), which then leaves it. */
+async function stillOpen(now, { before, closed = false } = {}) {
+  try {
+    // which to ask about comes from the record as this command found it; what is kept is the record as it is now, since a
+    // listen in another process may have added to it while this command closed one
+    const s = load(), ask = olderThan(heardWith(before ?? s.heard, now.map((id) => ({ id }))), now);
+    const keep = closed ? (s.heard ?? []).filter((h) => !now.includes(h.id)) : heardWith(s.heard, now.map((id) => ({ id })));
+    if (JSON.stringify(keep) !== JSON.stringify(s.heard ?? [])) save({ heard: keep });
+    if (!ask.length) return {};
+    const quick = { retry: false, timeoutMs: 5000 }, get = (path) => call(path, quick).catch(() => null);
+    const nextAct = s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS ? s.lastAcked : null;
+    const asked = existsSync(SERVE_SOCK) ? await askServe({ op: "planStatus" }) : null, plan = asked && !asked.lost ? asked.plan : loadServeState().plan;
+    const states = await Promise.all(ask.map(async (h) => {
+      const links = (s.links ?? []).filter((l) => l.message === h.id);
+      const [message, ...receipts] = await Promise.all([get(`/v1/edge/inbox/${encodeURIComponent(h.id)}`),
+        ...links.map(async (l) => ({ ...(await get(`/v1/edge/receipts/${encodeURIComponent(l.receipt)}`)), held: !!l.held }))]);
+      return orphanState({ message, receipts, plan: plan?.for === h.id && !PLAN_OVER.has(plan.state), nextAct: nextAct === h.id });
+    }));
+    const gone = ask.filter((_, i) => states[i] === "drop").map((h) => h.id), list = ask.filter((_, i) => states[i] === "list");
+    if (gone.length) unheard(gone);
+    return list.length ? { stillOpen: list.map(({ id, text }) => ({ id, text })), stillOpenNext: STILL_OPEN_NEXT } : {};
+  } catch (e) { calm(`stillOpen: ${e.message}`); return {}; }
 }
 
 /** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
@@ -3290,6 +3365,7 @@ async function result(id, outcome, ...text) {
   if (r.status === 409 && (r.data?.error?.code ?? r.data?.code) === "message.act-running") return { reported: false, closed: false, why: ACT_RUNNING };
   const d = clean(ok(r, "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
+  unheard([id]);
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
   return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
 }
@@ -4132,6 +4208,7 @@ async function followFolder() {
 async function pending() {
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
+  heard(a.ownerMessages);
   return { ...a, ...briefNow() };
 }
 
