@@ -242,6 +242,10 @@ script there.
 
 **Closing without `result`** (#1269, scorer version 4): a client can close a message in the command that finishes it, and its answer says `closed: true`. `ack <id> … --close done|failed` and `say … --for <id>` name the message themselves. An `act` or `wait` the world closed names it through `for` or the act that took the receipt, and the outcome is the receipt's. A `closed: true` that can't be placed counts as nothing. A run with none of these scores as version 3 did. A question reads such a close as the `result` step it replaced, right after the command that made it (`questionSteps`, evaluator version 3), so question files and their hashes don't change.
 
+**The world's record at run end** (#1309, scorer version 5): a directed run reads every owner message the director delivered from the world before it stops it (`GET /v1/edge/inbox/:id`, as that seat), and writes `playtest/final-cards.json`: closed or open, the outcome, and whether the agent or the server closed it. The seat's calls can't show the world's own later closes (#1299: a replaced act's message after 40 ticks, a linked act's at its end), and evidence packs stop at the next owner message. The scorecard's `messages` block reads this file, and each intention gets `final`. Without the file, the block is `unknown`. A read that fails is listed per message, never guessed, and never stops the run. No token, URL or message text is written. For a run that finished earlier, `node tools/playtest/runs/final-cards.mjs <runDir>` builds the same file from its kept world data, read-only.
+
+**A refused `result` closes nothing** (scorer version 5): when the world answers `reported: false` (for instance "its act is still going", #1299), the call counts as a decision but not as a close, in the scorecard and in what questions read (evaluator version 4).
+
 **Predeclared:** `controllability.mjs` holds the definitions and the refusal table. Its sha256 goes into every run's effective
 spec (`scorer`). The card says `predeclared: true` only when that hash still matches at evaluation; otherwise it scores
 anyway and says why not.

@@ -16,6 +16,7 @@ import { parseScript, stdinConsole } from './console.mjs';
 import { worldTruth } from './truth.mjs';
 import { verifyRun } from './verify.mjs';
 import { REPO_ROOT, scratchDir } from '../../../lib/paths.mjs';
+import { readFinalCards, writeFinalCards } from '../../runs/final-cards.mjs';
 
 const DEFAULT_SERVER_ROOT = process.env.PLAYTEST_SERVER_ROOT ?? REPO_ROOT;
 const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? scratchDir('playtest/runs');
@@ -154,6 +155,8 @@ export async function cmdDirect(a, hooks = null, { log = (...x) => console.error
     for (const seat of Object.values(seats)) { try { await within(seat.stop(), 300000); closed.seats.push(infoOf(seat)); } catch (e) { closed.seats.push({ error: e.message }); } }
     if (browser) { try { await browser.close(); } catch { /* ignore */ } }
     try { if (world?.base) writeJson(join(runDir, 'server', 'healthz-after.json'), await provision.healthz(world.base)); } catch { /* recorded as missing */ }
+    // #1309: the world's own record of every owner message, before the world goes: only it knows what was left open
+    try { if (world?.base) { const fc = await within(readFinalCards({ base: world.base, playtestDir: runDir }), 30000); if (fc) writeFinalCards(runDir, fc); else log('final cards: no answer in 30 s'); } } catch (e) { log('final cards not read:', e.message); }
     writeJson(join(runDir, 'close.json'), { ...now(), ...closed });
     receipt(runDir, 4, 'close', { ok: true });
     if (world?.pid && !a['keep-world']) { try { await provision.stopWorld(world); log('world stopped'); } catch (e) { log('world stop failed', e.message); } }

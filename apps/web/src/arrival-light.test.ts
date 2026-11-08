@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DISC_RADIUS, FILL_MS, SOLID, easeFraction, lightRadius, lightScale } from './arrival-light.ts';
+import { DISC_RADIUS, FILL_MS, PEAK, SOLID, START, easeFraction, lightRadius, lightScale } from './arrival-light.ts';
 
 const run = (targets: number[], seconds = 1 / 30) => { let f = 0; const out: number[] = []; for (const t of targets) out.push(f = easeFraction(f, t, seconds)); return out; };
 
@@ -20,13 +20,28 @@ test('a stalled frame never jumps it', () => {
   assert.ok(easeFraction(0, 1, 30) <= 0.6 * 0.25 + 1e-9, 'a long gap between frames moves no further than a short one');
 });
 
-test('it runs from just covering the text to the corners, on any aspect ratio, and the disc is sized to cover them', () => {
+test('#1318: it runs from 55% of just covering the text to 60% of the way to the corners, on any aspect ratio', () => {
+  assert.equal(START, 0.55); assert.equal(PEAK, 0.6);
   for (const [w, h] of [[1920, 1080], [390, 844], [844, 390], [1000, 1000], [320, 1400]]) {
-    assert.equal(lightRadius(0, w, h, 140), 140);
+    assert.ok(Math.abs(lightRadius(0, w, h, 140) - 0.55 * 140) < 1e-9);
     const corner = Math.hypot(w, h) / 2;
-    assert.ok(Math.abs(lightRadius(1, w, h, 140) - corner) < 1e-9);
-    assert.ok(Math.abs(lightScale(corner, w, h) * SOLID * Math.min(w, h) - corner) < 1e-9, 'the solid part reaches the corners');
+    assert.ok(Math.abs(lightRadius(1, w, h, 140) - 0.6 * corner) < 1e-9);
+    for (let f = 0.1; f <= 1; f += 0.1) assert.ok(lightRadius(f, w, h, 140) > lightRadius(f - 0.1, w, h, 140), 'it only grows');
+    const peak = lightRadius(1, w, h, 140);
+    assert.ok(Math.abs(lightScale(peak, w, h) * SOLID * Math.min(w, h) - peak) < 1e-9, 'the shader\'s solid part is that radius');
   }
+});
+
+test('#1318: no path turns the screen white: the dissolve starts from the light, corners grey', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8'), css = readFileSync(new URL('./world-chrome.css', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('./ArrivalLight.tsx', import.meta.url), 'utf8'), boot = readFileSync(new URL('./boot-light.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /data-white|\.viewer-arrival\[[^\]]*\]\{background:#fff/);
+  assert.doesNotMatch(html + view, /dataset\.white/);
+  assert.match(html, /\.3\*Math\.hypot\(innerWidth,innerHeight\)\/146/, 'the boot light ends at 60% of the corners, as the app\'s does');
+  assert.match(html, /80\.3\+/, 'and starts at 55% of the disc radius'); assert.ok(Math.abs(START * DISC_RADIUS - 80.3) < 1e-9);
+  assert.match(boot, /START = 0\.55, PEAK = 0\.6/);
+  assert.match(css, /\.arrival-disc\{--s:\.55;/);
+  assert.match(css, /\[data-fill="true"\] canvas\{opacity:0;transition:opacity 1\.2s/, 'the shader hands over to the disc, so every path ends on one picture');
 });
 
 test('first paint is the same picture: black, the disc and the words, and no card', () => {
@@ -49,7 +64,7 @@ test('the end of the light does not need frames: it starts from the props, on a 
   const css = readFileSync(new URL('./world-chrome.css', import.meta.url), 'utf8'), view = readFileSync(new URL('./ArrivalLight.tsx', import.meta.url), 'utf8');
   assert.match(css, /\[data-fill="true"\] \.arrival-disc\{transition:transform 1\.2s/); assert.equal(FILL_MS, 1200);
   assert.match(css, /\.arrival-disc\{[^}]*will-change:transform/);
-  assert.match(css, new RegExp(`width:calc\\(${DISC_RADIUS}px\\*2/\\.52\\)`));
+  assert.match(css, new RegExp(`width:calc\\(${DISC_RADIUS}px\\*2/\\.31\\).*#fff 31%`));
   assert.match(view, /useLayoutEffect\(\(\) => \{ if \(\(progress \?\? 0\) >= 1 \|\| done\) run\.current\?\.fill\(\)/);
   const step = view.slice(view.indexOf('const step ='), view.indexOf('raf = requestAnimationFrame(step);\n    if'));
   assert.doesNotMatch(step, /fill\(\)|settle\(\)|dataset/, 'the frame loop only draws');
