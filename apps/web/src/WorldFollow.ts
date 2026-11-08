@@ -22,7 +22,7 @@ export class WorldFollow {
   private instances=new WorldVisibilityInstances();
   private objects:THREE.Object3D[]=[];
   private hits:THREE.Intersection[]=[];
-  reset(){this.decoupled=false;this.gestureFrom=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.userAt=-Infinity;this.instances.reset();}
+  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.userAt=-Infinity;this.instances.reset();}
   /** Same candidates as recursive intersectObjects, minus objects whose hits
    * opaque() always rejects: hidden ancestry or own cameraTransparent. */
   private collect(roots:readonly THREE.Object3D[]){
@@ -123,8 +123,11 @@ export class WorldFollow {
     // #1316 (Gene): the rule is coupling. Following, the camera may come in close, even into a house after the Soul. A
     // deliberate pull out (zooming out, or dragging round) decouples it: from then on it stays where the viewer put it,
     // carried along with the Soul, and nothing pulls it back in. Follow again (a reset) couples it. Zooming in keeps it coupled.
-    if(!this.gestureFrom||this.clock-this.userAt>GESTURE_GAP)this.gestureFrom=before.clone();
-    if(after.length()>this.gestureFrom.length()*PULL_OUT.ratio||this.gestureFrom.angleTo(after)>PULL_OUT.angle)this.decoupled=true;
+    // Only the viewer's own steps count (each before..after pair), never what moved the camera between them (follow
+    // motion, the search): a running turn and zoom over the gesture.
+    if(!this.gesture||this.clock-this.userAt>GESTURE_GAP)this.gesture={turn:0,zoom:1};
+    this.gesture.turn+=before.angleTo(after);this.gesture.zoom*=after.length()/before.length();
+    if(this.gesture.zoom>PULL_OUT.ratio||this.gesture.turn>PULL_OUT.angle)this.decoupled=true;
     // Decoupled, the camera is exactly where the gesture put it (within the zoom bounds); coupled, the gesture scales the
     // asked-for distance, which the search comes back to.
     const length=this.decoupled?Math.max(FOLLOW_NEAR,Math.min(FOLLOW_MAX,after.length())):Math.max(FOLLOW_MIN,Math.min(FOLLOW_MAX,this.requested.length()*after.length()/before.length()));
@@ -134,7 +137,7 @@ export class WorldFollow {
     this.rendered=after.clone().setLength(this.decoupled?length:this.requested.length());
     this.chosen=null;this.userAt=this.clock;this.userOrbited=true;
   }
-  private gestureFrom:THREE.Vector3|null=null;
+  private gesture:{turn:number;zoom:number}|null=null;
   /** #1316: true once the viewer pulled the camera out: it keeps their view, and occlusion never moves it. */
   get held(){return this.decoupled;}
   /** #1317: the offset the viewer asked for (the camera trace's desired pose), or null before the first frame. */
