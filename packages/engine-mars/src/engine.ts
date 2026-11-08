@@ -2879,9 +2879,7 @@ export class MarsEngine implements Engine {
     });
   }
   canSnapshot(): boolean {
-    // A legacy formation callback is not data and must wait for a quiet point.
     for (const live of this.rt.live.values()) {
-      if (typeof live.exec?.detour?.clearOf === 'function') return false;
       // Some codecs admit only a safe execution phase (raise permits lowering).
       // A serializer's presence alone does not establish resumability.
       if (live.def.serializeExec) {
