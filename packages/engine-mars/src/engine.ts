@@ -151,6 +151,8 @@ type Prog = {
   build?: { phase: BuildPhase; crew: string[]; stopping?: Diag; reverse?: true };
 };
 /** #1150: an invariant that throws is a named violation, so the repair ladder sees it and the rest of the tick still runs. */
+/** #1369: every number in this value is finite (what the state hash requires). */
+const finiteDeepV1 = (v: unknown, depth = 0): boolean => typeof v === 'number' ? Number.isFinite(v) : !v || typeof v !== 'object' || depth > 8 || Object.values(v as object).every(x => finiteDeepV1(x, depth + 1));
 const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } catch (e) { return [{ code: 'engine.thrown', message: String((e as Error)?.message ?? e).slice(0, 200), subjects: [] }]; } };
 const containedKey = (v: { code: string; subjects?: string[] }) => `${v.code}|${[...(v.subjects ?? [])].sort().join()}`;
 /** #1150: how long a contained entry stays after it last fired. A rule that flickers stays contained, instead of faulting again each time it comes back. */
@@ -594,10 +596,46 @@ export class MarsEngine implements Engine {
     return v => known.has(containedKey(v)) || known.has(containedByRule(v.code));
   }
   /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
-  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } {
+  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { return this.stopWhereV1(() => true, why, from); }
+  /** #1369 quarantine/1: as `stopAllV1`, for the programmes of these bodies alone. Everyone else's go on. */
+  stopBodiesV1(bodies: string[], why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { const ids = new Set(bodies); return this.stopWhereV1(p => ids.has(p.actor), why, from); }
+  /** #1369 quarantine/1: the bodies whose own state is broken (a person with no human state, a pose or level that is no finite
+   *  number). Such a body can make every step throw, or the state hash, without any rule naming it. A pure read. */
+  corruptBodiesV1(): { code: string; subjects: string[] }[] {
+    const bad = (n: unknown) => typeof n !== 'number' || !Number.isFinite(n), out: { code: string; subjects: string[] }[] = [];
+    for (const e of listEntities(this.ents) as any[]) {
+      if (e.kind !== 'human') continue;
+      if (!e.human || typeof e.human !== 'object' || !Array.isArray(e.pose?.p) || e.pose.p.length !== 3 || e.pose.p.some(bad) || bad(e.pose.yaw ?? 0) || bad(e.human.level ?? 0) || !finiteDeepV1(e.human)) out.push({ code: 'entity.corrupt', subjects: [e.id] });
+    }
+    return out.sort((a, b) => (a.subjects[0] < b.subjects[0] ? -1 : 1));
+  }
+  /** #1369 quarantine/1: a broken body is held where it last stood whole: its programmes stopped (by the host), a fresh human
+   *  state if it lost its own, and `pose` (its last whole pose, which the host logged) if its own is no number. With no whole
+   *  pose to go back to, it stands at the nearest free spot to the world's arrival, and the host logs that pose loudly; a body
+   *  that is no number can't stay where it is. Never throws. Returns the pose the body is left at, for the log, so a replay
+   *  passes the same one back and leaves it in the same place. */
+  holdBodyV1(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null {
+    const e = this.ents[id]; if (!e) return null;
+    const fin = (n: unknown) => typeof n === 'number' && Number.isFinite(n), whole = Array.isArray(e.pose?.p) && e.pose.p.length === 3 && e.pose.p.every(fin) && fin(e.pose.yaw ?? 0);
+    let to = pose;
+    if (!whole && !to) {
+      const radius = e.body?.radius ?? HUMAN_RADIUS, [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0], spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius) ?? [ax, az]; } catch { return [ax, az] as [number, number]; } finally { this.ents[id] = e; this.tableCacheV1 = null; } })();   // the search reads every other body, not this one
+      const spatial = this.rt.services.spatial as Spatial, y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, spot[0], spot[1])) : 0;
+      to = { p: [spot[0], y, spot[1]], yaw: 0, level: 0 };
+    }
+    if (!whole && to) e.pose = { ...(e.pose ?? {}), p: [...to.p], yaw: to.yaw };
+    // a human state that lost itself, or holds a number that is no number (the hash can't take it), starts again fresh
+    if (!e.human || typeof e.human !== 'object' || !finiteDeepV1(e.human)) { const level = e.human?.level, fresh = this.m.human(id, e.pose.p[0], e.pose.p[2], { label: e.label }); e.human = fresh.human; e.human.level = to?.level ?? (typeof level === 'number' && Number.isFinite(level) ? level : 0); }
+    if (!fin(e.human.level ?? 0)) e.human.level = to?.level ?? 0;
+    e.human.speed = 0; acknowledgeRelocation(this.rt, id); this.tableCacheV1 = null;
+    try { if (!this.standsClearV1(id)) this.tryRelocateV1(id); } catch { /* it stands where it was held */ }
+    rememberPosesAfterRestore(this.rt);
+    return { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: e.human.level ?? 0 };
+  }
+  private stopWhereV1(which: (p: Prog) => boolean, why: { code: string; message: string }, from: number): { stopped: number; deadlines: number } {
     let stopped = 0, deadlines = 0;   // what this call changed, so a host knows if a replay has to make the same stops. A deadline ends nothing yet.
     const cancel = (id: string) => { try { this.cancelOrAbandonV1(id, why); } catch (e) { console.error('[engine] a stop could not end its action:', String(e).slice(0, 200)); } };   // this rung can't fail
-    for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    for (const p of [...this.programs.values()].filter(which).sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (p.stopping && p.action && this.rt.isActive(p.action)) { if (p.stopByV1 === undefined) { p.stopByV1 = from + LADDER_STOP_TICKS; deadlines++; } continue; }   // already on its way down: its own reason and cleanup stand, for a while
       if (p.action && this.rt.isActive(p.action)) cancel(p.action);
       if (p.action && this.rt.isActive(p.action)) { stopped++; p.stopping = why; p.refusalsV1 ??= []; p.stopByV1 = from + LADDER_STOP_TICKS; continue; }

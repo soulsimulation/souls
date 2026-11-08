@@ -1,4 +1,4 @@
-import {RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
+import {QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
@@ -698,12 +698,23 @@ export class EdgeLedger implements EdgeLedgerHooks {
     for (const m of this.host.minds.values()) this.comms?.streams.deliver?.(m.soulId, REWOUND.code, this.host.engine.world.tick, {text: REWOUND.message});
     this.onRelocated(relocated);
   }
+  /** #1369 quarantine/1: only the named Souls' programmes were stopped. Their open acts end here and each is told; nobody else. */
+  private onQuarantined(souls: string[], relocated: string[]) {
+    for (const soulId of souls) {
+      this.pending.delete(soulId);
+      for (const r of this.openReceipts(soulId)) this.update(r.id, {phase: 'failed', code: QUARANTINED.code, reason: QUARANTINED.message});
+      this.comms?.streams.deliver?.(soulId, QUARANTINED.code, this.host.engine.world.tick, {text: QUARANTINED.message});
+    }
+    this.onRelocated(relocated);
+  }
   /** Hotfix: a recovered engine fault ends the open receipts of the Souls whose programmes were set aside. */
   private onRecovery(e: {kind: string; payload: unknown}) {
     const fact = e.payload as {recovery?: {edge?: {souls: string[]}; lastRung?: {relocated?: string[]}}; lastRungInPlace?: {relocated?: string[]; stopped?: number}; refusal?: {relocated?: true; bodies: string[]}} | null;
     if (e.kind === 'rules' && fact?.lastRungInPlace && !fact.lastRungInPlace.stopped) return this.onRelocated(fact.lastRungInPlace.relocated ?? []);   // nothing ended, so there is nothing to tell
     if (e.kind === 'rules' && (fact?.recovery?.lastRung || fact?.lastRungInPlace)) return this.onRewound((fact.recovery?.lastRung ?? fact.lastRungInPlace)!.relocated ?? []);
     if (e.kind === 'rules' && fact?.refusal?.relocated) return this.onRelocated(fact.refusal.bodies);
+    const q = (e.payload as {quarantineV1?: {souls?: string[]; relocated?: string[]}} | null)?.quarantineV1;
+    if (e.kind === 'rules' && q) return this.onQuarantined(q.souls ?? [], q.relocated ?? []);
     const edge = fact?.recovery?.edge; if (e.kind !== 'rules' || !edge) return;
     for (const soulId of edge.souls) {
       this.pending.delete(soulId);
