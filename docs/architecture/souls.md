@@ -31,7 +31,8 @@ them with `listen` and answers with `ack` / `result`. Between pickup and the res
 (`apps/server/src/edge/owner-doing.ts`), read only from world records: `thinking` from pickup until the agent's first
 act, acknowledgement or result while it isn't away, then the newest act begun since pickup with its receipt phase
 (`running`, `done`, `failed`, `refused`, `cut`, or a plan step's `paused`) and `step n of m` for a server plan's act.
-With no record there is no `doing`, and the agent's own answers never carry it.
+Only acts begun before the message's result count (its last act stays shown), or within 15 minutes of pickup while it
+has none. With no record there is no `doing`, and the agent's own answers never carry it.
 
 ## Identity and durable reads
 

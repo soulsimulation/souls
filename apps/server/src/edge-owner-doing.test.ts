@@ -46,6 +46,12 @@ test('#1313 P1, P2, P4, P6: thinking, running, done and refused on the owner vie
   const end = edge.receipt(a.id, act.receipt.id)!.phase;
   assert.equal((await owner()).doing.phase, end === 'completed' ? 'done' : end === 'failed' ? 'failed' : 'cut', 'P1: the line follows the receipt to its end');
 
+  // the walk closed its message: what the Soul does next is no answer to it; a new message reads its own acts
+  await req('/v1/edge/act', token, {capability: 'fly:the-moon'});
+  assert.equal((await owner()).doing.phase, end === 'completed' ? 'done' : end === 'failed' ? 'failed' : 'cut', 'review: a closed message keeps its own last act');
+  assert.equal((await req(box, 'dev:alice', {text: 'fly to the moon'})).status, 200);
+  const m2 = (await req('/v1/edge/inbox/listen?timeoutMs=0', token)).data.backlog.at(-1);
+  await req(`/v1/edge/inbox/${m2.id}/ack`, token, {reply: 'Trying'});
   const refused = (await req('/v1/edge/act', token, {capability: 'fly:the-moon'})).data;
   assert.notEqual(refused.accepted, true);
   const r = (await owner()).doing;
