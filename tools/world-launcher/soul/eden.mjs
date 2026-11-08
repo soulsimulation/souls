@@ -2242,6 +2242,8 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     }
     if (r.status === 0 && cls === "none") r.data.error.notRetried = true;
     if (headers.authorization && !path.startsWith("/v1/edge/inbox/")) noticeInbox(r.data);
+    // a replay after a try that got no answer may be that very try, taken by the world: not a repeat of an earlier command
+    if (r.replayed && failed > 0) return { ...r, replayed: false, replayedRetry: true };
     return r;
   }
 }
@@ -3216,7 +3218,8 @@ async function say(...all) {
   if (w.unconfirmed) return { ...(faced ? { faced } : {}), ...unconfirmed("speech", w) }; // no gesture after speech the world did not confirm
   const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
   // a rerun the world answers from the first speech (same key) already had its gesture: it is not sent twice (the turn is
-  // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it.
+  // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it,
+  // and so does a run whose own first try went unanswered and was replayed to its retry (call() clears `replayed` then).
   const repeat = w.r.replayed === true && !w.resent;
   const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}) };
   return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
