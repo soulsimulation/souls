@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.3";
+const VERSION = "2.24.8";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2963,6 +2963,26 @@ async function act(...argv) {
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// 2.24.8 (#1381, #1420): `stop [receiptId]` cancels this Soul's own act under way with the world's stop:current: the act's
+// receipt ends failed/act.stopped, the body stays where it is, keeps its posture, and nothing else starts. It is an act
+// like any other (strict, keyed, linked to an owner message as act is), so the world's answer is printed as act prints
+// it, refusals included: act.none-running (nothing runs; it names the last act), act.already-ended, act.not-started,
+// receipt.unknown, act.shared (a shared carry: `next` names its stop-carry offer) and a ride's own refusal while aloft.
+// A world without stop:current answers capability.unknown: that is said in words, and nothing else is sent.
+export const STOP_ID = "stop:current";
+export function stopAnswer(out) {
+  if (!out || out.accepted !== false) return out;
+  if (out.code === "capability.unknown") return { accepted: false, code: "stop.unsupported", worldCode: out.code,
+    reason: "This world has no stop:current yet, so nothing was stopped. Here the act under way ends on its own, or is replaced by the next act you send." };
+  if (out.code === "act.shared") { const carry = /\bstop-carry:[^\s"'`,;)]+/.exec(String(out.reason ?? ""))?.[0]; return carry ? { ...out, next: carry } : out; }
+  return out;
+}
+async function stop(...argv) {
+  const receipt = argv[0] && !argv[0].startsWith("--") ? argv.shift() : undefined;
+  if (argv.some((a, i) => !a.startsWith("--") && !["--for", "--key", "--wait"].includes(argv[i - 1]))) throw new Error("usage: stop [receiptId] [--for <message-id>|none] [--key <k>] [--json]");
+  return stopAnswer(await act(STOP_ID, ...(receipt ? [JSON.stringify({ receipt })] : []), ...argv));
 }
 
 // #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
@@ -4378,6 +4398,7 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+          stop [receiptId]   (ends your own act under way, where you are; nothing else starts)
           say "<text>" [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
           (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
 owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
@@ -4517,7 +4538,7 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
+const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
@@ -4535,7 +4556,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const fn = commands[cmd];
   if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;
-  try { argv = ["act", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
+  try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null;
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
