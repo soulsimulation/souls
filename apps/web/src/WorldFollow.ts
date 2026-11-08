@@ -131,6 +131,8 @@ export class WorldFollow {
   }
   /** #1316: true once the viewer pulled the camera out: it keeps their view, and occlusion never moves it. */
   get held(){return this.decoupled;}
+  /** #1317: the offset the viewer asked for (the camera trace's desired pose), or null before the first frame. */
+  get desired():THREE.Vector3|null{return this.requested;}
   private decoupled=false;
   /** #1316: what moved the camera on the last frame, and with what, for the camera trace (#1317). */
   rule:{name:'start'|'held'|'user'|'collision'|'opening'|'search'|'glide'|'speed-cap';blocked?:boolean;reach?:number;cap?:number}={name:'start'};
