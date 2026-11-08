@@ -1,5 +1,5 @@
-// #1323 review finding 1: a recovery after the repair adoption must not lose it. The host moves its recovery baseline past
-// the adoption at once, and the fold accepts the fact over an older baseline too, so a rung 2 or 3 always comes out under
+// #1323 review finding 1: a recovery after the repair adoption must not lose it. The recovery baseline is still the one from
+// before the adoption until the next snapshot, and the fold accepts the fact over it, so a rung 2 or 3 always comes out under
 // the rules the header names, and a later boot reaches the same world.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,10 +36,13 @@ test('a fault the ladder rewinds, just after the adoption, keeps the repair rule
   let live;
   { const db = new Db(path), h = new WorldHost(db, reader, seed, 1e9, worldId, {durableClockV1: true}); h.recoveryForEdge = true; h.boot();
     assert.ok(await accept(h, h.adoptSoulsRepairV1('operator:souls-repair-default')));
-    // the first ticks after the adoption fault with a rule the ladder can't refuse: rung 2 has nothing to drop, so rung 3
-    plan.at = h.engine.world.tick + 2; plan.fault = () => [{code: 'support.floating', message: 'forced', subjects: [souls[0].entity_id]}];
+    // the very first tick after the adoption faults, with a rule the ladder can't refuse, before any snapshot has moved the
+    // baseline past the adoption (the boot's, from tick 40): rung 2 has nothing to drop, so rung 3 re-applies the adoption
+    plan.at = h.engine.world.tick + 1; plan.fault = () => [{code: 'support.floating', message: 'forced', subjects: [souls[0].entity_id]}];
     await run(h, 300);
     assert.equal(h.clockAvailable, true, 'no halt'); assert.ok((rungs(h).rewind ?? 0) + (rungs(h).contained ?? 0) >= 1, JSON.stringify(h.glitches));
+    const recipes = db.db.prepare("SELECT payload FROM events WHERE world_id=? AND author='world:recovery'").all(worldId).map((r) => JSON.parse(r.payload).recovery);
+    assert.ok(recipes.some((r) => r.events?.some((e) => e.payload?.soulsRepairAdoptV1)), 'a recovery went back past the adoption and re-applied it: ' + JSON.stringify(recipes.map((r) => ({n: r.events.length, kinds: r.events.map((e) => e.kind + ':' + Object.keys(e.payload ?? {}).join('/')), lastRung: r.lastRung, bseq: r.baseline?.seq}))));
     assert.match(h.engine.rulesVersion, REPAIR, 'still under the repair rules after the rewind'); assert.equal(db.world(worldId).rules_version, h.engine.rulesVersion);
     live = head(h); h.stop(); db.close(); }
   for (const crash of [false, true]) {

@@ -416,10 +416,10 @@ export class WorldHost {
       const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(expected.toRulesVersion,this.worldId,header);
       if(r.changes!==1)throw Error('souls-repair-adoption.header-moved');return true;
     };
-    // the recovery baseline moves past the adoption at once, so no rung 2 or 3 has to re-apply it (it could: the fold allows it)
-    const rebaseline=()=>{if(this.stepFailing||this.bootedFaulted||this.engine.canSnapshot&&!this.engine.canSnapshot())return;try{this.recoveryBaseline=this.captureBody();this.recoveryCapture=null;}catch(e){console.warn('[world] no recovery baseline after the repair adoption yet:',String(e).slice(0,200));}};
+    // A rung 2 or 3 before the next snapshot re-applies this fact over the older baseline, which its fold allows. No eager copy
+    // of the head is taken here: boot keeps one world in memory (the snapshot's text serves as the baseline), and so does this.
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{soulsRepairAdoptV1:expected},guard,journal,
-      resolve:e=>{if(this.engine.rulesVersion===expected.toRulesVersion)rebaseline();this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
+      resolve:e=>{this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
   }
   private stationEraEvent(source:LogEvent):LogEvent|undefined {
     const old=this.stationHistoryV1();if(!old)return undefined;
