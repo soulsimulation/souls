@@ -124,6 +124,8 @@ function body2(kind: Read2, soul: EdgeSoul, q: URLSearchParams): {body: object; 
     return {body: {tick: RW!.mw.world.tick, here: M2.hereFrame(L, soul, {doHere: modern}), ...(modern ? {apiContract: 'eden-edge/1.1'} : {}), ...(read2.debug ? {_debug: read2.debug.fireFacts(L, soul)} : {})}, world: true};
   }
   if (kind === 'observe') return {body: L.observe(soul, new Set((q.get('include') ?? '').split(',').filter(Boolean))) as object, world: true};
+  // #1329 part 4: a search builds far walks on demand (main's navigation): main answers it
+  if (kind === 'capabilities' && q.has('search')) return 'capabilities-search';
   if (kind === 'capabilities') return {body: {tick: RW!.mw.world.tick, ...L.capabilitiesPage(soul, {all: q.get('all') === '1'})}, world: true};
   // view: the caption (?alt=only) only; a picture is drawn by main's one render worker and served from main's memory,
   // and a gaze is an attention write (intents.attend): both main's

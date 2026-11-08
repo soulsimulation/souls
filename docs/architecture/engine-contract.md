@@ -153,8 +153,8 @@ is ignored for a world that has adopted. A factory that already has the rules (`
   refused pose for that one tick.
 - **The one relocation exception.** A `collision.human-static` naming a body that did not move means the world landed on it
   (a god edit past the bridge's own walk-out). There is no pose to go back to, so it stands at the nearest free spot,
-  logged and told to the Soul. Apart from a body a rung 3 finds inside something, below, this is the only time a body
-  changes place without moving there.
+  logged and told to the Soul. Apart from a body a rung 3 finds inside something, and a broken body that quarantine/1
+  holds (below), this is the only time a body changes place without moving there.
 - `step().refusals` reports each one. The host logs it as a `rules` event from `world:refusal`. Replay reads those only to
   compare the count, and a difference is reported, not fatal.
 
@@ -252,11 +252,34 @@ capture waits until the next is due. A snapshot from a clean tick in the stretch
 any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
 placed clears it, and a rung 3 keeps god edits, so it survives a restart until then.
 
-**What still halts:** durability only (`failCheckpoint`, a database that won't write, a clock frontier that can't be
-persisted, a stored baseline that won't restore). Each is named `durability.*`. Without `souls-repair/1`, `haltOnFault` is unchanged.
-A periodic snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt:
-it is skipped and counted at rung `contained` as `durability.snapshot-skipped`, the clock runs on, and the next due
-snapshot is tried (#1368).
+**The ladder's end: quarantine/1 (#1369).** A logged, host-only runtime policy (`runtimePolicy.quarantineV1`, adopted at
+boot after body-step-guard/1; the engine never reads it, so no snapshot binding changes). Under it:
+- When rung 3 can't go back (its baseline won't restore, its kept events won't re-apply, or the pending baseline won't
+  materialize), the host puts back the head it had before rung 2, by reference, and quarantines what the fault named.
+  It stops those bodies' programmes alone (`stopBodiesV1`, `world.quarantined`). It contains the fault's keys, and a body
+  inside something is moved clear once, as rung 3 does. It logs one `quarantineV1` rules event, which a replay applies
+  without reading an invariant. The glitch is rung `contained`, with the restore error as evidence. Everyone else goes on.
+  The quarantined Soul can act again at once: it is never held or refused for the quarantine. The rule a rung 3 went back
+  for stays on the head after that, and a snapshot is taken at once, so a restart never boots from the refused baseline.
+- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies.
+  A fault that names none still stops everything in place, as above.
+- A broken body (`entity.corrupt`: a person with no human state, or any number in its pose or human state that is no
+  finite number) can make every step or the state hash throw while no rule names it. It is found when a step faults,
+  when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
+  own is broken, and its last whole pose if its pose is broken. If no whole pose is on record, it goes to the nearest free
+  spot by the arrival, which is loud: logged, counted and told to its Soul. The event carries the pose, so a replay holds
+  it in the same place. A body that breaks again within a cooldown is not held again: the in-place rung's once-per-cooldown
+  report takes it.
+
+**What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
+persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it
+still halts as before (`recovery.baseline-unusable`). A state that still won't hash after its broken bodies are held halts
+as `engine.unhashable`. Without `souls-repair/1`, `haltOnFault` is unchanged.
+
+A snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt. On the
+periodic path (#1368), the manual `saveSnapshot` and the repair snapshot (#1376), it is skipped and counted at rung
+`contained` as `durability.snapshot-skipped`, and the clock runs on. A manual save answers `pending: true` and logs an
+`unsnappable-head` checkpoint. Other capture faults propagate as before.
 
 ## Conformance
 

@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.3";
+const VERSION = "2.24.5";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -3180,21 +3180,73 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
 }
 
 // say "<text>" [--for <message-id>] [--key <k>]: with --for, the speech is what the owner asked for, so it closes that message too.
-async function say(...input) {
-  // --key only among the trailing flags (with or around --for): "--key" inside speech is words
-  let words = input, key;
-  for (let n = words.length; n >= 2; n = words.length) {
-    if (words[n - 2] === "--key" && key === undefined) { key = keyArg(words[n - 1]); words = [...words.slice(0, n - 2)]; }
-    else if (words[n - 2] === "--for" && n >= 4 && words[n - 4] === "--key" && key === undefined) { key = keyArg(words[n - 3]); words = [...words.slice(0, n - 4), ...words.slice(n - 2)]; }
+// #1354: [--to <name|soulId> [--gesture <g>] [--stand-ok]] turns to them first (face:<soulId>, attention, so it never
+// replaces what the body is doing), speaks, then gestures toward them. Each part is reported; a refused part is never
+// retried, and a refused face or gesture never unsays the speech.
+const SAY_GESTURES = ["nod", "bow", "clap", "cheer", "shake-head", "point"], STANDS_UP = new Set(["bow"]);
+export function sayFlags(words) {
+  // only among the trailing flags: "tell her --to the letter" said unquoted is speech, as "what --for means" is
+  const flags = {}, drop = new Set();
+  if (["--to", "--gesture", "--key"].includes(words.at(-1))) throw new Error(`${words.at(-1)} needs a value`);
+  for (let i = words.length - 1; i >= 0;) {
+    if (words[i] === "--stand-ok") { flags.standOk = true; drop.add(i); i -= 1; }
+    else if (["--to", "--gesture", "--key"].includes(words[i - 1])) {
+      if (flags[words[i - 1].slice(2)] !== undefined) throw new Error(`${words[i - 1]} is given twice`);
+      flags[words[i - 1].slice(2)] = words[i]; drop.add(i).add(i - 1); i -= 2;
+    }
+    else if (words[i - 1] === "--for" && /^(msg_|none$)/.test(words[i])) i -= 2;
     else break;
   }
+  return { ...flags, words: words.filter((_, i) => !drop.has(i)) };
+}
+async function say(...all) {
+  let flags;
+  try { flags = sayFlags(all); } catch (e) { throw new Error(`${e.message}. usage: say "<text>" [--to <name|soulId> [--gesture <g>] [--stand-ok]] [--for <message-id>] [--key <k>]`); }
+  const { to, gesture, standOk, words } = flags, key = flags.key === undefined ? undefined : keyArg(flags.key);
   const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>" [--for <message-id>] [--key <k>]');
+  const usage = 'usage: say "<text>" [--to <name|soulId> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for <message-id>] [--key <k>]';
+  if (!text) throw new Error(usage);
+  if ((gesture || standOk) && !to) throw new Error(`--gesture and --stand-ok go with --to. ${usage}`);
+  if (gesture && !SAY_GESTURES.includes(gesture)) throw new Error(`--gesture is one of ${SAY_GESTURES.join(", ")}. ${usage}`);
+  const target = to ? await faceTarget(to) : null;
+  const faced = target ? await sayPart(target.id ? `face:${target.id}` : null, undefined, target) : undefined;
   const w = await keyedWrite("/v1/edge/say", { text: text.slice(0, 500) }, { key });
-  if (w.unconfirmed) return unconfirmed("speech", w);
+  if (w.unconfirmed) return { ...(faced ? { faced } : {}), ...unconfirmed("speech", w) }; // no gesture after speech the world did not confirm
   const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
-  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: await sayGesture(gesture, target, standOk) } : {}) };
+  return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
+}
+/** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
+async function faceTarget(to) {
+  const r = await call("/v1/edge/capabilities?all=1").catch(() => null), offers = (r?.status === 200 ? r.data?.capabilities ?? [] : []).filter((c) => c.verb === "face" && c.available !== false);
+  const nameOf = (c) => String(c.label ?? "").replace(/^Turn towards /, "").trim(), named = (c) => nameOf(c).toLowerCase();
+  const exact = offers.find((c) => c.id === `face:${to}` || c.target?.id === to);
+  const byName = exact ? [exact] : offers.filter((c) => named(c) === String(to).trim().toLowerCase());
+  if (byName.length === 1) return { id: byName[0].target?.id ?? byName[0].id.slice(5), name: nameOf(byName[0]) || to };
+  if (r?.status !== 200) return { name: to, code: "face.unknown", reason: `Could not read the offers to find ${to}, so the turn was not sent.` };
+  return byName.length ? { name: to, code: "face.ambiguous", reason: `${byName.length} Souls near you are called ${to}: use the soulId (${byName.map((c) => c.target?.id ?? c.id.slice(5)).join(", ")}).` }
+    : { name: to, code: "face.not-offered", reason: `${to} is not near enough to turn to: no face offer names them.` };
+}
+/** One strict act of say's, reported in a line: never retried after a refusal, never fatal to the speech. */
+async function sayPart(capability, params, target) {
+  if (!capability) return { to: target.name, accepted: false, code: target.code, reason: target.reason };
+  try {
+    const d = ok(await call("/v1/edge/act", { body: { capability, ...(params ? { params } : {}), strict: true, clientRef: randomUUID() } }), "act");
+    return d.accepted ? { id: capability, to: target.name, accepted: true, ...(d.receipt?.id ? { receipt: d.receipt.id } : {}) } : { id: capability, to: target.name, accepted: false, code: d.code, reason: d.reason };
+  } catch (e) { return { id: capability, to: target.name, accepted: false, code: "act.error", reason: e.message }; }
+}
+/** The gesture after the speech, toward them. A bow stands a seated or lying Soul up, so it goes only with --stand-ok. A
+ *  name that two Souls near you share would let the world pick either, so then nothing is sent. */
+const DOWN = new Set(["seated", "lying", "sleeping"]);
+async function sayGesture(g, target, standOk) {
+  const id = `${g}:here`;
+  if (target.code === "face.ambiguous") return { id, to: target.name, sent: false, reason: target.reason };
+  if (STANDS_UP.has(g) && !standOk) {
+    const r = await call("/v1/edge/here").catch(() => null), posture = r?.status === 200 ? (r.data?.here ?? r.data)?.me?.posture : undefined;
+    if (!posture || DOWN.has(posture)) return { id, to: target.name, sent: false, reason: posture ? `A ${g} would stand you up (you are ${posture}). Add --stand-ok to ${g} anyway.` : `Could not read your posture, and a ${g} stands a seated Soul up. Add --stand-ok to ${g} anyway.` };
+  }
+  return sayPart(id, { [g === "point" ? "at" : "to"]: target.id ?? target.name }, target);
 }
 
 async function converse(op, arg, ...text) {
@@ -3752,6 +3804,46 @@ export function foldAddressed(st, env, at = Date.now()) {
   return true;
 }
 const addressedView = ({ id, from, soulId, text, at }) => ({ id, from, soulId, text, at, untrusted: true });
+// #1345 (2.24.4): the reflex. Speech the world counts as said to this Soul turns it to the speaker at once, through the
+// offered `face:<soulId>` act, before any model call. The world stays the judge (strict: an id not offered is refused, and
+// nothing else is tried). Never over the agent's own look, turn or face while it holds (the world's LOOK_SECONDS and
+// FACE_SECONDS), never after auto-face:off, at most once per speaker per REFLEX_EVERY_MS, never for this Soul's own speech.
+// Off for the folder with `serve --no-reflex` (back on with `serve --reflex`).
+export const REFLEX_EVERY_MS = 30_000, REFLEX_KEEP = 8;
+export const REFLEX_STALE_MS = 10_000;   // speech replayed after a reconnect is history, not a call to turn now
+/** "30s", "5m", "1h2m" (the world's durationWord) in ms, or null. */
+export function holdMs(word) {
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(String(word ?? "")); if (!m || !word) return null;
+  return ((Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0)) * 60 + Number(m[3] ?? 0)) * 1000;
+}
+/** Pure: the Soul to turn to for one `speech.to-me` line, or null with why not. */
+export function reflexFor(st, env, { me, at = Date.now(), off = false, inFlight = 0 } = {}) {
+  const who = env?.about?.soulId, said = typeof env?.at === "number" ? env.at : Date.parse(env?.at ?? "");
+  if (off) return { skip: "off" };
+  if (env?.kind !== "speech.to-me" || typeof who !== "string" || !who || who === me) return { skip: "not-a-soul" };
+  if (Number.isFinite(said) && at - said > REFLEX_STALE_MS) return { skip: "old" };
+  const busy = attentionHeld(st, { at, inFlight }); if (busy) return { skip: busy };
+  if ((st.reflexed ?? []).some((x) => x.soulId === who && at - (x.t ?? 0) < REFLEX_EVERY_MS)) return { skip: "recent" };
+  return { soulId: who, name: env.about?.name ?? null };
+}
+/** Pure: why the agent's own attention rules a reflex out now (its look, turn or face held or on its way; auto-face off). */
+export function attentionHeld(st, { at = Date.now(), inFlight = 0 } = {}) {
+  return inFlight > 0 || (st.reflexHold ?? 0) > at ? "own-attention" : st.autoFaceOff ? "auto-face-off" : null;
+}
+/** The agent's own attention acts, by id, before the world answers: they hold off a reflex while on their way. */
+export const ATTENTION_ID = /^(look|look-at|turn|turn-to|face)(:|$)/;
+/** Pure: what the world's answer to an act this folder sent says about the agent's own attention. The world's own
+ *  `chosen.holdsFor` when it says; else a heading turn or a look holds 10 s, any other turn or face 30 s (LOOK_SECONDS,
+ *  FACE_SECONDS). `auto-face:off|on` is the setting. */
+export function noteAttention(st, d, at = Date.now()) {
+  const c = String(d?.receipt?.capability ?? d?.capability ?? "");
+  if (c.startsWith("auto-face:off")) { st.autoFaceOff = true; return true; }
+  if (c.startsWith("auto-face:on")) { st.autoFaceOff = false; return true; }
+  if (d?.channel !== "attention") return false;
+  const ms = holdMs(d.chosen?.holdsFor) ?? (/^turn:\d+$/.test(c) || c.startsWith("look") ? 10_000 : 30_000);
+  st.reflexHold = Math.max(st.reflexHold ?? 0, at + ms);
+  return true;
+}
 /** Pure: what a request should hear: anything nobody has heard yet, and anything that came while this request was held, so a
  *  wait and a listen held at the same moment both hear it. A peek looks and leaves it unheard. */
 export function takeAddressed(st, heldFromSeq, { peek = false } = {}) {
@@ -3809,6 +3901,7 @@ export function takePending(st) {
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
     events: shown,
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
+    ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
     ...(st.omitted ? { omitted: st.omitted } : {}),
     ...(st.gap ? { gap: true, gapNote: "The stream had a gap: read here again; some events were not seen." } : {}),
@@ -3951,7 +4044,7 @@ async function serveForeground() {
   st.folder = folderKey(s);
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
 
@@ -3998,6 +4091,27 @@ async function serveForeground() {
       tick();
     }
   }
+  // #1345: turn to whoever speaks to this Soul, at once, through the world's own offered act. Never awaited by the stream.
+  function reflex(env) {
+    const r = reflexFor(st, env, { me: s.soul, off: load().reflex === false, inFlight: attentionInFlight });
+    if (!r.soulId) { if (r.skip !== "not-a-soul") log(`reflex: not turning (${r.skip})`); return; }
+    const at = Date.now(), entry = { soulId: r.soulId, name: r.name, at: new Date(at).toISOString(), accepted: null, read: false, t: at };
+    st.reflexed = [...(st.reflexed ?? []).filter((x) => Date.now() - (x.t ?? 0) < REFLEX_EVERY_MS * 4), entry].slice(-REFLEX_KEEP);
+    const ref = randomUUID();
+    gated(() => {
+      // asked again at the moment it would go: an agent's look or turn queued ahead of it wins
+      const busy = attentionHeld(st, { inFlight: attentionInFlight }) ?? (load().reflex === false ? "off" : null);
+      return busy ? { skipped: busy } : worldOnce(`${world}/v1/edge/act`, { method: "POST", headers: { ...auth, "idempotency-key": ref }, timeoutMs: 15_000, body: { capability: `face:${r.soulId}`, clientRef: ref, strict: true } });
+    })
+      .catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }))
+      .then((a) => {
+        if (a.skipped) { st.reflexed = st.reflexed.filter((x) => x !== entry); log(`reflex: not turning (${a.skipped})`); persist(); return; }
+        entry.accepted = a.status === 200 && a.data?.accepted === true;
+        if (!entry.accepted) { entry.code = a.data?.code ?? codeOf(a.data) ?? `http-${a.status}`; log(`reflex: face ${r.soulId} not taken (${entry.code}); not retried`); }
+        else log(`reflex: faced ${r.name ?? r.soulId}`);
+        persist();
+      });
+  }
   // The world's own classified stream names what is said to this Soul, by its rule (speech.to-me); this client doesn't repeat that rule.
   async function addressedLoop() {
     let attempt = 0, code;
@@ -4025,7 +4139,7 @@ async function serveForeground() {
             if (f.id) st.addressedCursor = f.id;
             if (f.event !== "speech.to-me") continue;
             let env; try { env = JSON.parse(f.data); } catch { continue; }
-            if (foldAddressed(st, env)) woke = true;
+            if (foldAddressed(st, env)) { woke = true; reflex(env); }
           }
           if (woke) { persist(); wake(); }
         }
@@ -4046,6 +4160,12 @@ async function serveForeground() {
     // A response cut off partway is a world that did not answer, not a reason for this process to die.
     const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const repeatable = m.method === "GET" || m.headers?.["idempotency-key"];
+    // #1345: the agent's own look, turn or face holds off a reflex from the moment it is asked, not only once answered
+    const attending = m.method === "POST" && routeOf(m.url) === "/v1/edge/act" && ATTENTION_ID.test(String(m.body?.capability ?? ""));
+    if (attending) attentionInFlight++;
+    try { return await forwardOnce(m, pathOf, repeatable, once); } finally { if (attending) attentionInFlight--; }
+  }
+  async function forwardOnce(m, pathOf, repeatable, once) {
     const r = HELD_PATH.test(pathOf) ? await once() : await gated(async () => {
       let a = await once();
       for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) { busyWaited++; await pause(statedJitter(a.retryAfterMs ?? 1_000)); a = await once(); }
@@ -4054,6 +4174,7 @@ async function serveForeground() {
     const p = pathOf.split("?")[0], inboxWrite = /^\/v1\/edge\/inbox\/([^/]+)\/(ack|result)$/.exec(p);
     if (r.status >= 200 && r.status < 300) {
       if (r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); persist(); }
+      if (p === "/v1/edge/act" && r.data?.accepted === true && noteAttention(st, r.data)) persist();
       if (inboxWrite) {
         const x = st.messages.find((y) => y.id === decodeURIComponent(inboxWrite[1]));
         if (x) { x.acked = true; if (inboxWrite[2] === "result") x.closed = true; persist(); }
@@ -4282,9 +4403,14 @@ async function serveForeground() {
 // serve [--status|--stop]: start the detached process for this folder, or ask it how it is, or end it.
 async function serve(...args) {
   if (args[0] === "--foreground") return serveForeground();
+  // the reflex setting stays with the folder; a serve already up reads it at the next speech
+  const flags = args.filter((a) => a === "--no-reflex" || a === "--reflex");
+  args = args.filter((a) => a !== "--no-reflex" && a !== "--reflex");
+  if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
+  if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
   if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, next: `${CLI} serve` };
   if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
-  if (args.length) throw new Error("usage: serve [--status|--stop]");
+  if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const running = await askServe({ op: "status" });
   if (running?.serving) return { ...running, alreadyServing: true };
@@ -4378,12 +4504,12 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>" [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+          say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
           (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
 owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
-resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
+resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
 ${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
