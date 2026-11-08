@@ -285,3 +285,18 @@ test('PC10 (#689): "stand up / stop what I am doing" from a member is the safe s
   assert.equal(r.op.result, 'stopped'); assert.equal(w.f.host.engine.world.entities[r.beam].support?.kind, 'ground');
   for (const s of [Ada, Bo]) assert.equal(w.f.host.engine.world.entities[s.entityId].human.grip ?? null, null, `${s.name}'s hands are free`);
 });
+
+test('#1381 review: during a shared carry, stop:current is refused naming stop-carry, and the words "stop" stay the safe shared stop', {timeout: 300000}, async (t) => {
+  const w = await world(t), {Ada, Bo} = w.souls;
+  let byId = null, host = null, guest = null;
+  const r = await carry(w, t, () => false, async (c) => {
+    if (host || c.phase !== 'move' || c.n < 40) return;
+    byId = await act(w, Ada, {capability: 'stop:current'});
+    host = ok(await act(w, Ada, {capability: 'stop'})); guest = ok(await act(w, Bo, {capability: 'stop what you are doing'}));
+  });
+  assert.equal(byId.accepted, false); assert.equal(byId.code, 'act.shared'); assert.equal(byId.did_you_mean?.[0]?.id, `stop-carry:${r.op.id}`);
+  assert.equal(host.receipt.capability, `stop-carry:${r.op.id}`); assert.equal(guest.receipt.capability, `stop-carry:${r.op.id}`);
+  assert.equal(stops(w).length, 1, 'one stop event');
+  for (const [s, rc] of r.crew) { const x = read(w, s, rc); assert.equal(x.phase, 'completed'); assert.equal(x.code, 'shared.stopped'); }
+  assert.equal(r.op.result, 'stopped');
+});

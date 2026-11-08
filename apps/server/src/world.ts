@@ -218,6 +218,16 @@ export class WorldHost {
   // ------------------------------------------------------------ boot
   /** Load the latest snapshot and fast-forward through later log events, or start from genesis. */
   boot(): { from: 'genesis' | 'snapshot'; replayed: number } {
+    try { return this.bootV1(); }
+    catch (error) {   // #1379: a fallback that fails too names both: the replay's error, caused by the first unrestorable snapshot
+      const first = this.bootSkippedV1?.[0];
+      if (first) throw new Error(`boot.fallback-failed: snapshot tick ${first.tick} would not restore (${first.reason.slice(0, 160)}); the fallback failed: ${String(error).slice(0, 300)}`, { cause: first.error });
+      throw error;
+    }
+  }
+  private bootSkippedV1: {tick: number; seq: number; reason: string; error: unknown}[] | null = null;
+  private bootV1(): { from: 'genesis' | 'snapshot'; replayed: number } {
+    this.bootSkippedV1 = null;
     const tBoot = performance.now(); bootPhase('boot:restore');
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null;
     let w = this.db.world(this.worldId);
@@ -230,17 +240,30 @@ export class WorldHost {
     if(clock&&!this.durableClockV1)throw new Error('clock-frontier.reader-required');
     if(clock&&this.factory.canReplayHistory?.(clock.rulesVersion)===false)throw new Error('clock-frontier.rules-incompatible');
     const tRead = performance.now();
-    const snapRow = this.db.latestSnapshotText(this.worldId);
-    const snap = snapRow ? { ...snapRow, body: JSON.parse(snapRow.text) as unknown } : null;
-    const readMs = performance.now() - tRead;
+    let snapRow = this.db.latestSnapshotText(this.worldId);
     // Snapshot rejection is not permission to reinterpret history from genesis.
     // Check both durable identities before constructing or stepping any engine.
-    for(const version of [w.rules_version,...(snap?[snap.rulesVersion]:[])])
+    for(const version of [w.rules_version,...(snapRow?[snapRow.rulesVersion]:[])])
       if(this.factory.canReplayHistory?.(version)===false)throw new Error(`history rules are incompatible with the configured engine: ${version} -> ${this.factory.rulesVersion}`);
+    // #1379: a snapshot that won't restore (or decode) is skipped, loudly, for the next older one, then genesis; the log is
+    // the authority and replays from there. Rules the engine can't replay still refuse the boot above and below.
+    const skipped = this.bootSkippedV1 = [] as {tick: number; seq: number; reason: string; error: unknown}[];
+    let snap: (NonNullable<typeof snapRow> & {body: unknown}) | null = null, restored: Engine | null = null;
+    while (snapRow && (snapRow.rulesVersion === this.factory.rulesVersion || this.factory.canRestoreSnapshot?.(snapRow.rulesVersion))) {
+      if(this.factory.canReplayHistory?.(snapRow.rulesVersion)===false)throw new Error(`history rules are incompatible with the configured engine: ${snapRow.rulesVersion} -> ${this.factory.rulesVersion}`);
+      try { const body = JSON.parse(snapRow.text) as SnapshotBody; restored = this.factory.restore(body.runtime); snap = { ...snapRow, body }; break; }
+      catch (error) {
+        skipped.push({ tick: snapRow.tick, seq: snapRow.seq, reason: String(error).slice(0, 300), error });
+        console.error(`[world] the snapshot at tick ${snapRow.tick} (seq ${snapRow.seq}) will not restore; trying an older one, then genesis:`, String(error).slice(0, 300));
+        snapRow = this.db.latestSnapshotText(this.worldId, snapRow.tick);
+      }
+    }
+    if (!snap) snapRow = null;
+    const readMs = performance.now() - tRead;
     let from: 'genesis' | 'snapshot' = 'genesis';
-    if (snap && (snap.rulesVersion === this.factory.rulesVersion || this.factory.canRestoreSnapshot?.(snap.rulesVersion))) {
+    if (snap && restored) {
       const body = snap.body as SnapshotBody;
-      this.engine = this.factory.restore(body.runtime);
+      this.engine = restored;
       for (const m of body.minds) this.addMind({ ...m, agenda: m.agenda ?? [], agendaPos: m.agendaPos ?? 0, pending: m.pending ?? null });
       this.extra = body.extra ?? {};
       this.counts = body.counts ?? {};
@@ -315,6 +338,8 @@ export class WorldHost {
       this.seq = e.seq;
     }
     verifyClock();
+    for (const k of skipped) this.recordGlitch('recovery', k.error, { rule: 'boot.snapshot-unrestorable', tick: k.tick, evidence: { tick: k.tick, seq: k.seq, from, reason: k.reason } });
+    if (skipped.length) this.snapshotSoon ??= 'a snapshot would not restore';   // #1379: the next boot needn't fall back again
     if(replayDiffered)this.recordGlitch('recovery',new Error('clock-frontier.replay-differs'),{rule:'clock-frontier.replay-differs',tick:this.engine.world.tick,evidence:{}});
     if(this.repairRules)this.lastRewindTick=this.db.lastRewindTick(this.worldId,this.engine.world.tick-REWIND_COOLDOWN_TICKS)??-Infinity;
     this.factory.validateHistoryHead?.(this.engine,this.db.world(this.worldId)!.rules_version);
@@ -774,6 +799,14 @@ export class WorldHost {
     this.assertClockReady();
     const current:AcceptanceGuard=()=>{checkAcceptanceGuard(guard);if(kind==='decision'){const p=payload as DecisionPayload;if(!this.ownLectureRosterV1(p.soulId,p.steps))throw new StaleIntentAttempt();}return true;};
     return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard:current, journal, resolve, reject }));
+  }
+
+  /** #1327: an input whose own records (an edge act's receipt, the receipts it replaces) are written by `journal` in the
+   * event's acceptance transaction: both exist or neither does. No guard beyond the journal itself; a journal that throws
+   * refuses the input and the promise rejects. Rejects, never hangs, when the clock fails before or at its drain. */
+  enqueueJournaled(kind: EventKind, author: string, payload: unknown, journal: AcceptanceJournal): Promise<LogEvent> {
+    this.assertClockReady();
+    return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard: () => true, journal, resolve, reject }));
   }
 
   /** Atomic object/body producer: commit its side effects only after the real
