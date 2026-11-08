@@ -349,7 +349,7 @@ export class Intents {
   private capabilityWould(soul: EdgeSoul, cap: EdgeCapability, asked: string, params: Record<string, unknown>, note: string, extra?: Record<string, unknown>): Record<string, unknown> {
     const P = new Perception(this.L, soul), at = this.L.coreA.targetPoint(soul, cap);
     // #1329 part 3: a ride's rider is in it: no walk to it (it was measured to the ride's place centre, 27.6 m from the basket aloft)
-    const carrier = cap.verb === 'object' && cap.object ? this.L.rideCarrier(cap.object) : undefined, aboard = !!carrier && this.L.aboard(soul.entityId)?.id === carrier;
+    const carrier = cap.verb === 'object' && cap.object ? this.L.rideCarrier(cap.object) : undefined, ride = carrier ? this.L.aboard(soul.entityId) : null, aboard = !!ride && ride.id === carrier && ride.riderPhase !== 'boarding';
     return {ok: true, would: {capability: cap.id, label: cap.label, available: cap.available, ...(cap.blocked ? {blocked: cap.blocked} : {}), ...(Object.keys(params).length ? {params} : {}), channel: cap.verb === 'face' ? 'attention' : 'body',
       ...resolvedParts(this.L,soul,cap,asked), ...(note ? {resolved: note + (extra?.with ? `. Act it with these params (act ${cap.id} '${JSON.stringify(extra)}'), or act the same words; an act without "with" is solo.` : '')} : {}), ...(aboard ? {distance: 0, eta: durationWord(0), route: 'aboard'} : at && P.pos ? this.eta(P, at) : {})}};
   }

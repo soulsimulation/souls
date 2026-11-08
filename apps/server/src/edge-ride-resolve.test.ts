@@ -17,15 +17,17 @@ async function setup(t: {after(fn: () => void): void}) {
   await accept<unknown>(f.host, new LivingWorld(f.host).install(['Owners drive their Souls.'])); await invite(f, 'rider');
   const row = await accept<{id: string; entity_id: string}>(f.host, f.souls.create('dev:rider', {name: 'Rider', description: '1329 part 3 fixture'}));
   await accept<unknown>(f.host, f.host.installCarrierV1({id: 'eden-balloon', def: 'hot-air-balloon', label: 'Balloon', at: [-20, -9], yaw: Math.PI, route: 'commons-hop', waitSeconds: 15}));
-  const token = 'sim_RIDE_RESOLVE_FIXTURE'; f.db.setSoulToken(row.id, hashToken(token), 'synthetic');
+  await invite(f, 'walker');
+  const other = await accept<{id: string; entity_id: string}>(f.host, f.souls.create('dev:walker', {name: 'Walker', description: '1329 part 3 fixture, on the ground'}));
+  const token = 'sim_RIDE_RESOLVE_FIXTURE', otherToken = 'sim_RIDE_RESOLVE_WALKER'; f.db.setSoulToken(row.id, hashToken(token), 'synthetic'); f.db.setSoulToken(other.id, hashToken(otherToken), 'synthetic');
   const ledger = new EdgeLedger(f.host, f.db), app = new Hono();
   const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, soul: edgeSoulResolver(f.host, f.souls, c => c.req.header('authorization')?.replace(/^Bearer\s+/i, '')), ledger});
   t.after(() => { comms.close(); f.host.stop(); f.db.close(); });
   comms.objects.create({id: 'ride-test-balloon', kind: 'ride', name: 'Balloon', placeId: 'world', params: {carrier: 'eden-balloon'}});
-  const call = async (path: string, body?: unknown) => { const r = await accept(f.host, Promise.resolve(app.request(path, body === undefined ? {headers: {authorization: 'Bearer ' + token}} : {method: 'POST', headers: {authorization: 'Bearer ' + token, 'content-type': 'application/json'}, body: JSON.stringify(body)}))); return await r.json() as any; };
+  const call = async (path: string, body?: unknown, tok = token) => { const r = await accept(f.host, Promise.resolve(app.request(path, body === undefined ? {headers: {authorization: 'Bearer ' + tok}} : {method: 'POST', headers: {authorization: 'Bearer ' + tok, 'content-type': 'application/json'}, body: JSON.stringify(body)}))); return await r.json() as any; };
   const ent = () => f.host.engine.world.entities as Record<string, any>, balloon = () => ent()['eden-balloon'].carrier;
   const tick = (n: number, until?: () => boolean) => { for (let i = 0; i < n && !until?.(); i++) f.host.tickOnce(); };
-  return {f, row, ledger, comms, call, balloon, tick, actor: row.entity_id};
+  return {f, row, ledger, comms, call, balloon, tick, actor: row.entity_id, walker: other.entity_id, otherToken};
 }
 
 const rideIds = (r: any) => [r.resolve.would, ...(r.resolve.candidates ?? [])].filter(Boolean).filter((c: any) => (c.capability ?? c.id) === 'object:ride-test-balloon:start');
@@ -72,4 +74,11 @@ test('I6: a rider is 0 m from its ride; anyone else is measured to the carrier w
   q.balloon().departAtTick = q.f.host.engine.world.tick; q.tick(400, () => q.balloon().phase === 'aloft'); assert.equal(q.balloon().phase, 'aloft');
   q.tick(200);
   await check('aloft');
+  q.tick(600, () => q.balloon().phase !== 'aloft'); assert.equal(q.balloon().phase, 'aloft');
+  // the Soul on the ground: measured to the basket where it flies now, which has left its boarding point
+  const w = (await q.call('/v1/edge/resolve', {capability: 'object:ride-test-balloon:join'}, q.otherToken)).resolve.would;
+  const me2 = pos(q, q.walker), now = pos(q, 'eden-balloon'), toNow = Math.hypot(now[0] - me2[0], now[1] - me2[1]), toHome = Math.hypot(basket[0] - me2[0], basket[1] - me2[1]);
+  const flown = Math.hypot(now[0] - basket[0], now[1] - basket[1]);
+  assert.ok(flown > 5, `the balloon has left its boarding point: ${flown.toFixed(1)} m (walker ${toNow.toFixed(1)} m from it now, ${toHome.toFixed(1)} m from its boarding point)`);
+  assert.ok(typeof w?.distance === 'number' && w.distance >= toNow - 3 && Math.abs(w.distance - toNow) < Math.abs(w.distance - toHome) && w.route !== 'aboard', `walker join distance ${w?.distance} vs ${toNow.toFixed(1)} m to the basket now: ${JSON.stringify(w)}`);
 });
