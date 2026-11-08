@@ -5,7 +5,7 @@
 // no guards. Every command is one or two HTTP calls to the world and prints JSON.
 // Private state (world URL, Soul id, bearer token) lives in a `.souls/` home, or .eden-agent.json in a legacy folder.
 
-import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { createHash, randomUUID, randomBytes } from "node:crypto";
@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.0";
+const VERSION = "2.24.6";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -3140,27 +3140,40 @@ async function stopListen() {
   calm(`listen: took over from pid ${holder.pid}`);
 }
 
-// listen [--after <id>] [--once] [--take]: hold one long-poll open (this is also the Soul's "agent is
+// listen [--after <id>] [--once] [--take] [--follow]: hold one long-poll open (this is also the Soul's "agent is
 // listening" presence) and exit as soon as the owner has written, printing every waiting message.
+// #1359 --follow: never exit on a wake. Each wake is one JSON line on stdout (a host that streams a running command's lines,
+// such as Claude Code's Monitor tool, turns each into a notification), and the cursor moves past what was printed.
 async function listen(...args) {
-  let after, once = false, take = false;
+  let after, once = false, take = false, follow = false;
+  const usage = "usage: listen [--after <message-id>] [--once] [--take] [--follow]";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--after") after = args[++i];
     else if (args[i] === "--once") once = true;
     else if (args[i] === "--take") take = true;
-    else throw new Error("usage: listen [--after <message-id>] [--once] [--take]");
+    else if (args[i] === "--follow") follow = true;
+    else throw new Error(usage);
   }
+  if (follow && once) throw new Error(`--follow never ends on a message and --once never waits: pick one. ${usage}`);
+  let wakes = 0;
+  const emit = (line) => { writeSync(1, JSON.stringify(followLine({ ...line, wake: ++wakes })) + "\n"); };
+  const ended = (why, extra = {}) => { writeSync(1, JSON.stringify(followLine({ ended: why, ...extra })) + "\n"); return ""; };
   // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone, unless it says --take.
   if (!once) {
     if (take) await stopListen();
     const lock = takeListenLock();
     if (!lock.ok) return alreadyListening(lock.holder);
   }
+  if (follow) {
+    for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.prependOnceListener(sig, () => ended(sig === "SIGTERM" ? "stopped (SIGTERM: listen --take, or the host stopped it)" : `stopped (${sig})`, { next: `${CLI} listen --follow, if this Soul should keep listening here` }));
+    process.stderr.write(`listen --follow: listening; one line per wake${after ? `, after ${after}` : ""}\n`);
+  }
   let attempt = 0, lastCode;
   for (;;) {
     const q = new URLSearchParams({ timeoutMs: once ? "0" : "50000", ...(after ? { after } : {}) });
     const r = await call(`/v1/edge/inbox/listen?${q}`, { timeoutMs: 60_000, recoverRead: !once, retry: false, slowedNext: once ? undefined : "listen" });
-    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return alreadyListening(holder); }
+    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return follow ? ended("taken over", alreadyListening(holder)) : alreadyListening(holder); }
+    if (follow && r.status === 409) return ended("superseded", { why: r.data?.error?.message ?? "a newer listen for this Soul took over", next: "another listen is open for this Soul; this one has ended" });
     if (r.status === 0 || r.status === 429 || r.status >= 500) {
       const code = codeOf(r.data) ?? `http-${r.status}`;
       const ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -3170,11 +3183,21 @@ async function listen(...args) {
       await pause(ms);
       continue;
     }
-    const d = ok(r, "listen");
+    let d;
+    try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
     attempt = 0; lastCode = undefined;
     const messages = messagesOf(d).filter((m) => m.id !== after), brief = messages.length || d.addressed?.length || d.plan ? briefNow() : {};
     heard(messages);
     const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
+    if (follow) {
+      if (messages.length || d.addressed?.length || d.plan) {
+        emit({ messages, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older,
+          next: messages.length ? `ack each (ack <id> "Got it: …"), then do them in order; result <id> done|failed "…" unless the answer says closed. This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" });
+        if (messages.length) after = messages.at(-1).id;
+      }
+      await sleep(50);
+      continue;
+    }
     if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
@@ -3182,6 +3205,20 @@ async function listen(...args) {
     }
     await sleep(50);
   }
+}
+
+/** #1359: one --follow line fits a notification: at most FOLLOW_MAX characters. Long texts are shortened first, then the
+ *  memory brief goes, then older messages and speech; `listen --once` has them all, since nothing here acks a message. */
+export const FOLLOW_MAX = 2000;
+export function followLine(line, max = FOLLOW_MAX) {
+  const size = (o) => JSON.stringify(o).length, short = (list) => list?.map((m) => (String(m.text ?? "").length > 300 ? { ...m, text: m.text.slice(0, 300) + "…", textShortened: true } : m));
+  let o = { ...line, ...(line.messages ? { messages: short(line.messages) } : {}), ...(line.addressed ? { addressed: short(line.addressed) } : {}) };
+  if (size(o) > max && o.brief !== undefined) { const { brief, ...rest } = o; o = { ...rest, briefOmitted: true }; }
+  for (const k of ["addressed", "messages"]) while (size(o) > max && o[k]?.length > 1) o = { ...o, [k]: o[k].slice(1), [`${k}Omitted`]: (o[`${k}Omitted`] ?? 0) + 1 };
+  if (size(o) > max) { const { brief, stillOpen, ...rest } = o; o = { ...rest, ...(brief !== undefined ? { briefOmitted: true } : {}) }; }
+  if (size(o) > max && typeof o.next === "string") o = { ...o, next: o.next.slice(0, Math.max(40, o.next.length - (size(o) - max) - 1)) + "…" };
+  for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => ({ ...m, text: String(m.text ?? "").slice(0, 80) + "…", textShortened: true })) };
+  return o;
 }
 
 /** The owner's card holds 140 characters. A longer line is cut at a word and says so; it never costs the agent a retry. */
@@ -4220,7 +4257,7 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
           say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
+owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
