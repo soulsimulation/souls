@@ -114,7 +114,7 @@ function countFocusMiss(mine: Map<string, unknown> | undefined, kept: {tick: num
 }
 const OPEN: EdgeReceipt['phase'][] = ['waiting', 'started'];
 /** #1381: the explicit stop of the act under way, and the words that mean it while an act is open. */
-const STOP_CURRENT = 'stop:current', STOP_WORDS = /^(?:please\s+)?(?:stop|pause|halt|cancel|wait)(?:\s+(?:it|that|now|please|what\s+(?:i'?m|you'?re|i\s+am|you\s+are)\s+doing|the\s+(?:act|action)))*[.!]*$/i;
+const STOP_CURRENT = 'stop:current', STOP_WORDS = /^(?:please\s+)?(?:stop|pause|halt|cancel|wait)(?:,?\s+(?:stop|pause|it|that|now|please|what\s+(?:i'?m|you'?re|i\s+am|you\s+are)\s+doing|the\s+(?:act|action)))*[.!]*$/i;
 /** #1272: acts that go on over time and do nothing new when asked again. Answers, stands and hand acts do something each time. */
 const REPEATABLE = new Set(['walk', 'jog', 'run', 'stroll', 'go-near', 'hang-out', 'wander', 'swim', 'sit', 'sit-ground', 'lie', 'nap', 'rest', 'read']);
 /** An object whose place is not known: ranked after everything placed (listed only at green, if the page has room). */
@@ -591,7 +591,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #435 (W068): whether another Soul's search of the same place ran while this one did (read from the receipts, so any
    *  process that answers outcomes sees the same). */
   private searchOverlapped(r: {capability: string; soulId: string; acceptedTick: number; endedTick?: number | null}): boolean {return !!this.db.db.prepare('SELECT 1 FROM edge_receipts_v1 WHERE world_id=? AND capability=? AND soul_id<>? AND accepted_tick<=? AND (ended_tick IS NULL OR ended_tick>=?) LIMIT 1').get(this.host.worldId, r.capability, r.soulId, r.endedTick ?? 2 ** 31, r.acceptedTick);}
-  openReceipts(soulId: string): EdgeReceipt[] {return this.rows("soul_id=? AND phase IN ('waiting','started') ORDER BY accepted_tick", soulId).map(r => this.view(r));}
+  openReceipts(soulId: string): EdgeReceipt[] {return this.rows("soul_id=? AND phase IN ('waiting','started') ORDER BY accepted_tick, rowid", soulId).map(r => this.view(r));}
   private insert(soul: EdgeSoul, capability: string, phase: EdgeReceipt['phase'], clientRef?: string, keepActivity = false, {seatHeld, ...detail}: Record<string, unknown> = {},contentParams:Record<string,unknown>={},receiptId?:string): EdgeReceipt {
     const id = receiptId??'r_' + randomUUID(), tick = this.host.engine.world.tick,content=['read','write','use-computer','listen','paint','craft','post-letter'].includes(capability.split(':')[0])?outcomeParams(contentParams):{};
     // PC05 (#684, PC02 §3): a body act of a member of a running shared operation is refused, never a replacement
@@ -1254,7 +1254,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const objs = !focus || ride || focus.verbs.has('object') ? undefined : focusObjects(focus);
     if (!focus || ride || focus.verbs.has('object') || objs!.size) {const outer = this.carrierPass; this.carrierPass = outer ?? {}; try {for (const p of this.providers) try {caps.push(...p(soul, objs, this.objectPlaces));} catch {/* a provider fault hides only its own entries */}} finally {this.carrierPass = outer;}}
     // #1381: stop:current is offered only while this Soul has an act open; its label names that act
-    {const open = this.openReceipts(soul.soulId).at(-1); if (open) caps.unshift({id: STOP_CURRENT, verb: 'stop', label: `Stop what you are doing now (${open.capability}); you stay as you are, nothing else starts`, available: true, params: {receipt: {type: 'string', maxLength: 100, optional: true, description: 'stop only this act (its receipt id)'}}});}
+    {const open = this.openReceipts(soul.soulId).at(-1); if (open) {
+      const no = this.together.sharedRunning(soul.soulId) ? {code: 'act.shared', reason: 'A shared carry is under way; its stop-carry offer stops it safely.'} : ride ? stepping ?? this.rideStandRefusal(soul.entityId, caps) : null;
+      caps.unshift({id: STOP_CURRENT, verb: 'stop', label: `Stop what you are doing now (${open.capability}); you stay as you are, nothing else starts`, available: !no, ...(no ? {blocked: {code: no.code, reason: no.reason}} : {}), params: {receipt: {type: 'string', maxLength: 100, optional: true, description: 'stop only this act (its receipt id)'}}});}}
     if (ride && !stepping) {const seated = this.rideStandRefusal(soul.entityId, caps), i = seated ? caps.findIndex(c => c.id === 'stand:here') : -1; if (i >= 0) caps[i] = {...caps[i]!, available: false, blocked: seated!};}
     shapeRigidCapabilities(me, caps, plans as never, {seconds: {type: 'integer', min: 1, max: 600, default: 60}});
     if(me?.body?.motion?.dance||hasDeclaredProfile(me?.body))for(const c of caps){if(!['dance:here','rest:here','nap:here','lie:here'].includes(c.id))continue;const p=plans.get(c.id);if(p){const issue=this.mw.feasibility.canPerform({actor:soul.entityId,label:p.label,steps:p.steps});if(issue){c.available=false;c.blocked={code:issue.code,reason:issue.message};}}}
@@ -1745,7 +1747,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const refuse = (code: string, reason: string, extra?: {retry_after?: number}) => {this.recordRefusal(soul.soulId, 'act', capability, code, reason); return this.withInPlaceAlternative(soul, {accepted: false as const, code, reason, capability, ...extra});};
     if (this.host.stepFailing) return refuse(STEP_FAILING.code, STEP_FAILING.message);
     // #1381: the explicit stop of the act under way, with an honest answer when nothing runs (by id, or by its words while offered)
-    if (asked.trim() === STOP_CURRENT || (STOP_WORDS.test(asked.trim()) && this.openReceipts(soul.soulId).length)) return this.stopCurrent(soul, input.params, clientRef, refuse);
+    // (a member of a running shared carry: its words keep going to the carry's safe shared stop, PC10)
+    if (asked.trim() === STOP_CURRENT || (STOP_WORDS.test(asked.trim()) && this.openReceipts(soul.soulId).length && !this.together.sharedRunning(soul.soulId))) return this.stopCurrent(soul, input.params, clientRef, refuse);
     const askedVerb=asked.split(/[:\s]/)[0]!;const unsupported=askedVerb==='object'?null:this.bodyVerbProblem(soul,askedVerb);if(unsupported)return refuse(unsupported.code,unsupported.reason);
     if (this.faded.has(soul.soulId)) {
       // Reclaim: fall onto feet at a starting place, identity and history intact (C9).
@@ -2259,14 +2262,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const last = this.rows('soul_id=? ORDER BY accepted_tick DESC, rowid DESC LIMIT 1', soul.soulId)[0];
       return stopRefuse('act.none-running', last ? `Nothing to stop: ${last.capability} (${last.receipt_id}) already ${last.phase}${last.ended_tick !== null ? ` at tick ${last.ended_tick}` : ''}.` : 'Nothing to stop: this Soul has not acted yet.');
     }
+    // a shared carry under way (its own receipt, or the stop-carry asked of it): only the shared stop ends it safely
     const shared = this.together.sharedRunning(soul.soulId);
-    if (shared && shared.receipt === target.id) return {...stopRefuse('act.shared', `${target.capability} is a shared carry; stop it with stop-carry:${shared.op}, which lets the others know.`), did_you_mean: [{id: `stop-carry:${shared.op}`, label: 'Ask to stop the shared carry safely'}]};
-    const row = this.rows('receipt_id=?', target.id)[0]!, programId = row.program_id;
+    if (shared) return {...stopRefuse('act.shared', `${target.capability} is a shared carry; stop it with stop-carry:${shared.op}, which lets the others know.`), did_you_mean: [{id: `stop-carry:${shared.op}`, label: 'Ask to stop the shared carry safely'}]};
+    // aboard a ride: the ride owns the body until it is back on the ground (as stand:here: never dropped mid-air)
+    if (this.aboard(soul.entityId)) {const no = this.stepOutRefusal(soul.entityId) ?? this.rideStandRefusal(soul.entityId, this.binds(soul).caps); if (no) return stopRefuse(no.code, no.reason);}
+    const row = this.rows('receipt_id=?', target.id)[0]!, programId = row.program_id, newest = open.at(-1)?.id === target.id;
     const stop = tx(this.db.db, () => {
       this.update(target!.id, {phase: 'failed', code: 'act.stopped', reason: 'Stopped at your request'});
       return this.insert(soul, STOP_CURRENT, 'completed', clientRef, true, {stopped: target!.id});
     });
-    this.pending.delete(soul.soulId);
+    if (newest) this.pending.delete(soul.soulId);
     // the programme it ran (or, for an act still waiting on its decision, whatever that decision starts) stops safely
     try {await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, ...(programId ? {programId} : {}), why: 'act.stopped'});} catch {/* clock not ready: the act is ended; nothing runs for it */}
     this.comms?.fading.touch?.(soul.soulId);
@@ -3006,7 +3012,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   resolveOnDemand(soul: EdgeSoul, text: string, caps: EdgeCapability[], plans: Plans, typos = true): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} {
     const exact = caps.find(c => c.id === text);
     // #1381: "stop", "pause", "cancel" while an act is open mean the act under way (else, as before, stand:here)
-    if (!exact && STOP_WORDS.test(text.trim())) {const stop = caps.find(c => c.id === STOP_CURRENT); if (stop) return {v: {kind: 'alias', cap: stop, note: `${text} is ${STOP_CURRENT} (${stop.label}).`}, caps, plans};}
+    if (!exact && STOP_WORDS.test(text.trim())) {const stop = caps.find(c => c.id === STOP_CURRENT && c.available); if (stop) return {v: {kind: 'alias', cap: stop, note: `${text} is ${STOP_CURRENT} (${stop.label}).`}, caps, plans};}
     if(exact && this.secretOffer(soul,exact))return {v:{kind:'unknown',code:'capability.unknown',reason:'That action is not known here.',didYouMean:[]},caps,plans};
     if(!exact){const discovery=semanticDiscovery(this,soul,text,caps,plans);if(discovery){
       // #849: the one seat the words name was taken: bind it by its exact id (offered on demand when the listing leaves it out)

@@ -29,12 +29,14 @@ test('#1381 S1 S6: a walk under way stops where it is; the walk ends act.stopped
   const {w, req, act, rec, until, body, caps, token} = await world(t);
   assert.ok(!(await caps()).some(c => c.id === 'stop:current'), 'not offered with nothing running');
   const walk = await act(FAR); assert.equal(walk.accepted, true, JSON.stringify(walk));
-  await until(() => rec(walk.receipt.id).phase === 'started' && Math.hypot(body().velocity?.[0] ?? 0, body().velocity?.[2] ?? 0) >= 0 && w.host.engine.programOf(w.soul.entityId) !== null);
+  await until(() => rec(walk.receipt.id).phase === 'started' && w.host.engine.programOf(w.soul.entityId) !== null);
   await w.settle(40);
   const offered = (await caps()).find(c => c.id === 'stop:current');
   assert.ok(offered && offered.available, 'offered while the walk runs'); assert.match(offered!.label, /walk:knoll/);
+  const here = async () => ((await req('/v1/edge/here?include=doHere', token)).data.here?.doHere ?? []) as {id: string}[];
+  assert.ok((await here()).some(c => c.id === 'stop:current'), 'here offers it while the walk runs');
   // resolve: the words mean it while it runs
-  for (const words of ['stop', 'pause', 'stop what you are doing', 'cancel']) {
+  for (const words of ['stop', 'pause', 'stop what you are doing', 'cancel', 'wait, pause']) {
     const r = (await req('/v1/edge/resolve', token, {capability: words})).data.resolve;
     assert.equal(r.would?.capability, 'stop:current', `${words}: ${JSON.stringify(r).slice(0, 300)}`);
   }
@@ -49,6 +51,7 @@ test('#1381 S1 S6: a walk under way stops where it is; the walk ends act.stopped
   assert.equal(rec(walk.receipt.id).phase, 'failed', 'stays stopped');
   assert.ok(['stand', 'walk', 'idle', undefined].includes(body().human?.activity) && body().human?.activity !== 'sit', `posture unchanged in kind (${posture} -> ${body().human?.activity})`);
   assert.ok(!(await caps()).some(c => c.id === 'stop:current'), 'not offered once nothing runs');
+  assert.ok(!(await here()).some(c => c.id === 'stop:current'), 'nor in here');
   // with nothing open, "stop" means what it meant (stand:here)
   assert.notEqual((await req('/v1/edge/resolve', token, {capability: 'stop'})).data.resolve.would?.capability, 'stop:current');
 });
