@@ -15,7 +15,7 @@ const FACES = [{id: 'face:s_bo', verb: 'face', label: 'Turn towards Bo', target:
   {id: 'face:s_cy', verb: 'face', label: 'Turn towards Cy', target: {id: 's_cy', kind: 'soul'}, available: true},
   {id: 'wave:s_bo', verb: 'wave', label: 'Wave to Bo', target: {id: 's_bo', kind: 'soul'}, available: true}];
 
-async function world(t, {caps = FACES, refuse = new Set(), posture = 'standing'} = {}) {
+async function world(t, {caps = FACES, refuse = new Set(), posture = 'standing', sayReply = () => [200, {said: {id: 'sp_1', heardBy: 1}}, {}]} = {}) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-say-to-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
@@ -23,7 +23,8 @@ async function world(t, {caps = FACES, refuse = new Set(), posture = 'standing'}
       seen.push([req.method, url, body]);
       if (url === '/v1/edge/capabilities') return send(200, {capabilities: caps});
       if (url === '/v1/edge/here') return send(200, {here: {me: {posture}}});
-      if (url === '/v1/edge/say') return send(200, {said: {id: 'sp_1', heardBy: 1}});
+      if (url === '/v1/edge/say') {const reply = sayReply(); if (reply === 'drop') return req.socket.destroy(); const [st, j, h] = reply; res.writeHead(st, {'content-type': 'application/json', ...h}); return res.end(JSON.stringify(j));}
+      if (url.startsWith('/v1/edge/operations/')) return send(404, {error: {code: 'not-found'}});
       if (url === '/v1/edge/act') return refuse.has(body.capability) ? send(200, {accepted: false, code: 'gesture.too-far', reason: 'Bo is too far away; go near them first.'})
         : send(200, {accepted: true, channel: body.capability.startsWith('face:') ? 'attention' : 'body', receipt: {id: 'r_' + seen.length, capability: body.capability, phase: 'started'}});
       const m = /^\/v1\/edge\/inbox\/([^/]+)\/result$/.exec(url);
@@ -122,4 +123,42 @@ test('#1328 with #1354: say --to takes --key among its trailing flags and still 
   assert.equal(r.json.faced.accepted, true); assert.equal(r.json.gestured.accepted, true);
   const bad = await cli('say', 'hello', '--to', 'Bo', '--key', 'has space');
   assert.notEqual(bad.code, 0);
+});
+
+// #1358 review (steward-35): speech the world did not confirm sends no gesture; a rerun the world answers from the first
+// speech (same key) does not gesture twice, while a key held from an unconfirmed run still gestures on its rerun.
+test('#1358: no gesture after unconfirmed speech, and none twice for a replayed speech', async t => {
+  let mode = 'lost';
+  const replies = {lost: () => [502, {raw: 'bad gateway'}, {}], replay: () => [200, {said: {id: 'sp_1', heardBy: 1}}, {'idempotent-replay': 'true'}], ok: () => [200, {said: {id: 'sp_1', heardBy: 1}}, {}]};
+  const {seen, cli} = await world(t, {sayReply: () => replies[mode]()});
+  const posts = () => seen.filter(([m]) => m === 'POST').map(([, u, b]) => u === '/v1/edge/act' ? b.capability : u);
+
+  const lost = await cli('say', 'hello', '--to', 'Bo', '--gesture', 'nod');
+  assert.equal(lost.code, 75, lost.err); assert.equal(lost.json.unconfirmed, true); assert.equal(lost.json.faced.accepted, true);
+  assert.equal(lost.json.gestured, undefined); assert.ok(!posts().includes('nod:here'), 'no gesture after speech the world did not confirm');
+
+  mode = 'replay'; seen.length = 0;   // the same command again: the held key, and the world answers from the first speech
+  const held = await cli('say', 'hello', '--to', 'Bo', '--gesture', 'nod');
+  assert.equal(held.code, 0, held.err); assert.equal(held.json.resent, true);
+  assert.deepEqual(posts(), ['face:s_bo', '/v1/edge/say', 'nod:here'], 'the unconfirmed run sent no gesture, so this one does');
+
+  seen.length = 0;   // a rerun of a confirmed speech with its own --key: the world replays it
+  const again = await cli('say', 'hello', '--to', 'Bo', '--gesture', 'nod', '--key', 'k-say-1');
+  assert.equal(again.code, 0, again.err);
+  assert.deepEqual(posts(), ['face:s_bo', '/v1/edge/say'], 'the gesture is not sent twice');
+  assert.equal(again.json.gestured.sent, false); assert.match(again.json.gestured.reason, /already had this speech/);
+
+  mode = 'ok'; seen.length = 0;
+  assert.equal((await cli('say', 'hello', '--to', 'Bo', '--gesture', 'nod', '--key', 'k-say-2')).json.gestured.accepted, true, 'a fresh speech gestures');
+});
+
+// #1361 review (steward-35): the run's own first try was taken but its answer lost; call() retries with the same key and the
+// world replays the first answer. That is this run's speech, not an earlier one: the gesture still goes, once.
+test('#1361: a dropped first try replayed to its retry still gestures once', async t => {
+  let n = 0;
+  const {seen, cli} = await world(t, {sayReply: () => (++n === 1 ? 'drop' : [200, {said: {id: 'sp_1', heardBy: 1}}, {'idempotent-replay': 'true'}])});
+  const r = await cli('say', 'hello', '--to', 'Bo', '--gesture', 'nod');
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(seen.filter(([m]) => m === 'POST').map(([, u, b]) => u === '/v1/edge/act' ? b.capability : u), ['face:s_bo', '/v1/edge/say', '/v1/edge/say', 'nod:here']);
+  assert.equal(r.json.gestured.accepted, true); assert.equal(r.json.gestured.sent, undefined);
 });
