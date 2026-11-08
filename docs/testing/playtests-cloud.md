@@ -44,7 +44,7 @@ Everything is created beside the clone, in its parent directory.
 6. `cloud/compress-shots.mjs` converts every PNG to JPEG (≤ 1024 px, q75) and rewrites `.png` references in text files.
 7. `CLOUD.md` records the server and playtest commits, toolchain, memory and load before and after, and per-step
    timings.
-8. A spec arm's results go through `cloud/publish-scrub.mjs` first (#1131). Then `cloud/secret-guard.sh` scans the results
+8. The results are copied for the branch (`cloud/publish-copy.sh`), and only the copy is checked, so the run's own folder keeps what retention keeps (#1311). A spec arm's copy goes through `cloud/publish-scrub.mjs` first (#1131). Then `cloud/secret-guard.sh` scans the copy
    for token-shaped strings, Soul tokens (`sim_…`) and provider keys included, and refuses to commit if it finds any
    or can't run. Otherwise the
    results are committed under `results/<out-name>/` on `playtest-results` (an orphan branch on first use) and pushed
