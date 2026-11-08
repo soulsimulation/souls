@@ -58,7 +58,7 @@ import type {ContactActuatorIntent,ContactActuatorService} from '../../god/conta
 import type {DoorPassage,DoorPassageRefusal} from '../../god/door-passage.ts';
 import type {PaintingIntent, PaintingService} from '../../art/painting-completion.ts';
 import {humanoidDims} from '../../../../../mars/viewer/engine/bodies/humanoid.ts';
-import {Together, PAIRED, listed, togetherMayOffer, type Prepared, type TogetherPlan} from './together.ts';
+import {Together, PAIRED, SOLO, listed, togetherMayOffer, type Prepared, type TogetherPlan} from './together.ts';
 import {semanticDiscovery, PURPOSE} from '../intents/semantic-discovery.ts';
 import {knownPart} from '../intents/resolved-parts.ts';
 import {Intents,walkWithDestinationWords,walkWithFallback, attentionWords, offeredAttention, type IntentInput} from '../intents/intents.ts';
@@ -118,6 +118,8 @@ const REPEATABLE = new Set(['walk', 'jog', 'run', 'stroll', 'go-near', 'hang-out
 /** An object whose place is not known: ranked after everything placed (listed only at green, if the page has room). */
 const FAR: [number, number] = [1e9, 1e9];
 const WITH_PARAM = {type: 'array', items: 'Soul id or name', optional: true, description: 'Invite Souls near you; each joins only if they accept (shared walk / ride).'};
+/** #1355: the index of a plan's last sit-down step (-1 when none). */
+const lastSit = (steps: Program['steps']): number => {for (let i = steps.length - 1; i >= 0; i--) if (steps[i]!.verb === 'mars:sit' || steps[i]!.verb === 'sit') return i; return -1;};
 type Row = {created_at: number; receipt_id: string; soul_id: string; capability: string; phase: EdgeReceipt['phase']; accepted_tick: number; started_tick: number | null; ended_tick: number | null; code: string | null; reason: string | null; program_id: string | null; client_ref: string | null; plan?: string | null; detail?: string | null};
 const ARRIVAL_FRESH_MS = 10 * 60_000, MAX_DATE_MS = 8.64e15;
 type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string};
@@ -587,11 +589,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  process that answers outcomes sees the same). */
   private searchOverlapped(r: {capability: string; soulId: string; acceptedTick: number; endedTick?: number | null}): boolean {return !!this.db.db.prepare('SELECT 1 FROM edge_receipts_v1 WHERE world_id=? AND capability=? AND soul_id<>? AND accepted_tick<=? AND (ended_tick IS NULL OR ended_tick>=?) LIMIT 1').get(this.host.worldId, r.capability, r.soulId, r.endedTick ?? 2 ** 31, r.acceptedTick);}
   openReceipts(soulId: string): EdgeReceipt[] {return this.rows("soul_id=? AND phase IN ('waiting','started') ORDER BY accepted_tick", soulId).map(r => this.view(r));}
-  private insert(soul: EdgeSoul, capability: string, phase: EdgeReceipt['phase'], clientRef?: string, keepActivity = false, {seatHeld, ...detail}: Record<string, unknown> = {},contentParams:Record<string,unknown>={},receiptId?:string): EdgeReceipt {
+  private insert(soul: EdgeSoul, capability: string, phase: EdgeReceipt['phase'], clientRef?: string, keepActivity = false, {seatHeld, layerOver, ...detail}: Record<string, unknown> = {},contentParams:Record<string,unknown>={},receiptId?:string): EdgeReceipt {
     const id = receiptId??'r_' + randomUUID(), tick = this.host.engine.world.tick,content=['read','write','use-computer','listen','paint','craft','post-letter'].includes(capability.split(':')[0])?outcomeParams(contentParams):{};
     // PC05 (#684, PC02 §3): a body act of a member of a running shared operation is refused, never a replacement
     if (!keepActivity) {const open = this.openReceipts(soul.soulId); for (const old of open) {const busy = this.together.sharedBusyFor(old); if (busy) throw new EdgeError(409, 'shared.busy', busy.reason, {op: busy.op, ...(busy.alternatives ? {alternatives: busy.alternatives} : {})});}}
-    if (!keepActivity) {for (const old of this.openReceipts(soul.soulId)) {const left=this.together.sharedLeave(old);this.update(old.id, left?{phase:'failed',code:left.code,reason:left.reason}:seatHeld&&old.capability.startsWith('sit:')?{phase:'completed',code:SEAT_KEPT,reason:'Still seated: the newer action goes on from the seat.'}:{phase: 'replaced', reason: 'A newer action from this Soul replaced it.'});} afterCommit(this.db.db,()=>this.pending.delete(soul.soulId));}
+    if (!keepActivity) {for (const old of this.openReceipts(soul.soulId)) {if (old.id === layerOver) continue; const left=this.together.sharedLeave(old);this.update(old.id, left?{phase:'failed',code:left.code,reason:left.reason}:seatHeld&&old.capability.startsWith('sit:')?{phase:'completed',code:SEAT_KEPT,reason:'Still seated: the newer action goes on from the seat.'}:{phase: 'replaced', reason: 'A newer action from this Soul replaced it.'});} afterCommit(this.db.db,()=>this.pending.delete(soul.soulId));}
     tx(this.db.db,()=>{this.db.db.prepare('INSERT INTO edge_receipts_v1 (world_id,receipt_id,soul_id,capability,phase,accepted_tick,ended_tick,client_ref,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(this.host.worldId, id, soul.soulId, capability, phase, tick,OPEN.includes(phase)?null:tick, clientRef ?? null, Date.now());
     // The generic read alias can select a real shelf-reading spot. Preserve that
     // server binding for content classification; caller params.target is not it.
@@ -619,6 +621,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (patch.phase && !OPEN.includes(patch.phase)) next.detail = this.setDetail(id, {endedAt: bodyEnd(this, cur.soul_id)});   // strict/1: where the body ended up
     if(patch.phase&&!OPEN.includes(patch.phase))this.finishOutcome(next);});
     if (patch.phase && patch.phase !== cur.phase) this.emit(this.view(next));
+    if (patch.phase && !OPEN.includes(patch.phase) && this.layers.has(id)) queueMicrotask(() => this.resumeUnder(id));
   }
   /** Called only inside the original terminal phase transaction. Replay only reads the immutable result. */
   private finishOutcome(row:Row){if(this.outcomes.read(row.receipt_id))return;const receipt=this.view(row),op=receiptItemOp(this,receipt.id);this.together.onReceipt(receipt);const mind=this.host.minds.get(row.soul_id);if(!mind)return;const soul={soulId:mind.soulId,entityId:mind.entityId,name:mind.name,owner:mind.owner};this.outcomes.terminal(receipt,terminalSnapshot(this,soul,row.capability.split(':')[0]),{...confirmedTogetherEffects(this,receipt,op),...this.signReadEffects(receipt),...this.searchEffects(receipt,soul),...this.juggleEffects(receipt,soul),...this.repairEffects?.(receipt)});this.timeline.note(this.view(row),row.created_at,(tick)=>this.worldClock(tick));this.notifyMail();}
@@ -721,8 +724,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (r.program_id) try {void this.host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId, programId: r.program_id, why: why.code}).catch(() => {/* best effort */});} catch {/* clock not ready */}
     }
   }
-  private onProgram(ev: {id: string; kind: string; code?: string; message?: string}) {
-    if (ev.kind === 'step') return;
+  private onProgram(ev: {id: string; kind: string; code?: string; message?: string; tick?: number; step?: number}) {
+    if (ev.kind === 'step') {if (typeof ev.tick === 'number' && typeof ev.step === 'number' && this.rows("program_id=? AND phase='started' AND capability LIKE 'sit:%'", ev.id).length) {this.stepAt.set(ev.id, {step: ev.step, tick: ev.tick}); if (this.stepAt.size > 256) this.stepAt.delete(this.stepAt.keys().next().value!);} return;}
     const r = this.rows("program_id=? AND phase IN ('waiting','started')", ev.id)[0]; if (!r) return;
     // PC05: a shared operation's programme ended; every member's receipt ends with it
     if (this.together.sharedProgramEnded(r.receipt_id, ev)) return;
@@ -2109,14 +2112,50 @@ export class EdgeLedger implements EdgeLedgerHooks {
     };
     if (issue) {
       // Asleep or mid-step: stop safely first, then start (receipt `waiting`).
-      const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams); commit?.(r.id); remember(r.id);
+      const layer = this.gestureLayer(soul, capability, steps);
+      const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat(),...(layer ? {layerOver: layer} : {})},contentParams); commit?.(r.id); remember(r.id); if (layer) this.layOver(r.id, layer);
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
       if (issue.code === 'program.safe-stop-required') await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
       return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
-    const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams); commit?.(r.id); remember(r.id);
+    const layer = this.gestureLayer(soul, capability, steps);
+    const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat(),...(layer ? {layerOver: layer} : {})},contentParams); commit?.(r.id); remember(r.id); if (layer) this.layOver(r.id, layer);
     await this.decide(soul, r.id, capability, label, steps);
     return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
+  }
+  /** #1355: a seated gesture (a nod, a clap) is a layer over the sit: the sit's receipt stays open while it plays, and the
+   *  sit goes on under that receipt after it. By gesture receipt: the sit receipt it lies over. */
+  private layers = new Map<string, {sit: string; restFrom: number}>();
+  /** #1355: a sit's programme, the step it is on and the tick that step began (from the engine's own step events). */
+  private stepAt = new Map<string, {step: number; tick: number}>();
+  /** #1355: the open sit receipt a seated solo gesture lies over, if this act is one (a bow stands first, so it never is). */
+  private gestureLayer(soul: EdgeSoul, capability: string, steps: Program['steps']): string | undefined {
+    const [verb, where] = capability.split(':');
+    if (where !== 'here' || !SOLO[verb!]?.seated || steps.some(s => s.verb === 'stand') || !this.sittingNow(soul.entityId)) return undefined;
+    return this.openReceipts(soul.soulId).find(r => r.phase === 'started' && r.capability.startsWith('sit:') && this.launched.has(r.id))?.id;
+  }
+  /** #1355: the gesture's programme takes the body from the sit's: unhook the sit receipt so that end isn't read as its own. */
+  private layOver(gesture: string, sit: string) {
+    // the time a timed sit has had on its seat counts from the step after it sat down (its rest), not from the walk there
+    const pid = this.rows('receipt_id=?', sit)[0]?.program_id, at = pid ? this.stepAt.get(pid) : undefined, plan = this.launched.get(sit);
+    const sat = plan ? lastSit(plan.steps) : -1, now = this.host.engine.world.tick;
+    this.layers.set(gesture, {sit, restFrom: at && at.step > sat ? at.tick : now}); this.update(sit, {program_id: null});
+  }
+  /** #1355: the gesture ended. Still seated with nothing else running: the sit goes on under its own receipt, with the time
+   *  it has left on the seat; otherwise it ends as what happened says. */
+  private resumeUnder(gesture: string) {
+    const layer = this.layers.get(gesture); this.layers.delete(gesture); if (!layer) return; const sit = layer.sit;
+    const s = this.rows('receipt_id=?', sit)[0], plan = this.launched.get(sit), m = s ? this.host.minds.get(s.soul_id) : undefined;
+    if (!s || s.phase !== 'started' || !plan || !m) return;
+    if (!this.sittingNow(m.entityId) || this.openReceipts(s.soul_id).some(r => r.id !== sit)) {this.update(sit, {phase: 'replaced', reason: 'A newer action from this Soul replaced it.'}); return;}
+    // still on the seat, whose own hold (the native sit action) never stopped: the walk there and the sitting down are done,
+    // only what the sit does on the seat goes on (its timed rest)
+    const sat = lastSit(plan.steps);
+    const steps = structuredClone(plan.steps.slice(sat + 1)), gone = (this.host.engine.world.tick - layer.restFrom) / 20;
+    let left = Infinity; for (const x of steps) if (x.params && typeof x.params.seconds === 'number') {left = Math.min(left, x.params.seconds - gone); x.params.seconds = Math.max(1, Math.ceil(x.params.seconds - gone));}
+    if (sat < 0 || !steps.length) {this.update(sit, {phase: 'completed', code: SEAT_KEPT, reason: 'Still seated: the newer action goes on from the seat.'}); return;}
+    if (left < 1) {this.update(sit, {phase: 'completed'}); return;}
+    void this.decide(plan.soul, sit, plan.capability, plan.label, steps).catch(() => this.update(sit, {phase: 'completed', code: SEAT_KEPT, reason: 'Still seated: the newer action goes on from the seat.'}));
   }
   /** BS3: the plans `launch` started, by receipt, so a stuck walk can be relaunched once under the same receipt. */
   private launched = new Map<string, {soul: EdgeSoul; capability: string; label: string; steps: Program['steps']; relaunched?: true}>();
