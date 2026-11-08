@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # ship.sh's rehearse step, on the host (#1402; first run by hand for 4.16 and 4.16.1): boot a COPY of every world's database
 # with the STAGED release tree, before anything goes live, with boot-rehearsal.mjs (#1323).
-#   bash -s -- <staged release dir> <data dir> <scratch dir> [<meminfo file, default /proc/meminfo: a test seam>] < host-rehearse.sh
-# Read-only on production: each world's sim.db is opened read-only and copied (SQLite online backup) into
-# <scratch>/<slug>, which the tool deletes afterwards. No database byte or row leaves the host: stdout carries one JSON
+#   bash -s -- <staged release dir> <data dir> <scratch parent> [<meminfo file, default /proc/meminfo: a test seam>] < host-rehearse.sh
+# Read-only on production: each world's sim.db is opened read-only and copied (SQLite online backup) into a new
+# directory of this run's own (mktemp -d under <scratch parent>), removed with everything in it when the run ends; nothing
+# else is ever deleted. No database byte or row leaves the host: stdout carries one JSON
 # summary line per world (ids, rules headers, hashes, timings, verdicts) and a final REHEARSE line.
 # The world's reader, as its process would open it:
 #   running main.ts child  -> --from-pid <its pid> (its spawn environment, read in the tool's process only, never printed)
@@ -18,14 +19,16 @@
 # allows 90 s), not stopped. Exit 0: every verdict world passed; 2: at least one stop; 1: the rehearsal could not run.
 # Reads no operator variable: everything comes from its arguments (tests: tools/world-launcher/ship-root.test.mjs).
 set -uo pipefail
-REL="${1:?release dir}"; DATA="${2:?data dir}"; W="${3:?scratch dir}"; MEMINFO="${4:-/proc/meminfo}"
+REL="${1:?release dir}"; DATA="${2:?data dir}"; PARENT="${3:?scratch parent}"; MEMINFO="${4:-/proc/meminfo}"
 for f in tools/world-launcher/deploy/boot-rehearsal.mjs tools/world-launcher/children.mjs apps/server/src/main.ts node_modules; do
   [ -e "$REL/$f" ] || { echo "the staged tree has no $f"; exit 1; }
 done
 [ -f "$DATA/worlds.json" ] || { echo "no worlds.json in the data dir"; exit 1; }
-case "$W" in "$DATA"|"$DATA"/*) echo "the scratch dir must lie outside the data dir"; exit 1;; esac
-rm -rf "${W:?}"; mkdir -p "$W/results" "$W/env" && chmod 700 "$W" || exit 1
-trap 'rm -rf "${W:?}/env"' EXIT
+case "$PARENT/" in "$DATA"/*) echo "the scratch parent must lie outside the data dir"; exit 1;; esac
+W="$(mktemp -d "$PARENT/sim-rehearse-XXXXXX")" || { echo "cannot make a scratch dir"; exit 1; }
+# only this run's own directory, created just above, is ever removed
+trap 'rm -rf -- "$W"' EXIT
+mkdir -p "$W/results" "$W/env" && chmod 700 "$W" || exit 1
 cd "$REL" || exit 1
 echo "tree $(cat BUILD 2>/dev/null); node $(node --version)"
 # the plan: one line per world, Eden first: slug<TAB>kind<TAB>db<TAB>source args

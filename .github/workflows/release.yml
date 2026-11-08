@@ -9,17 +9,19 @@
 #   publish    (real ships only) compiles changes/ into CHANGELOG.md (same section, same date), tags v<version> on the
 #              shipped commit, creates the GitHub Release
 #
-# Receipts (real ships only): the head's full gate receipt.json and its V7 v7-receipt.json, as assets of a DRAFT GitHub
-# release (default tag receipts-v<version>; drafts are visible only to maintainers, and the receipts carry device
-# paths, so never publish that release). One gate per head runs through gate.yml or the laptop; V7 needs real Chrome on
-# a GPU, which the runner lacks, so this workflow runs no gate of its own. The ship job combines them
-# (tools/test-harness/ship-receipt.mjs) and ship.sh's preflight checks them for this exact head.
-#   gh release create receipts-v4.17 --draft --title "receipts 4.17" receipt.json v7-receipt.json
+# Receipt (real ships only): the head's publishable release-receipt.json, as the one asset of a prerelease (default tag
+# receipts-v<version>). The release owner derives it from the raw gate and V7 receipts, which carry device paths and
+# never leave the machine: it holds only shas, the build id, statuses, counts, timestamps and the raw receipts' sha256,
+# and ship-receipt.mjs refuses to write it unless it passes tools/proof/publication.mjs. One gate per head runs through
+# gate.yml or the laptop; V7 needs real Chrome on a GPU, which the runner lacks, so this workflow runs no gate.
+#   node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
+#   gh release create receipts-v4.17 --prerelease --title "receipts 4.17" release-receipt.json
 # Dry run:  gh workflow run release.yml --ref main -f version=<next version>            (dry_run defaults to true)
 # Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f date=<the dry run's date>]
 #           [-f accept_host_codes=halted]
-# A dry run is real work on the host: it uploads the release directory and its dependencies and makes a full
-# row-verified backup (pre-r<version>-rehearsal-production-*). Neither is pruned; mind the host's disk.
+# A dry run takes no backup (nothing goes live, so there is nothing to roll back) and runs no install.sh. It leaves the
+# staged release directory with its dependencies on the host, which a later real ship of the same build reuses. The
+# rehearsal's database copies live in a mktemp dir of the run's own, removed when it ends.
 #
 # Secrets: DEPLOY_SSH_KEY, SIM_DEPLOY_KNOWN_HOSTS, SIM_PROBE_GOD_JSON (the release-probe world's god file) in the
 #          production environment. Vars or secrets: SIM_DEPLOY_HOST, SIM_DEPLOY_USER. Optional var: SIM_ORIGIN
@@ -43,7 +45,7 @@ on:
         description: ship.sh --accept-host-codes (comma-separated, such as halted for a release that fixes a halted world)
         required: false
       receipts:
-        description: Draft release tag holding receipt.json and v7-receipt.json for the head; default receipts-v<version>
+        description: Release tag holding the head's release-receipt.json (ship-receipt.mjs --public); default receipts-v<version>
         required: false
 permissions:
   contents: read
@@ -107,10 +109,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     environment: production
-    # contents: write only so the receipts download can read a DRAFT release (drafts are invisible to a read token).
-    # The checkout does not persist the token; the pinned actions still receive it through their default inputs.
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Deploy secrets
         env:
@@ -168,10 +168,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           r="$RUNNER_TEMP/receipts"; mkdir -p "$r"
-          gh release download "$TAG" -R "$REPO" -p receipt.json -p v7-receipt.json -D "$r" \
-            || { echo "::error::No receipt.json and v7-receipt.json in the draft release $TAG. Upload the head's full gate and V7 receipts there first."; exit 1; }
-          [ "$(gh release view "$TAG" -R "$REPO" --json isDraft -q .isDraft)" = true ] || { echo "::error::$TAG is published: the receipts carry device paths, so they belong in a draft release only"; exit 1; }
-          node tools/test-harness/ship-receipt.mjs "$r/receipt.json" "$r/v7-receipt.json" --out "$r/ship-receipt.json"
+          gh release download "$TAG" -R "$REPO" -p release-receipt.json -D "$r" \
+            || { echo "::error::No release-receipt.json in the release $TAG. Derive it with ship-receipt.mjs --public and upload it there first."; exit 1; }
+          node tools/proof/publication.mjs "$r/release-receipt.json" || { echo "::error::release-receipt.json is not publishable: derive it with ship-receipt.mjs --public"; exit 1; }
+          # ship.sh's preflight checks it for this exact head (root-release.mjs receipt)
           echo "SHIP_RECEIPTS=$r" >> "$GITHUB_ENV"
       - name: Probe world
         env:

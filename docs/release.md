@@ -67,10 +67,10 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | Input | Default | Meaning |
 |---|---|---|
 | `version` | required | Release version for the changelog and tag, such as `4.17`; also ship.sh's `--label` |
-| `dry_run` | **true** | `ship.sh --no-switch`: every step for real except the activation, checked against the build that stays live. Stage skips `install.sh`, so the host's unit files and timers stay as they are. No receipts are needed and publish does not run. The label is `<version>-rehearsal`. It is real work on the host: the uploaded release directory with its dependencies and a full backup (`pre-r<version>-rehearsal-production-*`) stay, unpruned |
+| `dry_run` | **true** | `ship.sh --no-switch`: every step for real except the backup and the activation, checked against the build that stays live. Stage skips `install.sh`, so the host's unit files and timers stay as they are. No receipt is needed and publish does not run. The label is `<version>-rehearsal`. The staged release directory and its dependencies stay on the host; a later real ship of the same build reuses them. It deletes nothing on the host except the rehearsal's own scratch directory, which it created |
 | `date` | today (UTC) | The release date compiled into the changelog page and `CHANGELOG.md`. The page is part of the web build, so a real ship on a later day than its dry run of the same head must pass the dry run's date, or the staged build differs and stage refuses to overwrite it |
 | `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
-| `receipts` | `receipts-v<version>` | A **draft** GitHub release holding the head's `receipt.json` (full gate) and `v7-receipt.json` |
+| `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
 
 ```sh
 gh workflow run release.yml --ref main -f version=4.17                    # dry run: nothing goes live
@@ -85,19 +85,21 @@ Its jobs:
    known `PLAYWRIGHT_BROWSERS_PATH`, builds the Mars web overlay (`MARS_WEB_SRC`: the viewer's static site from this
    commit plus the static manifests, Draco decoders and campus model from the public origin), writes the probe god
    folder from `SIM_PROBE_GOD_JSON`, and for a real ship downloads the receipts and combines them
-   (`ship-receipt.mjs`). Then `ship.sh --label <version> --sha <head>` (with `--no-switch` for a dry run). Its output
+   (see below). Then `ship.sh --label <version> --sha <head>` (with `--no-switch` for a dry run). Its output
    is filtered so no IPv4 literal is printed; the host itself is a secret, so the log masks it.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit and creates the GitHub Release.
 
-**Receipts.** The workflow runs no gate: one full gate per head runs through `gate.yml` or the laptop, and the V7 walk
-needs real Chrome on a GPU, which the runner lacks. The receipts carry device paths, so they go in a draft release,
-which only maintainers can see; the ship job refuses a published one. Its token has `contents: write` only so it can
-read the draft; the checkout does not persist it (the pinned actions still receive it through their default inputs).
-The host is masked in every log even when `SIM_DEPLOY_HOST` is a variable.
+**Receipt.** The workflow runs no gate: one full gate per head runs through `gate.yml` or the laptop, and the V7 walk
+needs real Chrome on a GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
+leave the machine. The release owner derives the publishable release receipt from them. It holds only shas, the build
+id, statuses, counts, timestamps and the sha256 of each raw receipt, and `ship-receipt.mjs` refuses to write it unless
+it passes the publication check. The ship job checks it again, and ship.sh's preflight verifies it for the exact head
+(`root-release.mjs receipt`). The host is masked in every log even when `SIM_DEPLOY_HOST` is a variable.
 
 ```sh
-gh release create receipts-v4.17 --draft --title "receipts 4.17" receipt.json v7-receipt.json
+node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
+gh release create receipts-v4.17 --prerelease --title "receipts 4.17" release-receipt.json
 ```
 
 **Evidence.** The run's artifact `ship-<label>` holds only result files that pass `tools/proof/publication.mjs`
@@ -142,7 +144,7 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 | `--label <version>` | The release, such as `4.16`. Names the output folder and the backups (`pre-r416-production-<time>`). |
 | `--sha <full sha>` | The commit to ship. It must be HEAD of a clean tree and an ancestor of `origin/main`. |
 | `--dry-run` | Prints every step and its commands. Nothing remote is touched and nothing is written. Exits 1 when a guard would stop a real run. |
-| `--no-switch` | Runs every step for real except the activation: snapshot, stage, rehearse, backup, the probe (expecting the live build), the activation's preconditions, healthz of the live build, walks, poster, stall and cdn-walk. `host-activate.sh` never runs, and stage skips `install.sh` (`SIM_RELEASE_NO_INSTALL=1`), so no unit file or timer changes. A resume keeps the mode its run started in (`STEPS.txt`). Receipts are checked when `SHIP_RECEIPTS` is set and never required. `ship-result.json` says `rehearsed` (or `rehearsed-with-failures`); exit 0 only when every step passed |
+| `--no-switch` | Runs every step for real except the backup and the activation: snapshot, stage, rehearse, the probe (expecting the live build), healthz of the live build, walks, poster, stall and cdn-walk. Nothing goes live, so there is nothing to back up or roll back. `host-activate.sh` never runs, and stage skips `install.sh` (`SIM_RELEASE_NO_INSTALL=1`), so no unit file or timer changes. A resume keeps the mode its run started in (`STEPS.txt`). Receipts are checked when `SHIP_RECEIPTS` is set and never required. `ship-result.json` says `rehearsed` (or `rehearsed-with-failures`); exit 0 only when every step passed |
 | `--from <step>` | Resumes at `snapshot`, `stage`, `rehearse`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
 | `--out <dir>` | Output folder (default `$SHIP_OUT_ROOT/<label>`). A folder that already holds a run is refused without `--from`. |
 | `--accept-host-codes <code,...>` | The snapshot normally needs public healthz `hostOk`. With this list it passes while `hostOk` is false only if every `hostCodes` entry is listed, such as `halted` for a release that fixes a halted world. The list is printed and recorded in `snapshot.json` (`acceptedHostCodes`); any other code still refuses, and the drift checks compare `hostCodes` too. |
@@ -152,7 +154,7 @@ There is no host option. The host and operator paths come from the environment o
 | Variable | Default | Used for |
 |---|---|---|
 | `SIM_DEPLOY_HOST`, `SIM_DEPLOY_USER` | none / `root` | SSH target of the production host. ship.sh's own lines, the dry-run plan and `ROLLBACK.txt` never name it. Tools tee'd into `ship.log` can (`release.sh` prints its upload target, ssh its errors), so keep `ship.log` private |
-| `SHIP_RECEIPTS` | none; required | Folder holding the gate's `receipt.json` and `ship-receipt.json` for this commit |
+| `SHIP_RECEIPTS` | none; required | Folder holding the publishable `release-receipt.json` (`ship-receipt.mjs --public`), or the gate's `receipt.json` and `ship-receipt.json`, for this commit |
 | `SHIP_PROBE_CLI` | none; required | God folder of the [release-probe world](#the-release-probe-world) |
 | `PLAYWRIGHT_BROWSERS_PATH` | none; required | Browsers folder. Preflight checks that it actually holds a Chromium executable |
 | `SHIP_ORIGIN` | `https://soul.game` | Public origin |
@@ -169,7 +171,7 @@ There is no host option. The host and operator paths come from the environment o
 | preflight | Local guards: the host is set, the tree is clean, HEAD is `--sha`, the commit is on `origin/main`, the gate and ship receipts are clean for it, the probe folder and Chromium exist, every tool is present | Refused; nothing remote ran |
 | snapshot | Public healthz and read-only host metadata: stage link, config hash, registry identity, every database by name (`body-collections.sqlite` too), keeper. Writes `ROLLBACK.txt` | Stops |
 | stage | `release.sh production --no-activate` at base `/`; verifies the manifest locally and on the host; compares the host with the snapshot | Stops |
-| rehearse | `ship/host-rehearse.sh` on the host: boots a copy of every world's database with the staged tree (`boot-rehearsal.mjs`, 1200 ticks, fake minds, memory-capped scope, read-only on production; no database content leaves the host). The scope keeps 3 GB free (the launcher's wake floor is 2.5 GB) and the rehearsal has `oom_score_adj` 1000. Every registered world must pass (an unreadable result is a stop, never a pass); a fork other than Eden's, or an unregistered data directory, is approximate and reported only. A boot over 60 s is flagged slow. Writes `rehearse.json`; the activation requires a passing one for this build | Stops |
+| rehearse | `ship/host-rehearse.sh` on the host: boots a copy of every world's database with the staged tree (`boot-rehearsal.mjs`, 1200 ticks, fake minds, memory-capped scope, read-only on production; no database content leaves the host). The copies live in a `mktemp -d` directory of the run's own under `SHIP_HOST_TMP`, removed with everything in it when the run ends; nothing else is deleted. The scope keeps 3 GB free (the launcher's wake floor is 2.5 GB) and the rehearsal has `oom_score_adj` 1000. Every registered world must pass (an unreadable result is a stop, never a pass); a fork other than Eden's, or an unregistered data directory, is approximate and reported only. A boot over 60 s is flagged slow. Writes `rehearse.json`; the activation requires a passing one for this build | Stops |
 | backup | Row-verified compact copy of every database, `quick_check` on each, the same filenames as the snapshot | Stops |
 | probe-start | Starts `release-probe.mjs` and waits for `<out>/probe/ready` | Stops |
 | activate | Checks that the snapshot and backup are under an hour old and that nothing drifted, then runs `ship/host-activate.sh` on the host: one `activate.sh --reload`, one refresh of host health with the timer's own oneshot (`systemctl start sim-worlds-health@<stage>.service`, so a code recorded before the activation can't fail it), and a health check | Stops and reports the host's exit (below) |

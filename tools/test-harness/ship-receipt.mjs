@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Combine the two release receipts into the one a ship attaches.
 //   node tools/test-harness/ship-receipt.mjs <gate receipt.json> <v7-receipt.json> [--out <ship-receipt.json>]
+//        [--public <release-receipt.json>]
+// --public also writes the release receipt (#1402): only what ship.sh checks (shas, build id, statuses, counts,
+// timestamps, sha256 of each raw receipt), with no path, host or name. It must pass tools/proof/publication.mjs, or it is
+// not written. It is the receipt that may travel: the release workflow reads it from a draft release.
 // The CPU gate (release-gate.sh, Modal) excludes V7; the V7 walk (v7-walks.sh, real Chrome on 5870-5879) covers it.
 // They combine only when both judged the SAME candidate commit: the V7 source sha must equal the gate's candidate sha,
 // the V7 checkout must have been clean, the V7 walk must pass and the gate must not be blocked. Anything else is blocked.
@@ -9,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertPublishable } from '../proof/publication.mjs';
 
 export function combineReceipts(gate, v7) {
   const blockers = [];
@@ -37,10 +42,28 @@ export function combineReceipts(gate, v7) {
   };
 }
 
+const SHA40 = /^[0-9a-f]{40}$/, ISO = /^\d{4}-\d\d-\d\dT[\d:.]+Z$/, len = a => (Array.isArray(a) ? a.length : null);
+const sha = s => (typeof s === 'string' && SHA40.test(s) ? s : null), iso = s => (typeof s === 'string' && ISO.test(s) ? s : null);
+
+/** The release receipt: the ship's verdict inputs and nothing else. Every value is a sha, a fixed word, a count or a time. */
+export function publicReceipt(gate, gateSha256, v7, v7Sha256, combined = combineReceipts(gate, v7)) {
+  const candidate = sha(combined.candidate);
+  const r = { schema: 'release-receipt/1', at: new Date().toISOString(), candidate, build: candidate ? `we-${candidate.slice(0, 12)}` : null,
+    status: ['pass', 'quarantined', 'blocked'].includes(combined.status) ? combined.status : 'blocked', blockers: combined.blockers.length,
+    gate: { sha256: gateSha256, status: String(gate?.status ?? '').replace(/[^a-z-]/g, '') || null, scope: gate?.scope?.resolved === 'full' ? 'full' : 'not-full',
+      baseline: sha(gate?.refs?.baseline?.sha), startedAt: iso(gate?.startedAt), endedAt: iso(gate?.endedAt),
+      blockers: len(gate?.blockers), newFailures: len(gate?.newFailures), unexpectedSkips: len(gate?.unexpectedSkips), removed: len(gate?.removed), quarantined: len(gate?.quarantined) },
+    v7: { sha256: v7Sha256, status: v7?.status === 'pass' ? 'pass' : 'fail', source: sha(v7?.source), dirty: v7?.dirty === false ? false : true, at: iso(v7?.at), checks: len(v7?.checks), failed: len(v7?.failed) } };
+  assertPublishable(r);
+  return r;
+}
+
 export function main(args = process.argv.slice(2)) {
-  const [gatePath, v7Path, flag, outArg] = args;
-  if (!gatePath || !v7Path || (flag && flag !== '--out') || (flag && !outArg)) {
-    console.error('usage: ship-receipt.mjs <gate receipt.json> <v7-receipt.json> [--out <ship-receipt.json>]'); return 2;
+  const opt = k => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
+  const [gatePath, v7Path] = args, outArg = opt('--out'), pubArg = opt('--public');
+  const known = new Set(['--out', '--public']);
+  if (!gatePath || !v7Path || args.slice(2).some((a, i) => i % 2 === 0 && !known.has(a)) || args.length % 2 || (args.includes('--out') && !outArg) || (args.includes('--public') && !pubArg)) {
+    console.error('usage: ship-receipt.mjs <gate receipt.json> <v7-receipt.json> [--out <ship-receipt.json>] [--public <release-receipt.json>]'); return 2;
   }
   const load = p => { const bytes = readFileSync(resolve(p)); return { path: resolve(p), sha256: createHash('sha256').update(bytes).digest('hex'), json: JSON.parse(bytes) }; };
   const gate = load(gatePath), v7 = load(v7Path);
@@ -49,6 +72,7 @@ export function main(args = process.argv.slice(2)) {
   const receipt = { schemaVersion: 1, kind: 'ship-receipt', at: new Date().toISOString(), ...combined,
     gate: { path: gate.path, sha256: gate.sha256, status: gate.json.status }, v7: { path: v7.path, sha256: v7.sha256, status: v7.json.status, at: v7.json.at } };
   writeFileSync(out, JSON.stringify(receipt, null, 2) + '\n');
+  if (pubArg) { writeFileSync(resolve(pubArg), JSON.stringify(publicReceipt(gate.json, gate.sha256, v7.json, v7.sha256, combined), null, 2) + '\n'); console.log(`release receipt (publishable) ${resolve(pubArg)}`); }
   console.log(`RELEASE_SHIP ${receipt.status.toUpperCase()} candidate=${receipt.candidate || '?'} gate=${gate.json.status} v7=${v7.json.status} remaining=${receipt.remainingExclusions.join(',') || 'none'} blockers=${receipt.blockers.length} receipt=${out}`);
   return receipt.status === 'blocked' ? 1 : 0;
 }

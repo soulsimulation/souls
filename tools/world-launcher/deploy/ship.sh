@@ -7,8 +7,8 @@
 #     --label    the release, such as 4.16. Backups are pre-r416-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
-#     --no-switch  every step for real except the activation: stage, rehearse, backup, the probe and every check run against
-#                the build that stays live. Receipts are checked when SHIP_RECEIPTS is set, never required. Result: rehearsed
+#     --no-switch  every step for real except the backup and the activation: stage (without install.sh), rehearse, the probe
+#                and every check run against the build that stays live; nothing to roll back, so no backup. Receipts are checked when SHIP_RECEIPTS is set, never required. Result: rehearsed
 #     --from     resume at snapshot, stage, rehearse, backup, probe-start, healthz, walks, poster, stall or cdn-walk (same --out)
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
 #     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
@@ -102,7 +102,8 @@ NODE_MAJOR="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"; [[ "$NODE_MAJOR" =
 git -C "$ROOT" merge-base --is-ancestor "$SHA" origin/main 2>/dev/null || pf "$SHA is not an ancestor of origin/main"
 # --no-switch makes nothing live, so the receipts are reported, never required
 rf() { if [ "$NOSWITCH" = 1 ]; then say "   receipts (not required with --no-switch): $*"; else pf "$*"; fi; }
-if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with receipt.json and ship-receipt.json"
+if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with release-receipt.json (or receipt.json and ship-receipt.json)"
+elif [ -f "$RECEIPTS/release-receipt.json" ]; then node "$VERDICT" receipt "$RECEIPTS/release-receipt.json" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the release receipt is not clean for this commit"
 elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt.json" "$SHA" | sed 's/^/   /'; then rf "the gate and ship receipts are not clean for this commit"; fi
 [ -n "$PROBE_CLI" ] && [ -d "$PROBE_CLI" ] || pf "SHIP_PROBE_CLI is not the release-probe god folder"
 [ -n "$BROWSERS" ] && [ -n "$(find "$BROWSERS" -maxdepth 6 -path '*/chromium*' -type f \( -name chrome -o -name Chromium -o -name 'Google Chrome for Testing' -o -name headless_shell -o -name chrome-headless-shell \) -perm -u+x 2>/dev/null | head -1)" ] \
@@ -155,7 +156,7 @@ fi
 
 # ---- 4 rehearse -----------------------------------------------------------------------------------------------------
 if step rehearse "boot a copy of every world's database with the staged tree on the host (read-only on production)"; then
-  x_in "$SHIPD/host-rehearse.sh" x_to "$OUT/rehearse.log" rsh "bash -s -- $(quote "$REL" "$HOST_DATA" "$HOST_TMP/sim-rehearse-$TAG" "$HOST_MEMINFO")"; rc=$?
+  x_in "$SHIPD/host-rehearse.sh" x_to "$OUT/rehearse.log" rsh "bash -s -- $(quote "$REL" "$HOST_DATA" "$HOST_TMP" "$HOST_MEMINFO")"; rc=$?
   if [ "$DRY" = 0 ]; then
     grep -E '^\{"slug"|^REHEARSE ' "$OUT/rehearse.log" | sed 's/^/   /' | cut -c1-220
     node "$VERDICT" rehearse "$OUT/rehearse.log" "$BUILD" "$OUT/rehearse.json" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] && [ "$rc" = 0 ] || die "the boot rehearsal did not pass (exit $rc; rehearse.log): a world would not come up on this release"
@@ -164,7 +165,11 @@ if step rehearse "boot a copy of every world's database with the staged tree on 
 fi
 
 # ---- 5 backup -------------------------------------------------------------------------------------------------------
-if step backup "row-verified compact copy of every database; quick_check each; the same filenames as the snapshot"; then
+BACKUP_WHAT="row-verified compact copy of every database; quick_check each; the same filenames as the snapshot"
+[ "$NOSWITCH" = 0 ] || BACKUP_WHAT="NOT RUN (--no-switch): nothing goes live, so there is nothing to roll back"
+if step backup "$BACKUP_WHAT" && [ "$NOSWITCH" = 1 ]; then
+  [ "$DRY" = 1 ] || printf 'backup skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
+elif [ "$STARTED" = 1 ]; then
   if [ -f "$OUT/backup-receipt.json" ]; then rm -f "$OUT/backup-receipt.json"; say "   replacing an earlier backup receipt with a fresh backup"; fi
   drift
   x rcp "$SHIPD/compact-backup.sh" "$HOST_TMP/compact-backup.sh" || die "cannot copy compact-backup.sh"
@@ -198,11 +203,10 @@ fi
 
 # ---- 7 activate -----------------------------------------------------------------------------------------------------
 ACT_WHAT="one guarded --reload; a failed handover or health check rolls code back on the host"
-[ "$NOSWITCH" = 0 ] || ACT_WHAT="NOT RUN (--no-switch): the preconditions are checked; the live build stays live"
+[ "$NOSWITCH" = 0 ] || ACT_WHAT="NOT RUN (--no-switch): the rehearsal and drift are checked; the live build stays live"
 if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
   if [ "$DRY" = 0 ]; then
     [ -n "$PROBE_PID" ] || die "no probe is running: resume with --from probe-start"
-    node "$VERDICT" activation "$OUT/snapshot.json" "$OUT/backup-receipt.json" "$OUT/upload-receipt.json" "$MANIFEST" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "activation preconditions failed"
     node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build"
     drift
   fi

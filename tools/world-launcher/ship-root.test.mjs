@@ -50,7 +50,7 @@ function setup() {
   script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nif [ -e ${t}/host-codes ]; then hc="\\"hostOk\\":false,\\"hostCodes\\":$(cat ${t}/host-codes)"; else hc='"hostOk":true'; fi\nprintf '{"ok":true,%s,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$hc" "$(basename "$(readlink ${root}/production)")"`);
   if (spawnSync('sh', ['-c', 'command -v sha256sum']).status !== 0) script(join(fakebin, 'sha256sum'), 'exec shasum -a 256 "$@"');
   // ssh and scp: an empty environment on the far side, proving the remote block needs nothing from the operator
-  script(join(t, 'stubs/ssh'), `printf 'ssh\\t%s\\n' "$*" >> ${log}\nwhile [ "\${1:-}" = -o ]; do shift 2; done; shift\ncase "$*" in true) exit 0;; *" verify "*) cat > /dev/null; echo ok; exit 0;; *sim-rehearse*) ;; "bash -s --"*) [ ! -e ${t}/ssh-drop ] || { cat > /dev/null; exit 255; }; [ ! -e ${t}/tamper-manifest ] || echo tampered >> ${root}/releases/${build}/RELEASE-MANIFEST.json; [ ! -e ${t}/tamper-keeper ] || echo '{"keeper":{"pid":1}}' > ${data}/keeper.json;; esac\nexec env -i PATH="${fakebin}:$PATH" HOME=/nonexistent bash -c "$*"`);
+  script(join(t, 'stubs/ssh'), `printf 'ssh\\t%s\\n' "$*" >> ${log}\nwhile [ "\${1:-}" = -o ]; do shift 2; done; shift\ncase "$*" in true) exit 0;; *" verify "*) cat > /dev/null; echo ok; exit 0;; *host/meminfo*) ;; "bash -s --"*) [ ! -e ${t}/ssh-drop ] || { cat > /dev/null; exit 255; }; [ ! -e ${t}/tamper-manifest ] || echo tampered >> ${root}/releases/${build}/RELEASE-MANIFEST.json; [ ! -e ${t}/tamper-keeper ] || echo '{"keeper":{"pid":1}}' > ${data}/keeper.json;; esac\nexec env -i PATH="${fakebin}:$PATH" HOME=/nonexistent bash -c "$*"`);
   script(join(t, 'stubs/scp'), `printf 'scp\\t%s\\n' "$*" >> ${log}\ndest="\${@: -1}"; dest="\${dest#*:}"\ncase "$dest" in\n*compact-backup.sh) cat > "$dest" <<'BK'\n#!/usr/bin/env bash\nB=$(mktemp -d ${t}/host/$1-$2-XXXXXX)\nfor f in worlds/eden/sim.db worlds/mars/sim.db accounts.sqlite body-collections.sqlite; do mkdir -p "$(dirname "$B/$f")"; : > "$B/$f"; echo '{"dropped":{}}'; done\necho "$B"\nBK\n;;\n*sim-quick-check.mjs) echo 'for (const f of process.argv.slice(2)) console.log("ok " + f);' > "$dest";;\n*) : > "$dest";;\nesac`);
   // build, browser and manifest tools
   script(join(t, 'stubs/node'), `printf 'node\\t%s\\n' "$*" >> ${log}\nif [ -n "\${STUB_FAIL:-}" ] && [[ "$*" == *"$STUB_FAIL"* ]]; then exit 1; fi\ncase "$1" in *release-probe.mjs)\n  while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; shift; done\n  mkdir -p "$out"; touch "$out/ready"\n  for i in $(seq 1 600); do { [ -e "$out/released" ] || [ -e "$out/stop" ]; } && break; sleep 0.05; done\n  exit "\${STUB_PROBE_RC:-0}";;\nesac\nexit 0`);
@@ -328,7 +328,7 @@ test('#1402 rehearse: every world boots a copy with the staged tree before the b
   const receipt = JSON.parse(readFileSync(join(s.out, 'rehearse.json'), 'utf8'));
   assert.equal(receipt.status, 'pass'); assert.equal(receipt.worlds, 2); assert.equal(receipt.build, s.build);
   assert.match(r.stdout, /2 of 2 worlds boot and run/);
-  assert.ok(!existsSync(join(s.t, 'host/sim-rehearse-416/env')), 'the env files are removed');
+  assert.deepEqual(readdirSync(join(s.t, 'host')).filter(f => f.startsWith('sim-rehearse-')), [], 'the run removes its own scratch dir, copies and env files with it');
 });
 
 test('#1402 rehearse: a world that halts, or a rehearsal that dies, stops the run before the backup and the activation', () => {
@@ -345,13 +345,16 @@ test('#1402 rehearse: a world that halts, or a rehearsal that dies, stops the ru
 });
 
 test('#1402 --no-switch: every step but the activation, the probe and healthz expect the live build, receipts not required', () => {
-  const s = setup(), r = s.run([...s.base, '--no-switch'], { SHIP_RECEIPTS: '' });
+  const s = setup(); writeFileSync(join(s.t, 'host/sim-rehearse-keepme'), 'not ours');
+  const r = s.run([...s.base, '--no-switch'], { SHIP_RECEIPTS: '' });
+  assert.equal(readFileSync(join(s.t, 'host/sim-rehearse-keepme'), 'utf8'), 'not ours', 'a file the run did not create is never removed');
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /receipts \(not required with --no-switch\): SHIP_RECEIPTS is not set/);
   const calls = s.calls();
   assert.doesNotMatch(calls, /^activate\t|host-activate|systemctl\tstart/m);
   assert.match(calls, /release\tproduction --no-activate base=\/ noinstall=1/, 'no install.sh: unit files and timers stay as they are');
-  assert.match(calls, /compact-backup\.sh pre-r416 production/);
+  assert.doesNotMatch(calls, /compact-backup|quick-check/, 'no backup: nothing goes live');
+  assert.ok(!existsSync(join(s.out, 'backup-receipt.json')));
   assert.match(calls, new RegExp(`release-probe\\.mjs .*--expect-build ${PREV}`));
   for (const tool of ['walk.mjs', 'poster.mjs', 'stall.mjs', 'cdn-walk.mjs']) assert.match(calls, new RegExp(tool.replace('.', '\\.')), tool);
   assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV));
@@ -378,4 +381,20 @@ test('#1402 --no-switch: a probe that sees another build is recorded, not called
   assert.match(s.calls(), /noinstall=0/);
   r = s.run([...s.base, '--no-switch', '--from', 'walks']);
   assert.equal(r.status, 1); assert.match(r.stdout, /holds a run in another mode/);
+});
+
+test('#1402 the publishable release receipt: ship.sh accepts a clean one for this commit and refuses any other', async () => {
+  const { publicReceipt } = await import('../test-harness/ship-receipt.mjs');
+  const s = setup(), dir = join(s.t, 'public'); mkdirSync(dir);
+  const gate = { schemaVersion: 1, status: 'pass', blockers: [], exclusions: ['V7'], scope: { resolved: 'full' }, refs: { candidate: { sha: s.sha }, baseline: { sha: 'b'.repeat(40) } }, newFailures: [], unexpectedSkips: [], removed: [], quarantined: [], startedAt: '2026-11-08T10:00:00.000Z', harness: { dir: '/Users/someone/gate' } };
+  const v7 = { schemaVersion: 1, step: 'V7', source: s.sha, dirty: false, status: 'pass', checks: [{ id: 'x', ok: true }], failed: [], at: '2026-11-08T10:30:00.000Z', ports: '5870-5879' };
+  const write = (g, v) => writeFileSync(join(dir, 'release-receipt.json'), JSON.stringify(publicReceipt(g, 'a'.repeat(64), v, 'c'.repeat(64))));
+  write(gate, v7);
+  assert.doesNotMatch(readFileSync(join(dir, 'release-receipt.json'), 'utf8'), /Users|someone|5870/, 'no path, name or port travels');
+  let r = s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir });
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /the release receipt is clean for this commit/);
+  for (const [g, v] of [[{ ...gate, newFailures: [{}] }, v7], [{ ...gate, scope: { resolved: 'auto' } }, v7], [gate, { ...v7, dirty: true }], [gate, { ...v7, source: 'f'.repeat(40) }]]) {
+    write(g, v); r = s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir });
+    assert.equal(r.status, 1); assert.match(r.stdout, /release receipt is not clean/);
+  }
 });

@@ -2,6 +2,7 @@
 // Verdicts for ship.sh's root-only release: the receipts, the host snapshot and its drift, the row-verified backup and
 // the activation preconditions. Each command reads local files, prints what it found and exits 1 with the reason.
 //   node root-release.mjs receipts <gate receipt> <ship receipt> <sha>
+//   node root-release.mjs receipt <release-receipt.json> <sha>   (the publishable release receipt, ship-receipt.mjs --public)
 //   node root-release.mjs snapshot <healthz.json> <remote.json> <label sha> <out.json> [accepted host codes, comma-separated]
 //   node root-release.mjs drift <snapshot.json> <healthz.json> <remote.json>
 //   node root-release.mjs backup <backup.log> <quick-check.log> <snapshot.json> <label> <out.json>
@@ -47,6 +48,21 @@ export function rehearseReceipt(log, build) {
   return { schema: 'ship-rehearse/1', at: new Date().toISOString(), build, status: problems.length ? 'stop' : 'pass', problems,
     worlds: worlds.length, passed: worlds.filter(w => w.verdict === 'pass').length, approximate: worlds.filter(w => w.verdict === 'approximate').map(w => w.slug),
     slow: worlds.filter(w => w.flags?.some(f => f.startsWith('slow'))).map(w => w.slug), results: worlds };
+}
+
+/** The publishable release receipt (tools/test-harness/ship-receipt.mjs --public, #1402) for exactly this commit. */
+export function releaseReceiptProblems(r, sha) {
+  const out = [], g = r?.gate ?? {}, v = r?.v7 ?? {};
+  if (r?.schema !== 'release-receipt/1') out.push('not a release receipt (release-receipt/1)');
+  if (r?.candidate !== sha) out.push(`release receipt is for ${r?.candidate}, not this commit`);
+  if (r?.build !== `we-${sha.slice(0, 12)}`) out.push(`release receipt names build ${r?.build}`);
+  if (!['pass', 'quarantined'].includes(r?.status) || r?.blockers !== 0) out.push(`release receipt status ${r?.status}, ${r?.blockers} blockers`);
+  if (g.scope !== 'full') out.push(`gate scope ${g.scope} is not the full contract`);
+  if (!['pass', 'quarantined'].includes(g.status)) out.push(`gate status ${g.status}`);
+  for (const k of ['blockers', 'newFailures', 'unexpectedSkips', 'removed']) if (g[k] !== 0) out.push(`gate has ${g[k]} ${k}`);
+  if (!/^[0-9a-f]{64}$/.test(g.sha256 ?? '') || !/^[0-9a-f]{64}$/.test(v.sha256 ?? '')) out.push('release receipt lacks the raw receipts\' sha256');
+  if (v.status !== 'pass' || v.dirty !== false || v.source !== sha || !(v.checks > 0) || v.failed !== 0) out.push(`V7 ${v.status}, source ${v.source}, dirty ${v.dirty}, ${v.checks} checks, ${v.failed} failed`);
+  return out;
 }
 
 export function snapshotProblems(health, remote, sha = '', accepted = []) {
@@ -102,7 +118,8 @@ export function activationProblems(snapshot, snapshotSha256, backup, upload, man
 const fail = lines => { for (const l of lines) console.log(l); process.exit(1); };
 export function main(argv) {
   const [cmd, ...a] = argv;
-  if (cmd === 'receipts') { const p = receiptProblems(read(a[0]), read(a[1]), a[2], digest(a[0])); if (p.length) fail(p); console.log('gate and ship receipts are clean for this commit'); }
+  if (cmd === 'receipt') { const p = releaseReceiptProblems(read(a[0]), a[1]); if (p.length) fail(p); console.log('the release receipt is clean for this commit'); }
+  else if (cmd === 'receipts') { const p = receiptProblems(read(a[0]), read(a[1]), a[2], digest(a[0])); if (p.length) fail(p); console.log('gate and ship receipts are clean for this commit'); }
   else if (cmd === 'snapshot') {
     const accepted = (a[4] ?? '').split(',').filter(Boolean), health = read(a[0]), remote = read(a[1]), p = snapshotProblems(health, remote, a[2], accepted); if (p.length) fail(p);
     if (existsSync(a[3])) { const aside = `${a[3]}.${Date.now()}`; renameSync(a[3], aside); console.log(`kept the earlier snapshot as ${aside.split('/').pop()}`); }
