@@ -235,8 +235,9 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
   own is broken, and its last whole pose if its pose is broken. If no whole pose is on record, it goes to the nearest free
   spot by the arrival, which is loud: logged, counted and told to its Soul. The event carries the pose, so a replay holds
-  it in the same place. A body that breaks again within a cooldown is not held again: the in-place rung's once-per-cooldown
-  report takes it.
+  it in the same place. A body that breaks again within a cooldown is quarantined and held again, alone (#1377): its own
+  programmes stop and nobody else's. Its glitch row is written at most twice a cooldown; the log event, which a replay
+  needs, every time.
 
 **What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it

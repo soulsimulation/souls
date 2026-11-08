@@ -1583,14 +1583,12 @@ export class WorldHost {
   private sweepBrokenBodies() {
     let corrupt: string[] = [];
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch { return; }
-    if (corrupt.length && !this.heldRecently(corrupt)) this.quarantine(new Error(`entity.corrupt: ${corrupt.join(', ')}`), undefined, false);
+    if (corrupt.length) this.quarantine(new Error(`entity.corrupt: ${corrupt.join(', ')}`), undefined, false);
   }
-  /** When each broken body was last held: one that breaks again within a cooldown (a bug that breaks it every tick) is not held
-   *  again, and takes the in-place rung's once-per-cooldown report instead of a row a tick. */
-  private heldAt = new Map<string, number>();
   /** #1378: when each body was last quarantined, for any reason. */
   private quarantinedAt = new Map<string, number>();
-  private heldRecently(bodies: string[]) { const now = this.engine.world.tick; return bodies.length > 0 && bodies.every(id => now - (this.heldAt.get(id) ?? -Infinity) < REWIND_COOLDOWN_TICKS); }
+  /** #1377: each body's quarantines within the current cooldown, for the glitch row's rate. */
+  private repeats = new Map<string, {since: number; n: number}>();
   /** The bodies a fault names that are in the world, sorted. */
   private namedBodies(error: unknown): string[] { const ents = this.engine.world.entities as Record<string, unknown>; return [...new Set(faultKeys(error).flatMap(k => k.subjects))].filter(id => id !== '*' && ents[id]).sort(); }
   /** #1369: everything a restore replaces, by reference, so a ladder whose restores all failed goes on from the head it had and
@@ -1717,7 +1715,12 @@ export class WorldHost {
   private quarantine(error: unknown, restoreFailure?: unknown, tell = true): void {
     const tick = this.engine.world.tick, keys = faultKeys(error), {bodies, corrupt} = this.quarantineTargets(error);
     if (restoreFailure !== undefined) this.snapshotSoon ??= 'the recovery baseline would not restore';   // a restart must not boot from it
-    if (!bodies.length || this.heldRecently(corrupt)) return this.containInPlace(error, true);
+    if (!bodies.length) return this.containInPlace(error, true);
+    // #1377: a body broken again within the cooldown is quarantined again, its programmes alone stopped and a broken state held
+    // again (a body is always force-recovered); never everyone's. Past its second time in a cooldown the glitch row is not written
+    // again (the log event is: a replay needs the hold), so a bug that breaks it every tick is counted once, not a row a tick.
+    const loud = bodies.some(id => { const r = this.repeats.get(id); return !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2; });
+    for (const id of bodies) { const r = this.repeats.get(id); this.repeats.set(id, r && tick - r.since < REWIND_COOLDOWN_TICKS ? {since: r.since, n: r.n + 1} : {since: tick, n: 1}); }
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
     // #1378: a body held again within the cooldown is held whole, every rule on it contained, so a fault that comes back under
     // a new rule each tick is absorbed, not a step fault a tick (the key is logged in `contained`, so a replay holds it too)
@@ -1736,8 +1739,7 @@ export class WorldHost {
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    for (const id of corrupt) this.heldAt.set(id, tick);   // held or not, a body is tried once per cooldown
-    this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
@@ -1760,7 +1762,7 @@ export class WorldHost {
    *  is off the list, so a named fault always gets here, even while steps are failing, and the list's cap per rule bounds those
    *  rows. Each stop row answers a decision that started what it stopped. A fault that only repeats is written once per cooldown. */
   private containInPlace(error: unknown, noQuarantine = false): void {
-    if (this.quarantineRule && !noQuarantine) { const t = this.quarantineTargets(error); if ((t.corrupt.length || t.bodies.length) && !this.heldRecently(t.corrupt)) return this.quarantine(error); }   // #1378: while steps fail too   // #1369: only what the fault named stops
+    if (this.quarantineRule && !noQuarantine) { const t = this.quarantineTargets(error); if (t.corrupt.length || t.bodies.length) return this.quarantine(error); }   // #1377: a repeat too   // #1378: while steps fail too   // #1369: only what the fault named stops
     const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }

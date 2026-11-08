@@ -30,7 +30,7 @@ function faulted(base, control) {
   const wrap = (e) => {
     const rt = e.rt, fired = new WeakSet(), step = e.step.bind(e);
     rt.invariants = [(r) => { if (r.tick === control.at && !fired.has(r)) { fired.add(r); return control.fault(r) ?? []; } if (control.every) return control.every(r) ?? []; return []; }, ...rt.invariants];
-    e.step = () => { const o = step(); if (control.throwEvery) throw new Error('fixture.engine-bug'); if (control.throwNaming) throw new Error(JSON.stringify([{code: 'fixture.engine-bug', message: 'forced', subjects: [control.throwNaming]}])); return o; };
+    e.step = () => { if (control.breakEvery) control.breakEvery(e); const o = step(); if (control.throwEvery) throw new Error('fixture.engine-bug'); if (control.throwNaming) throw new Error(JSON.stringify([{code: 'fixture.engine-bug', message: 'forced', subjects: [control.throwNaming]}])); return o; };
     return e;
   };
   return {...base, create: (w) => wrap(base.create(w)), restore: (s) => { if (control.restoreFails && !(control.restoreOk > 0 && control.restoreOk--)) throw new Error(REFUSED); return wrap(base.restore(s)); }};
@@ -130,4 +130,31 @@ test('#1378 A1 a step-failing stretch whose faults name no body still refuses ev
   assert.ok(h.stepFailing); assert.equal(h.stepFailingFor(Cy.entityId), true);
   const r = await act(w, Cy, {capability: 'walk:shed'}); assert.equal(r.accepted, false); assert.equal(r.code, 'world.step-failing');
   w.control.throwEvery = false; await w.tick(200); assert.equal(h.stepFailing, null);
+});
+
+// #1377 (b): a body a bug breaks again every tick. Each time only its own programmes stop and it is held whole again; the glitch
+// row is written at most twice a cooldown; nobody else is stopped and the world never halts (engine.unhashable included).
+test('#1377 B1-B4 a body broken every tick is held again each time, alone: bystanders complete, nothing stops world-wide, rows are bounded, boots agree', {timeout: 300000}, async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, {path}), h = w.f.host, {Ada, Bo, Cy} = w.souls;
+  const early = ok(await act(w, Bo, {capability: 'walk:yard'})); ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
+  w.control.restoreFails = true;
+  // in the engine's own step, for a fixed stretch of ticks: real in every replay too
+  let broken = 0; const from = h.engine.world.tick + 1, to = from + 400;
+  w.control.breakEvery = (e) => { const tk = e.world.tick; if (tk < from || tk >= to) return; const b = e.world.entities[Ada.entityId]; if (b?.pose) { b.pose.p = [NaN, b.pose.p[1], b.pose.p[2]]; broken++; forgetMotion(e.rt); } };
+  await w.tick(30);
+  const mid = ok(await act(w, Cy, {capability: 'walk:shed'}));
+  for (let i = 0; i < 370; i++) { h.tickOnce(); if (i % 10 === 0) { await setImmediate(); h.drainInputs(); } }
+  const report = () => JSON.stringify({clock: h.clockAvailable, paused: h.paused, fault: String(h.engineFault ?? "").slice(0, 200), glitches: h.glitches.byRule, stepFailing: h.stepFailing?.slice(0, 100)}).slice(0, 700);
+  assert.ok(broken >= 390, 'broken every tick: ' + broken);
+  // every tick faults by construction, so steps are failing: that names Ada alone (#1378), and nothing else halts
+  assert.ok(running(h), report()); assert.equal((byRung(h).halt ?? 0) - (h.glitches.byRule['engine.step-failing']?.halt ?? 0), 0, report());
+  if (h.stepFailing) { assert.equal(h.stepFailingFor(Cy.entityId), false); assert.equal(h.stepFailingFor(Ada.entityId), true); }
+  assert.equal(rowsOf(w).filter((r) => r.evidence?.inPlace).length, 0, `no stop-all: ${report()}`);
+  assert.equal(w.f.db.events(worldId, 0).filter((e) => e.payload?.lastRungInPlace).length, 0, 'no stop-all event');
+  assert.ok(rowsOf(w).filter((r) => r.evidence?.quarantine).length <= 2, `glitch rows bounded: ${report()}`);
+  assert.ok(h.engine.world.entities[Ada.entityId].pose.p.every(Number.isFinite), 'held whole again');
+  await w.tick(400);
+  assert.equal(read(w, Bo, early).phase, 'completed', report()); assert.equal(read(w, Cy, mid).phase, 'completed', report());
+  const again = ok(await act(w, Ada, {capability: 'walk:yard'})); await w.tick(500); assert.equal(read(w, Ada, again).phase, 'completed', 'Ada acts again once the bug stops');
+  h.drainInputs(); h.saveSnapshot(true); bootsAgree(w, path);
 });
