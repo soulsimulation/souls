@@ -57,11 +57,13 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
   count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
-- `SIM_SOULS_REPAIR=1` is read per process and isn't a live switch: on a running server it stops every existing world
-  booting, because a world without `souls-repair/` refuses that build until the boot repair lands
-  ([#1150](https://github.com/soulsimulation/souls/issues/1150)). Keep it off outside a test world. `SIM_SHARED_CARRY=1` brings
-  repair with it, so a shared world made before that needs `SIM_SOULS_REPAIR=0` to boot; `0` turns repair off under either flag.
-  A world made with repair on can't go back: it won't boot with `0`.
+- The repair rules are on by default ([#1323](https://github.com/soulsimulation/souls/issues/1323)): a world whose history
+  began without them adopts them at its first boot on 4.16.1 or later, logged as one `rules` event, with the line
+  `[world] adopted the repair rules at tick <n> (one way)`. **That is one way: once adopted, a world can't boot on 4.16 or
+  earlier**, so a rollback past 4.16.1 needs that world's pre-release backup. Leave `SIM_SOULS_REPAIR` unset.
+  `SIM_SOULS_REPAIR=0` stops adoption for worlds that haven't adopted, and is ignored, with a warning, for one that has.
+  `SIM_SOULS_REPAIR=1` (or `SIM_SHARED_CARRY=1`, which brings repair) bypasses adoption: an old world then refuses to boot, as
+  in 4.16, so don't set it on a server with existing worlds.
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor

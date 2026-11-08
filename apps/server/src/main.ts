@@ -96,13 +96,20 @@ const applyExpansion=process.env.APPLY_EDEN_EXPANSION_CHECKPOINT==='1';
 if(applyExpansion&&(!edenLife||!newcomerResources||!sleepSnapshot||!lecture||!expansionGround||process.env.EDEN_CORE_RETAIN_READER==='1'))throw Error('eden-bootstrap.expansion-requires-complete-explicit-readers-and-install-mode');
 // Launcher (entity) worlds opt into native Soul arrivals and removal (SOUL_LIFECYCLE=1), so account approvals create Souls as live does. Lane P2.
 const accountLifecycle=config.worldEngine&&!edenCore&&process.env.SOUL_LIFECYCLE==='1';
-const factory=edenCore?await edenHistoryFactory(db,config.worldId,{lifeV1:edenLife,newcomerResourcesV1:newcomerResources,sleepSnapshotV1:sleepSnapshot,lectureV1:lecture,groundV1:expansionGround}):warmFactory??await plainFactory();
+// #1323: the repair rules are on by default; a world whose history began without them adopts them at its head (one way)
+const factory=edenCore?await repairReader(await edenHistoryFactory(db,config.worldId,{lifeV1:edenLife,newcomerResourcesV1:newcomerResources,sleepSnapshotV1:sleepSnapshot,lectureV1:lecture,groundV1:expansionGround})):warmFactory??await plainFactory();
+/** #1323: every Mars world reads its history with and without the repair rules; `SIM_SOULS_REPAIR=0` adopts nothing. */
+async function repairReader(inner:Awaited<ReturnType<typeof edenHistoryFactory>>) {
+  if (config.engine !== 'mars') return inner;
+  const mars = await import('@souls/engine-mars');
+  return mars.soulsRepairReaderV1(inner, { adopt: process.env.SIM_SOULS_REPAIR !== '0' });
+}
 /** A world's engine factory when it is not Eden core (that one reads its history from the database). Each process owns
  *  one world and imports its engine from this release. */
 async function plainFactory() {
   const mars = config.engine === 'mars' ? await import('@souls/engine-mars') : null;
   const accountLifecycle = config.worldEngine && !edenCoreRequested(config, process.env) && process.env.SOUL_LIFECYCLE === '1';
-  return mars?await mars.marsFactory(config.worldKey==='littlemartians'?mars.LITTLE_MARTIANS_WORLD:config.worldKey==='eden'||!KNOWN_WORLD_KEYS.includes(config.worldKey as never)?(accountLifecycle?{...mars.GREEN_FIELD_WORLD,safeCrewRemoval:true}:mars.GREEN_FIELD_WORLD):undefined):recordedToyFactory;
+  return mars?await repairReader(await mars.marsFactory(config.worldKey==='littlemartians'?mars.LITTLE_MARTIANS_WORLD:config.worldKey==='eden'||!KNOWN_WORLD_KEYS.includes(config.worldKey as never)?(accountLifecycle?{...mars.GREEN_FIELD_WORLD,safeCrewRemoval:true}:mars.GREEN_FIELD_WORLD):undefined)):recordedToyFactory;
 }
 // ground/1 (lane L8): every terrain recipe this entity world logged resolves by hash before the engine replays
 if (config.worldEngine) loadGroundRecipes(db, config.worldId);
@@ -111,6 +118,11 @@ const host = new WorldHost(db, factory, config.worldSeed, config.snapshotEveryTi
 host.snapshotDebtMs = config.snapshotDebtMs; host.snapshotMinGapMs = config.snapshotMinGapMs; host.snapshotAfterReplayTicks = config.snapshotAfterReplayTicks;
 bootAt.open = performance.now();
 const boot = host.boot();
+// #1323: after replay and the clock check, before the first live tick: the one logged adoption, or nothing
+{ const adoption = host.adoptSoulsRepairV1('operator:souls-repair-default'); host.drainInputs();
+  const fact = await adoption.catch((e) => { console.error('[world] the repair rules could not be adopted; the world runs under its own rules:', String(e).slice(0, 300)); return null; });
+  if (fact) console.log(`[world] adopted the repair rules at tick ${fact.tick} (one way): rules ${host.engine.rulesVersion}`);
+  if (process.env.SIM_SOULS_REPAIR === '0' && host.engine.rulesVersion.includes('+souls-repair/')) console.warn('[world] SIM_SOULS_REPAIR=0 is ignored for this world: it has adopted the repair rules, and that is one way'); }
 bootAt.engine = performance.now();
 if(edenCore)await installEdenCore(host,{applyCrew:process.env.APPLY_EDEN_CREW_CHECKPOINT==='1',applyCommons:process.env.APPLY_EDEN_COMMONS_CHECKPOINT==='1',retainReader:process.env.EDEN_CORE_RETAIN_READER==='1'});
 const edenCapabilities=edenCore&&host.engine.rulesVersion.includes('+crew-removal/1');
