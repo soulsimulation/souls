@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +38,7 @@ async function fixture(t, { onAct, object = () => steerAction(null) }) {
     let out = '', err = ''; child.stdout.on('data', c => { out += c; }); child.stderr.on('data', c => { err += c; });
     child.on('exit', code => { let d = null; try { d = JSON.parse(out); } catch {} resolve({ code, d, stdout: out, stderr: err }); });
   });
-  api = { seen, run, acts: () => seen.filter(s => s.url === '/v1/edge/act'), waitFrame: null };
+  api = { dir, seen, run, acts: () => seen.filter(s => s.url === '/v1/edge/act'), waitFrame: null };
   return api;
 }
 
@@ -124,4 +124,22 @@ test('a wait whose frames say the clock has stalled says so in the answer', { ti
   const got = await (async () => { f.waitFrame = { events: [], cursor: 'c_1', world: stall }; return f.run('act', 'walk:flag-orchard', '--wait', '1'); })();
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.d.stalled, stall.note);
+});
+
+test('a stalled act whose wait then sees the clock running says nothing about a stall', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, { onAct: (s, res) => json(res, 200, { accepted: true, receipt: { id: 'r_6', capability: 'walk:flag-orchard', phase: 'started' }, channel: 'body', world: { stalled: true, tick_age_ms: 3000, note: 'Stalled.' } }) });
+  f.waitFrame = { events: [], cursor: 'c_1', world: { load: 'green' } };
+  const got = await f.run('act', 'walk:flag-orchard', '--wait', '1');
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.d.stalled, undefined);
+});
+
+test('a remembered refusal belongs to its world: the same steer in another world is sent', { timeout: 10_000 }, async t => {
+  const f = await fixture(t, { onAct: (s, res) => json(res, 200, { accepted: false, code: 'steer.unknown-place', reason: 'Not a place you know.', capability: STEER }) });
+  await f.run('act', STEER, '{"to":"Atlantis"}');
+  assert.equal((await f.run('act', STEER, '{"to":"Atlantis"}')).d.repeat, 'refused');
+  const p = join(f.dir, '.eden-agent.json'), st = JSON.parse(readFileSync(p, 'utf8'));
+  writeFileSync(p, JSON.stringify({ ...st, world: st.world.replace('127.0.0.1', 'localhost') }), { mode: 0o600 });
+  await f.run('act', STEER, '{"to":"Atlantis"}');
+  assert.equal(f.acts().length, 2, 'sent again in the other world');
 });
