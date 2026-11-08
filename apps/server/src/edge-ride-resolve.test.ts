@@ -33,10 +33,20 @@ async function setup(t: {after(fn: () => void): void}) {
 const rideIds = (r: any) => [r.resolve.would, ...(r.resolve.candidates ?? [])].filter(Boolean).filter((c: any) => (c.capability ?? c.id) === 'object:ride-test-balloon:start');
 const pos = (q: Awaited<ReturnType<typeof setup>>, id: string) => {const p = (q.f.host.engine.world.entities as Record<string, any>)[id].pose.p; return [p[0], p[2]] as [number, number];};
 
-test('I5: from lift-off on, every tick, resolve answers start not available (ride.not-boarding)', {timeout: 180000}, async t => {
+test('I5: climbing in, start is not offered; from lift-off on, every tick, resolve answers start not available (ride.not-boarding)', {timeout: 180000}, async t => {
   const q = await setup(t);
   assert.equal((await q.call('/v1/edge/act', {capability: 'object:ride-test-balloon:join', clientRef: 'join'})).accepted, true);
-  q.tick(3000, () => q.ledger.aboard(q.actor)?.riderPhase === 'seated');
+  // climbing in: never offered as available while the body would refuse it (carrier.not-aboard on the Eden walk-in)
+  let climbing = 0;
+  for (let i = 0; i < 3000 && q.ledger.aboard(q.actor)?.riderPhase !== 'seated'; i++) {
+    q.f.host.tickOnce();
+    if (q.ledger.aboard(q.actor)?.riderPhase !== 'boarding' || i % 10) continue;
+    const r = await q.call('/v1/edge/resolve', {capability: 'start balloon ride'});
+    for (const c of rideIds(r)) {assert.equal(c.available, false, `climbing in, tick ${i}: ${JSON.stringify(c)}`); assert.equal(c.blocked?.code, 'ride.climbing-in');}
+    climbing += rideIds(r).length ? 1 : 0;
+  }
+  assert.ok(climbing >= 1, 'resolved the start at least once while climbing in');
+  assert.equal(q.ledger.aboard(q.actor)?.riderPhase, 'seated');
   // seated, still boarding: the start is on offer
   const seated = await q.call('/v1/edge/resolve', {capability: 'start balloon ride'});
   assert.ok(rideIds(seated).length, JSON.stringify(seated.resolve).slice(0, 400));

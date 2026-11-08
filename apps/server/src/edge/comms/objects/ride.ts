@@ -167,7 +167,9 @@ export const rideKind: ObjectKind<RideState> = {
       label: 'Depart now instead of waiting for more riders', roles: ['rider'], reach: 'anywhere', params: {},
       // r3 quality case 33: a host who forced "start" while the invited companion (who had accepted) was still walking to the
       // basket left them behind (carrier.departed). While a place is kept for an invited companion, it departs by itself.
-      available: s => s.rowing ? {code: 'ride.automatic', reason: 'The punt departs automatically after boarding; wait for the rowing receipt.'} : s.phase !== 'boarding' ? {code: 'ride.not-boarding', reason: 'It is not waiting at its boarding point.'}
+      available: (s, ctx) => s.rowing ? {code: 'ride.automatic', reason: 'The punt departs automatically after boarding; wait for the rowing receipt.'} : s.phase !== 'boarding' ? {code: 'ride.not-boarding', reason: 'It is not waiting at its boarding point.'}
+        // #1329 part 3: offered while the rider was still climbing in, then refused by the body (carrier.not-aboard)
+        : (s.boarding ?? []).some(r => r.soulId === ctx.soul.soulId) ? {code: 'ride.climbing-in', reason: `You are still climbing into ${attraction(s) ? `the ${attraction(s)} car` : 'the basket'}; start it once you are seated (a few seconds), or let it depart by itself.`}
         : (s.keptFor ?? []).length ? {code: 'ride.keeping-place', reason: `It is keeping a place for ${(s.keptFor ?? []).map(k => k.name).join(', ')} (invited) and departs by itself once they are aboard or the hold ends; starting now would leave them behind. Keep waiting.`} : null,
       validate(s, _p, ctx) { return rideKind.actions.start.available!(s, ctx); },
       apply(s) { return {state: s, result: {departing: s.carrier}, bodies: [{label: s.rowing ? 'Start the rowing loop' : 'Ask the balloon to lift off', steps: [{verb: 'mars:carrier_depart', params: {carrier: s.carrier}}]}]}; },
