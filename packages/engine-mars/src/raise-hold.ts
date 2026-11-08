@@ -11,7 +11,7 @@ import type { Entity, Pose } from '../../../mars/viewer/engine/world/types.ts';
 import { def, HUMAN_RADIUS, type AssetDef } from '../../../mars/viewer/engine/world/catalog.ts';
 import { dcos, dsin, heading, hypot, obbCorners, obbOverlap, pointInObb, rot2, type Vec2 } from '../../../mars/viewer/engine/core/math.ts';
 import { entityFootprint, type Spatial } from '../../../mars/viewer/engine/spatial/service.ts';
-import { makeWay } from '../../../mars/viewer/engine/locomotion/walk.ts';
+import { makeWay, registerClearOf } from '../../../mars/viewer/engine/locomotion/walk.ts';
 import { holdingDiagnostic } from '../../../mars/viewer/engine/construction/rules.ts';
 import { checkStations, childrenState, walkCrew, type Children } from '../../../mars/viewer/engine/construction/children.ts';
 import { frameStability } from './beam-connect.ts';
@@ -109,12 +109,13 @@ function release(rt: Runtime, ex: RaiseHoldExec, u: Entity) {
   for (const c of ex.p.crew) Object.assign(rt.world.entities[c].human!, { grip: undefined, task: undefined, activity: 'idle' });
   u.pose = structuredClone(ex.start); u.support = { kind: 'ground' }; u.phase = 'staged'; u.reservedBy = undefined;
 }
+/** q is clear of the lifters' next stances (makeWay's clearOf), or the hold has ended. */
+registerClearOf('raise-hold', (rt, ref, q) => !rt.isActive(ref.action) || ref.at!.every((m) => hypot(m[0] - q[0], m[1] - q[1]) >= RAISE_BYSTANDER_GAP + 0.1));
 /** Hold where it is, and ask a person in a lifter's way to step aside. */
 function bystanderWait(rt: Runtime, ex: RaiseHoldExec, u: Entity, moves: [string, Vec2, number][]): Diagnostic | null {
   const by = raiseBystander(rt, ex as never, moves);
   if (!by) return null;
-  const clear = (q: Vec2) => !rt.isActive(ex.id) || moves.every(([, m]) => hypot(m[0] - q[0], m[1] - q[1]) >= RAISE_BYSTANDER_GAP + 0.1);
-  makeWay(rt, by.who, by.at, { by: `the crew with ${u.id}`, subjects: [u.id, ...ex.p.crew], test: clear });
+  makeWay(rt, by.who, by.at, { by: `the crew with ${u.id}`, subjects: [u.id, ...ex.p.crew], test: { kind: 'raise-hold', action: ex.id, at: moves.map(([, m]) => [m[0], m[1]] as Vec2) } });
   return { code: 'raise.path-occupied', message: `the crew holds ${u.id} and waits for ${by.who} to move out of its way`, subjects: [u.id, by.who, ...ex.p.crew] };
 }
 
