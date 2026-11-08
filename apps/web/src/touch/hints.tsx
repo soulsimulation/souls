@@ -37,8 +37,8 @@ export function TouchHints() {
   }, []);
   if (phase === 'waiting' || phase === 'done') return null;
   return <div className="touch-hints" data-phase={phase} role="note" aria-label="Touch controls">
-    <figure><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray="4 4"/><circle cx="24" cy="24" r="8" fill="currentColor"/><path d="M24 3v5M24 40v5M3 24h5M40 24h5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg><figcaption>Thumb, lower left: walk</figcaption></figure>
-    <figure><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="17" cy="30" r="6" fill="currentColor"/><path d="M24 30h17M36 25l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M8 30h3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity=".5"/></svg><figcaption>Drag: look around</figcaption></figure>
+    <figure><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray="4 4"/><circle cx="24" cy="24" r="8" fill="currentColor"/><path d="M24 3v5M24 40v5M3 24h5M40 24h5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg><figcaption>Drag from the ring: move</figcaption></figure>
+    <figure><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="17" cy="30" r="6" fill="currentColor"/><path d="M24 30h17M36 25l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M8 30h3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity=".5"/></svg><figcaption>Drag anywhere else: turn</figcaption></figure>
     <figure><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="15" cy="33" r="5.5" fill="currentColor"/><circle cx="33" cy="15" r="5.5" fill="currentColor"/><path d="M11 37l-6 6M37 11l6-6M5 37v6h6M37 5h6v6" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg><figcaption>Pinch: glide closer</figcaption></figure>
   </div>;
 }
