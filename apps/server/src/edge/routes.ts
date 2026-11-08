@@ -72,7 +72,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   };
   const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
   app.get('/v1/edge/observe', wrap(c => {const s = deps.soul(c); limit(s, 'observe', 240); return L.observe(s, new Set((c.req.query('include') ?? '').split(',').filter(Boolean)));}));
-  app.get('/v1/edge/capabilities', wrap(c => {const s = deps.soul(c); limit(s, 'capabilities', 240); return {tick: deps.host.engine.world.tick, ...L.capabilitiesPage(s, {all: c.req.query('all') === '1', ...(typeof c.req.query('search') === 'string' ? {search: c.req.query('search')!.slice(0, 200)} : {})})};}));
+  app.get('/v1/edge/capabilities', wrap(c => {const s = deps.soul(c); limit(s, 'capabilities', 240); return {tick: deps.host.engine.world.tick, ...L.capabilitiesPage(s, {all: c.req.query('all') === '1', ...(c.req.query('search')?.trim() ? {search: c.req.query('search')!.trim().slice(0, 200)} : {})})};}));
   app.post('/v1/edge/act', wrap(async c => {const s = deps.soul(c); limit(s, 'act', 60); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {capability, params?, clientRef?} or {verb, target, …}'); }); const {for: forMessage, forDefault, strict, ...input} = (body ?? {}) as Record<string, unknown>;
     // CTRL-1 (#1093): a strict client (eden 2.9+) acts on offered ids only; words go through /v1/edge/resolve
     if (strict === true && !freeTextAct()) {const no = L.offerGate(s, input); if (no) return no;}

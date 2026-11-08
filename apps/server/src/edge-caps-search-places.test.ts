@@ -29,13 +29,24 @@ test('I7/I8: a search finds far places by name and alias, as resolve does, and s
   const lib = resolved('walk to library')!, sl = w.edge.capabilitiesPage(w.soul, { all: true, search: 'library' });
   assert.ok(sl.search!.places.includes(lib), JSON.stringify(sl.search));
   assert.equal(sl.capabilities.filter((c) => c.id === lib).length, 1);
+  // the id a search names is one act takes (by id, as a dry run reads it)
+  for (const id of w.edge.capabilitiesPage(w.soul, { all: true, search: 'lighthouse' }).search!.places) assert.equal((w.edge.intents.dryRun(w.soul, { capability: id }) as { ok: boolean }).ok, true, id);
+  // review: a water place's walk is its shore's, as resolve answers; a place with no walk is named in the note, never silent
+  const pondWalk = resolved('walk to Commons Pond'); assert.ok(pondWalk, 'resolve walks to the pond');
+  assert.ok(w.edge.capabilitiesPage(w.soul, { all: true, search: 'Commons Pond' }).search!.places.includes(pondWalk!));
+  for (const words of ['Koi Pond', 'West Lake', 'Southern Sea', 'Town Canal']) {
+    const r = w.edge.capabilitiesPage(w.soul, { all: true, search: words }).search!;
+    assert.ok(r.places.length > 0 || /no walk from here/.test(r.note ?? ''), `${words}: ${JSON.stringify(r)}`);
+  }
+  // an empty query is no search
+  assert.equal(w.edge.capabilitiesPage(w.soul, { all: true, search: undefined }).search, undefined);
   // I8: no place: says so, not just an empty list
   const none = w.edge.capabilitiesPage(w.soul, { all: true, search: 'airport' }).search!;
   assert.deepEqual(none.places, []); assert.equal(none.truncated, false); assert.equal(none.query, 'airport'); assert.match(none.note ?? '', /No place you know is named "airport"/);
   // I8: more places match than are built: says how many and how to narrow
   const many = w.edge.capabilitiesPage(w.soul, { all: true, search: 'house' }).search!;
   assert.ok(many.placesMatched > 12, `house matches ${many.placesMatched} places`);
-  assert.equal(many.places.length, 12); assert.equal(many.truncated, true); assert.match(many.note ?? '', /known places match "house"; the 12 best are listed/);
+  assert.equal(many.places.length, 12); assert.equal(many.truncated, true); assert.match(many.note ?? '', /known places match "house"; 12 are listed/);
   // unchanged without search: no search field, the same menu
   assert.equal(w.edge.capabilitiesPage(w.soul, { all: true }).search, undefined);
 });
