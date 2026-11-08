@@ -2281,7 +2281,8 @@ async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, s
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
   if (r.status >= 200 && r.status < 300) noteForMemory(url, method, body, data);
-  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null };
+  // the world's idempotency layer marks a repeat it answered from the first write (apps/server/src/edge/events/idempotency.ts)
+  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null, ...(r.headers.get("idempotent-replay") === "true" ? { replayed: true } : {}) };
 }
 
 // ---------------------------------------------------------------- memory
@@ -3214,7 +3215,10 @@ async function say(...all) {
   const w = await keyedWrite("/v1/edge/say", { text: text.slice(0, 500) }, { key });
   if (w.unconfirmed) return { ...(faced ? { faced } : {}), ...unconfirmed("speech", w) }; // no gesture after speech the world did not confirm
   const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
-  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: await sayGesture(gesture, target, standOk) } : {}) };
+  // a rerun the world answers from the first speech (same key) already had its gesture: it is not sent twice (the turn is
+  // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it.
+  const repeat = w.r.replayed === true && !w.resent;
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}) };
   return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
 }
 /** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
