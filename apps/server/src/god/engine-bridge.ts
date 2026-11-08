@@ -1937,6 +1937,12 @@ export class EngineBridge {
     L.floorOnDemand = (soul,q,caps,plans) => offer('floor on demand',soul,caps,plans,()=>this.nav.floorOnDemand(soul,q,caps,plans,tokenHit),null);
     L.floorsNear = (at, radius) => pass('floors near', () => this.floorsNear(at, radius), []);
     L.thingAt = (id) => { const t = this.nav.thingById(id); return t ? [t.at[0], t.at[1]] : null; };
+    // landing/1 (#1324): a building's outside door approach (nav: its first standing point), a room's: its building's front door
+    L.entranceOf = (placeId) => pass('entrance of', () => {
+      const ref = (this.edge?.places.byId.get(placeId) as { ref?: unknown } | undefined)?.ref, t = typeof ref === 'string' ? this.nav.thing(ref) : undefined;
+      if (t?.entry && t.entry.level === 0) return [t.entry.p[0], t.entry.p[1]] as [number, number];
+      return t?.rooms?.length && t.stands?.length ? [t.stands[0][0], t.stands[0][1]] as [number, number] : null;
+    }, null);
     L.thingWords = () => pass('thing words', () => this.nav.thingWords(), [] as string[]);
     L.beforeMap = () => { this.flush(); this.perceiveSync(); };
     if (L.sharedCarry && !this.readSide) {

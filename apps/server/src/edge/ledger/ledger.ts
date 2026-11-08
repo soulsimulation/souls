@@ -215,6 +215,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   floorsNear?: (at: [number, number], radius: number) => FloorNear[];
   /** World-engine worlds only, RESOLVE: where a named thing that is not an engine body stands ([x, z]), by entity id. */
   thingAt?: (id: string) => [number, number] | null;
+  /** World-engine worlds only, landing/1 (#1324): the outside approach of a building place's front door (a room's: its
+   *  building's), where a steer to it aims instead of the centroid inside; null for any other place. */
+  entranceOf?: (placeId: string) => [number, number] | null;
   /** World-engine worlds only, RESOLVE: the words of named things (beyond the listing), for reading a misspelt name. */
   thingWords?: () => string[];
   /** World-engine worlds only: called before the map is read, so a god's edit shows on the next `map`. Unset elsewhere. */
@@ -2355,7 +2358,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       departsAtTick: c.state.phase === 'boarding' ? c.state.departAtTick : null, returnsAtTick: c.state.phase === 'aloft' ? tick + Math.max(0, Math.round(end * 20) - c.state.elapsed) : null,
       route: {id: c.state.route.id, seconds: end, elapsedSeconds: Math.round(c.state.elapsed / 2) / 10, keys: c.state.route.keys, interpolation: 'eden-rides/1 hermite'},
       ...((c.state as {steer?: {by: string | null; land?: number[]; to: number[]; ret?: true}}).steer ? (() => {const st = (c.state as unknown as {steer: {by: string | null; land?: number[]; to: number[]; ret?: true}}).steer, m = st.by ? this.host.mindByEntity?.get(st.by) ?? [...this.host.minds.values()].find(x => x.entityId === st.by) : undefined;
-        return {steer: {by: m ? {soulId: m.soulId, name: m.name} : null, returning: !!st.ret, to: [st.to[0], st.to[2]], ...(st.land ? {landAt: [st.land[0], st.land[2]]} : {})}};})() : {}),
+        return {steer: {by: m ? {soulId: m.soulId, name: m.name} : null, returning: !!st.ret, to: [st.to[0], st.to[2]], ...(st.land ? {landAt: [st.land[0], st.land[2]]} : {}), ...((st as {asked?: number[]}).asked ? {asked: (st as {asked?: number[]}).asked} : {})}};})() : {}),
+      // landing/1 (#1324): the ride's last change to a steered landing (moved, hovering, flying home), for the riders' events
+      ...((c.state as {landNote?: unknown}).landNote ? {landNote: (c.state as {landNote?: unknown}).landNote} : {}),
       flights: c.state.flights, phaseTick: c.state.phaseTick, tick, waitSeconds: Math.round(((c.state as {waitTicks?: number}).waitTicks ?? 900) / 20),
       ...((b: {code: string; message: string} | null) => b ? {blocked: b} : {})(this.boardingIssue(c.id, tick, c.state.route.id))};
   }
@@ -2391,7 +2396,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
         return {ok: false, code: 'steer.unknown-place', reason: `"${String(spec.to).slice(0, 60)}" is not a place you know; name a place (or give a direction and distance)${near.length ? `. Places you know: ${[...new Set(near)].slice(0, 5).join(', ')}` : ''}.`, did_you_mean: r.did_you_mean.slice(0, 5)};
       }
       const pl = this.places.byId.get(r.chosen.place); if (!pl?.polygon?.length) return {ok: false, code: 'steer.unknown-place', reason: `${r.chosen.name} has no location to steer to.`};
-      const [x, z] = centroid(pl.polygon); return {ok: true, x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, label: pl.name};
+      // landing/1 (#1324): a building (or a room in one) is steered to outside its front door, not to the floor inside it
+      const [x, z] = this.entranceOf?.(pl.id) ?? centroid(pl.polygon); return {ok: true, x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, label: pl.name};
     }
     const POINTS: Record<string, number> = {n: 0, north: 0, ne: 45, northeast: 45, e: 90, east: 90, se: 135, southeast: 135, s: 180, south: 180, sw: 225, southwest: 225, w: 270, west: 270, nw: 315, northwest: 315};
     const deg = POINTS[String(spec.direction ?? '').toLowerCase().replace(/[\s-]/g, '')], d = Number(spec.distance);
@@ -2401,10 +2407,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** VEHICLE-STEER: the engine's own refusal for a steer step now (another rider steering, out of bounds, no open water, no
    *  landing spot), so the Soul hears it at once instead of in a failed receipt. Pure: nothing changes. */
-  steerCheck(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean}): {code: string; reason: string} | null {
+  steerCheck(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {code: string; reason: string} | null {
     const eng = this.host.engine as {previewMarsVerbV1?(verb: string, params: unknown): {code: string; message: string} | null};
     const no = eng.previewMarsVerbV1?.('carrier_steer', {actor: entityId, carrier, ...step}); if (!no) return null;
     return {code: no.code.replace(/^carrier\./, 'ride.'), reason: no.message.charAt(0).toUpperCase() + no.message.slice(1) + '.'};
+  }
+  /** landing/1 (#1324): where the engine's own steer plan would set the ride down now (the nearest clear outdoor spot to the
+   *  target, how far it moved and why), so the act's result says it. Pure: nothing changes. */
+  steerLanding(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {requested: [number, number]; at: [number, number]; adjustedM: number; reason?: string} | null {
+    const eng = this.host.engine as {previewSteerLandingV1?(params: unknown): {requested: [number, number]; at: [number, number, number]; adjustedM: number; reason?: string} | null};
+    const l = eng.previewSteerLandingV1?.({actor: entityId, carrier, ...step}); if (!l) return null;
+    return {requested: l.requested, at: [l.at[0], l.at[2]], adjustedM: l.adjustedM, ...(l.reason ? {reason: l.reason} : {})};
   }
   rides() {return this.carriersNative().map(c => this.carrierView(c.id)!);}
   private rideKey = new Map<string, string>();

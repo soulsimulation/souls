@@ -793,6 +793,12 @@ export class MarsEngine implements Engine {
   }
   /** VEHICLE-STEER: a pure check of a Mars verb (no `mars:` prefix) against the world now: the refusal it would meet, or null. */
   previewMarsVerbV1(verb: string, params: unknown): Diag | null { return this.plan(verb, params, true); }
+  /** landing/1 (#1324): where a `carrier_steer` would set its ride down now (the plan's own landing: the asked point, the spot,
+   *  how far it moved and why), or null (refused, or no landing). Pure: the same plan the step runs. */
+  previewSteerLandingV1(params: unknown): { requested: [number, number]; at: [number, number, number]; adjustedM: number; reason?: string } | null {
+    const def = this.registry.get('carrier_steer'), parsed = def?.schema.safeParse(params); if (!def || !parsed?.success) return null;
+    const r = def.plan(this.rt, parsed.data); return r.ok ? structuredClone((r.program as { landing?: any }).landing ?? null) : null;
+  }
   /** A reachable standing point `standoff` metres from a target, on the side the actor comes from if possible. 'here' if already there. */
   private goalNear(actor: string, to: unknown, standoff: number, stand?: unknown): { x: number; z: number; level: number } | 'here' | Diag {
     const me = this.pos(actor)!, t = this.pointOf(to);

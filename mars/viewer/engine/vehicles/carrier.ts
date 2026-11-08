@@ -19,13 +19,15 @@ import { z } from 'zod';
 import type { ActionDef, Diagnostic } from '../actions/types.ts';
 import type { Runtime, Invariant } from '../runtime/runtime.ts';
 import type { Entity, WorldState } from '../world/types.ts';
-import { angleDelta, dcos, dsin, heading, hypot, rot2, wrapAngle, type Vec2, type Vec3 } from '../core/math.ts';
+import { angleDelta, dcos, dsin, heading, hypot, rot2, wrapAngle, type OBB2, type Vec2, type Vec3 } from '../core/math.ts';
 import { CATALOG } from '../world/catalog.ts';
 import { entityList, stableIndices, type EntityTable } from '../world/entity-list.ts';
 import { relevantEntities } from '../world/relevant.ts';
 import { acknowledgeRelocation } from '../runtime/invariants.ts';
 import { G_SWIM, G_WALK } from '../spatial/ground.ts';
 import type { GroundNav } from '../spatial/tiled.ts';
+import type { Spatial } from '../spatial/service.ts';
+import { humanRadius } from '../bodies/humanoid.ts';
 
 export type CarrierSeatDef = { id: string; local: Vec2; yaw: number; exit: Vec2 };
 /** `doorway`: local floor points between the seats and the door, inside first (a basket's door opening): boarding walks
@@ -56,14 +58,28 @@ export type CarrierState = {
    *  it holds at `to` until `hoverUntil`, then flies itself home). `built`: the route from the pose to `to`/`land` is in
    *  `route` (a boarding ride builds it at lift-off). Absent: the ride flies its own route. */
   steer?: CarrierSteer;
+  /** landing/1 (#1324): what the world last did with a steered landing it could not make as planned (the spot was no longer
+   *  clear at the descent): `moved` to another spot, `hover` with none, `return` home after the hover. Riders hear it once. */
+  landNote?: LandNote;
 };
+export type LandNote = { tick: number; code: 'moved' | 'hover' | 'return'; at?: Vec2; m?: number; why?: string };
 /** `ret`: fly back (punts retrace the steered legs to where they left their own route, then finish it; balloons rejoin it
  *  in the air, or fly straight home when empty or steered before lift-off). `away`: the ride's own route and where it left it. */
 export type CarrierSteer = { by: string | null; to: Vec3; land?: Vec3; built: boolean; hoverUntil?: number; ret?: true;
-  away: { route: CarrierRoute; elapsed: number; wake: Vec3[] } };
+  away: { route: CarrierRoute; elapsed: number; wake: Vec3[] };
+  /** landing/1 (a steer with `landing: 'clear/1'`): the ground point asked for. Its landing is checked again through the final
+   *  descent and moved, or given up for a hover, when it is no longer clear. Absent: a steer recorded before, flown as it was. */
+  asked?: Vec2;
+  /** landing/1: climb straight up to this height before the first leg (a landing moved low down never crosses a wall). */
+  climb?: number;
+  /** landing/1: hovering because no spot near `asked` was clear; it retries and lands when one is. */
+  seek?: true };
 /** `outBy` (leaving only): the tick by which the rider is on the ground; a step-out still held up then is set down at its exit. */
 // alighting: a carrier_alight has asked this seated rider's ride to stop; the carrier does not lift off before the step-out begins.
-export type CarriedBody = { id: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; outBy?: number; alighting?: true };
+export type CarriedBody = { id: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; outBy?: number; alighting?: true;
+  /** step-out/1 (#1324, boarded with `clear: 'step-out/1'`): every step out of the basket and every set-down lands on ground the body
+   *  can stand on (static geometry, not only people). Absent: a ride boarded before, stepping out as it did. */
+  clear?: true };
 
 const TPS = 20;
 /** Clearance of the landing spot: no other person within this distance of the home centre below this height. */
@@ -71,6 +87,8 @@ const LANDING_HEIGHT = 3;
 /** A boarder starts its climb-in from anywhere this close to the carrier centre (several approach spots, no single queue point). */
 const BOARD_REACH = 3.2;
 const BLOCK_GAP = 0.56;
+/** step-out/1: margin over the body radius a step out of a basket keeps from static geometry (m). */
+const STAND_MARGIN = 0.05;
 const BOARD_TIMEOUT = 15 * TPS;
 /** Stepping out never holds a body for long (Gene's review 2026-10-23: a landed rider stayed "riding" behind a busy door/exit):
  *  a rider whose step-out has made no progress this long (busy door, someone on the exit) is set down at its seat exit (the
@@ -80,14 +98,47 @@ export const LEAVE_LIMIT = 12 * TPS;
 export function stepOutSeconds(body: CarriedBody | undefined, tick: number): number {
   return Math.max(1, Math.ceil(((body?.phase === 'leaving' && body.outBy !== undefined ? body.outBy : tick + LEAVE_LIMIT) - tick) / TPS));
 }
-/** The exit itself when clear, else the first clear spot a little further out from the carrier or to either side. */
-function setDownSpot(rt: Runtime, me: string, e: Entity, exit: Vec3): Vec3 {
+/** The exit itself when clear, else the first clear spot a little further out from the carrier or to either side.
+ *  step-out/1 (`clear`): clear of static geometry too, and further out when none of those is (rings to 6 m round the exit);
+ *  null when there is no such spot (the rider stays aboard rather than be set down in a wall). */
+function setDownSpot(rt: Runtime, me: string, e: Entity, exit: Vec3, clear?: boolean): Vec3 | null {
   const ax = exit[0] - e.pose.p[0], az = exit[2] - e.pose.p[2], n = hypot(ax, az) || 1, ux = ax / n, uz = az / n;
+  const ok = (p: Vec3) => !blockerAt(rt, me, p) && (!clear || standClear(rt, me, p));
   for (const [f, s] of [[0, 0], [0.8, 0], [1.6, 0], [0.8, 0.8], [0.8, -0.8], [0, 1.2], [0, -1.2], [2.4, 0]] as const) {
     const p: Vec3 = [r4(exit[0] + ux * f - uz * s), exit[1], r4(exit[2] + uz * f + ux * s)];
-    if (!blockerAt(rt, me, p)) return p;
+    if (ok(p)) return p;
   }
-  return exit;
+  if (!clear) return exit;
+  for (let ring = 1; ring <= 24; ring++) for (let k = 0, m = ring * 8; k < m; k++) {
+    const a = k * 2 * Math.PI / m, p: Vec3 = [r4(exit[0] + ring * 0.25 * dcos(a)), exit[1], r4(exit[2] + ring * 0.25 * dsin(a))];
+    if (ok(p)) return p;
+  }
+  return null;
+}
+/** step-out/1: a body of this rider's radius stands clear of static geometry at p (the fine raster the human-static invariant
+ *  reads, with a margin) on dry ground. True where there is no raster (no spatial service). */
+function standClear(rt: Runtime, me: string, p: Vec3): boolean {
+  const sp = rt.services.spatial as Spatial | undefined; if (!sp) return true;
+  sp.sync(rt.world);
+  const r = humanRadius(rt.world.entities[me]) + STAND_MARGIN, test = sp.clearTester(0, [p[0], p[2]], r);
+  return !!test && test([p[0], p[2]]) && sp.ground?.field?.medium(p[0], p[2]) !== G_SWIM;
+}
+/** step-out/1: the straight step from a to b keeps the body clear of static geometry all the way (samples every 0.2 m). */
+function stepClear(rt: Runtime, me: string, a: Vec3, b: Vec3): boolean {
+  const n = Math.max(1, Math.ceil(hypot(b[0] - a[0], b[2] - a[2]) / 0.2));
+  for (let i = 1; i <= n; i++) if (!standClear(rt, me, [a[0] + (b[0] - a[0]) * i / n, b[1], a[2] + (b[2] - a[2]) * i / n])) return false;
+  return true;
+}
+/** step-out/1: where a rider's last step out goes: its exit when that is clear and the step from the door to it is, else the
+ *  nearest such spot round the exit (rings to 4 m); null while there is none (it waits at the door). */
+function exitSpot(rt: Runtime, me: string, door: Vec3, exit: Vec3): Vec3 | null {
+  const ok = (p: Vec3) => !blockerAt(rt, me, p) && standClear(rt, me, p) && stepClear(rt, me, door, p);
+  if (ok(exit)) return exit;
+  for (let ring = 1; ring <= 16; ring++) for (let k = 0, m = ring * 8; k < m; k++) {
+    const a = k * 2 * Math.PI / m, p: Vec3 = [r4(exit[0] + ring * 0.25 * dcos(a)), exit[1], r4(exit[2] + ring * 0.25 * dsin(a))];
+    if (ok(p)) return p;
+  }
+  return null;
 }
 
 /** Named routes (World data; deterministic in route time). Positions are world metres, t seconds from lift-off. */
@@ -206,12 +257,14 @@ export function boardingPath(e: Entity, from: Vec3, seat: Vec3, d: CarrierDef): 
 /** together/1: places kept for companions who have not boarded yet. */
 const keptSeats = (c: CarrierState) => c.hold ? Math.max(0, c.hold.seats - c.hold.filled) : 0;
 const HOLD_MAX_SECONDS = 180;
-type RideParams = { actor: string; carrier: string; slot?: string; holdSeats?: number; holdSeconds?: number; reserved?: boolean; throughReturn?: boolean };
+type RideParams = { actor: string; carrier: string; slot?: string; holdSeats?: number; holdSeconds?: number; reserved?: boolean; throughReturn?: boolean; clear?: 'step-out/1' };
 const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
   verb: 'carrier_ride',
   description: 'Step into a free seat of a parked or boarding carrier (a balloon basket) from its door and stay seated while it carries you; step out only when it is on the ground.',
   schema: z.object({ actor: z.string().min(1), carrier: z.string().min(1), slot: z.string().min(1).max(40).optional(),
-    holdSeats: z.number().int().min(1).max(8).optional(), holdSeconds: z.number().min(5).max(HOLD_MAX_SECONDS).optional(), reserved: z.boolean().optional(), throughReturn: z.boolean().optional() }).strict(),
+    holdSeats: z.number().int().min(1).max(8).optional(), holdSeconds: z.number().min(5).max(HOLD_MAX_SECONDS).optional(), reserved: z.boolean().optional(), throughReturn: z.boolean().optional(),
+    // step-out/1 (#1324): the step out and any set-down keep clear of static geometry; a ride recorded without it steps out as it did
+    clear: z.literal('step-out/1').optional() }).strict(),
   resumable: true,
   reservations: (w: WorldState, p) => {
     const e = w.entities[p.carrier], slot = p.slot ?? (e ? seatFor(e, p.actor) : null) ?? 'none';
@@ -241,7 +294,7 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
     if (c.phase === 'parked') { c.phase = 'boarding'; c.phaseTick = rt.tick; c.departAtTick = rt.tick + c.waitTicks; }
     if (p.reserved && c.hold && c.hold.filled < c.hold.seats) c.hold.filled++;
     if (p.holdSeats && !c.hold) c.hold = { by: p.actor, seats: p.holdSeats, filled: 0, untilTick: rt.tick + Math.round((p.holdSeconds ?? 120) * TPS) };
-    (h as { carrier?: CarriedBody }).carrier = { id: e.id, slot: prog.slot, phase: 'boarding' };
+    (h as { carrier?: CarriedBody }).carrier = { id: e.id, slot: prog.slot, phase: 'boarding', ...(p.clear ? { clear: true as const } : {}) };
     h.task = id; h.activity = 'board'; delete h.speed;
     return { actor: p.actor, carrier: p.carrier, slot: prog.slot, phase: 'boarding', leg: 0, stopping: false, waited: 0, id, path: boardingPath(e, a.pose.p, seatPose(e, prog.slot)!.p, carrierDef(e)!), ...(p.throughReturn ? { throughReturn: true } : {}) };
   },
@@ -288,8 +341,13 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
     // A step-out held up past its limit (busy door, someone standing on the exit, a rider ahead) ends here: set down at the exit.
     // (A body already leaving from an older state gets its limit from now.)
     body.outBy ??= rt.tick + LEAVE_LIMIT;
-    const setDown = rt.tick >= body.outBy && c.phase !== 'aloft';
-    if (setDown) { const p = setDownSpot(rt, ex.actor, e, exit); a.pose.p = [p[0], a.pose.p[1], p[2]]; acknowledgeRelocation(rt, ex.actor); ex.leg = path.length; }
+    let setDown = rt.tick >= body.outBy && c.phase !== 'aloft';
+    if (setDown) {
+      const p = setDownSpot(rt, ex.actor, e, exit, body.clear);
+      // step-out/1: nowhere clear to stand round the exit: stay aboard and try again rather than be set down in a wall
+      if (!p) { body.outBy = rt.tick + LEAVE_LIMIT; setDown = false; rt.mark('carrier.no-set-down', { carrier: e.id, actor: ex.actor }); return { status: 'running', phase: 'leaving-wait' }; }
+      a.pose.p = [p[0], a.pose.p[1], p[2]]; acknowledgeRelocation(rt, ex.actor); ex.leg = path.length;
+    }
     if (!setDown && c.bank && c.phase === 'landed' && ex.leg === 0) {
       const mine=hypot(seat.p[0]-door[0],seat.p[2]-door[2]);
       if (Object.entries(c.seats).some(([slot,actor])=>actor&&actor!==ex.actor&&(()=>{const p=seatPose(e,slot)!.p;return hypot(p[0]-door[0],p[2]-door[2])<mine-.01;})()))
@@ -303,7 +361,13 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
       if (c.bank) { delete h.shore; contact?.(rt, ex.actor); }
       return { status: 'completed', outputs: { carrier: e.id, slot: ex.slot, phase: 'ashore', position: [...a.pose.p], ...(setDown ? { setDown: true } : {}) } };
     }
-    const to = path[ex.leg];
+    let to = path[ex.leg];
+    // step-out/1: the legs outside the basket (to its door, then out to the exit) go only to ground the body can stand on; the
+    // last one to the nearest clear spot round the exit that a straight step from the door reaches. None: wait at the door.
+    if (body.clear && !c.bank && ex.leg >= path.length - 2) {
+      if (ex.leg === path.length - 1) { const q = exitSpot(rt, ex.actor, door, exit); if (!q) return { status: 'running', phase: 'leaving-wait' }; to = q; }
+      else if (!standClear(rt, ex.actor, to)) return { status: 'running', phase: 'leaving-wait' };
+    }
     if (!takeDoor(c, ex.actor) || blockerAt(rt, ex.actor, to)) return { status: 'running', phase: 'leaving-wait' };
     body.outBy = rt.tick + LEAVE_LIMIT;
     if (moveToward(a, to, d.transferSpeed, dt)) ex.leg++;
@@ -366,6 +430,9 @@ const depart: ActionDef<{ actor: string; carrier: string }, null, DepartExec> = 
 // away flies itself home once its riders are out. Water rides go only where open water reaches in a straight line and let
 // riders off only at their own bank. Deterministic: everything is world state, built from the pose at a tick.
 const STEER_AIR = 4, STEER_WATER = 1.2, STEER_CLIMB = 1.5, STEER_CRUISE = 35, STEER_HOVER = 120 * TPS, STEER_LAND_SEARCH = 30, STEER_RANGE = 1200;
+/** landing/1: a moved landing first climbs to this far above the ground (m); a hover looking for clear ground retries this often;
+ *  the descent is checked this often, and always on the touchdown tick. */
+const RELAND_CLIMB = 12, SEEK_EVERY = 2 * TPS, DESCENT_CHECK_EVERY = 10;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 function groundNav(rt: Runtime): GroundNav | null { return (rt.services.spatial as { ground?: GroundNav } | undefined)?.ground ?? null; }
 function inExtent(g: GroundNav | null, x: number, z: number): boolean { if (!g) return true; const x0 = g.field.extent; return x >= x0[0] && z >= x0[1] && x <= x0[2] && z <= x0[3]; }
@@ -389,6 +456,87 @@ function findLanding(g: GroundNav | null, x: number, z: number, fallbackY: numbe
     }
   }
   return null;
+}
+/** landing/1 (#1324): the disc a set-down basket needs round its centre, at any yaw: the basket (1.5 x 1.2 m), its boarding
+ *  step (1.25 m) and both seat exits (2.2 m out) with a body radius beyond them (m). */
+export const LAND_CLEAR = 2.6;
+/** landing/1: ring spacing of the landing search (m), and how far it looks to name the nearest clear ground in a refusal. */
+const LAND_RING = 2, LAND_FAR = 80;
+/** Things lower than this above the ground are stepped over, not landed on (a rug, paint, a kerb) (m). */
+const LAND_STEP = 0.3;
+type Blocker = { id: string; label?: string; obb: OBB2; top: number; floor: boolean };
+/** A blocker's readable name: its label without the part suffix ('rose-house wall:f0:s' → 'rose-house wall'). */
+const name = (b: Blocker) => (b.label ?? b.id).split(/[:#]/)[0].trim() || b.id;
+/** Distance from (x, z) to an oriented box (0 inside). */
+function obbDistance(o: OBB2, x: number, z: number): number {
+  const l = rot2([x - o.c[0], z - o.c[1]], -o.yaw);
+  return hypot(Math.max(0, Math.abs(l[0]) - o.half[0]), Math.max(0, Math.abs(l[1]) - o.half[1]));
+}
+/** landing/1: everything a basket must not land on, under or inside within `reach` of (x, z), from the raw static scene: every
+ *  obstacle at any height (walls, closed doors, lintels, benches, a roof), and every floor that is not the ground's own (a god
+ *  building's slab, a deck, an upper storey). The ride's own parked box is not one. The coarse solids hold none of the thin ones. */
+function blockersNear(rt: Runtime, self: string, x: number, z: number, reach: number): Blocker[] {
+  const sp = rt.services.spatial as Spatial | undefined; if (!sp) return [];
+  const sc = sp.staticScene(rt.world), own = new Set(sc.own), out: Blocker[] = [];
+  for (const o of sc.obstacles) if (o.id !== self && !o.id.startsWith(self + '#') && obbDistance(o.obb, x, z) <= reach) out.push({ id: o.id, label: o.label, obb: o.obb, top: o.y1, floor: false });
+  for (const f of sc.surfaces) if ((f.level > 0 || !own.has(f.id)) && obbDistance(f.obb, x, z) <= reach) out.push({ id: f.id, label: f.label, obb: f.obb, top: f.y, floor: true });
+  return out;
+}
+/** landing/1: why a basket cannot set down at (x, z) (null: it can): outside the world, water, uneven ground, a building or
+ *  something standing within the basket's disc or over it (the open sky and descent column, from the raw scene), or too close to
+ *  anything on the fine clearance raster (thin walls, closed doors, fixtures, water edges, steep ground), as the god walk-out's
+ *  landing check reads it. `near`: blockersNear for a search round this spot (read once). */
+function landingIssueAt(rt: Runtime, g: GroundNav | null, x: number, z: number, y: number, near: Blocker[]): string | null {
+  for (let k = 0; k < 9; k++) {
+    const a = k * Math.PI / 4, px = k === 8 ? x : x + 2 * dcos(a), pz = k === 8 ? z : z + 2 * dsin(a);
+    if (!inExtent(g, px, pz)) return 'outside the world';
+    if (g && g.base.medium(px, pz) !== G_WALK) return 'water or ground no one can stand on';
+    if (g && Math.abs(g.standY(px, pz) - y) > 1) return 'ground too uneven';
+  }
+  for (const b of near) if (b.top > y + LAND_STEP && obbDistance(b.obb, x, z) < LAND_CLEAR)
+    return b.floor ? `inside or under a building (${name(b)})` : `too close to ${name(b)}`;
+  const sp = rt.services.spatial as Spatial | undefined;
+  if (sp) { sp.sync(rt.world); const t = sp.clearTester(0, [x, z], LAND_CLEAR); if (!t || !t([x, z])) return 'not enough clear ground round it'; }
+  return null;
+}
+export type LandingSpot = { requested: [number, number]; at: Vec3; adjustedM: number; reason?: string };
+/** landing/1 (#1324): the nearest spot to (x, z) a basket can set down on (rings of 2 m out to STEER_LAND_SEARCH), with how far it
+ *  moved and why the asked spot would not do; else how far the nearest clear ground is (null: none within LAND_FAR). Pure. */
+export function landingSpot(rt: Runtime, self: string, x: number, z: number, fallbackY: number, within = STEER_LAND_SEARCH, far = LAND_FAR): LandingSpot | { far: number | null; reason: string } {
+  const g = groundNav(rt), near = blockersNear(rt, self, x, z, far + LAND_CLEAR);
+  const yAt = (px: number, pz: number) => g ? g.standY(px, pz) : fallbackY;
+  const reason = landingIssueAt(rt, g, x, z, yAt(x, z), near);
+  for (let r = 0; r <= far; r += LAND_RING) {
+    const n = r === 0 ? 1 : Math.ceil(2 * Math.PI * r / LAND_RING);
+    for (let i = 0; i < n; i++) {
+      const a = i * 2 * Math.PI / n, px = r4(x + r * dcos(a)), pz = r4(z + r * dsin(a)), y = yAt(px, pz);
+      if (r > 0 && landingIssueAt(rt, g, px, pz, y, near)) continue;
+      if (r === 0 && reason) continue;
+      const m = r1(hypot(px - x, pz - z));
+      if (m > within) return { far: Math.round(m), reason: reason! };
+      return { requested: [r4(x), r4(z)], at: [px, r4(y), pz], adjustedM: m, ...(reason ? { reason } : {}) };
+    }
+  }
+  return { far: null, reason: reason ?? 'no clear ground' };
+}
+/** landing/1: why the basket cannot set down at `at` now (null: it can). */
+function landingIssueNow(rt: Runtime, e: Entity, at: Vec3): string | null {
+  return landingIssueAt(rt, groundNav(rt), at[0], at[2], at[1], blockersNear(rt, e.id, at[0], at[2], LAND_CLEAR + 0.5));
+}
+/** landing/1: the steered landing is no longer clear (`why`): land on the nearest clear spot to the asked point instead (up to a
+ *  safe height first, across, then down), or, with none, hover there and keep looking (the hover's own limit flies it home). */
+function reland(rt: Runtime, e: Entity, c: CarrierState, s: CarrierSteer, L: Vec3, why: string): void {
+  const g = groundNav(rt), climb = r4(Math.max(e.pose.p[1], (g ? g.standY(e.pose.p[0], e.pose.p[2]) : L[1]) + RELAND_CLIMB, L[1] + RELAND_CLIMB));
+  const l = landingSpot(rt, e.id, s.asked![0], s.asked![1], L[1], STEER_LAND_SEARCH, STEER_LAND_SEARCH);
+  s.climb = climb; s.built = false; delete s.hoverUntil; c.holding = false;
+  if (!('far' in l)) {
+    s.land = l.at; s.to = [l.at[0], climb, l.at[2]]; delete s.seek;
+    c.landNote = { tick: rt.tick, code: 'moved', at: [l.at[0], l.at[2]], m: l.adjustedM, why };
+  } else {
+    delete s.land; s.to = [L[0], climb, L[2]]; s.seek = true;
+    c.landNote = { tick: rt.tick, code: 'hover', why };
+  }
+  rt.mark('carrier.landing-moved', { carrier: e.id, code: c.landNote.code, why, ...(c.landNote.at ? { at: c.landNote.at } : {}) });
 }
 /** Where a punt can row toward (x, z) in a straight line over open water: the target itself, or the last water point 3 m
  *  short of the first shore on the way; null when it cannot move that way at all. */
@@ -416,7 +564,10 @@ function steerRoute(rt: Runtime, e: Entity, c: CarrierState): CarrierRoute {
     else { const cy = Math.max(p0[1], c.home[1] + STEER_CRUISE); if (p0[1] < cy - 1) pts.push([p0[0], cy, p0[2]]); pts.push([c.home[0], cy, c.home[2]], [...c.home] as Vec3); }
     if ((water || Object.values(c.seats).some(Boolean)) && a.elapsed > 0) { const t0 = a.elapsed / TPS; tail = a.route.keys.filter(k => k.t > t0 + 0.05).map(k => ({ t: k.t - t0, p: [...k.p] as Vec3 })); }
     else if (!same(pts[pts.length - 1], c.home)) pts.push([...c.home] as Vec3);
-  } else { pts.push([...s.to] as Vec3); if (s.land && !same(s.land, s.to)) pts.push([...s.land] as Vec3); }
+  } else {
+    if (s.climb !== undefined && p0[1] < s.climb - 0.5) pts.push([p0[0], s.climb, p0[2]]);   // landing/1: up first, then across
+    pts.push([...s.to] as Vec3); if (s.land && !same(s.land, s.to)) pts.push([...s.land] as Vec3);
+  }
   const keys: RouteKey[] = [{ t: 0, p: pts[0] }];
   let t = 0;
   for (let i = 1; i < pts.length; i++) { if (same(pts[i], pts[i - 1]) && i < pts.length - 1) continue; t = r1(t + legTime(keys[keys.length - 1].p, pts[i], water)); keys.push({ t, p: pts[i] }); }
@@ -424,7 +575,7 @@ function steerRoute(rt: Runtime, e: Entity, c: CarrierState): CarrierRoute {
   return { id: s.ret ? 'steer-return' : 'steer', keys };
 }
 function startReturn(c: CarrierState, by: string | null = null) {
-  c.steer = { by, to: [...c.home] as Vec3, land: [...c.home] as Vec3, built: false, ret: true, away: c.steer!.away };
+  c.steer = { by, to: [...c.home] as Vec3, land: [...c.home] as Vec3, built: false, ret: true, away: c.steer!.away, ...(c.steer?.asked ? { asked: c.steer.asked } : {}) };
 }
 
 /** A steer is over: the ride gets its own route back (a steer flew a 'steer'/'steer-return' route in its place), so the next
@@ -433,12 +584,14 @@ function endSteer(c: CarrierState): void {
   if (c.steer) c.route = c.steer.away.route;
   delete c.steer;
 }
-type SteerParams = { actor: string; carrier: string; x?: number; z?: number; land?: boolean; stop?: boolean };
-type SteerPlan = { to: Vec3; land?: Vec3; ret?: true; mode: 'to' | 'land' | 'stop' | 'return'; seconds: number };
+type SteerParams = { actor: string; carrier: string; x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1' };
+type SteerPlan = { to: Vec3; land?: Vec3; ret?: true; mode: 'to' | 'land' | 'stop' | 'return'; seconds: number; landing?: LandingSpot };
 const steer: ActionDef<SteerParams, SteerPlan, { carrier: string; id: string; plan: SteerPlan }> = {
   verb: 'carrier_steer',
   description: 'A seated rider steers the ride: go toward (x, z) (and land there), land here, or stop and hold. Without steering the ride follows its own route.',
-  schema: z.object({ actor: z.string().min(1), carrier: z.string().min(1), x: z.number().finite().optional(), z: z.number().finite().optional(), land: z.boolean().optional(), stop: z.boolean().optional() }).strict(),
+  // landing/1 (#1324): `landing: 'clear/1'` lands on the nearest spot clear on the fine raster and under open sky, re-checked
+  // through the descent; a steer recorded without it keeps the landing it always chose, so recorded programmes replay unchanged.
+  schema: z.object({ actor: z.string().min(1), carrier: z.string().min(1), x: z.number().finite().optional(), z: z.number().finite().optional(), land: z.boolean().optional(), stop: z.boolean().optional(), landing: z.literal('clear/1').optional() }).strict(),
   resumable: true,
   reservations: (_w, p) => [{ resource: `carrier-steer:${p.carrier}`, mode: 'exclusive' }],
   plan(rt, p) {
@@ -468,26 +621,32 @@ const steer: ActionDef<SteerParams, SteerPlan, { carrier: string; id: string; pl
       return { ok: true, program: { to, mode: 'to', seconds: Math.round(legTime(here, to, true)) } };
     }
     const groundY = (px: number, pz: number) => g ? g.standY(px, pz) : home[1];
-    let land: Vec3 | undefined;
-    if (p.land) {
+    let land: Vec3 | undefined, landing: LandingSpot | undefined;
+    if (p.land && p.landing === 'clear/1') {
+      const l = landingSpot(rt, e.id, x, zz, home[1]);
+      if ('far' in l) return { ok: false, diagnostic: diag('no-landing-spot', `nowhere ${name} can set down within ${STEER_LAND_SEARCH} m of (${Math.round(x)}, ${Math.round(zz)}) (${l.reason}); ${l.far !== null ? `the nearest clear ground is about ${l.far} m away` : `there is no clear ground within ${LAND_FAR} m`}`, [e.id]) };
+      land = l.at; landing = l;
+    } else if (p.land) {
       const l = findLanding(g, x, zz, home[1]);
       if (!l) return { ok: false, diagnostic: diag('no-landing-spot', `nowhere clear, dry and level to set down within ${STEER_LAND_SEARCH} m of (${Math.round(x)}, ${Math.round(zz)})`, [e.id]) };
       land = l;
     }
     const cy = hasXZ ? Math.max(here[1], groundY(here[0], here[2]) + STEER_CRUISE, groundY(x, zz) + STEER_CRUISE) : Math.max(here[1], (land?.[1] ?? 0) + 5);
     const to: Vec3 = land ? [land[0], r4(cy), land[2]] : [r4(x), r4(cy), r4(zz)];
-    return { ok: true, program: { to, land, mode: hasXZ ? 'to' : 'land', seconds: Math.round(legTime(here, to, false) + (land ? legTime(to, land, false) : 0)) } };
+    return { ok: true, program: { to, land, mode: hasXZ ? 'to' : 'land', seconds: Math.round(legTime(here, to, false) + (land ? legTime(to, land, false) : 0)), ...(landing ? { landing } : {}) } };
   },
   start(rt, p, prog, id) {
     const e = rt.world.entities[p.carrier], c = state(e)!;
     // where it leaves its own route (or, steered again while flying itself back, that return route), and the steered legs
     const away = c.steer && !c.steer.ret ? c.steer.away : { route: c.route, elapsed: c.phase === 'aloft' ? c.elapsed : 0, wake: [] as Vec3[] };
     if (!prog.ret) away.wake.push([...e.pose.p] as Vec3);
-    c.steer = { by: p.actor, to: prog.to, ...(prog.land ? { land: prog.land } : {}), built: false, ...(prog.ret ? { ret: true as const } : {}), away };
+    c.steer = { by: p.actor, to: prog.to, ...(prog.land ? { land: prog.land } : {}), built: false, ...(prog.ret ? { ret: true as const } : {}), away, ...(prog.landing ? { asked: prog.landing.requested } : {}) };
+    delete c.landNote;
     if (c.phase === 'boarding') { c.departAtTick = Math.min(c.departAtTick ?? rt.tick, rt.tick); delete c.hold; }
     return { carrier: p.carrier, id, plan: prog };
   },
-  step(_rt, ex) { const q = ex.plan; return { status: 'completed', outputs: { steering: ex.carrier, mode: q.mode, to: [q.to[0], q.to[2]], ...(q.land ? { landAt: [q.land[0], q.land[2]] } : {}), seconds: q.seconds } }; },
+  step(_rt, ex) { const q = ex.plan; return { status: 'completed', outputs: { steering: ex.carrier, mode: q.mode, to: [q.to[0], q.to[2]], ...(q.land ? { landAt: [q.land[0], q.land[2]] } : {}), seconds: q.seconds,
+    ...(q.landing ? { landing: { requested: q.landing.requested, at: [q.landing.at[0], q.landing.at[2]], adjustedM: q.landing.adjustedM, ...(q.landing.reason ? { reason: q.landing.reason } : {}) } } : {}) } }; },
   cancel() { return { ok: true }; },
 };
 export const CARRIER_ACTIONS: ActionDef[] = [ride, alight, depart, steer] as ActionDef[];
@@ -536,7 +695,8 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
         const a = actor ? rt.world.entities[actor] : undefined;
         if (!actor || rt.holder(`carrier-seat:${e.id}#${slot}`).length) continue;
         c.seats[slot] = null; freeDoor(c, actor); if (!a?.human || carried(a)?.id !== e.id) continue;
-        const h = a.human, def = d.seats.find(s => s.id === slot), exit = c.bank?.exits[slot] ?? (def ? at(e, def.exit) : doorPoint(e)!), p = setDownSpot(rt, actor, e, exit);
+        const h = a.human, def = d.seats.find(s => s.id === slot), exit = c.bank?.exits[slot] ?? (def ? at(e, def.exit) : doorPoint(e)!), p = setDownSpot(rt, actor, e, exit, carried(a)?.clear);
+        if (!p) { c.seats[slot] = actor; continue; }   // step-out/1: nowhere clear round its exit yet: it stays aboard until there is
         delete (h as { carrier?: CarriedBody }).carrier; delete h.task; delete h.baseActivity; delete h.seatHeight; delete h.speed; h.activity = 'idle';
         a.pose.p = [p[0], c.bank ? exit[1] : e.pose.p[1], p[2]]; acknowledgeRelocation(rt, actor);
         if (c.bank) { delete h.shore; (rt.services.carrierBankContact as ((rt: Runtime, actor: string) => void) | undefined)?.(rt, actor); }
@@ -555,10 +715,20 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
     const end = routeTicks(c.route);
     if (s && !s.land && c.elapsed >= end) {   // holding where a rider steered it; with no new steer it rejoins its own route
       s.hoverUntil ??= tick + STEER_HOVER;
-      if (tick >= s.hoverUntil) startReturn(c);
+      if (s.seek && s.asked && (s.hoverUntil - tick) % SEEK_EVERY === 0 && tick < s.hoverUntil) {   // landing/1: clear ground near the asked spot again?
+        const l = landingSpot(rt, e.id, s.asked[0], s.asked[1], c.home[1], STEER_LAND_SEARCH, STEER_LAND_SEARCH);
+        if (!('far' in l)) { s.land = l.at; s.to = [l.at[0], e.pose.p[1], l.at[2]]; s.built = false; delete s.seek; delete s.hoverUntil; c.landNote = { tick, code: 'moved', at: [l.at[0], l.at[2]], m: l.adjustedM }; rt.mark('carrier.landing-moved', { carrier: e.id, code: 'moved', at: c.landNote.at }); continue; }
+      }
+      if (tick >= s.hoverUntil) { if (s.seek) { c.landNote = { tick, code: 'return', why: c.landNote?.why }; rt.mark('carrier.landing-moved', { carrier: e.id, code: 'return' }); } startReturn(c); }
       continue;
     }
     const L = s?.land ?? c.home, away = !same(L, c.home), next = routePosition(c.route, c.elapsed + 1);
+    // landing/1 (#1324): a steered landing is checked again on the way down (and always on the touchdown tick); a spot that is
+    // no longer clear (a god built there) moves the landing, or turns it into a hover. Its own home is never re-checked.
+    if (s?.land && s.asked && away && c.elapsed + 1 > end / 2 && (c.elapsed % DESCENT_CHECK_EVERY === 0 || c.elapsed + 1 >= end)) {
+      const why = landingIssueNow(rt, e, L);
+      if (why) { reland(rt, e, c, s, L, why); continue; }
+    }
     c.holding = (!s || !!s.land) && next[1] - L[1] < LANDING_HEIGHT && c.elapsed + 1 > (e.def === 'rowing-punt' ? end - TPS : end / 2) && !landingClear(rt, e, c, d, L);
     if (c.holding) continue;
     c.elapsed++;
@@ -571,7 +741,12 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
     if (s && !s.land) continue;   // a steer without land ends in the air (or afloat): the hold above takes it from the next tick
     if (c.elapsed >= end && away) { e.pose.p = [...L] as Vec3; delete e.phase; c.phase = 'landed'; c.phaseTick = tick; c.elapsed = end; continue; }   // steered down away from home: as it is
     if (c.elapsed >= end && Math.abs(angleDelta(e.pose.yaw, c.yaw)) > 1e-6) { c.elapsed = end - 1; continue; }   // finish turning before touching down
-    if (c.elapsed >= end) { endSteer(c); e.pose.p = [...c.home] as Vec3; e.pose.yaw = c.yaw; delete e.phase; c.phase = 'landed'; c.phaseTick = tick; c.elapsed = end; }
+    if (c.elapsed >= end) {
+      // landing/1: a ride's own home is where it was installed, with whatever stood there then: it always lands there, and a home
+      // that no longer reads clear is only reported (after a landing/1 steer, so unsteered flights read nothing more)
+      if (s?.asked) { const why = landingIssueNow(rt, e, c.home); if (why) rt.mark('carrier.home-not-clear', { carrier: e.id, why }); }
+      endSteer(c); e.pose.p = [...c.home] as Vec3; e.pose.yaw = c.yaw; delete e.phase; c.phase = 'landed'; c.phaseTick = tick; c.elapsed = end;
+    }
   }
 }
 
