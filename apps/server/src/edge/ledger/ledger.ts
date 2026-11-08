@@ -973,7 +973,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const done = handed.then(() => ({error: undefined as unknown}), (error: unknown) => ({error: error ?? new Error('act.hand-off-refused')}));
     void done.then(() => {this.handed.delete(id); if (ref && this.handedRefs.get(ref) === id) this.handedRefs.delete(ref);});
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs()); timer.unref?.();});
+    // not unref'd: the wait itself is what keeps this request alive (a test process has nothing else to)
+    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs());});
     const out = await Promise.race([done, late]).finally(() => clearTimeout(timer));
     if (this.rows('receipt_id=?', id)[0]) {
       if (out !== 'late' && out.error) console.error('[edge] act committed, then its hand-off failed; answered with its receipt', id, out.error instanceof Error ? out.error.message : String(out.error));
@@ -1001,7 +1002,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     try {queued = this.host.enqueue('edge-stop', `edge:${soulId}`, payload).then(() => then?.());}
     catch (error) {console.error('[edge] stop after an accepted act could not be queued', soulId, error instanceof Error ? error.message : String(error)); return;}
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs()); timer.unref?.();})]).finally(() => clearTimeout(timer));
+    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs());})]).finally(() => clearTimeout(timer));
   }
 
   // ---------------------------------------------------------------- capabilities
