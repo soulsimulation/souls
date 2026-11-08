@@ -528,6 +528,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const c=context.current,soul=c.sim.conn.replica.souls.get(soulId),p=soul?shown.current.entities[soul.entityId]?.p:null;
         if(!soul||!p||past.current||c.loading||c.graphicsUnavailable||!shown.current.take||(initialGate&&initialGate.snapshot().stage!=='ready'))return false;
         soulFlightChip=!!opts?.chip;  // #892: a touch's follow shows the bottom chip, not the card (same flight)
+        followView.reset();followed=null;  // #1316: Follow couples the camera again, whatever the mode was
         navigation?.release();rts.release();groupSelection.clear();c.onSelect(soulId,soulFlightChip?'chip':undefined);c.setThing(null);
         const target=new THREE.Vector3(p[0],p[1]+1,p[2]);
         if(reducedMotionQuery?.matches){soulFlight=null;c.cameraMode='follow';c.follow=true;c.setCameraMode('follow');hapticTick();return true;}
