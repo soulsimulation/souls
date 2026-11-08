@@ -72,7 +72,8 @@ const TIRED = /\b(energy|tired|exhaust\w*|fatigue\w*)\b/i;
 export function plainReason(code: string | null | undefined, reason: string | null | undefined): string {
   const c = code ?? '', r = (reason ?? '').trim();
   if (TIRED.test(c.replace(/[.-]/g, ' ')) || TIRED.test(r)) return 'too tired: rest first';
-  const jargon = !r || (c && r.includes(c)) || /\bis supported, but\b/.test(r) || /\([a-z]+\.[a-z.-]+\)/.test(r);
+  // #1313: a sentence written for the agent ("Send an offered id; did_you_mean lists…") is jargon to an owner too
+  const jargon = !r || (c && r.includes(c)) || /\bis supported, but\b/.test(r) || /\([a-z]+\.[a-z.-]+\)/.test(r) || /\bdid_you_mean\b|\boffered id\b/.test(r);
   const mapped = PLAIN_REASON[c] ?? PLAIN_REASON[c.slice(c.lastIndexOf('.') + 1)];
   if (mapped && jargon) return mapped;
   const cleaned = r.replace(/\s*\([a-z]+\.[a-z.-]+\)/g, '').replace(/^.{1,120}? is supported, but /, '').trim();
@@ -91,11 +92,19 @@ export function describeCapability(cap: string, nameOf: (id: string) => string |
 
 /** What the Soul tried, for a refusal: "tried to sit down", "tried to fly to moon". */
 export function describeAttempt(cap: string, nameOf: (id: string) => string | null): string {
+  return `tried to ${describeBase(cap, nameOf)}`;
+}
+/** #1313: the act in its base form, as the owner's card names an act under way: "sit down", "walk to cottage". */
+export function describeBase(cap: string, nameOf: (id: string) => string | null): string {
   const [verb = cap, ...rest] = cap.split(':');
-  if (verb === 'object') { const [obj = '', action = 'use'] = rest; return `tried to ${action.replace(/-/g, ' ')} ${nameOf(obj) ?? plain(obj)}`.trim(); }
+  if (verb === 'object') { const [obj = '', action = 'use'] = rest; return `${action.replace(/-/g, ' ')} ${nameOf(obj) ?? plain(obj)}`.trim(); }
   const named = targetOf(rest, nameOf), spot = SPOT_ACTIVITIES[verb]?.label, verbWords = verb.replace(/-/g, ' ');
-  if (named) return `tried to ${BASE_TO[verb] ?? (spot ? spot.toLowerCase() + ' at' : verbWords)} ${named}`;
-  return `tried to ${BASE[verb] ?? (spot ? spot.toLowerCase() : verbWords)}`;
+  if (named) return `${BASE_TO[verb] ?? (spot ? spot.toLowerCase() + ' at' : verbWords)} ${named}`;
+  return BASE[verb] ?? (spot ? spot.toLowerCase() : verbWords);
+}
+/** Plain names for place, thing and Soul ids, as the owner reads them. */
+export function ownerNames(L: EdgeLedger): (id: string) => string | null {
+  return (id: string) => { const n = L.places.byId.get(id)?.name ?? (L.host.nameOf(id) !== id ? L.host.nameOf(id) : null) ?? (L.places.byId.has(id.replace(/^g-/, '')) ? id : null); return n == null ? null : plain(n); };
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -103,7 +112,7 @@ const xz = (p: unknown): {x: number; z: number} | null => Array.isArray(p) && ty
 
 export function ownerDay(L: EdgeLedger, db: Db, soulId: string, since: number): DayEntry[] {
   const w = L.host.worldId, sql = db.db;
-  const nameOf = (id: string) => { const n = L.places.byId.get(id)?.name ?? (L.host.nameOf(id) !== id ? L.host.nameOf(id) : null) ?? (L.places.byId.has(id.replace(/^g-/, '')) ? id : null); return n == null ? null : plain(n); };
+  const nameOf = ownerNames(L);
   const out: DayEntry[] = [];
   const ids = sql.prepare('SELECT receipt_id FROM edge_receipts_v1 WHERE world_id=? AND soul_id=? AND created_at>=? ORDER BY created_at DESC LIMIT ?').all(w, soulId, since, MAX) as {receipt_id: string}[];
   const created = sql.prepare('SELECT created_at FROM edge_receipts_v1 WHERE world_id=? AND receipt_id=?');
