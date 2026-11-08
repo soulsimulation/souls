@@ -44,6 +44,9 @@ export type OwnerLoopWorld = {
   holding?(soulId: string, receiptId: string): boolean;
   /** #1295: a light read of a receipt for the sweep and the guard (no body or outcome facts); else `read` is used. */
   brief?(soulId: string, receiptId: string): {id: string; capability: string; phase: string; acceptedTick: number; endedTick: number | null} | null;
+  /** #1329: a ride object's name (null: not a ride), and the ride this Soul's body is aboard now (null: on the ground). */
+  rideName?(objectId: string): string | null;
+  aboard?(soulId: string): {phase: string} | null;
 };
 /** #1295: where links are kept across a restart (`ownerLinkStore`); without one they live in memory only. */
 export type OwnerLinkStore = {load(): [string, string][]; save(receipt: string, soulId: string, link: string): void; drop(receipt: string): void};
@@ -64,7 +67,10 @@ type Link = {scope: {scope: string; owner: string}; message: string; steps?: Mes
   /** #1295: the act asked for its own duration (`seconds`), so a held pose is still running; `gone`: the tick the receipt was
    *  replaced (the world closes its messages GONE_TICKS later unless another act serves them); `late`: past HOLD_TICKS, the
    *  world has said it hadn't finished. */
-  timed?: number; gone?: number; late?: true};
+  timed?: number; gone?: number; late?: true;
+  /** #1329: the act joins a ride: the message waits for the body to be back on the ground. `since`: the tick the join
+   *  completed aboard; `flew`: the ride left its boarding while this Soul was aboard; `said`: the aboard progress line is out. */
+  ride?: {object: string; name: string; since?: number; flew?: true; said?: true}};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
@@ -78,6 +84,9 @@ export const HOLD_TICKS = 15 * 60 * 20;
 /** #1295: how long a replaced act's messages wait for the replacing act to be linked to them (world ticks). */
 export const GONE_TICKS = 40;
 const SWEEP_TICKS = 20;
+/** #1329: a ride's message still aboard this long after boarding (world ticks, 30 minutes) closes `failed`, never stays open. */
+export const RIDE_TICKS = 30 * 60 * 20;
+const RIDE_JOIN = /^object:([^:]+):join$/;
 /** How near a named thing or Soul the body must end to be at it (metres). */
 const AT_M = 6;
 
@@ -135,12 +144,15 @@ export class OwnerLoop {
     const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
     const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
     const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
-    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {})};
+    const rideId = RIDE_JOIN.exec(receipt.capability)?.[1], rideName = rideId && world?.aboard ? world.rideName?.(rideId) ?? null : null;
+    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {}),
+      ...(rideId && rideName ? {ride: {object: rideId, name: rideName}} : {})};
     const prior = this.links.get(receipt.id);
     if (prior) {l.also = [...(prior.message === message ? [] : [{...prior, also: undefined, late: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)]; if (prior.late) l.late = true;}
     this.keep(receipt.id, l);
     if (this.links.size > MAX_LINKS) this.forget(this.links.keys().next().value!);
-    const open = !!l.steps && !this.serves(l, l.steps.length - 1, receipt, false);
+    // #1329: a ride join is boarding, not the ride: the message stays open until the body is back on the ground
+    const open = !!l.ride || (!!l.steps && !this.serves(l, l.steps.length - 1, receipt, false));
     if (!OPEN.includes(receipt.phase)) this.ended(receipt);
     return {open};
   }
@@ -166,9 +178,11 @@ export class OwnerLoop {
     return [...this.links.values()].some(l => l.gone === undefined && [l, ...(l.also ?? [])].some(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner));
   }
   private peek(soulId: string, id: string) {return this.world?.brief ? this.world.brief(soulId, id) : this.read(soulId, id);}
-  private ended(r: EdgeReceipt) {
+  private ended(r: EdgeReceipt, tick?: number) {
     const l = this.links.get(r.id); if (!l || OPEN.includes(r.phase)) return;
-    const full = this.read(r.soulId, r.id) ?? r, line = resultLine(full);
+    const full = this.read(r.soulId, r.id) ?? r, ride = this.aboard(l, r, tick);
+    if (ride === 'aboard') return;
+    const line = ride ?? resultLine(full);
     // replaced: the act that replaced it closes the message when it is linked to it; else the world does (sweep)
     if (!line) {if (l.gone === undefined) {l.gone = r.endedTick ?? r.acceptedTick; this.keep(r.id, l);} return;}
     this.forget(r.id);
@@ -179,6 +193,24 @@ export class OwnerLoop {
       if (other) {this.inbox.serverProgress?.(one.scope, one.message, `now: ${line.text.replace(/[.\s]+$/, '')}; ${other.capability} still going`); continue;}
       this.report(one, seen, line);
     }
+  }
+  /** #1329: a completed ride join: 'aboard' while the body is on the ride (the first time, a progress line), else the
+   *  ride's own close: done when it departed with this Soul aboard, failed when the Soul left before it did, or after
+   *  RIDE_TICKS still aboard. null: not a ride join, or the join did not complete (it closes as any act does). */
+  private aboard(l: Link, r: EdgeReceipt, tick?: number): 'aboard' | {text: string; outcome: 'done' | 'failed'} | null {
+    if (!l.ride || r.phase !== 'completed' || !this.world?.aboard) return null;
+    const ride = l.ride, now = this.world.aboard(r.soulId);
+    if (now) {
+      ride.since ??= r.endedTick ?? r.acceptedTick;
+      if (now.phase !== 'boarding') ride.flew = true;
+      if (tick !== undefined && tick - ride.since >= RIDE_TICKS) return {text: `Still on the ${ride.name} after ${Math.round(RIDE_TICKS / 1200)} minutes.`, outcome: 'failed'};
+      if (!ride.said) {ride.said = true; for (const one of [l, ...(l.also ?? [])]) this.inbox.serverProgress?.(one.scope, one.message, `now: aboard the ${ride.name}; not back on the ground yet`);}
+      this.keep(r.id, l);
+      return 'aboard';
+    }
+    // never seen aboard (a join that completed while the Soul was already out): the join's own line
+    if (ride.since === undefined) return null;
+    return ride.flew ? {text: `Rode the ${ride.name} and stepped out on the ground.`, outcome: 'done'} : {text: `Left the ${ride.name} before it departed.`, outcome: 'failed'};
   }
   /** #1295: once a second (call after each world tick): close what a replaced act left with nothing serving it, close a
    *  message whose act has run past the hold limit as not done, catch an end this process missed (a restart), and drop a
@@ -199,7 +231,7 @@ export class OwnerLoop {
       this.forget(id);
       return;
     }
-    if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full); else this.forget(id); return;}
+    if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full, tick); else this.forget(id); return;}
     // a timed act gets the time it asked for, and a minute more, before it counts as overlong
     const limit = Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0));
     if (l.late || tick - r.acceptedTick < limit) return;

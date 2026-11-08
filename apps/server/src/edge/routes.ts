@@ -46,7 +46,9 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const box = deps.ownerInbox as Partial<OwnerLoopInbox> | undefined;
   const loop = box?.hasMessage && box.serverResult ? new OwnerLoop(box as OwnerLoopInbox, (soul, id) => L.receipt(soul, id) as never, l => L.onReceipt(l),
     {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id),
-      holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id)}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
+      holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id),
+      // #1329: a ride join's message waits for the body to be back on the ground
+      rideName: id => L.rideName(id), aboard: soulId => {const m = deps.host.minds.get(soulId), a = m ? L.aboard(m.entityId) : null; return a ? {phase: a.phase} : null;}}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
   // #1295: the loop closes what a replaced or overlong act left open, once a second of world time. SIM_OWNER_HOLD_S
   // shortens the hold limit (15 minutes) for tests and proof worlds.
   if (loop) L.onTick(tick => loop.sweep(tick));
