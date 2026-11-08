@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { WorldFollow } from '../src/WorldFollow.ts';
+import { WorldFollowMotion } from '../src/WorldFollowMotion.ts';
 
 // VF4: a Soul walks along a street lined with houses that pass between it and the camera.
 function street(){
@@ -99,6 +100,18 @@ test('#1316: a pull out counts over the whole gesture: a slow trackpad zoom out 
   assert.equal(run(o=>o.clone().applyAxisAngle(up,.006),30),true,'a slow drag, 1 px a step, decouples');
   assert.equal(run(o=>o.clone().applyAxisAngle(up,.008),2),false,'2 px of jitter in a click stays coupled');
   assert.equal(run(o=>o.clone().multiplyScalar(1.015),1),false,'a 1.5% slip inside a pinch stays coupled');
+});
+
+test('#1316: zooming in while the Soul starts walking stays coupled: follow motion is not the viewer pulling out', () => {
+  const follow=new WorldFollow(),motion=new WorldFollowMotion();let target=new THREE.Vector3(0,1,0);
+  let offset=follow.resolve(target,new THREE.Vector3(0,3,9),[],1/60);motion.reset(target.toArray(),target.toArray());
+  for(let i=0;i<180;i++){
+    target=new THREE.Vector3(i/60*1.4,1,0);   // she starts walking sideways at 1.4 m/s
+    const t=motion.sample(target.toArray(),target.toArray(),1/60)!;follow.shiftFrame(new THREE.Vector3(...t.offsetTranslation));offset.add(new THREE.Vector3(...t.offsetTranslation));
+    if(i<96&&i%6===0){const closer=offset.clone().multiplyScalar(.98);follow.userInput(offset,closer);offset=closer;}   // 2% wheel steps every 100 ms
+    offset=follow.resolve(target,offset,[],1/60);
+  }
+  assert.equal(follow.held,false,'a zoom in, however long, stays coupled');
 });
 
 test('#1316: a zoom in stays a collision camera: with a wall between, the zoomed camera is drawn in front of it', () => {
