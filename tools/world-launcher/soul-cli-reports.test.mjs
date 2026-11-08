@@ -98,9 +98,12 @@ test('a folder that cannot be written changes nothing for the command', { timeou
   const w = await world(), d = folder(w.url, true), plain = folder(w.url, false);
   try {
     chmodSync(d, 0o555);
+    // Root (the gate's Modal containers) writes through mode bits, so there the folder is writable after all and only
+    // the unchanged command is the claim; for any other uid the record is not written either.
+    const blocked = (() => { try { writeFileSync(join(d, '.probe'), ''); rmSync(join(d, '.probe')); return false; } catch { return true; } })();
     const x = await run(d, 'here'), y = await run(plain, 'here');
     assert.deepEqual([x.code, x.out, x.err], [y.code, y.out, y.err]);
-    assert.ok(!existsSync(join(d, '.eden-report.jsonl')));
+    if (blocked) assert.ok(!existsSync(join(d, '.eden-report.jsonl')));
   } finally { chmodSync(d, 0o755); w.close(); rmSync(d, { recursive: true, force: true }); rmSync(plain, { recursive: true, force: true }); }
 });
 
