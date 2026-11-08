@@ -96,7 +96,7 @@ const ACT_ALIASES: Record<string, string> = {'turn-on': 'switch-on', 'turn-off':
 /** #428: a second meaning of an everyday word, used only when its ACT_ALIASES meaning is not on offer and this one is:
  *  "cross out" a sign-up name (unsign) or a notebook line (the pinboard faculty's unpin). */
 const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unpin', 'strike-off': 'unpin'};
-const LABEL_FILLER = new Set(['from', 'your', 'my', 'out', 'off', 'down', 'take', 'cross', 'in', 'on', 'of']), PLAIN_WORDS = new Set(['the', 'a', 'an', 'this', 'that', 'please']), SAYS_MORE = new Set(['first', 'and']), THING_ALIASES: Record<string, string> = {journal: 'notebook', logbook: 'notebook', noticeboard: 'board'};
+const LABEL_FILLER = new Set(['from', 'your', 'my', 'out', 'off', 'down', 'take', 'cross', 'in', 'on', 'of']), PLAIN_WORDS = new Set(['the', 'a', 'an', 'this', 'that', 'please']), SAYS_MORE = new Set(['first', 'and', 'then']), THING_ALIASES: Record<string, string> = {journal: 'notebook', logbook: 'notebook', noticeboard: 'board'};
 /** #428: "write in the notebook" is a notebook's line (the pinboard faculty's `pin`), only where a notebook's line is on
  *  offer (its label says so), so "write in the study" still reaches a desk beside a pinboard. */
 const NOTEBOOK_WORDS: Record<string, string> = {'write-in': 'pin', 'write-a-line-in': 'pin'};
