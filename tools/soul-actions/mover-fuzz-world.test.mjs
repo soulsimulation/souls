@@ -76,3 +76,42 @@ for (const what of ['table', 'cottage'])
     if (process.env.MOVER_FUZZ_REPORT) console.info('[mover-fuzz-world]', what, JSON.stringify(tally));
     assert.equal(tally.halts, 0, JSON.stringify(tally));
   });
+
+// Slice 1b: the engine's own placements (the ladder's and the god walk-out's), driven directly. Each case aims Ada at a seeded
+// spot near a god-built cottage, a table or another Soul, and reads what the placement made. With body-step-guard/1 off and on
+// (#1360's validator for bodies). Strict: the aimed spot itself overlaps (what a goal check would refuse up front).
+const PLACERS = {
+  relocate: (e, id, to) => e.relocateHumanV1(id, to),
+  restore: (e, id, to) => e.restoreHumanPoseV1(id, {p: [to[0], 0, to[1]], yaw: 0, level: 0}),
+  'god walk-out': (e, id, to) => e.godWalkoutV1(id, to, [], 'relocated'),
+};
+for (const guard of [false, true])
+  test(`mover fuzz (world): the engine's placements aimed at crowded spots, body-step-guard/1 ${guard ? 'on' : 'off'}`, {timeout: 600000}, async (t) => {
+    t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {}); t.mock.method(console, 'log', () => {});
+    const w = await world(t), h = w.f.host, {Ada, Bo} = w.souls;
+    if (guard) await accept(h, h.enableBodyStepGuardV1('test'));
+    const [ax, , az] = h.engine.world.entities[Ada.entityId].pose.p;
+    w.god.act({ops: [{op: 'place', def: coreRef('cottage'), name: 'hut', p: [ax + 6, az + 6], r: 0, params: COTTAGE}, {op: 'place', def: 'core/table@1', name: 'desk', p: [ax - 4, az + 3]}]});
+    await w.tick(10);
+    const tallies = {};
+    for (const [name, place] of Object.entries(PLACERS)) {
+      const tally = tallies[name] = {cases: 0, placed: 0, overlaps: 0, overlapKinds: {}, strictWouldRefuse: 0, strictAndOverlapped: 0, strictPlacedClean: 0};
+      for (let k = 0; k < 30; k++) {
+        const r = rng(1411 + k * 7919), e = h.engine, ada = e.world.entities[Ada.entityId], home = [...ada.pose.p];
+        const anchors = [[ax + 6, az + 6], [ax - 4, az + 3], [...e.world.entities[Bo.entityId].pose.p].filter((_, i) => i !== 1)];
+        const a = anchors[k % 3], to = [a[0] + (r() - 0.5) * 6, a[1] + (r() - 0.5) * 6];
+        const before = solidOverlapsV1(e.rt, {objects: []});
+        ada.pose.p = [to[0], ada.pose.p[1], to[1]];
+        const strict = newOverlapsV1(before, solidOverlapsV1(e.rt, {objects: []})).length > 0;
+        ada.pose.p = home;
+        let ok = false; try { ok = place(e, Ada.entityId, to) !== false; } catch { ok = false; }
+        const made = newOverlapsV1(before, solidOverlapsV1(e.rt, {objects: []}));
+        tally.cases++; if (ok) tally.placed++;
+        tally.overlaps += made.length; for (const o of made) tally.overlapKinds[o.kind] = (tally.overlapKinds[o.kind] ?? 0) + 1;
+        if (strict) { tally.strictWouldRefuse++; if (made.length) tally.strictAndOverlapped++; else if (ok) tally.strictPlacedClean++; }
+        ada.pose.p = home; e.rt.acknowledgeRelocation?.(Ada.entityId);
+      }
+    }
+    if (process.env.MOVER_FUZZ_REPORT) console.info('[mover-fuzz-placements]', `guard ${guard ? 'on' : 'off'}`, JSON.stringify(tallies));
+    if (guard) for (const [name, tally] of Object.entries(tallies)) if (name !== 'god walk-out') assert.equal(tally.overlaps, 0, `${name} under the guard never stands a body in a solid or a body: ${JSON.stringify(tally)}`);
+  });
