@@ -127,7 +127,8 @@ export class OwnerLoop {
   /** D3d: whether this act serves step `i` of a linked message: its verb, and (several steps, last one) its target. */
   private serves(l: Link, i: number, r: EdgeReceipt, ended: boolean): boolean {
     const st = l.steps![i]!;
-    if (!st.verbs.includes(verbOf(r))) return false;
+    // #1329: a ride join (`object:<ride>:join`) is the message's "ride"
+    if (!st.verbs.includes(l.ride ? 'ride' : verbOf(r))) return false;
     if (l.steps!.length < 2 || i < l.steps!.length - 1) return true;
     if (st.unresolved) return false;   // the agent's own result closes it
     return !st.target || !this.world || reachedTarget(r, st.target, this.world, ended, l.act);
