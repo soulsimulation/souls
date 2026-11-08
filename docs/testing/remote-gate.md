@@ -148,6 +148,10 @@ flows (approval link stays on top; in-window approval).
 gate's candidate, the V7 checkout was clean, every V7 check passed, the gate was not blocked and its scope was
 `full`. Otherwise it is `blocked` (exit 1). It records both input hashes and the remaining exclusion (V8).
 
+`--public <release-receipt.json>` also writes the release receipt, the one that may leave the machine (the release
+workflow reads it, [release](../release.md#the-release-workflow)): shas, build id, statuses, counts, timestamps and the
+sha256 of both raw receipts, nothing else. It is written only when it passes `tools/proof/publication.mjs`.
+
 ## `remote-suite.sh` (raw runner)
 
 ```sh
