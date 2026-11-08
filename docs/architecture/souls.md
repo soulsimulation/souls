@@ -235,7 +235,9 @@ a fault after the commit answers `accepted: true` with the receipt. An act hande
 answers **HTTP 202** `{accepted: true, pending: true, receipt: {id, capability, phase: 'pending'}}`:
 `GET /v1/edge/receipts/:id` answers that phase until the row exists, a retry with the same `clientRef` (or the same bare
 `Idempotency-Key`, which names the act when no `clientRef` is sent) gets the same answer, never a second act, and the
-idempotency table does not keep a 202. Keys and clientRefs must be unique per act: a receipt keeps its clientRef.
+idempotency table does not keep a 202. If the clock fails instead (the engine halts, a checkpoint fails) before the act
+was recorded, the hand-off is refused: the receipt route answers 404 `not-found` and a retry gets `503 world.unavailable`;
+nothing was written. Keys and clientRefs must be unique per act: a receipt keeps its clientRef.
 
 | Route | Purpose |
 |---|---|

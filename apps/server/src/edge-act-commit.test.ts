@@ -147,6 +147,8 @@ test('#1382 follow-up: the clock fails after the hand-off and before any drain: 
   t.after(() => { (w.f.host as unknown as {clockFailure?: unknown}).clockFailure = undefined; });
   for (let i = 0; i < 5; i++) await turn();
   const seen = await w.send(`/v1/edge/receipts/${id}`);
-  assert.notEqual(seen.data?.receipt?.phase, 'pending', `no longer pending: ${JSON.stringify(seen)}`);
+  assert.equal(seen.status, 404, `no longer pending: ${JSON.stringify(seen)}`); assert.equal(seen.data?.error?.code ?? seen.data?.code, 'not-found');
+  const retry = await w.send('/v1/edge/act', {capability: 'read:here', clientRef: 'k-1382-halt'}, 'k-1382-halt');
+  assert.equal(retry.status, 503, JSON.stringify(retry.data)); assert.equal(retry.data?.error?.code ?? retry.data?.code, 'world.unavailable');
   assert.equal(w.rows().length, 0, 'nothing was written');
 });
