@@ -4,6 +4,7 @@
 #   PLAYTEST_SCENARIO=tools/playtest/scenarios/<x>.json … runs that one scenario instead of the frozen set.
 #   PLAYTEST_DIRECT=tools/playtest/scenarios/casts/<x>.json … runs that cast as a headless swarm-directed session
 #   (`playtest.mjs direct --headless`; the cast's console script plays the console) instead of the frozen set.
+#   PLAYTEST_SPECS="<spec.json> …" runs a live arm of Soul Runs specs, one at a time, with its spend stops (run-specs.sh).
 # Run from a clone of the playtest branch (lane/playtest-20261024). Idempotent: rerunning resumes every step
 # (worktree, install, web build stamp, asset overlay, replay-set receipts, PNG compression, commit). See README.md.
 # Layout beside the clone: ../server (fix branch worktree), ../mars-web (overlay), ../results/<out-name>, ../results-branch.
@@ -88,6 +89,10 @@ elif [ -n "${PLAYTEST_SCENARIO:-}" ]; then
   for i in $(seq 1 "$REPEATS"); do
     step "run-$(basename "$PLAYTEST_SCENARIO" .json)-r$i" node tools/playtest/playtest.mjs run "$PLAYTEST_SCENARIO" --server-root "$SERVER" --out "$OUT/$(basename "$PLAYTEST_SCENARIO" .json)-r$i" || RS_RC=$?
   done
+elif [ -n "${PLAYTEST_SPECS:-}" ]; then
+  # a live arm of Soul Runs specs (PLAYTEST_SPECS="a.json b.json", all of them per repeat): tools/playtest/cloud/run-specs.sh (#1098)
+  read -r -a SPECS <<< "$PLAYTEST_SPECS"
+  step run-specs bash tools/playtest/cloud/run-specs.sh "$SERVER" "$OUT" "$REPEATS" "${SPECS[@]}" || RS_RC=$?
 elif [ -n "${PLAYTEST_DIRECT:-}" ]; then
   # one directed session per repeat (PLAYTEST_DIRECT=<cast.json>, -r1, -r2 …): verdict in <run>/director/VERDICT.md
   for i in $(seq 1 "$REPEATS"); do
@@ -123,9 +128,16 @@ OVERLAY_FACT="$(node -e 'try{const m=JSON.parse(require("fs").readFileSync(proce
   awk '{printf "| %s | %s | %s |\n", $1, $2, $3}' "$TIMES"
 } > "$OUT/CLOUD.md"
 
+# --- a spec arm's results carry this machine's details: scrub and check them, and publish nothing if that fails (#1131)
+if [ -n "${PLAYTEST_SPECS:-}" ]; then
+  # not a `step`: PLAYTEST_CLOUD_SKIP must not be able to turn this off
+  node tools/playtest/cloud/publish-scrub.mjs "$OUT" >>"$LOG" 2>&1 || { say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7; }
+fi
+
 # --- secret guard: refuse to publish token-shaped strings
-if grep -rIlE 'sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gho_[A-Za-z0-9]{30,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
-  say "token-shaped strings found in $(wc -l < "$PARENT/.secret-hits") files (names in $PARENT/.secret-hits); NOT committing"; exit 3
+# (tools/playtest/cloud/secret-guard.sh; a scan that can't run refuses too)
+if ! bash tools/playtest/cloud/secret-guard.sh "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
+  say "token-shaped strings found in $(wc -l < "$PARENT/.secret-hits") files, or the scan failed (names in $PARENT/.secret-hits); NOT committing"; exit 3
 fi
 rm -f "$PARENT/.secret-hits"
 

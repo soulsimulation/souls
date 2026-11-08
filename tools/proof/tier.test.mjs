@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { globToRegExp, loadPolicy, tierFor, tierForFile } from './tier.mjs';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { POLICY_PATH, globToRegExp, loadPolicy, tierFor, tierForFile } from './tier.mjs';
 import { SCOPE_RULES } from '../test-harness/release-gate.mjs';
 
 const policy = loadPolicy();
@@ -9,6 +11,12 @@ const tier = (files, labels) => tierFor(files, policy, labels).tier;
 test('docs, process and CI changes are T0', () => {
   assert.equal(tier(['README.md', 'docs/TESTING.md', '.github/workflows/ci.yml', 'changes/x.md', 'tools/playtest/a.mjs']), 'T0');
   assert.equal(tier([]), 'T0');
+});
+
+test('body-authoring source of the pinned presets is T1; other tools stay T0', () => {
+  assert.deepEqual(tierForFile('tools/body-authoring/pip/robot.mjs', policy), { tier: 'T1', rule: 'tools/body-authoring/' });
+  assert.equal(tier(['tools/body-authoring/centaur/centaur.test.mjs', 'docs/a.md']), 'T1');
+  assert.equal(tier(['tools/body-authoring-notes/x.md']), 'T0');
 });
 
 test('server and package logic is T1; visible UI is T2; Soul/engine is T3', () => {
@@ -38,6 +46,17 @@ test('shared god navigation/perception and split read-facade code require T3', (
   ]) assert.equal(tier([file]), 'T3', file);
   for (const file of ['apps/server/src/account-auth.ts', 'apps/server/src/god/assets.ts', 'apps/server/src/http.ts']) {
     assert.deepEqual(tierForFile(file, policy), { tier: 'T1', rule: 'apps/server/' }, file);
+  }
+});
+
+test('a change to the proof policy itself is T3, and only the policy file', () => {
+  const self = relative(fileURLToPath(new URL('../../', import.meta.url)), POLICY_PATH);
+  assert.deepEqual(tierForFile(self, policy), { tier: 'T3', rule: self }, 'the rule names the file loadPolicy reads');
+  assert.deepEqual(tierForFile('docs/process/PROOF-POLICY.yml', policy), { tier: 'T3', rule: 'docs/process/PROOF-POLICY.yml' });
+  assert.equal(tier(['docs/process/PROOF-POLICY.yml', 'changes/x.md', 'docs/process/agent-workflow.md']), 'T3');
+  assert.equal(tier(['docs/process/PROOF-POLICY.yml'], ['tier:T0']), 'T3', 'labels never lower it');
+  for (const file of ['docs/process/agent-workflow.md', 'docs/process/PROOF-POLICY.md', 'docs/process/PROOF-POLICY.yml.bak']) {
+    assert.deepEqual(tierForFile(file, policy), { tier: 'T0', rule: 'docs/' }, file);
   }
 });
 
@@ -71,4 +90,21 @@ test('globs support *, ** and {a,b}', () => {
 test('malformed rules are rejected', () => {
   assert.throws(() => loadPolicy('paths:\n  - prefix: docs/\ndefault_tier: T1\n'));
   assert.throws(() => loadPolicy('paths:\n  - { prefix: "docs/", tier: T9 }\ndefault_tier: T1\n'));
+});
+
+// #928: test-only fixes under the edge family are T1; anything else in the change keeps T3.
+test('edge tests compute T1 only when the change touches nothing but tests and T0 paths', () => {
+  assert.equal(tier(['apps/server/src/edge-read-browse-free.test.ts', 'changes/browse-west-shelf-fixture.md']), 'T1', '#917');
+  assert.equal(tier(['apps/server/src/edge-body-rolling.test.ts', 'changes/rolling-doze-pinned-id.md']), 'T1', '#922');
+  assert.equal(tier(['apps/server/src/edge/ledger/ledger.test.ts']), 'T1', 'nested edge/** tests');
+  assert.equal(tier(['apps/server/src/edge-x.test.mjs', 'docs/a.md', 'apps/server/src/edge-y.test.ts']), 'T1');
+  assert.equal(tier(['apps/server/src/edge-x.test.ts', 'apps/server/src/edge-x.ts']), 'T3', 'with product code under the edge family');
+  assert.equal(tier(['apps/server/src/edge-x.test.ts', 'apps/server/test/core-a-fixture.ts']), 'T3', 'with a shared fixture (T1, not a test)');
+  assert.equal(tier(['apps/server/src/edge-x.test.ts', 'apps/web/src/hud.ts']), 'T3', 'with any non-T0 file');
+  assert.equal(tier(['apps/server/src/edge-x.test.ts'], ['tier:T3']), 'T3', 'a label still raises');
+  for (const file of ['apps/server/src/soul-x.test.ts', 'apps/server/src/nav-x.test.ts', 'apps/server/src/body/x.test.ts', 'packages/kernel/src/x.test.ts', 'apps/server/src/split/menu-world.test.ts']) assert.equal(tier([file]), 'T3', `${file}: other families are unchanged`);
+  assert.deepEqual(tierForFile('apps/server/src/edge-x.test.ts', policy), { tier: 'T3', rule: 'apps/server/src/{edge,intent,soul,brain,body,purpose,lifecycle,nav}*' }, 'without the change context the T3 rule applies');
+  assert.equal(tierForFile('apps/server/src/edge-x.test.ts', policy, { testsOnly: true }).tier, 'T1');
+  assert.equal(tier(['apps/server/src/edge-x.spec.ts']), 'T3', 'only *.test.ts and *.test.mjs');
+  assert.throws(() => loadPolicy('paths:\n  - { prefix: "a/", tier: T1, when: sometimes }\ndefault_tier: T1\n'), /unknown when/);
 });

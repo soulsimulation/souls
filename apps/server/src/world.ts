@@ -3,7 +3,7 @@ import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
 import {authoredBoundariesDeclarationV1Schema,type AuthoredBoundariesDeclarationV1} from '@souls/engine-contract';
-import type {EngineRefusalV1} from '@souls/engine-contract';
+import {ACTION_THREW,REWOUND,type EngineRefusalV1} from '@souls/engine-contract';
 import {edenLectureV1} from '@souls/engine-mars';
 import {renderPlatformRowsV1Schema,type RenderPlatformV1} from '@souls/engine-contract';
 import {officeStairGuardsDeclarationV1Schema,type OfficeStairGuardsDeclarationV1} from '@souls/engine-contract';
@@ -45,7 +45,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
-import { countGlitch, faultFacts, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
+import { countGlitch, faultFacts, faultKeys, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
 
@@ -74,7 +74,16 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
   edge?: { stopActors: string[]; excludedSeqs: number[]; souls: string[];
     /** The rewound bodies' last valid poses (taken before the faulting tick): after the replay each lands back there, or at
      *  the nearest free standing point, instead of where the rewind left it (its arrival point). Absent in older recipes. */
-    poses?: Record<string, RecoveryPose> } };
+    poses?: Record<string, RecoveryPose> };
+  /** #1150 rung 3: `events` are re-applied to the baseline without stepping, every programme stops and the clock moves to
+   *  `untilTick`. `contained` is what the fault named: the recipe says it, so a replay never has to find it again. */
+  lastRung?: { contained?: {code:string;subjects:string[]}[]; relocated?: string[]; skipped?: number[] } };
+/** #1150: a minute of world time. A fault within it of a rung 3 doesn't rewind again. */
+const REWIND_COOLDOWN_TICKS = 1200;
+/** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
+const STEP_FAILING_WINDOW_TICKS = 200, STEP_FAILING_FAULTS = 100;
+/** What rung 3 leaves out: decisions, and the facts that only mean something for a programme a decision started. */
+const DROPPED_ON_REWIND = new Set(['decision', 'play', 'edge-stop', 'intent-admission-v2', 'intent-arrival-v1', 'intent-sleep-stop-v1']);
 export type RecoveryPose = { p: [number, number, number]; yaw: number; level: number };
 /** A synchronous, read-only acceptance check. Throw to refuse before logging. */
 export type AcceptanceGuard = () => true;
@@ -100,7 +109,7 @@ export class PersistedIntentAdmissionFault extends Error {
 }
 type Pending = { kind: EventKind; author: string; payload: any; resolve?: (e: LogEvent) => void; guard?: AcceptanceGuard; journal?: AcceptanceJournal; reject?: (error: unknown) => void; purpose?: PurposeRef; stationEra?:boolean; atomicObjectDecision?:boolean };
 export type BootStats = { from: 'genesis' | 'snapshot'; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
-export type SnapshotBody = { runtime: EngineSnapshot; minds: Mind[]; seq: number; extra: Record<string, unknown>; kernel?: KState; counts?: Record<string, number> };
+export type SnapshotBody = { runtime: EngineSnapshot; minds: Mind[]; seq: number; extra: Record<string, unknown>; kernel?: KState; counts?: Record<string, number>; faultedHeadV1?: true };
 export type HostListener = {
   onBatch?(b: Batch): void;
   onHeartbeat?(h: Heartbeat): void;
@@ -254,13 +263,15 @@ export class WorldHost {
       if(this.engine.world.tick<clock.tick)throw new Error('clock-frontier.snapshot-prefix-differs');
       checkedClock=true; // A later exact durable snapshot supersedes this prefix.
     }
-    let replayedRefusals=0;
+    let replayedRefusals=0,replayThrew=false,replayDiffered=false;
     const stepReplay=()=>{
       const before=this.engine.runtime.violations.length;
-      const out=this.engine.step();this.advanceLives();replayTicks++;bootTick(this.engine.world.tick);
+      let out:ReturnType<Engine['step']>;
+      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;bootTick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
+      this.advanceLives();replayTicks++;bootTick(this.engine.world.tick);
       replayedRefusals+=out.refusals?.length??0;
       if(this.durableClockV1){
-        if(this.engine.runtime.violations.length>before)throw new Error('clock-frontier.replay-violates');
+        if(this.engine.runtime.violations.length>before&&!this.repairRules)throw new Error('clock-frontier.replay-violates');   // #1150: a repair in the log follows it
         this.kernel.tick=this.engine.world.tick;sweep(this.kernel);
       }
       this.afterPrograms(out.programs,true);
@@ -270,9 +281,13 @@ export class WorldHost {
       if(this.seq!==clock.throughSeq||this.engine.world.tick>clock.tick)throw new Error('clock-frontier.prefix-differs');
       while(this.engine.world.tick<clock.tick)stepReplay();
       this.kernel.tick=this.engine.world.tick;sweep(this.kernel);
-      if(this.engine.rulesVersion!==clock.rulesVersion||this.engine.dt!==clock.dtSeconds
-        ||this.engine.stateHash()!==clock.engineHash||kernelHash(this.kernel)!==clock.kernelHash)
-        throw new Error('clock-frontier.replay-differs');
+      const sameRules=this.engine.rulesVersion===clock.rulesVersion&&this.engine.dt===clock.dtSeconds;
+      if(!sameRules||this.engine.stateHash()!==clock.engineHash||kernelHash(this.kernel)!==clock.kernelHash){
+        // #1150: a replay is a legal world even when it isn't the one that ran, say past a throw it didn't repeat. Refusing it
+        // would refuse every boot for good, so the replayed head stands and the difference is reported.
+        if(!sameRules||!this.repairRules)throw new Error('clock-frontier.replay-differs');
+        console.error(`[world] the replay differs from the live world at tick ${clock.tick}; going on from the replay`);replayDiffered=true;
+      }
       checkedClock=true;
     };
     let repaired = -1; for (let i=0;i<later.length;i++) if (later[i].kind === 'rules' && later[i].payload?.recovery) repaired=i;
@@ -289,10 +304,12 @@ export class WorldHost {
     for (const e of later) {
       if(clock&&!checkedClock&&e.seq>clock.throughSeq)verifyClock();
       while (this.engine.world.tick < e.tick) stepReplay();
-      this.apply(e, true);
+      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); }
       this.seq = e.seq;
     }
     verifyClock();
+    if(replayDiffered)this.recordGlitch('recovery',new Error('clock-frontier.replay-differs'),{rule:'clock-frontier.replay-differs',tick:this.engine.world.tick,evidence:{}});
+    if(this.repairRules)this.lastRewindTick=this.db.lastRewindTick(this.worldId,this.engine.world.tick-REWIND_COOLDOWN_TICKS)??-Infinity;
     this.factory.validateHistoryHead?.(this.engine,this.db.world(this.worldId)!.rules_version);
     if(this.extra.stationV1)this.stationPhysicalHeadV1();
     const replayedAt = performance.now();
@@ -304,7 +321,7 @@ export class WorldHost {
     if (this.snapshotAfterReplayTicks > 0 && replayTicks > this.snapshotAfterReplayTicks) this.snapshotSoon = `replayed ${replayTicks} ticks`;
     // The snapshot's own text is the baseline (decoded only if a fault needs it): no second decoded copy of the world is
     // held, and no copy is taken after restore and replay have run over the decoded body's shared parts.
-    if (snapRow && (lastRepair === null || !canCapture)) { const text = snapRow.text; this.recoveryCapture = () => JSON.parse(text) as SnapshotBody; }
+    if (snapRow && (lastRepair === null || !canCapture)) { const text = snapRow.text; if ((snap?.body as SnapshotBody | undefined)?.faultedHeadV1) this.bootedFaulted = true; else this.recoveryCapture = () => JSON.parse(text) as SnapshotBody; }   // #1150: a faulted head is no baseline
     else if (canCapture) this.recoveryBaseline = this.captureBody();
     // Write this world's starting vocabulary into its log once, so its history never depends on what the code's set becomes.
     if (!this.db.hasVocabulary(this.worldId)) void this.enqueue('rules', 'system', { vocabulary: structuredClone(baseVocabulary(this.kernel)), why: 'the vocabulary this world began with' });
@@ -525,12 +542,14 @@ export class WorldHost {
     if (this.recoveryForEdge) this.validPoses = { tick, poses: this.soulPoses() };
     // 1. apply queued inputs at this tick, logging them
     this.drainInputs();
+    if (this.repairRules && !this.clockAvailable) return;   // a repair in that drain couldn't be written: a named halt, not a throw
     // 2. step the engine
     let out: ReturnType<Engine['step']>;
     const previousViolations = this.engine.runtime.violations.length;
     const tStep = performance.now();
-    try { out = this.engine.step(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
-    catch (error) { for (const r of out!?.refusals ?? []) this.countRefusal(r); this.recoverFault(error); return; }
+    try { out = this.stepEngine(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
+    catch (error) { for (const r of out!?.refusals ?? []) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
+    this.noteCleanTick();
     this.advanceLives();
     this.kernel.tick = this.engine.world.tick;
     sweep(this.kernel);
@@ -541,11 +560,14 @@ export class WorldHost {
     this.observeIntentActions();
     this.afterPrograms(out.programs, false);
     if (out.refusals) this.noteRefusals(out.refusals);
+    if (this.repairRules && !this.clockAvailable) return;
     this.replayDebtMs += performance.now() - tStep;
     if(this.durableClockV1){
       // Derived effects become durable before this elapsed body tick is sent.
       // Listener-generated next inputs retain their ordinary queue semantics.
-      this.drainInputs();this.persistClockFrontier();
+      this.drainInputs();
+      if(this.repairRules&&!this.clockAvailable)return;
+      this.persistClockFrontier();
     }
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
@@ -651,6 +673,7 @@ export class WorldHost {
           }catch(restartError){this.stop();p.reject?.(restartError);throw restartError;}
         }else {this.recoverFault(error, e.kind === 'decision' ? e.payload.card : undefined, e.kind === 'decision' && !e.payload?.card ? {seq: e.seq, entityId: e.payload?.entityId} : undefined); recovered = true;}
       }
+      if (this.repairRules && !this.clockAvailable) { for (const q of pending.slice(pending.indexOf(p))) q.reject?.(this.clockFailure); return; }   // nothing more may be written from this head
       const accepted=[e,...(admission?[admission]:[]),...(stationEra?[stationEra]:[]),...(arrival?[arrival]:[])];
       if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
       // No listener can observe a physical event before its committed era fold.
@@ -881,6 +904,7 @@ export class WorldHost {
   /** Apply a logged event: the fold moves the engine and the kernel; this adds the minds' bookkeeping. */
   apply(e: LogEvent, replay: boolean,deferDecisionNotice?:(notify:()=>void)=>void) {
     const tick = e.tick;
+    if(e.kind==='rules'&&e.payload?.lastRungInPlace)for(const m of this.minds.values())m.pending=null;
     if(e.kind==='rules'&&e.payload?.reflection?.episodeMemory){
       const p=e.payload,record=p.reflection.episodeMemory,m=this.minds.get(p.soulId);
       if(!this.extra.intentEpisodeMemoryV1||!m||record.contract!=='private-purpose-episodes/1'||record.proseKind!=='interpretation'||!Number.isSafeInteger(record.throughSeq)||record.throughSeq<0||record.throughSeq>=e.seq||Object.keys(record).sort().join(',')!=='contract,episodes,proseKind,throughSeq'||JSON.stringify(record.episodes)!==JSON.stringify(episodesFromHistoryV1(this.intentHistoryOf(p.soulId),m.owner,record.throughSeq)))throw Error('purpose-episodes.invalid-source');
@@ -1206,6 +1230,9 @@ export class WorldHost {
   enableConcurrentLinkEgressV1(){if((this.extra.runtimePolicy as {concurrentLinkEgressV1?:boolean}|undefined)?.concurrentLinkEgressV1)return Promise.resolve();return this.enqueue('rules','operator:concurrent-link-egress',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,concurrentLinkEgressV1:true},why:'resolve mutual stair-entry traffic waits with supported collision-checked landing courtesy; retain goals, seat occupants and historical replay before this event'});}
   enableShoreDepartV1(){if((this.extra.runtimePolicy as {shoreDepartV1?:boolean}|undefined)?.shoreDepartV1)return Promise.resolve();return this.enqueue('rules','operator:shore-depart',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,shoreDepartV1:true},why:'shore travel may step away from a body already touching the mover; only a step toward it is occupied (two swimmers stopped against a third at the dry gate held each other for good); retain historical replay before this event'});}
   enableContinuousDayV1(){if(this.extra.continuousDayV1)return Promise.resolve();return this.enqueue('rules','operator:continuous-day',{continuousDayV1:true,why:'Gene: no nightly quiet hours. The day turns as a plain event; no quiet renewal, overdue-checkpoint pause or held intent; snapshots carry in-flight work. A quiet already under way ends at once without compaction. Retain historical quiet/compact replay before this event'});}
+  /** route-reach/1 (#872): far walks from upper floors are planned down to the ground a chunk at a time, a fine hop the tile
+   *  window cut short is retried one tile wider, and a place is reported full only when people fill it. Prospective. */
+  enableRouteReachV1(){if((this.extra.runtimePolicy as {routeReachV1?:boolean}|undefined)?.routeReachV1)return Promise.resolve();return this.enqueue('rules','operator:route-reach',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,routeReachV1:true},why:'route-reach/1 (#872): reachable places are planned, not refused route.unreachable or ground.too-far'});}
   enableSpreadClearV1(){if((this.extra.runtimePolicy as {spreadClearV1?:boolean}|undefined)?.spreadClearV1)return Promise.resolve();return this.enqueue('rules','operator:spread-clear',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,spreadClearV1:true},why:'walking to a place picks a free spot on clear ground inside it (a plaza round a fountain, a park round its pond), not a spot inside an obstacle, so arrivals stand in the place; retain historical replay before this event'});}
   enableReflexTimeoutV1(){if((this.extra.runtimePolicy as {reflexTimeoutV1?:boolean}|undefined)?.reflexTimeoutV1)return Promise.resolve();return this.enqueue('rules','operator:reflex-timeout',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,reflexTimeoutV1:true},why:'every reflex the runtime reports stalled on other people for 60 s (walk, seat, stair, swim, courtesy step, yield) is natively cancelled in every state, so no single body can hold another or the world; retain historical replay before this event'});}
   /** placeRegionsV1: admit W1 places (id, label, polygon) as native destination regions in one logged prospective rules fact.
@@ -1411,6 +1438,7 @@ export class WorldHost {
     let nested = -1; for (let i=0;i<recipe.events.length;i++) if (recipe.events[i].kind === 'rules' && recipe.events[i].payload?.recovery) nested=i;
     // Keep the outer recipe's original violation ceiling even when its replay prefix is superseded.
     this.restoreBody(recipe.baseline);
+    if (recipe.lastRung) return this.applyLastRung(recipe);
     const historicViolations=this.engine.runtime.violations.length;
     if (nested >= 0) { this.apply(recipe.events[nested],true); this.seq=recipe.events[nested].seq; }
     else {
@@ -1441,6 +1469,8 @@ export class WorldHost {
     try { baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; }
     catch (failure) { this.failCheckpoint(failure); return; }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
+    // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
+    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
     const untilTick=this.engine.world.tick, originalSeq=this.seq, all=this.db.events(this.worldId,baseline.seq);
     const pending=[...this.minds.values()].filter(m=>m.pending).map(m=>m.pending!.card);
@@ -1450,7 +1480,7 @@ export class WorldHost {
     // collision's two people), widening once to every edge decision since the baseline; never a process exit.
     const plans = excluded.length ? [{excluded, edge: undefined as RecoveryRecipe['edge']}, {excluded, edge: undefined as RecoveryRecipe['edge']}]
       : this.edgeRecovery() ? this.edgePlans(error, all, edgeHint).map(edge => ({excluded: [] as string[], edge})) : [];
-    if (!plans.length) throw new Error(`Engine fault has no attributable card: ${String(error)}`);
+    if (!plans.length) { if (this.repairRules) return this.lastRung(error, baseline, all, untilTick, originalSeq); throw new Error(`Engine fault has no attributable card: ${String(error)}`); }
     const faults={...this.extra.cardFaults as Record<string,number>};
     for (let attempt=0;attempt<plans.length;attempt++) {
       const plan=plans[attempt];
@@ -1461,19 +1491,161 @@ export class WorldHost {
       const edge=plan.edge?{...plan.edge,...this.rewoundPoses(plan.edge, all)}:undefined;
       const recipe: RecoveryRecipe={baseline:structuredClone(baseline),events,untilTick,faults:{...faults},excluded:[...plan.excluded],reason:String(error).slice(0,800),...(edge?{edge}:{})};
       try { this.restoreRecovery(recipe); }
-      catch (replayError) { if (attempt===plans.length-1) { if (this.edgeRecovery()) return this.haltOnFault(replayError, 'recovery replay still faults', error, untilTick); throw replayError; } continue; }
+      catch (replayError) { if (attempt===plans.length-1) { if (this.repairRules) return this.lastRung(error, baseline, all, untilTick, originalSeq); if (this.edgeRecovery()) return this.haltOnFault(replayError, 'recovery replay still faults', error, untilTick); throw replayError; } continue; }
       this.seq=originalSeq;
       const e: LogEvent={seq:++this.seq,tick:untilTick,kind:'rules',author:'world:recovery',payload:{recovery:recipe},at:Date.now()};
-      this.db.appendEvent(this.worldId,e); this.resetAcc(); this.acc.log.push(e); this.ring=[];
+      if (!this.writeRepair(e)) return;
+      this.resetAcc(); this.acc.log.push(e); this.ring=[];
       this.recordGlitch('recovery', error, {tick:untilTick, bodies:[...(edgeHint?.entityId?[edgeHint.entityId]:[]),...(plan.edge?.stopActors??[])], evidence:{seq:e.seq, plan:attempt+1, plans:plans.length, excluded:plan.excluded, ...(plan.edge?{stopActors:plan.edge.stopActors, excludedSeqs:plan.edge.excludedSeqs, souls:plan.edge.souls}:{})}});
       if(this.durableClockV1)this.persistClockFrontier();
       for (const m of this.minds.values()) this.acc.dirty.add(m.soulId);
       for (const l of this.listeners) l.onApplied?.(e);
       // Rebaseline at the repaired head, so the next recipe never nests this one (each carries a whole body: nested,
       // they double per fault), and snapshot it so a boot starts after it too.
-      if (!this.engine.canSnapshot || this.engine.canSnapshot()) this.snapshotHead(true);
+      if (!this.snapshotRepair()) return;
       this.flush(); this.heartbeat(); return;
     }
+  }
+  /** Rung 3s this world has had, for the launcher's ALERT (#1150). */
+  get rewinds(): number { return Object.values(this.glitches.byRule).reduce((n, r) => n + (r.rewind ?? 0), 0); }
+  /** #1150: this world repairs instead of halting for a broken rule. */
+  private get repairRules(): boolean { return this.engine.rulesVersion.includes('+souls-repair/'); }
+  /** The tick of the last rung 3. A fault soon after stays on the head, so a fault that keeps firing can't rewind every tick. */
+  private lastRewindTick = -Infinity;
+  /** The rules a rung 3 has already gone back for. Going back didn't answer them, and each rewind writes a whole world, so a rule
+   *  that returns past the hold stays on the head. Live only: a restart allows one more. */
+  private rewoundRules = new Set<string>();
+  private rewoundFor(error: unknown) { return this.ruleNames(error).every(rule => this.rewoundRules.has(rule)); }
+  private ruleNames(error: unknown): string[] { const keys = faultKeys(error); return keys.length ? keys.map(k => k.code) : [faultFacts(error).rule]; }
+  /** When each rule's in-place fault was last reported: one that keeps firing is written once per cooldown. */
+  private inPlaceAt = new Map<string, number>();
+  /** What the step that just faulted finished, when it returned at all. */
+  private faultedPrograms: ProgramEvent[] | null = null;
+  /** The ticks that ended in a fault, within the last window. */
+  private faultTicks: number[] = [];
+  /** #1150: why steps are failing, while they are. The clock runs but bodies can't get anywhere, so acts are refused and the
+   *  world counts as halted for the launcher's alert. Live only: it ends when faults fall away, and a restart finds it again. */
+  stepFailing: string | null = null;
+  private pruneFaultTicks() { const since = this.engine.world.tick - STEP_FAILING_WINDOW_TICKS; while (this.faultTicks.length && this.faultTicks[0] <= since) this.faultTicks.shift(); }
+  private noteFaultedTick(error: unknown) {
+    if (!this.repairRules) return;
+    this.faultTicks.push(this.engine.world.tick); this.pruneFaultTicks();
+    if (this.stepFailing || this.faultTicks.length < STEP_FAILING_FAULTS) return;
+    this.stepFailing = String(error).slice(0, 800);
+    console.error(`[world] ${this.faultTicks.length} of the last ${STEP_FAILING_WINDOW_TICKS} ticks faulted; acts are refused until that falls away:`, this.stepFailing);
+    this.recordGlitch('halt', error, {rule: 'engine.step-failing', tick: this.engine.world.tick, evidence: {ticks: this.faultTicks.length}});
+  }
+  /** Booted from a marked snapshot, with no clean tick since. */
+  private bootedFaulted = false;
+  private noteCleanTick() {
+    if (this.bootedFaulted) { this.bootedFaulted = false; this.snapshotSoon ??= 'first clean tick since a faulted head'; }
+    if (!this.faultTicks.length) return;
+    this.pruneFaultTicks();
+    if (this.stepFailing && this.faultTicks.length < STEP_FAILING_FAULTS * 3 / 4) { this.stepFailing = null; this.snapshotSoon ??= 'steps are clean again'; }   // the first clean baseline since
+  }
+  /** #1150: a step that throws before its tick moves still moves the clock, live and in a replay alike, so a cooldown never
+   *  waits on a tick that isn't coming and a replay can't spin on one. */
+  private stepEngine(): ReturnType<Engine['step']> {
+    const tick = this.engine.world.tick;
+    try { return this.engine.step(); }
+    catch (error) {
+      // always, even if the tick did move: this is also where the step check's memory and the bounds the step skipped are put right
+      if (this.repairRules) { const to = Math.max(this.engine.world.tick, tick + 1); try { this.engine.setClockV1!(to); } catch { this.engine.world.tick = to; } }
+      throw error;
+    }
+  }
+  /** #1150: a repair that can't be written is a durability failure, the one halt left, and says so. */
+  private writeRepair(e: LogEvent): boolean {
+    try { this.db.appendEvent(this.worldId, e); return true; }
+    catch (failure) { if (!this.repairRules) throw failure; this.failCheckpoint(failure, 'durability.repair'); return false; }
+  }
+  /** #1150: while steps are failing, a due snapshot is taken now: a sliced one would be cancelled by the next fault. It writes
+   *  the frontier first, as every snapshot must, or a crash could leave a snapshot past the frontier that no boot accepts. A
+   *  broken head may not capture: that is no durability failure, so it waits until one is next due. Only a failed write halts.
+   *  It isn't clean, so it serves a boot and never a rewind, here or after a restart. */
+  private snapshotFaultedHead() {
+    let head: ReturnType<WorldHost['captureHead']>;
+    const skip = () => { this.lastSnapshotTick = this.engine.world.tick; this.snapshotTaken(); };
+    try { if (this.engine.canSnapshot && !this.engine.canSnapshot()) return skip(); head = this.captureHead(); }
+    catch (failure) { console.warn('[world] a faulted head would not snapshot; trying again when one is due:', String(failure).slice(0, 200)); return skip(); }
+    if (this.durableClockV1) { try { this.persistClockFrontier(); } catch { return; } }   // already a named halt
+    try { this.commitHead(head, true); }
+    catch (failure) { this.failCheckpoint(failure, 'durability.repair'); }
+  }
+  private snapshotRepair(): boolean {
+    if (this.engine.canSnapshot && !this.engine.canSnapshot()) return true;
+    try { this.snapshotHead(true); return true; }
+    catch (failure) { if (!this.repairRules) throw failure; this.failCheckpoint(failure, 'durability.repair'); return false; }
+  }
+  /** #1150 rung 3: rung 2 failed. Back to the last clean state, keeping everything but decisions, and on from there.
+   *  If those events won't re-apply, the baseline alone: that takes no step and no input, so it can't fail on a rule. */
+  private lastRung(error: unknown, baseline: SnapshotBody, all: LogEvent[], untilTick: number, originalSeq: number) {   // both from before rung 2's replays moved them
+    const kept = all.filter(e => !DROPPED_ON_REWIND.has(e.kind) && e.author !== 'world:refusal' && !e.payload?.recovery);
+    for (const events of [kept, []]) {
+      const recipe: RecoveryRecipe = { baseline: structuredClone(baseline), events, untilTick, faults: {...this.extra.cardFaults as Record<string, number>}, excluded: [], reason: String(error).slice(0, 800), lastRung: {contained: faultKeys(error)} };
+      try { this.restoreRecovery(recipe); }
+      catch (failure) { console.error(`[world] last rung: ${events.length} kept events would not re-apply:`, String(failure).slice(0, 300)); continue; }
+      this.seq = originalSeq;
+      const e: LogEvent = {seq: ++this.seq, tick: untilTick, kind: 'rules', author: 'world:recovery', payload: {recovery: recipe}, at: Date.now()};
+      if (!this.writeRepair(e)) return;
+      for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);
+      this.resetAcc(); this.acc.log.push(e); this.ring = [];
+      this.recordGlitch('rewind', error, {tick: untilTick, evidence: {seq: e.seq, kept: events.length, dropped: all.length - events.length, contained: recipe.lastRung!.contained, relocated: recipe.lastRung!.relocated, skipped: recipe.lastRung!.skipped}});
+      if (this.durableClockV1) this.persistClockFrontier();
+      for (const m of this.minds.values()) this.acc.dirty.add(m.soulId);
+      for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a rewind:', String(failure).slice(0, 200)); }
+      if (!this.snapshotRepair()) return;
+      this.flush(); this.heartbeat(); return;
+    }
+    this.failCheckpoint(new Error(`recovery.baseline-unusable: ${String(error).slice(0, 300)}`));   // the store's own copy won't restore: durability, not a rule
+  }
+  /** The replayable half of rung 3: no engine step, so no rule can fire during it. */
+  private applyLastRung(recipe: RecoveryRecipe) {
+    this.engine.stopAllV1!(REWOUND, recipe.untilTick);
+    const skipped: number[] = [];   // one event that won't re-apply costs only itself. It fails the same way on every replay.
+    for (const e of recipe.events) { try { this.apply(e, true); } catch { skipped.push(e.seq); } this.seq = e.seq; }
+    if (skipped.length) recipe.lastRung!.skipped = skipped;
+    this.lastRewindTick = recipe.untilTick;
+    this.engine.setClockV1!(recipe.untilTick);
+    Object.assign(recipe.lastRung!, this.engine.containV1!(recipe.lastRung!.contained ?? []));
+    this.extra.cardFaults = {...recipe.faults};
+    for (const m of this.minds.values()) { m.pending = null; m.nextEvalTick = this.engine.world.tick + 1; m.evalTrigger = 'activity-failed'; m.lastFingerprint = ''; }
+    this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.kernelDirty = true;
+  }
+  /** #1150 rung 3 with no restore: stop what runs, contain what the fault named. Only a list and some stops, so it can't fail.
+   *  The event carries both, so a replay makes the same stops and the same list and reads nothing. Anything the step faulted on
+   *  is off the list, so a named fault always gets here, even while steps are failing, and the list's cap per rule bounds those
+   *  rows. Each stop row answers a decision that started what it stopped. A fault that only repeats is written once per cooldown. */
+  private containInPlace(error: unknown) {
+    const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
+    // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
+    if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
+    const {stopped, deadlines} = this.engine.stopAllV1!(REWOUND), repeat = !!this.stepFailing || (seen !== undefined && tick - seen < REWIND_COOLDOWN_TICKS);
+    // the next clean tick is what a boot should start from, and a stretch of throws asks once per cooldown, not every tick
+    if (!keys.length && (!repeat || stopped || tick - this.lastSnapshotTick >= REWIND_COOLDOWN_TICKS)) this.snapshotSoon ??= 'a step threw';
+    if (repeat && !stopped && !deadlines && !keys.length) return;
+    if (!repeat) this.inPlaceAt.set(rule, tick);
+    const inPlace = {...this.engine.containV1!(keys), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300)};
+    const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:rewind', payload: {lastRungInPlace: inPlace}, at: Date.now()};
+    if (!this.writeRepair(e)) return;
+    this.seq = e.seq; this.acc.log.push(e);
+    if (!repeat || keys.length || stopped) this.recordGlitch(stopped ? 'rewind' : 'contained', error, {tick, evidence: {seq: e.seq, inPlace: true, contained: inPlace.contained, relocated: inPlace.relocated}});
+    for (const m of this.minds.values()) { m.pending = null; this.acc.dirty.add(m.soulId); }
+    for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a stop in place:', String(failure).slice(0, 200)); }
+    this.tellQuietly(() => { this.flush(); this.heartbeat(); });
+  }
+  /** What goes out to clients from a faulted tick. A broken head can break that too, and this rung can't fail. */
+  private tellQuietly(tell: () => void) {
+    try { tell(); }
+    catch (failure) { console.error('[world] could not tell clients about a fault:', String(failure).slice(0, 200)); }
+  }
+  /** #1150: a faulted tick keeps the ordinary beat, so what was said and logged still reaches clients and nothing piles up. What
+   *  the step refused stands if the head did, and its row is how a relocated Soul hears of it. */
+  private afterFaultedTick(head: WorldHost['engine'], refusals?: EngineRefusalV1[]) {
+    if (!this.clockAvailable) return;
+    if (this.engine === head) for (const r of refusals ?? []) { void this.enqueue('rules', 'world:refusal', {refusal: r}); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }
+    const now = this.engine.world.tick;
+    this.tellQuietly(() => { if (now % BATCH_TICKS === 0) this.flush(); if (now % HEARTBEAT_TICKS === 0) this.heartbeat(); });
   }
   /** Where each Soul's body is now (sorted by entity id). */
   private soulPoses(): Map<string, RecoveryPose> {
@@ -1553,7 +1725,7 @@ export class WorldHost {
   /** #1150 rung 1: the engine already undid these moves. The log keeps each as evidence, in this tick; a replay recomputes
    *  them from state, so it reads these only to compare the count. */
   private noteRefusals(refusals: EngineRefusalV1[]) {
-    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); this.countRefusal(r); }
+    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); this.countRefusal(r); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }   // a replay needn't repeat the throw, so don't leave it one to repeat
     this.drainInputs();
   }
   private countRefusal(r: EngineRefusalV1) { this.recordGlitch('refusal', JSON.stringify([{ code: r.rule, subjects: r.bodies }]), { tick: r.tick, evidence: { programs: r.programs, poses: r.poses } }); }
@@ -1775,6 +1947,7 @@ export class WorldHost {
     this.assertClockReady();
     this.cancelPeriodicSnapshot();
     this.drainInputs();
+    if (this.repairRules && !this.clockAvailable) return { pending: false, tick: this.engine.world.tick };   // nothing more from this head
     if(this.durableClockV1)this.persistClockFrontier();
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) {
       // A graceful close still needs a durable replay destination when the
@@ -1790,13 +1963,21 @@ export class WorldHost {
   /** Capture and persist the head as the snapshot and recovery baseline (the caller has checked it can snapshot). */
   private snapshotHead(sync: boolean): { tick: number; stateHash: string } {
     this.cancelPeriodicSnapshot();
+    return this.commitHead(this.captureHead(), sync);
+  }
+  private captureHead() {
     const t0 = performance.now();
     const runtime = this.engine.snapshot();
-    const body = this.captureBody(runtime);
+    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash() };
+  }
+  private commitHead({ t0, runtime, body, physicalHash }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
     // captureBody owns every field; persistence only reads it, and restoration/
     // recovery recipes clone before mutation. Keep one immutable captured body.
-    this.recoveryBaseline = body; this.recoveryCapture = null;
-    const meta = { tick: runtime.tick, seq: this.seq, stateHash: runtime.stateHash, physicalHash: this.engine.physicalHash(), rulesVersion: this.engine.rulesVersion, body };
+    // #1150: a head captured here during a failing stretch is marked and serves a boot, never a rewind. A sliced capture
+    // only starts on a tick that stepped clean, so it stays unmarked, as the first clean tick after a stretch would.
+    if (this.stepFailing || this.bootedFaulted) body.faultedHeadV1 = true; else this.recoveryBaseline = body;
+    this.recoveryCapture = null;
+    const meta = { tick: runtime.tick, seq: this.seq, stateHash: runtime.stateHash, physicalHash, rulesVersion: this.engine.rulesVersion, body };
     this.snapshotMs.capture = performance.now() - t0;
     this.lastSnapshotTick = runtime.tick; this.snapshotTaken();
     const generation = this.snapshotGeneration;
@@ -1811,6 +1992,7 @@ export class WorldHost {
     if (this.periodicSnapshot) return;
     if (!this.engine.captureCheckpoint && !this.engine.captureSnapshot) { this.saveSnapshot(false); return; }
     this.assertClockReady(); this.drainInputs();
+    if (this.repairRules && !this.clockAvailable) return;
     if (this.durableClockV1) this.persistClockFrontier();
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
     this.snapshotGeneration++;
@@ -1874,11 +2056,11 @@ export class WorldHost {
     };
     later(finish);
   }
-  private failCheckpoint(error: unknown): void {
+  private failCheckpoint(error: unknown, rule = 'durability.checkpoint'): void {
     console.error('[snapshot] periodic checkpoint failed', error);
     this.recoveryCapture = null;
     this.clockFailure = error instanceof Error ? error : new Error('periodic checkpoint failed', { cause: error }); this.paused = true; this.stop();
-    this.recordGlitch('halt', error, {rule: 'durability.checkpoint'});
+    this.recordGlitch('halt', error, {rule});
     for (const listener of this.listeners) try { listener.onClockUnavailable?.(); } catch { /* preserve checkpoint fault */ }
   }
   /** Superseding snapshots, recovery and stop must not leave a writer scheduled

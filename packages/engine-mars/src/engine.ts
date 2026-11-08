@@ -2,7 +2,7 @@ import {LIE_CLEARANCE} from '../../../mars/viewer/engine/social/pose.ts';
 import {regionArrivalMask} from './region-arrival.ts';
 import { createHash } from 'node:crypto';
 import { capturePhysicalHashInput, capturedPhysicalHashSteps, physicalHashNeedsLegacyCapture } from './checkpoint-hash.ts';
-import { stableStringify, type EngineRefusalV1 } from '@souls/engine-contract';
+import { ACTION_THREW, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
 import {bodyProfile} from '../../../mars/viewer/engine/bodies/navigation.ts';
 import {immutableAuthoredBoundaryFact} from '../../../mars/viewer/engine/spatial/edits.ts';
 import {keepStaticGridsForBoot,withStaticGridReadCache,type BootGridStore} from '../../../mars/viewer/engine/spatial/grid.ts';
@@ -18,7 +18,8 @@ import {newcomerResourcesPublicV1Schema,commonsNewcomerResourcesV1Schema,type Co
 import {existingGreenLandmarkV1} from './green-landmark.ts';
 import {existingGreenLandmarkTransitionV1Schema,type ExistingGreenLandmarkTransitionV1} from '@souls/engine-contract';
 import {fixtureSlots, isFree, seatApproach} from '../../../mars/viewer/engine/social/slots.ts';
-import {angleDelta} from '../../../mars/viewer/engine/core/math.ts';
+import {angleDelta,type OBB2} from '../../../mars/viewer/engine/core/math.ts';
+import {settleBeside} from '../../../mars/viewer/engine/runtime/static-step.ts';
 import {publishedWaitsFor} from '../../../mars/viewer/engine/runtime/waits.ts';
 import {inShoreDomain} from '../../../mars/viewer/engine/locomotion/connected-shore.ts';
 import {rerouteCarrier,setCarrierRoute,type CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
@@ -59,7 +60,7 @@ import { disassemblyPlan, DISASSEMBLY_POLICY } from './disassembly.ts';
 import { MARS_2026_MAP, withMars2026Map } from './mars-2026-map.ts';
 import { disassemblyRegistry } from '../../../mars/viewer/engine/construction/disassembly.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { connectBeamV1, framesStand } from './beam-connect.ts';
+import { connectBeamV1, framesStand, settleFrames } from './beam-connect.ts';
 import { decksBear, installJoistV1, laySheetV1 } from './deck-install.ts';
 import { installFlightV1, installTreadV1, stairsBear } from './stair-install.ts';
 import { captureRenderScene, commonsSceneMetadataV1Schema, type RenderSceneCaptureV1, type RenderScene } from '@souls/engine-contract';
@@ -135,6 +136,8 @@ type Prog = {
   trafficSince?: number;
   trafficTries?: number;
   stopping?: Diag;
+  /** #1150: the tick a ladder's stop gives up waiting. A stop that was refused, or a set-down that can't finish, must not hold a body for good. */
+  stopByV1?: number;
   /** PC08: stopped with `untilSafe` (a shared carry): a held-up action keeps its own hold-up diagnostic, not a retry's. */
   stopUntilSafe?: true;
   /** #1150: the ticks the world refused this programme's moves; it then ends `failed`, not `cancelled`. */
@@ -144,8 +147,18 @@ type Prog = {
   readiedActors?:string[];
   build?: { phase: BuildPhase; crew: string[]; stopping?: Diag; reverse?: true };
 };
+/** #1150: an invariant that throws is a named violation, so the repair ladder sees it and the rest of the tick still runs. */
+const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } catch (e) { return [{ code: 'engine.thrown', message: String((e as Error)?.message ?? e).slice(0, 200), subjects: [] }]; } };
+const containedKey = (v: { code: string; subjects?: string[] }) => `${v.code}|${[...(v.subjects ?? [])].sort().join()}`;
+/** #1150: how long a contained entry stays after it last fired. A rule that flickers stays contained, instead of faulting again each time it comes back. */
+const CONTAINED_HOLD_TICKS = 1200;
+/** #1150: past this many subjects of one rule the rule is contained whole, so a rule that names someone new each tick costs a few rows, not a row a tick. */
+const CONTAINED_KEYS_PER_RULE = 8, ANY_SUBJECT = '*';
+/** #1150: twenty seconds for what the ladder stopped to finish its own cleanup. Past that it is abandoned, and bodies are free. */
+const LADDER_STOP_TICKS = 400;
+const containedByRule = (code: string) => `${code}|${ANY_SUBJECT}`;
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
-export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR=1 decides. */ soulsRepairV1?:boolean; groundReclaimV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
+export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
 export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arrival:[0,18],arrivalPlace:'garden',reference:[0,16],grounds:{id:'grounds',name:'Ceramic garden'}};
 export const GREEN_FIELD_WORLD:MarsWorldConfig={scene:'greenfield',arrival:[0,0],arrivalPlace:'field',reference:[2,0],grounds:{id:'grounds',name:'Green field'}};
 export const EDEN_COMMONS_WORLD:MarsWorldConfig={scene:'eden-commons',arrival:[14,4],arrivalPlace:'commons',reference:[9,5],grounds:{id:'grounds',name:'Eden commons'}};
@@ -272,6 +285,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     this.rt.services.doorPassersV1=this.doorPassersV1;
@@ -326,6 +340,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     this.rt.services.doorPassersV1=this.doorPassersV1;
@@ -344,10 +359,13 @@ export class MarsEngine implements Engine {
     if (reuse) this.tableReusesV1++;
     const table: EntityTable = reuse ? checkedTable(cached!) : listTable(this.ents);
     this.tableCacheV1 = null;
+    if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardedInvariantV1);
+    if (this.cfg.soulsRepairV1 === true) this.rt.actionThrewV1 ??= (action: string, error: unknown) => this.abandonV1(action, error);
     const refusable = this.cfg.soulsRepairV1 === true ? this.refusalCopyV1(table) : null, seen = this.rt.violations.length;
     this.m.stepCarriers(this.rt, table);   // carrier/1: rides move their seated riders first (no carriers: no effect)
     this.m.stepHandHolds(this.rt);         // entry 35: hands let go finish, a broken pair lets go (no holds: no effect)
     this.rt.step(table);
+    if (refusable && this.world.containedV1) this.stillContainedV1(seen, refusable);
     if (refusable && this.rt.violations.length > seen) this.refuseV1(refusable, seen);
     const pass: EntityTable | null = (this.rt as any).passTable ?? null;
     const still = !!pass && pass.entities === this.ents && (this.rt as any).live.size === 0 && !this.quiet && this.programs.size === 0 && this.leaving.length === 0;
@@ -360,7 +378,7 @@ export class MarsEngine implements Engine {
     for (const p of [...this.programs.values()]) this.advance(p);
     if (tick - this.recorder.startTick >= 20) {
       // the next take's baseline is the state the last one ended in, this tick (the recorder samples from the pass's listing while it holds)
-      const cut = () => this.startRecorder(this.finishRecorder());
+      const cut = () => { if (refusable) this.recutV1(); else this.startRecorder(this.finishRecorder()); };
       if (still) withEntityList(this.rt.world, cut, pass); else cut();
     }
     if (this.leaving.length) this.leaving = this.leaving.filter((id) => !this.tryRemove(id));
@@ -397,6 +415,7 @@ export class MarsEngine implements Engine {
     return out;
   }
 
+  private guardedV1?: unknown[];
   /** #1150: where each body an action can move stands before this tick, with the load it holds. Never stored. */
   private refusalCopyV1(table: EntityTable): Map<string, RefusalCopy> {
     const out = new Map<string, RefusalCopy>(), ents = this.ents, { keys, list } = table as { keys: string[]; list: any[] };
@@ -426,7 +445,7 @@ export class MarsEngine implements Engine {
     const ents = this.ents, moved = (id: string) => { const c = copy.get(id), e = ents[id]; return !!c && !!e && (c.pose.p.some((n, i) => n !== e.pose.p[i]) || c.level !== e.human?.level || (!e.human && c.pose.yaw !== e.pose.yaw)); };   // a body that only turned stayed where it was; a load's turn sweeps its ends
     const undo = new Set<string>();
     for (const id of [...new Set(v.subjects ?? [])].sort()) { const g = this.refusalGroupV1(id); if (g.some(moved) || (v.code === 'motion.overspeed' && copy.has(id))) g.forEach(x => undo.add(x)); }
-    if (!undo.size) return null;
+    if (!undo.size) return v.code === 'collision.human-static' ? this.relocationPlanV1(v, copy) : null;
     const programs = new Map<string, Prog>(), actions = new Set<string>();
     for (const id of [...undo].sort()) {
       const e = ents[id]; if (!copy.has(id) || e.human?.riding || e.human?.carrier || e.human?.on || e.human?.activity?.startsWith('climb')) return null;
@@ -436,7 +455,145 @@ export class MarsEngine implements Engine {
       for (const h of this.holders(id)) { if (this.rt.live.get(h)?.cancelling) return null; actions.add(h); }
     }
     const holding = new Set<string>(); for (const id of undo) for (const h of this.holders(id)) holding.add(h);
-    return { violation: v, rule: v.code, undo: [...undo].sort(), programs, actions, holding: [...holding].sort() };
+    return { violation: v, rule: v.code, undo: [...undo].sort(), relocate: undefined as string[] | undefined, programs, actions, holding: [...holding].sort() };
+  }
+  /** #1150 decision 1: nobody moved, so the world moved onto them. Bodies that can stand elsewhere go to the nearest free spot. */
+  private relocationPlanV1<V extends { code: string; subjects?: string[] }>(v: V, copy: Map<string, RefusalCopy>) {
+    const ents = this.ents, ids = [...new Set(v.subjects ?? [])].filter(id => ents[id]?.human).sort();
+    if (ids.every(id => this.standsClearV1(id)) || ids.some(id => { const h = ents[id].human; return h.riding || h.carrier || h.on || h.sleepPose || h.grip || this.refusalProgramV1(id)?.build; })) return null;
+    const programs = new Map<string, Prog>(), actions = new Set<string>();
+    for (const id of ids) { const p = this.refusalProgramV1(id); if (p) programs.set(p.id, p); else for (const h of this.holders(id)) actions.add(h); }
+    return { violation: v, rule: v.code, undo: [] as string[], relocate: ids as string[] | undefined, programs, actions, holding: [] as string[] };
+  }
+  private relocateV1<V>(plan: { violation: V; rule: string; relocate?: string[]; programs: Map<string, Prog>; actions: Set<string> }, stuck: V[], done: Map<string, EngineRefusalV1>, tick: number) {
+    for (const p of plan.programs.values()) { if (p.action && this.rt.isActive(p.action)) this.rt.cancel(p.action, relocationDiag); if (!p.action || !this.rt.isActive(p.action)) this.end(p, 'failed', relocationDiag); }
+    for (const h of [...plan.actions].sort()) this.rt.cancel(h, relocationDiag);
+    const poses: EngineRefusalV1['poses'] = {};
+    for (const id of plan.relocate!) {
+      const e = this.ents[id];
+      if (!this.tryRelocateV1(id)) { stuck.push(plan.violation); return; }
+      poses[id] = { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: e.human.level };
+    }
+    done.set(`relocated|${plan.relocate!.join()}`, { tick, rule: plan.rule, bodies: plan.relocate!, programs: [...plan.programs.keys()].sort(), poses, relocated: true });
+  }
+  private bodyRadiusV1(e: any): number { return e.body?.family === 'floater' ? (e.body.radius ?? .35) : humanRadius(e); }
+  /** Nothing solid at this body's feet, so moving it can't answer a rule about where it stands. */
+  private standsClearV1(id: string): boolean {
+    const e = this.ents[id], spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
+    const grid = spatial.levelAt(e.human.level ?? 0, [e.pose.p[0], e.pose.p[2]]);
+    return !!grid && clearanceAt(grid, [e.pose.p[0], e.pose.p[2]]) >= this.bodyRadiusV1(e);
+  }
+  private tryRelocateV1(id: string): boolean { const e = this.ents[id]; try { return this.restoreHumanPoseV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: e.human.level }, this.bodyRadiusV1(e)); } catch { return false; } }
+  /** Did this step take a body further into the break it is already in? Nearer the solid thing, or nearer the other body. */
+  private pressesInV1(v: { code: string; subjects?: string[] }, copy: Map<string, RefusalCopy>): boolean {
+    if (!v.code.startsWith('collision.')) return false;   // for a rule like `lift.hands-out-of-reach`, nearer is the cure
+    const ents = this.ents, was = (id: string) => copy.get(id)?.pose.p ?? ents[id]?.pose.p, ids = (v.subjects ?? []).filter(id => ents[id]);
+    if (v.code !== 'collision.human-static') { const [a, b] = ids, [p, q] = [was(a), was(b)]; return !!p && !!q && Math.hypot(ents[a].pose.p[0] - ents[b].pose.p[0], ents[a].pose.p[2] - ents[b].pose.p[2]) < Math.hypot(p[0] - q[0], p[2] - q[2]); }
+    const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
+    return ids.some(id => {
+      const e = ents[id], c = copy.get(id), at: [number, number] = [e.pose.p[0], e.pose.p[2]], grid = e.human && spatial.levelAt(e.human.level ?? 0, at), from = c && spatial.levelAt(c.level ?? 0, [c.pose.p[0], c.pose.p[2]]); if (!grid || !from) return false;
+      const now = clearanceAt(grid, at); return now < this.bodyRadiusV1(e) && now < clearanceAt(from, [c!.pose.p[0], c!.pose.p[2]]);
+    });
+  }
+  /** Contained entries don't fault again, and leave the list once they have been quiet for a hold. A key that fired
+   *  last tick is a break still standing, and a body inside something may walk out of it, never further in. Anything else on
+   *  the list only absorbs what has no plan, so the list never switches off rung 1 for a move that started or deepened a break. */
+  private stillContainedV1(seen: number, copy: Map<string, RefusalCopy>) {
+    const rt = this.rt, key = containedKey, list = this.world.containedV1!, tick: number = rt.tick, entries = new Map(list.map(c => [key(c), c]));
+    const fresh = rt.violations.splice(seen) as (Diag & { subjects?: string[] })[], firing = new Set<string>();
+    for (const v of fresh) {
+      const own = entries.get(key(v)), entry = own ?? entries.get(containedByRule(v.code)), standing = own?.until === tick - 1 + CONTAINED_HOLD_TICKS && !v.code.startsWith('motion.') && !this.pressesInV1(v, copy);
+      const plan = entry && !standing ? this.refusalPlanV1(v, copy, tick) : null;
+      if (entry && (!plan || plan.relocate)) firing.add(key(entry));   // a relocation that can't answer it is still this break firing
+      if (!entry || plan) rt.violations.push(v as any);
+    }
+    const left = list.flatMap(c => firing.has(key(c)) ? [{ ...c, until: tick + CONTAINED_HOLD_TICKS }] : tick < (c.until ?? 0) ? [c] : []);
+    if (left.length) this.world.containedV1 = left; else delete this.world.containedV1;
+  }
+  /** #1150: `rt.cancel`, and under the repair rules a cancel that throws abandons the action, so a stop can't throw for ever. */
+  private cancelOrAbandonV1(action: string, why: Diag) {
+    try { this.rt.cancel(action, why); } catch (error) { if (this.cfg.soulsRepairV1 !== true) throw error; this.abandonV1(action, error); }
+  }
+  /** #1150: an action that threw can't finish its own cleanup, and it must not stop everyone else's tick or hold a body for good.
+   *  Its whole tree ends here, and whatever it held is set down where it is: the one time a load is let go without a set-down,
+   *  because the action that would set it down is what broke. Everything here follows from the world and the throw, so a replay
+   *  of the same throw does the same. The Soul's programme ends on its next advance, as for any action that failed. */
+  private abandonV1(action: string, error: unknown) {
+    const rt = this.rt as any, records = rt.records as Map<string, { id: string; parent?: string }>, ents = this.ents;
+    let root = action; for (let up = records.get(root)?.parent; up; up = records.get(root)?.parent) root = up;
+    const tree = new Set([root]); for (let grew = true; grew;) { grew = false; for (const r of records.values()) if (r.parent && tree.has(r.parent) && !tree.has(r.id) && rt.isActive(r.id)) { tree.add(r.id); grew = true; } }
+    const bodies = (listEntities(ents) as any[]).filter(e => e.human?.grip && this.holders(e.id).some(h => tree.has(h))).map(e => e.id as string).sort();
+    const depth = (id: string) => { let n = 0; for (let r = records.get(id); r?.parent; r = records.get(r.parent)) n++; return n; }, internal = rt.internals();
+    for (const id of [...tree].sort((a, b) => depth(b) - depth(a) || (a < b ? -1 : 1))) {
+      const l = rt.live.get(id); if (!l) { rt.forceCancel?.(id, ACTION_THREW); continue; }
+      try { internal.forceFinish(l, 'failed', ACTION_THREW); } catch { rt.live.delete(id); for (const [k, list] of internal.owners) { const kept = list.filter((o: { action: string }) => o.action !== id); if (kept.length) internal.owners.set(k, kept); else internal.owners.delete(k); } }
+    }
+    const poses: EngineRefusalV1['poses'] = {}, spatial = this.rt.services.spatial as Spatial, joined: string[] = [];
+    for (const id of bodies) {
+      const h = ents[id].human, item = ents[h.grip?.entity], level: number = h.level ?? 0; delete h.grip; delete h.task; h.activity = 'idle';
+      if (!item || !['held', 'in-hand'].includes(item.support?.kind)) continue;
+      delete item.reservedBy;
+      // a part joined to others stays where it is and stands by itself, as a god's joined upright does: laying it down would
+      // leave the joints it keeps, and the crew on the other end of them could never let go
+      if (item.connections?.length) { item.support = { kind: 'ground' }; item.phase = 'installed'; joined.push(item.id); continue; }
+      const [x, , z] = item.pose.p, floor = spatial.base?.levels.find((l: { id: number }) => l.id === level)?.y ?? 0;
+      placeOnGround(item, [x, level === 0 && this.rt.world.groundV1 && spatial.ground ? r3(standOn(spatial.ground, x, z)) : floor, z], item.pose.yaw ?? 0); acknowledgeRelocation(this.rt, item.id);
+      poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
+    }
+    if (joined.length) settleFrames(this.rt);
+    (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200) });
+    // the crews holding the rest of that frame: nobody can finish it with them now, and their stop waits on a frame that won't stand
+    const group = new Set(joined); for (const id of group) for (const c of ents[id]?.connections ?? []) group.add(c.to);
+    for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a part of the same frame broke: ${id}`); }
+  }
+  /** Is this violation on the list, by name or by its rule? */
+  private coveredV1(): (v: { code: string; subjects?: string[] }) => boolean {
+    const known = new Set((this.world.containedV1 ?? []).map(containedKey));
+    return v => known.has(containedKey(v)) || known.has(containedByRule(v.code));
+  }
+  /** #1150 rung 3: every programme ends with `why`, taking no step. An action with its own cleanup finishes it on later ticks. */
+  stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } {
+    let stopped = 0, deadlines = 0;   // what this call changed, so a host knows if a replay has to make the same stops. A deadline ends nothing yet.
+    const cancel = (id: string) => { try { this.cancelOrAbandonV1(id, why); } catch (e) { console.error('[engine] a stop could not end its action:', String(e).slice(0, 200)); } };   // this rung can't fail
+    for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      if (p.stopping && p.action && this.rt.isActive(p.action)) { if (p.stopByV1 === undefined) { p.stopByV1 = from + LADDER_STOP_TICKS; deadlines++; } continue; }   // already on its way down: its own reason and cleanup stand, for a while
+      if (p.action && this.rt.isActive(p.action)) cancel(p.action);
+      if (p.action && this.rt.isActive(p.action)) { stopped++; p.stopping = why; p.refusalsV1 ??= []; p.stopByV1 = from + LADDER_STOP_TICKS; continue; }
+      stopped++;
+      try { this.end(p, p.build ? 'cancelled' : 'failed', why); } catch { this.programs.delete(p.id); if (this.byActor.get(p.actor) === p.id) this.byActor.delete(p.actor); }
+    }
+    return { stopped, deadlines };
+  }
+  /** #1150: the take ends and the next begins, even if closing this one throws: a recorder left finished would throw every tick after. */
+  private recutV1(between?: () => void) {
+    let hash: string | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
+    between?.(); this.startRecorder(between ? undefined : hash);
+  }
+  /** #1150 rung 3: the clock moves to the fault's tick without stepping the world, so ticks stay monotonic for the log. */
+  setClockV1(tick: number) {
+    this.recutV1(() => { this.world.tick = tick; }); this.tableCacheV1 = null;
+    // as a boot from this head would: the step check remembers these poses, or its first tick would differ from a boot's
+    rememberPosesAfterRestore(this.rt);
+    // a step that threw never reached its own bounds, and a stretch of them must not grow these for ever
+    const rt = this.rt as any; if (rt.violations.length > 1000) rt.violations.splice(0, rt.violations.length - 1000);
+    if (rt.events.length > 20000) { rt.events.splice(0, rt.events.length - 1000); this.cursor = rt.events.length; }
+  }
+  /** #1150 rung 3: `keys` are what the fault itself named, and a replay passes the kept ones back, so this reads no invariant and
+   *  no replay can differ: a read here would move the step check's memory where a replay's wouldn't. A body in the wrong is
+   *  relocated once. A key gets a place on the list until its rule has too many, and then the rule goes on instead. */
+  containV1(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] } {
+    const tick: number = this.rt.tick, list = new Map((this.world.containedV1 ?? []).filter(c => tick < (c.until ?? 0)).map(c => [containedKey(c), c]));
+    const named = (code: string) => [...list.values()].filter(c => c.code === code && c.subjects[0] !== ANY_SUBJECT).length;
+    const kept = new Map<string, ContainedKeyV1>(), put = (code: string, subjects: string[]) => { const c = { code, subjects }, k = containedKey(c); kept.set(k, c); list.set(k, { ...c, until: tick + CONTAINED_HOLD_TICKS }); };
+    for (const { code, subjects } of keys.map(c => ({ code: c.code, subjects: [...c.subjects].sort() })).sort((a, b) => (containedKey(a) < containedKey(b) ? -1 : 1))) {
+      if (subjects[0] === ANY_SUBJECT || list.has(containedKey({ code, subjects })) || named(code) < CONTAINED_KEYS_PER_RULE) put(code, subjects); else put(code, [ANY_SUBJECT]);
+    }
+    const relocated: string[] = [];
+    // only a body inside something: a floating load's bearer has nowhere better to stand
+    for (const id of [...new Set([...kept.values()].filter(c => c.code.startsWith('collision.')).flatMap(c => c.subjects))].sort()) { const e = this.ents[id]; if (!e?.human) continue; const [x, , z] = e.pose.p; if (this.tryRelocateV1(id) && (e.pose.p[0] !== x || e.pose.p[2] !== z)) relocated.push(id); }
+    if (list.size) this.world.containedV1 = [...list.values()].sort((a, b) => (containedKey(a) < containedKey(b) ? -1 : 1)); else delete this.world.containedV1;
+    rememberPosesAfterRestore(this.rt);   // a stop can move a load and this a body: the next tick starts from here, as a boot from this head would
+    return { contained: [...kept.values()], relocated };
   }
   /** #1150 rung 1: every new violation this step is undone and its programmes stopped, or none is. What the invariants
    *  still find after that stays in `violations`, for the host's repair. A pure function of world state and the rules. */
@@ -448,6 +605,7 @@ export class MarsEngine implements Engine {
     const stuck: typeof fresh = [];
     const told = new Set<string>();
     for (const plan of plans as NonNullable<(typeof plans)[number]>[]) {
+      if (plan.relocate) { this.relocateV1(plan, stuck, done, tick); continue; }
       const why = refusalDiag(plan.rule), key = `${plan.rule}|${plan.undo.join()}`;
       for (const id of plan.undo) { const c = copy.get(id)!, e = ents[id]; e.pose = { ...c.pose, p: [...c.pose.p] }; if (e.human) { e.human.level = c.level; e.human.speed = 0; } }
       for (const h of plan.holding) { if (told.has(h)) continue; told.add(h); const l = rt.live.get(h); l?.def.refused?.(rt, l.exec); }   // once a tick: a whole crew can be named
@@ -462,8 +620,9 @@ export class MarsEngine implements Engine {
     }
     (this.out.refusals ??= []).push(...done.values());
     // The moves are back; ask the invariants again. A second pass in one tick also resets the step check's memory to these poses.
-    withEntityList(rt.world, () => { for (const inv of rt.invariants) for (const d of inv(rt)) { rt.violations.push({ ...d, tick }); rt.events.push({ tick, type: 'violation', code: d.code, message: d.message, subjects: d.subjects }); } }, listTable(ents));
-    rt.violations.push(...stuck);
+    const covered = this.coveredV1();
+    withEntityList(rt.world, () => { for (const inv of rt.invariants) for (const d of inv(rt)) { if (covered(d)) continue; rt.violations.push({ ...d, tick }); rt.events.push({ tick, type: 'violation', code: d.code, message: d.message, subjects: d.subjects }); } }, listTable(ents));
+    rt.violations.push(...stuck.filter(v => !covered(v)));
   }
 
   private emit(p: Prog, kind: ProgramEvent['kind'], d?: Diag) {
@@ -488,8 +647,9 @@ export class MarsEngine implements Engine {
     if(p.stopping){
       // PC08: while an `untilSafe` stop's action is held up it stands still, so a retry would refuse again and only hide
       // the hold-up's own diagnostic (who is in the way); it is retried once the action moves again
-      if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.rt.cancel(p.action,p.stopping);return;}
-      return this.end(p,p.refusalsV1?'failed':'cancelled',p.stopping);
+      if(p.stopByV1!==undefined&&this.rt.tick>=p.stopByV1&&p.action&&this.rt.isActive(p.action))this.abandonV1(p.action,`the stop did not finish: ${p.stopping.code}`);
+      if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.cancelOrAbandonV1(p.action,p.stopping);return;}
+      return this.end(p,p.refusalsV1&&!p.build?'failed':'cancelled',p.stopping);   // an unfinished build's failure throws
     }
     for (let guard = 0; guard < 12; guard++) {
       if (!this.ents[p.actor]) return this.end(p, 'cancelled', { code: 'actor.removed', message: 'the actor is gone' });
@@ -712,7 +872,11 @@ export class MarsEngine implements Engine {
     const order=[...spots.slice(offset),...spots.slice(0,offset)].map((p,i)=>({p,i,band:lap?Math.round(Math.abs(Math.hypot(p[0]-e.pose.p[0],p[1]-e.pose.p[2])-6)/2):pond?Math.round(Math.hypot(p[0]-e.pose.p[0],p[1]-e.pose.p[2])/8):Math.round(Math.hypot(p[0]-mid[0],p[1]-mid[1])/2)})).sort((a,b)=>a.band-b.band||a.i-b.i).slice(0,24);
     let last:Diag={code:'route.unreachable',message:'no reachable spaced spot'},crowded:Diag|undefined;
     for(const {p} of order){const no=this.plan(this.movementVerb(actor,p[0],p[1]),{actor,x:p[0],z:p[1],level},subjects);if(!no)return {x:p[0],z:p[1],level};last=no;if(subjects&&this.waterBodyObstruction(no,actor))crowded??=no;}
-    if(v2&&ring.length){const ground=0;for(const p of ring.sort((a,b)=>Math.hypot(a[0]-e.pose.p[0],a[1]-e.pose.p[2])-Math.hypot(b[0]-e.pose.p[0],b[1]-e.pose.p[2])).slice(0,24)){const no=this.plan(this.movementVerb(actor,p[0],p[1]),{actor,x:p[0],z:p[1],level:ground});if(!no)return {x:p[0],z:p[1],level:ground};}
+    let ringLast:Diag|undefined;
+    if(v2&&ring.length){const ground=0;for(const p of ring.sort((a,b)=>Math.hypot(a[0]-e.pose.p[0],a[1]-e.pose.p[2])-Math.hypot(b[0]-e.pose.p[0],b[1]-e.pose.p[2])).slice(0,24)){const no=this.plan(this.movementVerb(actor,p[0],p[1]),{actor,x:p[0],z:p[1],level:ground});if(!no)return {x:p[0],z:p[1],level:ground};ringLast=no;}
+      // route-reach/1 (#872): only people make a place full (someone stands inside it); when nobody does, the spots no walk
+      // reaches report the planner's own reason
+      if(this.cfg.routeReachV1===true&&ringLast&&!taken.some(t=>inPoly(t[0],t[1],r.polygon)))return crowded??ringLast;
       return {code:'route.region-full',message:`${region} is full and nobody can stand beside it right now`};}
     return crowded??last;
   }
@@ -1368,7 +1532,7 @@ export class MarsEngine implements Engine {
    * pose (taken the tick before the fault) instead of wherever the rewind left it (e.g. its arrival point). Upstairs it keeps
    * its floor when the floor still has room there; otherwise the nearest free standing point on level 0 (dry or wadable
    * ground on a ground world, never deep water), rings of 0.5 m out to 40 m. Refuses busy/held/sleeping/seated-aboard bodies. */
-  restoreHumanPoseV1(id: string, pose: { p: [number, number, number]; yaw?: number; level?: number }): boolean {
+  restoreHumanPoseV1(id: string, pose: { p: [number, number, number]; yaw?: number; level?: number }, radius: number = HUMAN_RADIUS): boolean {
     const e = this.ents[id];
     if (!e?.human || this.byActor.has(id) || this.holders(id).length || e.human.sleepPose || e.human.on || e.human.riding || e.human.carrier) return false;
     if (!Array.isArray(pose?.p) || pose.p.length !== 3 || !pose.p.every(Number.isFinite)) return false;
@@ -1381,17 +1545,17 @@ export class MarsEngine implements Engine {
     };
     const [x0, y0, z0] = pose.p, level = Number.isInteger(pose.level) ? pose.level! : 0;
     if (level > 0) {
-      const g = spatial.levelAt(level, [x0, z0]); if (g && clearanceAt(g, [x0, z0]) >= HUMAN_RADIUS && free(x0, z0, level)) return land([r3(x0), r3(y0), r3(z0)], level);
+      const g = spatial.levelAt(level, [x0, z0]); if (g && clearanceAt(g, [x0, z0]) >= radius && free(x0, z0, level)) return land([r3(x0), r3(y0), r3(z0)], level);
       // MARSLIVED: a crowded upper floor (five Souls in a raised diner) keeps the body on its floor: the nearest free
       // spot on that level within 2 m, before the ground search below (which put it outside, under the floor)
       for (let ring = 1; ring <= 5; ring++) for (let k = 0; k < ring * 8; k++) {
         const ang = (k / (ring * 8)) * Math.PI * 2, x = r3(x0 + dcos(ang) * ring * 0.4), z = r3(z0 + dsin(ang) * ring * 0.4), gg = spatial.levelAt(level, [x, z]);
-        if (gg && clearanceAt(gg, [x, z]) >= HUMAN_RADIUS && free(x, z, level)) return land([x, r3(y0), z], level);
+        if (gg && clearanceAt(gg, [x, z]) >= radius && free(x, z, level)) return land([x, r3(y0), z], level);
       }
     }
     const grid = spatial.levelAt(0, [x0, z0]); if (!grid) return false;
     const f = this.rt.world.groundV1 ? spatial.ground?.field : undefined;
-    const ok = (x: number, z: number) => clearanceAt(grid, [x, z]) >= HUMAN_RADIUS && free(x, z, 0) && (!f || f.medium(x, z) <= 1);
+    const ok = (x: number, z: number) => clearanceAt(grid, [x, z]) >= radius && free(x, z, 0) && (!f || f.medium(x, z) <= 1);
     for (let ring = 0; ring <= 80; ring++) { const n = Math.max(1, ring * 8); for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2, x = r3(x0 + dcos(ang) * ring * 0.5), z = r3(z0 + dsin(ang) * ring * 0.5);
       if (ok(x, z)) return land([x, f ? r3(standOn(spatial.ground!, x, z)) : 0, z], 0);
@@ -2242,6 +2406,8 @@ export class MarsEngine implements Engine {
   /** Floors (2026-10-26): where a body's feet rest at (x, z) on `level`: level 0 of a ground world is the nav's standing
    *  height (the terrain, or a floor plate / deck on it; the swim root in deep water); else the level's flat height. */
   standYAtV1(x:number,z:number,level=0):number|null{const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);if(level===0&&this.rt.world.groundV1&&spatial.ground)return r3(standOn(spatial.ground,x,z));const l=spatial.scene.levels.find(v=>v.id===level);return l?l.y:null;}
+  /** #1070: where this body must ease to so that `to` stays clear once `solids` stand (static-step.ts settleBeside). */
+  settleBesideV1(actor:string,to:[number,number],solids:readonly OBB2[],level=0):[number,number]|null|undefined{const a=this.rt.world.entities[actor];return a?settleBeside(this.rt,a,to,solids,level):undefined;}
   clearanceAtV1(x:number,z:number,level=0):number{const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);const clear=spatial.clearanceReader(level,[x,z]);return clear?clear([x,z]):0;}
   /** nav read (L1): clearanceAtV1 capped at `cap` — the same value below it, `cap` at or above it — answered off the paged
    *  windows without building fine nav tiles. For the many "is there standing room here (≥ t ≤ cap)?" reads. */
@@ -2449,6 +2615,8 @@ export class MarsEngine implements Engine {
     if(policy.walkSettleWaitV1===true){this.cfg={...this.cfg,walkSettleWaitV1:true};this.rt.services.walkSettleWaitV1=true;}
     if(policy.occupiedLinkRoutingV1===true){this.cfg={...this.cfg,occupiedLinkRoutingV1:true};this.rt.services.occupiedLinkRoutingV1=true;}
     if(policy.concurrentLinkEgressV1===true){this.cfg={...this.cfg,concurrentLinkEgressV1:true};this.rt.services.concurrentLinkEgressV1=true;}
+    // route-reach/1 (#872, prospective): far walks from upper floors and fine hops a tile window cut short are planned, not refused.
+    if((policy as {routeReachV1?:boolean}).routeReachV1===true){this.cfg={...this.cfg,routeReachV1:true};if(this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;}
     // stairLandingClearanceV1 (prospective, #509): the last climb step refuses a landing occupied on its destination level.
     if(policy.stairLandingClearanceV1===true){this.cfg={...this.cfg,stairLandingClearanceV1:true};this.rt.services.stairLandingClearanceV1=true;}
     this.cfg.sleepBlockTicks = policy.sleepBlockTicks;
@@ -2577,6 +2745,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     this.startRecorder();
@@ -2699,7 +2868,7 @@ function checkedTable(t: EntityTable): EntityTable {
 }
 
 function centroid(poly: [number, number][]): [number, number] { let x = 0, z = 0; for (const p of poly) { x += p[0]; z += p[1]; } return [r3(x / poly.length), r3(z / poly.length)]; }
-function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
+function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY+'+'+SHARED_BAY_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
 /** PC13 (#692): a world whose engine has the shared raise (SIM_SHARED_CARRY) says so in its rules version: a journal that
  *  names raise_hold_v1 does not replay, nor a snapshot restore, where the verb is not registered. */
 export const SHARED_RAISE_POLICY = 'shared-raise/1';
@@ -2709,6 +2878,8 @@ export const SHARED_BEAM_POLICY = 'shared-beam/1';
 export const SHARED_DECK_POLICY = 'shared-deck/1';
 /** PC16 (#695): the same flag adds install_flight_v1, install_tread_v1 and the stair invariant: a journal that builds stairs needs them. */
 export const SHARED_STAIRS_POLICY = 'shared-stairs/1';
+/** PC17 (#696): the same flag adds the raise's named base and a shared carry's clear lift: a journal that uses either needs them. */
+export const SHARED_BAY_POLICY = 'shared-bay/1';
 
 /** The factory is made once the Mars engine has been loaded (an async import); after that everything is synchronous. */
 export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promise<EngineFactory> {
@@ -2718,7 +2889,10 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promis
   const sharedCarry = cfg.sharedCarryV1 ?? process.env.SIM_SHARED_CARRY === '1';
   // resolved once here, so the engine's own rules version (this.cfg) says what the factory registered; off adds no key
   if (sharedCarry && cfg.sharedCarryV1 !== true) cfg = {...cfg, sharedCarryV1: true};
-  if ((cfg.soulsRepairV1 ?? process.env.SIM_SOULS_REPAIR === '1') && cfg.soulsRepairV1 !== true) cfg = {...cfg, soulsRepairV1: true};
+  // a world that can build what can stop standing has the ladder, unless it is switched off: `SIM_SOULS_REPAIR=0` is the
+  // operator's way back, and how a shared world made before the ladder still boots under its own rules
+  const repairEnv = process.env.SIM_SOULS_REPAIR;
+  if ((cfg.soulsRepairV1 ?? (repairEnv !== '0' && (sharedCarry || repairEnv === '1'))) && cfg.soulsRepairV1 !== true) cfg = {...cfg, soulsRepairV1: true};
   const m = sharedCarry ? {...loaded, invariants: [...loaded.invariants, looseFramesHeld, framesStand, decksBear, stairsBear]} : loaded;
   // disassembly/1 adds its reverse verbs to this engine's registry only; the default registry is unchanged.
   const registry = cfg.disassemblyV1 ? disassemblyRegistry(m.createRegistry) : m.createRegistry(), services = m.servicesFor(m.scenes);

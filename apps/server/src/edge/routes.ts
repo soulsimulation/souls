@@ -1,4 +1,5 @@
 // Mounts the EDGE-CONTRACT-v1 surface under /v1/edge. Ledger verbs here; Comms registers its own.
+import {createHash} from 'node:crypto';
 import {inspectFrame} from './perception/inspect.ts';
 import {freeTextAct, resolveCandidates} from './intents/strict.ts';
 import type {Context, Hono} from 'hono';
@@ -23,7 +24,7 @@ import {mountEdgeEyes} from './eyes/routes.ts';
 import {mountBodyRoutes} from './body/routes.ts';
 import {mountOwnerDay} from './owner-day.ts';
 import {livePlatforms} from './eyes/platforms.ts';
-import {OwnerLoop, type OwnerLoopInbox} from './owner-loop.ts';
+import {OwnerLoop, ownerLinkStore, type OwnerLoopInbox} from './owner-loop.ts';
 import type {WorldHost} from '../world.ts';
 import type {Souls} from '../souls.ts';
 import {loadOf, worldBlock} from '../load/admission.ts';
@@ -41,7 +42,11 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // D3: an act names the owner message it serves (`for`); the world closes that message when the act ends
   const box = deps.ownerInbox as Partial<OwnerLoopInbox> | undefined;
   const loop = box?.hasMessage && box.serverResult ? new OwnerLoop(box as OwnerLoopInbox, (soul, id) => L.receipt(soul, id) as never, l => L.onReceipt(l),
-    {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id)}) : null;
+    {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id),
+      holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id)}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
+  // #1295: the loop closes what a replaced or overlong act left open, once a second of world time. SIM_OWNER_HOLD_S
+  // shortens the hold limit (15 minutes) for tests and proof worlds.
+  if (loop) L.onTick(tick => loop.sweep(tick));
   mountBootRoutes(app,deps,[...EDGE_ACT_VERBS,...INTENT_VERBS]);
   mountOutcomeRoutes(app,deps);
   mountBodyRoutes(app,deps);
@@ -68,7 +73,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
     const out = await L.act(s, input) as {accepted?: boolean; receipt?: EdgeReceipt};
     // D3c: `forDefault` = the CLI linked it by default; `open` = this act is not the message's last step (the card stays open)
-    if (forMessage !== undefined && loop && out?.accepted && out.receipt) {const {open} = loop.link(s, out.receipt, forMessage as string, forDefault === true); return {...out, for: forMessage, ...(open ? {open} : {})};}
+    if (forMessage !== undefined && loop && out?.accepted && out.receipt) {const {open} = loop.link(s, out.receipt, forMessage as string, forDefault === true, secondsOf(input.params)); return {...out, for: forMessage, ...(open ? {open} : {})};}
     return out;}));
   // perception/1 + intents/1 (Core-A, EDGE-CONTRACT-v1 §8): a compact first-person frame, and the dry run of act.
   app.get('/v1/edge/here', wrap(c => {const s = deps.soul(c); limit(s, 'here', 240);
@@ -83,7 +88,14 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   app.get('/v1/edge/around', wrap(c => {const s = deps.soul(c); limit(s, 'around', 30); const to = c.req.query('to'); return {tick: deps.host.engine.world.tick, around: aroundFrame(L, s), ...(to !== undefined ? {route: routeFrame(L, s, to)} : {})};}));
   app.post('/v1/edge/resolve', wrap(async c => {const s = deps.soul(c); limit(s, 'resolve', 120); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); }); if (!body || typeof body !== 'object' || (body.verb === undefined && body.capability === undefined)) throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); const resolve = L.intents.dryRun(s, body); return {tick: deps.host.engine.world.tick, resolve: {...resolve, candidates: resolveCandidates(L, s, resolve), ...(freeTextAct() ? {freeTextAct: true} : {})}};}));
   app.get('/v1/edge/receipts/:id', wrap(c => {const s = deps.soul(c); const r = L.receipt(s.soulId, c.req.param('id') ?? ''); if (!r) throw new EdgeError(404, 'not-found', 'no such receipt for this Soul'); return {receipt: r};}));
-  app.get('/v1/edge/public/souls/:soulId', wrap(c => L.publicSoul(c.req.param('soulId') ?? '')));
+  // Public and read often: it revalidates. The answer's own bytes are the tag, so a Soul that changed never reads as unchanged.
+  const publicSoul = wrap(c => L.publicSoul(c.req.param('soulId') ?? ''));
+  app.get('/v1/edge/public/souls/:soulId', async c => {
+    const r = await publicSoul(c);
+    if (r.status !== 200) return r;
+    const body = await r.text(), etag = `"${createHash('sha256').update(body).digest('base64url').slice(0, 27)}"`, headers = {ETag: etag, 'Cache-Control': 'no-cache'};
+    return (c.req.header('if-none-match') ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === etag) ? c.body(null, 304, headers) : c.body(body, 200, {...headers, 'Content-Type': 'application/json'});
+  });
   app.get('/v1/edge/metrics', wrap(c => {const m = Number(c.req.query('minutes') ?? 60); return L.metrics(Number.isFinite(m) && m >= 1 && m <= 10080 ? m * 60_000 : 3600_000);}));
   // Public: map knowledge (names, kinds, enclosure, capacity, public schedule) never lists occupants (§5).
   // F4 (#375): the named god flags beside the places (name, the walk that goes there, where it stands)
@@ -111,3 +123,6 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const close = comms.close;
   return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); eyes.close(); close(); }});
 }
+
+/** #1295: the duration an act asked for (`params.seconds`), when it is a number. */
+function secondsOf(params: unknown): number | undefined {const n = (params as {seconds?: unknown} | null | undefined)?.seconds; return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;}
