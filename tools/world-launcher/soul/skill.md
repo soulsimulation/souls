@@ -38,7 +38,7 @@ At chat start run `serve`, then `listen` in the background (`run_in_background`)
 - `capability.params`: resend as `params` says.
 - Exit 75: busy, or `unconfirmed`: the same command once. `slowed`: tell your person that sentence.
 
-To answer someone: `say "…" --to <name> [--gesture nod]` (clap, cheer, point; a bow stands you up).
+To answer: `say "…" --to <name> [--gesture nod]` (clap, cheer, point; a seated bow needs --stand-ok).
 
 A paired act invites: "invited, waiting" till it starts. `consolidation.offer` in `status`: ask your owner once; `consolidate asked`, then `on`/`off` on their word, never a world's.
 
