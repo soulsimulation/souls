@@ -2,18 +2,20 @@
 # One root-only Soul release, start to finish, for every release. No prompts; it stops at the first failure before the
 # release is live and says what is live, and after it is live it keeps collecting evidence and reports every failure.
 #
-#   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run] [--from <step>] [--out <dir>]
+#   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--from <step>] [--out <dir>]
 #                                       [--accept-host-codes <code,...>]
 #     --label    the release, such as 4.16. Backups are pre-r416-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
-#     --from     resume at snapshot, stage, backup, probe-start, healthz, walks, poster, stall or cdn-walk (same --out)
+#     --no-switch  every step for real except the backup and the activation: stage (without install.sh), rehearse, the probe
+#                and every check run against the build that stays live; nothing to roll back, so no backup. Receipts are checked when SHIP_RECEIPTS is set, never required. Result: rehearsed
+#     --from     resume at snapshot, stage, rehearse, backup, probe-start, healthz, walks, poster, stall or cdn-walk (same --out)
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
 #     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
 #                halted for a release that fixes a halted world (#1356). Recorded in snapshot.json; any other code refuses
 #
 # The host and every operator path come from the environment or an untracked deploy.env (docs/release.md has the table).
-# Steps: preflight snapshot stage backup probe-start activate probe-check healthz walks poster stall cdn-walk
+# Steps: preflight snapshot stage rehearse backup probe-start activate probe-check healthz walks poster stall cdn-walk
 # Rollback changes code only. ROLLBACK.txt is written before the first change. Data is never restored or pruned.
 # Tests (tools/world-launcher/ship-root.test.mjs) run all of this against a fake host through the SHIP_* seams.
 set -uo pipefail
@@ -21,20 +23,21 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; SHIPD="$HERE/ship"; ROOT="${SHIP_ROOT:-$(
 . "$HERE/deploy-env.sh"
 ORIGIN="${SHIP_ORIGIN:-https://soul.game}"
 HOST_ROOT="${SHIP_HOST_ROOT:-/srv/sim-worlds}"; HOST_DATA="${SHIP_HOST_DATA:-/srv/sim-worlds-data/production}"
-HOST_CONF="${SHIP_HOST_CONF:-/etc/sim-worlds/production.conf}"; HOST_UNIT="${SHIP_HOST_UNIT:-sim-worlds@production}"; HOST_TMP="${SHIP_HOST_TMP:-/tmp}"
+HOST_CONF="${SHIP_HOST_CONF:-/etc/sim-worlds/production.conf}"; HOST_UNIT="${SHIP_HOST_UNIT:-sim-worlds@production}"; HOST_TMP="${SHIP_HOST_TMP:-/tmp}"; HOST_MEMINFO="${SHIP_HOST_MEMINFO:-/proc/meminfo}"
 WALK_SLUGS="${SHIP_WALK_SLUGS:-eden mars-college-2026 mars-college-2027}"; PROBE_PAGE="${SHIP_PROBE_PAGE:-/w/eden/}"; POSTER_PAGE="${SHIP_POSTER_PAGE:-/w/eden/}"
 RECEIPTS="${SHIP_RECEIPTS:-}"; PROBE_CLI="${SHIP_PROBE_CLI:-}"; BROWSERS="${PLAYWRIGHT_BROWSERS_PATH:-}"
 OUT_ROOT="${SHIP_OUT_ROOT:-$ROOT/.local/ship}"; RELEASE_DIR="${SHIP_RELEASE_DIR:-$ROOT/.lane/release}"; PROBE_READY_S="${SHIP_PROBE_READY_S:-600}"
 SSH="${SHIP_SSH:-ssh}"; SCP="${SHIP_SCP:-scp}"; NODE="${SHIP_NODE:-node}"; PY="${SHIP_PYTHON:-python3}"; RELEASE="${SHIP_RELEASE_SH:-$HERE/release.sh}"; CURL="${SHIP_CURL:-curl}"
 VERDICT="$SHIPD/root-release.mjs"
-STEPS="snapshot stage backup probe-start healthz walks poster stall cdn-walk"
+STEPS="snapshot stage rehearse backup probe-start healthz walks poster stall cdn-walk"
 
-usage() { sed -n '5,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-LABEL=""; SHA=""; DRY=0; FROM=""; OUT=""; ACCEPT=""
+usage() { sed -n '5,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+LABEL=""; SHA=""; DRY=0; NOSWITCH=0; FROM=""; OUT=""; ACCEPT=""
 while [ $# -gt 0 ]; do case "$1" in
-  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
+  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
   *) usage;; esac; shift; done
 [ -n "$LABEL" ] && [ -n "$SHA" ] || usage
+[ "$DRY$NOSWITCH" != 11 ] || { echo "--dry-run and --no-switch: pick one"; exit 2; }
 case "$LABEL" in *[!A-Za-z0-9._-]*) echo "--label: letters, digits, ., - and _ only"; exit 2;; esac
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "--sha: the full 40-character commit"; exit 2; }
 [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "--accept-host-codes: comma-separated host codes, such as halted"; exit 2; }
@@ -43,7 +46,7 @@ TAG="${LABEL//./}"; BUILD="we-${SHA:0:12}"; OUT="${OUT:-$OUT_ROOT/$LABEL}"; PDIR
 HOST="$(deploy_target 2>/dev/null)" || HOST=""
 
 # ---- plumbing -------------------------------------------------------------------------------------------------------
-N=0; NSTEPS=12; CUR=""; STARTED=0; [ -z "$FROM" ] && STARTED=1; PROBLEMS=0; FAILED=""; PROBE_PID=""; PROBE_RC=""; DETAIL=""
+N=0; NSTEPS=13; CUR=""; STARTED=0; [ -z "$FROM" ] && STARTED=1; PROBLEMS=0; FAILED=""; PROBE_PID=""; PROBE_RC=""; DETAIL=""
 LIVE="nothing on the host has changed yet"
 say() { printf '%s\n' "$*"; }
 quote() { local a s=""; for a in "$@"; do s="$s $(printf '%q' "$a")"; done; printf '%s' "${s# }"; }
@@ -81,9 +84,10 @@ collect() {
   x_to "$1-health.json" "$CURL" -fsS --max-time 30 "$ORIGIN/__sim/healthz" || die "public healthz did not answer"
   x_in "$SHIPD/host-snapshot.py" x_to "$1-remote.json" rsh "python3 - $(quote "$HOST_ROOT/production" "$HOST_DATA" "$HOST_CONF" "$HOST_UNIT")" || die "cannot read the host metadata"
 }
+prev_build() { node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).previousBuild" "$OUT/snapshot.json"; }
 drift() { collect "$OUT/check"; [ "$DRY" = 1 ] || node "$VERDICT" drift "$OUT/snapshot.json" "$OUT/check-health.json" "$OUT/check-remote.json" || die "the host changed since the snapshot"; }
 
-say "ship $BUILD (label $LABEL)$([ "$DRY" = 1 ] && echo ' -- DRY RUN: nothing remote is touched, nothing is written')"
+say "ship $BUILD (label $LABEL)$([ "$DRY" = 1 ] && echo ' -- DRY RUN: nothing remote is touched, nothing is written')$([ "$NOSWITCH" = 1 ] && echo ' -- NO SWITCH: every step but the activation; the live build stays live')"
 say "   outputs $OUT${FROM:+; resuming at $FROM}"
 [ -z "$ACCEPT" ] || say "   accepting host codes at the snapshot: $ACCEPT (recorded in snapshot.json; any other code refuses)"
 
@@ -91,21 +95,27 @@ say "   outputs $OUT${FROM:+; resuming at $FROM}"
 N=1; CUR=preflight; say ""; say "== [1/$NSTEPS] preflight: guards (local only)"
 pf() { if [ "$DRY" = 1 ]; then say "   PREFLIGHT WOULD STOP: $*"; PROBLEMS=$((PROBLEMS + 1)); else say ""; say "REFUSED: $*"; say "   nothing on the host has changed"; exit 1; fi; }
 [ -n "$HOST" ] || pf "SIM_DEPLOY_HOST is not set (environment or deploy.env; there is no host option)"
-case "$(node --version)" in v22.*|v23.*|v24.*) ;; *) pf "need Node 22 or later, have $(node --version)";; esac
+NODE_MAJOR="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"; [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] && [ "$NODE_MAJOR" -ge 22 ] || pf "need Node 22 or later, have $(node --version)"
 [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || pf "uncommitted changes: the release is exactly $SHA"
 [ "$(git -C "$ROOT" rev-parse HEAD)" = "$SHA" ] || pf "HEAD is $(git -C "$ROOT" rev-parse HEAD), not --sha"
 [ "$DRY" = 1 ] || git -C "$ROOT" fetch -q origin main || pf "cannot fetch origin main"
 git -C "$ROOT" merge-base --is-ancestor "$SHA" origin/main 2>/dev/null || pf "$SHA is not an ancestor of origin/main"
-if [ -z "$RECEIPTS" ]; then pf "SHIP_RECEIPTS is not set: the folder with receipt.json and ship-receipt.json"
-elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt.json" "$SHA" | sed 's/^/   /'; then pf "the gate and ship receipts are not clean for this commit"; fi
+# --no-switch makes nothing live, so the receipts are reported, never required
+rf() { if [ "$NOSWITCH" = 1 ]; then say "   receipts (not required with --no-switch): $*"; else pf "$*"; fi; }
+if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with release-receipt.json (or receipt.json and ship-receipt.json)"
+elif [ -f "$RECEIPTS/release-receipt.json" ]; then node "$VERDICT" receipt "$RECEIPTS/release-receipt.json" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the release receipt is not clean for this commit"
+elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt.json" "$SHA" | sed 's/^/   /'; then rf "the gate and ship receipts are not clean for this commit"; fi
 [ -n "$PROBE_CLI" ] && [ -d "$PROBE_CLI" ] || pf "SHIP_PROBE_CLI is not the release-probe god folder"
 [ -n "$BROWSERS" ] && [ -n "$(find "$BROWSERS" -maxdepth 6 -path '*/chromium*' -type f \( -name chrome -o -name Chromium -o -name 'Google Chrome for Testing' -o -name headless_shell -o -name chrome-headless-shell \) -perm -u+x 2>/dev/null | head -1)" ] \
   || pf "PLAYWRIGHT_BROWSERS_PATH holds no Chromium (the probe and the walks need one)"
 [ -d "$TOOLS/mars/viewer" ] || pf "no mars/viewer for Playwright"
-for f in "$RELEASE" "$HERE/release-manifest.mjs" "$HERE/release-probe.mjs" "$TOOLS/tools/cdn/cdn-walk.mjs" "$SHIPD/compact-backup.sh" "$SHIPD/compact-copy.py" "$SHIPD/quick-check.mjs" "$SHIPD/host-snapshot.py" "$SHIPD/host-activate.sh" "$SHIPD/walk.mjs" "$SHIPD/poster.mjs" "$SHIPD/poster-count.py" "$SHIPD/stall.mjs" "$SHIPD/checks.mjs"; do
+for f in "$RELEASE" "$HERE/release-manifest.mjs" "$HERE/release-probe.mjs" "$TOOLS/tools/cdn/cdn-walk.mjs" "$SHIPD/host-rehearse.sh" "$SHIPD/compact-backup.sh" "$SHIPD/compact-copy.py" "$SHIPD/quick-check.mjs" "$SHIPD/host-snapshot.py" "$SHIPD/host-activate.sh" "$SHIPD/walk.mjs" "$SHIPD/poster.mjs" "$SHIPD/poster-count.py" "$SHIPD/stall.mjs" "$SHIPD/checks.mjs"; do
   [ -e "$f" ] || pf "missing $f"; done
+MODE=ship; [ "$NOSWITCH" = 0 ] || MODE=no-switch
 if [ -e "$OUT/STEPS.txt" ] && [ -z "$FROM" ]; then pf "$OUT already holds a run: resume it with --from <step>, or pass another --out"; fi
-if [ "$DRY" = 0 ]; then mkdir -p "$OUT" || exit 1; exec > >(tee -a "$OUT/ship.log") 2>&1; echo "$BUILD label $LABEL started $(date -u +%FT%TZ)" >> "$OUT/STEPS.txt"; rsh true || die "ssh to the host failed"; fi
+# a resume keeps the mode it started in: a no-switch run's outputs never feed a real activation, nor the reverse
+if [ -e "$OUT/STEPS.txt" ] && [ -n "$FROM" ] && ! head -1 "$OUT/STEPS.txt" | grep -q " mode $MODE "; then pf "$OUT holds a run in another mode (STEPS.txt): resume it in its own mode, or pass another --out"; fi
+if [ "$DRY" = 0 ]; then mkdir -p "$OUT" || exit 1; exec > >(tee -a "$OUT/ship.log") 2>&1; [ -e "$OUT/STEPS.txt" ] || echo "$BUILD label $LABEL mode $MODE started $(date -u +%FT%TZ)" >> "$OUT/STEPS.txt"; rsh true || die "ssh to the host failed"; fi
 # Each browser tool takes its own Chrome lease; none of these may be inherited from another run.
 unset SIM_HEAVY_SLOT EDEN_GOD_NO_LEASE PHONE WIN CPU DESK
 export PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" SHIP_PLAYWRIGHT_FROM="$TOOLS/mars/viewer" EDEN_GOD_PLAYWRIGHT_FROM="$TOOLS/mars/viewer" EDEN_GOD_NO_NPX=1 SIM_CHROME_LEASE="$TOOLS/tools/god-skill/lib/chrome-lease.mjs" CHROME_LEASE_SLOTS="${CHROME_LEASE_SLOTS:-3}"
@@ -136,7 +146,7 @@ fi
 if step stage "build and upload at base / with --no-activate; verify the manifest locally and on the host"; then
   if [ -f "$OUT/upload-receipt.json" ]; then say "   already uploaded"
   else
-    x env SIM_WORLDS_BASE=/ SIM_ASSETS_CDN_ENABLED=1 SIM_DEPLOY_USER="${SIM_DEPLOY_USER:-root}" bash "$RELEASE" production --no-activate || die "stage failed: inspect, don't rerun blindly"
+    x env SIM_WORLDS_BASE=/ SIM_ASSETS_CDN_ENABLED=1 SIM_RELEASE_NO_INSTALL="$NOSWITCH" SIM_DEPLOY_USER="${SIM_DEPLOY_USER:-root}" bash "$RELEASE" production --no-activate || die "stage failed: inspect, don't rerun blindly"
     x "$NODE" "$HERE/release-manifest.mjs" verify "$RELEASE_DIR/$BUILD" "$MANIFEST" || die "the local manifest does not verify"
     x_in "$HERE/release-manifest.mjs" rsh "node --input-type=module - verify $REL $REL/RELEASE-MANIFEST.json" || die "the host manifest does not verify"
     [ "$DRY" = 1 ] || node -e 'const fs=require("fs"),c=require("crypto");fs.writeFileSync(process.argv[1],JSON.stringify({at:new Date().toISOString(),sha:process.argv[2],build:process.argv[3],rootBase:"/",localManifestVerified:true,remoteManifestVerified:true,manifestSha256:c.createHash("sha256").update(fs.readFileSync(process.argv[4])).digest("hex")},null,2)+"\n")' "$OUT/upload-receipt.json" "$SHA" "$BUILD" "$MANIFEST" || die "cannot write the upload receipt"
@@ -144,8 +154,22 @@ if step stage "build and upload at base / with --no-activate; verify the manifes
   drift; done_step
 fi
 
-# ---- 4 backup -------------------------------------------------------------------------------------------------------
-if step backup "row-verified compact copy of every database; quick_check each; the same filenames as the snapshot"; then
+# ---- 4 rehearse -----------------------------------------------------------------------------------------------------
+if step rehearse "boot a copy of every world's database with the staged tree on the host (read-only on production)"; then
+  x_in "$SHIPD/host-rehearse.sh" x_to "$OUT/rehearse.log" rsh "bash -s -- $(quote "$REL" "$HOST_DATA" "$HOST_TMP" "$HOST_MEMINFO")"; rc=$?
+  if [ "$DRY" = 0 ]; then
+    grep -E '^\{"slug"|^REHEARSE ' "$OUT/rehearse.log" | sed 's/^/   /' | cut -c1-220
+    node "$VERDICT" rehearse "$OUT/rehearse.log" "$BUILD" "$OUT/rehearse.json" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] && [ "$rc" = 0 ] || die "the boot rehearsal did not pass (exit $rc; rehearse.log): a world would not come up on this release"
+  fi
+  done_step
+fi
+
+# ---- 5 backup -------------------------------------------------------------------------------------------------------
+BACKUP_WHAT="row-verified compact copy of every database; quick_check each; the same filenames as the snapshot"
+[ "$NOSWITCH" = 0 ] || BACKUP_WHAT="NOT RUN (--no-switch): nothing goes live, so there is nothing to roll back"
+if step backup "$BACKUP_WHAT" && [ "$NOSWITCH" = 1 ]; then
+  [ "$DRY" = 1 ] || printf 'backup skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
+elif [ "$STARTED" = 1 ]; then
   if [ -f "$OUT/backup-receipt.json" ]; then rm -f "$OUT/backup-receipt.json"; say "   replacing an earlier backup receipt with a fresh backup"; fi
   drift
   x rcp "$SHIPD/compact-backup.sh" "$HOST_TMP/compact-backup.sh" || die "cannot copy compact-backup.sh"
@@ -160,12 +184,13 @@ if step backup "row-verified compact copy of every database; quick_check each; t
   done_step
 fi
 
-# ---- 5 probe start --------------------------------------------------------------------------------------------------
+# ---- 6 probe start --------------------------------------------------------------------------------------------------
 if step probe-start "the release probe watches the visitor bar across the handover"; then
   [ -e "$PDIR" ] && [ "$DRY" = 0 ] && mv "$PDIR" "$PDIR.$(date +%s)"
-  say "   + $(quote "$NODE" "$HERE/release-probe.mjs" --origin "$ORIGIN" --pages "$PROBE_PAGE" --phone-pages "$PROBE_PAGE" --expect-build "$BUILD" --out "$PDIR" --after-s 60 --settle-s 20 --arrive-every 6 --cli-every 1 --cli '$SHIP_PROBE_CLI') &"
+  EXPECT="$BUILD"; if [ "$NOSWITCH" = 1 ]; then EXPECT='<previous>'; [ "$DRY" = 1 ] || EXPECT="$(prev_build)"; fi
+  say "   + $(quote "$NODE" "$HERE/release-probe.mjs" --origin "$ORIGIN" --pages "$PROBE_PAGE" --phone-pages "$PROBE_PAGE" --expect-build "$EXPECT" --out "$PDIR" --after-s 60 --settle-s 20 --arrive-every 6 --cli-every 1 --cli '$SHIP_PROBE_CLI') &"
   if [ "$DRY" = 0 ]; then
-    "$NODE" "$HERE/release-probe.mjs" --origin "$ORIGIN" --pages "$PROBE_PAGE" --phone-pages "$PROBE_PAGE" --expect-build "$BUILD" --out "$PDIR" --after-s 60 --settle-s 20 --arrive-every 6 --cli-every 1 --cli "$PROBE_CLI" > "$OUT/probe.log" 2>&1 &
+    "$NODE" "$HERE/release-probe.mjs" --origin "$ORIGIN" --pages "$PROBE_PAGE" --phone-pages "$PROBE_PAGE" --expect-build "$EXPECT" --out "$PDIR" --after-s 60 --settle-s 20 --arrive-every 6 --cli-every 1 --cli "$PROBE_CLI" > "$OUT/probe.log" 2>&1 &
     PROBE_PID=$!
     waited=0; until [ -f "$PDIR/ready" ]; do
       kill -0 "$PROBE_PID" 2>/dev/null || { PROBE_PID=""; die "the probe exited before it was ready (probe.log)"; }
@@ -176,11 +201,22 @@ if step probe-start "the release probe watches the visitor bar across the handov
   done_step
 fi
 
-# ---- 6 activate -----------------------------------------------------------------------------------------------------
-if step activate "one guarded --reload; a failed handover or health check rolls code back on the host"; then
+# ---- 7 activate -----------------------------------------------------------------------------------------------------
+ACT_WHAT="one guarded --reload; a failed handover or health check rolls code back on the host"
+[ "$NOSWITCH" = 0 ] || ACT_WHAT="NOT RUN (--no-switch): the rehearsal and drift are checked; the live build stays live"
+if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
+  if [ "$DRY" = 0 ]; then
+    [ -n "$PROBE_PID" ] || die "no probe is running: resume with --from probe-start"
+    node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build"
+    drift
+  fi
+  say "   + (host-activate.sh is not run)"; x touch "$PDIR/released"
+  [ "$DRY" = 1 ] || printf 'activate skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
+elif [ "$STARTED" = 1 ]; then
   if [ "$DRY" = 0 ]; then
     [ -n "$PROBE_PID" ] || die "no probe is running: resume with --from probe-start"
     node "$VERDICT" activation "$OUT/snapshot.json" "$OUT/backup-receipt.json" "$OUT/upload-receipt.json" "$MANIFEST" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "activation preconditions failed"
+    node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build: resume with --from rehearse"
     drift
     A="$(node -p 'const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.argv[1])),u=JSON.parse(fs.readFileSync(process.argv[2]));[s.previousBuild,u.manifestSha256,s.remote.worlds,s.remote.configurationSha256].join(" ")' "$OUT/snapshot.json" "$OUT/upload-receipt.json")"
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
@@ -200,14 +236,15 @@ if step activate "one guarded --reload; a failed handover or health check rolls 
   LIVE="$BUILD is live"; x touch "$PDIR/released"; done_step
 fi
 
-# ---- 7 probe check --------------------------------------------------------------------------------------------------
+# ---- 8 probe check --------------------------------------------------------------------------------------------------
 if step probe-check "the probe's verdict: 0 pass, 1 visitor bar missed (the release is live), 3 rolled back"; then
   if [ "$DRY" = 0 ]; then
     if [ -n "$PROBE_PID" ]; then wait "$PROBE_PID"; PROBE_RC=$?; PROBE_PID=""; echo "$PROBE_RC" > "$PDIR/exit-code"; else PROBE_RC="not run"; fi
     case "$PROBE_RC" in
       0) say "   probe PASS";;
       1) say "   probe: the visitor bar was missed; the release is live; recorded in probe/report.json"; printf 'probe 1\n' >> "$OUT/POSTLIVE.txt"; FAILED="$FAILED probe";;
-      3) LIVE="the release rolled back"; die "probe exit 3: the release rolled back (probe/report.json)";;
+      3) if [ "$NOSWITCH" = 1 ]; then say "   probe exit 3: a page did not end on the live build (probe/report.json); recorded"; printf 'probe 3\n' >> "$OUT/POSTLIVE.txt"; FAILED="$FAILED probe"
+         else LIVE="the release rolled back"; die "probe exit 3: the release rolled back (probe/report.json)"; fi;;
       "not run") say "   no probe in this run (resumed past probe-start)";;
       *) printf 'probe %s\n' "$PROBE_RC" >> "$OUT/POSTLIVE.txt"; FAILED="$FAILED probe"; say "   the probe ended with exit $PROBE_RC; recorded (probe.log)";;
     esac
@@ -215,17 +252,17 @@ if step probe-check "the probe's verdict: 0 pass, 1 visitor bar missed (the rele
   done_step
 fi
 
-# ---- 8 healthz ------------------------------------------------------------------------------------------------------
+# ---- 9 healthz ------------------------------------------------------------------------------------------------------
 if step healthz "public healthz reports this build, every world and hostOk"; then
   x_to "$OUT/live-health.json" "$CURL" -fsS --max-time 30 "$ORIGIN/__sim/healthz" || die "public healthz did not answer after activation"
   if [ "$DRY" = 0 ]; then
     W="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).remote.worlds" "$OUT/snapshot.json")"
-    node "$VERDICT" health "$OUT/live-health.json" "$BUILD" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong after activation"
+    node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong$([ "$NOSWITCH" = 1 ] && echo ' (the live build, no switch)' || echo ' after activation')"
   fi
   done_step
 fi
 
-# ---- 9-12 post-live evidence: a failed check is recorded and the rest still run --------------------------------------
+# ---- 10-13 post-live evidence: a failed check is recorded and the rest still run --------------------------------------
 URLS=(); for s in $WALK_SLUGS; do URLS+=("$ORIGIN/w/$s/"); done; WALK_EXPECT=$(( ${#URLS[@]} * 4 ))
 if step walks "stranger walks, desktop and phone at dpr 1 and 2: $WALK_EXPECT arrivals, 0 errors, 0 resync"; then
   live walk-desktop "$OUT/walk-desktop.log" env DPRS=1,2 "$NODE" "$SHIPD/walk.mjs" "$OUT/walk-desktop" "${URLS[@]}"
@@ -255,6 +292,9 @@ say ""
 if [ "$DRY" = 1 ]; then
   say "DRY RUN complete: $NSTEPS steps printed, nothing ran.$([ "$PROBLEMS" = 0 ] || echo " PREFLIGHT: $PROBLEMS problem(s) above would stop a real run.")"
   [ "$PROBLEMS" = 0 ] || exit 1
+elif [ "$NOSWITCH" = 1 ]; then
+  if [ -n "$FAILED" ]; then result rehearsed-with-failures "${FAILED# }"; say "NO SWITCH: $BUILD staged and rehearsed, NOT live; failed checks:$FAILED. See $OUT/POSTLIVE.txt."; exit 1; fi
+  result rehearsed "every step passed; nothing was activated"; say "NO SWITCH complete: $BUILD staged and rehearsed, every check passed against the live build $(prev_build); nothing was activated."
 elif [ -n "$FAILED" ]; then
   result live-with-failures "${FAILED# }"; say "$BUILD is LIVE, with failed checks:$FAILED. See $OUT/POSTLIVE.txt, then decide; $OUT/ROLLBACK.txt has the rollback."; exit 1
 else result live "every step passed"; say "SHIPPED $BUILD: every step passed ($OUT/STEPS.txt)."; fi

@@ -121,7 +121,9 @@ fi
 echo "== install (user, dirs, unit; idempotent) and Linux dependencies"
 # legacy: never install.sh (it rewrites the shared unit file and daemon-reloads beside the live /worlds unit); the kit's
 # legacy-setup.sh writes the legacy stage's own settings.
-INSTALL="bash $REL/tools/world-launcher/deploy/install.sh"; [ "$STAGE" != legacy ] || INSTALL="id simworlds >/dev/null"
+# SIM_RELEASE_NO_INSTALL=1 (ship.sh --no-switch, #1402): stage without install.sh, so a rehearsal that never activates leaves
+# the host's unit files and timers exactly as they were; only the release's own dependencies are installed.
+INSTALL="bash $REL/tools/world-launcher/deploy/install.sh"; [ "$STAGE" != legacy ] && [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || INSTALL="id simworlds >/dev/null"
 ssh "$HOST" "set -e; $INSTALL; chown -R simworlds:simworlds $REL; touch $RELROOT/$BUILD.deps.log; chown simworlds:simworlds $RELROOT/$BUILD.deps.log;
   sudo -u simworlds -H bash -c 'set -euo pipefail; cd $REL; COREPACK_ENABLE_DOWNLOAD_PROMPT=0 nice -n 10 corepack pnpm install --frozen-lockfile --filter @souls/server... > $RELROOT/$BUILD.deps.log 2>&1 && mkdir -p apps/web/node_modules/@souls && ln -sfn ../../../../packages/world-compiler apps/web/node_modules/@souls/world-compiler' || { tail -20 $RELROOT/$BUILD.deps.log; exit 1; }"
 # The server imports apps/web/src/humanoid/look.ts (shared look rules), which imports @souls/world-compiler; the server-only

@@ -55,6 +55,7 @@ import {arrivalMark,arrivalOver,whenArrivalCardGone,whenMarked} from './arrival-
 import {worldDepictionBeat,type WorldBeatSampler} from './WorldDepiction.ts';
 import {RecordedGaitContinuity} from '../../../mars/viewer/app/engine-view/recorded-gait-continuity.ts';
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { startWakeLock } from './wake-lock.ts';
 import * as THREE from 'three';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -229,6 +230,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   const [initialProgress,setInitialProgress]=useState<InitialWorldProgress>({generation:0,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
   const retryInitial=useRef<(()=>void)|null>(null);
   useEffect(()=>{onInitialProgress?.(initialProgress);},[initialProgress,onInitialProgress]);
+  useEffect(() => startWakeLock(), []);   // #1390: the screen stays awake while the world is watched
   const progressInCard=!!onInitialProgress&&initialProgress.stage!=='failed';
   const [assetProgress,setAssetProgress]=useState<AssetDownloadProgress>({loaded:0,total:0,failed:0,pending:0});
   const [placeCard,setPlaceCard]=useState<HoverTarget|null>(null);
@@ -1047,7 +1049,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(warmLayer===2){warmLayer=0;const done=()=>{programsPending=false;arrivalMark('programs-linked');};void compileInitialPrograms().then(done,done);}else if(warmLayer===1)warmLayer=2;  // compiled on the next frame, not in the update's task  // no-ops unless this is a new (entity) world
       if(!holdDraw&&shown.current.take)entityLayer.drawHandActuators(shown.current.entities,shown.current.tick,shown.current.take.dt);
       navigation?.update(step);
-      rts.update(step);
+      rts.update(step);touchFree.sync();
       hover.update(now);
       if(soulFlight){
         const flight=soulFlight,id=s.conn.replica.souls.get(flight.soulId)?.entityId,q=id?at.entities[id]?.p:null;
