@@ -125,19 +125,26 @@ the walks, the poster and the stall run on a GPU workstation, over plain HTTPS, 
 
 `ship/eyes.mjs --sha <sha> [--run <id>]` and the ship job meet through commit statuses on the release sha
 ([`ship/handover.mjs`](../tools/world-launcher/deploy/ship/handover.mjs)). Every description carries the run id, so a
-status from an earlier attempt never counts:
+status from an earlier run or attempt never counts (`<run>` is `<run id>.<attempt>`, since a re-run keeps the id):
 
 | Who | Context | State and description | Meaning |
 |---|---|---|---|
-| job | `release/ship` | pending `run=<id> mode=<ship\|no-switch> waiting-for-eyes` | about to run ship.sh `--no-eyes` |
-| eyes | `release/eyes` | pending `run=<id> ready` | the probe is watching (expecting `we-<sha12>`, or the live build for a dry run) |
-| job | `release/ship` | success `run=<id> released`, or failure `run=<id> stopped: …` | activated (or skipped it, `--no-switch`), or stopped before |
-| eyes | `release/eyes` | success `run=<id> pass`, or failure `run=<id> fail: <checks>` | the verdict |
+| job | `release/ship` | pending `run=<run> mode=<ship\|no-switch> waiting-for-eyes` | about to run ship.sh `--no-eyes` |
+| eyes | `release/eyes` | pending `run=<run> ready` | the probe is watching (expecting `we-<sha12>`, or the live build for a dry run) |
+| job | `release/ship` | success `run=<run> released`, or failure `run=<run> stopped: …` | activated (or skipped it, `--no-switch`), or stopped before |
+| eyes | `release/eyes` | success `run=<run> pass`, or failure `run=<run> fail: <checks>` | the verdict |
 
-Eyes refuses a run whose head is not `--sha`, or that is not `release.yml`. A failure, an interrupt or a crash posts
-`fail`, never `pass`. A ship that stops before the release fails eyes without walks. Outputs, `probe/report.json`
-included, go to `.local/ship/<label>-eyes/`. The run's artifact adds the probe's bar (`probe-bar.json`) when the
-probe ran there.
+Right before the activation, ship.sh's `SHIP_PREACTIVATE_CMD` checks that the newest `release/eyes` status for the
+attempt is still `ready`; otherwise nothing goes live. If the `released` status cannot be posted after a real
+activation, the job records it, retries once and goes on; it never reports that as "before the release". Status
+details are reduced to `[A-Za-z0-9 ()=.,:_-]`, so no path or stack trace reaches GitHub; a failed probe names the bar
+items it missed, such as `probe(noBuild=2)`.
+
+Eyes refuses a run whose head is not `--sha`, or that is not `release.yml`. It skips an earlier run's or attempt's
+waiting status and keeps looking. A failure, an interrupt or a crash posts
+`fail`, never `pass`, and lets the probe stop and remove its edits first. A ship that stops before the release fails eyes without walks. Outputs, `probe/report.json`
+included, go to `.local/ship/<label>-eyes/`, with the bar alone in `probe-bar.json`. With `eyes=runner`, the run's
+artifact carries `probe-bar.json` too.
 
 ### Rollback without ssh
 
@@ -189,7 +196,7 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 | `--sha <full sha>` | The commit to ship. It must be HEAD of a clean tree and an ancestor of `origin/main`. |
 | `--dry-run` | Prints every step and its commands. Nothing remote is touched and nothing is written. Exits 1 when a guard would stop a real run. |
 | `--no-switch` | Runs every step for real except the backup and the activation: snapshot, stage, rehearse, the probe (expecting the live build), healthz of the live build, walks, poster, stall and cdn-walk. Nothing goes live, so there is nothing to back up or roll back. `host-activate.sh` never runs, and stage skips `install.sh` (`SIM_RELEASE_NO_INSTALL=1`), so no unit file or timer changes. A resume keeps the mode its run started in (`STEPS.txt`). Receipts are checked when `SHIP_RECEIPTS` is set and never required. `ship-result.json` says `rehearsed` (or `rehearsed-with-failures`); exit 0 only when every step passed |
-| `--no-eyes` | Skips the browser steps (probe-start, probe-check, walks, poster, stall), recording each as `skipped-no-eyes` in `STEPS.txt`; a GPU workstation runs them with [`ship/eyes.mjs`](#the-workstations-eyes). `SHIP_PROBE_CLI` is then not required. `SHIP_RELEASED_CMD`, when set, runs where the probe would be told the release is done (after the activation, or its `--no-switch` skip); its failure stops the run. The mode in `STEPS.txt` gains `-no-eyes`, and a resume keeps it |
+| `--no-eyes` | Skips the browser steps (probe-start, probe-check, walks, poster, stall), recording each as `skipped-no-eyes` in `STEPS.txt`; a GPU workstation runs them with [`ship/eyes.mjs`](#the-workstations-eyes). `SHIP_PROBE_CLI` is then not required. `SHIP_PREACTIVATE_CMD`, when set, runs right before the activation (or its `--no-switch` skip) and its failure stops the run with nothing changed. `SHIP_RELEASED_CMD` runs where the probe would be told the release is done; its failure is recorded as `released-hook` and the run goes on. The mode in `STEPS.txt` gains `-no-eyes`, and a resume keeps it |
 | `--from <step>` | Resumes at `snapshot`, `stage`, `rehearse`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
 | `--out <dir>` | Output folder (default `$SHIP_OUT_ROOT/<label>`). A folder that already holds a run is refused without `--from`. |
 | `--accept-host-codes <code,...>` | The snapshot normally needs public healthz `hostOk`. With this list it passes while `hostOk` is false only if every `hostCodes` entry is listed, such as `halted` for a release that fixes a halted world. The list is printed and recorded in `snapshot.json` (`acceptedHostCodes`); any other code still refuses, and the drift checks compare `hostCodes` too. |
