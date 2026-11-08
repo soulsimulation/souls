@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 54,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-08T00:42:37.064Z",
+  "mono": 57264,
+  "elapsedSec": 54,
+  "n": 3,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "please walk over to the orchard, and after that go and sit on the bench outside the cottage",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_8861d4bd-b799-439e-be42-39bcd3151e5b",
+  "requestId": "ada-002"
+ }
+}

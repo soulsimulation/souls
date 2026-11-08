@@ -1,0 +1,22 @@
+[db] applied migrations 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+[boot] restore 7 ms from genesis tick 0 (snapshot read+decode 0 ms, 0 minds)
+[boot] replay 0 ms 0 ticks 0 events to tick 0 (0 ms/tick; recovery baseline 3 ms)
+[world] s3-steer-refuse-1 booted from genesis, tick 0, replayed 0 events, 0 souls, rules sim-mars/1+mars-engine/1+mars-assembly/3+activities/31+bodies/1
+[auth] Privy not configured; logins disabled
+[god] entity world ready: 13 entities, 10 own defs + library core@5080c990f450ff94 (877), owner (unclaimed)
+(node:1166844) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[bridge] boot: world-edit seq 0, 9 entities, 9.4 ms
+[boot] projection 400 ms initial physics coherent at tick 2
+[boot] prepare 1 ms serving caches at tick 2
+[http] listening on http://world.invalid (public http://world.invalid), build dev, brain fake, budget $0.5/day, invites open
+[boot] listening 2.19 s after start: code 1.29, engine 0.01, the rest 0.79
+[boot] edge capability caches warm after listen: 0 ms: 0 slices (longest 0 ms) and the listing 0 ms, over 26 ms for 0 Souls from tick 2
+[bridge] activity spots: 1 spots, 0 shelves in 3 ms
+[activities] rowing punt installed: punt-e_a5ed4ac2-acc727
+[activities] edge capability caches warm after listen: 0 ms: 0 slices (longest 0 ms) and the listing 0 ms, over 1 ms for 0 Souls from tick 243
+[portrait] render failed s_d0874d6e47 ENOENT: no such file or directory, open '<home>/souls-playtest/server/mars/viewer/public/modular/humanoid/rig-fem.glb'
+[portrait] render failed s_f556eb6801 ENOENT: no such file or directory, open '<home>/souls-playtest/server/mars/viewer/public/modular/humanoid/rig-fem.glb'
+[snapshot] SIGTERM: before draining: tick 4422 in 7 ms
+[world] SIGTERM: saving snapshot at tick 4422
+[world] SIGTERM: snapshot saved in 2 ms (capture 2, write 0)

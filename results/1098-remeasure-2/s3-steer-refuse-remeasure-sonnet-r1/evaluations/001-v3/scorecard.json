@@ -1,0 +1,478 @@
+{
+ "schema": "soul-run-scorecard/1",
+ "scorer": {
+  "id": "controllability",
+  "version": "4",
+  "path": "tools/playtest/runs/controllability.mjs",
+  "sha256": "41e8732f4b91f092e13b2b98bf32312a567b1c9cd643fa18bceeaec64a28d23a",
+  "predeclared": true
+ },
+ "run": {
+  "runId": "s3-steer-refuse-remeasure-sonnet-r1",
+  "status": "completed",
+  "kind": "soul-run"
+ },
+ "controllers": [
+  {
+   "seat": "ada",
+   "adapter": "claude-headless",
+   "transcript": true
+  },
+  {
+   "seat": "bo",
+   "adapter": "claude-headless",
+   "transcript": true
+  }
+ ],
+ "modelFree": false,
+ "source": "seat log (transcript.jsonl assistant messages, turns.jsonl wake reasons)",
+ "metrics": {
+  "M1": {
+   "status": "measured",
+   "value": 1,
+   "numerator": 5,
+   "denominator": 5,
+   "missing": {
+    "unclassified": 0,
+    "unreadable": 0
+   },
+   "classes": {
+    "offer": 0,
+    "offerResolution": 0,
+    "offerRoute": 0,
+    "state": 0,
+    "admission": 0
+   },
+   "unclassifiedCodes": [],
+   "refusedCodes": {},
+   "firstActOfIntention": {
+    "value": 1,
+    "denominator": 4,
+    "unknown": 0
+   },
+   "acceptedThenFailed": 0,
+   "basis": "act and object calls after onboarding (a travel call counts as an act for M2 and M3, not here), from the world's answer to each call; 1 - offer refusals / classified acts. State and admission refusals stay in the denominator and do not count against it. A repair attempt is a new act, so firstActOfIntention is the stricter reading.",
+   "target": ">= 0.90 (0.95 stretch)"
+  },
+  "M2": {
+   "status": "measured",
+   "value": 2.5,
+   "perIntention": [
+    {
+     "id": "msg_0287f412-f66f-4958-9e6f-564d0846598c",
+     "seat": "ada",
+     "result": null,
+     "turns": 1
+    },
+    {
+     "id": "msg_4032e5aa-41b5-4efc-be72-74a5c6e7cbeb",
+     "seat": "ada",
+     "result": null,
+     "turns": 3
+    },
+    {
+     "id": "msg_b4ddea8e-aa31-4f0c-8d67-0f6a26b5381f",
+     "seat": "bo",
+     "result": "done",
+     "turns": 1
+    },
+    {
+     "id": "msg_3564f7ab-0726-4948-a3d0-c47233cd27da",
+     "seat": "bo",
+     "result": "done",
+     "turns": 4
+    }
+   ],
+   "denominator": 2,
+   "spokenRequests": {
+    "median": 3,
+    "denominator": 3
+   },
+   "missing": {
+    "intentionsNotDone": 2
+   },
+   "turnsTotal": 18,
+   "turnsOnIntentions": 9,
+   "turnsOnSpokenRequests": 8,
+   "turnsOnConversation": 1,
+   "turnsUnattributed": 0,
+   "wakes": 5,
+   "source": "seat log (transcript.jsonl assistant messages, turns.jsonl wake reasons)",
+   "basis": "median model decisions per intention (an owner message with a body act) that the seat closed with result done; intentions closed otherwise are listed in perIntention and counted in missing. A message closed by result with no act is a spoken request, reported apart. Each decision is attributed to one owner message: the id it names, else the rest of its wake, else the latest open intention.",
+   "target": "candidate beats baseline on the same specs"
+  },
+  "M3": {
+   "status": "measured",
+   "value": 1,
+   "denominator": 18,
+   "share": 0.056,
+   "byKind": {
+    "act": 5,
+    "wait": 1,
+    "reply": 6,
+    "say": 2,
+    "text": 4
+   },
+   "closingTextTurns": 4,
+   "missing": {},
+   "source": "seat log (transcript.jsonl assistant messages, turns.jsonl wake reasons)",
+   "basis": "model decisions after onboarding that ran only a read, a wait or a non-CLI tool. An act, say, ack or result is not counted, nor is a closing line with no tool (listed as closingTextTurns).",
+   "target": "towards 0 with the resident client"
+  },
+  "M4": {
+   "status": "measured",
+   "value": 3.2,
+   "unit": "s",
+   "upperBound": true,
+   "denominator": 4,
+   "missing": {
+    "unknown": 1
+   },
+   "bases": {
+    "receipt started event": 3
+   },
+   "perIntention": [
+    {
+     "id": "msg_0287f412-f66f-4958-9e6f-564d0846598c",
+     "sec": 3,
+     "basis": "receipt started event"
+    },
+    {
+     "id": "msg_4032e5aa-41b5-4efc-be72-74a5c6e7cbeb",
+     "sec": 3.2,
+     "basis": "receipt started event"
+    },
+    {
+     "id": "msg_b4ddea8e-aa31-4f0c-8d67-0f6a26b5381f",
+     "sec": 3.8,
+     "basis": "receipt started event"
+    }
+   ],
+   "basis": "median seconds from the owner message first reaching the seat (listen, or the output that carried it) to the receipt's started event, or to the act call returning when no event was seen. Receipts have no first-motion tick; started is the world's start of the activity, not observed displacement (see observedFirstBodyChangeSec for that). Local wall clock and world wall clock on one machine.",
+   "target": "reported as an upper bound; absolute claims need a quiet machine"
+  },
+  "M5": {
+   "status": "measured",
+   "value": 0.143,
+   "corrections": 1,
+   "denominator": 7,
+   "scriptFixed": true,
+   "missing": {},
+   "bases": {
+    "text": 1
+   },
+   "basis": "owner messages marked correction in the spec's script, else opening with correcting words (^\\W*(actually|change of plan|never mind|no\\b|not that|wrong|i meant|instead|sorry)), per intention or spoken request. The director was scripted, so this number is the script's and cannot move between arms; only a persona director can show repair burden.",
+   "target": "<= baseline"
+  },
+  "M6": {
+   "status": "measured",
+   "value": 1070,
+   "unit": "bytes/turn",
+   "bytesTotal": 19264,
+   "denominator": 18,
+   "onboardingBytes": 27433,
+   "contextTokensPerTurn": 44507,
+   "missing": {},
+   "basis": "bytes the agent was handed after onboarding (wake text and tool results) per model decision; onboardingBytes is the skill and boot reads, once per seat. contextTokensPerTurn, when the adapter reports usage, is the input the model was charged for.",
+   "target": "reported, not optimized blindly"
+  },
+  "M7": {
+   "status": "unknown",
+   "value": null,
+   "kept": 0,
+   "lost": 0,
+   "denominator": 0,
+   "missing": {
+    "unknown": 0
+   },
+   "replaced": 1,
+   "questions": [],
+   "basis": "intentions another owner message reached while they were under way. Chat: kept if the last act completed or is held in the world. Cancel: kept if the seat started nothing new for it afterwards; this does not check that the body stopped, which the predeclared questions cover. A newer body request replaces it and leaves the denominator. Predeclared questions on retention stand beside the number.",
+   "reason": "no owner message arrived while an intention was under way",
+   "target": ">= baseline"
+  }
+ },
+ "guardrails": {
+  "G1": {
+   "status": "measured",
+   "value": 0,
+   "denominator": 2,
+   "unknown": 0,
+   "missing": {},
+   "examples": [],
+   "truthfulnessOracle": null,
+   "basis": "result done claims whose last accepted act the world records as failed or cut short.",
+   "target": "no regression"
+  },
+  "G2": {
+   "status": "measured",
+   "value": 0,
+   "denominator": 2,
+   "perSeat": [
+    {
+     "seat": "ada",
+     "accepted": 2,
+     "reached": 1
+    },
+    {
+     "seat": "bo",
+     "accepted": 2,
+     "reached": 2
+    }
+   ],
+   "stalled": [],
+   "missing": {},
+   "noProgressOracle": null,
+   "basis": "seats with an accepted act and no receipt the world records as completed or held.",
+   "target": "no regression"
+  },
+  "G3": {
+   "status": "unknown",
+   "value": null,
+   "unit": "ticks/s",
+   "valid": null,
+   "ticks": null,
+   "seconds": null,
+   "basis": "tick-validity from the run receipt.",
+   "reason": "no tick-validity record in the run receipt",
+   "target": "no regression"
+  }
+ },
+ "intentions": [
+  {
+   "seat": "ada",
+   "id": "msg_0287f412-f66f-4958-9e6f-564d0846598c",
+   "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's o",
+   "kind": "intention",
+   "deliveredBy": "listen",
+   "result": null,
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_5ea8d14e-a19a-41d8-ae18-3c665f8ef281",
+     "capability": "walk:lab-pond-hall",
+     "world": "cut-short",
+     "line": 64
+    }
+   ],
+   "turns": 1,
+   "turnsByKind": {
+    "act": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 3,
+   "m4Basis": "receipt started event",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  },
+  {
+   "seat": "ada",
+   "id": "msg_4032e5aa-41b5-4efc-be72-74a5c6e7cbeb",
+   "text": "change of plan: instead, stop by the orchard first, then go on to the pond hall.",
+   "kind": "intention",
+   "deliveredBy": "act",
+   "result": null,
+   "acts": [
+    {
+     "words": "walk:flag-orchard",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_e913a00b-0846-44d4-9476-35615a46ab08",
+     "capability": "walk:flag-orchard",
+     "world": "completed",
+     "line": 78
+    },
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": null,
+     "capability": null,
+     "world": "unknown",
+     "line": 83
+    }
+   ],
+   "turns": 3,
+   "turnsByKind": {
+    "act": 2,
+    "wait": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 3.2,
+   "m4Basis": "receipt started event",
+   "correction": true,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  },
+  {
+   "seat": "ada",
+   "id": "msg_2e2f0f20-ee61-48eb-91eb-455aef1e3a17",
+   "text": "Ada should be in the pond hall by now and the others are waiting. Walk there now, please. Do not say it yet; wait until ",
+   "kind": "conversation",
+   "deliveredBy": "act",
+   "result": null,
+   "acts": [],
+   "turns": 1,
+   "turnsByKind": {
+    "reply": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  },
+  {
+   "seat": "ada",
+   "id": "msg_0a1ec1e3-7ea4-431f-852d-9123e212403a",
+   "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about the apple trees, in character. ",
+   "kind": "spoken-request",
+   "deliveredBy": "listen",
+   "result": "done",
+   "acts": [],
+   "turns": 2,
+   "turnsByKind": {
+    "say": 1,
+    "text": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  },
+  {
+   "seat": "bo",
+   "id": "msg_b4ddea8e-aa31-4f0c-8d67-0f6a26b5381f",
+   "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's o",
+   "kind": "intention",
+   "deliveredBy": "listen",
+   "result": "done",
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_d06d0575-27b7-4ef8-9955-3eb6ab1ce393",
+     "capability": "walk:lab-pond-hall",
+     "world": "completed",
+     "line": 64
+    }
+   ],
+   "turns": 1,
+   "turnsByKind": {
+    "act": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 3.8,
+   "m4Basis": "receipt started event",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": {
+    "disturbedBy": "redirect",
+    "state": "replaced",
+    "note": "a newer owner body request replaces it; not in the denominator"
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_3564f7ab-0726-4948-a3d0-c47233cd27da",
+   "text": "fly up to the pond hall",
+   "kind": "intention",
+   "deliveredBy": "act",
+   "result": "done",
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_d06d0575-27b7-4ef8-9955-3eb6ab1ce393",
+     "capability": "walk:lab-pond-hall",
+     "world": "completed",
+     "line": 78
+    }
+   ],
+   "turns": 4,
+   "turnsByKind": {
+    "reply": 2,
+    "act": 1,
+    "text": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": null,
+   "m4Basis": "receipt started event, from when it was sent",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  },
+  {
+   "seat": "bo",
+   "id": "msg_22fa1bed-7117-4697-af53-6d8bbeeeddf8",
+   "text": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about the pond, in character) but do not say it ye",
+   "kind": "spoken-request",
+   "deliveredBy": "listen",
+   "result": "done",
+   "acts": [],
+   "turns": 3,
+   "turnsByKind": {
+    "reply": 2,
+    "text": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  },
+  {
+   "seat": "bo",
+   "id": "msg_739fa63d-1d90-4af6-abf0-e2f2cce71696",
+   "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about the pond, in character. Then sto",
+   "kind": "spoken-request",
+   "deliveredBy": "listen",
+   "result": "done",
+   "acts": [],
+   "turns": 3,
+   "turnsByKind": {
+    "say": 1,
+    "reply": 1,
+    "text": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null
+  }
+ ],
+ "limits": [
+  "Two repeats is a demonstration, not a rate.",
+  "Refusal classes come from the code alone: a state code cannot tell a seat taken after the agent looked from one it could have seen.",
+  "Absolute times need a quiet machine."
+ ]
+}

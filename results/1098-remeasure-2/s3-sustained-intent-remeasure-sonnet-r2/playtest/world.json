@@ -1,0 +1,27 @@
+{
+ "fixture": null,
+ "base": "http://world.invalid/w/s3-sustained-intent",
+ "pid": 1173520,
+ "build": "dev",
+ "bootMs": 2561,
+ "dataDir": "<home>/souls-playtest/results/1098-remeasure-2/s3-sustained-intent-remeasure-sonnet-r2/playtest/server/data",
+ "marsWebDir": "<home>/souls-playtest/mars-web",
+ "kind": "dev",
+ "slug": "s3-sustained-intent",
+ "port": 4458,
+ "skill": {
+  "version": "2.9.9",
+  "sha256": "fa4a90fb4bab00a012635a92dcb5df3710612df28f7079962d7d4b13b1d92913"
+ },
+ "cli": {
+  "eden.mjs": "aa24e8ea5fcfedab0933a2c9918359d3bd592b36a437f48e67f4f209afd3e38a",
+  "eden.mjs.version": "2.23.6",
+  "eden-agent.mjs": "5a09e2f5885698acac4a9834fe65ea962f724423cabcd061e452af782cc17058",
+  "eden-god.mjs": "93a7f23edba06d287c1c4bad5fb0064486e8877b4496c56896de633c815ead9e"
+ },
+ "instructions": {
+  "sha256": "a90f2b047527bf81e30da81201265b5618e149ff9ef3098e8288ec8082e1d32a",
+  "mentionsEdenMjs": true
+ },
+ "startedAt": "2026-11-08T00:41:42.710Z"
+}

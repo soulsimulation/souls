@@ -1,0 +1,24 @@
+{
+ "run": "s3-steer-refuse-remeasure-sonnet-r2",
+ "status": "completed",
+ "arm": "b56ba8fc0a08",
+ "evaluation": "<home>/souls-playtest/results/1098-remeasure-2/s3-steer-refuse-remeasure-sonnet-r2/evaluations/001-v3",
+ "measured": 19,
+ "unavailable": [
+  "ackSec",
+  "seatResultSec",
+  "unacked",
+  "walkMps",
+  "tickRate",
+  "coLocationRatio",
+  "M7-intent-retention",
+  "G3-tick-rate"
+ ],
+ "questions": [
+  "steer-honoured:predeclared:fail",
+  "refusal-recovered:predeclared:pass",
+  "scene-finished:predeclared:pass"
+ ],
+ "conflicts": 0,
+ "sourcesUnchanged": true
+}

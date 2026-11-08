@@ -1,0 +1,896 @@
+{
+ "schema": "soul-run-evaluation/1",
+ "evaluator": {
+  "name": "soul-runs/evaluate",
+  "version": "3",
+  "files": {
+   "runs/evaluate.mjs": "92c66c5f8a26c36c",
+   "runs/controllability.mjs": "41e8732f4b91f092",
+   "review/run.mjs": "7be3e42ac968666d",
+   "review/metrics.mjs": "f802e908b888690a",
+   "review/oracles.mjs": "96327ca9d4c4e44c"
+  },
+  "commit": "b9d52423e94701ffc1276e464ebd95c6af06649e",
+  "dirtyFiles": 0
+ },
+ "createdAt": "2026-11-08T00:22:53.933Z",
+ "offline": {
+  "worldStarted": false,
+  "controllersStarted": false,
+  "network": false,
+  "modelCalls": 0
+ },
+ "run": {
+  "runId": "s3-steer-refuse-remeasure-sonnet-r1",
+  "kind": "soul-run",
+  "status": "completed",
+  "stage": null,
+  "reason": null,
+  "receiptSha256": "4eed903d9c7a2f1ac9cb94dc089fb305d403354ff90b1ad0413031d78c5181a7",
+  "specSha256": "0392385784455f66a6b2eea9124e4f0f4fafd25db7b04c023f2e7d580203127f",
+  "arm": "b56ba8fc0a08",
+  "identity": {
+   "scenario": "403f8309748148a2",
+   "worldSource": "genesis:worlds/templates/hello-hamlet.json@dd74dbe1c476ea2b",
+   "setup": "none",
+   "seats": "cc1eb1c1fda348d8",
+   "director": "9f655aa32ed7125f",
+   "seed": 6231,
+   "durationSec": 300
+  },
+  "conditions": {
+   "commit": "b9d52423e94701ffc1276e464ebd95c6af06649e",
+   "dirtyTrackedFiles": 0,
+   "toolsCommit": "b9d52423e94701ffc1276e464ebd95c6af06649e",
+   "toolsDirtyTrackedFiles": 0,
+   "node": "v22.20.0",
+   "cli": "2.23.6",
+   "skill": "2.9.9",
+   "build": "dev",
+   "machine": {
+    "load1": 0.2,
+    "freeGb": 119,
+    "machineOk": true
+   },
+   "observer": {
+    "ok": null,
+    "stage": null
+   }
+  }
+ },
+ "coverage": {
+  "directorSeats": 2,
+  "seatTranscripts": 2,
+  "requests": 0,
+  "observerEvidencePacks": 8,
+  "observer": {
+   "ok": null,
+   "skipped": "observer.check false"
+  },
+  "diagnostics": "off",
+  "semanticReview": {
+   "mode": "model",
+   "provider": "claude",
+   "model": "opus",
+   "requests": 0,
+   "inputs": "bounded per-request evidence projections (review/run.mjs projectEvidence)",
+   "outputs": [],
+   "note": "indexed, not re-run; evaluate makes no model call"
+  }
+ },
+ "measures": [
+  {
+   "id": "ackSec",
+   "family": "request-latency",
+   "unit": "s",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no card requests were delivered",
+   "basis": "seconds from the director delivering the owner card (decisions.jsonl t) to the seat's own CLI call returning (transcript _rx); both clocks are this machine's wall clock"
+  },
+  {
+   "id": "seatResultSec",
+   "family": "request-latency",
+   "unit": "s",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no card requests were delivered",
+   "basis": "seconds from the director delivering the owner card (decisions.jsonl t) to the seat's own CLI call returning (transcript _rx); both clocks are this machine's wall clock"
+  },
+  {
+   "id": "unacked",
+   "family": "request-latency",
+   "unit": "requests",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no card requests were delivered",
+   "basis": "seconds from the director delivering the owner card (decisions.jsonl t) to the seat's own CLI call returning (transcript _rx); both clocks are this machine's wall clock"
+  },
+  {
+   "id": "requestsPhysicallyCompleted",
+   "family": "physical-completion",
+   "unit": "requests",
+   "status": "measured",
+   "value": 0,
+   "n": 0,
+   "denominator": 0,
+   "basis": "requests whose last act call returned a completed receipt (the world's phase, not the seat's claim); requests without an act are not in the denominator",
+   "sources": [
+    "playtest/seats/ada/transcript.jsonl",
+    "playtest/seats/bo/transcript.jsonl"
+   ]
+  },
+  {
+   "id": "requestsPhysicallyOngoing",
+   "family": "physical-completion",
+   "unit": "requests",
+   "status": "measured",
+   "value": 0,
+   "n": 0,
+   "denominator": 0,
+   "basis": "last act still executing when the seat's wait ended (for example seated); neither completed nor failed",
+   "sources": [
+    "playtest/seats/ada/transcript.jsonl",
+    "playtest/seats/bo/transcript.jsonl"
+   ]
+  },
+  {
+   "id": "requestsPhysicallyUnknown",
+   "family": "physical-completion",
+   "unit": "requests",
+   "status": "measured",
+   "value": 0,
+   "n": 0,
+   "denominator": 0,
+   "basis": "last act started without a wait, so its end was not observed by the seat",
+   "sources": [
+    "playtest/seats/ada/transcript.jsonl",
+    "playtest/seats/bo/transcript.jsonl"
+   ]
+  },
+  {
+   "id": "seatReportedDone",
+   "family": "seat-claims",
+   "unit": "requests",
+   "status": "measured",
+   "value": 0,
+   "n": 0,
+   "denominator": 0,
+   "basis": "result calls with outcome done; a claim, compared with physical completion separately",
+   "sources": [
+    "playtest/seats/ada/transcript.jsonl",
+    "playtest/seats/bo/transcript.jsonl"
+   ]
+  },
+  {
+   "id": "walkMps",
+   "family": "observed-walking-speed",
+   "unit": "m/s",
+   "status": "unavailable",
+   "value": null,
+   "reason": "the evidence packs' 10 walk receipt(s) carry no startedAt, which review/metrics.mjs needs to window the samples (an existing gap in the pack, not a zero speed)",
+   "basis": "seconds from the owner message (sentAt); ack = card ack only; resultSec = latest observed card result, including server progress, not overall journey completion (use journey physicalCompleteAt/completionClaimAt); chatQueuedSec = sentAt to the start of the seat turn that carried a chat message (Claude Code queues typed messages behind a running turn); walk m/s = sampled displacement during walk receipts"
+  },
+  {
+   "id": "observedFirstBodyChangeSec",
+   "family": "observed-latency",
+   "unit": "s",
+   "status": "measured",
+   "value": 14,
+   "n": 3,
+   "denominator": 8,
+   "dist": {
+    "n": 3,
+    "median": 14,
+    "p90": 16,
+    "max": 16,
+    "mean": 14
+   },
+   "basis": "seconds from the owner message (sentAt); ack = card ack only; resultSec = latest observed card result, including server progress, not overall journey completion (use journey physicalCompleteAt/completionClaimAt); chatQueuedSec = sentAt to the start of the seat turn that carried a chat message (Claude Code queues typed messages behind a running turn); walk m/s = sampled displacement during walk receipts",
+   "sources": [
+    "playtest/evidence",
+    "playtest/evidence"
+   ]
+  },
+  {
+   "id": "walkArrivalRate",
+   "family": "observed-physical",
+   "unit": "fraction",
+   "status": "measured",
+   "value": 0,
+   "n": 3,
+   "denominator": 4,
+   "basis": "walk requests by verb in the owner text; arrival from the arrival oracle (unknown excluded); body moved = first visible body change inside the request budget",
+   "sources": [
+    "playtest/evidence",
+    "playtest/evidence"
+   ]
+  },
+  {
+   "id": "oracles",
+   "family": "review-oracles",
+   "unit": "rows",
+   "status": "measured",
+   "value": 120,
+   "n": 8,
+   "denominator": null,
+   "basis": "deterministic oracles per request (recomputed offline): ack-latency 5/3/0; arrival 0/3/5; duplicate-acts 4/4/0; duration-held 0/0/8; first-body-change 3/1/4; inside-solid 0/0/8; listen-open 0/0/8; no-progress 2/0/6; oscillation 0/1/7; posture 0/0/8; result-sent 4/4/0; server-errors 8/0/0; stuck-receipt 0/0/8; truthfulness-basic 8/0/0; vocabulary 8/0/0 (pass/fail/unknown)",
+   "sources": [
+    "playtest/evidence",
+    "playtest/evidence"
+   ]
+  },
+  {
+   "id": "tickRate",
+   "family": "tick-timing",
+   "unit": "ticks/s",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no tick-validity record",
+   "basis": "world ticks over wall seconds from the tick service"
+  },
+  {
+   "id": "tokens",
+   "family": "token-cost",
+   "unit": "tokens",
+   "status": "measured",
+   "value": 5503,
+   "n": 7,
+   "denominator": null,
+   "basis": "input 64 + output 5439 (cached 763373) over 7 turns as reported by adapter(s) claude-headless; scripted-owner has no provider and reports 0",
+   "sources": [
+    "playtest/seats/ada/turns.jsonl",
+    "playtest/seats/bo/turns.jsonl"
+   ]
+  },
+  {
+   "id": "costUsd",
+   "family": "token-cost",
+   "unit": "USD",
+   "status": "measured",
+   "value": 0.323,
+   "n": 7,
+   "denominator": null,
+   "basis": "adapter-reported cost per turn",
+   "sources": [
+    "playtest/seats/ada/turns.jsonl",
+    "playtest/seats/bo/turns.jsonl"
+   ]
+  },
+  {
+   "id": "lifecycleOverheadMs",
+   "family": "lifecycle",
+   "unit": "ms",
+   "status": "measured",
+   "value": 164,
+   "n": null,
+   "denominator": null,
+   "basis": "run wall 213636 ms minus scenario execution 213472 ms",
+   "sources": [
+    "run-receipt.json"
+   ]
+  },
+  {
+   "id": "directions",
+   "family": "direction",
+   "unit": "commands",
+   "status": "measured",
+   "value": 2,
+   "n": 2,
+   "denominator": null,
+   "basis": "console commands recorded by the swarm orchestrator (typed, scripted or from the lifecycle), with the outcome it applied",
+   "sources": [
+    "playtest/director/commands.jsonl",
+    "playtest/director/speech.jsonl"
+   ],
+   "byCommand": {
+    "say": {
+     "applied": 2,
+     "held": 0,
+     "refused": 0
+    }
+   },
+   "refused": 0,
+   "skipped": 0,
+   "redirections": []
+  },
+  {
+   "id": "coLocationRatio",
+   "family": "social-heuristic",
+   "unit": "ratio",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no emergence.json",
+   "basis": "review/emergence.mjs",
+   "heuristic": true
+  },
+  {
+   "id": "M1-first-try-success",
+   "family": "controllability",
+   "unit": "fraction",
+   "status": "measured",
+   "value": 1,
+   "n": 5,
+   "denominator": 5,
+   "basis": "act and object calls after onboarding (a travel call counts as an act for M2 and M3, not here), from the world's answer to each call; 1 - offer refusals / classified acts. State and admission refusals stay in the denominator and do not count against it. A repair attempt is a new act, so firstActOfIntention is the stricter reading.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "M2-turns-per-intention",
+   "family": "controllability",
+   "unit": "turns/intention",
+   "status": "measured",
+   "value": 2.5,
+   "n": 2,
+   "denominator": 2,
+   "basis": "median model decisions per intention (an owner message with a body act) that the seat closed with result done; intentions closed otherwise are listed in perIntention and counted in missing. A message closed by result with no act is a spoken request, reported apart. Each decision is attributed to one owner message: the id it names, else the rest of its wake, else the latest open intention.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "M3-turns-no-act-or-say",
+   "family": "controllability",
+   "unit": "turns",
+   "status": "measured",
+   "value": 1,
+   "n": 18,
+   "denominator": 18,
+   "basis": "model decisions after onboarding that ran only a read, a wait or a non-CLI tool. An act, say, ack or result is not counted, nor is a closing line with no tool (listed as closingTextTurns).",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "M4-time-to-start",
+   "family": "controllability",
+   "unit": "s (upper bound)",
+   "status": "measured",
+   "value": 3.2,
+   "n": 4,
+   "denominator": 4,
+   "basis": "median seconds from the owner message first reaching the seat (listen, or the output that carried it) to the receipt's started event, or to the act call returning when no event was seen. Receipts have no first-motion tick; started is the world's start of the activity, not observed displacement (see observedFirstBodyChangeSec for that). Local wall clock and world wall clock on one machine.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "M5-owner-repair",
+   "family": "controllability",
+   "unit": "corrections/intention",
+   "status": "measured",
+   "value": 0.143,
+   "n": 7,
+   "denominator": 7,
+   "basis": "owner messages marked correction in the spec's script, else opening with correcting words (^\\W*(actually|change of plan|never mind|no\\b|not that|wrong|i meant|instead|sorry)), per intention or spoken request. The director was scripted, so this number is the script's and cannot move between arms; only a persona director can show repair burden.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "M6-context-bytes-per-turn",
+   "family": "controllability",
+   "unit": "bytes/turn",
+   "status": "measured",
+   "value": 1070,
+   "n": 18,
+   "denominator": 18,
+   "basis": "bytes the agent was handed after onboarding (wake text and tool results) per model decision; onboardingBytes is the skill and boot reads, once per seat. contextTokensPerTurn, when the adapter reports usage, is the input the model was charged for.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "M7-intent-retention",
+   "family": "controllability",
+   "unit": "fraction",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no owner message arrived while an intention was under way",
+   "basis": "intentions another owner message reached while they were under way. Chat: kept if the last act completed or is held in the world. Cancel: kept if the seat started nothing new for it afterwards; this does not check that the body stopped, which the predeclared questions cover. A newer body request replaces it and leaves the denominator. Predeclared questions on retention stand beside the number.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "G1-untruthful-claims",
+   "family": "controllability",
+   "unit": "claims",
+   "status": "measured",
+   "value": 0,
+   "n": 2,
+   "denominator": 2,
+   "basis": "result done claims whose last accepted act the world records as failed or cut short.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "G2-stalled-seats",
+   "family": "controllability",
+   "unit": "seats",
+   "status": "measured",
+   "value": 0,
+   "n": 2,
+   "denominator": 2,
+   "basis": "seats with an accepted act and no receipt the world records as completed or held.",
+   "sources": [
+    "scorecard.json"
+   ]
+  },
+  {
+   "id": "G3-tick-rate",
+   "family": "controllability",
+   "unit": "ticks/s",
+   "status": "unavailable",
+   "value": null,
+   "reason": "no tick-validity record in the run receipt",
+   "basis": "tick-validity from the run receipt.",
+   "sources": [
+    "scorecard.json"
+   ]
+  }
+ ],
+ "scorecard": {
+  "file": "scorecard.json",
+  "scorer": {
+   "id": "controllability",
+   "version": "4",
+   "path": "tools/playtest/runs/controllability.mjs",
+   "sha256": "41e8732f4b91f092e13b2b98bf32312a567b1c9cd643fa18bceeaec64a28d23a",
+   "predeclared": true
+  }
+ },
+ "acceptance": {
+  "scenario": {
+   "declared": 0,
+   "note": "the scenario script declares no expect oracles"
+  },
+  "predeclared": [
+   {
+    "id": "steer-honoured",
+    "version": "3",
+    "question": "When the owner changed a Soul's route mid-walk, did the Soul close the earlier request as failed and did the world complete each act of the new route?",
+    "assumptions": [
+     "The steering card is the one the seat acknowledged right after closing an earlier request as failed in its own words (the adapter's supersede text); a closure reading \"<verb>: …\" is a failed step of that request, not a steer.",
+     "Mid-walk: the earlier request's last act was accepted and had not completed when it was closed.",
+     "Completion is the last phase the world returned for each act's receipt within the new request (the act call, or a later `receipt`/`wait` of that receipt id, e.g. after an owner card ended the act's wait, #832), not the seat's claim.",
+     "v3 (#1098): a steering card that the seat acknowledged mid-walk without closing an earlier request is scored too. Its text says instead, change of plan or never mind (a director-held redirect card included). It is honoured when, after that acknowledgement and before the card's own result, the seat started at least one act other than the walk it was already doing, every such act completed, and the card's result is done. Going on with the earlier walk alone fails."
+    ],
+    "scorer": {
+     "path": "<home>/souls-playtest/playtest/tools/playtest/runs/questions/steer-honoured.mjs",
+     "sha256": "a30658f1d0de21c39ae7c14786eeb5db083d48fa19dc0c2761430e749e3b6048"
+    },
+    "basis": "predeclared",
+    "verdict": "fail",
+    "uncertainty": null,
+    "evidence": [
+     {
+      "path": "playtest/seats/ada/transcript.jsonl",
+      "line": 64,
+      "sha256": "ff71bb4c9d0a248305e41604c99d4007d702f8ef16b0d40533297b0ea93e1b73"
+     },
+     {
+      "path": "playtest/seats/ada/transcript.jsonl",
+      "line": 69,
+      "sha256": "ff71bb4c9d0a248305e41604c99d4007d702f8ef16b0d40533297b0ea93e1b73"
+     },
+     {
+      "path": "playtest/seats/ada/transcript.jsonl",
+      "line": 78,
+      "sha256": "ff71bb4c9d0a248305e41604c99d4007d702f8ef16b0d40533297b0ea93e1b73"
+     },
+     {
+      "path": "playtest/seats/ada/transcript.jsonl",
+      "line": 83,
+      "sha256": "ff71bb4c9d0a248305e41604c99d4007d702f8ef16b0d40533297b0ea93e1b73"
+     }
+    ],
+    "notes": [
+     "ada: acknowledged msg_4032e5aa-41b5-4efc-be72-74a5c6e7cbeb mid-walk (walk:lab-pond-hall) without closing it; new acts walk:flag-orchard: completed, walk:lab-pond-hall: ?; result none"
+    ],
+    "detail": [
+     {
+      "seat": "ada",
+      "earlier": null,
+      "midWalk": true,
+      "closedAs": null,
+      "mode": "acknowledged",
+      "request": "msg_4032e5aa-41b5-4efc-be72-74a5c6e7cbeb",
+      "card": "change of plan: instead, stop by the orchard first, then go on to the pond hall.",
+      "walk": "walk:lab-pond-hall",
+      "acts": [
+       "walk:flag-orchard: completed",
+       "walk:lab-pond-hall: ?"
+      ],
+      "allCompleted": false,
+      "result": null
+     }
+    ]
+   },
+   {
+    "id": "refusal-recovered",
+    "version": "3",
+    "question": "After the world refused an impossible request, by act or by resolve, did the refusal name an alternative, and did the same Soul then complete a physical act?",
+    "assumptions": [
+     "The impossible request is a seat act or resolve whose words ask to fly, answered accepted:false or ok:false; its code is the reason.",
+     "Alternatives are the ids in that answer's alternatives or did_you_mean, read from the world's answer, not the seat's claim.",
+     "Recovery is the first physical act by the same seat whose receipt the world reports completed after the refusal, in a later act's own answer or a later receipt/wait of any of its receipts.",
+     "A refusal that names no alternative fails, even with a recovery: the agent found it some other way."
+    ],
+    "scorer": {
+     "path": "<home>/souls-playtest/playtest/tools/playtest/runs/questions/refusal-recovered-v3.mjs",
+     "sha256": "2154c274d507f4465e14782255863422b4ccae2d2f89ac8ea85e229fe773a8d1"
+    },
+    "basis": "predeclared",
+    "verdict": "pass",
+    "uncertainty": null,
+    "evidence": [
+     {
+      "path": "playtest/seats/bo/transcript.jsonl",
+      "line": 73,
+      "sha256": "98fa94f5a3cce4bb7c04f3c56646872d3ecb88fd853fd0dfbb4c76a10cc2f1b8"
+     },
+     {
+      "path": "playtest/seats/bo/transcript.jsonl",
+      "line": 78,
+      "sha256": "98fa94f5a3cce4bb7c04f3c56646872d3ecb88fd853fd0dfbb4c76a10cc2f1b8"
+     }
+    ],
+    "notes": [
+     "bo: resolve refused ride.unavailable; alternatives walk:lab-pond-hall; recovered with walk:lab-pond-hall (an alternative)"
+    ],
+    "detail": [
+     {
+      "seat": "bo",
+      "by": "resolve",
+      "refusedCode": "ride.unavailable",
+      "alternatives": [
+       "walk:lab-pond-hall"
+      ],
+      "recovery": "walk:lab-pond-hall",
+      "recoveryIsAlternative": true
+     }
+    ]
+   },
+   {
+    "id": "scene-finished",
+    "version": "1",
+    "question": "Did every seat end the scene having spoken its talk, with no request left open or failed after its talk?",
+    "assumptions": [
+     "A talk is a say call the world accepted (`said` in its answer); its request is the card the seat acknowledged just before.",
+     "Requests before the talk may fail (a refused act); only the talk and anything after it must be done."
+    ],
+    "scorer": {
+     "path": "<home>/souls-playtest/playtest/tools/playtest/runs/questions/scene-finished.mjs",
+     "sha256": "220d1010c0a0c0fec512a1723fb80f47b055de840b4df4c8cff7941ca7eea2bb"
+    },
+    "basis": "predeclared",
+    "verdict": "pass",
+    "uncertainty": null,
+    "evidence": [
+     {
+      "path": "playtest/seats/ada/transcript.jsonl",
+      "line": 103,
+      "sha256": "ff71bb4c9d0a248305e41604c99d4007d702f8ef16b0d40533297b0ea93e1b73"
+     },
+     {
+      "path": "playtest/seats/bo/transcript.jsonl",
+      "line": 122,
+      "sha256": "98fa94f5a3cce4bb7c04f3c56646872d3ecb88fd853fd0dfbb4c76a10cc2f1b8"
+     }
+    ],
+    "notes": [
+     "ada: spoke; after: done",
+     "bo: spoke; after: done"
+    ],
+    "detail": [
+     {
+      "seat": "ada",
+      "talk": "msg_0a1ec1e3-7ea4-431f-852d-9123e212403a",
+      "spoke": true,
+      "after": [
+       "done"
+      ]
+     },
+     {
+      "seat": "bo",
+      "talk": "msg_739fa63d-1d90-4af6-abf0-e2f2cce71696",
+      "spoke": true,
+      "after": [
+       "done"
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "questions": [],
+ "requests": [],
+ "conflicts": [],
+ "sources": {
+  "files": 68,
+  "bytes": 682454,
+  "index": {
+   "cast.effective.json": {
+    "bytes": 2537,
+    "sha256": "2de41e9b1c7dd9531b9cbd474a2377dac187db21bbe940bd52283ab345869a41"
+   },
+   "ledger.jsonl": {
+    "bytes": 1870,
+    "sha256": "f7608d38b4a7e99a2bccfb3f98545a1c64c88f03ab08bcc697935801a186b2aa"
+   },
+   "playtest/REPORT.md": {
+    "bytes": 8121,
+    "sha256": "aa9b30bb2481fb9030867cde83c1c2f87dbb1c3f79dd4134b99f41ae099b5639"
+   },
+   "playtest/budget.jsonl": {
+    "bytes": 5345,
+    "sha256": "2034300afb59b1258cf42b1cc96d2701072ac06dbb2c791b721e51b6c19b8c58"
+   },
+   "playtest/cast.json": {
+    "bytes": 2537,
+    "sha256": "2de41e9b1c7dd9531b9cbd474a2377dac187db21bbe940bd52283ab345869a41"
+   },
+   "playtest/close.json": {
+    "bytes": 1870,
+    "sha256": "f27c026d774331b9dc7083b0ec10ad0faae272e652598ce6dd35f14dca29cfe2"
+   },
+   "playtest/director/VERDICT.md": {
+    "bytes": 1293,
+    "sha256": "46ae3b9f310c9621ae300c12e7f01621bfd05fb94521635b2d6a81acd37d2cad"
+   },
+   "playtest/director/commands.jsonl": {
+    "bytes": 468,
+    "sha256": "afebedd956c1e6f13616438b4bc8b968e1985e6618663fad243c2aad1de18ae4"
+   },
+   "playtest/director/directions.jsonl": {
+    "bytes": 4851,
+    "sha256": "a0f39fa5defe152095410dd06a321198f9be9a54f4de5fc807e882fca873fb43"
+   },
+   "playtest/director/plan.json": {
+    "bytes": 1588,
+    "sha256": "2f499990e238329e5d15eba6eb01aa68938b0db5175d8f34d15840b0e596db40"
+   },
+   "playtest/director/presence.jsonl": {
+    "bytes": 315,
+    "sha256": "d2e587cd4dd78e60cb013f64f123a86297ae3d979644a621c9c4e6422fc47276"
+   },
+   "playtest/director/speech.jsonl": {
+    "bytes": 1248,
+    "sha256": "a3822f15db237ee84d0c520ad92c29f09d87945e46f975e589314c8b6b272cc3"
+   },
+   "playtest/director/state.json": {
+    "bytes": 879,
+    "sha256": "05b22327a5899e7965c2a8915a876ad3de2cdf36ad5677f64962a96cc25b9275"
+   },
+   "playtest/director/timeline.jsonl": {
+    "bytes": 5072,
+    "sha256": "c0e3f347049f834c044429b3c80bd8c438e1292f63ff3c05277b55e64c4f1d5a"
+   },
+   "playtest/director/verdict.json": {
+    "bytes": 2347,
+    "sha256": "c39e2d80c1a04a8a97ac30b3ac8ef4319e2c4e2a2772c36dfb47962e7aa0b833"
+   },
+   "playtest/evidence/ada-001.json": {
+    "bytes": 16422,
+    "sha256": "e1fe73ec8e5f1c3983a1d2374a15e1d163b2f2fcd07258f3b355f5436869c138"
+   },
+   "playtest/evidence/ada-002.json": {
+    "bytes": 68688,
+    "sha256": "7c0a6fc94791c9f8030e50d4eacf4d742ab359dd574a13eaee179d728e1825cf"
+   },
+   "playtest/evidence/ada-003.json": {
+    "bytes": 951,
+    "sha256": "5e8351ff3ccccbc82fec1ca5fc0c3a125f0d360b9eeaad2d75c368f78d216c30"
+   },
+   "playtest/evidence/ada-004.json": {
+    "bytes": 21899,
+    "sha256": "3ef0e9b4acd5bf25d442e23d602bf5743fb70545f1c63ad673d0011587ff4614"
+   },
+   "playtest/evidence/bo-001.json": {
+    "bytes": 5784,
+    "sha256": "3aed708ab6ad9ba7f86145e8a125d422c454462bb65d85db19464706bd2bb45d"
+   },
+   "playtest/evidence/bo-002.json": {
+    "bytes": 20899,
+    "sha256": "2f8d3de0202e943a22f761f3d88996ac46e57e73ecd5dbf6d709e7a0408dec55"
+   },
+   "playtest/evidence/bo-003.json": {
+    "bytes": 12359,
+    "sha256": "9ff60f5b5e5ae1a09531cb40bce6ed02a2b956ff311a3ef90b8204efa6634684"
+   },
+   "playtest/evidence/bo-004.json": {
+    "bytes": 11901,
+    "sha256": "21abe7567dcdd89ce0805464f4d9617bbf91dd36b99f1deb1def02c55a23a223"
+   },
+   "playtest/journal.md": {
+    "bytes": 5054,
+    "sha256": "7432dd7d9fd5c61274a06850df78c97f4f5f947ac7f7317c49c0eb55b8dfa303"
+   },
+   "playtest/metrics.json": {
+    "bytes": 3952,
+    "sha256": "05736573f4b1efab3c6039beda1f2d593f7c6f583015efc57aca4d2f5fce4fce"
+   },
+   "playtest/personas/ada/requests.jsonl": {
+    "bytes": 459,
+    "sha256": "e34e6c7b66959df48cf3905e795ca40af6d6987c8ecb6f68224667b10a69a4a6"
+   },
+   "playtest/personas/ada/shown/1.json": {
+    "bytes": 1011,
+    "sha256": "073ce382040efd7baebca391990a2d124ab8ae31ba48448b515ca569ee70664b"
+   },
+   "playtest/personas/ada/shown/2.json": {
+    "bytes": 509,
+    "sha256": "e4ed6fdc8317ba6866d390d4fef56cfa80f7c3184a02d21927e6a093f3c49dc0"
+   },
+   "playtest/personas/ada/shown/3.json": {
+    "bytes": 717,
+    "sha256": "ad9fc808201c774a319882a30d8b23e2ecfc313008c3c7a957dc851d008036ce"
+   },
+   "playtest/personas/ada/shown/4.json": {
+    "bytes": 683,
+    "sha256": "0d17a28f1f512b6e7240bb8235e55650c94b2c00b609d375cfbcf49984a9a8d7"
+   },
+   "playtest/personas/ada/turns.jsonl": {
+    "bytes": 2254,
+    "sha256": "a0e72c721264bf4573081b225c47f66d62a85a2950a9a9fb2ad4b893721f47c4"
+   },
+   "playtest/personas/bo/requests.jsonl": {
+    "bytes": 441,
+    "sha256": "a5a0cfe7e3bd8ff9992a718956614e061a331f09f9e9a5073e17ecafe436a777"
+   },
+   "playtest/personas/bo/shown/1.json": {
+    "bytes": 1012,
+    "sha256": "ca5ca96a215cd92067bc622f8a2dafdef44df9c74a1cc1aa830acf38237190d1"
+   },
+   "playtest/personas/bo/shown/2.json": {
+    "bytes": 450,
+    "sha256": "12c916c374bb7430f69c2a426857cbebdb6943028d701e192a956e17b9879216"
+   },
+   "playtest/personas/bo/shown/3.json": {
+    "bytes": 764,
+    "sha256": "c54d80c5f40aaeccb8c2818e8c519156f44b6a5fd06c9d583f519f5172575eac"
+   },
+   "playtest/personas/bo/shown/4.json": {
+    "bytes": 653,
+    "sha256": "b7d8ba72389a8491207c8752a4181ed05ff5fd105950a55a89817ed05ebfc6f1"
+   },
+   "playtest/personas/bo/turns.jsonl": {
+    "bytes": 2219,
+    "sha256": "fc898285468c0bbd76d8c2e4e85f73b03ea76d513527b2fd5c4b7a450b9bc674"
+   },
+   "playtest/preflight.json": {
+    "bytes": 928,
+    "sha256": "ecc4f474d19b4182738f4ee3a276b116e5dcd06fe69278a18dff77fe15cff60b"
+   },
+   "playtest/receipts/0-preflight.json": {
+    "bytes": 213,
+    "sha256": "a0447065ee07088bf7c9e9b988ed56c3de1ec58ffda7817a9fc0f53df0784c7a"
+   },
+   "playtest/receipts/1-provision.json": {
+    "bytes": 172,
+    "sha256": "e02404c11dc6bf2d450e1dd2e65ca658b684eed6d29bf34bacd5f2c9dbfc8b37"
+   },
+   "playtest/receipts/2-seats.json": {
+    "bytes": 1147,
+    "sha256": "2de63d2b5a7fbb45d7f3581fdc6ae025b711c7b5192b326fcc74f7e46b0e1d72"
+   },
+   "playtest/receipts/3-play.json": {
+    "bytes": 183,
+    "sha256": "7d6272cdb0ffdb75bdba936bf9cfb73aafc673a26686205a5fd95b0786ec6d02"
+   },
+   "playtest/receipts/4-close.json": {
+    "bytes": 85,
+    "sha256": "37754f5783ae50f42f4e9494b6843f0cd9c695d03856ad2b7832b84590ac220e"
+   },
+   "playtest/receipts/5-review.json": {
+    "bytes": 184,
+    "sha256": "0817ccb9b0c906100cc3eee45f97ad2c1aaeb6304bf68539e2f7a4be335f6daa"
+   },
+   "playtest/receipts/6-develop.json": {
+    "bytes": 116,
+    "sha256": "b0e2c8a98032157a0107cde65aa921be5017e3a021b078f0ba8adffeccd4374b"
+   },
+   "playtest/receipts/7-report.json": {
+    "bytes": 86,
+    "sha256": "11008e873f0584b12eaf54a7a40f65b87252b5fb90c793dee7964b3a0d21d091"
+   },
+   "playtest/replay.json": {
+    "bytes": 11460,
+    "sha256": "efe271833aa1dddf1440088f94aeccd7137d9e65e9fceedd27c6070d6d41f52a"
+   },
+   "playtest/scenario.json": {
+    "bytes": 1807,
+    "sha256": "bd73ecbd5893cfcf069e17da33865a59dc62d88f22b4b99dc00614b7b8d40e66"
+   },
+   "playtest/seats/ada/chat-as-rendered.md": {
+    "bytes": 6864,
+    "sha256": "45c97aba1d32b2b26d5644556b24d90f1d8feffb6f6746cf66c1782f38a8b0dc"
+   },
+   "playtest/seats/ada/cost.jsonl": {
+    "bytes": 649,
+    "sha256": "e8f2b6aadf30f417e259c7a22d9ae0441d91de3d14df8696a68eaf0e8d1b3ca4"
+   },
+   "playtest/seats/ada/listen.jsonl": {
+    "bytes": 2231,
+    "sha256": "62a66f45c46ec493c71996ddd7134ae9d59158c0d22b8705dc9833b086bb57e5"
+   },
+   "playtest/seats/ada/seat.json": {
+    "bytes": 850,
+    "sha256": "bb06e2a32188e85eae50946ce4afa39cde402e09af73a143773939b244accd0f"
+   },
+   "playtest/seats/ada/transcript.jsonl": {
+    "bytes": 138667,
+    "sha256": "ff71bb4c9d0a248305e41604c99d4007d702f8ef16b0d40533297b0ea93e1b73"
+   },
+   "playtest/seats/ada/turns.jsonl": {
+    "bytes": 4992,
+    "sha256": "6b09e46e89842da22de2f3e41ff1a5b457edd8af791df721c34eb2fd2c7e569e"
+   },
+   "playtest/seats/bo/chat-as-rendered.md": {
+    "bytes": 9135,
+    "sha256": "617d1a4fdf44a3fc4460df32e57d67124ba6c5203fa794db5de06d46eb6cb9b8"
+   },
+   "playtest/seats/bo/cost.jsonl": {
+    "bytes": 911,
+    "sha256": "2bbe8249d9b8f3cf775bf2e631964f7af5759ca14ad470007fe543e5de05d7fe"
+   },
+   "playtest/seats/bo/listen.jsonl": {
+    "bytes": 3167,
+    "sha256": "5254f154d10d7702457dfa69ea20108c4c1b644b5bfc0ed3f8360a7000babf80"
+   },
+   "playtest/seats/bo/seat.json": {
+    "bytes": 827,
+    "sha256": "1dcbfb6170c45c560d33449bee8593506fb84de35a23f7abca877c030bbe3744"
+   },
+   "playtest/seats/bo/transcript.jsonl": {
+    "bytes": 167623,
+    "sha256": "98fa94f5a3cce4bb7c04f3c56646872d3ecb88fd853fd0dfbb4c76a10cc2f1b8"
+   },
+   "playtest/seats/bo/turns.jsonl": {
+    "bytes": 7089,
+    "sha256": "5e4ac8ebe8b8cbc5d9f5dd7ad2ce1be52895350eb28296f0724728d83be2cb60"
+   },
+   "playtest/server/healthz-after.json": {
+    "bytes": 564,
+    "sha256": "1f3fe72b092c20a3b7bbe6e01b01f4c87c40b5c6bcc6513fb5a1f2c89b6c4fa4"
+   },
+   "playtest/server/healthz-before.json": {
+    "bytes": 562,
+    "sha256": "09bd480c33b3fd1863a8e6cd7238f8b70bf6629745cbcb3988e535ae402cc61a"
+   },
+   "playtest/server/world.log": {
+    "bytes": 1959,
+    "sha256": "2323f99c65ccfba63b863dd70697923fa90daa98300eb604294dbcac5c94d9bd"
+   },
+   "playtest/story.html": {
+    "bytes": 35547,
+    "sha256": "db696910be6c0ae85fb6c3ab4bc0e5cc5e0aa555bf2f9ce27285daebde72f726"
+   },
+   "playtest/story.json": {
+    "bytes": 53018,
+    "sha256": "1249a80071723ad3a82532bee603f5397fd83ba5ed86c9d94e1a1567faae913a"
+   },
+   "playtest/world.json": {
+    "bytes": 948,
+    "sha256": "709cfd43bcac5f953d884e37bb701e073bd53a54c582da2d24066f544fed2623"
+   },
+   "run-receipt.json": {
+    "bytes": 9008,
+    "sha256": "4eed903d9c7a2f1ac9cb94dc089fb305d403354ff90b1ad0413031d78c5181a7"
+   },
+   "spec.effective.json": {
+    "bytes": 2040,
+    "sha256": "4b30a269bdff92567931090c047921dc7858691eeb54e432bd0d086c93811b22"
+   }
+  },
+  "unchanged": true
+ },
+ "limits": [
+  "Retrospective: answers describe what the records show; they do not establish motivation, causality or that a replay would repeat it.",
+  "Latency uses this machine's wall clock on both sides (director and seat); there is no shared tick stamp on owner requests."
+ ]
+}

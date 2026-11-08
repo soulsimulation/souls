@@ -1,0 +1,9 @@
+{
+ "step": "provision",
+ "t": "2026-11-08T00:32:16.792Z",
+ "mono": 3017,
+ "ok": true,
+ "base": "http://world.invalid/w/s3-steer-refuse",
+ "build": "dev",
+ "kind": "dev"
+}

@@ -1,0 +1,10 @@
+{
+ "step": "play",
+ "t": "2026-11-08T00:22:51.516Z",
+ "mono": 213173,
+ "ok": true,
+ "stoppedBy": "plan-complete",
+ "elapsedSec": 210,
+ "phase": "done",
+ "gateReason": "all-present"
+}

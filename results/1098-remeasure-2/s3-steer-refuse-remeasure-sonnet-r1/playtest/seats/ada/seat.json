@@ -1,0 +1,31 @@
+{
+ "id": "ada",
+ "kind": "soul",
+ "adapter": "claude-headless",
+ "model": "sonnet",
+ "effort": "low",
+ "soulName": "Ada",
+ "worldBase": "http://world.invalid/w/s3-steer-refuse",
+ "folder": "<home>/souls-playtest/results/1098-remeasure-2/s3-steer-refuse-remeasure-sonnet-r1/playtest/seats/ada/folder",
+ "createdAt": "2026-11-08T00:19:21.322Z",
+ "sessionId": "5831ccfc-f324-44d2-a270-a99bece624cd",
+ "soulId": "s_80be104d04",
+ "ownerIdentity": "agent-077acf14c225d137709f7063",
+ "assisted": false,
+ "wake": true,
+ "sessionCostUsd": {
+  "5831ccfc-f324-44d2-a270-a99bece624cd": 0.14684570000000002
+ },
+ "sessionContextTokens": 33351,
+ "effortApplied": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 15,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 26119,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ },
+ "unknownCost": {}
+}

@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 58,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-08T00:23:58.242Z",
+  "mono": 61119,
+  "elapsedSec": 58,
+  "n": 4,
+  "seat": "bo",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "could you pop into the reading room?",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_bfe70624-18e3-4365-a21b-dbf9829b71fd",
+  "requestId": "bo-002"
+ }
+}

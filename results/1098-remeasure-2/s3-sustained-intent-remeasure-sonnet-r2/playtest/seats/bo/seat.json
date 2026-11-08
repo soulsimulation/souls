@@ -1,0 +1,30 @@
+{
+ "id": "bo",
+ "kind": "soul",
+ "adapter": "claude-headless",
+ "model": "sonnet",
+ "effort": "low",
+ "soulName": "Bo",
+ "worldBase": "http://world.invalid/w/s3-sustained-intent",
+ "folder": "<home>/souls-playtest/results/1098-remeasure-2/s3-sustained-intent-remeasure-sonnet-r2/playtest/seats/bo/folder",
+ "createdAt": "2026-11-08T00:41:42.882Z",
+ "sessionId": "d27e194d-25e3-4b39-816d-a9c08db273f8",
+ "soulId": "s_22efedde4f",
+ "ownerIdentity": "agent-7b52e3cb77f676f990821895",
+ "assisted": false,
+ "wake": true,
+ "sessionCostUsd": {
+  "d27e194d-25e3-4b39-816d-a9c08db273f8": 0.220445
+ },
+ "sessionContextTokens": 38829,
+ "effortApplied": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 36,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 23962,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

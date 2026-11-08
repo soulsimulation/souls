@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-08T00:31:27.869Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-08T00:31:29.872Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 344,
+   "firstAt": "2026-11-08T00:31:45.912Z",
+   "text": "Good morning, everyone! I'm Ada, and I keep bees, so my morning errand started at the hives, checking that the colony was warm and humming. Then I wandered the hamlet to the orchard, where the blossoms are drawing in my bees, and I had a lovely walk toward the cottage knoll. Now I'm here at the pond hall, happy to hear how your mornings went.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-08T00:31:49.874Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 235,
+   "firstAt": "2026-11-08T00:31:55.062Z",
+   "text": "Um, hi. My morning changed plans a few times. I was sent to the pond hall, then the orchard, then told to stop, and finally back here. I'm shy, so I took it as a quiet tune: keep moving, keep humming. I'm glad I ended up here with you.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 1
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-08T00:31:27.869Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 22,
+    "cachedTokens": 248641,
+    "cacheCreationTokens": 16300,
+    "outputTokens": 2008,
+    "costUsd": 0.1918,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 44,
+    "cachedTokens": 599921,
+    "cacheCreationTokens": 26035,
+    "outputTokens": 4388,
+    "costUsd": 0.2292,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 66,
+   "cachedTokens": 848562,
+   "cacheCreationTokens": 42335,
+   "outputTokens": 6396,
+   "costUsd": 0.421,
+   "turns": 8,
+   "unknownTurns": 0
+  }
+ }
+}

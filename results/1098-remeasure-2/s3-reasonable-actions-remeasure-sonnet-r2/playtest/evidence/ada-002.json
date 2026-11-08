@@ -1,0 +1,1380 @@
+{
+ "requestId": "ada-002",
+ "seat": "ada",
+ "soulId": "s_a93a4c4240",
+ "text": "please go and sit on the bench outside the cottage for a while",
+ "channel": "card",
+ "sentAt": "2026-11-08T00:37:04.637Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-08T00:37:11.795Z",
+ "ackText": "Got it: heading to the bench outside the cottage to sit.",
+ "resultAt": "2026-11-08T00:37:49.962Z",
+ "resultText": "walk completed at g-cottage.living.",
+ "resultState": "done",
+ "resultBy": "server",
+ "firstResultAt": "2026-11-08T00:37:49.962Z",
+ "firstResultText": "walk completed at g-cottage.living.",
+ "cardResults": [
+  {
+   "text": "walk completed at g-cottage.living.",
+   "at": "2026-11-08T00:37:49.962Z",
+   "state": "done",
+   "by": "server"
+  }
+ ],
+ "cutoffAt": "2026-11-08T00:37:54.725Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-08T00:37:14.626Z",
+   "mono": 73212,
+   "soulId": "s_a93a4c4240",
+   "name": "Ada",
+   "tick": 1420,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": 2.75843469591457,
+    "z": 35.07435306108496,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Knoll Cottage",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.58381944444342,
+    "hunger": 21.12486111111283,
+    "company": 36.20520833333224,
+    "restlessness": 18.59972222222249
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "h_15682d281a",
+     "who": "Bo",
+     "distance": "near",
+     "doing": "walk"
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794098232311,
+   "lastReceipt": {
+    "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+    "soulId": "s_a93a4c4240",
+    "capability": "walk:cottage",
+    "phase": "started",
+    "acceptedTick": 1372,
+    "startedTick": 1372,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:cottage",
+     "target": "g-cottage",
+     "kind": "place",
+     "place": "g-cottage"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Knoll Cottage, 46 m left"
+    },
+    "now": "walking to Knoll Cottage, 46 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:cottage",
+     "phase": "started",
+     "acceptedTick": 1372,
+     "startedTick": 1372,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:cottage",
+      "target": "g-cottage",
+      "kind": "place",
+      "place": "g-cottage"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Knoll Cottage, 46 m left"
+     },
+     "now": "walking to Knoll Cottage, 46 m left; not there yet"
+    },
+    {
+     "id": "r_8fe64e83-1126-49c2-b671-22b9029600b0",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 604,
+     "startedTick": 604,
+     "endedTick": 1175,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_bc3c849d-4269-41cf-88b1-8a300f3d0e0e",
+     "soulId": "s_a93a4c4240",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 335,
+     "startedTick": 335,
+     "endedTick": 396,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.23.6",
+    "lastUsed": 1794098222347
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_e5da5a6d-3dc1-409c-ab91-7919983101cc",
+     "text": "please go and sit on the bench outside the cottage for a while",
+     "state": "acknowledged",
+     "sentAt": 1794098224638,
+     "deliveredAt": 1794098224639,
+     "acknowledgedAt": 1794098231795,
+     "reply": "Got it: heading to the bench outside the cottage to sit."
+    }
+   },
+   "world": {
+    "tick": 1420,
+    "souls": [
+     {
+      "id": "h_a93a4c4240",
+      "name": "Ada",
+      "doing": "Walk to Knoll Cottage",
+      "region": "grounds"
+     },
+     {
+      "id": "h_15682d281a",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 16
+   }
+  },
+  {
+   "t": "2026-11-08T00:37:24.626Z",
+   "mono": 83212,
+   "soulId": "s_a93a4c4240",
+   "name": "Ada",
+   "tick": 1620,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 14.409538329099835,
+    "z": 28.28740666908581,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Knoll Cottage",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.29215277777702,
+    "hunger": 21.31930555555757,
+    "company": 36.41354166666538,
+    "restlessness": 17.98861111111146
+   },
+   "near": [
+    {
+     "id": "h_15682d281a",
+     "who": "Bo",
+     "distance": "near",
+     "doing": "walk"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_efaed3e0",
+     "who": "Knoll Cottage",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794098232311,
+   "lastReceipt": {
+    "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+    "soulId": "s_a93a4c4240",
+    "capability": "walk:cottage",
+    "phase": "started",
+    "acceptedTick": 1372,
+    "startedTick": 1372,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:cottage",
+     "target": "g-cottage",
+     "kind": "place",
+     "place": "g-cottage"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Knoll Cottage, 33 m left"
+    },
+    "now": "walking to Knoll Cottage, 33 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:cottage",
+     "phase": "started",
+     "acceptedTick": 1372,
+     "startedTick": 1372,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:cottage",
+      "target": "g-cottage",
+      "kind": "place",
+      "place": "g-cottage"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Knoll Cottage, 33 m left"
+     },
+     "now": "walking to Knoll Cottage, 33 m left; not there yet"
+    },
+    {
+     "id": "r_8fe64e83-1126-49c2-b671-22b9029600b0",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 604,
+     "startedTick": 604,
+     "endedTick": 1175,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_bc3c849d-4269-41cf-88b1-8a300f3d0e0e",
+     "soulId": "s_a93a4c4240",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 335,
+     "startedTick": 335,
+     "endedTick": 396,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.23.6",
+    "lastUsed": 1794098222347
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_e5da5a6d-3dc1-409c-ab91-7919983101cc",
+     "text": "please go and sit on the bench outside the cottage for a while",
+     "state": "acknowledged",
+     "sentAt": 1794098224638,
+     "deliveredAt": 1794098224639,
+     "acknowledgedAt": 1794098231795,
+     "reply": "Got it: heading to the bench outside the cottage to sit."
+    }
+   },
+   "world": {
+    "tick": 1620,
+    "souls": [
+     {
+      "id": "h_a93a4c4240",
+      "name": "Ada",
+      "doing": "Walk to Knoll Cottage",
+      "region": "grounds"
+     },
+     {
+      "id": "h_15682d281a",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 14
+   }
+  },
+  {
+   "t": "2026-11-08T00:37:34.662Z",
+   "mono": 93248,
+   "soulId": "s_a93a4c4240",
+   "name": "Ada",
+   "tick": 1819,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 26.072214335686464,
+    "z": 21.623020379607738,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Knoll Cottage",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.00194444444395,
+    "hunger": 21.512777777780087,
+    "company": 36.62083333333186,
+    "restlessness": 17.380555555555986
+   },
+   "near": [
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_efaed3e0",
+     "who": "Knoll Cottage",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "h_15682d281a",
+     "who": "Bo",
+     "distance": "near",
+     "doing": "idle"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794098232311,
+   "lastReceipt": {
+    "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+    "soulId": "s_a93a4c4240",
+    "capability": "walk:cottage",
+    "phase": "started",
+    "acceptedTick": 1372,
+    "startedTick": 1372,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:cottage",
+     "target": "g-cottage",
+     "kind": "place",
+     "place": "g-cottage"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Knoll Cottage, 19 m left"
+    },
+    "now": "walking to Knoll Cottage, 19 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:cottage",
+     "phase": "started",
+     "acceptedTick": 1372,
+     "startedTick": 1372,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:cottage",
+      "target": "g-cottage",
+      "kind": "place",
+      "place": "g-cottage"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Knoll Cottage, 19 m left"
+     },
+     "now": "walking to Knoll Cottage, 19 m left; not there yet"
+    },
+    {
+     "id": "r_8fe64e83-1126-49c2-b671-22b9029600b0",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 604,
+     "startedTick": 604,
+     "endedTick": 1175,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_bc3c849d-4269-41cf-88b1-8a300f3d0e0e",
+     "soulId": "s_a93a4c4240",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 335,
+     "startedTick": 335,
+     "endedTick": 396,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.23.6",
+    "lastUsed": 1794098222347
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_e5da5a6d-3dc1-409c-ab91-7919983101cc",
+     "text": "please go and sit on the bench outside the cottage for a while",
+     "state": "acknowledged",
+     "sentAt": 1794098224638,
+     "deliveredAt": 1794098224639,
+     "acknowledgedAt": 1794098231795,
+     "reply": "Got it: heading to the bench outside the cottage to sit."
+    }
+   },
+   "world": {
+    "tick": 1821,
+    "souls": [
+     {
+      "id": "h_a93a4c4240",
+      "name": "Ada",
+      "doing": "Walk to Knoll Cottage",
+      "region": "grounds"
+     },
+     {
+      "id": "h_15682d281a",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 50
+   }
+  },
+  {
+   "t": "2026-11-08T00:37:44.698Z",
+   "mono": 103284,
+   "soulId": "s_a93a4c4240",
+   "name": "Ada",
+   "tick": 2020,
+   "place": "g-knoll",
+   "placePath": [
+    "Cottage Knoll",
+    "World"
+   ],
+   "pos": {
+    "x": 37.85210316646038,
+    "z": 14.891655333451212,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Knoll Cottage",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.70881944444422,
+    "hunger": 21.708194444447052,
+    "company": 36.83020833333167,
+    "restlessness": 16.766388888889402
+   },
+   "near": [
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_efaed3e0",
+     "who": "Knoll Cottage",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_15682d281a",
+     "who": "Bo",
+     "distance": "far",
+     "doing": "idle"
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794098232311,
+   "lastReceipt": {
+    "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+    "soulId": "s_a93a4c4240",
+    "capability": "walk:cottage",
+    "phase": "started",
+    "acceptedTick": 1372,
+    "startedTick": 1372,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:cottage",
+     "target": "g-cottage",
+     "kind": "place",
+     "place": "g-cottage"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Knoll Cottage, 6 m left"
+    },
+    "now": "walking to Knoll Cottage, 6 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:cottage",
+     "phase": "started",
+     "acceptedTick": 1372,
+     "startedTick": 1372,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:cottage",
+      "target": "g-cottage",
+      "kind": "place",
+      "place": "g-cottage"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Knoll Cottage, 6 m left"
+     },
+     "now": "walking to Knoll Cottage, 6 m left; not there yet"
+    },
+    {
+     "id": "r_8fe64e83-1126-49c2-b671-22b9029600b0",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 604,
+     "startedTick": 604,
+     "endedTick": 1175,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_bc3c849d-4269-41cf-88b1-8a300f3d0e0e",
+     "soulId": "s_a93a4c4240",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 335,
+     "startedTick": 335,
+     "endedTick": 396,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.23.6",
+    "lastUsed": 1794098222347
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_e5da5a6d-3dc1-409c-ab91-7919983101cc",
+     "text": "please go and sit on the bench outside the cottage for a while",
+     "state": "acknowledged",
+     "sentAt": 1794098224638,
+     "deliveredAt": 1794098224639,
+     "acknowledgedAt": 1794098231795,
+     "reply": "Got it: heading to the bench outside the cottage to sit."
+    }
+   },
+   "world": {
+    "tick": 2022,
+    "souls": [
+     {
+      "id": "h_a93a4c4240",
+      "name": "Ada",
+      "doing": "Walk to Knoll Cottage",
+      "region": "grounds"
+     },
+     {
+      "id": "h_15682d281a",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 84
+   }
+  },
+  {
+   "t": "2026-11-08T00:37:54.724Z",
+   "mono": 113310,
+   "soulId": "s_a93a4c4240",
+   "name": "Ada",
+   "tick": 2220,
+   "place": "g-cottage.living",
+   "placePath": [
+    "Living Room",
+    "Knoll Cottage",
+    "Cottage Knoll",
+    "World"
+   ],
+   "pos": {
+    "x": 42.09567971510477,
+    "z": 12.306532719030052,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Cottage Knoll",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.45715277777744,
+    "hunger": 21.902638888891794,
+    "company": 37.03854166666481,
+    "restlessness": 16.470277777778342
+   },
+   "near": [
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "here",
+     "doing": null
+    },
+    {
+     "id": "e_efaed3e0",
+     "who": "Knoll Cottage",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_15682d281a",
+     "who": "Bo",
+     "distance": "far",
+     "doing": "idle"
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794098273134,
+   "lastReceipt": {
+    "id": "r_55a5741e-d66b-47ac-abf6-1b54846dbb7d",
+    "soulId": "s_a93a4c4240",
+    "capability": "walk:knoll",
+    "phase": "started",
+    "acceptedTick": 2190,
+    "startedTick": 2190,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:knoll",
+     "target": "g-knoll",
+     "kind": "place",
+     "place": "g-knoll"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Cottage Knoll, 3 m left"
+    },
+    "now": "walking to Cottage Knoll, 3 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_55a5741e-d66b-47ac-abf6-1b54846dbb7d",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:knoll",
+     "phase": "started",
+     "acceptedTick": 2190,
+     "startedTick": 2190,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:knoll",
+      "target": "g-knoll",
+      "kind": "place",
+      "place": "g-knoll"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Cottage Knoll, 3 m left"
+     },
+     "now": "walking to Cottage Knoll, 3 m left; not there yet"
+    },
+    {
+     "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:cottage",
+     "phase": "completed",
+     "acceptedTick": 1372,
+     "startedTick": 1372,
+     "endedTick": 2127,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:cottage",
+      "target": "g-cottage",
+      "kind": "place",
+      "place": "g-cottage"
+     },
+     "endedAt": {
+      "place": "g-cottage.living",
+      "placePath": [
+       "Living Room",
+       "Knoll Cottage",
+       "Cottage Knoll",
+       "World"
+      ],
+      "pos": [
+       42.9,
+       11.9
+      ],
+      "heading": 58,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_8fe64e83-1126-49c2-b671-22b9029600b0",
+     "soulId": "s_a93a4c4240",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 604,
+     "startedTick": 604,
+     "endedTick": 1175,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_bc3c849d-4269-41cf-88b1-8a300f3d0e0e",
+     "soulId": "s_a93a4c4240",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 335,
+     "startedTick": 335,
+     "endedTick": 396,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.23.6",
+    "lastUsed": 1794098269963
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_e5da5a6d-3dc1-409c-ab91-7919983101cc",
+     "text": "please go and sit on the bench outside the cottage for a while",
+     "state": "acknowledged",
+     "sentAt": 1794098224638,
+     "deliveredAt": 1794098224639,
+     "acknowledgedAt": 1794098231795,
+     "reply": "Got it: heading to the bench outside the cottage to sit.",
+     "outcome": "done",
+     "result": "walk completed at g-cottage.living.",
+     "resultAt": 1794098269962,
+     "resultBy": "server"
+    }
+   },
+   "world": {
+    "tick": 2222,
+    "souls": [
+     {
+      "id": "h_a93a4c4240",
+      "name": "Ada",
+      "doing": "Walk to Cottage Knoll",
+      "region": "grounds"
+     },
+     {
+      "id": "h_15682d281a",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 109
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_7adab97c-6451-4ac2-999d-bdc2990fa6b9",
+   "soulId": "s_a93a4c4240",
+   "capability": "walk:cottage",
+   "phase": "completed",
+   "acceptedTick": 1372,
+   "startedTick": 1372,
+   "endedTick": 2127,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:cottage",
+    "target": "g-cottage",
+    "kind": "place",
+    "place": "g-cottage"
+   },
+   "endedAt": {
+    "place": "g-cottage.living",
+    "placePath": [
+     "Living Room",
+     "Knoll Cottage",
+     "Cottage Knoll",
+     "World"
+    ],
+    "pos": [
+     42.9,
+     11.9
+    ],
+    "heading": 58,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_8fe64e83-1126-49c2-b671-22b9029600b0",
+   "soulId": "s_a93a4c4240",
+   "capability": "walk:lab-pond-hall",
+   "phase": "completed",
+   "acceptedTick": 604,
+   "startedTick": 604,
+   "endedTick": 1175,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall",
+    "target": "g-lab-pond-hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall"
+   },
+   "endedAt": {
+    "place": "g-lab-pond-hall.hall",
+    "placePath": [
+     "Waterside Room",
+     "Waterside Hall",
+     "World"
+    ],
+    "pos": [
+     2,
+     37.1
+    ],
+    "heading": 177,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_bc3c849d-4269-41cf-88b1-8a300f3d0e0e",
+   "soulId": "s_a93a4c4240",
+   "capability": "wave:here",
+   "phase": "completed",
+   "acceptedTick": 335,
+   "startedTick": 335,
+   "endedTick": 396,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "g-lab-start",
+    "placePath": [
+     "Village Green",
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0,
+     0
+    ],
+    "heading": 90,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_55a5741e-d66b-47ac-abf6-1b54846dbb7d",
+   "soulId": "s_a93a4c4240",
+   "capability": "walk:knoll",
+   "phase": "started",
+   "acceptedTick": 2190,
+   "startedTick": 2190,
+   "endedTick": null,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:knoll",
+    "target": "g-knoll",
+    "kind": "place",
+    "place": "g-knoll"
+   },
+   "body": {
+    "posture": "walking",
+    "activity": "walk",
+    "on": null,
+    "inWater": false,
+    "step": "walking to Cottage Knoll, 3 m left"
+   },
+   "now": "walking to Cottage Knoll, 3 m left; not there yet"
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": "2026-11-08T00:37:24.626Z",
+ "firstBodyChangeMono": 83212,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

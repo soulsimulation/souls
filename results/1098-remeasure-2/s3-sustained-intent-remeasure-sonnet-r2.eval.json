@@ -1,0 +1,23 @@
+{
+ "run": "s3-sustained-intent-remeasure-sonnet-r2",
+ "status": "completed",
+ "arm": "65251c3aae72",
+ "evaluation": "<home>/souls-playtest/results/1098-remeasure-2/s3-sustained-intent-remeasure-sonnet-r2/evaluations/001-v3",
+ "measured": 20,
+ "unavailable": [
+  "ackSec",
+  "seatResultSec",
+  "unacked",
+  "walkMps",
+  "tickRate",
+  "coLocationRatio",
+  "G3-tick-rate"
+ ],
+ "questions": [
+  "errand-kept-through-burst:predeclared:unknown",
+  "cancel-not-resumed:predeclared:unknown",
+  "reasonable-carried-out:predeclared:unknown"
+ ],
+ "conflicts": 0,
+ "sourcesUnchanged": true
+}

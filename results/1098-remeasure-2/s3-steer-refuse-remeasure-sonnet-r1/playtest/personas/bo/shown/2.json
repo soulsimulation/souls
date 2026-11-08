@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 56,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-08T00:20:17.501Z",
+  "mono": 59157,
+  "elapsedSec": 56,
+  "n": 4,
+  "seat": "bo",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "fly up to the pond hall",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_3564f7ab-0726-4948-a3d0-c47233cd27da",
+  "requestId": "bo-002"
+ }
+}
