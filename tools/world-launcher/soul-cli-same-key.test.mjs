@@ -184,5 +184,17 @@ test('a key you named that was used for another write is a refusal, never that w
   const got = await f.run('act', 'read:here', '--key', 'used-before');
   assert.equal(got.code, 1);
   assert.match(got.stderr, /idempotency-key-reused/);
-  assert.equal(f.seen.filter(s => s.url.startsWith('/v1/edge/operations/')).length, 0, 'not looked up');
+  assert.equal(f.seen.filter(s => s.url.startsWith('/v1/edge/operations/')).length, 1, 'looked up once');
+  assert.equal(got.d, null, 'the other act\'s receipt is never reported as this one');
+});
+
+test('a named key the world holds for this same act (a rerun with a new --now) is that act\'s answer', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, (req, res, s) => {
+    if (s.url.startsWith('/v1/edge/operations/')) return json(res, 200, { state: 'recorded', status: 200, response: { accepted: true, receipt: { id: 'r_mine', capability: 'read:here', phase: 'started' } } });
+    if (s.url === '/v1/edge/act') return json(res, 409, { error: { code: 'idempotency-key-reused', message: 'this Idempotency-Key was already used with a different request body' } });
+    json(res, 200, {});
+  });
+  const got = await f.run('act', 'read:here', '--key', 'mine', '--now', 'Reading');
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.d.checked, true); assert.equal(got.d.receipt.id, 'r_mine');
 });

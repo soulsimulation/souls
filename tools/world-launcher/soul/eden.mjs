@@ -2185,8 +2185,11 @@ async function keyedWrite(path, body, { key: given, ref: givenRef, once = false 
   writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now() }]);
   const r = await call(path, { body: ref ? { ...body, clientRef: ref } : body, key, once });
   const settle = () => writePending(readPending().filter((x) => x.intent !== intent));
-  if (confirmedAnswer(r, !!given)) { settle(); return { r, key, ref, resent }; }
+  // a named key the world already holds: its own earlier act (same offered id) is this act's answer; another write's is not
+  const reused = !!given && r.status === 409 && codeOf(r.data) === "idempotency-key-reused";
+  if (confirmedAnswer(r, !!given) && !reused) { settle(); return { r, key, ref, resent }; }
   const found = await lookupWrite(path, key);
+  if (reused && !(once && found?.data?.receipt?.capability === body.capability)) { settle(); return { r, key, ref, resent }; }
   if (found) { settle(); clearSlowed(path); return { r: { ...r, ...found }, key, ref, resent, checked: true }; }
   return { r, key, ref, resent, once, unconfirmed: true };
 }
