@@ -57,7 +57,7 @@ export async function openExpandedLocalEdenV1({input,dataDir,worldId,port=4959,w
     const finiteFoodReader=!!foodDeliveryId||header?.rules_version.includes('+fd/1');
     const socialReader=social||!!header?.rules_version.includes('+social-eden/1');
     const {edenHistoryFactory}=await load('apps/server/src/eden-bootstrap.ts');
-    const factory=await edenHistoryFactory(db,worldId,{lifeV1:true,newcomerResourcesV1:true,sleepSnapshotV1:true,groundV1:true,lectureV1:true});
+    const factory=(await load('packages/engine-mars/src/index.ts')).soulsRepairReaderV1(await edenHistoryFactory(db,worldId,{lifeV1:true,newcomerResourcesV1:true,sleepSnapshotV1:true,groundV1:true,lectureV1:true}),{adopt:false});   // #1323: reads an adopted history
     host=new WorldHost(db,factory,header?.seed??cfg.worldSeed,cfg.snapshotEveryTicks,worldId,{durableClockV1:true});
     const boot=host.boot();
     if(approachRetention){if(!host.enableIntentApproachRetentionV1)throw Error('selected runtime needs native approach retention');await drive(host.enableIntentApproachRetentionV1());}
