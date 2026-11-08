@@ -45,7 +45,7 @@ async function probe(upAfterMs) {
   const code = await new Promise((yes) => child.on('exit', yes));
   clearInterval(t); o.close();
   const report = existsSync(join(out, 'report.json')) ? JSON.parse(readFileSync(join(out, 'report.json'), 'utf8')) : null;
-  return { code, log, bar: report?.bar };
+  return { code, log, bar: report?.bar, arrivalErrors: report?.arrivals.filter((a) => a.errorText || (a.status !== null && !(a.status >= 200 && a.status < 400))).length };
 }
 
 test('a page that answers 503 when the probe starts is retried, and the build it then shows is read: no false rollback', { timeout: 120_000 }, async () => {
@@ -54,7 +54,8 @@ test('a page that answers 503 when the probe starts is retried, and the build it
   assert.deepEqual(r.bar.rolledBack, [], r.log);
   assert.deepEqual(r.bar.notLoaded, [], r.log);
   assert.deepEqual(r.bar.builds, { 'desktop /w/eden/': `null -> ${BUILD}`, 'phone /w/eden/': `null -> ${BUILD}` });
-  assert.ok(r.bar.errorPagesBeforeReady >= 2, 'the starting 503s are reported');
+  assert.ok(r.bar.errorPagesBeforeReady >= 2, 'the starting 503s are reported apart');
+  assert.equal(r.bar.errorPages, r.arrivalErrors, 'only what fresh visitors saw counts against the release');
   assert.equal(r.code === 3, false, r.log);
 });
 

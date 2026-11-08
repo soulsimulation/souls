@@ -32,8 +32,8 @@
 // as rolled back. A watched page whose document did not load (a world that is down when the probe starts, the state a
 // fixing release starts from) is retried every --retry-s seconds (default 5), after READY too, and marked when it first
 // loads; one that never loads is `notLoaded`, one that loaded but never got a build-naming welcome is `noBuild`. Both
-// fail the visitor bar (exit 1) and neither is a rollback (#1414). Error pages before READY are reported
-// (errorPagesBeforeReady) and do not count against the release.
+// fail the visitor bar (exit 1) and neither is a rollback (#1414). A watcher's error pages before it is watched (READY,
+// or its first load) are reported (errorPagesBeforeReady) and do not count against the release; arrivals always count.
 //
 // Bar (G9): errorPages 0, every arrival loaded (document 2xx/3xx within 30 s), lost 0, unclean 0, every reconnect <= 5000 ms,
 // no page reloaded, watched >= --after-s after the release ended.
@@ -267,9 +267,11 @@ try {
 
 // ---------- verdict
 const drops = report.watchers.flatMap((w) => (w.drops ?? []).map((d) => ({ ...d, device: w.device, path: w.path })));
-const pageError = (e) => /\.html|\/$|\/\?/.test(e.url), sinceReady = (e) => readyAt !== null && e.at >= readyAt;
-const errorPagesBeforeReady = report.watchers.reduce((n, w) => n + w.errorText.filter((e) => !sinceReady(e)).length + w.errors5xx.filter((e) => pageError(e) && !sinceReady(e)).length, 0);
-const errorPages = report.watchers.reduce((n, w) => n + w.errorText.filter(sinceReady).length + w.errors5xx.filter((e) => pageError(e) && sinceReady(e)).length, 0)
+// A watcher's own error pages count from the moment it is watched (marked, at READY or when it first loads); before that
+// they are the state the release starts from, reported apart. Fresh arrivals always count: they are the visitors.
+const pageError = (e) => /\.html|\/$|\/\?/.test(e.url), watched = (w) => (e) => w.marked && e.at >= w.markAt;
+const errorPagesBeforeReady = report.watchers.reduce((n, w) => n + w.errors5xx.filter((e) => pageError(e) && !watched(w)(e)).length, 0);
+const errorPages = report.watchers.reduce((n, w) => n + w.errorText.filter(watched(w)).length + w.errors5xx.filter((e) => pageError(e) && watched(w)(e)).length, 0)
   + report.arrivals.filter((a) => a.errorText || (a.status !== null && !(a.status >= 200 && a.status < 400))).length;
 report.bar = {
   errorPages, errorPagesBeforeReady,
