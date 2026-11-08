@@ -131,6 +131,10 @@ Install `sim.caddy` and `sim-blobs.snippet` from `host-config/` (the snippet is 
 - serves `https://sim.eden.art` with `encode zstd gzip` and `X-Robots-Tag noindex`, sends `/worlds*` to the
   production port, imports the blobs handler, and sends everything else to the legacy port.
 
+That is the former topology. Since #1416 the sim.eden.art site is
+[`tools/world-launcher/deploy/caddy/sim-eden-art.caddy`](../../tools/world-launcher/deploy/caddy/sim-eden-art.caddy):
+a redirect to `soul.game` that keeps only the Clerk primary sign-in bridge.
+
 `/etc/caddy/Caddyfile` needs only `{ admin 127.0.0.1:2019 }` and `import sites/*.caddy`. Then
 `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`.
 

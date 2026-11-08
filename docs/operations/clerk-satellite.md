@@ -51,6 +51,25 @@ SDK synchronization parameters, world paths and pairing fragments. The page has 
 noindex headers, denies framing and supplies a CSP with a hash for its inline bootstrap and Clerk's documented
 script hosts, Clerk's blob workers and the primary edge's Cloudflare analytics script. Avoid adding a second, conflicting CSP at the proxy on this route. It never renders or logs tokens.
 
+## The primary origin redirects everything else
+
+`https://sim.eden.art` serves only the sign-in bridge now (#1416). Every other request goes permanently to
+`https://soul.game` with the same path and query: 301 for GET and HEAD, and 308 for other methods, so an old client's
+POST stays a POST. The site file is
+[`tools/world-launcher/deploy/caddy/sim-eden-art.caddy`](../../tools/world-launcher/deploy/caddy/sim-eden-art.caddy).
+Its `/sign-in` handler is the one above, pointed at `soul.game`. Install it in place of the old sim.eden.art site block
+on the host that serves that name, and leave every other site on that host alone. Then:
+
+```sh
+caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs   # PASS: the redirects, the bridge, the canonical pages
+```
+
+Then walk sign-in on the real URL: signed out on `soul.game`, sign in, return to the same world, reload.
+
+`https://sim.eden.art` stays in `CLERK_AUTHORIZED_PARTIES` and in the CDN's CORS origins. Clerk makes the primary
+session on this origin, and the bridge runs here. Removing it would break sign-in for every satellite.
+
 ## Verify before release
 
 Use an isolated mirror first, then record one uncut real-speed journey on the real satellite: sign in via the
