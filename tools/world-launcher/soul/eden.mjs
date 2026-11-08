@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.23.7";
+const VERSION = "2.24.2";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2039,6 +2039,10 @@ export function retryAfterMs(headers, data) {
 export const codeOf = (data) => data?.error?.code ?? data?.code ?? null;
 /** A designed refusal that says "later", not "no". */
 export const isBusy = (status, data) => (status === 503 || status === 429) && BUSY_CODES.has(codeOf(data));
+// #1328 / #1327 (P10): a world that could not answer (its ledger or clock failed) may still have taken a write. A read or
+// a keyed write waits it out like a busy world, with the same key, so the world acts at most once; an unkeyed write never.
+export const STALL_CODES = new Set(["unavailable", "world.unavailable", "world-unavailable", "world.stalled"]);
+export const isStalled = (status, data) => status >= 500 && STALL_CODES.has(codeOf(data));
 // Writes the world deduplicates by Idempotency-Key (apps/server/src/edge/events/idempotency.ts) — the only writes that retry.
 const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+)$/;
 const READ_POSTS = /^\/v1\/edge\/resolve$/;
@@ -2053,6 +2057,7 @@ const WAITING = {
   "soul.busy": "your previous request is still being answered", "soul.slow-down": "you are asking faster than the world answers",
   "rate-limited": "you are asking faster than the world answers",
   "client.rate": "too many requests are coming from this address", "account.rate": "this account's Souls are asking faster than the world allows",
+  unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
 const said = new Set();
 /** One calm line per distinct thing (stderr), never a stream. */
@@ -2074,6 +2079,7 @@ const REASON = {
   "rate-limited": "I asked faster than the world answers", "world.busy": "the world was too busy to answer in time",
   "world.crowded": "the world is crowded", "world.starting": "the world is still starting up",
   "lifecycle-pending": "the world is still finishing my arrival",
+  unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
 const slowedRun = [];   // this process's refusals: {ch, at, code, reason, ms, next}
 export const channelOf = (path) => (String(path).startsWith("/v1/edge/inbox/listen") ? "listen" : "requests");
@@ -2086,7 +2092,8 @@ export function refusalOf(status, data, ms) {
 export function readSlowed(ch, at = Date.now()) {
   try { const j = JSON.parse(readFileSync(SLOWED_FILES[ch], "utf8")); return Array.isArray(j) ? j.filter((x) => at - x.at < SLOWED_WINDOW_MS) : []; } catch { return []; }
 }
-/** next: "retry" (this CLI waits ms and asks again), "listen" (the listen loop does), "none" (given up; try again after ms). */
+/** next: "retry" (this CLI waits ms and asks again), "listen" (the listen loop does), "check" (a write the world did not
+ *  confirm: never repeated blind; the CLI looks it up by its key first), "none" (given up; try again after ms). */
 function noteRefusal(path, r, next, ms) {
   const ch = channelOf(path), e = { at: Date.now(), ...refusalOf(r.status, r.data, ms), next };
   slowedRun.push({ ch, ...e });
@@ -2108,7 +2115,8 @@ export function slowedSentence(list, ch = "requests", at = Date.now()) {
   const lead = ch === "listen" ? (n === 1 ? `My listen for your messages was just refused: ${why}` : `My listen for your messages was refused ${n} times in the last ${span}: ${why}`)
     : SLOW_CODES.has(last.code) ? (n === 1 ? `The world asked me to slow down${last.ms ? ` for ${secs(last.ms)}` : ""}: ${why}` : `The world asked me to slow down ${n} times in the last ${span}: ${why}`)
     : n === 1 ? `My last request was refused: ${why}` : `My last ${n} requests were refused in the last ${span}: ${why}`;
-  const tail = last.next === "listen" ? `still listening, next try ${when}` : last.next === "retry" ? `retrying ${when}` : `not retried; I can try once more ${when}`;
+  const tail = last.next === "listen" ? `still listening, next try ${when}` : last.next === "retry" ? `retrying ${when}`
+    : last.next === "check" ? "the world did not confirm it; the same command again checks first and sends the same key, so the world acts at most once" : `not retried; I can try once more ${when}`;
   return `${lead}; ${tail}.`;
 }
 /** Refused, then answered within this command: said once, in the past tense. */
@@ -2129,9 +2137,55 @@ export function slowedLine(at = Date.now()) {
   return parts.length ? parts.join(" ") : null;
 }
 
+// #1328 (with #1327's client half, P10): one intention, one key. In the Eden incident an act got 503 after the world had
+// taken it; the agent ran it again with a fresh key and the world made a second receipt that replaced the first. A keyed
+// write (act, say, converse, object act) now keeps its key in PENDING_FILE until the world confirms it, so a rerun of the
+// same write sends the same key (and, for act, the same clientRef: the world answers it with the first receipt). A write
+// that ends unconfirmed is looked up by its key before anything is advised. `--key <k>` names the key outright.
+export const PENDING_FILE = ".eden-pending.json", PENDING_MS = 10 * 60_000, PENDING_MAX = 20;
+const stable = (v) => Array.isArray(v) ? `[${v.map(stable).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
+/** What makes two writes the same intention: the route and the body, without the key, the public now line or the message it serves. */
+export function intentionOf(path, body) {
+  const { clientRef, idempotencyKey, now: _now, for: _for, forDefault, ...rest } = body ?? {};
+  return `${path.split("?")[0]} ${stable(rest)}`;
+}
+export function readPending(at = Date.now()) {
+  try { const j = JSON.parse(readFileSync(PENDING_FILE, "utf8")); return Array.isArray(j) ? j.filter((x) => x && typeof x.key === "string" && at - x.at < PENDING_MS) : []; } catch { return []; }
+}
+function writePending(list) {
+  try { if (list.length) writeFileSync(PENDING_FILE, JSON.stringify(list.slice(-PENDING_MAX)) + "\n", { mode: 0o600 }); else if (existsSync(PENDING_FILE)) unlinkSync(PENDING_FILE); } catch { /* a read-only folder: this run's key only */ }
+}
+/** A 2xx or 4xx is the world's answer; no answer, a 5xx, a 429 the CLI stopped waiting out, or a key reused with another body is not. */
+export const confirmedAnswer = (r) => r.status >= 200 && r.status < 500 && r.status !== 429 && !(r.status === 409 && codeOf(r.data) === "idempotency-key-reused");
+/** The world's record of a write by its key (`GET /v1/edge/operations/<key>`): {status, response} when it took, else null. */
+async function lookupWrite(path, key) {
+  const route = `POST ${path.split("?")[0]}`;
+  const r = await call(`/v1/edge/operations/${encodeURIComponent(key)}?route=${encodeURIComponent(route)}`, { retry: false, timeoutMs: 10_000, keepSlowed: true }).catch(() => null);
+  return r?.status === 200 && r.data?.state === "recorded" && Number.isInteger(r.data.status) && r.data.response ? { status: r.data.status, data: r.data.response } : null;
+}
+/** One keyed write. `ref`: the key is also the act's clientRef. Returns the answer (or the world's record of it) with
+ *  `key`, `resent` (this key came from an earlier unconfirmed run), `checked` (found by lookup) or `unconfirmed`. */
+async function keyedWrite(path, body, { key: given, ref = false } = {}) {
+  const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent);
+  const key = given ?? held?.key ?? randomUUID(), resent = !!held, sent = ref ? { ...body, clientRef: key } : body;
+  writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, at: held?.at ?? Date.now() }]);
+  const r = await call(path, { body: sent, key });
+  const settle = () => writePending(readPending().filter((x) => x.intent !== intent));
+  if (confirmedAnswer(r)) { settle(); return { r, key, resent }; }
+  const found = await lookupWrite(path, key);
+  if (found) { settle(); clearSlowed(path); return { r: { ...r, ...found }, key, resent, checked: true }; }
+  return { r, key, resent, unconfirmed: true };
+}
+/** A write the world did not confirm and has no record of: said plainly, never "try once more". Exit 75 (try later). */
+function unconfirmed(what, w) {
+  const code = codeOf(w.r.data) ?? (w.r.status ? `http-${w.r.status}` : "unreachable");
+  process.exitCode = 75;
+  return { unconfirmed: true, code, key: w.key, reason: `The world did not confirm this ${what} (${code}) and has no record of it yet. It may still have taken it: running the same command again checks first and sends the same key, so the world acts at most once.` };
+}
+
 // as: "soul" (default, the Soul's delegated token), "owner" (account routes under /v1/agent, same token),
 // "dev" (legacy self-made identity), "none". retry: false hands every answer back at once (listen runs its own loop).
-async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext } = {}) {
+async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext, key, keepSlowed = false } = {}) {
   const s = load();
   if (as === "soul") ({ path, body } = withNow(path, body));
   const url = need(s, "world", `Run: ${CLI} register <world-url>`) + path;
@@ -2141,15 +2195,16 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
   const headers = { "content-type": "application/json" };
   if ((as === "soul" || as === "owner") && s.token) headers.authorization = `Bearer ${s.token}`;
   if (as === "dev" && s.identity) headers.authorization = `Bearer dev:${s.identity}`;
-  if (cls === "keyed") headers["idempotency-key"] = randomUUID();   // one key for every try of this one write
+  if (cls === "keyed") headers["idempotency-key"] = key ?? randomUUID();   // one key for every try of this one write (#1328: and of its reruns)
   const t0 = Date.now();
   for (let failed = 0, busy = 0; ; ) {
     const r = await callOnce(url, { method, headers, body, timeoutMs, recoverRead });
     if (r.load && r.load !== "green") calm(`the world is under load (${r.load}); answers may be slow`);
     worldNote(r.data);
-    const refused = r.status === 429 || r.status === 503, waitOut = isBusy(r.status, r.data) && cls !== "none" && busy < RETRY.busyWaits;
+    const refused = r.status === 429 || r.status === 503, waitOut = (isBusy(r.status, r.data) || isStalled(r.status, r.data)) && cls !== "none" && busy < RETRY.busyWaits;
     const waitMs = waitOut ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null;
-    if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? "none", waitMs ?? r.retryAfterMs);
+    if (keepSlowed) { /* a lookup about an earlier refusal neither adds one nor clears it */ }
+    else if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? (cls === "keyed" ? "check" : "none"), waitMs ?? r.retryAfterMs);
     else if (r.status >= 200 && r.status < 500) clearSlowed(path);
     if (r.status === 0 && cls !== "none") {
       if (++failed < RETRY.tries) {
@@ -2835,8 +2890,8 @@ export function parseActionArgs(input) {
 // owner/social notification interrupts.
 const OFFER_ID = /^[a-z][\w-]*:\S+$/i;
 async function act(...argv) {
-  const { args, wait: waitFor, json, for: forArg } = waitOption(argv);
-  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--json]');
+  const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
+  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
   const parsed = parseActionArgs(args);
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
     const r = ok(await call("/v1/edge/resolve", { body: parsed }), "resolve").resolve;
@@ -2847,7 +2902,7 @@ async function act(...argv) {
       return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}) };
     }
   }
-  const body = { ...parsed, strict: true, clientRef: randomUUID() };
+  const body = { ...parsed, strict: true };
   // D3: the owner message this act serves; the world writes its result line when the act ends, unless you write one first.
   // D3b (cloud fix-r3 trio tam-003: a later walk closed "walk with Mira" as Done): by default only the first act the world
   // accepts after an ack, within IMPLICIT_FOR_MS of it, serves that message; later acts serve one only with --for <id>.
@@ -2856,15 +2911,17 @@ async function act(...argv) {
   // the default serves the next act too (within IMPLICIT_FOR_MS of this one).
   const s = load(), implicit = forArg === undefined && s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS;
   const forId = forArg === "none" ? undefined : forArg ?? (implicit ? s.lastAcked : undefined);
-  let r = await call("/v1/edge/act", { body: forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body });
-  if (implicit && r.status === 400 && /owner message/.test(r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); r = await call("/v1/edge/act", { body }); }
-  const d = ok(r, "act");
+  // #1328: the key is the clientRef too, kept until the world confirms the act, so a rerun is answered with the first receipt
+  let w = await keyedWrite("/v1/edge/act", forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body, { key, ref: true });
+  if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { ref: true }); }
+  if (w.unconfirmed) return unconfirmed("act", w);
+  const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   if (!d.accepted) {
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}) };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
@@ -2926,7 +2983,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
@@ -2941,16 +2998,22 @@ export function brief(out) {
   return o;
 }
 
+/** --key <k>: the world's limits for an Idempotency-Key and a clientRef (1 to 100 printable characters, no spaces). */
+export function keyArg(k) {
+  if (typeof k !== "string" || !/^[\x21-\x7e]{1,100}$/.test(k)) throw new Error("--key takes 1 to 100 printable characters, no spaces");
+  return k;
+}
 function waitOption(argv) {
   const args = [];
-  let wait = 0, json = false, forId;
+  let wait = 0, json = false, forId, key;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--wait") { wait = /^\d+$/.test(argv[i + 1] ?? "") ? Number(argv[++i]) : 60; }
     else if (argv[i] === "--json") json = true;
     else if (argv[i] === "--for") forId = argv[++i];
+    else if (argv[i] === "--key") key = keyArg(argv[++i]);
     else args.push(argv[i]);
   }
-  return { args, wait, json, for: forId };
+  return { args, wait, json, for: forId, key };
 }
 
 async function resolve(...args) {
@@ -3022,12 +3085,15 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   return out;
 }
 
-// say "<text>" [--for <message-id>]: with --for, the speech is what the owner asked for, so it closes that message too.
-async function say(...words) {
+// say "<text>" [--for <message-id>] [--key <k>]: with --for, the speech is what the owner asked for, so it closes that message too.
+async function say(...input) {
+  const k = input.findIndex((w, i) => w === "--key" && i === input.length - 2), key = k < 0 ? undefined : keyArg(input[k + 1]), words = k < 0 ? input : input.slice(0, k);   // only a trailing --key: "--key" inside speech is words
   const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>" [--for <message-id>]');
-  const said = clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+  if (!text) throw new Error('usage: say "<text>" [--for <message-id>] [--key <k>]');
+  const w = await keyedWrite("/v1/edge/say", { text: text.slice(0, 500) }, { key });
+  if (w.unconfirmed) return unconfirmed("speech", w);
+  const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
   return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
 }
 
@@ -3044,13 +3110,16 @@ async function converse(op, arg, ...text) {
   else if (op === "say") body = { op, conversation: arg, text: text.join(" ") };
   else if (["accept", "decline", "leave", "ask"].includes(op)) body = { op, conversation: arg };
   else throw new Error(usage);
-  return clean(ok(await call("/v1/edge/converse", { body }), "converse"));
+  const w = await keyedWrite("/v1/edge/converse", body);
+  return w.unconfirmed ? unconfirmed("conversation step", w) : { ...clean(ok(w.r, "converse")), ...(w.checked ? { checked: true } : {}) };
 }
 
 async function object(id, action, params) {
   if (!id) throw new Error("usage: object <objectId> [action] [params-json]");
   if (!action) return clean(ok(await call(`/v1/edge/objects/${encodeURIComponent(id)}`), "object"));
-  const d = clean(ok(await call(`/v1/edge/objects/${encodeURIComponent(id)}/act`, { body: { action, params: params ? JSON.parse(params) : {} } }), "object"));
+  const w = await keyedWrite(`/v1/edge/objects/${encodeURIComponent(id)}/act`, { action, params: params ? JSON.parse(params) : {} });
+  if (w.unconfirmed) return unconfirmed("object act", w);
+  const d = { ...clean(ok(w.r, "object")), ...(w.checked ? { checked: true } : {}) };
   if (d.receipt?.id) save({ lastReceipt: d.receipt.id, lastActAt: now() });
   return d;
 }
@@ -4137,8 +4206,9 @@ memory    memory <words>   remember --person|--place <id|name> "<note>"   rememb
 look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>" [--for id]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+          say "<text>" [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+          (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
 owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
