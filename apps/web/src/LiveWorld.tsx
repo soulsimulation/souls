@@ -1047,7 +1047,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(warmLayer===2){warmLayer=0;const done=()=>{programsPending=false;arrivalMark('programs-linked');};void compileInitialPrograms().then(done,done);}else if(warmLayer===1)warmLayer=2;  // compiled on the next frame, not in the update's task  // no-ops unless this is a new (entity) world
       if(!holdDraw&&shown.current.take)entityLayer.drawHandActuators(shown.current.entities,shown.current.tick,shown.current.take.dt);
       navigation?.update(step);
-      rts.update(step);
+      rts.update(step);touchFree.sync();
       hover.update(now);
       if(soulFlight){
         const flight=soulFlight,id=s.conn.replica.souls.get(flight.soulId)?.entityId,q=id?at.entities[id]?.p:null;

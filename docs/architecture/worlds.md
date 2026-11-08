@@ -42,7 +42,9 @@ view spawns a floating stick that walks the eye; one finger elsewhere looks in p
 between the fingers, a two-finger vertical drag rises or lowers, and a double-tap flies there. Each gesture feeds the
 existing `WorldRtsCamera` path (WASD, Q/E, right-drag, wheel, double-click), so the same guard holds. A finished touch
 look always commits its new pivot, kept within that guard's rectangle. Follow and Broadcast keep OrbitControls' touch
-orbit and pinch.
+orbit and pinch. While the stick is available, a faint dashed ring marks its home in the lower left (#1387): a drag from
+the ring moves, and a drag anywhere else turns. The ring is hidden while the floating stick is up, and in Follow and
+Broadcast, where no stick exists. The first-run hint uses the same words.
 On a touch screen, one tap on a Soul's body or name plate follows it at once, through the same `flyToSoul` glide as the
 card's Follow button; the Soul's card collapses to a bottom chip (`SoulChip.tsx`: name, status line, Card). While
 following, a fast one-finger sideways flick (`touch/soul-swipe.ts`: over 60 px, under 400 ms) goes to the next (left)
