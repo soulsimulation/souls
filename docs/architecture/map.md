@@ -303,7 +303,7 @@ the ≤ 140-character `now` line (`soul_now_v1`, outside the log) and receipts. 
 feed only the *central* `Brain`. A continuity runtime would plug in at the CLI (`client-memory.mjs`, `client-living.mjs`)
 and read `boot` + `here`, not into the world process.
 
-**CLI.** `eden-agent.mjs` (v1.9.19) maps about forty commands (now, look, listen, here, observe, capabilities, act,
+**CLI.** `eden-agent.mjs` (v1.9.21) maps about forty commands (now, look, listen, here, observe, capabilities, act,
 resolve, say, converse, object, wait, receipt, plan, events, view, travel, live, register, approval, pair-soul, …) onto
 the `EDGE` route table (`eden-agent.mjs:45`); `live` spawns the `claude` CLI (codex or ollama as alternatives). It is
 dependency-free and does not import `@souls/protocol`.
