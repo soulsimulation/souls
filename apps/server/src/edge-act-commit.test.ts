@@ -115,3 +115,23 @@ test('an ordinary act is unchanged: accepted, one receipt, a newer act replaces 
   const rows = w.rows(); assert.equal(rows.length, 2); assert.equal(rows[0].phase, 'replaced'); assert.ok(open(rows[1].phase), rows[1].phase);
   assert.equal(b.data.receipt.id, rows[1].id);
 });
+
+test('T5: a plan step whose act is pending waits to start again; a hand-off lost after the 202 never leaves it running on a receipt that does not exist', async t => {
+  const w = await world(t), was = process.env.SIM_ACT_COMMIT_WAIT_MS, host = w.f.host as any;
+  process.env.SIM_ACT_COMMIT_WAIT_MS = '150'; t.after(() => { if (was === undefined) delete process.env.SIM_ACT_COMMIT_WAIT_MS; else process.env.SIM_ACT_COMMIT_WAIT_MS = was; });
+  const made = await w.send('/v1/edge/plan', {steps: [{do: 'read:here'}]});
+  assert.equal(made.status, 200, JSON.stringify(made.data));
+  const step = async () => (await w.send('/v1/edge/plan')).data.plan;
+  let plan: any;
+  for (let i = 0; i < 40; i++) { plan = await step(); if (JSON.stringify(plan).includes('starting')) break; await new Promise(r => setTimeout(r, 50)); }
+  assert.equal(plan.steps[0].status, 'starting', JSON.stringify(plan)); assert.equal(plan.steps[0].receipt, undefined, 'no receipt that may never exist');
+  // the hand-off is lost (the clock failed at its drain, or a restart dropped the queue): nothing is written
+  for (const q of host.queue.splice(0)) q.reject?.(new Error('hand-off lost (test)'));
+  await turn(); assert.equal(w.rows().length, 0);
+  // the clock runs again: the step's retry acts afresh and runs on a real receipt
+  const until = Date.now() + 12_000;
+  while (Date.now() < until && !(w.rows().length && (await step()).steps[0].status === 'running')) { w.f.host.drainInputs(); await new Promise(r => setTimeout(r, 100)); }
+  plan = await step(); const rows = w.rows();
+  assert.equal(rows.length, 1, JSON.stringify(rows)); assert.equal(plan.steps[0].status, 'running', JSON.stringify(plan));
+  assert.equal(rows[0].capability, 'read:here');
+});

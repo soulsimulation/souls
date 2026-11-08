@@ -233,8 +233,9 @@ Its receipt row, the older open receipts it replaces and its decision event comm
 so either all exist or none do. A world whose clock has failed answers `503 world.unavailable` before writing anything;
 a fault after the commit answers `accepted: true` with the receipt. An act handed over while the clock then stops
 answers **HTTP 202** `{accepted: true, pending: true, receipt: {id, capability, phase: 'pending'}}`:
-`GET /v1/edge/receipts/:id` answers that phase until the row exists, a retry with the same `clientRef` gets the same
-answer (never a second act), and the idempotency table does not keep a 202.
+`GET /v1/edge/receipts/:id` answers that phase until the row exists, a retry with the same `clientRef` (or the same bare
+`Idempotency-Key`, which names the act when no `clientRef` is sent) gets the same answer, never a second act, and the
+idempotency table does not keep a 202. Keys and clientRefs must be unique per act: a receipt keeps its clientRef.
 
 | Route | Purpose |
 |---|---|

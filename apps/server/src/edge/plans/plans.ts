@@ -249,13 +249,14 @@ export class Plans {
       let out: Record<string, unknown>;
       try { out = await this.actor.act(soul, input); }
       catch (e) {
-        // #1327: handed to the world, not recorded yet: the step runs on that receipt id (a retry would be the same act)
-        if (e instanceof ActPending) out = e.body as unknown as Record<string, unknown>; else {
+        // #1327: handed to the world, not recorded yet. Try again later with the same clientRef (not counted as a fault): it
+        // is answered pending again, with the committed receipt once it exists, or acts afresh if the hand-off was lost.
+        if (e instanceof ActPending) { s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p); return; }
         if (e instanceof EdgeError && e.status < 500 && e.status !== 429) { this.busy.delete(p.id); return this.stepFailed(p, e.code, e.message); }
         s.state.transient++; s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p);
         if (s.state.transient > TRANSIENT_MAX) { this.busy.delete(p.id); return this.stepFailed(p, 'plan.unavailable', 'The world could not take this step after repeated tries.'); }
         return;
-      }}
+      }
       if (p.state !== 'running' || p.steps[p.current] !== s) return;          // the plan changed while acting
       if (out.accepted !== true) {
         const code = String(out.code ?? 'refused'), reason = String(out.reason ?? '');
