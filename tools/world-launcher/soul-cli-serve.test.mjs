@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REFLEX_EVERY_MS, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
+import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -966,22 +966,28 @@ test('#476: an ordinary wait still returns the world\'s answer through serve', a
 const faces = (w) => w.bodies.filter((b) => String(b.capability).startsWith('face:'));
 
 test('#1345 pure: whom the reflex turns to, and when not', () => {
-  const env = { kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' } }, at = 1_000_000;
+  const at = 1_000_000, env = { kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, at: new Date(at).toISOString() };
   assert.deepEqual(reflexFor({}, env, { me: 's_ada', at }), { soulId: 's_bo', name: 'Bo' });
   assert.equal(reflexFor({}, env, { me: 's_ada', at, off: true }).skip, 'off');
   assert.equal(reflexFor({}, env, { me: 's_bo', at }).skip, 'not-a-soul', 'never its own speech');
   assert.equal(reflexFor({}, { kind: 'speech.to-me', about: { name: 'a sign' } }, { me: 's_ada', at }).skip, 'not-a-soul');
   assert.equal(reflexFor({}, { ...env, kind: 'speech.ambient' }, { me: 's_ada', at }).skip, 'not-a-soul');
-  const st = {};
-  assert.equal(noteAttention(st, 'look:s_cy', at), true); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 9_000 }).skip, 'own-attention');
-  assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 10_001 }).soulId, 's_bo', 'a look holds 10 s');
-  noteAttention(st, 'face:s_cy', at); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 29_000 }).skip, 'own-attention', 'a face holds 30 s');
-  assert.equal(noteAttention(st, 'walk:mill', at), false, 'a body act is not attention');
-  noteAttention(st, 'auto-face:off', at); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 }).skip, 'auto-face-off');
-  noteAttention(st, 'auto-face:on', at); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 }).soulId, 's_bo');
-  st.reflexed = [{ soulId: 's_bo', t: at + 60_000 }];
-  assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 + REFLEX_EVERY_MS - 1 }).skip, 'recent');
-  assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 + REFLEX_EVERY_MS }).soulId, 's_bo');
+  assert.equal(reflexFor({}, env, { me: 's_ada', at: at + 11_000 }).skip, 'old', 'speech replayed after a reconnect');
+  assert.equal(reflexFor({}, env, { me: 's_ada', at, inFlight: 1 }).skip, 'own-attention', 'an agent look on its way');
+  const look = { channel: 'attention', receipt: { capability: 'look:s_cy' }, chosen: { holdsFor: '10s' } };
+  const turnTo = { channel: 'attention', receipt: { capability: 'turn:eden-bandstand' }, chosen: {} };
+  let st = {};
+  assert.equal(noteAttention(st, look, at), true); assert.equal(attentionHeld(st, { at: at + 9_000 }), 'own-attention'); assert.equal(attentionHeld(st, { at: at + 10_001 }), null, 'a look holds what the world says');
+  st = {}; noteAttention(st, turnTo, at); assert.equal(attentionHeld(st, { at: at + 20_000 }), 'own-attention', 'a turn to a thing holds 30 s');
+  st = {}; noteAttention(st, { channel: 'attention', receipt: { capability: 'turn:270' }, chosen: {} }, at); assert.equal(attentionHeld(st, { at: at + 10_001 }), null, 'a heading turn holds 10 s');
+  st = {}; noteAttention(st, { channel: 'attention', receipt: { capability: 'look:x' }, chosen: { holdsFor: '5m' } }, at); assert.equal(attentionHeld(st, { at: at + 299_000 }), 'own-attention', 'a long look');
+  assert.equal(noteAttention(st, { channel: 'body', receipt: { capability: 'walk:mill' } }, at), false, 'a body act is not attention');
+  noteAttention(st, { channel: 'none', receipt: { capability: 'auto-face:off' } }, at); assert.equal(attentionHeld(st, { at: at + 400_000 }), 'auto-face-off');
+  noteAttention(st, { channel: 'none', receipt: { capability: 'auto-face:on' } }, at); assert.equal(attentionHeld(st, { at: at + 400_000 }), null);
+  assert.deepEqual([holdMs('30s'), holdMs('5m'), holdMs('1h2m'), holdMs(''), holdMs('soon')], [30_000, 300_000, 3_720_000, null, null]);
+  st = { reflexed: [{ soulId: 's_bo', t: at }] };
+  assert.equal(reflexFor(st, { ...env, at: undefined }, { me: 's_ada', at: at + REFLEX_EVERY_MS - 1 }).skip, 'recent');
+  assert.equal(reflexFor(st, { ...env, at: undefined }, { me: 's_ada', at: at + REFLEX_EVERY_MS }).soulId, 's_bo');
 });
 
 test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, through face:, and the agent still hears it', async (t) => {
@@ -1012,10 +1018,6 @@ test('#1345 A2/A3/A5: no reflex over the agent\'s own look, after auto-face:off,
   w.say('Ada?');
   await sleep(600);
   assert.equal(faces(w).length, 0, 'the agent\'s own look holds');
-  await w.cli('act', 'auto-face:off');
-  w.say('Ada, after the look?');
-  await sleep(600);
-  assert.equal(faces(w).length, 0, 'auto-face off');
   const w2 = await world(t);
   await w2.cli('serve', '--no-reflex');
   await until(() => w2.streams > 0);
@@ -1030,4 +1032,27 @@ test('#1345 A2/A3/A5: no reflex over the agent\'s own look, after auto-face:off,
   assert.equal(faces(w2).length, 1, 'a refused reflex is never retried');
   const p = await w2.cli('pending');
   assert.deepEqual(p.json.faced.map(({ accepted, code }) => [accepted, code]), [[false, 'soul.not-in-sight']]);
+});
+
+test('#1345 A2: a reflex queued behind the agent\'s own look is dropped when its turn comes', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  await until(() => w.streams > 0);
+  w.busyNext = 2;   // the look waits out soul.busy inside serve while the speech arrives
+  const looking = w.cli('act', 'look:s_cy');
+  await sleep(20);
+  w.say('Ada?');
+  await looking;
+  await sleep(600);
+  assert.equal(faces(w).length, 0, 'the agent\'s look won');
+});
+
+test('#1345 A5: the flags are checked before anything is saved', async (t) => {
+  const w = await world(t);
+  const bad = await w.cli('serve', '--no-reflex', '--bogus');
+  assert.notEqual(bad.code, 0);
+  assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, undefined, 'nothing saved on a usage error');
+  const st = await w.cli('serve', '--status', '--no-reflex');
+  assert.equal(st.code, 0, st.err);
+  assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, false);
 });
