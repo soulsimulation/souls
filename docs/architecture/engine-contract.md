@@ -158,6 +158,38 @@ is ignored for a world that has adopted. A factory that already has the rules (`
 - `step().refusals` reports each one. The host logs it as a `rules` event from `world:refusal`. Replay reads those only to
   compare the count, and a difference is reported, not fatal.
 
+**Hold or settle** (`hold-settle/1`, #1334). This is a logged runtime policy (cfg `refusalSettleV1`), and every world
+adopts it at boot after `body-step-guard/1`. It acts only under the repair rules. A history from before its event
+replays as it was recorded. Under it, rung 1 answers each violation on its own:
+
+- **Hold.** The moves are undone as above, and the refusal row is written, but the programme is not stopped. The third
+  refusal of one programme within 5 s fails it with `world.refused:<rule>`, as one refusal does without the rule. It no
+  longer goes to the host.
+- **Settle.** Some bodies can't be answered by an undo:
+  - a body with no copy;
+  - a body whose copied pose fails `bodyStandsClear`;
+  - a moved rider or climber;
+  - a body named by `collision.human-static` or `collision.human-human` without having moved (for `human-human`,
+    every named body but the first by id);
+  - a rider named by a `carrier.*` rule.
+
+  Each of these bodies is settled in that tick:
+  1. its programme ends with `world.settled:<rule>`;
+  2. whatever action holds it is force-finished, and a held load is set down where it is (the `engine.action-threw`
+     rule);
+  3. its seat, door turn and ride mark are freed;
+  4. it stands at the nearest pose the ring search accepts. That search uses body-step-guard/1's validator
+     (`bodyStandsClear`, and keeping apart from other bodies), which is why the policy is adopted after the guard.
+
+  Every body's spot is found before anything changes, so a settle places all its bodies or none. If one can't be
+  placed, nothing is moved or ended, and the violation goes to the host as it was.
+
+  The row has `relocated: true` and the poses, so the Soul is told. Settle replaces the relocation exception above: it
+  is the one way the world moves a body without the body walking there.
+- **Still for the host, alone:** a rule outside these classes, a body on a build programme, `human.riding`, `human.on`,
+  a sleeping body, and a settle with any body no ring search can place. These are no longer a reason to send the whole tick: every
+  other violation of that tick is still held, failed or settled.
+
 ### The ladder
 
 1. **Refuse** (above), inside `Engine.step`.
