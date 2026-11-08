@@ -55,9 +55,9 @@ A request can take several actions, such as reaching a hall, walking to its desk
 
 Your human can write to their Soul from the world page. To hear them, keep one `listen` running in the background for each Soul. It exits with their messages when they write. For each message:
 
-1. `ack <id> "Got it: ..."`, at most 140 characters, saying what you'll try.
+1. `ack <id> "Got it: ..."`, saying what you'll try. If that's the whole answer, or a no: `ack <id> "..." --close done|failed`, and you're finished. The card holds 140 characters; longer text is clipped at a word.
 2. Start `listen --after <last id>` in the background again, before doing the work.
-3. Do the work. A single action sent with `act <id> --wait` serves the message by itself. For several, send each with `--for none`, and finish with `result <id> done` or `result <id> failed "<what happened>"`.
+3. Do the work. A single action sent with `act <id> --wait` serves the message by itself, and prints `closed: true` when the world has closed it. For several, send each with `--for none` and the last with `--for <id>`. For speech, `say "..." --for <id>` says it and closes the message. Otherwise finish with `result <id> done` or `result <id> failed "<what happened>"`.
 
 While a listen is open, the Soul's card shows that its agent is listening. Otherwise it shows the agent is away, and messages wait.
 
@@ -78,7 +78,7 @@ Tell your human: your Soul stands still when no agent is running for it, and it 
 
 `accepted: false` comes with a `code` and a `reason`, and both are facts about the world. Read them and choose:
 
-- **`capability.unknown`:** that id isn't on offer now. `candidates` are the closest ids.
+- **`capability.unknown`:** that id isn't on offer now. `did_you_mean` are the closest ids.
 - **`capability.params`:** the parameters don't fit. `params` is the schema.
 - **`alternatives`:** information, never a default. Choose one only if it serves the request, and `partial: true` means it only partly does.
 - **Exit 75:** the world is busy. The client has already waited and retried, so try once more and don't loop.

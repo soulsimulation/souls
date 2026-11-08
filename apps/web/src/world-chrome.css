@@ -304,3 +304,4 @@ canvas[data-pointer-focus]:focus{outline:none}
 .touch-hints svg{width:40px;height:40px}
 @media (prefers-reduced-motion:reduce){.navbar-popover.navbar-sheet{animation:none}.touch-hints{transition:none}}
 .camera-help-scrim{padding:max(16px,var(--sa-t)) max(16px,var(--sa-r)) max(16px,var(--sa-b)) max(16px,var(--sa-l))}  /* #893: the help dialog clears the notch and home indicator */
+#boot-arrival:not([data-fill="true"]) .arrival-disc{transition:transform .5s ease-out}

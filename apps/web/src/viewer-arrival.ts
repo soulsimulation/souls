@@ -58,3 +58,27 @@ export function arrivalProgress(initial: InitialWorldProgress | null | undefined
 export function assetDownloadProgress(d: { loaded: number; failed: number; total: number; pending: number } | null | undefined): number | null {
   return d && d.pending > 0 && d.total > 0 ? Math.min(1, Math.max(0, (d.loaded + d.failed) / d.total)) : null;
 }
+
+/** #1266: the arrival's one progress, 0..1, shown by the bar and by the white light's radius alike. The page's own code
+ *  is its first share, counted in bytes by the first paint's boot light (index.html) up to STARTED; then the world's
+ *  data arriving (WORLD_DATA); the download in bytes then takes it to
+ *  BYTES_SHARE; the world's preparation and its first frame take it to FIRST_FRAME; 1 only once the world is drawn (the
+ *  card has gone). Never 1 while the world is still being prepared. */
+export const STARTED = 0.12, WORLD_DATA = 0.15, BYTES_SHARE = 0.85, PREPARING = 0.9, FIRST_FRAME = 0.95;
+/** The download's part of the arrival, for a fraction of its bytes (the first paint's boot light uses it too). */
+export const downloadShare = (d: number) => WORLD_DATA + (BYTES_SHARE - WORLD_DATA) * Math.min(1, Math.max(0, d));
+export function arrivalFraction(o: {
+  card: boolean; bytes: { loaded: number; total: number; known: boolean }; initial: InitialWorldProgress | null | undefined;
+  downloads?: { loaded: number; failed: number; total: number; pending: number } | null; arriving: boolean;
+}): number {
+  if (!o.card) return 1;
+  const stage = o.initial?.stage;
+  const download = o.bytes.known && o.bytes.total > 0 ? o.bytes.loaded / o.bytes.total
+    : stage === 'downloading' ? arrivalProgress(o.initial) : !o.initial && o.arriving ? assetDownloadProgress(o.downloads) : null;
+  // before any bytes are measurable: the page's code is running; then the world's data has come (its gate exists)
+  let f = download === null ? (o.initial || !o.arriving ? WORLD_DATA : STARTED) : downloadShare(download);
+  // then two steps the page can see: the world is being built from what arrived, and its first frame is being drawn
+  if (stage === 'preparing') f = Math.max(f, PREPARING);
+  if (stage === 'first-frame') f = Math.max(f, FIRST_FRAME);
+  return Math.min(FIRST_FRAME, f);
+}

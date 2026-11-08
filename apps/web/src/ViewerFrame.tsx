@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
-import { arrivalProgress, assetDownloadProgress, heldLabel, initialPending } from './viewer-arrival.ts';
+import { arrivalFraction, heldLabel, initialPending } from './viewer-arrival.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
@@ -107,9 +107,8 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // and is full once the world is ready. Without a byte total yet, the older measures stand in.
   const bytes = useSyncExternalStore(assetBytes.subscribe.bind(assetBytes), () => assetBytes.snapshot());
   // new worlds learn their total from the snapshot a moment after the first downloads start: no bar until then
-  const inBytes = bytes.known && bytes.total > 0, byByte = card && inBytes;
-  const measured = !card ? (arrivalShown ? 1 : null) : initial && (initial.stage === 'preparing' || initial.stage === 'first-frame') ? 1
-    : byByte ? bytes.loaded / bytes.total : bytes.total > 0 && !bytes.known ? null : initial ? arrivalProgress(initial) : arriving ? assetDownloadProgress(state?.assetDownloads) : null;
+  // #1266: one progress for the bar and the light: bytes, then preparation, and 100% only once the world is drawn
+  const measured = !card ? (arrivalShown ? 1 : null) : arrivalFraction({ card, bytes, initial, downloads: state?.assetDownloads, arriving });
   const peak = useRef(0);  // a file fetched again after an abort restarts its count: the bar (and its MB) hold, never step back
   if (!card) peak.current = 0;
   const progress = measured === null ? null : card ? (peak.current = Math.max(peak.current, Math.min(1, measured))) : measured;
@@ -186,7 +185,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   </div>;
   return <>
     {!arriving && <TouchHints />}
-    {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={`Loading ${worldName ?? 'the world'}`} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
+    {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={worldName ?? ''} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
     {followCue && !arriving && <div className="viewer-follow-hint" role="status" aria-live="polite" data-cue={followCue}>{followCue === 'follow'
       ? coarse ? <>Following <b>{followName ?? 'a Soul'}</b> · swipe for the next Soul · tap the ground to take over</> : <>Following <b>{followName ?? 'a Soul'}</b> · drag to look around, scroll to zoom · press <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to look around freely</>
       : <>Your camera · <b>Return to Broadcast</b> is top left</>}</div>}

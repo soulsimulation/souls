@@ -44,6 +44,8 @@ export type VocabContext = {
 export type VocabResult =
   | {kind: 'exact'; cap: EdgeCapability}
   | {kind: 'alias'; cap: EdgeCapability; note: string; params?: Record<string, unknown>;
+    /** #849: words that name exactly one seat: a dry run answers with it, an act asks for its id. */
+    oneSeat?: true;
     /** RESOLVE (2026-10-21): the target words named no offered thing by its own name, only a place whose description lists
      *  them ("go to the horse": a lawn "with ... a horse"): a host may offer a walk to the nearest thing so named instead. */
     seek?: string[];

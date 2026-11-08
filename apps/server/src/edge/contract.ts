@@ -60,5 +60,8 @@ export type EdgeDeps = {host: WorldHost; db: Db; souls: Souls; build?: string; s
     soulPresence?(soulId: string): {listening: boolean; at: number | null}; onSoulListen?(listener: (soulId: string) => void): void}};
 export class EdgeError extends Error {readonly status: number; readonly code: string; readonly extra?: Record<string, unknown>; constructor(status: number, code: string, message: string, extra?: Record<string, unknown>) {super(message); this.status = status; this.code = code; if (extra) this.extra = extra;}}
 /** The `error` object of an eden-edge/1 refusal: code, message and any structured detail (e.g. `control.revoked`). */
+/** #485: a sit that a newer act took over from the seat itself: it did what it was asked, so it ends completed, and a plan
+ *  still pauses on it as on a replaced step. */
+export const SEAT_KEPT = 'seat.kept';
 export const edgeErrorOf = (e: EdgeError) => ({code: e.code, message: e.message, ...e.extra});
 export const edgeBody = <T extends object>(body: T) => ({contract: EDGE_CONTRACT, ...body});
