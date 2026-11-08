@@ -54,6 +54,16 @@ test('judge: waits fail closed; a failure ends every wait, and only the wanted w
   assert.equal(judge(p('success', 'run=1 released'), 'waiting'), 'wait');
 });
 
+test('B1: a ready counts only while fresh: a stale or undated ready is not a probe watching now', () => {
+  const now = Date.parse('2026-11-08T22:00:00Z');
+  const at = (iso) => ({ state: 'pending', ...parseDescription('run=5.1 ready'), at: Date.parse(iso) });
+  assert.equal(judge(at('2026-11-08T21:59:00Z'), 'ready', { now, maxAgeMs: 180_000 }), 'yes');
+  assert.equal(judge(at('2026-11-08T21:50:00Z'), 'ready', { now, maxAgeMs: 180_000 }), 'wait');
+  assert.equal(judge({ ...at('x'), at: null }, 'ready', { now, maxAgeMs: 180_000 }), 'wait');
+  assert.equal(judge(at('2026-11-08T21:50:00Z'), 'ready', { now }), 'yes', 'no bound asked: the old reading');
+  assert.equal(latestFor([{ context: CONTEXT.eyes, state: 'pending', description: 'run=5.1 ready', updated_at: '2026-11-08T21:59:00Z' }], CONTEXT.eyes, '5.1').at, Date.parse('2026-11-08T21:59:00Z'));
+});
+
 test('waitFor: polls until the status appears, stops at a failure, times out closed, backs off on 403', async () => {
   let t = 0; const now = () => t, sleep = async (ms) => { t += ms; };
   const seq = [[], [st(CONTEXT.eyes, 'pending', 'run=5 ready')], [st(CONTEXT.eyes, 'success', 'run=5 pass')]];
@@ -68,12 +78,12 @@ test('waitFor: polls until the status appears, stops at a failure, times out clo
 });
 
 // a fake `gh`: statuses and runs from files, every POST appended to posts.log
-function fakeGh(statuses, runInfo, after = null) {
+function fakeGh(statuses, runInfo, after = null, { delayReads = 0 } = {}) {
   const t = mkdtempSync(join(tmpdir(), 'eyes-')), bin = join(t, 'bin'); mkdirSync(bin); mkdirSync(join(t, 'god'));
   writeFileSync(join(t, 'god/.eden-god.json'), '{}'); writeFileSync(join(t, 'statuses.json'), JSON.stringify(statuses)); writeFileSync(join(t, 'run.json'), JSON.stringify(runInfo));
   // after: the job's next status (released or stopped), served once eyes has posted ready
   if (after) writeFileSync(join(t, 'after.json'), JSON.stringify([after, ...statuses]));
-  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash\ncase "$*" in *"-X POST"*) echo "$*" >> ${t}/posts.log;; *"/statuses?"*) if [ -e ${t}/after.json ] && grep -q ' ready ' ${t}/posts.log 2>/dev/null; then cat ${t}/after.json; else cat ${t}/statuses.json; fi;; *"/actions/runs/"*) cat ${t}/run.json;; *) exit 1;; esac\n`);
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash\ncase "$*" in *"-X POST"*) echo "$*" >> ${t}/posts.log;; *"/statuses?"*) if [ -e ${t}/after.json ] && grep -q ' ready ' ${t}/posts.log 2>/dev/null && [ "$(echo x >> ${t}/reads; wc -l < ${t}/reads)" -gt ${delayReads} ]; then cat ${t}/after.json; else cat ${t}/statuses.json; fi;; *"/actions/runs/"*) cat ${t}/run.json;; *) exit 1;; esac\n`);
   chmodSync(join(bin, 'gh'), 0o755);
   const run = (args, env = {}) => spawnSync(process.execPath, [EYES, ...args, '--cli', join(t, 'god'), '--out', join(t, 'out'), '--repo', 'o/r', '--poll-s', '0.1'], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env }, encoding: 'utf8', timeout: 60_000 });
   return { t, run, posts: () => (existsSync(join(t, 'posts.log')) ? readFileSync(join(t, 'posts.log'), 'utf8') : '') };
@@ -112,6 +122,7 @@ function fakeDeploy(t) {
   writeFileSync(join(d, 'release-probe.mjs'), `import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 const a = process.argv.slice(2), out = a[a.indexOf('--out') + 1]; mkdirSync(out, { recursive: true });
 appendFileSync(${JSON.stringify(log)}, 'probe ' + a[a.indexOf('--expect-build') + 1] + '\\n'); writeFileSync(out + '/ready', '');
+if (process.env.FAKE_PROBE_DIE) { await new Promise((r) => setTimeout(r, 500)); appendFileSync(${JSON.stringify(log)}, 'probe died\\n'); process.exit(9); }
 const end = Date.now() + 30000; while (Date.now() < end && !existsSync(out + '/released') && !existsSync(out + '/stop')) await new Promise((r) => setTimeout(r, 50));
 appendFileSync(${JSON.stringify(log)}, existsSync(out + '/stop') ? 'probe stopped\\n' : 'probe released\\n');
 writeFileSync(out + '/report.json', JSON.stringify({ bar: JSON.parse(process.env.FAKE_PROBE_BAR || '{"pass":true}') }));
@@ -163,4 +174,20 @@ test('A10: a waiting status of an earlier attempt, or of a finished run, is skip
   f = fakeGh([st(CONTEXT.ship, 'failure', 'run=77.1 stopped: no eyes'), WAITING], RUN); d = fakeDeploy(f.t);
   r = f.run(['--sha', SHA, '--find-min', '0.01'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
   assert.equal(r.status, 1); assert.equal(f.posts(), '');
+});
+
+test('B1: a probe that dies after ready fails eyes at once, before any release, and runs no walk', () => {
+  const f = fakeGh([WAITING], RUN), d = fakeDeploy(f.t);
+  const r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR, FAKE_PROBE_DIE: '1' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual(posted(f), ['pending release/eyes run=77.1 ready', 'failure release/eyes run=77.1 fail: the probe exited before the release']);
+  assert.doesNotMatch(d.tools(), /walk\.mjs/);
+});
+
+test('B1: while it waits for the release, eyes re-posts ready every heartbeat', () => {
+  const f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'success', 'run=77.1 released'), { delayReads: 12 }), d = fakeDeploy(f.t);
+  const r = f.run(['--sha', SHA, '--heartbeat-s', '0.2'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const p = posted(f); assert.ok(p.filter((x) => x === 'pending release/eyes run=77.1 ready').length >= 3, p.join(' | '));
+  assert.equal(p.at(-1), 'success release/eyes run=77.1 pass');
 });

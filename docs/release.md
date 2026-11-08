@@ -91,7 +91,8 @@ Its jobs:
    (see below). Then `ship.sh --label <version> --sha <head>` (with `--no-switch` for a dry run). Its output
    is filtered so no IPv4 literal is printed; the host itself is a secret, so the log masks it.
    With `eyes=laptop` the job waits up to 20 minutes for the workstation's probe before ship.sh, and up to 45 minutes
-   for its verdict after it. Both waits fail closed: no pass, no publish. A real ship whose browser checks then fail is
+   for its verdict after it. Both waits fail closed: no pass, no publish. A stop once the host activation began (other than
+   the host's own refusal) is reported as "live state unknown", with the rollback command. A real ship whose browser checks then fail is
    live; the summary prints the [rollback](#rollback-without-ssh) command.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit and creates the GitHub Release.
@@ -134,8 +135,9 @@ status from an earlier run or attempt never counts (`<run>` is `<run id>.<attemp
 | job | `release/ship` | success `run=<run> released`, or failure `run=<run> stopped: …` | activated (or skipped it, `--no-switch`), or stopped before |
 | eyes | `release/eyes` | success `run=<run> pass`, or failure `run=<run> fail: <checks>` | the verdict |
 
-Right before the activation, ship.sh's `SHIP_PREACTIVATE_CMD` checks that the newest `release/eyes` status for the
-attempt is still `ready`; otherwise nothing goes live. If the `released` status cannot be posted after a real
+While it waits, eyes re-posts `ready` every minute and fails at once if its probe exits. Right before the activation,
+ship.sh's `SHIP_PREACTIVATE_CMD` checks that the newest `release/eyes` status for the attempt is `ready` and under
+3 minutes old; otherwise nothing goes live. If the `released` status cannot be posted after a real
 activation, the job records it, retries once and goes on; it never reports that as "before the release". Status
 details are reduced to `[A-Za-z0-9 ()=.,:_-]`, so no path or stack trace reaches GitHub; a failed probe names the bar
 items it missed, such as `probe(noBuild=2)`.
@@ -152,8 +154,8 @@ artifact carries `probe-bar.json` too.
 gh workflow run rollback.yml --ref main -f build=<we-previous> -f from=<we-live> [-f dry_run=true]
 ```
 
-[`rollback.yml`](../.github/workflows/rollback.yml) runs in the `production` environment, in the `release`
-concurrency group. It runs [`deploy/rollback.sh`](../tools/world-launcher/deploy/rollback.sh), which does exactly what
+[`rollback.yml`](../.github/workflows/rollback.yml) runs in the `production` environment, in its own
+`rollback` concurrency group, so it never queues behind a release's verdict wait. It runs [`deploy/rollback.sh`](../tools/world-launcher/deploy/rollback.sh), which does exactly what
 ship.sh's `ROLLBACK.txt` says: the previous release's own `activate.sh production <dir> --reload`, then public healthz
 on that build with every registered world. It refuses, changing nothing (exit 80), unless the live build is `from`,
 the host's `production.previous` is `build`, and `releases/<build>` is staged. When the host is already on `build` it

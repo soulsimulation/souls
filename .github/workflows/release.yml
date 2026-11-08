@@ -112,7 +112,7 @@ jobs:
   ship:
     needs: preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240   # setup + the 20-min eyes wait + ship.sh + the 45-min verdict wait + margin, so the verdict and its rollback line always print
     environment: production
     permissions:
       contents: read
@@ -254,7 +254,7 @@ jobs:
             # the workstation runs the browser steps. Right before the activation its probe must still be watching (newest
             # release/eyes for this attempt is "ready"); right after, it is told. A failed tell is recorded, not a stop.
             args+=(--no-eyes)
-            export SHIP_PREACTIVATE_CMD="node tools/world-launcher/deploy/ship/handover.mjs wait $SHA release/eyes --run $RUN --want ready --timeout-min 1 --every-s 20"
+            export SHIP_PREACTIVATE_CMD="node tools/world-launcher/deploy/ship/handover.mjs wait $SHA release/eyes --run $RUN --want ready --max-age-s 180 --timeout-min 1 --every-s 20"
             export SHIP_RELEASED_CMD="node tools/world-launcher/deploy/ship/handover.mjs post $SHA release/ship success 'run=$RUN released' --url '$URL'"
           fi
           # fails closed: only an explicit false ships
@@ -272,9 +272,15 @@ jobs:
             echo "ship.sh: $(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).status.replace(/[^a-z-]/g, '')" "$out/ship-result.json")" >> "$GITHUB_STEP_SUMMARY"
             if node tools/proof/publication.mjs "$out/ship-result.json" > /dev/null 2>&1; then { echo '```json'; cat "$out/ship-result.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
           fi
-          # released = the activation ran (or its no-switch skip), whatever the hook managed to say
+          # released = the activation ran (or its no-switch skip), whatever the hook managed to say. A stop once the host
+          # activation began (ACTIVATING), other than the host's own refusal (exit 80), leaves the live build unknown.
+          detail=$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).detail" "$out/ship-result.json" 2>/dev/null || true)
           if [ "$EYES" != runner ] && ! grep -qE '^activate (ok|skipped-no-switch) ' "$out/STEPS.txt" 2>/dev/null; then
-            node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship failure "run=$RUN stopped: ship.sh exit $status before the release" --url "$URL" || true
+            if [ -e "$out/ACTIVATING" ] && [ "$detail" != "activate exit 80" ]; then
+              node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship failure "run=$RUN stopped: at the activation, live state unknown" --url "$URL" || true
+            else
+              node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship failure "run=$RUN stopped: ship.sh exit $status before the release" --url "$URL" || true
+            fi
           fi
           # activated, but ship.sh could not tell the workstation: tell it once more, so its checks still run
           if [ "$EYES" != runner ] && grep -q '^released-hook 1$' "$out/POSTLIVE.txt" 2>/dev/null; then
@@ -292,16 +298,28 @@ jobs:
         run: |
           # Fails closed: no pass from ship/eyes.mjs for this run means no publish. After a real activation the summary
           # names the code-only rollback, which needs no ssh (rollback.yml, ship.sh's ROLLBACK.txt).
-          steps="$RUNNER_TEMP/ship/$LABEL/STEPS.txt"
-          grep -qE '^activate (ok|skipped-no-switch) ' "$steps" 2>/dev/null || { echo "::error::nothing was activated (no eyes, or ship.sh stopped first); nothing to publish"; exit 1; }
+          out="$RUNNER_TEMP/ship/$LABEL" steps="$RUNNER_TEMP/ship/$LABEL/STEPS.txt"
+          rollback_line() {
+            prev=$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).previousBuild" "$out/snapshot.json" 2>/dev/null || echo '<previous build>')
+            echo "gh workflow run rollback.yml --ref main -f build=$prev -f from=we-${SHA:0:12}"
+          }
+          if ! grep -qE '^activate (ok|skipped-no-switch) ' "$steps" 2>/dev/null; then
+            detail=$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).detail" "$out/ship-result.json" 2>/dev/null || true)
+            if [ -e "$out/ACTIVATING" ] && [ "$detail" != "activate exit 80" ]; then
+              cmd=$(rollback_line)
+              { echo "LIVE STATE UNKNOWN: ship.sh stopped at the activation ($detail). Read its STOPPED line in the ship.sh step and healthz; if we-${SHA:0:12} is live and should not be, roll back (no ssh, no data touched):"; echo; echo "    $cmd"; } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::stopped at the activation ($detail): the live build is unknown. See the STOPPED line above and healthz. Rollback if needed: $cmd"
+            else
+              echo "::error::nothing was activated (no eyes, or ship.sh stopped before the activation); nothing to publish"
+            fi
+            exit 1
+          fi
           if node tools/world-launcher/deploy/ship/handover.mjs wait "$SHA" release/eyes --run "$RUN" --want final --timeout-min 45 --every-s 30; then
             echo "eyes: pass" >> "$GITHUB_STEP_SUMMARY"; exit 0
           fi
           echo "eyes: FAIL or no verdict in 45 min" >> "$GITHUB_STEP_SUMMARY"
           if [ "$DRY_RUN" = false ]; then
-            snap="$RUNNER_TEMP/ship/$LABEL/snapshot.json"
-            prev=$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).previousBuild" "$snap" 2>/dev/null || echo '<previous build>')
-            cmd="gh workflow run rollback.yml --ref main -f build=$prev -f from=we-${SHA:0:12}"
+            cmd=$(rollback_line)
             { echo "The release IS live and its browser checks failed. Decide; to roll code back (no ssh, no data touched):"; echo; echo "    $cmd"; } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::we-${SHA:0:12} is live and the workstation's checks failed or never reported. Rollback: $cmd"
           else

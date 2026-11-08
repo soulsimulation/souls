@@ -11,6 +11,7 @@
 //
 //   node handover.mjs post <sha> <context> <state> <description> [--repo o/r] [--url <target>]
 //   node handover.mjs wait <sha> <context> --run <id> --want <ready|final|waiting|released> [--timeout-min 15] [--every-s 30] [--repo o/r]
+//        [--max-age-s 180]   ready only: the newest ready must be this fresh (eyes re-posts it every minute while its probe lives)
 //     prints the matching status's state and description; exit 0 when it is the one wanted, 1 on failure or timeout (fail closed)
 //     --timeout-min 0 reads once: the newest status must already be the wanted one (ship.sh's pre-activation check)
 // Descriptions are public: details are reduced to [A-Za-z0-9 ()=.,:_-], so no path, address or stack trace is posted.
@@ -42,18 +43,23 @@ export function latestFor(statuses, context, run) {
   for (const s of statuses ?? []) {
     if (s.context !== context) continue;
     const p = parseDescription(s.description);
-    if (p && sameRun(p.run, run)) return { state: s.state, ...p, description: s.description };
+    if (p && sameRun(p.run, run)) return { state: s.state, ...p, description: s.description, at: Date.parse(s.updated_at ?? s.created_at ?? '') || null };
   }
   return null;
 }
 
 /** What a waiter makes of the newest matching status: 'yes' (wanted), 'no' (a definite failure: stop), 'wait'. */
-export function judge(s, want) {
+/** maxAgeMs (ready only): eyes re-posts ready every minute while its probe lives, so an older one means it is gone */
+export function judge(s, want, { now = Date.now(), maxAgeMs = null } = {}) {
   if (!s) return 'wait';
   if (s.state === 'failure' || s.state === 'error') return 'no';
   switch (want) {
     case 'waiting': return s.state === 'pending' && s.word === 'waiting-for-eyes' ? 'yes' : 'wait';
-    case 'ready': return s.state === 'pending' && s.word === 'ready' ? 'yes' : s.state === 'success' ? 'no' : 'wait';   // a pass with no ready is not a handover
+    case 'ready': {
+      if (s.state === 'success') return 'no';   // a pass with no ready is not a handover
+      if (s.state !== 'pending' || s.word !== 'ready') return 'wait';
+      return maxAgeMs == null || (s.at != null && now - s.at <= maxAgeMs) ? 'yes' : 'wait';   // stale (or undated): not watching now
+    }
     case 'released': return s.state === 'success' && s.word === 'released' ? 'yes' : 'wait';
     case 'final': return s.state === 'success' && s.word === 'pass' ? 'yes' : 'wait';
     default: throw Error(`unknown want ${want}`);
@@ -73,11 +79,11 @@ export async function postStatus(repo, sha, context, state, desc, url, { tries =
 }
 
 /** Poll until the wanted status appears; a failure status or the timeout ends it. A failed API read is retried (5 min back-off on 403). */
-export async function waitFor({ repo, sha, context, run, want, timeoutMs, everyMs = 30_000, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), list = listStatuses, log = () => {} }) {
+export async function waitFor({ repo, sha, context, run, want, timeoutMs, maxAgeMs = null, everyMs = 30_000, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), list = listStatuses, log = () => {} }) {
   const end = now() + timeoutMs; let last = null;
   for (;;) {
     let wait = everyMs;
-    try { last = latestFor(await list(repo, sha), context, run); const j = judge(last, want); if (j !== 'wait') return { ok: j === 'yes', status: last }; }
+    try { last = latestFor(await list(repo, sha), context, run); const j = judge(last, want, { now: now(), maxAgeMs }); if (j !== 'wait') return { ok: j === 'yes', status: last }; }
     catch (e) { log(`status read failed: ${e.message}`); if (/403|rate limit/i.test(e.message)) wait = Math.max(everyMs, 300_000); }
     if (timeoutMs <= 0 || now() + wait > end) return { ok: false, status: last, timedOut: true };
     await sleep(wait);
@@ -95,12 +101,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (cmd === 'post') {
     const [state, desc] = rest;
     if (!['pending', 'success', 'failure'].includes(state) || !parseDescription(desc)) { console.error('post: state pending|success|failure and a "run=<id> …" description'); process.exit(2); }
-    await postStatus(repo, sha, context, state, desc, flag('url'));
-    console.log(`${context} ${state}: ${desc}`);
+    const p = parseDescription(desc), d = description(p.run, p.word, { mode: p.mode, detail: p.detail });   // the same safe alphabet
+    await postStatus(repo, sha, context, state, d, flag('url'));
+    console.log(`${context} ${state}: ${d}`);
   } else if (cmd === 'wait') {
     const run = flag('run'), want = flag('want');
     if (!isRun(run)) { console.error('wait: --run <id>[.<attempt>]'); process.exit(2); }
-    const r = await waitFor({ repo, sha, context, run, want, timeoutMs: Number(flag('timeout-min', 15)) * 60_000, everyMs: Number(flag('every-s', 30)) * 1000, log: (m) => console.log(m) });
+    const maxAgeMs = flag('max-age-s') ? Number(flag('max-age-s')) * 1000 : null;
+    const r = await waitFor({ repo, sha, context, run, want, maxAgeMs, timeoutMs: Number(flag('timeout-min', 15)) * 60_000, everyMs: Number(flag('every-s', 30)) * 1000, log: (m) => console.log(m) });
     console.log(r.status ? `${context} ${r.status.state}: ${r.status.description}` : `${context}: no status for run ${run}`);
     if (r.timedOut) console.log(`timed out waiting for ${want}`);
     process.exit(r.ok ? 0 : 1);

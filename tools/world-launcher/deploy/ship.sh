@@ -246,6 +246,8 @@ elif [ "$STARTED" = 1 ]; then
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
   preactivate
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
+  # from here a stop is not "before the release": the host may have switched (release.yml reads this marker)
+  [ "$DRY" = 1 ] || date -u +%FT%TZ > "$OUT/ACTIVATING"
   rc=0; x_in "$SHIPD/host-activate.sh" rsh "bash -s -- $(quote "$HOST_ROOT" "$HOST_DATA" "$HOST_CONF" "$HOST_UNIT" "$ORIGIN" "$BUILD") $A" || rc=$?
   # The host's exit is the only account of what happened (ship/host-activate.sh). Never claim a rollback it didn't report.
   DETAIL="exit $rc"; WAS="${A%% *}"

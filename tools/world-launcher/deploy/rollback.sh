@@ -28,6 +28,7 @@ STATE="$(rsh "set -e; b(){ basename \"\$(readlink \"\$1\" 2>/dev/null || echo no
   || { echo "REFUSED: cannot read the host"; exit 80; }
 read -r LIVE PREV STAGED WORLDS <<< "$STATE"
 echo "host: live $LIVE, previous $PREV, $BUILD staged as ${STAGED}, $WORLDS worlds"
+[[ "$WORLDS" =~ ^[1-9][0-9]*$ ]] || { echo "REFUSED: the host's world count is not a number ($WORLDS); nothing changed"; exit 80; }
 health() {
   "$CURL" -fsS --max-time 30 "$ORIGIN/__sim/healthz" > "$OUT/health.json" || { echo "public healthz did not answer"; return 1; }
   node "$HERE/ship/root-release.mjs" health "$OUT/health.json" "$BUILD" "$WORLDS"

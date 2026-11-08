@@ -119,8 +119,24 @@ await postStatus(repo, sha, CONTEXT.eyes, 'pending', description(run, 'ready'), 
 say('probe ready; posted release/eyes ready; waiting for the activation');
 
 // 3. the release: release/ship "released" (activated, or the no-switch skip); a stop before it fails eyes without walks
-const rel = await waitFor({ repo, sha, context: CONTEXT.ship, run, want: 'released', timeoutMs: releaseMin * 60_000, everyMs: pollMs, log: say });
-if (!rel.ok) await abort(rel.timedOut ? `no release within ${releaseMin} min` : `ship stopped before the release (${rel.status?.detail || rel.status?.description})`);
+// "ready" means watching now: while waiting, the probe's exit fails eyes at once, and ready is re-posted every heartbeat so the
+// job's pre-activation check (--max-age-s) refuses a ready that a dead probe or a sleeping workstation left behind
+const heartbeatMs = Number(flag('heartbeat-s', 60)) * 1000;
+let probeGone = false; probeExit.then(() => { probeGone = true; });
+const relEnd = Date.now() + releaseMin * 60_000; let lastBeat = Date.now(), rel = null;
+for (;;) {
+  if (probeGone) await abort('the probe exited before the release');
+  let st = null; try { st = latestFor(await listStatuses(repo, sha), CONTEXT.ship, run); } catch (e) { say('status read failed; retrying'); }
+  if (st && (st.state === 'failure' || st.state === 'error')) await abort(`ship stopped before the release (${st.detail || st.description})`);
+  if (st?.state === 'success' && st.word === 'released') { rel = st; break; }
+  if (probeGone) await abort('the probe exited before the release');
+  if (Date.now() > relEnd) await abort(`no release within ${releaseMin} min`);
+  if (!aborting && Date.now() - lastBeat >= heartbeatMs) {
+    try { await postStatus(repo, sha, CONTEXT.eyes, 'pending', description(run, 'ready'), runUrl(), { tries: 1 }); lastBeat = Date.now(); } catch (e) { say('ready heartbeat failed; retrying next poll'); }
+  }
+  await new Promise((r) => setTimeout(r, pollMs));
+}
+if (probeGone) await abort('the probe exited before the release');
 writeFileSync(join(PDIR, 'released'), ''); say('released; the probe watches 60 s more');
 
 // 4. the checks: ship.sh's commands, checks.mjs's bars

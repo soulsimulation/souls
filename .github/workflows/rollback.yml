@@ -20,8 +20,9 @@ on:
         default: false
 permissions:
   contents: read
+# its own group: a rollback must never queue behind a release run's 45-minute verdict wait, the case it exists for
 concurrency:
-  group: release
+  group: rollback
   cancel-in-progress: false
 env:
   SIM_ORIGIN: ${{ vars.SIM_ORIGIN || 'https://soul.game' }}

@@ -475,3 +475,21 @@ test('#1438 rollback.sh: back to the previous build through its own activate.sh,
   assert.ok(!r.stdout.includes(HOST));
   assert.equal(rb(['--build', PREV, '--from', PREV]).status, 2);
 });
+
+test('#1438 B1: the real pre-activation check refuses a stale ready and a failed eyes, and passes a fresh one', () => {
+  const HANDOVER = join(HERE, 'deploy/ship/handover.mjs');
+  const check = (statuses) => {
+    const s = setup(), bin = join(s.t, 'ghbin'); writeFileSync(join(s.t, 'statuses.json'), JSON.stringify(statuses));
+    script(join(bin, 'gh'), `cat ${join(s.t, 'statuses.json')}`);
+    const r = s.run([...s.base, '--no-eyes'], { PATH: `${bin}:${process.env.PATH}`, SHIP_PREACTIVATE_CMD: `node ${HANDOVER} wait ${'a'.repeat(40)} release/eyes --run 5.1 --want ready --max-age-s 180 --timeout-min 0 --repo o/r` });
+    return { s, r, live: readlinkSync(join(s.root, 'production')) };
+  };
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  let c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(10 * 60_000) }]);
+  assert.equal(c.r.status, 1); assert.match(c.r.stdout, /SHIP_PREACTIVATE_CMD refused the activation/); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
+  assert.ok(existsSync(join(c.s.out, 'snapshot.json')) && !existsSync(join(c.s.out, 'ACTIVATING')), 'refused before the activation marker');
+  c = check([{ context: 'release/eyes', state: 'failure', description: 'run=5.1 fail: the probe exited before the release', updated_at: ago(1000) }, { context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(30_000) }]);
+  assert.equal(c.r.status, 1); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
+  c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(20_000) }]);
+  assert.equal(c.r.status, 0, c.r.stdout); assert.equal(c.live, join(c.s.root, 'releases', c.s.build)); assert.ok(existsSync(join(c.s.out, 'ACTIVATING')));
+});
