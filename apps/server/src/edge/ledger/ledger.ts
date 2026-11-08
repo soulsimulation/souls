@@ -40,7 +40,7 @@ const STUCK_RADIUS = 0.34;
  *  bench by the fountain), never the 30 m walk to a chair in another house. 3 m failed the party and activities gates. */
 export const HERE_SEAT_M = 8;
 const STUCK_REASON = 'The walk made no headway for 30 seconds, even after looking for another way from where it stood; choose another way or somewhere else.';
-import {EdgeError, SEAT_KEPT, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
+import {ActPending, actCommitScope, EdgeError, SEAT_KEPT, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
 import {CATALOG} from '../../../../../mars/viewer/engine/world/catalog.ts';
 import {PlaceIndex, centroid, derivePlaceData, happenings, validatePlaceData, type PlaceData,type Place} from './places.ts';
 /** Loops round a place (jog/run/cycle-around) are offered within this distance of its outline (m). */
@@ -86,6 +86,9 @@ const WAIT_CODES = new Set(['program.safe-stop-required', 'program.safe-stop-pen
  *  Any other `carry.*` refusal is permanent; any other code waits until the proposal lapses. */
 const SHARED_CARRY_WAIT = new Set(['carry.item-unavailable', 'carry.path-occupied', 'carry.pickup-occupied', 'carry.setdown-occupied', 'carry.route-blocked', 'carry.target-blocked']);
 const WAIT_LIMIT_TICKS = 20 * 60;   // a waiting receipt that cannot start within a minute fails
+/** #1327: how long an act waits for the world to record what it handed over before it answers `pending` (HTTP 202). A
+ *  slowed clock still drains every tick; only a clock that stopped after the hand-off reaches this. */
+const actCommitWaitMs = () => Number(process.env.SIM_ACT_COMMIT_WAIT_MS) > 0 ? Number(process.env.SIM_ACT_COMMIT_WAIT_MS) : 10_000;
 const NEAR_RADIUS = 20, GO_NEAR_RADIUS = 60;
 /** srv-act-words (C): the destination words of a focus-shaped walk (vocabulary WORDS_FOCUS_SHAPE's walk arm). */
 const WALK_DEST = /^(?:please )?(?:go|walk|head)(?: over| back)? (?:to|into|inside|towards?) ([a-z0-9' -]+?)[.!]?$/;
@@ -609,7 +612,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if(phase==='completed'&&capability==='stand:here')this.ownerControlGrace(soul.soulId);
     if (Object.keys(detail).length || keepActivity || !OPEN.includes(phase)) this.setDetail(id, {...detail, ...(keepActivity ? {channel: this.nextChannel ?? 'none'} : {}), ...(!OPEN.includes(phase) ? {endedAt: bodyEnd(this, soul.soulId)} : {})});
     if(!OPEN.includes(phase))this.finishOutcome(this.rows('receipt_id=?',id)[0]);});
-    const r = this.receipt(soul.soulId, id)!; this.emit(r); return r;
+    const r = this.receipt(soul.soulId, id)!; this.emit(r); this.committed(id); return r;
   }
   private update(id: string, patch: Partial<Pick<Row, 'phase' | 'code' | 'reason' | 'program_id' | 'started_tick'>>) {
     const cur = this.rows('receipt_id=?', id)[0]; if (!cur) return;
@@ -940,6 +943,66 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (unsupported) { this.update(receipt, {phase: 'failed', code: unsupported.code, reason: unsupported.reason}); return; }
     this.planFor(receipt, capability, label, steps);
     return this.host.enqueue('decision', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, option: capability, label, steps, reevalTicks: 1e9, fallback: false, trigger: `edge-act:${receipt}`});
+  }
+  /**
+   * #1327: an act's acceptance as one unit at the sequencer. `write(id)` (the receipt row, the `replaced` marks of older
+   * open receipts, and whatever the caller commits with it), the plan and the decision event commit in one transaction:
+   * all of it exists or none of it does. The id is chosen before the hand-off, so the event's trigger names it. Resolves
+   * with the id once the row exists; a refusal or fault before the commit rejects with nothing written; one after it
+   * resolves (the row is the truth); a clock that stops after the hand-off throws ActPending (HTTP 202).
+   */
+  private async acceptDecision(soul: EdgeSoul, capability: string, label: string, steps: Program['steps'], write: (id: string) => void, clientRef?: string): Promise<string> {
+    const id = 'r_' + randomUUID();
+    steps = this.together.holdingSteps(soul, capability, steps);
+    const unsupported = this.nativeUseRefusal?.(capability, steps);
+    // nothing to hand over: the act ends at once, as decide() ends it (no event, so nothing can be half-written)
+    if (unsupported) {tx(this.db.db, () => {write(id); this.update(id, {phase: 'failed', code: unsupported.code, reason: unsupported.reason});}); this.committed(id); return id;}
+    const handed = this.host.enqueueJournaled('decision', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, option: capability, label, steps, reevalTicks: 1e9, fallback: false, trigger: `edge-act:${id}`},
+      () => {write(id); this.planFor(id, capability, label, steps); return true;});
+    await this.settle(soul.soulId, id, capability, clientRef, handed);
+    return id;
+  }
+  /** #1327: acts handed to the sequencer and not yet settled, by receipt id and by `soulId\0clientRef`. */
+  private handed = new Map<string, {soulId: string; capability: string}>();
+  private handedRefs = new Map<string, string>();
+  /** #1327: wait for a hand-off. The receipt row decides: present, the act is accepted (whatever the promise said); absent
+   *  after a rejection, the rejection is the answer (nothing was written); absent after the wait, ActPending. */
+  private async settle(soulId: string, id: string, capability: string, clientRef: string | undefined, handed: Promise<unknown>): Promise<void> {
+    const ref = typeof clientRef === 'string' && clientRef ? `${soulId}\u0000${clientRef}` : null;
+    this.handed.set(id, {soulId, capability}); if (ref) this.handedRefs.set(ref, id);
+    const done = handed.then(() => ({error: undefined as unknown}), (error: unknown) => ({error: error ?? new Error('act.hand-off-refused')}));
+    void done.then(() => {this.handed.delete(id); if (ref && this.handedRefs.get(ref) === id) this.handedRefs.delete(ref);});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // not unref'd: the wait itself is what keeps this request alive (a test process has nothing else to)
+    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs());});
+    const out = await Promise.race([done, late]).finally(() => clearTimeout(timer));
+    if (this.rows('receipt_id=?', id)[0]) {
+      if (out !== 'late' && out.error) console.error('[edge] act committed, then its hand-off failed; answered with its receipt', id, out.error instanceof Error ? out.error.message : String(out.error));
+      this.committed(id); return;
+    }
+    if (out === 'late') throw new ActPending(id, capability);
+    throw out.error;
+  }
+  /** #1327: the act this request committed (see actCommitScope). */
+  private committed(id: string) {const scope = actCommitScope.getStore(); if (scope && !scope.receipt) scope.receipt = id;}
+  /** #1327: an act handed over and not yet recorded, as its receipt route answers it. */
+  pendingReceipt(soulId: string, id: string): ActPending['body']['receipt'] | null {const h = this.handed.get(id); return h && h.soulId === soulId ? {id, capability: h.capability, phase: 'pending'} : null;}
+  /** #1327: an act this Soul sent with this clientRef that is handed over and not yet recorded: a retry is answered with it. */
+  private pendingByRef(soulId: string, clientRef: unknown): ActPending | null {
+    if (typeof clientRef !== 'string' || !clientRef) return null;
+    const id = this.handedRefs.get(`${soulId}\u0000${clientRef}`), h = id ? this.handed.get(id) : undefined;
+    return id && h ? new ActPending(id, h.capability) : null;
+  }
+  /** #1327: an act refused before it writes anything when the world's clock has failed (a stalled one is refused in http.ts). */
+  private clockGate() {if ((this.host as {clockAvailable?: boolean}).clockAvailable === false) throw new EdgeError(503, 'world.unavailable', 'The world\'s clock is not running; nothing was done. Try again shortly.');}
+  /** #1327: a stop queued after an act's receipt committed (the act waits on it, armed). Bounded: a clock that stops after
+   *  the receipt exists leaves the receipt to its own deadline instead of hanging the answer or turning it into a 503. */
+  private async stopAfterAccept(soulId: string, payload: Record<string, unknown>, then?: () => void): Promise<void> {
+    let queued: Promise<unknown>;
+    try {queued = this.host.enqueue('edge-stop', `edge:${soulId}`, payload).then(() => then?.());}
+    catch (error) {console.error('[edge] stop after an accepted act could not be queued', soulId, error instanceof Error ? error.message : String(error)); return;}
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs());})]).finally(() => clearTimeout(timer));
   }
 
   // ---------------------------------------------------------------- capabilities
@@ -1644,6 +1707,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
   async act(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
     // PC05 (#684, PC02 §3): `shared.busy` (from insert) is the act's refusal: no receipt, nothing replaced, the owner's
     // message stays unacked; the agent decides what to do
+    // #1327: a failed clock is refused before anything is written; a retry of an act handed over and not yet recorded
+    // gets that act's pending answer, never a second act
+    this.clockGate();
+    {const pending = this.pendingByRef(soul.soulId, input.clientRef); if (pending) throw pending;}
     const again = this.repeatOf(soul, input);
     if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); this.comms?.fading.touch?.(soul.soulId); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}
     const replay = typeof input.clientRef === 'string' && !!this.coreA.byClientRef(soul.soulId, input.clientRef);   // its answer is another act's: nothing to note
@@ -1942,15 +2009,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if(seats.length&&this.body(soul.entityId)?.body?.family!=='floater')return this.launch(soul,capability,'Stand up',[{verb:'stand',params:{nativeSeatReleaseV1:seats[0].action}}],clientRef,resolved,refuse);
       // Seated with nothing running (a seat stays held after its act ends): stand up for real.
       if (!program && h && (h.activity === 'sit' || h.baseActivity === 'sit')) {
-        const r = this.insert(soul, capability, 'waiting', clientRef);
-        await this.decide(soul, r.id, capability, 'Stand up', [{verb: 'stand', params: {}}]);
-        return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
+        const id = await this.acceptDecision(soul, capability, 'Stand up', [{verb: 'stand', params: {}}], id => {this.insert(soul, capability, 'waiting', clientRef, false, {}, {}, id);}, clientRef);
+        return {accepted: true, receipt: this.receipt(soul.soulId, id)!, ...resolved};
       }
+      if (program) this.clockGate();   // #1327: the stop below must be queueable before the receipt is written
       const r = this.insert(soul, capability, program ? 'started' : 'completed', clientRef);
       // C9: any accepted action resets the idle clock and reclaims a faded Soul (an immediate stand:here never reached comms' touch)
       if (!program) this.comms?.fading.touch?.(soul.soulId);
-      if (program) await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
-      if (program) this.update(r.id, {phase: 'completed'});
+      // #1327: the receipt is the answer once written; the stop completes it, bounded so a stopped clock can't hang it
+      if (program) await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id}, () => this.update(r.id, {phase: 'completed'}));
       return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
     // PC08: a stop offer reached through words or a bare verb is the same stop (never an ordinary body act)
@@ -2112,15 +2179,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.launched.set(id, {soul, capability, label, steps}); if (this.launched.size > 512) this.launched.delete(this.launched.keys().next().value!);
     };
     if (issue) {
-      // Asleep or mid-step: stop safely first, then start (receipt `waiting`).
+      // Asleep or mid-step: stop safely first, then start (receipt `waiting`). #1327: the armed receipt starts itself once
+      // the body is free; the stop is queued after it commits and bounded, so it never turns the answer into a 503.
+      this.clockGate();
       const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams); commit?.(r.id); remember(r.id);
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
-      if (issue.code === 'program.safe-stop-required') await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
+      if (issue.code === 'program.safe-stop-required') await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
       return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
-    const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams); commit?.(r.id); remember(r.id);
-    await this.decide(soul, r.id, capability, label, steps);
-    return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
+    // #1327: the receipt, the replaced marks, this act's own commit and the decision event: one acceptance
+    const id = await this.acceptDecision(soul, capability, label, steps, id => {this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams,id); commit?.(id); remember(id);}, clientRef);
+    return {accepted: true as const, receipt: this.receipt(soul.soulId, id)!, ...resolved};
   }
   /** BS3: the plans `launch` started, by receipt, so a stuck walk can be relaunched once under the same receipt. */
   private launched = new Map<string, {soul: EdgeSoul; capability: string; label: string; steps: Program['steps']; relaunched?: true}>();
@@ -2173,9 +2242,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  steps. It is a body act like any other, so an earlier open act is ended and its programme stopped safely; nothing
    *  else moves, and nothing is claimed until a commit (PC05). */
   private async openShared(soul: EdgeSoul, capability: string, clientRef: string | undefined, prep: {commit?: (receipt: string) => void; detail?: Record<string, unknown>}, resolved: {resolved?: Resolved}) {
+    if (this.host.engine.programOf(soul.entityId)) this.clockGate();   // #1327: its stop must be queueable before the receipt is written
     const r = tx(this.db.db, () => {const r = this.insert(soul, capability, 'waiting', clientRef, false, prep.detail ?? {}); prep.commit?.(r.id); return r;});
     this.comms?.fading.touch?.(soul.soulId);
-    if (this.host.engine.programOf(soul.entityId)) await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
+    if (this.host.engine.programOf(soul.entityId)) await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});   // #1327: bounded, after the receipt
     return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
   }
   /** together/1: where a Soul, place, object or ride named in plain words is (for facing / pointing). */
@@ -2199,6 +2269,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true, receipt: this.view(old)};}
     const refuse = (code: string, reason: string) => {this.recordRefusal(soul.soulId, 'object', capability, code, reason); return {accepted: false as const, code, reason};};
     if (this.host.stepFailing) return refuse(STEP_FAILING.code, STEP_FAILING.message);
+    this.clockGate();   // #1327: before anything is written
+    {const pending = this.pendingByRef(soul.soulId, clientRef); if (pending) throw pending;}
     const busy = this.sharedBusy(soul.soulId); if (busy) return {...refuse('shared.busy', busy.reason), ...this.busyExtra(busy)};
     const nativeUse = this.nativeUseRefusal?.(capability, steps);
     if (nativeUse) return refuse(nativeUse.code, nativeUse.reason);
@@ -2208,14 +2280,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (this.host.quietBarrier) {const r = this.insert(soul, capability, 'waiting', clientRef,false,{...(effects?{confirmedEffects:effects}:{})}); this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability}); return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!};}
     const issue = this.host.engine.canPerform({actor: soul.entityId, label, steps});
     if (issue && !WAIT_CODES.has(issue.code)) return refuse(issue.code, issue.code.startsWith('carrier.') ? issue.message : humanBlockedExplanationV1(issue.code, label));
-    const r = this.insert(soul, capability, 'waiting', clientRef,false,{...(effects?{confirmedEffects:effects}:{})});
     if (issue) {
+      const r = this.insert(soul, capability, 'waiting', clientRef,false,{...(effects?{confirmedEffects:effects}:{})});
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
-      if (issue.code === 'program.safe-stop-required') await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
+      if (issue.code === 'program.safe-stop-required') await this.stopAfterAccept(soul.soulId, {soulId: soul.soulId, entityId: soul.entityId, receipt: r.id});
       return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!};
     }
-    await this.decide(soul, r.id, capability, label, steps);
-    return {accepted: true, receipt: this.receipt(soul.soulId, r.id)!};
+    // #1327: one acceptance, as in launch
+    const id = await this.acceptDecision(soul, capability, label, steps, id => {this.insert(soul, capability, 'waiting', clientRef,false,{...(effects?{confirmedEffects:effects}:{})},{},id);}, clientRef);
+    return {accepted: true, receipt: this.receipt(soul.soulId, id)!};
   }
 
   /** PC09 (#688, PC02 §3): a member of a running shared carry faded. Their fade is their stop: the same logged
@@ -2317,7 +2390,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
         // A later start can fail or be replaced; that terminal receipt is authoritative.
         // Ride apply() adds no member: riders/custody are projected from native state.
         tx(this.db.db,()=>{authority();const fresh=this.host.engine.canPerform({actor:soul.entityId,label,steps});if(fresh&&!WAIT_CODES.has(fresh.code))throw new EdgeError(409,fresh.code,fresh.code.startsWith('carrier.')?fresh.message:humanBlockedExplanationV1(fresh.code,label));const detail=admission.commit(id)??{};this.insert(soul,capability,'waiting',clientRef,false,detail,{},id);afterCommit(this.db.db,()=>this.arm({receipt:id,soul,steps,label,deadline:this.host.engine.world.tick+WAIT_LIMIT_TICKS,capability}));},{immediate:true});
-        if(issue?.code==='program.safe-stop-required')await this.host.enqueue('edge-stop',`edge:${soul.soulId}`,{soulId:soul.soulId,entityId:soul.entityId,receipt:id});
+        // #1327: the receipt committed above; its stop is bounded, so a clock that stops now can't hang the answer
+        if(issue?.code==='program.safe-stop-required')await this.stopAfterAccept(soul.soulId,{soulId:soul.soulId,entityId:soul.entityId,receipt:id});
       }else{
         const guard=():true=>{authority();if(this.host.quietBarrier)throw new EdgeError(409,'state.changed','The world entered a quiet barrier; retry.');const fresh=this.host.engine.canPerform({actor:soul.entityId,label,steps});if(fresh)throw new EdgeError(409,fresh.code,fresh.code.startsWith('carrier.')?fresh.message:humanBlockedExplanationV1(fresh.code,label));return true;};
         this.planFor(id,capability,label,steps);
@@ -2366,6 +2440,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** One object-table read per pass (a listing or a vocabulary asks per offer): the table, fetched on the first miss. */
   private objectTableOnce() {let t: ReturnType<NonNullable<NonNullable<EdgeLedger['comms']>['objects']['objectTable']>> | undefined, got = false; return () => {if (!got) {t = this.comms?.objects.objectTable?.(); got = true;} return t;};}
+  /** #1329: a ride object's name, or null when the id is not a ride. */
+  rideName(objectId: string): string | null {const o = this.comms?.objects.all().find(x => x.id === objectId); return o?.kind === 'ride' ? (o as {name?: string}).name ?? objectId : null;}
   aboard(entityId: string): {id: string; slot: string; riderPhase: string; phase: string; label: string; outInSeconds?: number} | null {
     return (this.mw as unknown as {carrierOf?: (a: string) => ReturnType<EdgeLedger['aboard']>}).carrierOf?.(entityId) ?? null;
   }

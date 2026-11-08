@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.2";
+const VERSION = "2.24.3";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2924,6 +2924,9 @@ async function act(...argv) {
       return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}) };
     }
   }
+  // #1337 (P9): a ride steer the world would refuse is answered here, in the world's words, and never sent
+  const early = await steerPreflight(parsed);
+  if (early) return early;
   const body = { ...parsed, strict: true };
   // D3: the owner message this act serves; the world writes its result line when the act ends, unless you write one first.
   // D3b (cloud fix-r3 trio tam-003: a later walk closed "walk with Mira" as Done): by default only the first act the world
@@ -2941,21 +2944,61 @@ async function act(...argv) {
   const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
   if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   if (!d.accepted) {
+    noteSteerRefusal(parsed, d);
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
+  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
   // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
   // still going while a later step of it has ended (#1289)
   if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for, ...(body.params?.seconds !== undefined ? { timed: true } : {}) }], d.receipt.id) });
-  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) {
+    const { stalled: _was, ...before } = out;   // the wait's frames are newer: a clock running again drops the act's word
+    out = { ...before, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  }
   if (out.held) heldLinks(out.receipt?.id);
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
+// GET /v1/edge/objects/<id>, whose actions carry the world's `blocked` code and reason); a failed or slow read changes
+// nothing. A steer to a named place (`to`) that the world refused for that place (no landing spot there, out of bounds,
+// a place it doesn't know, bad params) is not sent again for STEER_REFUSED_MS in this world: the CLI answers with the
+// world's own refusal. Only a named place is fixed: "land here", a direction and distance, and a water route all depend
+// on where the ride is now, so those are always sent. So are another target, another ride, and refusals that pass
+// (someone else steering, on the ground).
+export const STEER_REFUSED_MS = 5 * 60_000;
+export const STEER_TARGET_REFUSALS = new Set(["ride.no-landing-spot", "ride.out-of-bounds", "ride.params", "ride.steer-params", "steer.unknown-place", "steer.params"]);
+const STEER = /^object:([^:\s]+):steer$/;
+const steerKey = (p) => `${load().world ?? ""} ${String(p.capability).trim()} ${JSON.stringify(Object.keys(p.params ?? {}).sort().map((k) => [k, p.params[k]]))}`;
+const fixedTarget = (p) => typeof p.params?.to === "string" && p.params.to.trim() !== "";
+async function steerPreflight(parsed) {
+  const m = STEER.exec(String(parsed.capability ?? "").trim());
+  if (!m) return null;
+  const key = steerKey(parsed), held = fixedTarget(parsed) ? (load().refusedSteers ?? []).find((x) => x.key === key && Date.now() - x.at < STEER_REFUSED_MS) : null;
+  if (held) return { accepted: false, code: held.code, reason: held.reason, repeat: "refused", note: "The world refused this same steer; it was not sent again. Steer somewhere else, or tell your person why." };
+  const r = await call(`/v1/edge/objects/${encodeURIComponent(m[1])}`, { retry: false, timeoutMs: 5_000 }).catch(() => null);
+  const a = r?.status === 200 ? (r.data?.object?.actions ?? []).find((x) => x?.action === "steer") : null;
+  return a && a.available === false && a.blocked?.code ? { accepted: false, code: a.blocked.code, reason: a.blocked.reason, preflight: true } : null;
+}
+function noteSteerRefusal(parsed, d) {
+  if (!STEER.test(String(parsed.capability ?? "").trim()) || !fixedTarget(parsed) || !STEER_TARGET_REFUSALS.has(d.code)) return;
+  const key = steerKey(parsed), kept = (load().refusedSteers ?? []).filter((x) => x.key !== key && Date.now() - x.at < STEER_REFUSED_MS);
+  save({ refusedSteers: [...kept, { key, code: d.code, reason: d.reason, at: Date.now() }].slice(-10) });
+}
+/** The landing the world chose, in one sentence (#1324's `result.landing`: {requested, at, adjustedM, reason}). Always
+ *  "lands": a steer's receipt ends when the ride takes the steer, long before touchdown; the landing event says it landed. */
+export function landingSentence(l) {
+  const m = Number(l?.adjustedM);
+  if (!l || !(m > 0)) return null;
+  const name = (x) => { const v = typeof x === "string" ? x : x?.label ?? x?.name ?? x?.place ?? null; return v == null ? null : String(v).slice(0, 60); };
+  const asked = name(l.requested), at = name(l.at), why = l.reason ? String(l.reason).replace(/[.\s]+$/, "").slice(0, 100) : "";
+  return `Lands ${Math.round(m)} m from ${asked ?? "where I asked"}${at ? `, at ${at}` : ""}${why ? `: ${why}` : ""}.`;
 }
 
 /** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
@@ -3000,6 +3043,12 @@ function compactEvent(event) {
   // Unusual large producer payload: retain the event reference, never imply that omitted details were absent.
   return {id: e.id, kind: e.kind, at: e.at, tick: e.tick, detailsOmitted: true, untrusted: true};
 }
+/** #1326's `world: {stalled: true, tick_age_ms, note}`: the world's own sentence, else one from the tick age. */
+export function stalledSentence(w) {
+  if (typeof w?.note === "string" && w.note.trim()) return w.note.trim().slice(0, 200);
+  const s = Math.round((Number(w?.tick_age_ms) || 0) / 1000);
+  return `The world's clock has not moved${s > 0 ? ` for ${s} s` : ""}; what I asked waits until it runs again.`;
+}
 export function brief(out) {
   const rec = out.receipt && !out.receipt.error ? out.receipt : null, fin = !!rec && TERMINAL.has(rec.phase);
   // F2 (#373): only a completed receipt is `done`; a failed or replaced one says `failed` with the world's reason, never
@@ -3016,10 +3065,15 @@ export function brief(out) {
     ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
+  // #1337: where the world adjusted what was asked (a landing moved to clear ground, words read as another id), one sentence;
+  // and a world whose clock has stalled says so
+  const adjusted = landingSentence(out.landing ?? rec?.result?.landing) ?? (out.resolved?.note && out.resolved.to !== out.resolved.from ? String(out.resolved.note).slice(0, 200) : null);
+  if (adjusted) o.adjusted = adjusted;
+  if (out.stalled) o.stalled = stalledSentence(out.stalled);
   // #832: an owner message that ends a wait must not push the receipt out: shorten the message texts (stderr's OWNER
   // MESSAGE line has them in full), then keep only the newest, so the agent still sees which act is open. Without
   // owner messages the output is as before (resolved, then receipt, go first).
-  for (const k of o.ownerMessages ? ["resolved"] : ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
+  for (const k of o.ownerMessages ? ["resolved", "stalled"] : ["resolved", "receipt", "stalled"]) if (JSON.stringify(o).length > 600) delete o[k];
   if (JSON.stringify(o).length > 600 && o.ownerMessages) {
     o.ownerMessages = o.ownerMessages.map((m) => (String(m.text ?? "").length > 100 ? { ...m, text: m.text.slice(0, 100) + "…", textShortened: true } : m));
     if (JSON.stringify(o).length > 600 && o.ownerMessages.length > 1) { o.ownerMessagesOmitted = o.ownerMessages.length - 1; o.ownerMessages = o.ownerMessages.slice(-1); }
@@ -3081,7 +3135,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
   const since = cursor;
   const seen = [];
-  let terminal = null, held = null, addressed = null, addressedSince = null;
+  let terminal = null, held = null, addressed = null, addressedSince = null, stalled = null;
   while (Date.now() < until) {
     const t = Math.max(1, Math.min(55, Math.round((until - Date.now()) / 1000)));
     const q = `timeout=${t}&after=${encodeURIComponent(cursor)}` + (Number.isSafeInteger(ownerMark) ? `&ownerSince=${ownerMark}` : "") + (addressedSince != null ? `&addressedSince=${addressedSince}` : "");
@@ -3092,6 +3146,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
       await pause(ms); continue;
     }
     const d = ok(r, "wait");
+    stalled = d.world?.stalled === true ? d.world : null;   // #1337: the latest frame's word on the world's clock
     if (!d.gap) seen.push(...(d.events ?? []));
     cursor = d.cursor ?? cursor;
     if (Number.isSafeInteger(d.ownerMark)) ownerMark = d.ownerMark;
@@ -3109,7 +3164,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
