@@ -81,29 +81,29 @@ test('T3: the decision commits, then the answer fails: 200 accepted with that re
   } finally { ledger.noteAct = noteAct; }
 });
 
-test('T4: a clock that stops after the hand-off: 202 pending with the receipt id; a same-key retry is that act, never a second', async t => {
+test('T4: a clock that stops after the hand-off: 202 pending with the receipt id; a same-ref retry is that act, never a second', async t => {
   const w = await world(t), was = process.env.SIM_ACT_COMMIT_WAIT_MS;
   process.env.SIM_ACT_COMMIT_WAIT_MS = '150'; t.after(() => { if (was === undefined) delete process.env.SIM_ACT_COMMIT_WAIT_MS; else process.env.SIM_ACT_COMMIT_WAIT_MS = was; });
-  const key = 'k-1327-pending', body = {capability: 'read:here', clientRef: key};
+  const ref = 'k-1327-pending', body = {capability: 'read:here', clientRef: ref};
   // nothing drains: the clock has stopped
   // bounded: without #1327 this request never answers at all
-  const first = await Promise.race([w.send('/v1/edge/act', body, key), new Promise<{status: number; data: any}>(r => setTimeout(() => r({status: 0, data: 'no answer in 3 s'}), 3000).unref())]);
+  const first = await Promise.race([w.send('/v1/edge/act', body, ref), new Promise<{status: number; data: any}>(r => setTimeout(() => r({status: 0, data: 'no answer in 3 s'}), 3000).unref())]);
   assert.equal(first.status, 202, JSON.stringify(first.data)); assert.equal(first.data.accepted, true); assert.equal(first.data.pending, true);
   const id = first.data.receipt.id; assert.match(id, /^r_/); assert.equal(first.data.receipt.phase, 'pending');
   assert.equal(w.rows().length, 0, 'not recorded yet');
   const seen = await w.send(`/v1/edge/receipts/${id}`); assert.equal(seen.status, 200); assert.equal(seen.data.receipt.phase, 'pending');
-  const again = await w.send('/v1/edge/act', body, key);
+  const again = await w.send('/v1/edge/act', body, ref);
   assert.equal(again.status, 202); assert.equal(again.data.receipt.id, id, 'the same act');
-  // a key alone (no clientRef) names the act as well
-  const k2 = 'k-1327-key-only', alone = await w.send('/v1/edge/act', {capability: 'dance:here'}, k2);
+  // a ref alone (no clientRef) names the act as well
+  const ref2 = 'k-1327-ref-only', alone = await w.send('/v1/edge/act', {capability: 'dance:here'}, ref2);
   assert.equal(alone.status, 202); const id2 = alone.data.receipt.id;
-  assert.equal((await w.send('/v1/edge/act', {capability: 'dance:here'}, k2)).data.receipt.id, id2, 'the same act');
+  assert.equal((await w.send('/v1/edge/act', {capability: 'dance:here'}, ref2)).data.receipt.id, id2, 'the same act');
   // the clock moves again: one receipt per act, under its id
   for (let i = 0; i < 5; i++) { w.f.host.drainInputs(); await turn(); }
-  const rows = w.rows(); assert.equal(rows.length, 2, JSON.stringify(rows)); assert.equal(rows[0].id, id); assert.equal(rows[0].ref, key);
-  assert.equal(rows[1].id, id2); assert.equal(rows[1].ref, k2); assert.equal(rows[0].phase, 'replaced', 'the later act replaced it, in order');
+  const rows = w.rows(); assert.equal(rows.length, 2, JSON.stringify(rows)); assert.equal(rows[0].id, id); assert.equal(rows[0].ref, ref);
+  assert.equal(rows[1].id, id2); assert.equal(rows[1].ref, ref2); assert.equal(rows[0].phase, 'replaced', 'the later act replaced it, in order');
   const now = await w.send(`/v1/edge/receipts/${id}`); assert.equal(now.status, 200); assert.notEqual(now.data.receipt.phase, 'pending');
-  const third = await w.req('/v1/edge/act', body, key);
+  const third = await w.req('/v1/edge/act', body, ref);
   assert.equal(third.status, 200); assert.equal(third.data.accepted, true); assert.equal(third.data.receipt.id, id);
   assert.equal(w.rows().length, 2, 'no new receipt');
 });
