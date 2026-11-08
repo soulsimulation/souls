@@ -317,3 +317,10 @@ canvas[data-pointer-focus]:focus{outline:none}
 @media (prefers-reduced-motion:reduce){.navbar-popover.navbar-sheet{animation:none}.touch-hints{transition:none}}
 .camera-help-scrim{padding:max(16px,var(--sa-t)) max(16px,var(--sa-r)) max(16px,var(--sa-b)) max(16px,var(--sa-l))}  /* #893: the help dialog clears the notch and home indicator */
 #boot-arrival:not([data-fill="true"]) .arrival-disc{transition:transform .5s ease-out}
+/* #1386: a press, long-press, double-tap or drag on the world page never selects or highlights anything (iOS Safari's
+   blue selection and callout, Android's tap highlight). Set on <body> while a world page is up, so dialogs portaled to it
+   are covered too, and so are modal dialogs (the top layer does not take user-select from its parent); fields, code and
+   the copyable start prompt keep their text. */
+body:has(.human-world),body:has(.human-world) :is(dialog,[popover]),.human-world,.navbar-popover,#boot-arrival{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+body:has(.human-world) :is(input,textarea,[contenteditable]:not([contenteditable=false]),pre,code,.soul-prompt){-webkit-touch-callout:default;-webkit-user-select:text;user-select:text}
+body:has(.human-world) .soul-prompt{-webkit-user-select:all;user-select:all}
