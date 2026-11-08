@@ -98,6 +98,11 @@ const NAMES_PLACE = new WeakMap<object, Map<string, boolean>>();
  *  Soul's ambient sit), in cells of this size, bumped for Souls within this reach (fires 150 m). */
 // MENU_REACH_M covers SPOT_REACH: an activity spot is offered up to 200 m off, and a claim on it (an act whose target it
 // is) bumps the spot's cell, so every Soul that may list it rebuilds
+/** #1329 part 4: at most this many place walks a capabilities search builds. */
+const SEARCH_PLACES = 12;
+/** `GET /v1/edge/capabilities?search=` (#1329 part 4): `places` are walk ids, best first, for the known places the words name
+ *  (resolve's reading); `truncated` when more places matched than are listed. Absent on a world without search. */
+export type CapabilitySearch = {query: string; places: string[]; placesMatched: number; truncated: boolean; note?: string};
 const MENU_MAX_AGE_TICKS = 2400, MENU_CELL_M = 32, MENU_REACH_M = SPOT_REACH;
 /** L3 (b): a kept words menu (wordsMenu) serves at most this long, and while my own position stays in one cell of this size. */
 const WORDS_MAX_AGE_TICKS = 200, WORDS_CELL_M = 2;
@@ -1599,10 +1604,38 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** Walks and ride boardings advertise `with` (quality cases 21/27: the invitation was there but undiscoverable). */
   /** L3 item 5: the page of this Soul's menu a listing shows (`all`: the whole menu), and what it leaves out. Act and
    *  resolve read the whole menu, so an offer left out stays reachable by id and by words. */
-  capabilitiesPage(soul: EdgeSoul, opts: {all?: boolean} = {}): {capabilities: EdgeCapability[]; paramsByVerb: Record<string, ParamSchema>; omitted?: Omitted} {
-    const caps = this.capabilities(soul), schemas = (list: EdgeCapability[]) => paramsByVerb(list.map(c => c.verb)); if (opts.all) return {capabilities: caps, paramsByVerb: schemas(caps)};
+  capabilitiesPage(soul: EdgeSoul, opts: {all?: boolean; search?: string} = {}): {capabilities: EdgeCapability[]; paramsByVerb: Record<string, ParamSchema>; omitted?: Omitted; search?: CapabilitySearch} {
+    const caps = this.capabilities(soul), schemas = (list: EdgeCapability[]) => paramsByVerb(list.map(c => c.verb));
+    // #1329 part 4: a search reads the whole menu and the places this Soul knows (as resolve does), never just the page
+    if (opts.search !== undefined) {const found = this.placeWalks(soul, opts.search, caps), all = [...caps, ...found.walks]; return {capabilities: all, paramsByVerb: schemas(all), search: found.search};}
+    if (opts.all) return {capabilities: caps, paramsByVerb: schemas(caps)};
     const b = this.body(soul.entityId), {listed, omitted} = pageCapabilities(caps, this.listingWhere(soul), b ? [b.pose.p[0], b.pose.p[2]] : null, this.loadLevel);
     return {capabilities: listed, paramsByVerb: schemas(listed), ...(omitted ? {omitted} : {})};
+  }
+  /** #1329 part 4 (`caps --search library` matched 0 of 14,400 offers while `resolve "walk to library"` found it): a walk to a
+   *  far place is made on demand, so it is in no menu. The places this Soul knows that the words name (resolve's placeMatch,
+   *  names, aliases, everyday words), each with its walk built as act takes it, at most SEARCH_PLACES. */
+  private placeWalks(soul: EdgeSoul, text: string, menu: EdgeCapability[]): {walks: EdgeCapability[]; search: CapabilitySearch} {
+    const words = tokens(text), {places, withheld} = this.vocabPlaces(soul), found = words.length ? placeMatch(words, places, withheld) : [];
+    const byTarget = new Map(menu.filter(c => c.verb === 'walk' && c.target?.kind === 'place').map(c => [c.target!.id, c.id])), onMenu = new Set(menu.map(c => c.id));
+    const walks: EdgeCapability[] = [], ids: string[] = [], noWalk: string[] = [];
+    let tried = 0;
+    for (const p of found) {
+      if (ids.length >= SEARCH_PLACES) break;
+      tried++;
+      const listed = byTarget.get(p.id); if (listed) {if (!ids.includes(listed)) ids.push(listed); continue;}
+      // the walk `resolve walk:<place>` answers (a pond's goes to its shore), built as act takes it, never a secret one
+      const r = this.resolveOnDemand(soul, `walk:${p.id}`, [...menu], new Map()), cap = r.v.kind === 'unknown' ? undefined : r.v.cap;
+      if (!cap || cap.verb !== 'walk') {noWalk.push(p.name); continue;}
+      if (ids.includes(cap.id)) continue;
+      if (!onMenu.has(cap.id)) {walks.push({...cap, aliases: [...new Set([...(cap.aliases ?? []), p.name, ...(p.aliases ?? [])])]}); onMenu.add(cap.id);}
+      ids.push(cap.id);
+    }
+    const truncated = tried < found.length, notes: string[] = [];
+    if (!found.length) notes.push(`No place you know is named "${text}"; capabilities lists the whole menu to match against.`);
+    if (truncated) notes.push(`${found.length} known places match "${text}"; ${ids.length} are listed. Add a word to narrow it, or resolve "walk to <place>".`);
+    if (noWalk.length) notes.push(`${noWalk.length === 1 ? `${noWalk[0]} has` : `${noWalk.length} matching places (${noWalk.slice(0, 3).join(', ')}${noWalk.length > 3 ? ', …' : ''}) have`} no walk from here; resolve "walk to <place>" says why.`);
+    return {walks, search: {query: text, places: ids, placesMatched: found.length, truncated, ...(notes.length ? {note: notes.join(' ')} : {})}};
   }
   /** LOAD-CONTRACT §1 dial "menu listing radius" (listing.ts LISTING.radius: green the nearest of all, amber 64 m, red 32 m). */
   private loadLevel: LoadLevel = 'green';

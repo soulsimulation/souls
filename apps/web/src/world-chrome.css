@@ -257,6 +257,13 @@ canvas[data-pointer-focus]:focus{outline:none}
 .navbar-popover button{display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;width:100%;min-height:38px;padding:9px 10px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;cursor:pointer}
 .navbar-popover button:hover,.navbar-popover button:focus-visible,.navbar-popover button[aria-pressed=true]{background:color-mix(in srgb,var(--fg) 10%,transparent)}
 .navbar-popover button[role=switch] b{font-size:12px}
+.navbar-popover button[data-music=blocked] b{color:#b45309}
+.navbar-popover .audio-track{display:grid;grid-template-columns:38px 1fr 38px;align-items:center;gap:4px}
+.navbar-popover .audio-track button{justify-content:center;padding:0}
+.navbar-popover .audio-track svg{width:16px;height:16px}
+.navbar-popover .audio-track span{text-align:center;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navbar-audio.music-blocked .navbar-menu-trigger{position:relative}
+.navbar-audio.music-blocked .navbar-menu-trigger::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:#f59e0b}
 .navbar-popover label{display:grid;gap:6px;padding:8px 10px;font-weight:600}
 .navbar-popover select{width:100%;min-height:38px;padding:6px;border-radius:6px;background:var(--bg);color:var(--fg);border:1px solid var(--line);font:inherit}
 .navbar-popover .soul-avatar{width:30px;height:30px;flex:none;border-radius:50%}
