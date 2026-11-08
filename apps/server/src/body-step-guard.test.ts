@@ -42,11 +42,14 @@ test('boot order: the courtesy event, the edge rules and body-step-guard/1 are a
   };
   const f = fixture(file); await boot(f);
   const p = policy(f)!;
-  for (const k of ['quietSeatCourtesy', 'quietStallReleaseV1', 'bodyStepGuardV1']) assert.equal(p[k], true, `${k} kept in the host's record`);
+  for (const k of ['quietSeatCourtesy', 'quietStallReleaseV1', 'bodyStepGuardV1', 'stairWayV1']) assert.equal(p[k], true, `${k} kept in the host's record`);
   const rules = f.db.events(f.host.worldId).filter((e) => e.kind === 'rules').length;
   f.host.stop(); f.db.close();
   const g = fixture(file); t.after(() => { g.host.stop(); g.db.close(); });
   await boot(g);
   assert.equal(g.db.events(g.host.worldId).filter((e) => e.kind === 'rules').length, rules, 'a reboot logs no rule again');
-  assert.equal(guardEvents(g).length, 1);
+  // #1428: stair-way/1 follows the guard, and its event copies the policy before it, so the guard is in that one too
+  const stair = (e: { payload?: unknown }) => (e.payload as { runtimePolicy?: { stairWayV1?: boolean } }).runtimePolicy?.stairWayV1 === true;
+  assert.equal(guardEvents(g).filter((e) => !stair(e)).length, 1);
+  assert.equal(g.db.events(g.host.worldId).filter((e) => e.kind === 'rules' && stair(e)).length, 1, 'stair-way/1 adopted once, after the guard');
 });
