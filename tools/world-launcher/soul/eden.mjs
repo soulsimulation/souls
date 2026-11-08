@@ -5,7 +5,7 @@
 // no guards. Every command is one or two HTTP calls to the world and prints JSON.
 // Private state (world URL, Soul id, bearer token) lives in a `.souls/` home, or .eden-agent.json in a legacy folder.
 
-import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { createHash, randomUUID, randomBytes } from "node:crypto";
@@ -2242,6 +2242,8 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     }
     if (r.status === 0 && cls === "none") r.data.error.notRetried = true;
     if (headers.authorization && !path.startsWith("/v1/edge/inbox/")) noticeInbox(r.data);
+    // a replay after a try that got no answer may be that very try, taken by the world: not a repeat of an earlier command
+    if (r.replayed && failed > 0) return { ...r, replayed: false, replayedRetry: true };
     return r;
   }
 }
@@ -2281,7 +2283,8 @@ async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, s
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
   if (r.status >= 200 && r.status < 300) noteForMemory(url, method, body, data);
-  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null };
+  // the world's idempotency layer marks a repeat it answered from the first write (apps/server/src/edge/events/idempotency.ts)
+  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null, ...(r.headers.get("idempotent-replay") === "true" ? { replayed: true } : {}) };
 }
 
 // ---------------------------------------------------------------- memory
@@ -2750,6 +2753,15 @@ export function rankCapabilities(list, search) {
   }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** 2.24.7 (#1412): the places the world reads the words as (`search.places`, resolve's own reading, best first) lead, in
+ *  the world's order, then the client's own ranking without repeats. A world without `search` gets today's ranking. */
+export function searchOrder(list, search, answer) {
+  const ranked = rankCapabilities(list, search), places = Array.isArray(answer?.places) ? answer.places : [];
+  if (!places.length) return ranked;
+  const byId = new Map(list.map((c) => [c.id, c])), first = [...new Set(places)].map((id) => byId.get(id)).filter(Boolean), lead = new Set(first.map((c) => c.id));
+  return [...first, ...ranked.filter((c) => !lead.has(c.id))];
+}
+
 /** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
 const LABEL_MAX = 80;
 export function shortLabel(id, label) {
@@ -2786,18 +2798,25 @@ async function caps(...args) {
   }
   // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
   limit ??= search && !all ? 12 : 60;
-  // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
-  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
+  // The plain listing is the world's page (what is near); search and verb filters read the whole menu. 2.24.7 (#1412):
+  // a search sends its words too, and a world that reads them answers `search` with resolve's own place reading.
+  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "") + (search ? "&search=" + encodeURIComponent(search) : "")), "capabilities");
   let list = d.capabilities ?? [];
   if (!all) list = list.filter((c) => c.available);
   if (verb) list = list.filter((c) => c.verb === verb);
-  if (search) {
-    list = rankCapabilities(list, search);
-  }
+  if (search) list = searchOrder(list, search, d.search);
+  const seen = search && d.search && typeof d.search === "object" ? d.search : null;
+  // the world's own note first; with none and nothing listed, say why: the world knew the place but a filter left it out, or nothing matched
+  const filtered = verb ? `--verb ${verb}` : "available offers (--all lists the rest)";
+  const note = seen?.note ?? (seen && !list.length ? (seen.placesMatched > 0
+    ? `The world knows ${seen.placesMatched === 1 ? "a place" : `${seen.placesMatched} places`} named "${search}", but none is among ${filtered}.`
+    : `Nothing here or on the menu matches "${search}". Try other words, or resolve "walk to ${search}".`) : undefined);
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
     ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
     ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
+    ...(seen && Number.isFinite(seen.placesMatched) ? { placesMatched: seen.placesMatched } : {}),
+    ...(note ? { note } : {}),
     offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
@@ -3200,21 +3219,77 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
 }
 
 // say "<text>" [--for <message-id>] [--key <k>]: with --for, the speech is what the owner asked for, so it closes that message too.
-async function say(...input) {
-  // --key only among the trailing flags (with or around --for): "--key" inside speech is words
-  let words = input, key;
-  for (let n = words.length; n >= 2; n = words.length) {
-    if (words[n - 2] === "--key" && key === undefined) { key = keyArg(words[n - 1]); words = [...words.slice(0, n - 2)]; }
-    else if (words[n - 2] === "--for" && n >= 4 && words[n - 4] === "--key" && key === undefined) { key = keyArg(words[n - 3]); words = [...words.slice(0, n - 4), ...words.slice(n - 2)]; }
+// #1354: [--to <name|soulId> [--gesture <g>] [--stand-ok]] turns to them first (face:<soulId>, attention, so it never
+// replaces what the body is doing), speaks, then gestures toward them. Each part is reported; a refused part is never
+// retried, and a refused face or gesture never unsays the speech.
+const SAY_GESTURES = ["nod", "bow", "clap", "cheer", "shake-head", "point"], STANDS_UP = new Set(["bow"]);
+export function sayFlags(words) {
+  // only among the trailing flags: "tell her --to the letter" said unquoted is speech, as "what --for means" is
+  const flags = {}, drop = new Set();
+  if (["--to", "--gesture", "--key"].includes(words.at(-1))) throw new Error(`${words.at(-1)} needs a value`);
+  for (let i = words.length - 1; i >= 0;) {
+    if (words[i] === "--stand-ok") { flags.standOk = true; drop.add(i); i -= 1; }
+    else if (["--to", "--gesture", "--key"].includes(words[i - 1])) {
+      if (flags[words[i - 1].slice(2)] !== undefined) throw new Error(`${words[i - 1]} is given twice`);
+      flags[words[i - 1].slice(2)] = words[i]; drop.add(i).add(i - 1); i -= 2;
+    }
+    else if (words[i - 1] === "--for" && /^(msg_|none$)/.test(words[i])) i -= 2;
     else break;
   }
+  return { ...flags, words: words.filter((_, i) => !drop.has(i)) };
+}
+async function say(...all) {
+  let flags;
+  try { flags = sayFlags(all); } catch (e) { throw new Error(`${e.message}. usage: say "<text>" [--to <name|soulId> [--gesture <g>] [--stand-ok]] [--for <message-id>] [--key <k>]`); }
+  const { to, gesture, standOk, words } = flags, key = flags.key === undefined ? undefined : keyArg(flags.key);
   const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>" [--for <message-id>] [--key <k>]');
+  const usage = 'usage: say "<text>" [--to <name|soulId> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for <message-id>] [--key <k>]';
+  if (!text) throw new Error(usage);
+  if ((gesture || standOk) && !to) throw new Error(`--gesture and --stand-ok go with --to. ${usage}`);
+  if (gesture && !SAY_GESTURES.includes(gesture)) throw new Error(`--gesture is one of ${SAY_GESTURES.join(", ")}. ${usage}`);
+  const target = to ? await faceTarget(to) : null;
+  const faced = target ? await sayPart(target.id ? `face:${target.id}` : null, undefined, target) : undefined;
   const w = await keyedWrite("/v1/edge/say", { text: text.slice(0, 500) }, { key });
-  if (w.unconfirmed) return unconfirmed("speech", w);
+  if (w.unconfirmed) return { ...(faced ? { faced } : {}), ...unconfirmed("speech", w) }; // no gesture after speech the world did not confirm
   const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
-  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
+  // a rerun the world answers from the first speech (same key) already had its gesture: it is not sent twice (the turn is
+  // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it,
+  // and so does a run whose own first try went unanswered and was replayed to its retry (call() clears `replayed` then).
+  const repeat = w.r.replayed === true && !w.resent;
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}) };
+  return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
+}
+/** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
+async function faceTarget(to) {
+  const r = await call("/v1/edge/capabilities?all=1").catch(() => null), offers = (r?.status === 200 ? r.data?.capabilities ?? [] : []).filter((c) => c.verb === "face" && c.available !== false);
+  const nameOf = (c) => String(c.label ?? "").replace(/^Turn towards /, "").trim(), named = (c) => nameOf(c).toLowerCase();
+  const exact = offers.find((c) => c.id === `face:${to}` || c.target?.id === to);
+  const byName = exact ? [exact] : offers.filter((c) => named(c) === String(to).trim().toLowerCase());
+  if (byName.length === 1) return { id: byName[0].target?.id ?? byName[0].id.slice(5), name: nameOf(byName[0]) || to };
+  if (r?.status !== 200) return { name: to, code: "face.unknown", reason: `Could not read the offers to find ${to}, so the turn was not sent.` };
+  return byName.length ? { name: to, code: "face.ambiguous", reason: `${byName.length} Souls near you are called ${to}: use the soulId (${byName.map((c) => c.target?.id ?? c.id.slice(5)).join(", ")}).` }
+    : { name: to, code: "face.not-offered", reason: `${to} is not near enough to turn to: no face offer names them.` };
+}
+/** One strict act of say's, reported in a line: never retried after a refusal, never fatal to the speech. */
+async function sayPart(capability, params, target) {
+  if (!capability) return { to: target.name, accepted: false, code: target.code, reason: target.reason };
+  try {
+    const d = ok(await call("/v1/edge/act", { body: { capability, ...(params ? { params } : {}), strict: true, clientRef: randomUUID() } }), "act");
+    return d.accepted ? { id: capability, to: target.name, accepted: true, ...(d.receipt?.id ? { receipt: d.receipt.id } : {}) } : { id: capability, to: target.name, accepted: false, code: d.code, reason: d.reason };
+  } catch (e) { return { id: capability, to: target.name, accepted: false, code: "act.error", reason: e.message }; }
+}
+/** The gesture after the speech, toward them. A bow stands a seated or lying Soul up, so it goes only with --stand-ok. A
+ *  name that two Souls near you share would let the world pick either, so then nothing is sent. */
+const DOWN = new Set(["seated", "lying", "sleeping"]);
+async function sayGesture(g, target, standOk) {
+  const id = `${g}:here`;
+  if (target.code === "face.ambiguous") return { id, to: target.name, sent: false, reason: target.reason };
+  if (STANDS_UP.has(g) && !standOk) {
+    const r = await call("/v1/edge/here").catch(() => null), posture = r?.status === 200 ? (r.data?.here ?? r.data)?.me?.posture : undefined;
+    if (!posture || DOWN.has(posture)) return { id, to: target.name, sent: false, reason: posture ? `A ${g} would stand you up (you are ${posture}). Add --stand-ok to ${g} anyway.` : `Could not read your posture, and a ${g} stands a seated Soul up. Add --stand-ok to ${g} anyway.` };
+  }
+  return sayPart(id, { [g === "point" ? "at" : "to"]: target.id ?? target.name }, target);
 }
 
 async function converse(op, arg, ...text) {
@@ -3319,27 +3394,45 @@ async function stopListen() {
   calm(`listen: took over from pid ${holder.pid}`);
 }
 
-// listen [--after <id>] [--once] [--take]: hold one long-poll open (this is also the Soul's "agent is
+// listen [--after <id>] [--once] [--take] [--follow]: hold one long-poll open (this is also the Soul's "agent is
 // listening" presence) and exit as soon as the owner has written, printing every waiting message.
+// #1359 --follow: never exit on a wake. Each wake is one JSON line on stdout (a host that streams a running command's lines,
+// such as Claude Code's Monitor tool, turns each into a notification), and the cursor moves past what was printed.
 async function listen(...args) {
-  let after, once = false, take = false;
+  let after, once = false, take = false, follow = false;
+  const usage = "usage: listen [--after <message-id>] [--once] [--take] [--follow]";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--after") after = args[++i];
     else if (args[i] === "--once") once = true;
     else if (args[i] === "--take") take = true;
-    else throw new Error("usage: listen [--after <message-id>] [--once] [--take]");
+    else if (args[i] === "--follow") follow = true;
+    else throw new Error(usage);
   }
+  if (follow && once) throw new Error(`--follow never ends on a message and --once never waits: pick one. ${usage}`);
+  let wakes = 0;
+  const emit = (line) => { writeSync(1, JSON.stringify(followLine({ ...line, wake: ++wakes })) + "\n"); };
+  const ended = (why, extra = {}) => { writeSync(1, JSON.stringify(followLine({ ended: why, ...extra })) + "\n"); return ""; };
   // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone, unless it says --take.
   if (!once) {
     if (take) await stopListen();
     const lock = takeListenLock();
     if (!lock.ok) return alreadyListening(lock.holder);
   }
-  let attempt = 0, lastCode;
+  if (follow) {
+    for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.prependOnceListener(sig, () => ended(sig === "SIGTERM" ? "stopped (SIGTERM: listen --take, or the host stopped it)" : `stopped (${sig})`, { next: `${CLI} listen --follow, if this Soul should keep listening here` }));
+    process.stderr.write(`listen --follow: listening; one line per wake${after ? `, after ${after}` : ""}\n`);
+  }
+  let attempt = 0, lastCode, superseded = 0;
   for (;;) {
     const q = new URLSearchParams({ timeoutMs: once ? "0" : "50000", ...(after ? { after } : {}) });
     const r = await call(`/v1/edge/inbox/listen?${q}`, { timeoutMs: 60_000, recoverRead: !once, retry: false, slowedNext: once ? undefined : "listen" });
-    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return alreadyListening(holder); }
+    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return follow ? ended("taken over", { pid: holder.pid, next: "a newer listen in this folder took over; nothing to do" }) : alreadyListening(holder); }
+    // a 409 while this folder's lock is still ours is this folder's own other long-poll (a `serve` that just started, or one
+    // restarting after travel): the next try goes through it. Three in a row is someone else with this token: stop.
+    if (follow && r.status === 409) {
+      if (++superseded < 3) { await pause(fullJitter(superseded)); continue; }
+      return ended("superseded", { why: r.data?.error?.message ?? "another listen for this Soul took over", next: "another listen for this Soul, from somewhere else, keeps taking over; this one has ended" });
+    }
     if (r.status === 0 || r.status === 429 || r.status >= 500) {
       const code = codeOf(r.data) ?? `http-${r.status}`;
       const ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -3349,11 +3442,21 @@ async function listen(...args) {
       await pause(ms);
       continue;
     }
-    const d = ok(r, "listen");
-    attempt = 0; lastCode = undefined;
+    let d;
+    try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
+    attempt = 0; lastCode = undefined; superseded = 0;
     const messages = messagesOf(d).filter((m) => m.id !== after), brief = messages.length || d.addressed?.length || d.plan ? briefNow() : {};
     heard(messages);
     const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
+    if (follow) {
+      if (messages.length || d.addressed?.length || d.plan) {
+        emit({ messages, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older,
+          next: messages.length ? `ack each (ack <id> "Got it: …"), then do them in order; result <id> done|failed "…" unless the answer says closed. This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" });
+        if (messages.length) after = messages.at(-1).id;
+      }
+      await sleep(50);
+      continue;
+    }
     if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
@@ -3361,6 +3464,26 @@ async function listen(...args) {
     }
     await sleep(50);
   }
+}
+
+/** #1359: one --follow line fits a notification: at most FOLLOW_MAX characters. A plan is cut to its state and the refused
+ *  step (`pending` has the rest). Then long texts are shortened, then the memory brief and the older-open list go, and only
+ *  then older new messages: those stay unacknowledged, so `listen --once` shows them, and `next` says so. */
+export const FOLLOW_MAX = 2000;
+export function followLine(line, max = FOLLOW_MAX) {
+  const size = (o) => JSON.stringify(o).length, short = (list) => list?.map((m) => (String(m.text ?? "").length > 300 ? { ...m, text: m.text.slice(0, 300) + "…", textShortened: true } : m));
+  let o = { ...line, ...(line.messages ? { messages: short(line.messages) } : {}), ...(line.addressed ? { addressed: short(line.addressed) } : {}) };
+  if (o.plan?.steps) {
+    const { steps, ...plan } = o.plan, refused = steps.find((st) => st.state === "refused");
+    o = { ...o, plan: { ...plan, ...(refused ? { refused: { n: refused.n, id: refused.id, ...(refused.code ? { code: refused.code } : {}), ...(refused.reason ? { reason: String(refused.reason).slice(0, 300) } : {}) } } : {}), stepsOmitted: steps.length } };
+  }
+  const drop = (...keys) => { if (size(o) > max && keys.some((k) => o[k] !== undefined)) { const n = { ...o }; for (const k of keys) delete n[k]; o = { ...n, [`${keys[0]}Omitted`]: true }; } };
+  drop("brief"); drop("stillOpen", "stillOpenNext");
+  for (const k of ["addressed", "messages"]) while (size(o) > max && o[k]?.length > 1) o = { ...o, [k]: o[k].slice(1), [`${k}Omitted`]: (o[`${k}Omitted`] ?? 0) + 1 };
+  if (o.messagesOmitted) o = { ...o, next: `${o.messagesOmitted} older message${o.messagesOmitted > 1 ? "s" : ""} did not fit this line: run ${CLI} listen --once for them all, then ack each. ${o.next ?? ""}`.trim() };
+  for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => (String(m.text ?? "").length > 80 ? { ...m, text: String(m.text).slice(0, 80) + "…", textShortened: true } : m)) };
+  if (size(o) > max && typeof o.next === "string") o = { ...o, next: o.next.slice(0, Math.max(40, o.next.length - (size(o) - max) - 1)) + "…" };
+  return o;
 }
 
 /** The owner's card holds 140 characters. A longer line is cut at a word and says so; it never costs the agent a retry. */
@@ -3772,6 +3895,46 @@ export function foldAddressed(st, env, at = Date.now()) {
   return true;
 }
 const addressedView = ({ id, from, soulId, text, at }) => ({ id, from, soulId, text, at, untrusted: true });
+// #1345 (2.24.4): the reflex. Speech the world counts as said to this Soul turns it to the speaker at once, through the
+// offered `face:<soulId>` act, before any model call. The world stays the judge (strict: an id not offered is refused, and
+// nothing else is tried). Never over the agent's own look, turn or face while it holds (the world's LOOK_SECONDS and
+// FACE_SECONDS), never after auto-face:off, at most once per speaker per REFLEX_EVERY_MS, never for this Soul's own speech.
+// Off for the folder with `serve --no-reflex` (back on with `serve --reflex`).
+export const REFLEX_EVERY_MS = 30_000, REFLEX_KEEP = 8;
+export const REFLEX_STALE_MS = 10_000;   // speech replayed after a reconnect is history, not a call to turn now
+/** "30s", "5m", "1h2m" (the world's durationWord) in ms, or null. */
+export function holdMs(word) {
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(String(word ?? "")); if (!m || !word) return null;
+  return ((Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0)) * 60 + Number(m[3] ?? 0)) * 1000;
+}
+/** Pure: the Soul to turn to for one `speech.to-me` line, or null with why not. */
+export function reflexFor(st, env, { me, at = Date.now(), off = false, inFlight = 0 } = {}) {
+  const who = env?.about?.soulId, said = typeof env?.at === "number" ? env.at : Date.parse(env?.at ?? "");
+  if (off) return { skip: "off" };
+  if (env?.kind !== "speech.to-me" || typeof who !== "string" || !who || who === me) return { skip: "not-a-soul" };
+  if (Number.isFinite(said) && at - said > REFLEX_STALE_MS) return { skip: "old" };
+  const busy = attentionHeld(st, { at, inFlight }); if (busy) return { skip: busy };
+  if ((st.reflexed ?? []).some((x) => x.soulId === who && at - (x.t ?? 0) < REFLEX_EVERY_MS)) return { skip: "recent" };
+  return { soulId: who, name: env.about?.name ?? null };
+}
+/** Pure: why the agent's own attention rules a reflex out now (its look, turn or face held or on its way; auto-face off). */
+export function attentionHeld(st, { at = Date.now(), inFlight = 0 } = {}) {
+  return inFlight > 0 || (st.reflexHold ?? 0) > at ? "own-attention" : st.autoFaceOff ? "auto-face-off" : null;
+}
+/** The agent's own attention acts, by id, before the world answers: they hold off a reflex while on their way. */
+export const ATTENTION_ID = /^(look|look-at|turn|turn-to|face)(:|$)/;
+/** Pure: what the world's answer to an act this folder sent says about the agent's own attention. The world's own
+ *  `chosen.holdsFor` when it says; else a heading turn or a look holds 10 s, any other turn or face 30 s (LOOK_SECONDS,
+ *  FACE_SECONDS). `auto-face:off|on` is the setting. */
+export function noteAttention(st, d, at = Date.now()) {
+  const c = String(d?.receipt?.capability ?? d?.capability ?? "");
+  if (c.startsWith("auto-face:off")) { st.autoFaceOff = true; return true; }
+  if (c.startsWith("auto-face:on")) { st.autoFaceOff = false; return true; }
+  if (d?.channel !== "attention") return false;
+  const ms = holdMs(d.chosen?.holdsFor) ?? (/^turn:\d+$/.test(c) || c.startsWith("look") ? 10_000 : 30_000);
+  st.reflexHold = Math.max(st.reflexHold ?? 0, at + ms);
+  return true;
+}
 /** Pure: what a request should hear: anything nobody has heard yet, and anything that came while this request was held, so a
  *  wait and a listen held at the same moment both hear it. A peek looks and leaves it unheard. */
 export function takeAddressed(st, heldFromSeq, { peek = false } = {}) {
@@ -3829,6 +3992,7 @@ export function takePending(st) {
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
     events: shown,
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
+    ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
     ...(st.omitted ? { omitted: st.omitted } : {}),
     ...(st.gap ? { gap: true, gapNote: "The stream had a gap: read here again; some events were not seen." } : {}),
@@ -3971,7 +4135,7 @@ async function serveForeground() {
   st.folder = folderKey(s);
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
 
@@ -4018,6 +4182,27 @@ async function serveForeground() {
       tick();
     }
   }
+  // #1345: turn to whoever speaks to this Soul, at once, through the world's own offered act. Never awaited by the stream.
+  function reflex(env) {
+    const r = reflexFor(st, env, { me: s.soul, off: load().reflex === false, inFlight: attentionInFlight });
+    if (!r.soulId) { if (r.skip !== "not-a-soul") log(`reflex: not turning (${r.skip})`); return; }
+    const at = Date.now(), entry = { soulId: r.soulId, name: r.name, at: new Date(at).toISOString(), accepted: null, read: false, t: at };
+    st.reflexed = [...(st.reflexed ?? []).filter((x) => Date.now() - (x.t ?? 0) < REFLEX_EVERY_MS * 4), entry].slice(-REFLEX_KEEP);
+    const ref = randomUUID();
+    gated(() => {
+      // asked again at the moment it would go: an agent's look or turn queued ahead of it wins
+      const busy = attentionHeld(st, { inFlight: attentionInFlight }) ?? (load().reflex === false ? "off" : null);
+      return busy ? { skipped: busy } : worldOnce(`${world}/v1/edge/act`, { method: "POST", headers: { ...auth, "idempotency-key": ref }, timeoutMs: 15_000, body: { capability: `face:${r.soulId}`, clientRef: ref, strict: true } });
+    })
+      .catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }))
+      .then((a) => {
+        if (a.skipped) { st.reflexed = st.reflexed.filter((x) => x !== entry); log(`reflex: not turning (${a.skipped})`); persist(); return; }
+        entry.accepted = a.status === 200 && a.data?.accepted === true;
+        if (!entry.accepted) { entry.code = a.data?.code ?? codeOf(a.data) ?? `http-${a.status}`; log(`reflex: face ${r.soulId} not taken (${entry.code}); not retried`); }
+        else log(`reflex: faced ${r.name ?? r.soulId}`);
+        persist();
+      });
+  }
   // The world's own classified stream names what is said to this Soul, by its rule (speech.to-me); this client doesn't repeat that rule.
   async function addressedLoop() {
     let attempt = 0, code;
@@ -4045,7 +4230,7 @@ async function serveForeground() {
             if (f.id) st.addressedCursor = f.id;
             if (f.event !== "speech.to-me") continue;
             let env; try { env = JSON.parse(f.data); } catch { continue; }
-            if (foldAddressed(st, env)) woke = true;
+            if (foldAddressed(st, env)) { woke = true; reflex(env); }
           }
           if (woke) { persist(); wake(); }
         }
@@ -4066,6 +4251,12 @@ async function serveForeground() {
     // A response cut off partway is a world that did not answer, not a reason for this process to die.
     const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const repeatable = m.method === "GET" || m.headers?.["idempotency-key"];
+    // #1345: the agent's own look, turn or face holds off a reflex from the moment it is asked, not only once answered
+    const attending = m.method === "POST" && routeOf(m.url) === "/v1/edge/act" && ATTENTION_ID.test(String(m.body?.capability ?? ""));
+    if (attending) attentionInFlight++;
+    try { return await forwardOnce(m, pathOf, repeatable, once); } finally { if (attending) attentionInFlight--; }
+  }
+  async function forwardOnce(m, pathOf, repeatable, once) {
     const r = HELD_PATH.test(pathOf) ? await once() : await gated(async () => {
       let a = await once();
       for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) { busyWaited++; await pause(statedJitter(a.retryAfterMs ?? 1_000)); a = await once(); }
@@ -4074,6 +4265,7 @@ async function serveForeground() {
     const p = pathOf.split("?")[0], inboxWrite = /^\/v1\/edge\/inbox\/([^/]+)\/(ack|result)$/.exec(p);
     if (r.status >= 200 && r.status < 300) {
       if (r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); persist(); }
+      if (p === "/v1/edge/act" && r.data?.accepted === true && noteAttention(st, r.data)) persist();
       if (inboxWrite) {
         const x = st.messages.find((y) => y.id === decodeURIComponent(inboxWrite[1]));
         if (x) { x.acked = true; if (inboxWrite[2] === "result") x.closed = true; persist(); }
@@ -4302,9 +4494,14 @@ async function serveForeground() {
 // serve [--status|--stop]: start the detached process for this folder, or ask it how it is, or end it.
 async function serve(...args) {
   if (args[0] === "--foreground") return serveForeground();
+  // the reflex setting stays with the folder; a serve already up reads it at the next speech
+  const flags = args.filter((a) => a === "--no-reflex" || a === "--reflex");
+  args = args.filter((a) => a !== "--no-reflex" && a !== "--reflex");
+  if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
+  if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
   if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, next: `${CLI} serve` };
   if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
-  if (args.length) throw new Error("usage: serve [--status|--stop]");
+  if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const running = await askServe({ op: "status" });
   if (running?.serving) return { ...running, alreadyServing: true };
@@ -4399,12 +4596,12 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
           stop [receiptId]   (ends your own act under way, where you are; nothing else starts)
-          say "<text>" [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+          say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
           (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
-owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
+owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
-resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
+resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
 ${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;

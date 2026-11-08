@@ -39,6 +39,9 @@
 .human-world:not(.has-advanced) .viewer-status [data-viewer-status]{font-weight:650}
 .human-world:not(.has-advanced) .viewer-status [data-viewer-status].ok::before{content:'';display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent);vertical-align:1px}
 .human-world:not(.has-advanced) .viewer-status .viewer-connection{font-weight:600}
+.human-world:not(.has-advanced) .viewer-status [data-viewer-status].preview::before{content:'';display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:#f0a020;box-shadow:0 0 0 3px color-mix(in srgb,#f0a020 26%,transparent);vertical-align:1px}
+/* #1392: the Live pill is the whole status chip; it opens the time panel like the old clock did */
+.human-world:not(.has-advanced) .viewer-status button.live-pill{margin:0;padding:0;min-height:0;border:0;border-radius:0;background:none;font:inherit;font-size:inherit;color:inherit;text-decoration:none;cursor:pointer}
 .human-world:not(.has-advanced) .viewer-status button{min-height:26px;padding:2px 10px;margin-left:8px;border-radius:999px;font-size:12px}
 .human-world:not(.has-advanced) .viewer-status .viewer-reason{display:inline-block;margin:0;padding:0;background:none;font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
 
@@ -213,6 +216,7 @@
 .time-preview input[type=range]{width:100%}
 .time-preview button{align-self:flex-start;font:inherit;padding:3px 10px;border-radius:999px;border:1px solid rgba(0,0,0,.2);background:#fff;cursor:pointer}
 .time-preview .dim{opacity:.7;font-size:12px}
+.time-preview .time-preview-now{font-weight:650}
 /* Lane P6 (2026-10-19): small screens only (HudMore.tsx sets html.phone-tidy there, never on desktop). Secondary controls
    leave the world view and are offered from the HUD's one "More" button; watch mode keeps only the primary chrome. */
 html.phone-tidy .human-world:not(.has-advanced) [data-god-panel-toggle],html.phone-tidy .human-world:not(.has-advanced) .visitor-controls{display:none!important}
@@ -313,3 +317,32 @@ canvas[data-pointer-focus]:focus{outline:none}
 @media (prefers-reduced-motion:reduce){.navbar-popover.navbar-sheet{animation:none}.touch-hints{transition:none}}
 .camera-help-scrim{padding:max(16px,var(--sa-t)) max(16px,var(--sa-r)) max(16px,var(--sa-b)) max(16px,var(--sa-l))}  /* #893: the help dialog clears the notch and home indicator */
 #boot-arrival:not([data-fill="true"]) .arrival-disc{transition:transform .5s ease-out}
+/* #1391: phone widths (HudMenu.tsx sets html.phone-menu, never on desktop or tablets). Only the hamburger floats; the other
+   top-bar controls stay mounted but out of sight and out of the way (stacked at the hamburger, invisible, no pointer
+   events), so the menu's rows can click them and their popovers and dialogs still open (those are made visible). */
+html.phone-menu .human-world:not(.has-advanced) .world-hud.slim>.hud-left{position:relative}
+html.phone-menu .human-world:not(.has-advanced) .world-hud.slim>.hud-left>:not(.hud-menu-wrap){position:absolute;top:0;left:0;visibility:hidden;pointer-events:none}
+html.phone-menu .human-world:not(.has-advanced) .world-hud.slim>.hud-actions{visibility:hidden;pointer-events:none}
+html.phone-menu .human-world:not(.has-advanced) .world-hud.slim>.hud-actions .account-menu[open],
+html.phone-menu .human-world:not(.has-advanced) .world-hud.slim>.hud-left dialog{visibility:visible;pointer-events:auto}
+.hud-menu-wrap{position:relative;display:inline-flex;flex:none}
+.human-world .hud-menu{display:grid;place-items:center;flex:none;width:38px;height:38px;min-height:38px;padding:0;box-sizing:border-box;border-radius:50%;border:1px solid var(--glass-line,var(--line));background:#000;color:#fff;box-shadow:var(--glass-shadow,none);cursor:pointer}
+.human-world .hud-menu svg{width:20px;height:20px}
+@media(pointer:coarse){.human-world .hud-menu{width:44px;height:44px;min-height:44px}}
+.hud-menu-panel{position:absolute;top:calc(100% + 8px);left:0;z-index:30;display:flex;flex-direction:column;gap:2px;box-sizing:border-box;width:min(300px,calc(100vw - 24px - var(--sa-l,0px) - var(--sa-r,0px)));max-height:calc(100dvh - 80px - var(--sa-t,0px) - var(--sa-b,0px));overflow:auto;padding:6px;border-radius:16px;border:1px solid var(--glass-line,var(--line));background:color-mix(in srgb,var(--panel) 82%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:var(--glass-shadow,0 8px 28px #0004);transform-origin:top left;transition:opacity .16s ease-out,transform .16s ease-out,visibility 0s linear .16s}
+.hud-menu-panel[data-open=false]{opacity:0;transform:translateY(-6px) scale(.98);visibility:hidden;pointer-events:none}
+.hud-menu-panel[data-open=true]{opacity:1;transform:none;visibility:visible;transition-delay:0s}
+.human-world .hud-menu-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:44px;box-sizing:border-box;padding:10px 12px;border:0;border-radius:10px;background:transparent;color:var(--fg);font:600 14px/1.2 system-ui,sans-serif;text-align:left;text-decoration:none;cursor:pointer}
+.human-world .hud-menu-row:hover,.human-world .hud-menu-row:focus-visible{background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.human-world .hud-menu-row[data-section-start]{margin-top:2px;border-top:1px solid color-mix(in srgb,var(--fg) 10%,transparent);border-radius:0 0 10px 10px}
+.hud-menu-worlds{justify-content:flex-start!important}
+.hud-menu-worlds img{display:block;width:24px;height:24px;padding:3px;border-radius:50%;background:#000}
+.hud-menu-value{color:var(--dim);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+@media (prefers-reduced-motion:reduce){.hud-menu-panel{transition:none}}
+/* #1386: a press, long-press, double-tap or drag on the world page never selects or highlights anything (iOS Safari's
+   blue selection and callout, Android's tap highlight). Set on <body> while a world page is up, so dialogs portaled to it
+   are covered too, and so are modal dialogs (the top layer does not take user-select from its parent); fields, code and
+   the copyable start prompt keep their text. */
+body:has(.human-world),body:has(.human-world) :is(dialog,[popover]),.human-world,.navbar-popover,#boot-arrival{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+body:has(.human-world) :is(input,textarea,[contenteditable]:not([contenteditable=false]),pre,code,.soul-prompt){-webkit-touch-callout:default;-webkit-user-select:text;user-select:text}
+body:has(.human-world) .soul-prompt{-webkit-user-select:all;user-select:all}
