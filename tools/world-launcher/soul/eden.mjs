@@ -3251,8 +3251,10 @@ export function orphanState({ message, receipts = [], plan = false, nextAct = fa
  *  `before`: the record as it was before this command closed one of them (`closed`), which then leaves it. */
 async function stillOpen(now, { before, closed = false } = {}) {
   try {
-    const s = load(), record = heardWith(before ?? s.heard, now.map((id) => ({ id }))), ask = olderThan(record, now);
-    const keep = closed ? record.filter((h) => !now.includes(h.id)) : record;
+    // which to ask about comes from the record as this command found it; what is kept is the record as it is now, since a
+    // listen in another process may have added to it while this command closed one
+    const s = load(), ask = olderThan(heardWith(before ?? s.heard, now.map((id) => ({ id }))), now);
+    const keep = closed ? (s.heard ?? []).filter((h) => !now.includes(h.id)) : heardWith(s.heard, now.map((id) => ({ id })));
     if (JSON.stringify(keep) !== JSON.stringify(s.heard ?? [])) save({ heard: keep });
     if (!ask.length) return {};
     const quick = { retry: false, timeoutMs: 5000 }, get = (path) => call(path, quick).catch(() => null);

@@ -55,7 +55,7 @@ test('an orphan is open, with nothing running, replaced, planned or about to be 
   assert.equal(orphanState({message: null}), 'keep');
 });
 
-async function world(t, {messages = {}, receipts = {}, backlog = [], reads = 200, events = []} = {}) {
+async function world(t, {messages = {}, receipts = {}, backlog = [], reads = 200, events = [], onResult} = {}) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-still-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
@@ -66,6 +66,7 @@ async function world(t, {messages = {}, receipts = {}, backlog = [], reads = 200
       if (url.startsWith('/v1/edge/receipts/')) { const r = receipts[url.split('/').pop()]; return r ? send(200, {receipt: r}) : send(404, {error: {code: 'not-found', message: 'no such receipt'}}); }
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
       if (m?.[2] === '/ack') { messages[m[1]] = {...messages[m[1]], state: 'acknowledged'}; return send(200, {inbox: {}}); }
+      if (m?.[2] === '/result') onResult?.(m[1]);
       if (m?.[2] === '/result') { messages[m[1]] = {...messages[m[1]], result: body.text, outcome: body.outcome}; return send(200, {inbox: {}}); }
       if (m && reads !== 200) return send(reads, {error: {code: 'broken', message: 'the inbox broke'}});
       if (m) return messages[m[1]] ? send(200, {message: {id: m[1], ...messages[m[1]]}}) : send(404, {error: {code: 'not-found', message: 'no such message'}});
@@ -157,4 +158,15 @@ test('a sit that asked for its own seconds is still running while held: wait nev
     const a = await w.cli('ack', 'm_new', 'Got it.');
     assert.deepEqual(a.json.stillOpen?.map(x => x.id), timed ? undefined : ['m_sit']);
   }
+});
+
+test('a listen that records while ack --close is closing keeps what it recorded', async t => {
+  let w;
+  w = await world(t, {messages: {m_x: {state: 'acknowledged', text: 'Is it raining?'}}, onResult: () => {
+    const s = w.read(); w.state({...s, heard: [...s.heard, {id: 'm_n', text: 'New', batch: 'm_n'}, {id: 'm_o', text: 'Other', batch: 'm_n'}]});
+  }});
+  w.state({heard: [{id: 'm_x', text: 'Is it raining?', batch: 'm_x'}]});
+  const a = await w.cli('ack', 'm_x', 'No.', '--close', 'done');
+  assert.equal(a.json.closed, true);
+  assert.deepEqual(w.read().heard.map(h => [h.id, h.batch]), [['m_n', 'm_n'], ['m_o', 'm_n']]);
 });
