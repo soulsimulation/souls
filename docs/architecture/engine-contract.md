@@ -79,13 +79,15 @@ in the raw scene may stand over the disc either, so no wall, lintel, roof or god
 lands on the nearest such spot within 30 m, in rings of 2 m, and the plan returns `landing: {requested, at, adjustedM, reason}`.
 With no spot it is refused `carrier.no-landing-spot`, naming how far the nearest clear ground is. The spot is read again through
 the second half of the flight and on the touchdown tick. When the spot is no longer clear, the landing moves to the nearest clear
-spot to the asked point: the ride climbs 12 m, flies across, then comes down. With no clear spot it hovers and looks again every
+spot to the asked point: the ride climbs back to cruise height (35 m), flies across, then comes down. After a third move it
+flies home. With no clear spot it hovers and looks again every
 2 s, and flies home after the 2-minute hover. The ride state's `landNote` says which happened. A ride's own home is never
 re-checked; a home that no longer reads clear is only reported, as a `carrier.home-not-clear` mark. A steer without the marker
 keeps the landing it always chose, so recorded programmes replay unchanged.
 A `carrier_ride` boarded with `clear: 'step-out/1'` (the ride object's join sends it) steps out only onto ground the body can stand
 on. The leg to the door waits while the door spot isn't clear. The last leg goes to the exit, or to the nearest clear spot round it
-that a straight step from the door reaches. A 12 s set-down uses the same check, and a rider with nowhere clear stays aboard instead
+that a straight step from the door reaches. The rider stands at the ground's height there. A 12 s set-down uses the same check,
+searching up to 12 m round the exit, and a rider with nowhere clear stays aboard instead
 of being placed in a wall. God edits never walk out a rider whose ride is in the air (#1339).
 
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another

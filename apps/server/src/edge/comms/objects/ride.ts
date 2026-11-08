@@ -102,7 +102,7 @@ export const rideKind: ObjectKind<RideState> = {
       // landing/1 (#1329 item 1): the landing says where it really came down: home, or the spot a steer chose
       const away = next.landing ?? state.landing;
       if (next.phase === 'landed' || (state.phase === 'aloft' && next.phase === 'parked')) events.push({to: was, text: next.rowing ? 'The punt has returned to its bank; you are disembarking. Wait for the row receipt and your ashore observation.' : attraction(next) ? `The ${attraction(next)} has stopped where you boarded; you step out.`
-        : next.phase === 'landed' && away ? `The balloon has landed ${landingWords(away.asked, away.at, next.steerLabel)}; you step out.` : 'The balloon is back where it started; you step out.'});
+        : next.phase === 'landed' && away ? `The balloon has landed ${landingWords(away.asked, away.at, next.steerLabel)}; you step out.` : 'The balloon has landed back where it started; you step out.'});
     }
     // D1 (playtest 121122 zed-019: "You are in the punt" at accept, rowing ~10 s later): a rider is in only once seated
     const seated = (x: RideState, id: string) => x.riders.some(o => o.soulId === id) && !(x.boarding ?? []).some(o => o.soulId === id);
@@ -144,7 +144,7 @@ export const rideKind: ObjectKind<RideState> = {
       validate(s, _p, ctx) { return rideKind.actions.join.available!(s, ctx); },
       apply(s, _p, _ctx) {
         return {state: s, result: {boarding: s.carrier}, bodies: [{label: s.rowing ? 'Row the punt loop and disembark' : attraction(s) ? `Ride the ${attraction(s)}` : 'Board the balloon', steps: [
-          ...(!s.rowing ? [{verb: 'stand', params: {}}] : []), {verb: 'walk_to', params: {to: s.rowing ? s.door : s.carrier, standoff: s.rowing ? 0 : 2.2, ...(s.rowing ? {} : {stand: 'clear/1'})}}, {verb: 'mars:carrier_ride', params: {carrier: s.carrier, clear: 'step-out/1', ...(s.rowing ? {throughReturn: true} : {})}}]}]};
+          ...(!s.rowing ? [{verb: 'stand', params: {}}] : []), {verb: 'walk_to', params: {to: s.rowing ? s.door : s.carrier, standoff: s.rowing ? 0 : 2.2, ...(s.rowing ? {} : {stand: 'clear/1'})}}, {verb: 'mars:carrier_ride', params: {carrier: s.carrier, ...(s.rowing ? {throughReturn: true} : {clear: 'step-out/1'})}}]}]};
       },
     },
     leave: {

@@ -158,3 +158,53 @@ test('A10 property: seeded steer targets round a cottage and benches never pick 
     assert.ok(l.adjustedM <= 30 && Math.abs(Math.hypot(l.at[0] - x, l.at[2] - z) - l.adjustedM) < 0.1, 'the distance it says it moved');
   }
 });
+
+test('A4: with no clear ground left near the asked spot it hovers, keeps looking, then flies home and lands there', { timeout: 900000 }, async (t) => {
+  const w = await world(t);
+  await w.board();
+  const go = await w.act('object:ride-sky-balloon:steer', { direction: 'SW', distance: 45, land: true });
+  assert.equal(go.accepted, true, JSON.stringify(go).slice(0, 800));
+  const asked = go.result.landing.requested;
+  assert.ok(await w.run(400, () => !!w.car().carrier.steer?.built), 'flying the steer');
+  // garden walls 4.5 m apart over all the ground within 30 m of the asked spot (no 5.2 m disc fits between two), leaving the
+  // corner round the ride's home open (it lands there in the end; a home is never re-checked); the field ends 30 m out west and south
+  const ops: any[] = [], ax = Math.round(asked[0]), az = Math.round(asked[1]);
+  for (let k = -8; k <= 8; k++) { const z = az + k * 4.5, x1 = z > BALLOON[1] - 10 ? BALLOON[0] - 10 : ax + 36; ops.push({ op: 'place', def: coreRef('garden-wall'), name: `row-${k + 8}`, shape: { path: [[ax - 36, z], [x1, z]] } }); }
+  const g: any = w.god.act({ ops }, 'build over the landing ground');
+  assert.equal(g.accepted, true, JSON.stringify(g).slice(0, 400));
+  const codes: string[] = [];
+  const note = () => { const n = w.car().carrier.landNote?.code; if (n && codes[codes.length - 1] !== n) codes.push(n); };
+  assert.ok(await w.run(12000, () => w.car().carrier.phase === 'landed', note), 'came down: ' + w.car().carrier.phase);
+  assert.deepEqual(codes, ['hover', 'return'], 'hovered, then flew home');
+  assert.ok(flat(w.car().pose.p, w.car().carrier.home) < 0.01, 'landed at home');
+  assert.ok(await w.run(1200, () => !w.body().human.carrier), 'stepped out');
+  const p = w.body().pose.p;
+  assert.ok(w.E.clearanceAtV1(p[0], p[2]) >= 0.28, `the rider stands clear: ${w.E.clearanceAtV1(p[0], p[2])}`);
+});
+
+test('A6: a bench standing on a rider\'s exit at home: the rider steps out to clear ground beside it, never into it', { timeout: 900000 }, async (t) => {
+  const w = await world(t);
+  const b = w.car(), d = { exit: [-2.0, -0.9] }, c = Math.cos(b.pose.yaw), s = Math.sin(b.pose.yaw);
+  // the seat exit of rider-a in world space (carrier.ts at(): rot2(local, yaw) = [x c - z s, x s + z c])
+  const exit = [b.pose.p[0] + d.exit[0] * c - d.exit[1] * s, b.pose.p[2] + d.exit[0] * s + d.exit[1] * c];
+  const g: any = w.god.act({ ops: [{ op: 'place', def: coreRef('bench'), name: 'exit-bench', p: [Math.round(exit[0] * 10) / 10, Math.round(exit[1] * 10) / 10] }] }, 'a bench on the exit');
+  assert.equal(g.accepted, true, JSON.stringify(g).slice(0, 400));
+  await w.settle(3);
+  assert.ok(w.E.clearanceAtV1(exit[0], exit[1]) < 0.28, 'the exit itself is blocked: ' + w.E.clearanceAtV1(exit[0], exit[1]));
+  await w.board();
+  assert.ok(await w.run(12000, () => w.car().carrier.phase === 'landed'), 'flew its loop and landed at home');
+  assert.ok(await w.run(1200, () => !w.body().human.carrier), 'stepped out');
+  const p = w.body().pose.p;
+  assert.ok(w.E.clearanceAtV1(p[0], p[2]) >= 0.28, `the rider stands clear of the bench: ${w.E.clearanceAtV1(p[0], p[2])} at ${p}`);
+});
+
+test('A8: a steer recorded without the landing marker keeps the landing it always chose', { timeout: 900000 }, async (t) => {
+  const w = await world(t);
+  await w.board();
+  const actor = w.ana.entityId, inside = { actor, carrier: 'sky-balloon', x: HOUSE[0] - 2.8, z: HOUSE[1], land: true };
+  // before landing/1 a green field without a ground model accepted any point, a cottage's floor too: unmarked, it still does
+  assert.equal(w.E.previewMarsVerbV1('carrier_steer', inside), null, 'unmarked: accepted as before');
+  assert.equal(w.E.previewSteerLandingV1(inside), null, 'unmarked: no landing/1 search');
+  const marked = w.E.previewSteerLandingV1({ ...inside, landing: 'clear/1' });
+  assert.ok(marked && marked.adjustedM > 0 && outdoors(w.E, marked.at[0], marked.at[2]), 'marked: moved outdoors ' + JSON.stringify(marked));
+});

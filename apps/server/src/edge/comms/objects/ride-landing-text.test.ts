@@ -21,7 +21,7 @@ test('a landing at home says so; a steered landing names the spot; neither says 
   assert.ok(away.some(t => t === 'The balloon has landed 14 m south of the library; you step out.'), JSON.stringify(away));
   const aloftHome = rideKind.initial({carrier: 'b'}, ctx(view('aloft'))) as RideState;
   const home = texts(aloftHome, view('landed'));
-  assert.ok(home.some(t => t === 'The balloon is back where it started; you step out.'), JSON.stringify(home));
+  assert.ok(home.some(t => t === 'The balloon has landed back where it started; you step out.'), JSON.stringify(home));
   assert.ok(![...away, ...home].some(t => /grass/.test(t)));
 });
 
