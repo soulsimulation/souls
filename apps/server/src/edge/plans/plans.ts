@@ -98,7 +98,8 @@ export class Plans {
   constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number} = {}) {
     this.core = core; this.actor = actor; this.envelope = envelope;
     core.db.exec(`CREATE TABLE IF NOT EXISTS edge_plans_v1 (world_id TEXT NOT NULL, plan_id TEXT NOT NULL, soul_id TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (world_id, plan_id)) WITHOUT ROWID;
-      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);`);
+      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);
+      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul_at ON edge_plans_v1 (world_id, soul_id, created_at);`);
     for (const r of core.db.prepare("SELECT body FROM edge_plans_v1 WHERE world_id = ? AND state IN ('running','paused') ORDER BY created_at").all(core.worldId) as {body: string}[]) {
       const p = JSON.parse(r.body) as Plan;
       const prior = this.active.get(p.soulId);

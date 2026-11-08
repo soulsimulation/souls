@@ -22,7 +22,8 @@ import {registerEdgePlans} from './plans/index.ts';
 import type {Plans} from './plans/plans.ts';
 import {mountEdgeEyes} from './eyes/routes.ts';
 import {mountBodyRoutes} from './body/routes.ts';
-import {mountOwnerDay} from './owner-day.ts';
+import {mountOwnerDay, ownerNames} from './owner-day.ts';
+import {ownerDoing, type DoingMessage} from './owner-doing.ts';
 import {livePlatforms} from './eyes/platforms.ts';
 import {OwnerLoop, ownerLinkStore, type OwnerLoopInbox} from './owner-loop.ts';
 import type {WorldHost} from '../world.ts';
@@ -117,6 +118,9 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null,
     bootNotice: process.env.EDGE_BOOT_NOTICE === '1' ? `The world server restarted${deps.build ? ` (${deps.build})` : ''}. Plans and open acts carried on; read the digest if you missed anything.` : null});
   plans = registerEdgePlans(app, deps, comms, events, L);
+  // #1313: the owner's card reads the act under way for its newest message from the world's records
+  if (box && 'doingOf' in box) {const names = ownerNames(L); (box as {doingOf: unknown}).doingOf = (soulId: string, latest: DoingMessage | null, away: boolean) =>
+    ownerDoing({db: deps.db.db, worldId: deps.host.worldId, receipt: (s, id) => L.receipt(s, id), nameOf: names, linked: loop ? (s, m) => {const row = deps.db.soul(s); return row ? loop.running({scope: `soul:${s}`, owner: row.owner}, m) : null;} : undefined}, soulId, latest, away);}
   const reminders=mountPersonalReminders(app,deps,comms);
   mountSchema(app);
   const capture=options.evidenceCapture?captureNativeEvidence({gate:options.evidenceCapture,db:deps.db,worldId:deps.host.worldId,comms}):null;
