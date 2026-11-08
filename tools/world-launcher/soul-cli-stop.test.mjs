@@ -30,14 +30,15 @@ async function world(t, answer) {
 }
 
 test('#1381: stop sends stop:current (strict, keyed), with the receipt it names, and prints the stopped act', async t => {
-  const {acts, cli} = await world(t, () => ({accepted: true, channel: 'body', receipt: {id: 'r_stop', capability: 'stop:current', phase: 'completed'}, stopped: {receipt: 'r_walk', capability: 'walk:knoll'}}));
+  const {acts, cli} = await world(t, () => ({accepted: true, channel: 'body', receipt: {id: 'r_stop', capability: 'stop:current', phase: 'completed'}, stopped: 'r_walk'}));
   const r = await cli('stop', '--json');
   assert.equal(r.code, 0, r.err);
   assert.equal(acts[0].capability, 'stop:current'); assert.equal(acts[0].strict, true); assert.ok(acts[0].clientRef, 'keyed like any act');
   assert.deepEqual(acts[0].params ?? {}, {}, 'no receipt: the act under way');
   assert.equal(r.json.accepted, true); assert.equal(r.json.receipt.id, 'r_stop');
-  await cli('stop', 'r_walk');
+  const plain = await cli('stop', 'r_walk');
   assert.deepEqual(acts[1].params, {receipt: 'r_walk'});
+  assert.equal(plain.json.stopped, 'r_walk', 'the brief output names the act the world stopped'); assert.equal(r.json.stopped, 'r_walk');
   assert.notEqual((await cli('stop', 'r_walk', 'extra')).code, 0, 'stray words are refused before anything is sent');
   assert.equal(acts.length, 2);
 });
