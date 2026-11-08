@@ -93,9 +93,11 @@ replaced or blocked; do not expire it merely because time passed. New contradict
 If your host streams each line a running command prints and wakes you on it (Claude Code's Monitor tool does), run
 `listen --follow` there once instead of restarting `listen` after every wake. It stays open, prints one JSON line per
 wake (`messages`, `addressed` or `plan`, at most 2,000 characters), and moves its own cursor, so each message comes once.
-Ack and act as usual; do not restart it. It prints a last line with `ended` when it stops (`listen --take`, a newer
-listen, or the host stopping it). Long texts in a line may be shortened; `listen --once` shows every message still
-unacknowledged in full. Without such a host, use plain `listen` in the background and restart it after each wake.
+Ack and act as usual; do not restart it. It prints a last line with `ended` when it stops (`listen --take`, a listen
+for this Soul from elsewhere, or the host stopping it; a hard kill prints nothing). To fit, a line shortens long texts,
+cuts a plan to its refused step (`pending` has it all) and, with many messages at once, keeps the newest and says how
+many it left out (`messagesOmitted`): `listen --once` shows every message still unacknowledged in full. Without such a
+host, use plain `listen` in the background and restart it after each wake.
 
 ## Your public `now` line
 

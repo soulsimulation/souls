@@ -3168,12 +3168,17 @@ async function listen(...args) {
     for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.prependOnceListener(sig, () => ended(sig === "SIGTERM" ? "stopped (SIGTERM: listen --take, or the host stopped it)" : `stopped (${sig})`, { next: `${CLI} listen --follow, if this Soul should keep listening here` }));
     process.stderr.write(`listen --follow: listening; one line per wake${after ? `, after ${after}` : ""}\n`);
   }
-  let attempt = 0, lastCode;
+  let attempt = 0, lastCode, superseded = 0;
   for (;;) {
     const q = new URLSearchParams({ timeoutMs: once ? "0" : "50000", ...(after ? { after } : {}) });
     const r = await call(`/v1/edge/inbox/listen?${q}`, { timeoutMs: 60_000, recoverRead: !once, retry: false, slowedNext: once ? undefined : "listen" });
-    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return follow ? ended("taken over", alreadyListening(holder)) : alreadyListening(holder); }
-    if (follow && r.status === 409) return ended("superseded", { why: r.data?.error?.message ?? "a newer listen for this Soul took over", next: "another listen is open for this Soul; this one has ended" });
+    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return follow ? ended("taken over", { pid: holder.pid, next: "a newer listen in this folder took over; nothing to do" }) : alreadyListening(holder); }
+    // a 409 while this folder's lock is still ours is this folder's own other long-poll (a `serve` that just started, or one
+    // restarting after travel): the next try goes through it. Three in a row is someone else with this token: stop.
+    if (follow && r.status === 409) {
+      if (++superseded < 3) { await pause(fullJitter(superseded)); continue; }
+      return ended("superseded", { why: r.data?.error?.message ?? "another listen for this Soul took over", next: "another listen for this Soul, from somewhere else, keeps taking over; this one has ended" });
+    }
     if (r.status === 0 || r.status === 429 || r.status >= 500) {
       const code = codeOf(r.data) ?? `http-${r.status}`;
       const ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -3185,7 +3190,7 @@ async function listen(...args) {
     }
     let d;
     try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
-    attempt = 0; lastCode = undefined;
+    attempt = 0; lastCode = undefined; superseded = 0;
     const messages = messagesOf(d).filter((m) => m.id !== after), brief = messages.length || d.addressed?.length || d.plan ? briefNow() : {};
     heard(messages);
     const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
@@ -3207,17 +3212,23 @@ async function listen(...args) {
   }
 }
 
-/** #1359: one --follow line fits a notification: at most FOLLOW_MAX characters. Long texts are shortened first, then the
- *  memory brief goes, then older messages and speech; `listen --once` has them all, since nothing here acks a message. */
+/** #1359: one --follow line fits a notification: at most FOLLOW_MAX characters. A plan is cut to its state and the refused
+ *  step (`pending` has the rest). Then long texts are shortened, then the memory brief and the older-open list go, and only
+ *  then older new messages: those stay unacknowledged, so `listen --once` shows them, and `next` says so. */
 export const FOLLOW_MAX = 2000;
 export function followLine(line, max = FOLLOW_MAX) {
   const size = (o) => JSON.stringify(o).length, short = (list) => list?.map((m) => (String(m.text ?? "").length > 300 ? { ...m, text: m.text.slice(0, 300) + "…", textShortened: true } : m));
   let o = { ...line, ...(line.messages ? { messages: short(line.messages) } : {}), ...(line.addressed ? { addressed: short(line.addressed) } : {}) };
-  if (size(o) > max && o.brief !== undefined) { const { brief, ...rest } = o; o = { ...rest, briefOmitted: true }; }
+  if (o.plan?.steps) {
+    const { steps, ...plan } = o.plan, refused = steps.find((st) => st.state === "refused");
+    o = { ...o, plan: { ...plan, ...(refused ? { refused: { n: refused.n, id: refused.id, ...(refused.code ? { code: refused.code } : {}), ...(refused.reason ? { reason: String(refused.reason).slice(0, 300) } : {}) } } : {}), stepsOmitted: steps.length } };
+  }
+  const drop = (...keys) => { if (size(o) > max && keys.some((k) => o[k] !== undefined)) { const n = { ...o }; for (const k of keys) delete n[k]; o = { ...n, [`${keys[0]}Omitted`]: true }; } };
+  drop("brief"); drop("stillOpen", "stillOpenNext");
   for (const k of ["addressed", "messages"]) while (size(o) > max && o[k]?.length > 1) o = { ...o, [k]: o[k].slice(1), [`${k}Omitted`]: (o[`${k}Omitted`] ?? 0) + 1 };
-  if (size(o) > max) { const { brief, stillOpen, ...rest } = o; o = { ...rest, ...(brief !== undefined ? { briefOmitted: true } : {}) }; }
+  if (o.messagesOmitted) o = { ...o, next: `${o.messagesOmitted} older message${o.messagesOmitted > 1 ? "s" : ""} did not fit this line: run ${CLI} listen --once for them all, then ack each. ${o.next ?? ""}`.trim() };
+  for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => (String(m.text ?? "").length > 80 ? { ...m, text: String(m.text).slice(0, 80) + "…", textShortened: true } : m)) };
   if (size(o) > max && typeof o.next === "string") o = { ...o, next: o.next.slice(0, Math.max(40, o.next.length - (size(o) - max) - 1)) + "…" };
-  for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => ({ ...m, text: String(m.text ?? "").slice(0, 80) + "…", textShortened: true })) };
   return o;
 }
 
