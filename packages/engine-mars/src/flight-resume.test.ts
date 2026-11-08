@@ -12,7 +12,7 @@ const commons=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true});
 
 /** The commons deck's front flight climbs from (9, -0.4) on level 0 to its landing at (9, -1.4) on level 1. The climber's walk
  *  is force-ended halfway up (as stall-guard/1 does), so it stands on the flight at neither landing's height. */
-function stranded(policy:boolean){
+function stranded(policy:boolean,nudge=0){
   const e=commons.create((()=>{const w=commons.genesis('flight-resume') as any;w.entities.climber=m.human('climber',9,.8,{yaw:-Math.PI/2});return w;})()) as MarsEngine;
   if(policy)e.configureRuntimePolicy({sleepBlockTicks:1200,flightResumeV1:true});
   const climb=e.perform({actor:'climber',label:'climb onto the deck',steps:[{verb:'walk_to',params:{to:'commons-deck',standoff:0}}]});assert.equal(climb.ok,true,JSON.stringify(climb));
@@ -23,6 +23,7 @@ function stranded(policy:boolean){
   // stood idle on this low flight, the body overlaps the deck's edge on its level-0 grid: the stranded state itself is flagged
   // (an idle body is not exempt as a climber is); that is the state the walk must recover from, so it is cleared here
   e.step();assert.deepEqual([...new Set(e.runtime.violations.map((d:any)=>d.code))].filter(c=>c!=='collision.human-static'),[]);(e.runtime.violations as unknown[]).length=0;
+  c.pose.p=[c.pose.p[0]+nudge,c.pose.p[1],c.pose.p[2]];
   assert.equal(c.human!.level,0);assert.ok(c.pose.p[1]>.2,'left standing on the flight, above its floor');
   return e;
 }
@@ -35,9 +36,9 @@ test('#1367 without the policy a walk from a body on a flight drops it to the fl
   assert.equal(v?.code,'motion.teleport',JSON.stringify(e.runtime.violations));
 });
 
-for(const [name,x,z,level] of [['down to the lawn',9,2,0],['up onto the deck',9,-2.2,1]] as const)
+for(const [name,x,z,level,nudge] of [['down to the lawn',9,2,0,0],['up onto the deck',9,-2.2,1,0],['down, from a pose rounded off the path by 0.5 mm',9,2,0,.0005]] as const)
   test(`#1367 under flight-resume/1 a stranded climber walks ${name}: it resumes the flight, never jumps, and arrives on the floor`,()=>{
-    const e=stranded(true),c=e.world.entities.climber;walk(e,x,z,level);
+    const e=stranded(true,nudge),c=e.world.entities.climber;walk(e,x,z,level);
     let done=false;
     for(let i=0;i<600&&!done;i++){
       // the tick the walk is admitted the body still stands idle where it was stranded (the flag cleared above); from the next
@@ -60,4 +61,18 @@ test('#1367 flight-resume/1 is prospective, hashed and kept across a snapshot',a
   e.configureRuntimePolicy({sleepBlockTicks:1200,flightResumeV1:true});assert.notEqual(e.stateHash(),before);
   const copy=f.restore(e.snapshot()) as MarsEngine;assert.equal((copy as any).rt.services.flightResumeV1,true);
   for(let i=0;i<10;i++){e.step();copy.step();assert.equal(copy.stateHash(),e.stateHash());}
+});
+
+test('#1367 a walk from a floor beside a flight plans as it did: the policy changes nothing for a body on its own floor',()=>{
+  // at the foot landing, just beside the foot, and on the deck by the top landing: the same route with and without the policy
+  for(const [x,z,level,y] of [[9,-.4,0,0],[9.4,-.3,0,0],[9,-1.4,1,.24],[8.6,-1.6,1,.24]] as const){
+    const routes=[false,true].map(policy=>{
+      const w=commons.genesis('flight-resume-floor') as any;w.entities.walker=m.human('walker',x,z,{level,y});
+      const e=commons.create(w) as MarsEngine;if(policy)e.configureRuntimePolicy({sleepBlockTicks:1200,flightResumeV1:true});
+      const r=e.perform({actor:'walker',label:'walk',steps:[{verb:'mars:walk_to',params:{x:9,z:3,level:0}}]});assert.equal(r.ok,true,JSON.stringify(r));
+      e.step();const ex=[...((e as any).rt.services.walkExecs?.values()??[])].find((q:any)=>q.actor==='walker') as any;
+      return JSON.stringify({legs:ex?.route.legs,phase:ex?.phase,climbT:ex?.climbT,pose:e.world.entities.walker.pose});
+    });
+    assert.equal(routes[1],routes[0],`from (${x}, ${z}) level ${level}`);
+  }
 });

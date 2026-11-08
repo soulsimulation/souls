@@ -1803,6 +1803,7 @@ function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: n
   if (rt.services.flightResumeV1 !== true || !a.human || a.human.riding || a.human.carrier) return null;
   const lv = a.human.level, p = a.pose.p, sp = spatial(rt, a.id);
   sp.sync(rt.world);
+  let found: { link: LinkLeg['link']; t: number; total: number; d: number } | null = null;
   for (const link of sp.scene.links) {
     if (link.from.level !== lv && link.to.level !== lv) continue;
     if ((link.from.level === lv && Math.abs(p[1] - link.from.y) < 0.05) || (link.to.level === lv && Math.abs(p[1] - link.to.y) < 0.05)) continue;   // on its own floor
@@ -1811,27 +1812,34 @@ function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: n
     for (let i = 0; i < g.lens.length; i++) {
       const P = g.path[i], Q = g.path[i + 1], L = g.lens[i];
       const u = L > 1e-9 ? clamp(((p[0] - P[0]) * (Q[0] - P[0]) + (p[1] - P[1]) * (Q[1] - P[1]) + (p[2] - P[2]) * (Q[2] - P[2])) / (L * L), 0, 1) : 0;
-      const d = hypot(p[0] - (P[0] + (Q[0] - P[0]) * u), p[1] - (P[1] + (Q[1] - P[1]) * u), p[2] - (P[2] + (Q[2] - P[2]) * u));
+      // on the path, as a climb leaves a body (its pose rounded to the millimetre): the first resumed step moves it only along the
+      // path, so its published speed stays a climber's; a body any farther off the path is not on this flight
+      const x = P[0] + (Q[0] - P[0]) * u, y = P[1] + (Q[1] - P[1]) * u, z = P[2] + (Q[2] - P[2]) * u;
+      if (hypot(p[0] - x, p[2] - z) > 1e-3 || Math.abs(p[1] - y) > 0.05) { acc += L; continue; }
+      const d = hypot(p[0] - x, p[1] - y, p[2] - z);
       if (d < best) { best = d; at = acc + u * L; }
       acc += L;
     }
-    if (best <= 0.1 && at > 1e-6 && at < g.total - 1e-6) return { link, t: at, total: g.total };
+    if (best < Infinity && at > 1e-6 && at < g.total - 1e-6 && (!found || best < found.d)) found = { link, t: at, total: g.total, d: best };   // the nearest flight
   }
-  return null;
+  return found && { link: found.link, t: found.t, total: found.total };
 }
 
 /** #1367: a route from a body on a flight: the flight from where it stands to one landing, then the route on from that landing.
- *  Up first, then down; the shorter of those that reach the goal. */
+ *  Up first, then down; the shorter of those that reach the goal, except that while others use the flight the body goes their
+ *  way when that way reaches the goal (two climbers facing each other on one flight would wait on each other). */
 function planFromFlight(rt: Runtime, a: Entity, f: { link: LinkLeg['link']; t: number; total: number }, goal: { level: number; p: Vec2 }) {
   const sp = spatial(rt, a.id), profile = bodyProfile(a);
   let best: { ok: true; route: Route } | null = null, first: ReturnType<typeof planWalk> | null = null;
-  for (const ascending of [true, false]) {
+  const used = traffic(rt).get(`link:${f.link.id}`), withTraffic = used && [...used.actors].some((id) => id !== a.id) ? dist2(used.entry, f.link.from.p) < dist2(used.entry, f.link.to.p) : undefined;
+  for (const ascending of withTraffic === false ? [false, true] : [true, false]) {
     const end = ascending ? f.link.to : f.link.from, left = ascending ? f.total - f.t : f.t;
     const r = sp.route(rt.world, profile, { level: end.level, p: end.p }, goal, a.body?.family === 'floater' ? { planner: 'corridor' } : undefined);
     first ??= r;
     if (!r.ok) continue;
     const route: Route = { ...r.route, legs: [{ kind: 'link', link: f.link, ascending }, ...r.route.legs], length: left + r.route.length };
     if (!best || route.length < best.route.length) best = { ok: true, route };
+    if (withTraffic === ascending) { best = { ok: true, route }; break; }
   }
   return best ?? first!;
 }

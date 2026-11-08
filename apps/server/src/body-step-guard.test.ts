@@ -45,11 +45,11 @@ test('boot order: the courtesy event, the edge rules and body-step-guard/1 are a
   };
   const f = fixture(file); await boot(f);
   const p = policy(f)!;
-  for (const k of ['quietSeatCourtesy', 'quietStallReleaseV1', 'bodyStepGuardV1', 'quarantineV1']) assert.equal(p[k], true, `${k} kept in the host's record`);
+  for (const k of ['quietSeatCourtesy', 'quietStallReleaseV1', 'bodyStepGuardV1', 'quarantineV1', 'flightResumeV1']) assert.equal(p[k], true, `${k} kept in the host's record`);
   const rules = f.db.events(f.host.worldId).filter((e) => e.kind === 'rules').length;
   f.host.stop(); f.db.close();
   const g = fixture(file); t.after(() => { g.host.stop(); g.db.close(); });
   await boot(g);
   assert.equal(g.db.events(g.host.worldId).filter((e) => e.kind === 'rules').length, rules, 'a reboot logs no rule again');
-  assert.equal(guardEvents(g).length, 1); assert.equal(quarantineEvents(g).length, 1, 'quarantine/1 is adopted once, after the guard');
+  assert.equal(guardEvents(g).length, 1); assert.equal(quarantineEvents(g).length, 1, 'quarantine/1 is adopted once, after the guard'); assert.equal(adopting('flightResumeV1')(g).length, 1, 'flight-resume/1 is adopted once, last');
 });
