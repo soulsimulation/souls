@@ -3,11 +3,14 @@
 # release is live and says what is live, and after it is live it keeps collecting evidence and reports every failure.
 #
 #   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run] [--from <step>] [--out <dir>]
+#                                       [--accept-host-codes <code,...>]
 #     --label    the release, such as 4.16. Backups are pre-r416-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
 #     --from     resume at snapshot, stage, backup, probe-start, healthz, walks, poster, stall or cdn-walk (same --out)
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
+#     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
+#                halted for a release that fixes a halted world (#1356). Recorded in snapshot.json; any other code refuses
 #
 # The host and every operator path come from the environment or an untracked deploy.env (docs/release.md has the table).
 # Steps: preflight snapshot stage backup probe-start activate probe-check healthz walks poster stall cdn-walk
@@ -26,14 +29,15 @@ SSH="${SHIP_SSH:-ssh}"; SCP="${SHIP_SCP:-scp}"; NODE="${SHIP_NODE:-node}"; PY="$
 VERDICT="$SHIPD/root-release.mjs"
 STEPS="snapshot stage backup probe-start healthz walks poster stall cdn-walk"
 
-usage() { sed -n '5,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-LABEL=""; SHA=""; DRY=0; FROM=""; OUT=""
+usage() { sed -n '5,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+LABEL=""; SHA=""; DRY=0; FROM=""; OUT=""; ACCEPT=""
 while [ $# -gt 0 ]; do case "$1" in
-  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;;
+  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
   *) usage;; esac; shift; done
 [ -n "$LABEL" ] && [ -n "$SHA" ] || usage
 case "$LABEL" in *[!A-Za-z0-9._-]*) echo "--label: letters, digits, ., - and _ only"; exit 2;; esac
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "--sha: the full 40-character commit"; exit 2; }
+[[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "--accept-host-codes: comma-separated host codes, such as halted"; exit 2; }
 if [ -n "$FROM" ]; then case " $STEPS " in *" $FROM "*) ;; *) echo "--from: one of $STEPS (activation always runs with a fresh probe, from probe-start)"; exit 2;; esac; fi
 TAG="${LABEL//./}"; BUILD="we-${SHA:0:12}"; OUT="${OUT:-$OUT_ROOT/$LABEL}"; PDIR="$OUT/probe"; REL="$HOST_ROOT/releases/$BUILD"; MANIFEST="$RELEASE_DIR/$BUILD/RELEASE-MANIFEST.json"
 HOST="$(deploy_target 2>/dev/null)" || HOST=""
@@ -81,6 +85,7 @@ drift() { collect "$OUT/check"; [ "$DRY" = 1 ] || node "$VERDICT" drift "$OUT/sn
 
 say "ship $BUILD (label $LABEL)$([ "$DRY" = 1 ] && echo ' -- DRY RUN: nothing remote is touched, nothing is written')"
 say "   outputs $OUT${FROM:+; resuming at $FROM}"
+[ -z "$ACCEPT" ] || say "   accepting host codes at the snapshot: $ACCEPT (recorded in snapshot.json; any other code refuses)"
 
 # ---- 1 preflight: every guard, on every run, resumed or not ---------------------------------------------------------
 N=1; CUR=preflight; say ""; say "== [1/$NSTEPS] preflight: guards (local only)"
@@ -109,7 +114,7 @@ export PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" SHIP_PLAYWRIGHT_FROM="$TOOLS/mars/vi
 if step snapshot "read-only host metadata (every database by name, body-collections.sqlite too), ROLLBACK.txt"; then
   collect "$OUT/before"
   if [ "$DRY" = 0 ]; then
-    node "$VERDICT" snapshot "$OUT/before-health.json" "$OUT/before-remote.json" "$SHA" "$OUT/snapshot.json" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "the host is not ready for a release"
+    node "$VERDICT" snapshot "$OUT/before-health.json" "$OUT/before-remote.json" "$SHA" "$OUT/snapshot.json" "$ACCEPT" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "the host is not ready for a release"
     PREV="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).previousBuild" "$OUT/snapshot.json")"
     cat > "$OUT/ROLLBACK.txt" <<ROLLBACK
 Root-only rollback for $LABEL. The host comes from SIM_DEPLOY_HOST; never write it into a public record.

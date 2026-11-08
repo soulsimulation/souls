@@ -69,6 +69,7 @@ import { readNativeGathering } from './gathering-observation.ts';
 import { prepareCommonsTransition } from './commons-transition.ts';
 import { commonsTransitionV1Schema,type CommonsTransitionV1,type CommonsTransitionAdmissionV1 } from '@souls/engine-contract';
 import {crewRemovalTransitionV1Schema,type CrewRemovalTransitionV1,type CrewRemovalTransitionAdmissionV1} from '@souls/engine-contract';
+import {soulsRepairAdoptionV1Schema,type SoulsRepairAdoptionV1,type SoulsRepairAdoptionAdmissionV1} from '@souls/engine-contract';
 import {commonsProvisions,COMMONS_PERSONAL_RESOURCES} from './commons-provisions.ts';
 import {commonsKitchen,COMMONS_KITCHENS,type CommonsKitchenVersion} from './commons-kitchen.ts';
 import type {RetainedCommonsShoreReader} from './retained-shore.ts';
@@ -262,6 +263,7 @@ export class MarsEngine implements Engine {
   private takeScenes = new Map<string,RenderSceneCaptureV1>();
   private quiet = false;
   private crewRemovalTransitionReader=false;
+  private soulsRepairAdoptionReader:false|'replay'|'adopt'=false;
   private foodDeliveryReader=false;
   private foodDeliveries:CommonsFoodDeliveryV1[]=[];
   private edenGroundReader?:EdenGroundReaderV1;
@@ -337,7 +339,7 @@ export class MarsEngine implements Engine {
   stateHash(): string { return this.stateHashWithWorld(this.rt.stateHash()); }
   /** Reuse only the native hash captured synchronously by snapshot(); never cache a live world hash across calls. */
   private stateHashWithWorld(nativeStateHash: string): string { return hashOf(this.stateHashInputs(nativeStateHash)); }
-  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:this.cfg}:{}) }; }
+  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
   // Preserve the contract serializer's exact bytes; only the Node digest implementation changes.
   physicalHash(): string { return createHash('sha256').update(stableStringify(physicalView(this.world))).digest('hex'); }
 
@@ -1949,6 +1951,34 @@ export class MarsEngine implements Engine {
   /** Only the explicit dual-history factory enables this prospective reader.
    * Installing the reader itself changes no rules, body, program or hash. */
   enableCrewRemovalTransitionReaderV1(){this.crewRemovalTransitionReader=true;}
+  /** #1323: only the server's repair reader (soulsRepairReaderV1) enables this; the reader itself changes nothing. It always
+   *  replays a logged adoption; it proposes one only with `adopt` (not under `SIM_SOULS_REPAIR=0`). */
+  enableSoulsRepairAdoptionReaderV1(adopt:boolean){this.soulsRepairAdoptionReader=adopt?'adopt':'replay';}
+  /** #1323: the repair rules from here on, as an engine made or restored under them has them: the step check remembers the
+   *  poses it starts from, so a boot from this head and the live world make the same first check. */
+  private turnOnSoulsRepairV1(){this.finishRecorder();this.cfg={...this.cfg,soulsRepairV1:true};rememberPosesAfterRestore(this.rt);this.startRecorder();}
+  /** #1323: a history that began under the repair rules (made by a factory that had them) and has no adoption fact. */
+  bornUnderSoulsRepairV1(){if(this.cfg.soulsRepairV1===true)return;if(this.programs.size)throw Error('souls-repair-adoption.genesis-only');this.turnOnSoulsRepairV1();}
+  /** #1323: a snapshot taken under the repair rules, restored by a reader without them: as marsFactory's own restore. */
+  restoredUnderSoulsRepairV1(){if(this.cfg.soulsRepairV1!==true)this.turnOnSoulsRepairV1();}
+  previewSoulsRepairAdoptionV1(replaying=false):SoulsRepairAdoptionAdmissionV1{
+    const no=(code:string,message:string)=>({ok:false as const,diagnostic:{code:'souls-repair-adoption.'+code,message}});
+    if(this.cfg.soulsRepairV1===true)return no('already-adopted','souls-repair/1 is already active');
+    if(!this.soulsRepairAdoptionReader)return no('reader-unavailable','the server repair reader is required');
+    if(!replaying&&this.soulsRepairAdoptionReader!=='adopt')return no('opted-out','SIM_SOULS_REPAIR=0: a logged adoption replays, none is proposed');
+    return {ok:true,transition:soulsRepairAdoptionV1Schema.parse({contract:'souls-repair-adoption/1',tick:this.world.tick,fromRulesVersion:this.rulesVersion,
+      toRulesVersion:this.composedRules(nativeRulesVersion(this.physical?.rulesVersion??this.m.rulesVersion,{...this.cfg,soulsRepairV1:true})),fromStateHash:this.stateHash()})};
+  }
+  /** #1323: no quiet boundary is needed: a programme under way goes on under the repair rules from the next step. The fold
+   *  checks the rules versions only. Its tick and state hash are evidence: a recovery (rung 2 or 3) re-applies the fact over a
+   *  baseline from before it, at another tick or state, and the world must come out under the rules the header names. */
+  adoptSoulsRepairV1(raw:SoulsRepairAdoptionV1){
+    const fact=soulsRepairAdoptionV1Schema.parse(raw),preview=this.previewSoulsRepairAdoptionV1(true);
+    if(!preview.ok)throw Error(preview.diagnostic.code+': '+preview.diagnostic.message);
+    if(fact.fromRulesVersion!==preview.transition.fromRulesVersion||fact.toRulesVersion!==preview.transition.toRulesVersion)throw Error('souls-repair-adoption.stale-or-forged');
+    this.turnOnSoulsRepairV1();
+    if(this.rulesVersion!==fact.toRulesVersion)throw Error('souls-repair-adoption.rules-version');
+  }
   enableCommonsFoodDeliveryReaderV1(recorded:CommonsFoodDeliveryV1[]=[]){this.foodDeliveryReader=true;if(recorded.length){this.finishRecorder();this.foodDeliveries=recorded.map(d=>commonsFoodDeliveryV1Schema.parse(d));if(this.foodDeliveries.length>4||this.foodDeliveries.some((d,i)=>d.batch!==i+1))throw Error('food-delivery.snapshot-sequence');this.renderBaseKey='';this.startRecorder();}}
   commonsFoodDeliveriesV1(){return structuredClone(this.foodDeliveries);}
   previewCommonsFoodDeliveryV1(deliveryId:string){
@@ -2902,6 +2932,11 @@ function checkedTable(t: EntityTable): EntityTable {
 }
 
 function centroid(poly: [number, number][]): [number, number] { let x = 0, z = 0; for (const p of poly) { x += p[0]; z += p[1]; } return [r3(x / poly.length), r3(z / poly.length)]; }
+/** #1323: the repair rules are named by the rules version, never by the state hash, as in an engine without a physical
+ *  binding; so an adoption leaves the hash where it was and a snapshot under them restores through the readers below them.
+ *  A config without them is the same object, so the hash of every world without the rules is unchanged. (A physically bound
+ *  world made with them, under `SIM_SHARED_CARRY=1` or `SIM_SOULS_REPAIR=1`, now hashes without the key: dev worlds only.) */
+function physicalPolicyV1(cfg:MarsWorldConfig):MarsWorldConfig{if(cfg.soulsRepairV1!==true)return cfg;const {soulsRepairV1:_,...rest}=cfg;return rest;}
 function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY+'+'+SHARED_BAY_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
 /** PC13 (#692): a world whose engine has the shared raise (SIM_SHARED_CARRY) says so in its rules version: a journal that
  *  names raise_hold_v1 does not replay, nor a snapshot restore, where the verb is not registered. */

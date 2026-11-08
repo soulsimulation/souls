@@ -97,7 +97,7 @@ the repository root (copy [`deploy.env.example`](../deploy.env.example); the env
 ## ship.sh
 
 ```sh
-tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run] [--from <step>] [--out <dir>]
+tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run] [--from <step>] [--out <dir>] [--accept-host-codes <code,...>]
 ```
 
 It asks nothing: ssh runs in batch mode, and it never prompts. Before the release is live, any failure stops the run.
@@ -110,6 +110,7 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 | `--dry-run` | Prints every step and its commands. Nothing remote is touched and nothing is written. Exits 1 when a guard would stop a real run. |
 | `--from <step>` | Resumes at `snapshot`, `stage`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
 | `--out <dir>` | Output folder (default `$SHIP_OUT_ROOT/<label>`). A folder that already holds a run is refused without `--from`. |
+| `--accept-host-codes <code,...>` | The snapshot normally needs public healthz `hostOk`. With this list it passes while `hostOk` is false only if every `hostCodes` entry is listed, such as `halted` for a release that fixes a halted world. The list is printed and recorded in `snapshot.json` (`acceptedHostCodes`); any other code still refuses, and the drift checks compare `hostCodes` too. |
 
 There is no host option. The host and operator paths come from the environment or the untracked `deploy.env`:
 
@@ -134,7 +135,7 @@ There is no host option. The host and operator paths come from the environment o
 | stage | `release.sh production --no-activate` at base `/`; verifies the manifest locally and on the host; compares the host with the snapshot | Stops |
 | backup | Row-verified compact copy of every database, `quick_check` on each, the same filenames as the snapshot | Stops |
 | probe-start | Starts `release-probe.mjs` and waits for `<out>/probe/ready` | Stops |
-| activate | Checks that the snapshot and backup are under an hour old and that nothing drifted, then runs `ship/host-activate.sh` on the host: one `activate.sh --reload` and a health check | Stops and reports the host's exit (below) |
+| activate | Checks that the snapshot and backup are under an hour old and that nothing drifted, then runs `ship/host-activate.sh` on the host: one `activate.sh --reload`, one refresh of host health with the timer's own oneshot (`systemctl start sim-worlds-health@<stage>.service`, so a code recorded before the activation can't fail it), and a health check | Stops and reports the host's exit (below) |
 | probe-check | Reads the probe's exit | 3 stops (the release rolled back). Anything else is recorded and the run continues |
 | healthz | Public healthz reports this build, every world and `hostOk` | Stops |
 | walks | `ship/walk.mjs` on desktop and phone at dpr 1 and 2, then `checks.mjs walks` | Recorded |
