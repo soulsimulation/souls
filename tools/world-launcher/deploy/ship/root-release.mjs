@@ -7,6 +7,8 @@
 //   node root-release.mjs backup <backup.log> <quick-check.log> <snapshot.json> <label> <out.json>
 //   node root-release.mjs activation <snapshot.json> <backup-receipt.json> <upload-receipt.json> <manifest>
 //   node root-release.mjs health <healthz.json> <build> <worlds>
+//   node root-release.mjs rehearse <rehearse.log> <build> <out.json>   (the host's boot rehearsal of every world, #1402)
+//   node root-release.mjs rehearsed <rehearse.json> <build>
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -31,6 +33,20 @@ export function receiptProblems(gate, ship, sha, gateSha256) {
   if (ship?.newFailures) out.push(`ship receipt has ${ship.newFailures} new failures`);
   if (ship?.gate?.sha256 !== gateSha256) out.push('ship receipt names a different gate receipt');
   return out;
+}
+
+/** The boot rehearsal's log (ship/host-rehearse.sh): one JSON line per world and a final REHEARSE line. Every world that
+ *  is not approximate must pass; an approximate one is reported. A log without its REHEARSE line never passes. */
+export function rehearseReceipt(log, build) {
+  const lines = log.split('\n'), worlds = lines.filter(l => l.startsWith('{"slug"')).map(l => JSON.parse(l));
+  const done = lines.find(l => l.startsWith('REHEARSE ')), problems = [];
+  if (!done) problems.push('the rehearsal did not finish (no REHEARSE line)');
+  if (!worlds.length) problems.push('no world was rehearsed');
+  else if (done && JSON.parse(done.slice(9)).worlds !== worlds.length) problems.push('the rehearsal log is incomplete');
+  for (const w of worlds) if (w.verdict !== 'pass' && w.verdict !== 'approximate') problems.push(`${w.slug}: ${w.flags?.join('; ') || w.verdict}`);
+  return { schema: 'ship-rehearse/1', at: new Date().toISOString(), build, status: problems.length ? 'stop' : 'pass', problems,
+    worlds: worlds.length, passed: worlds.filter(w => w.verdict === 'pass').length, approximate: worlds.filter(w => w.verdict === 'approximate').map(w => w.slug),
+    slow: worlds.filter(w => w.flags?.some(f => f.startsWith('slow'))).map(w => w.slug), results: worlds };
 }
 
 export function snapshotProblems(health, remote, sha = '', accepted = []) {
@@ -100,6 +116,11 @@ export function main(argv) {
     writeFileSync(a[4], JSON.stringify(r, null, 2) + '\n', { flag: 'wx' }); console.log(`${r.databases} databases copied, compared and quick-checked`);
   } else if (cmd === 'activation') { const p = activationProblems(read(a[0]), digest(a[0]), read(a[1]), read(a[2]), digest(a[3])); if (p.length) fail(p); console.log('snapshot, backup and upload are fresh and agree'); }
   else if (cmd === 'health') { const h = read(a[0]); if (!h.ok || !h.hostOk || h.build !== a[1] || h.worlds !== Number(a[2])) fail([`healthz: ok ${h.ok}, hostOk ${h.hostOk}, build ${h.build}, worlds ${h.worlds}`]); console.log(`healthz ok, ${h.build}, ${h.worlds} worlds`); }
+  else if (cmd === 'rehearse') {
+    const r = rehearseReceipt(readFileSync(a[0], 'utf8'), a[1]); writeFileSync(a[2], JSON.stringify(r, null, 2) + '\n');
+    if (r.problems.length) fail(r.problems);
+    console.log(`${r.passed} of ${r.worlds} worlds boot and run on ${a[1]}${r.approximate.length ? `; approximate, not a verdict: ${r.approximate.join(', ')}` : ''}${r.slow.length ? `; SLOW boot: ${r.slow.join(', ')}` : ''}`);
+  } else if (cmd === 'rehearsed') { const r = existsSync(a[0]) ? read(a[0]) : null; if (r?.status !== 'pass' || r.build !== a[1]) fail([`no passing boot rehearsal of ${a[1]}`]); console.log(`boot rehearsal passed for ${r.worlds} worlds`); }
   else fail([`unknown command ${cmd}`]);
 }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
