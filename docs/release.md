@@ -168,6 +168,12 @@ but `compact-backup.sh` has its own hard-coded data path.
 
 Not done here: publishing new CDN assets first, the uncut live clip, the changelog PR, the tag and the GitHub Release.
 
+**Eyes' browser.** Nothing in the release installs Playwright's Chromium. Before shipping a release, run
+`node tools/world-launcher/deploy/eyes-browser.mjs --tree <the staged release> --browsers <the eyes PLAYWRIGHT_BROWSERS_PATH>`
+on the host as the worlds' user. It prints the revision Playwright expects and what Eyes would launch, and exits 1 when
+Eyes would have no browser. That matters most when the release bumps Playwright. Install a missing revision with the
+command it prints. Folding this into ship.sh's rehearse step is a follow-up to #1410 ([Eyes](architecture/souls.md#eyes)).
+
 Tests run the whole command against a fake host, with the remote block under an empty environment:
 `node --test tools/world-launcher/ship-root.test.mjs`.
 

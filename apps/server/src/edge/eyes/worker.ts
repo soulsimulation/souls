@@ -40,6 +40,7 @@ export class EyesWorker implements EyesRenderer {
     this.child = child;
     child.stderr?.on('data', d => {const line = String(d).trim(); if (line) console.error('[eyes-worker]', line.slice(0, 400));});
     child.on('message', (msg: {t: string; [k: string]: unknown}) => {
+      if (this.child !== child) return;   // a late message from a worker that has already exited
       if (msg.t === 'status') {
         this.state = msg.ready ? 'ready' : 'starting'; this.renderer = (msg.renderer as string) ?? this.renderer; this.detail = (msg.detail as string) ?? null;
         if (msg.ready) {this.since ??= new Date().toISOString(); this.backoffMs = 5000; this.pump();}
