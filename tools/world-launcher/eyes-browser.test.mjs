@@ -43,16 +43,16 @@ test('--install installs exactly the expected revision with the release\'s own C
   assert.equal(again.code, 0); assert.equal(again.json.installed, undefined); assert.equal(s.calls(), 'install chromium gc=1\n');
 });
 
-test('a failed install never stops a release: exit 0, a WARN eyes: degraded line and the degraded marker', () => {
+test('a failed install never stops a release: exit 0, a WARN edenEyes: degraded line and the degraded marker', () => {
   const s = setup({ installFails: true }); mkdirSync(join(s.browsers, 'chromium-1194/chrome-linux64'), { recursive: true }); writeFileSync(join(s.browsers, 'chromium-1194/chrome-linux64/chrome'), '');
   const r = s.run('--install');
   assert.equal(r.code, 0, r.out);
   assert.match(r.json.degraded, /installing chromium-1248 did not give Playwright its own Chromium .*failed .*exit 1/); assert.equal(r.json.problem, undefined); assert.equal(r.json.path, null);
-  assert.match(r.out, /^WARN eyes: degraded \([^()\n/]+\)$/m, 'one path-free line ship.sh can carry into ship-result.json');
+  assert.match(r.out, /^WARN edenEyes: degraded \([^()\n/]+\)$/m, 'one path-free line ship.sh can carry into ship-result.json');
 });
 
-test('--warn checks only: a missing browser is WARN eyes: degraded and exit 0, and nothing is installed', () => {
+test('--warn checks only: a missing browser is WARN edenEyes: degraded and exit 0, and nothing is installed', () => {
   const s = setup(), r = s.run('--warn');
-  assert.equal(r.code, 0, r.out); assert.match(r.out, /^WARN eyes: degraded \(no-browser: expected chromium-1248\)$/m);
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /^WARN edenEyes: degraded \(no-browser: expected chromium-1248\)$/m);
   assert.equal(s.calls(), '');
 });

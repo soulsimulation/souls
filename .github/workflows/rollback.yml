@@ -1,0 +1,81 @@
+# Code-only rollback of a root release, for a release owner without ssh (#1438). It runs exactly ship.sh's ROLLBACK.txt
+# through tools/world-launcher/deploy/rollback.sh: the previous release's own activate.sh --reload, then public healthz on
+# that build with every registered world. No backup, database, registry, auth or host setting is touched and nothing is
+# deleted. It refuses unless the host's live build is `from` and its production.previous is `build`.
+#   gh workflow run rollback.yml --ref main -f build=<we-previous> -f from=<we-candidate> [-f dry_run=true]
+# release.yml prints this command in its summary when a real ship's browser checks fail.
+name: rollback
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: The build to go back to (we-<12 hex>), the host's production.previous
+        required: true
+      from:
+        description: The build live now, being rolled back (we-<12 hex>)
+        required: true
+      dry_run:
+        description: Read the host and print the command only
+        type: boolean
+        default: false
+permissions:
+  contents: read
+# its own group: a rollback must never queue behind a release run's 45-minute verdict wait, the case it exists for
+concurrency:
+  group: rollback
+  cancel-in-progress: false
+env:
+  SIM_ORIGIN: ${{ vars.SIM_ORIGIN || 'https://soul.game' }}
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Inputs
+        env:
+          REF: ${{ github.ref }}
+          BUILD: ${{ inputs.build }}
+          FROM: ${{ inputs.from }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
+          [ -z "$SIM_DEPLOY_USER" ] || echo "::add-mask::$SIM_DEPLOY_USER"
+          [ "$REF" = refs/heads/main ] || { echo "::error::rollback runs from main only (got $REF)"; exit 1; }
+          [[ "$BUILD" =~ ^we-[0-9a-f]{12}$ && "$FROM" =~ ^we-[0-9a-f]{12}$ && "$BUILD" != "$FROM" ]] || { echo "::error::build and from: two different we-<12 hex> builds"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: rollback.sh
+        env:
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+          SIM_DEPLOY_ENV: /nonexistent
+          BUILD: ${{ inputs.build }}
+          FROM: ${{ inputs.from }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          export SHIP_ORIGIN="$SIM_ORIGIN" SHIP_OUT_ROOT="$RUNNER_TEMP"
+          args=(--build "$BUILD" --from "$FROM"); [ "$DRY_RUN" != true ] || args+=(--dry-run)
+          set +e
+          tools/world-launcher/deploy/rollback.sh "${args[@]}" 2>&1 | sed -u -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g' | tee "$RUNNER_TEMP/rollback.txt"
+          status=${PIPESTATUS[0]}
+          { echo "rollback.sh exit $status"; echo '```'; tail -5 "$RUNNER_TEMP/rollback.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

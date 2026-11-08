@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Which Chromium a release's Eyes worker would launch (#1340), checked before it goes live:
 //   node tools/world-launcher/deploy/eyes-browser.mjs [--tree <release dir, default this checkout>] [--browsers <PLAYWRIGHT_BROWSERS_PATH>] [--install]
-// --warn: a missing browser prints `WARN eyes: degraded (...)` and exits 0 instead of exit 1 (check only).
+// --warn: a missing browser prints `WARN edenEyes: degraded (...)` and exits 0 instead of exit 1 (check only).
 // --install (release.sh's stage, through ship/eyes-install.sh): when Playwright's own Chromium is missing, install exactly
 // that revision with the release's own Playwright CLI (`playwright install chromium`, PLAYWRIGHT_SKIP_BROWSER_GC=1 so no
 // other installed revision is ever removed), then check again. A failed install or check never stops a release: it prints
-// `WARN eyes: degraded (<reason>)`, records `degraded`, and exits 0; the worker's own 30-min back-off handles the rest.
+// `WARN edenEyes: degraded (<reason>)`, records `degraded`, and exits 0; the worker's own 30-min back-off handles the rest.
 // Idempotent: an installed revision is left as it is.
 // Reads the release's own Playwright (mars/viewer's @playwright/test) for the revision it expects, then applies the worker's
 // rule (apps/server/src/edge/eyes/browser-config.mjs eyesExecutable): EDGE_EYES_CHROME, else Playwright's own, else the
@@ -47,7 +47,7 @@ if ((a.includes('--install') || a.includes('--warn')) && result.problem) {
   // never fatal to a release (a download hiccup must not hold back engine fixes): say it, record it, carry on
   const reason = result.problem.replace(/[()\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
   console.error(`eyes: ${result.log}`);
-  console.error(`WARN eyes: degraded (${reason})`);
+  console.error(`WARN edenEyes: degraded (${reason})`);
   console.log(JSON.stringify({ ...result, problem: undefined, degraded: reason }));
   process.exit(0);
 }

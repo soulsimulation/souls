@@ -22,10 +22,14 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued
  *  together would drop the earlier one's flag from the host's record and log it again at the next boot. After `after` (main's
- *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1 on every world.
- *  A failed edge rule does not keep the guard out. */
+ *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1, #1369
+ *  quarantine/1 and #1334 hold-settle/1 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
+ *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
+ *  already logged in that place. */
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string }): Promise<void> {
   await opts.after?.catch(() => undefined);
   if (opts.edge) await enableEdgeRuntimeRules(host, opts.worldKey).catch((e) => console.error('[world] an edge runtime rule could not be adopted:', String(e).slice(0, 300)));
-  await host.enableBodyStepGuardV1('world');
+  await host.enableBodyStepGuardV1('world').catch((e) => console.error('[world] body-step-guard/1 could not be adopted:', String(e).slice(0, 300)));
+  await host.enableQuarantineV1('world').catch((e) => console.error('[world] quarantine/1 could not be adopted:', String(e).slice(0, 300)));
+  await host.enableRefusalSettleV1('world');   // #1334, after the guard: its settle stands bodies where the guard would
 }

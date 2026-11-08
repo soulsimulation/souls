@@ -521,7 +521,10 @@ const DUCK_HOLD_MS = 2500; let duckHeldUntil = 0;
 const musicDuck = () => { const now = performance.now(); if (pianoNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
 const musicSync = () => syncMusic({ on: musicOn(), station: settings.station, audible: audible(), volume: settings.volume * musicDuck(), unlocked: !!ctx && ctx.state === 'running' });
 function unlock() {
-  if (ctx || typeof AudioContext === 'undefined') return;
+  // #1389: a tap also wakes a context the browser suspended or interrupted (iOS after the page was in the background);
+  // only a tap may, and the music waits on this one (`unlocked`)
+  if (ctx) { if (ctx.state !== 'running' && audible()) void ctx.resume().catch(() => {}); return; }
+  if (typeof AudioContext === 'undefined') return;
   try { ctx = new AudioContext(); master = ctx.createGain(); applyMaster(); master.connect(ctx.destination); meter = ctx.createAnalyser(); meter.fftSize = 2048; master.connect(meter); noise(ctx).stop(); } catch { ctx = null; }
 }
 function step(host: Host) {

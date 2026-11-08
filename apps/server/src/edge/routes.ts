@@ -46,7 +46,9 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const box = deps.ownerInbox as Partial<OwnerLoopInbox> | undefined;
   const loop = box?.hasMessage && box.serverResult ? new OwnerLoop(box as OwnerLoopInbox, (soul, id) => L.receipt(soul, id) as never, l => L.onReceipt(l),
     {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id),
-      holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id)}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
+      holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id),
+      // #1329: a ride join's message waits for the body to be back on the ground
+      rideName: id => L.rideName(id), aboard: soulId => {const m = deps.host.minds.get(soulId), a = m ? L.aboard(m.entityId) : null; return a ? {phase: a.phase} : null;}}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
   // #1295: the loop closes what a replaced or overlong act left open, once a second of world time. SIM_OWNER_HOLD_S
   // shortens the hold limit (15 minutes) for tests and proof worlds.
   if (loop) L.onTick(tick => loop.sweep(tick));
@@ -74,7 +76,9 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   };
   const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
   app.get('/v1/edge/observe', wrap(c => {const s = deps.soul(c); limit(s, 'observe', 240); return L.observe(s, new Set((c.req.query('include') ?? '').split(',').filter(Boolean)));}));
-  app.get('/v1/edge/capabilities', wrap(c => {const s = deps.soul(c); limit(s, 'capabilities', 240); return {tick: deps.host.engine.world.tick, ...L.capabilitiesPage(s, {all: c.req.query('all') === '1'})};}));
+  // #1329 part 4 follow-up: a search builds the whole menu and up to 12 walks on main (up to ~0.5 s), so it has its own
+  // budget, as around does; a plain listing keeps the capabilities budget
+  app.get('/v1/edge/capabilities', wrap(c => {const s = deps.soul(c), search = c.req.query('search')?.trim(); if (search) limit(s, 'capabilities-search', 30); else limit(s, 'capabilities', 240); return {tick: deps.host.engine.world.tick, ...L.capabilitiesPage(s, {all: c.req.query('all') === '1', ...(search ? {search: search.slice(0, 200)} : {})})};}));
   app.post('/v1/edge/act', wrap(async c => {const s = deps.soul(c); limit(s, 'act', 60); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {capability, params?, clientRef?} or {verb, target, …}'); }); const {for: forMessage, forDefault, strict, ...input} = (body ?? {}) as Record<string, unknown>;
     // #1327: a key without a clientRef names the act too, so a retry of an act handed over and not yet recorded is that act
     {const key = c.req.header('idempotency-key'); if (input.clientRef === undefined && key && key.length <= 100) input.clientRef = key;}
