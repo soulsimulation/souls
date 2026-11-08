@@ -4,7 +4,7 @@
 // that owns the cost and documents its own green/amber/red/black values.
 import {monitorEventLoopDelay, PerformanceObserver, type IntervalHistogram} from 'node:perf_hooks';
 import v8 from 'node:v8';
-import {LEVELS, S, sharedLoad, type Level} from './shared.ts';
+import {clockOf, LEVELS, S, sharedLoad, type ClockState, type Level} from './shared.ts';
 import {frameBudgetMs} from './admission.ts';
 
 export type Signals = {service: number; loopP99Ms: number; heapFrac: number; gcFrac: number; oldestMs: number};
@@ -105,8 +105,19 @@ export class QuietTick {
   }
 }
 
+const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100;
 /** What the monitor reads from the world (WorldHost satisfies it). */
-export type HostLike = {rewinds?: number; engine: {world: {tick: number}}; tickMs: number[]; paused: boolean; pace: number; baseRate: number; readonly running: boolean; readonly clockAvailable: boolean; readonly stepFailing?: string | null};
+export type HostLike = {rewinds?: number; engine: {world: {tick: number}}; tickMs: number[]; paused: boolean; pace: number; baseRate: number; readonly running: boolean; readonly clockAvailable: boolean; readonly stepFailing?: string | null;
+  /** #1326: the effective rate (lower while dilated), and the host's listeners, where the monitor notes each completed tick. */
+  clockRate?: number; listeners?: {afterTickComplete?(tick: number): void}[]};
+/** #1326: a clock owing ticks counts as stalled once its last tick is older than this, or 10 of its expected tick intervals
+ *  at the current rate and attention pace when that is longer (a world sleeping at a reduced pace ticks less often). */
+export const STALL_MIN_MS = 2000;
+export function stallMsOf(h: Pick<HostLike, 'running' | 'paused' | 'clockAvailable' | 'pace' | 'clockRate' | 'baseRate'>): number {
+  const rate = (h.clockRate ?? h.baseRate) * h.pace;
+  if (!h.running || h.paused || !h.clockAvailable || !(rate > 0)) return 0;
+  return Math.max(STALL_MIN_MS, 10 * TICK_MS / rate);
+}
 export type Dial = (level: Level) => void;
 export type MonitorOpts = {
   host: HostLike;
@@ -127,7 +138,6 @@ export type MonitorOpts = {
   drill?: Level;
 };
 
-const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100;
 export class LoadMonitor {
   readonly state = new LevelState();
   readonly baseline: QuietBaseline;
@@ -151,6 +161,8 @@ export class LoadMonitor {
   private soulsAt = 0;
   private souls = {awake: 0, waiting: 0, connected: 0};
   private a: Float64Array;
+  private tickHook: {afterTickComplete(): void} | null = null;
+  private seenTick = -1;
   private now: () => number;
   private o: MonitorOpts;
   constructor(o: MonitorOpts) { this.o = o; this.a = o.shared ?? sharedLoad; this.now = o.now ?? Date.now; this.windowMs = o.windowMs ?? 5000; this.baseline = new QuietBaseline(o.baselineMs); this.state.baselineMs = this.baseline.value; }
@@ -159,6 +171,8 @@ export class LoadMonitor {
   register(name: string, dial: Dial) { this.dials.set(name, dial); try { dial(this.level); } catch (e) { console.error(`[load] dial ${name} failed`, e); } }
   start() {
     if (this.timer) return;
+    // #1326: the wall time of each completed tick, at the tick (a sample alone would lag it by up to 250 ms)
+    if (this.o.host.listeners && !this.tickHook) { this.tickHook = {afterTickComplete: () => { this.a[S.tickAt] = this.now(); }}; this.o.host.listeners.push(this.tickHook); }
     this.hist = monitorEventLoopDelay({resolution: 10}); this.hist.enable(); this.histAt = this.startedAt = this.now(); this.quiet = {depth: 0, reqMs: this.o.requestMs?.() ?? 0, service: 1, tick0: this.o.host.engine.world.tick};
     try { this.obs = new PerformanceObserver(list => { for (const e of list.getEntries()) this.gc.push({at: this.now(), ms: e.duration}); }); this.obs.observe({entryTypes: ['gc']}); } catch { this.obs = null; }
     process.on('SIGCONT', this.resumed);
@@ -171,11 +185,13 @@ export class LoadMonitor {
   }
   stop() {
     if (this.timer) clearInterval(this.timer); this.timer = null;
+    if (this.tickHook) { const ls = this.o.host.listeners, i = ls?.indexOf(this.tickHook) ?? -1; if (i >= 0) ls!.splice(i, 1); this.tickHook = null; }
     if (this.pendingSample) clearImmediate(this.pendingSample); this.pendingSample = null;
     process.off('SIGCONT', this.resumed); this.hist?.disable(); this.obs?.disconnect();
   }
   private resumed = () => {
     const now = this.now();
+    if (this.a[S.tickAt]) this.a[S.tickAt] = now;   // #1326: time spent suspended (SIGSTOP) is not a stall
     this.ticks = []; this.prevLoopP99 = 0; this.hist?.reset(); this.histAt = now; this.gc = [];
     this.quiet = {depth: 0, reqMs: this.o.requestMs?.() ?? 0, service: 1, tick0: this.o.host.engine.world.tick};
     this.state.resumed(now);
@@ -188,6 +204,12 @@ export class LoadMonitor {
     a[S.lastTurnAt] = now;
     a[S.halted] = h.clockAvailable === false || h.stepFailing ? 1 : 0;
     a[S.rewinds] = h.rewinds ?? 0;
+    // #1326: a tick this sample sees advance dates from now at the latest: a host without listeners, the first sample, and a
+    // faulted tick (the world moves on, but afterTickComplete runs only after a clean one)
+    if (h.engine.world.tick !== this.seenTick) { this.seenTick = h.engine.world.tick; a[S.tickAt] = Math.max(a[S.tickAt], now); }
+    // a clock that starts owing again (unpaused, restarted, its rate raised from 0) counts its age from now
+    const stallMs = stallMsOf(h); if (stallMs > 0 && !(a[S.stallMs] > 0)) a[S.tickAt] = now;
+    a[S.stallMs] = stallMs; a[S.clockRate] = h.clockRate ?? h.baseRate; a[S.baseRate] = h.baseRate;
     // tick service over 5 s: ticks run / ticks owed at the admin rate and the attention pace (dilation counts as missed)
     const prev = this.ticks.at(-1), owing = h.running && !h.paused && h.clockAvailable;
     const due = prev && owing ? (Math.min(1000, now - prev.at) * h.baseRate * h.pace) / TICK_MS : 0;
@@ -261,6 +283,8 @@ export class LoadMonitor {
     this.o.onLevel?.(from, to, s);
     for (const [name, dial] of this.dials) { try { dial(to); } catch (e) { console.error(`[load] dial ${name} failed`, e); } }
   }
+  /** #1326: the clock as the shared numbers tell it now (tick age, stalled, dilation). */
+  clock(): ClockState { return clockOf(this.a, this.now()); }
   /** The /healthz `load` block: O(1), from the last sample. */
   health() {
     const s = this.signals;
