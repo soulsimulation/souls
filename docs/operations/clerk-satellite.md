@@ -59,6 +59,8 @@ in `apps/web/index.html`, before the snapshot prefetch, so a visit boots the wor
 page would leave and boot again once Clerk mounted after the arrival card (#1385). The script runs only on the
 configured satellite origin's world pages. It never runs for a signed-in cookie, a picture page or a return from the
 sync. After a sync that did not come back, it waits a minute before trying again, so a blocked cookie never loops.
+The page's referrer is kept in `sessionStorage` across the round trip, so the visitor count still credits the site a
+visitor came from (`presyncReferrer` in `visitor-counts.ts`, origin only as for any referrer).
 
 ## Verify before release
 
