@@ -434,8 +434,17 @@ test('#1438 --no-eyes --no-switch: the hook runs at the skipped activation; a fa
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.ok(existsSync(marker)); assert.doesNotMatch(s.calls(), /^activate\t/m);
   assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'rehearsed');
+  // after a real activation a failed hook is recorded, never a stop: the build is live and the evidence still runs
   s = setup(); r = s.run([...s.base, '--no-eyes'], { SHIP_RELEASED_CMD: 'exit 7' });
-  assert.equal(r.status, 1); assert.match(r.stdout, /STOPPED at step activate: SHIP_RELEASED_CMD failed/);
+  assert.equal(r.status, 1); assert.match(r.stdout, /FAILED SHIP_RELEASED_CMD/);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^released-hook 1$/m); assert.match(s.calls(), /cdn-walk\.mjs/);
+  assert.deepEqual(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live-with-failures');
+  // before it: a refusing pre-activation check stops the run and nothing goes live, in both modes
+  s = setup(); r = s.run([...s.base, '--no-eyes'], { SHIP_PREACTIVATE_CMD: 'exit 1' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /STOPPED at step activate: SHIP_PREACTIVATE_CMD refused the activation/);
+  assert.doesNotMatch(s.calls(), /^activate\t/m); assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV));
+  s = setup(); r = s.run([...s.base, '--no-switch', '--no-eyes'], { SHIP_RECEIPTS: '', SHIP_PREACTIVATE_CMD: 'exit 1', SHIP_RELEASED_CMD: `touch ${marker}.2` });
+  assert.equal(r.status, 1); assert.ok(!existsSync(`${marker}.2`), 'no release is announced after a refusal');
   s = setup(); r = s.run(s.base, { SHIP_PROBE_CLI: '' });
   assert.equal(r.status, 1); assert.match(r.stdout, /REFUSED: SHIP_PROBE_CLI is not the release-probe god folder/);
   s = setup(); r = s.run([...s.base, '--dry-run', '--no-eyes']);

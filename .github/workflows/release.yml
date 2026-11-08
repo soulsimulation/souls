@@ -124,9 +124,11 @@ jobs:
           SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
           SIM_PROBE_GOD_JSON: ${{ secrets.SIM_PROBE_GOD_JSON }}
           SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
         run: |
           # masked even when set as a variable: release.sh prints its upload target, so ship's log would name the host
           [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
+          [ -z "$SIM_DEPLOY_USER" ] || echo "::add-mask::$SIM_DEPLOY_USER"
           missing=()
           for name in DEPLOY_SSH_KEY SIM_DEPLOY_KNOWN_HOSTS SIM_PROBE_GOD_JSON; do [ -n "${!name}" ] || missing+=("$name"); done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -214,7 +216,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.preflight.outputs.sha }}
-          RUN: ${{ github.run_id }}
+          RUN: ${{ github.run_id }}.${{ github.run_attempt }}
           DRY_RUN: ${{ inputs.dry_run }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -224,7 +226,9 @@ jobs:
           H=tools/world-launcher/deploy/ship/handover.mjs
           mode=no-switch; [ "$DRY_RUN" != false ] || mode=ship
           node $H post "$SHA" release/ship pending "run=$RUN mode=$mode waiting-for-eyes" --url "$URL"
-          { echo "Waiting for eyes: \`node tools/world-launcher/deploy/ship/eyes.mjs --sha $SHA --run $RUN --label ${{ needs.preflight.outputs.label }}\`"; } >> "$GITHUB_STEP_SUMMARY"
+          eyes="node tools/world-launcher/deploy/ship/eyes.mjs --sha $SHA --run $RUN --label ${{ needs.preflight.outputs.label }}"
+          echo "::notice title=Start the workstation's eyes::$eyes"
+          echo "Eyes: \`$eyes\`" >> "$GITHUB_STEP_SUMMARY"
           if ! node $H wait "$SHA" release/eyes --run "$RUN" --want ready --timeout-min 20 --every-s 20; then
             node $H post "$SHA" release/ship failure "run=$RUN stopped: no eyes" --url "$URL" || true
             echo "::error::No workstation eyes for run $RUN within 20 min: nothing was staged. Start ship/eyes.mjs, then dispatch again."
@@ -241,15 +245,17 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           EYES: ${{ inputs.eyes }}
           GH_TOKEN: ${{ github.token }}
-          RUN: ${{ github.run_id }}
+          RUN: ${{ github.run_id }}.${{ github.run_attempt }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           export SHIP_ORIGIN="$SIM_ORIGIN" SHIP_OUT_ROOT="$RUNNER_TEMP/ship"
           args=(--label "$LABEL" --sha "$SHA")
           if [ "$EYES" != runner ]; then
-            # the workstation runs the browser steps; it learns of the activation (or its no-switch skip) at that moment
+            # the workstation runs the browser steps. Right before the activation its probe must still be watching (newest
+            # release/eyes for this attempt is "ready"); right after, it is told. A failed tell is recorded, not a stop.
             args+=(--no-eyes)
-            export SHIP_RELEASED_CMD="node tools/world-launcher/deploy/ship/handover.mjs post $SHA release/ship success 'run=$RUN released' --url '$URL' && touch '$RUNNER_TEMP/released'"
+            export SHIP_PREACTIVATE_CMD="node tools/world-launcher/deploy/ship/handover.mjs wait $SHA release/eyes --run $RUN --want ready --timeout-min 1 --every-s 20"
+            export SHIP_RELEASED_CMD="node tools/world-launcher/deploy/ship/handover.mjs post $SHA release/ship success 'run=$RUN released' --url '$URL'"
           fi
           # fails closed: only an explicit false ships
           [ "$DRY_RUN" = false ] || args+=(--no-switch)
@@ -266,8 +272,13 @@ jobs:
             echo "ship.sh: $(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).status.replace(/[^a-z-]/g, '')" "$out/ship-result.json")" >> "$GITHUB_STEP_SUMMARY"
             if node tools/proof/publication.mjs "$out/ship-result.json" > /dev/null 2>&1; then { echo '```json'; cat "$out/ship-result.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
           fi
-          if [ "$EYES" != runner ] && [ ! -e "$RUNNER_TEMP/released" ]; then
+          # released = the activation ran (or its no-switch skip), whatever the hook managed to say
+          if [ "$EYES" != runner ] && ! grep -qE '^activate (ok|skipped-no-switch) ' "$out/STEPS.txt" 2>/dev/null; then
             node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship failure "run=$RUN stopped: ship.sh exit $status before the release" --url "$URL" || true
+          fi
+          # activated, but ship.sh could not tell the workstation: tell it once more, so its checks still run
+          if [ "$EYES" != runner ] && grep -q '^released-hook 1$' "$out/POSTLIVE.txt" 2>/dev/null; then
+            node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship success "run=$RUN released" --url "$URL" || echo "::warning::could not tell the workstation the release is done; its verdict will time out (fail closed)"
           fi
           exit $status
       - name: The workstation's verdict
@@ -275,13 +286,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.preflight.outputs.sha }}
-          RUN: ${{ github.run_id }}
+          RUN: ${{ github.run_id }}.${{ github.run_attempt }}
           DRY_RUN: ${{ inputs.dry_run }}
           LABEL: ${{ needs.preflight.outputs.label }}
         run: |
           # Fails closed: no pass from ship/eyes.mjs for this run means no publish. After a real activation the summary
           # names the code-only rollback, which needs no ssh (rollback.yml, ship.sh's ROLLBACK.txt).
-          [ -e "$RUNNER_TEMP/released" ] || { echo "::error::nothing was released (no eyes, or ship.sh stopped first); nothing to publish"; exit 1; }
+          steps="$RUNNER_TEMP/ship/$LABEL/STEPS.txt"
+          grep -qE '^activate (ok|skipped-no-switch) ' "$steps" 2>/dev/null || { echo "::error::nothing was activated (no eyes, or ship.sh stopped first); nothing to publish"; exit 1; }
           if node tools/world-launcher/deploy/ship/handover.mjs wait "$SHA" release/eyes --run "$RUN" --want final --timeout-min 45 --every-s 30; then
             echo "eyes: pass" >> "$GITHUB_STEP_SUMMARY"; exit 0
           fi

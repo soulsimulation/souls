@@ -16,19 +16,21 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTEXT, defaultRepo, description, isSha, postStatus, waitFor } from './handover.mjs';
+import { CONTEXT, defaultRepo, description, isRun, isSha, latestFor, listStatuses, postStatus, sameRun, waitFor } from './handover.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url)), DEPLOY = resolve(HERE, '..'), ROOT = resolve(HERE, '../../../..');
+// EYES_DEPLOY_DIR: tests only, a deploy/ folder of stand-in tools (release-probe.mjs, ship/*.mjs, ship/poster-count.py)
+const HERE = dirname(fileURLToPath(import.meta.url)), DEPLOY = process.env.EYES_DEPLOY_DIR || resolve(HERE, '..'), ROOT = resolve(HERE, '../../../..');
 const argv = process.argv.slice(2);
 const flag = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
 const sha = flag('sha'), wantRun = flag('run', null), repo = flag('repo', defaultRepo());
 const origin = (flag('origin', 'https://soul.game')).replace(/\/$/, '');
 const cli = resolve(flag('cli', join(ROOT, '.local/release-probe')));
-const findMin = Number(flag('find-min', 45)), releaseMin = Number(flag('release-min', 30));
+// release-min: from ready to the activation; the job's snapshot, stage, rehearsal and backup all run in it
+const findMin = Number(flag('find-min', 45)), releaseMin = Number(flag('release-min', 60)), pollMs = Number(flag('poll-s', 15)) * 1000;
 const PAGE = '/w/eden/', SLUGS = ['eden', 'mars-college-2026', 'mars-college-2027'];
 const say = (s) => console.log(`[eyes ${new Date().toISOString().slice(11, 19)}Z] ${s}`);
 if (!isSha(sha)) { console.error('eyes: --sha must be the full 40-hex commit the dispatched run ships'); process.exit(2); }
-if (wantRun != null && !/^\d+$/.test(wantRun)) { console.error('eyes: --run is the Actions run id (digits)'); process.exit(2); }
+if (wantRun != null && !isRun(wantRun)) { console.error('eyes: --run is the Actions run id (digits, optionally .<attempt>)'); process.exit(2); }
 if (!existsSync(join(cli, '.eden-god.json'))) { console.error(`eyes: no release-probe god folder at ${cli} (--cli; docs/release.md "The release-probe world")`); process.exit(2); }
 
 const gh = (args) => new Promise((yes, no) => { const p = spawn('gh', args, { stdio: ['ignore', 'pipe', 'pipe'] }); let o = '', e = ''; p.stdout.on('data', (d) => (o += d)); p.stderr.on('data', (d) => (e += d)); p.on('close', (c) => (c ? no(Error(e.trim().slice(0, 300))) : yes(o))); });
@@ -39,10 +41,11 @@ const tool = (log, cmd, args, env = {}) => new Promise((yes) => {
   p.on('close', (c) => { writeFileSync(log, buf); yes(c ?? 1); }); p.on('error', () => yes(127));
 });
 
+const runUrl = () => `https://github.com/${repo}/actions/runs/${String(run).split('.')[0]}`;
 let run = null, posted = false, probe = null, PDIR = null, probeExit = null, aborting = false;
 async function finish(state, word, detail) {
   if (posted || !run) return; posted = true;
-  try { await postStatus(repo, sha, CONTEXT.eyes, state, description(run, word, { detail }), `https://github.com/${repo}/actions/runs/${run}`); say(`posted ${CONTEXT.eyes} ${state}: ${word}${detail ? `: ${detail}` : ''}`); }
+  try { const d = description(run, word, { detail }); await postStatus(repo, sha, CONTEXT.eyes, state, d, runUrl()); say(`posted ${CONTEXT.eyes} ${state}: ${d}`); }
   catch (e) { say(`COULD NOT POST ${CONTEXT.eyes} ${state} (${e.message}); the run waits and then fails closed`); }
 }
 async function abort(why, code = 1) {
@@ -51,25 +54,38 @@ async function abort(why, code = 1) {
   await finish('failure', 'fail', why);
   // the probe removes its own edits from the release-probe world when told to stop: let it, within 4 min
   if (probe && PDIR) {
-    writeFileSync(join(PDIR, 'stop'), ''); probe.kill('SIGTERM'); say('waiting for the probe to clean up its edits');
+    writeFileSync(join(PDIR, 'stop'), ''); say('waiting for the probe to clean up its edits');
     await Promise.race([probeExit, new Promise((r) => setTimeout(r, 240_000))]);
+    probe?.kill('SIGTERM');
   }
   process.exit(code);
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => abort(`interrupted (${sig})`, 130));
-process.on('uncaughtException', (e) => abort(`crashed: ${e.message}`.slice(0, 100)));
-process.on('unhandledRejection', (e) => abort(`crashed: ${e?.message ?? e}`.slice(0, 100)));
+// the message stays in this log: it can carry local paths, which never go into a public status
+const crashed = (e) => { say(`crash: ${e?.stack ?? e}`); return abort(`eyes crashed${/^[A-Z][A-Z0-9_]+$/.test(e?.code ?? '') ? ` (${e.code})` : ''}`); };
+process.on('uncaughtException', crashed); process.on('unhandledRejection', crashed);
 
-// 1. the run: its release/ship "waiting-for-eyes" on this sha, and Actions agreeing that the run ships this sha
+// 1. the run: the newest release/ship "waiting-for-eyes" on this sha whose run is release.yml, in progress, shipping this
+// sha, at the attempt the status names. An earlier run's or attempt's status is skipped; another sha refuses (exit 2).
 say(`looking for a release run of ${sha.slice(0, 12)}${wantRun ? ` (run ${wantRun})` : ''}; up to ${findMin} min`);
-const found = await waitFor({ repo, sha, context: CONTEXT.ship, run: wantRun, want: 'waiting', timeoutMs: findMin * 60_000, everyMs: 30_000, log: say });
-if (!found.ok) { say(found.timedOut ? 'no release run is waiting for eyes on this sha' : `the run is not waiting: ${found.status?.description}`); process.exit(1); }
-run = found.status.run; const mode = found.status.mode;
-const info = JSON.parse(await gh(['api', `repos/${repo}/actions/runs/${run}`]));
-if (info.head_sha !== sha || !/\.github\/workflows\/release\.yml$/.test(info.path ?? '') || info.status === 'completed') {
-  run = null; say(`REFUSED: run ${found.status.run} is ${info.path} at ${String(info.head_sha).slice(0, 12)} (${info.status}), not release.yml shipping ${sha.slice(0, 12)}`); process.exit(2);
+let mode = null; const skipped = new Set(), findEnd = Date.now() + findMin * 60_000;
+for (;;) {
+  let statuses = []; try { statuses = await listStatuses(repo, sha); } catch (e) { say(`status read failed; retrying`); }
+  const waiting = statuses.filter((x) => x.context === CONTEXT.ship && x.state === 'pending').map((x) => latestFor([x], CONTEXT.ship, wantRun)).filter((x) => x?.word === 'waiting-for-eyes' && !skipped.has(x.run));
+  const cand = waiting[0];
+  if (cand && latestFor(statuses, CONTEXT.ship, cand.run)?.word === 'waiting-for-eyes') {
+    const [id, attempt] = cand.run.split('.');
+    const info = JSON.parse(await gh(['api', `repos/${repo}/actions/runs/${id}`]));
+    if (info.head_sha !== sha || !/\.github\/workflows\/release\.yml$/.test(info.path ?? '')) {
+      say(`REFUSED: run ${id} is ${info.path} at ${String(info.head_sha).slice(0, 12)}, not release.yml shipping ${sha.slice(0, 12)}`); process.exit(2);
+    }
+    if (info.status !== 'completed' && (attempt === undefined || String(info.run_attempt) === attempt)) { run = cand.run; mode = cand.mode; break; }
+    say(`run ${cand.run} is not the live attempt (${info.status}, attempt ${info.run_attempt}); still looking`); skipped.add(cand.run);
+  } else if (cand) skipped.add(cand.run);
+  if (Date.now() + pollMs * 2 > findEnd) { say('no release run is waiting for eyes on this sha'); process.exit(1); }
+  await new Promise((r) => setTimeout(r, pollMs * 2));
 }
-const label = flag('label', `run-${run}`);
+const label = flag('label', `run-${String(run).replace('.', '-')}`);
 const OUT = resolve(flag('out', join(ROOT, `.local/ship/${label}-eyes`))); PDIR = join(OUT, 'probe');
 if (existsSync(join(OUT, 'eyes-result.json'))) { const was = `${OUT}.${Date.now()}`; renameSync(OUT, was); say(`an earlier eyes run moved to ${was}`); }
 mkdirSync(OUT, { recursive: true });
@@ -98,20 +114,26 @@ for (let i = 0; !existsSync(join(PDIR, 'ready')); i++) {
   if (i > 600) await abort('the probe was not ready in 600 s');
   await new Promise((r) => setTimeout(r, 1000));
 }
-await postStatus(repo, sha, CONTEXT.eyes, 'pending', description(run, 'ready'), `https://github.com/${repo}/actions/runs/${run}`);
+if (aborting) await new Promise(() => {});   // an abort is under way: it posts the failure and exits
+await postStatus(repo, sha, CONTEXT.eyes, 'pending', description(run, 'ready'), runUrl());
 say('probe ready; posted release/eyes ready; waiting for the activation');
 
 // 3. the release: release/ship "released" (activated, or the no-switch skip); a stop before it fails eyes without walks
-const rel = await waitFor({ repo, sha, context: CONTEXT.ship, run, want: 'released', timeoutMs: releaseMin * 60_000, everyMs: 15_000, log: say });
+const rel = await waitFor({ repo, sha, context: CONTEXT.ship, run, want: 'released', timeoutMs: releaseMin * 60_000, everyMs: pollMs, log: say });
 if (!rel.ok) await abort(rel.timedOut ? `no release within ${releaseMin} min` : `ship stopped before the release (${rel.status?.detail || rel.status?.description})`);
 writeFileSync(join(PDIR, 'released'), ''); say('released; the probe watches 60 s more');
 
 // 4. the checks: ship.sh's commands, checks.mjs's bars
 const failed = [], post = [];
 const rc = await probeExit; post.push(`probe ${rc}`);
-if (rc !== 0) failed.push(rc === 3 ? (mode === 'no-switch' ? 'probe(build)' : 'probe(rolled-back)') : 'probe');
+// the bar alone (counts, page paths, build ids): what failed, readable without the workstation's files
+let bar = null; try { bar = JSON.parse(readFileSync(join(PDIR, 'report.json'), 'utf8')).bar; writeFileSync(join(OUT, 'probe-bar.json'), JSON.stringify(bar, null, 1) + '\n'); } catch {}
+const missed = !bar ? ['no-report'] : [['errorPages', bar.errorPages], ['notLoaded', bar.notLoaded?.length], ['noBuild', bar.noBuild?.length], ['arrivalsNotLoaded', bar.arrivalsNotLoaded?.length],
+  ['lost', bar.lost], ['unclean', bar.unclean], ['notResumed', bar.notResumed], ['reloaded', bar.reloaded?.length], ['rolledBack', bar.rolledBack?.length]].filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`)
+  .concat(bar.reconnectMaxMs > 5000 ? [`reconnectMaxMs=${bar.reconnectMaxMs}`] : []);
+if (rc !== 0) failed.push(`probe(${missed.join(',') || `exit=${rc}`})`);
 const live = async (name, log, cmd, args, more = {}) => { const c = await tool(join(OUT, log), cmd, args, { ...env, ...more }); post.push(`${name} ${c}`); if (c) failed.push(name); say(`${name}: ${c ? `FAILED (exit ${c})` : 'ok'}`); };
-const N = process.execPath, SHIPD = HERE, URLS = SLUGS.map((s) => `${origin}/w/${s}/`);
+const N = process.execPath, SHIPD = join(DEPLOY, 'ship'), URLS = SLUGS.map((s) => `${origin}/w/${s}/`);
 await live('walk-desktop', 'walk-desktop.log', N, [join(SHIPD, 'walk.mjs'), join(OUT, 'walk-desktop'), ...URLS], { DPRS: '1,2' });
 await live('walk-phone', 'walk-phone.log', N, [join(SHIPD, 'walk.mjs'), join(OUT, 'walk-phone'), ...URLS], { PHONE: '1', DPRS: '1,2' });
 await live('walks-verdict', 'walks-check.txt', N, [join(SHIPD, 'checks.mjs'), 'walks', String(URLS.length * 4), join(OUT, 'walk-desktop/walk.json'), join(OUT, 'walk-phone/walk.json')]);

@@ -37,8 +37,10 @@ jobs:
           BUILD: ${{ inputs.build }}
           FROM: ${{ inputs.from }}
           SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
         run: |
           [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
+          [ -z "$SIM_DEPLOY_USER" ] || echo "::add-mask::$SIM_DEPLOY_USER"
           [ "$REF" = refs/heads/main ] || { echo "::error::rollback runs from main only (got $REF)"; exit 1; }
           [[ "$BUILD" =~ ^we-[0-9a-f]{12}$ && "$FROM" =~ ^we-[0-9a-f]{12}$ && "$BUILD" != "$FROM" ]] || { echo "::error::build and from: two different we-<12 hex> builds"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

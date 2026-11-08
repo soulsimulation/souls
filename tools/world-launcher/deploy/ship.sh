@@ -10,8 +10,10 @@
 #     --no-switch  every step for real except the backup and the activation: stage (without install.sh), rehearse, the probe
 #                and every check run against the build that stays live; nothing to roll back, so no backup. Receipts are checked when SHIP_RECEIPTS is set, never required. Result: rehearsed
 #     --no-eyes  skip the browser steps (probe-start, probe-check, walks, poster, stall): a GPU workstation runs them over
-#                HTTPS with ship/eyes.mjs (#1438), because a GPU-less runner cannot hold their bars. SHIP_RELEASED_CMD, when set,
-#                runs at the moment the probe would be told the release is done (after the activation, or its no-switch skip)
+#                HTTPS with ship/eyes.mjs (#1438), because a GPU-less runner cannot hold their bars. SHIP_PREACTIVATE_CMD, when
+#                set, runs right before the activation (or its no-switch skip) and its failure stops the run: nothing goes live
+#                unless the workstation's probe still watches. SHIP_RELEASED_CMD runs where the probe would be told the release
+#                is done; after a real activation its failure is recorded (released-hook) and the evidence still runs
 #     --from     resume at snapshot, stage, rehearse, backup, probe-start, healthz, walks, poster, stall or cdn-walk (same --out)
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
 #     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
@@ -76,7 +78,13 @@ result() { [ "$DRY" = 1 ] || printf '{"at":"%s","label":"%s","sha":"%s","build":
 # the probe learns the release is done (or, with --no-eyes, the workstation does, through SHIP_RELEASED_CMD)
 released() {
   [ "$NOEYES" = 1 ] || x touch "$PDIR/released"
-  [ -z "${SHIP_RELEASED_CMD:-}" ] || { say "   + SHIP_RELEASED_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_RELEASED_CMD" || die "SHIP_RELEASED_CMD failed"; }
+  [ -z "${SHIP_RELEASED_CMD:-}" ] || { say "   + SHIP_RELEASED_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_RELEASED_CMD" \
+    || { say "   FAILED SHIP_RELEASED_CMD: $LIVE; recorded, continuing"; printf 'released-hook 1\n' >> "$OUT/POSTLIVE.txt"; FAILED="$FAILED released-hook"; }; }
+}
+# the last word before anything goes live: with --no-eyes, the workstation's probe must still be watching
+preactivate() {
+  [ -z "${SHIP_PREACTIVATE_CMD:-}" ] && return 0
+  say "   + SHIP_PREACTIVATE_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_PREACTIVATE_CMD" || die "SHIP_PREACTIVATE_CMD refused the activation (the workstation's probe is not watching); nothing changed"
 }
 stop_probe() { [ -n "$PROBE_PID" ] && kill -0 "$PROBE_PID" 2>/dev/null || return 0; say "   stopping the release probe"; touch "$PDIR/stop"; wait "$PROBE_PID" 2>/dev/null; PROBE_PID=""; }
 die() {
@@ -225,6 +233,7 @@ if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
     node "$VERDICT" rehearsed "$OUT/rehearse.json" "$BUILD" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "no passing boot rehearsal of this build"
     drift
   fi
+  preactivate
   say "   + (host-activate.sh is not run)"; released
   [ "$DRY" = 1 ] || printf 'activate skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
 elif [ "$STARTED" = 1 ]; then
@@ -235,6 +244,7 @@ elif [ "$STARTED" = 1 ]; then
     drift
     A="$(node -p 'const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.argv[1])),u=JSON.parse(fs.readFileSync(process.argv[2]));[s.previousBuild,u.manifestSha256,s.remote.worlds,s.remote.configurationSha256].join(" ")' "$OUT/snapshot.json" "$OUT/upload-receipt.json")"
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
+  preactivate
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
   rc=0; x_in "$SHIPD/host-activate.sh" rsh "bash -s -- $(quote "$HOST_ROOT" "$HOST_DATA" "$HOST_CONF" "$HOST_UNIT" "$ORIGIN" "$BUILD") $A" || rc=$?
   # The host's exit is the only account of what happened (ship/host-activate.sh). Never claim a rollback it didn't report.

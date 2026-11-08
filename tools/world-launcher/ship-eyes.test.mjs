@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTEXT, description, judge, latestFor, parseDescription, waitFor } from './deploy/ship/handover.mjs';
+import { CONTEXT, description, judge, latestFor, parseDescription, safeDetail, sameRun, waitFor } from './deploy/ship/handover.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EYES = join(HERE, 'deploy/ship/eyes.mjs'), HANDOVER = join(HERE, 'deploy/ship/handover.mjs');
@@ -19,6 +19,16 @@ test('descriptions: run id and mode round-trip, the 140-character limit holds, a
   assert.ok(description(1, 'fail', { detail: 'x'.repeat(300) }).length <= 140);
   for (const d of ['', 'pass', 'run=abc pass', 'run=1 mode=prod pass', null]) assert.equal(parseDescription(d), null, String(d));
   assert.throws(() => description('12a', 'pass'));
+  assert.deepEqual(parseDescription('run=42.3 ready'), { run: '42.3', mode: null, word: 'ready', detail: '' });
+});
+
+test('a re-run keeps the run id, so the attempt decides; public details lose paths and stack text', () => {
+  assert.ok(sameRun('42.2', '42.2')); assert.ok(!sameRun('42.1', '42.2')); assert.ok(sameRun('42.1', '42')); assert.ok(!sameRun('421.1', '42'));
+  const list = [st(CONTEXT.eyes, 'pending', 'run=42.1 ready')];
+  assert.equal(latestFor(list, CONTEXT.eyes, '42.2'), null, 'attempt 1 is never attempt 2');
+  const d = description('42.2', 'fail', { detail: "eyes crashed: ENOENT open '/home/someone/x/probe/report.json' at <anonymous>" });
+  assert.doesNotMatch(d, /\/|<|'/); assert.match(d, /^run=42\.2 fail: eyes crashed: ENOENT open home someone x probe report.json at anonymous$/);
+  assert.equal(safeDetail('probe(noBuild=2,errorPages=1) stall-verdict'), 'probe(noBuild=2,errorPages=1) stall-verdict');
 });
 
 test('latestFor: the newest status of the context for this run; another run or context never counts', () => {
@@ -58,12 +68,14 @@ test('waitFor: polls until the status appears, stops at a failure, times out clo
 });
 
 // a fake `gh`: statuses and runs from files, every POST appended to posts.log
-function fakeGh(statuses, runInfo) {
+function fakeGh(statuses, runInfo, after = null) {
   const t = mkdtempSync(join(tmpdir(), 'eyes-')), bin = join(t, 'bin'); mkdirSync(bin); mkdirSync(join(t, 'god'));
   writeFileSync(join(t, 'god/.eden-god.json'), '{}'); writeFileSync(join(t, 'statuses.json'), JSON.stringify(statuses)); writeFileSync(join(t, 'run.json'), JSON.stringify(runInfo));
-  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash\ncase "$*" in *"-X POST"*) echo "$*" >> ${t}/posts.log;; *"/statuses?"*) cat ${t}/statuses.json;; *"/actions/runs/"*) cat ${t}/run.json;; *) exit 1;; esac\n`);
+  // after: the job's next status (released or stopped), served once eyes has posted ready
+  if (after) writeFileSync(join(t, 'after.json'), JSON.stringify([after, ...statuses]));
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash\ncase "$*" in *"-X POST"*) echo "$*" >> ${t}/posts.log;; *"/statuses?"*) if [ -e ${t}/after.json ] && grep -q ' ready ' ${t}/posts.log 2>/dev/null; then cat ${t}/after.json; else cat ${t}/statuses.json; fi;; *"/actions/runs/"*) cat ${t}/run.json;; *) exit 1;; esac\n`);
   chmodSync(join(bin, 'gh'), 0o755);
-  const run = (args) => spawnSync(process.execPath, [EYES, ...args, '--cli', join(t, 'god'), '--out', join(t, 'out'), '--repo', 'o/r'], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8', timeout: 60_000 });
+  const run = (args, env = {}) => spawnSync(process.execPath, [EYES, ...args, '--cli', join(t, 'god'), '--out', join(t, 'out'), '--repo', 'o/r', '--poll-s', '0.1'], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env }, encoding: 'utf8', timeout: 60_000 });
   return { t, run, posts: () => (existsSync(join(t, 'posts.log')) ? readFileSync(join(t, 'posts.log'), 'utf8') : '') };
 }
 
@@ -91,4 +103,64 @@ test('handover.mjs CLI: posts only well-formed statuses, and wait exits 1 on a f
   assert.equal(r.status, 0, r.stderr); assert.match(f.posts(), /statuses\/a{40} -f state=success -f context=release\/ship -f description=run=3 released/);
   r = spawnSync(process.execPath, [HANDOVER, 'wait', SHA, CONTEXT.eyes, '--run', '3', '--want', 'final', '--repo', 'o/r'], { env, encoding: 'utf8' });
   assert.equal(r.status, 1); assert.match(r.stdout, /release\/eyes failure: run=3 fail: probe/);
+});
+
+// stand-in deploy tools for eyes (EYES_DEPLOY_DIR): a probe that waits for released or stop, browser tools that log, a
+// checks.mjs that fails the verdict FAKE_FAIL_CHECK names
+function fakeDeploy(t) {
+  const d = join(t, 'deploy'), log = join(t, 'tools.log'); mkdirSync(join(d, 'ship'), { recursive: true });
+  writeFileSync(join(d, 'release-probe.mjs'), `import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+const a = process.argv.slice(2), out = a[a.indexOf('--out') + 1]; mkdirSync(out, { recursive: true });
+appendFileSync(${JSON.stringify(log)}, 'probe ' + a[a.indexOf('--expect-build') + 1] + '\\n'); writeFileSync(out + '/ready', '');
+const end = Date.now() + 30000; while (Date.now() < end && !existsSync(out + '/released') && !existsSync(out + '/stop')) await new Promise((r) => setTimeout(r, 50));
+appendFileSync(${JSON.stringify(log)}, existsSync(out + '/stop') ? 'probe stopped\\n' : 'probe released\\n');
+writeFileSync(out + '/report.json', JSON.stringify({ bar: JSON.parse(process.env.FAKE_PROBE_BAR || '{"pass":true}') }));
+process.exit(Number(process.env.FAKE_PROBE_RC || 0));`);
+  for (const f of ['walk.mjs', 'poster.mjs', 'stall.mjs']) writeFileSync(join(d, 'ship', f), `import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(log)}, '${f}\\n');`);
+  writeFileSync(join(d, 'ship', 'checks.mjs'), `import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(log)}, 'checks ' + process.argv[2] + '\\n'); process.exit(process.argv[2] === process.env.FAKE_FAIL_CHECK ? 1 : 0);`);
+  writeFileSync(join(d, 'ship', 'poster-count.py'), '');
+  return { EYES_DEPLOY_DIR: d, tools: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') };
+}
+const WAITING = st(CONTEXT.ship, 'pending', 'run=77.1 mode=ship waiting-for-eyes'), RUN = { head_sha: SHA, path: '.github/workflows/release.yml', status: 'in_progress', run_attempt: 1 };
+const posted = (f) => f.posts().split('\n').filter(Boolean).map((l) => l.match(/state=(\w+) -f context=(\S+) -f description=(.*?) --silent/).slice(1).join(' '));
+
+test('eyes end to end (stand-in tools): ready, then the checks after released, then pass', () => {
+  const f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'success', 'run=77.1 released')), d = fakeDeploy(f.t);
+  const r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(posted(f), ['pending release/eyes run=77.1 ready', 'success release/eyes run=77.1 pass']);
+  assert.deepEqual(d.tools().trim().split('\n'), [`probe we-${SHA.slice(0, 12)}`, 'probe released', 'walk.mjs', 'walk.mjs', 'checks walks', 'poster.mjs', 'checks poster', 'stall.mjs', 'checks stall']);
+});
+
+test('A6: a failing bar fails eyes, which posts failure naming it; a probe miss names the bar item', () => {
+  let f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'success', 'run=77.1 released')), d = fakeDeploy(f.t);
+  let r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR, FAKE_FAIL_CHECK: 'stall' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual(posted(f), ['pending release/eyes run=77.1 ready', 'failure release/eyes run=77.1 fail: stall-verdict']);
+  f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'success', 'run=77.1 released')); d = fakeDeploy(f.t);
+  r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR, FAKE_PROBE_RC: '1', FAKE_PROBE_BAR: JSON.stringify({ pass: false, errorPages: 0, noBuild: ['a', 'b'], reconnectMaxMs: 9000 }) });
+  assert.equal(r.status, 1);
+  assert.equal(posted(f)[1], 'failure release/eyes run=77.1 fail: probe(noBuild=2,reconnectMaxMs=9000)');
+  assert.ok(existsSync(join(f.t, 'out/probe-bar.json')));
+});
+
+test('A4: a ship that stops before the release fails eyes without walks, and the probe is told to stop', () => {
+  const f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'failure', 'run=77.1 stopped: ship.sh exit 1 before the release')), d = fakeDeploy(f.t);
+  const r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual(posted(f), ['pending release/eyes run=77.1 ready', 'failure release/eyes run=77.1 fail: ship stopped before the release (ship.sh exit 1 before the release)']);
+  assert.match(d.tools(), /probe stopped/); assert.doesNotMatch(d.tools(), /walk\.mjs|stall\.mjs/);
+});
+
+test('A10: a waiting status of an earlier attempt, or of a finished run, is skipped; nothing is posted for it', () => {
+  let f = fakeGh([WAITING], { ...RUN, run_attempt: 2 }), d = fakeDeploy(f.t);
+  let r = f.run(['--sha', SHA, '--find-min', '0.01'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 1, r.stdout + r.stderr); assert.match(r.stdout, /not the live attempt/); assert.equal(f.posts(), ''); assert.equal(d.tools(), '');
+  f = fakeGh([WAITING], { ...RUN, status: 'completed' }); d = fakeDeploy(f.t);
+  r = f.run(['--sha', SHA, '--find-min', '0.01'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 1); assert.equal(f.posts(), '');
+  // the newest status of that attempt already says it stopped: not waiting any more
+  f = fakeGh([st(CONTEXT.ship, 'failure', 'run=77.1 stopped: no eyes'), WAITING], RUN); d = fakeDeploy(f.t);
+  r = f.run(['--sha', SHA, '--find-min', '0.01'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 1); assert.equal(f.posts(), '');
 });
