@@ -55,12 +55,13 @@ test('an orphan is open, with nothing running, replaced, planned or about to be 
   assert.equal(orphanState({message: null}), 'keep');
 });
 
-async function world(t, {messages = {}, receipts = {}, backlog = [], reads = 200} = {}) {
+async function world(t, {messages = {}, receipts = {}, backlog = [], reads = 200, events = []} = {}) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-still-'));
   const server = createServer((req, res) => {
     let b = ''; req.on('data', d => b += d); req.on('end', () => {
       const body = JSON.parse(b || '{}'), url = req.url.split('?')[0], send = (s, j) => {res.writeHead(s, {'content-type': 'application/json'}); res.end(JSON.stringify(j));};
       seen.push([req.method, url, body]);
+      if (url === '/v1/edge/wait') return send(200, {cursor: 'c_1', events});
       if (url === '/v1/edge/inbox/listen') return send(200, {inbox: {}, backlog: backlog.shift() ?? []});
       if (url.startsWith('/v1/edge/receipts/')) { const r = receipts[url.split('/').pop()]; return r ? send(200, {receipt: r}) : send(404, {error: {code: 'not-found', message: 'no such receipt'}}); }
       const m = /^\/v1\/edge\/inbox\/([^/]+)(\/ack|\/result)?$/.exec(url);
@@ -131,4 +132,29 @@ test('with nothing older the answers carry no new keys', async t => {
   const l = await w.cli('listen', '--once'), a = await w.cli('ack', 'm_1', 'Hi.');
   assert.deepEqual(Object.keys(l.json).filter(k => /stillOpen/.test(k)), []);
   assert.deepEqual(Object.keys(a.json).sort(), ['acked', 'reply']);
+});
+
+test('ack --close takes its message out of the record, and lists nothing from its own answer', async t => {
+  const one = {id: 'm_a', text: 'Is it raining?', state: 'delivered'}, two = {id: 'm_b', text: 'Walk home', state: 'delivered'};
+  const w = await world(t, {messages: {m_a: {...one}, m_b: {...two}}, backlog: [[one, two]]});
+  await w.cli('listen', '--once');
+  const a = await w.cli('ack', 'm_a', 'No.', '--close', 'done');
+  assert.equal(a.json.closed, true); assert.equal(a.json.stillOpen, undefined, 'm_b came in the same answer');
+  assert.deepEqual(w.read().heard.map(h => h.id), ['m_b']);
+  const again = await w.cli('ack', 'm_a', 'No.', '--close', 'done');
+  assert.equal(again.json.already, 'done'); assert.deepEqual(w.read().heard.map(h => h.id), ['m_b'], 'already closed: not recorded again');
+});
+
+test('a sit that asked for its own seconds is still running while held: wait never marks it, so it is never listed', async t => {
+  const sit = {id: 'r_sit', capability: 'sit:bench', phase: 'started'};
+  const held = {id: 'e_1', kind: 'activity.observed', receipt: {...sit}, action: {status: 'executing', phase: 'seated'}, body: {posture: 'seated', seated: true}};
+  for (const timed of [true, false]) {
+    const w = await world(t, {messages: {m_sit: {state: 'acknowledged', text: 'Sit'}, m_new: {state: 'delivered', text: 'Come here'}}, receipts: {r_sit: sit}, events: [held]});
+    w.state({heard: [{id: 'm_sit', text: 'Sit', batch: 'm_sit'}], lastReceipt: 'r_sit', links: [{receipt: 'r_sit', message: 'm_sit', ...(timed ? {timed: true} : {})}]});
+    const waited = await w.cli('wait', '2', 'r_sit');
+    assert.equal(waited.json.receipt.observed, 'seated', 'the wait saw the pose held');
+    assert.equal(w.read().links[0].held, timed ? undefined : true);
+    const a = await w.cli('ack', 'm_new', 'Got it.');
+    assert.deepEqual(a.json.stillOpen?.map(x => x.id), timed ? undefined : ['m_sit']);
+  }
 });

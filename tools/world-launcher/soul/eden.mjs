@@ -2870,7 +2870,7 @@ async function act(...argv) {
   // wait once the body holds the pose.
   // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
   // still going while a later step of it has ended (#1289)
-  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for }], d.receipt.id) });
+  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for, ...(body.params?.seconds !== undefined ? { timed: true } : {}) }], d.receipt.id) });
   if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
   if (out.held) heldLinks(out.receipt?.id);
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
@@ -2885,10 +2885,11 @@ export function keepLinks(links, open, max = 64) {
   return out;
 }
 
-/** #1314: an open-ended sit or lie this client saw held has done what it was asked, so its message has nothing running for it. */
+/** #1314: an open-ended sit or lie this client saw held has done what it was asked, so its message has nothing running for it.
+ *  One that asked for its own `seconds` is still running while it holds, as in the world (#1295). */
 function heldLinks(receipt) {
-  const links = load().links ?? [];
-  if (receipt && links.some((l) => l.receipt === receipt && !l.held)) save({ links: links.map((l) => (l.receipt === receipt ? { ...l, held: true } : l)) });
+  const links = load().links ?? [], mark = (l) => l.receipt === receipt && !l.held && !l.timed;
+  if (receipt && links.some(mark)) save({ links: links.map((l) => (mark(l) ? { ...l, held: true } : l)) });
 }
 /** A receipt that has ended guards nothing, so its links make room: the list must never lose one that may still be open. */
 function forgetLinks(receipt) {
@@ -3196,9 +3197,9 @@ async function ack(id, ...rest) {
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
-  const seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
-  if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id])) };
-  if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id])) };   // acked already: the first reply stands, so this text reached nothing
+  const before = load().heard, seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
+  if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id], { before, closed: true })) };
+  if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id], { before, closed: !!shut.already })) };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
   if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
   return { ...said, ...d, ...shut, ...(await stillOpen([id])) };
@@ -3212,7 +3213,7 @@ export function firstWords(text, max = 40) {
   const t = String(text ?? "").replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   const cut = t.slice(0, max - 1), space = cut.lastIndexOf(" ");
-  return (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "") + "…";
+  return (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.]+$/, "") + "…";
 }
 /** Pure: messages one answer handed over join the record as one batch; one already there keeps its place. */
 export function heardWith(record, messages, max = HEARD_MAX) {
@@ -3246,11 +3247,13 @@ export function orphanState({ message, receipts = [], plan = false, nextAct = fa
   }
   return "list";
 }
-/** `stillOpen` for an answer about the messages `now`: older recorded ones the world reads as open, with nothing running. */
-async function stillOpen(now) {
+/** `stillOpen` for an answer about the messages `now`: older recorded ones the world reads as open, with nothing running.
+ *  `before`: the record as it was before this command closed one of them (`closed`), which then leaves it. */
+async function stillOpen(now, { before, closed = false } = {}) {
   try {
-    const s = load(), record = heardWith(s.heard, now.map((id) => ({ id }))), ask = olderThan(record, now);
-    if (record.length !== (s.heard ?? []).length) save({ heard: record });
+    const s = load(), record = heardWith(before ?? s.heard, now.map((id) => ({ id }))), ask = olderThan(record, now);
+    const keep = closed ? record.filter((h) => !now.includes(h.id)) : record;
+    if (JSON.stringify(keep) !== JSON.stringify(s.heard ?? [])) save({ heard: keep });
     if (!ask.length) return {};
     const quick = { retry: false, timeoutMs: 5000 }, get = (path) => call(path, quick).catch(() => null);
     const nextAct = s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS ? s.lastAcked : null;
@@ -4150,6 +4153,7 @@ async function followFolder() {
 async function pending() {
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
+  heard(a.ownerMessages);
   return { ...a, ...briefNow() };
 }
 
