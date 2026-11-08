@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { foldAddressed, foldEvents, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
+import { REFLEX_EVERY_MS, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -864,7 +864,7 @@ test('#476 A1: speech said to the Soul ends a held wait within 2 s, the receipt 
   const r = await waiting, took = Date.now() - t0;
   assert.ok(took < 2000 + 300, `ended after ${took} ms: ${r.err}`);
   assert.deepEqual(r.json.addressed.map((a) => [a.from, a.text, a.untrusted]), [['Bo', 'Ada, can you hear me?', true]]);
-  assert.equal(w.acts, acts, 'A2: nothing acted again');
+  assert.equal(w.bodies.filter((b) => !String(b.capability).startsWith('face:')).length, acts, 'A2: nothing acted again (the reflex face is #1345\'s, an attention act)');
   const next = await w.cli('wait', '1');
   assert.equal(next.json.addressed, undefined, 'said once, heard once');
 });
@@ -960,4 +960,74 @@ test('#476: an ordinary wait still returns the world\'s answer through serve', a
   const r = await w.cli('wait', '1');
   assert.ok(r.json.events.some((e) => e.text === 'hello'), r.out);
   assert.equal(r.json.addressed, undefined);
+});
+
+// #1345 (2.24.4): the reflex face.
+const faces = (w) => w.bodies.filter((b) => String(b.capability).startsWith('face:'));
+
+test('#1345 pure: whom the reflex turns to, and when not', () => {
+  const env = { kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' } }, at = 1_000_000;
+  assert.deepEqual(reflexFor({}, env, { me: 's_ada', at }), { soulId: 's_bo', name: 'Bo' });
+  assert.equal(reflexFor({}, env, { me: 's_ada', at, off: true }).skip, 'off');
+  assert.equal(reflexFor({}, env, { me: 's_bo', at }).skip, 'not-a-soul', 'never its own speech');
+  assert.equal(reflexFor({}, { kind: 'speech.to-me', about: { name: 'a sign' } }, { me: 's_ada', at }).skip, 'not-a-soul');
+  assert.equal(reflexFor({}, { ...env, kind: 'speech.ambient' }, { me: 's_ada', at }).skip, 'not-a-soul');
+  const st = {};
+  assert.equal(noteAttention(st, 'look:s_cy', at), true); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 9_000 }).skip, 'own-attention');
+  assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 10_001 }).soulId, 's_bo', 'a look holds 10 s');
+  noteAttention(st, 'face:s_cy', at); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 29_000 }).skip, 'own-attention', 'a face holds 30 s');
+  assert.equal(noteAttention(st, 'walk:mill', at), false, 'a body act is not attention');
+  noteAttention(st, 'auto-face:off', at); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 }).skip, 'auto-face-off');
+  noteAttention(st, 'auto-face:on', at); assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 }).soulId, 's_bo');
+  st.reflexed = [{ soulId: 's_bo', t: at + 60_000 }];
+  assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 + REFLEX_EVERY_MS - 1 }).skip, 'recent');
+  assert.equal(reflexFor(st, env, { me: 's_ada', at: at + 60_000 + REFLEX_EVERY_MS }).soulId, 's_bo');
+});
+
+test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, through face:, and the agent still hears it', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  await until(() => w.streams > 0);
+  const acts = w.acts, t0 = Date.now();
+  w.say('Ada, over here!');
+  assert.ok(await until(() => faces(w).length === 1, 2000), 'one reflex');
+  assert.ok(Date.now() - t0 < 1000, `within the second (${Date.now() - t0} ms)`);
+  const f = faces(w)[0];
+  assert.deepEqual([f.capability, f.strict, typeof f.clientRef], ['face:s_bo', true, 'string']);
+  assert.equal(w.acts, acts + 1);
+  const p = await w.cli('pending');
+  assert.deepEqual(p.json.addressed.map((a) => a.text), ['Ada, over here!'], 'heard as before');
+  assert.deepEqual(p.json.faced.map(({ soulId, name, accepted }) => [soulId, name, accepted]), [['s_bo', 'Bo', true]]);
+  assert.equal((await w.cli('pending')).json.faced, undefined, 'said once');
+  w.say('Ada, again');
+  await sleep(600);
+  assert.equal(faces(w).length, 1, 'A3: once per speaker per 30 s');
+});
+
+test('#1345 A2/A3/A5: no reflex over the agent\'s own look, after auto-face:off, or with --no-reflex; a refused one is not retried', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  await until(() => w.streams > 0);
+  await w.cli('act', 'look:s_cy');
+  w.say('Ada?');
+  await sleep(600);
+  assert.equal(faces(w).length, 0, 'the agent\'s own look holds');
+  await w.cli('act', 'auto-face:off');
+  w.say('Ada, after the look?');
+  await sleep(600);
+  assert.equal(faces(w).length, 0, 'auto-face off');
+  const w2 = await world(t);
+  await w2.cli('serve', '--no-reflex');
+  await until(() => w2.streams > 0);
+  w2.say('Ada?');
+  await sleep(600);
+  assert.equal(faces(w2).length, 0, 'off for the folder');
+  await w2.cli('serve', '--reflex');
+  w2.refuse['face:s_bo'] = 'soul.not-in-sight';
+  w2.say('Ada, now?');
+  assert.ok(await until(() => faces(w2).length === 1, 2000), 'on again: one try');
+  await sleep(500);
+  assert.equal(faces(w2).length, 1, 'a refused reflex is never retried');
+  const p = await w2.cli('pending');
+  assert.deepEqual(p.json.faced.map(({ accepted, code }) => [accepted, code]), [[false, 'soul.not-in-sight']]);
 });

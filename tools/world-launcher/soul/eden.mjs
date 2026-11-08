@@ -3514,6 +3514,32 @@ export function foldAddressed(st, env, at = Date.now()) {
   return true;
 }
 const addressedView = ({ id, from, soulId, text, at }) => ({ id, from, soulId, text, at, untrusted: true });
+// #1345 (2.24.4): the reflex. Speech the world counts as said to this Soul turns it to the speaker at once, through the
+// offered `face:<soulId>` act, before any model call. The world stays the judge (strict: an id not offered is refused, and
+// nothing else is tried). Never over the agent's own look, turn or face while it holds (the world's LOOK_SECONDS and
+// FACE_SECONDS), never after auto-face:off, at most once per speaker per REFLEX_EVERY_MS, never for this Soul's own speech.
+// Off for the folder with `serve --no-reflex` (back on with `serve --reflex`).
+export const REFLEX_EVERY_MS = 30_000, REFLEX_KEEP = 8;
+const HOLDS = { look: 10_000, turn: 10_000, face: 30_000 };
+/** Pure: the Soul to turn to for one `speech.to-me` line, or null with why not. */
+export function reflexFor(st, env, { me, at = Date.now(), off = false } = {}) {
+  const who = env?.about?.soulId;
+  if (off) return { skip: "off" };
+  if (env?.kind !== "speech.to-me" || typeof who !== "string" || !who || who === me) return { skip: "not-a-soul" };
+  if ((st.reflexHold ?? 0) > at) return { skip: "own-attention" };
+  if (st.autoFaceOff) return { skip: "auto-face-off" };
+  if ((st.reflexed ?? []).some((x) => x.soulId === who && at - (x.t ?? 0) < REFLEX_EVERY_MS)) return { skip: "recent" };
+  return { soulId: who, name: env.about?.name ?? null };
+}
+/** Pure: what an act this folder sent says about the agent's own attention (a held look, turn or face; auto-face off/on). */
+export function noteAttention(st, capability, at = Date.now()) {
+  const c = String(capability ?? ""), verb = c.split(":")[0];
+  if (c === "auto-face:off") st.autoFaceOff = true;
+  else if (c === "auto-face:on") st.autoFaceOff = false;
+  else if (HOLDS[verb]) st.reflexHold = Math.max(st.reflexHold ?? 0, at + HOLDS[verb]);
+  else return false;
+  return true;
+}
 /** Pure: what a request should hear: anything nobody has heard yet, and anything that came while this request was held, so a
  *  wait and a listen held at the same moment both hear it. A peek looks and leaves it unheard. */
 export function takeAddressed(st, heldFromSeq, { peek = false } = {}) {
@@ -3571,6 +3597,7 @@ export function takePending(st) {
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
     events: shown,
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
+    ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
     ...(st.omitted ? { omitted: st.omitted } : {}),
     ...(st.gap ? { gap: true, gapNote: "The stream had a gap: read here again; some events were not seen." } : {}),
@@ -3760,6 +3787,22 @@ async function serveForeground() {
       tick();
     }
   }
+  // #1345: turn to whoever speaks to this Soul, at once, through the world's own offered act. Never awaited by the stream.
+  function reflex(env) {
+    const r = reflexFor(st, env, { me: s.soul, off: load().reflex === false });
+    if (!r.soulId) return;
+    const at = Date.now(), entry = { soulId: r.soulId, name: r.name, at: new Date(at).toISOString(), accepted: null, read: false, t: at };
+    st.reflexed = [...(st.reflexed ?? []).filter((x) => Date.now() - (x.t ?? 0) < REFLEX_EVERY_MS * 4), entry].slice(-REFLEX_KEEP);
+    const ref = randomUUID();
+    gated(() => worldOnce(`${world}/v1/edge/act`, { method: "POST", headers: { ...auth, "idempotency-key": ref }, timeoutMs: 15_000, body: { capability: `face:${r.soulId}`, clientRef: ref, strict: true } }))
+      .catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }))
+      .then((a) => {
+        entry.accepted = a.status === 200 && a.data?.accepted === true;
+        if (!entry.accepted) { entry.code = a.data?.code ?? codeOf(a.data) ?? `http-${a.status}`; log(`reflex: face ${r.soulId} not taken (${entry.code}); not retried`); }
+        else log(`reflex: faced ${r.name ?? r.soulId}`);
+        persist();
+      });
+  }
   // The world's own classified stream names what is said to this Soul, by its rule (speech.to-me); this client doesn't repeat that rule.
   async function addressedLoop() {
     let attempt = 0, code;
@@ -3787,7 +3830,7 @@ async function serveForeground() {
             if (f.id) st.addressedCursor = f.id;
             if (f.event !== "speech.to-me") continue;
             let env; try { env = JSON.parse(f.data); } catch { continue; }
-            if (foldAddressed(st, env)) woke = true;
+            if (foldAddressed(st, env)) { woke = true; reflex(env); }
           }
           if (woke) { persist(); wake(); }
         }
@@ -3816,6 +3859,7 @@ async function serveForeground() {
     const p = pathOf.split("?")[0], inboxWrite = /^\/v1\/edge\/inbox\/([^/]+)\/(ack|result)$/.exec(p);
     if (r.status >= 200 && r.status < 300) {
       if (r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); persist(); }
+      if (p === "/v1/edge/act" && r.data?.accepted === true && noteAttention(st, m.body?.capability ?? r.data.receipt?.capability)) persist();
       if (inboxWrite) {
         const x = st.messages.find((y) => y.id === decodeURIComponent(inboxWrite[1]));
         if (x) { x.acked = true; if (inboxWrite[2] === "result") x.closed = true; persist(); }
@@ -4046,7 +4090,9 @@ async function serve(...args) {
   if (args[0] === "--foreground") return serveForeground();
   if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, next: `${CLI} serve` };
   if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
-  if (args.length) throw new Error("usage: serve [--status|--stop]");
+  // the reflex setting stays with the folder; a serve already up reads it at the next speech
+  if (args[0] === "--no-reflex" || args[0] === "--reflex") { save({ reflex: args[0] === "--reflex" }); args = args.slice(1); }
+  if (args.length) throw new Error("usage: serve [--status|--stop|--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const running = await askServe({ op: "status" });
   if (running?.serving) return { ...running, alreadyServing: true };
@@ -4143,7 +4189,7 @@ do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   r
 owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
-resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
+resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
 ${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
