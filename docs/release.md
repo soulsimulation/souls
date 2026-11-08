@@ -168,11 +168,13 @@ but `compact-backup.sh` has its own hard-coded data path.
 
 Not done here: publishing new CDN assets first, the uncut live clip, the changelog PR, the tag and the GitHub Release.
 
-**Eyes' browser.** Nothing in the release installs Playwright's Chromium. Before shipping a release, run
-`node tools/world-launcher/deploy/eyes-browser.mjs --tree <the staged release> --browsers <the eyes PLAYWRIGHT_BROWSERS_PATH>`
-on the host as the worlds' user. It prints the revision Playwright expects and what Eyes would launch, and exits 1 when
-Eyes would have no browser. That matters most when the release bumps Playwright. Install a missing revision with the
-command it prints. Folding this into ship.sh's rehearse step is a follow-up to #1410 ([Eyes](architecture/souls.md#eyes)).
+**Eyes' browser.** `release.sh`'s stage gives Eyes the Chromium the release's Playwright expects (#1340). After the
+dependencies are installed, `ship/eyes-install.sh` reads the running keeper's `EDGE_EYES`, `PLAYWRIGHT_BROWSERS_PATH` and
+`EDGE_EYES_CHROME`, and only those. With Eyes on, it runs `eyes-browser.mjs --install` as the worlds' user. That installs
+exactly the expected revision when it is missing, with the release's own Playwright CLI and `PLAYWRIGHT_SKIP_BROWSER_GC=1`,
+so no installed revision is ever removed. It then checks that Eyes launches Playwright's own Chromium. A failed install
+or check stops the stage, so a release never goes live with Eyes unable to launch. The host must reach Playwright's
+download host; a release whose revision is already installed downloads nothing ([Eyes](architecture/souls.md#eyes)).
 
 Tests run the whole command against a fake host, with the remote block under an empty environment:
 `node --test tools/world-launcher/ship-root.test.mjs`.

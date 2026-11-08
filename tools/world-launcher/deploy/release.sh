@@ -126,6 +126,11 @@ ssh "$HOST" "set -e; $INSTALL; chown -R simworlds:simworlds $REL; touch $RELROOT
   sudo -u simworlds -H bash -c 'set -euo pipefail; cd $REL; COREPACK_ENABLE_DOWNLOAD_PROMPT=0 nice -n 10 corepack pnpm install --frozen-lockfile --filter @souls/server... > $RELROOT/$BUILD.deps.log 2>&1 && mkdir -p apps/web/node_modules/@souls && ln -sfn ../../../../packages/world-compiler apps/web/node_modules/@souls/world-compiler' || { tail -20 $RELROOT/$BUILD.deps.log; exit 1; }"
 # The server imports apps/web/src/humanoid/look.ts (shared look rules), which imports @souls/world-compiler; the server-only
 # install doesn't link web's workspace deps, so link that one package (2026-10-11: we-39cb14d848af worlds failed to boot).
+# #1340: Eyes' Chromium is the one this release's Playwright expects, installed now if the stage has Eyes on; a failed
+# install or check stops the stage before anything goes live (ship/eyes-install.sh; nothing is ever removed).
+if [ "$STAGE" != legacy ]; then
+  ssh "$HOST" "bash -s -- $REL $STAGE" < "$ROOT/tools/world-launcher/deploy/ship/eyes-install.sh" || { echo "Eyes' browser for $BUILD could not be installed or checked (above): refusing to stage"; exit 1; }
+fi
 
 if [ "$ACTIVATE" = 0 ]; then echo "uploaded $BUILD (not activated)"; exit 0; fi
 echo "== activate $STAGE -> $BUILD"
