@@ -50,8 +50,9 @@ or previous (right) Soul here; slower drags still orbit. The order is a ring mad
 then the others by the director's interest score, then by distance. A tap on the ground while following hands you the
 camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Broadcast a touch screen's chip reads
 "Now showing <name>" with a Follow button. Mouse clicks keep the card-and-button flow.
-The first touch of a page on a touch screen shows three glyphs (stick, drag, pinch; `touch/hints.tsx`) that fade on
-the first drag, a second finger or after 3 s. The device remembers it in `localStorage` (`sim.touch-hints`). `?shot`
+The first touch of a page on a touch screen shows three glyphs (stick, drag, pinch; `touch/hints.tsx`). They stay up for
+at least 4 s whatever the person does, then fade on the next drag, second finger or tap, or by themselves at 10 s (#1388).
+Once they have been up for 4 s, the device remembers them in `localStorage` (`sim.touch-hints`). `?shot`
 and automation (`navigator.webdriver`) never show it. `?hints=1` overrides `navigator.webdriver` only, for recording
 proof of the hint. Phones get the camera menu as a bottom sheet (Broadcast, Free, Follow for a selected Soul or Stop
 following, Camera controls, Fullscreen) clear of `env(safe-area-inset-*)`. A device with `navigator.vibrate` ticks for
