@@ -30,7 +30,7 @@ function faulted(base, control) {
     e.step = () => { const o = step(); if (control.throwEvery) throw new Error('fixture.engine-bug'); return o; };
     return e;
   };
-  return {...base, create: (w) => wrap(base.create(w)), restore: (s) => { if (control.restoreFails) throw new Error(REFUSED); return wrap(base.restore(s)); }};
+  return {...base, create: (w) => wrap(base.create(w)), restore: (s) => { if (control.restoreFails && !(control.restoreOk > 0 && control.restoreOk--)) throw new Error(REFUSED); return wrap(base.restore(s)); }};
 }
 async function world(t, {quarantine = true, path = ':memory:'} = {}) {
   const control = {at: -1, fault() {}}, factory = faulted(repair, control), f = fixture(path, factory, {durableClockV1: true}); f.brain.quiesce();
@@ -102,7 +102,9 @@ test('Q1 a refused rung 3 restore quarantines the one body: no halt, a contained
   assert.equal(read(w, Bo, far).phase, 'started', 'Bo was not stopped');
   assert.ok(w.comms.streams.read(Ada.soulId, 0).events.some((e) => e.kind === 'world.quarantined'), 'Ada hears it');
   assert.ok(!w.comms.streams.read(Bo.soulId, 0).events.some((e) => e.kind === 'world.quarantined' || e.kind === 'world.rewound'), 'Bo hears nothing');
-  w.control.fault = () => []; await w.tick(600);
+  w.control.fault = () => []; await w.tick(20); for (let i = 0; i < 8; i++) await setImmediate();
+  assert.ok((w.f.db.latestSnapshot(worldId)?.tick ?? -1) > ev[0].tick, 'a snapshot past the fault is taken at once, so a restart never boots from the baseline that would not restore');
+  await w.tick(580);
   assert.ok(h.engine.world.tick >= at + 590, `600 ticks on (${h.engine.world.tick - at})`); assert.ok(running(h));
   assert.equal(read(w, Bo, far).phase, 'completed', 'Bo arrives');
   const again = ok(await act(w, Ada, {capability: 'walk:yard'})), cy = ok(await act(w, Cy, {capability: 'walk:shed'})); await w.tick(500);
@@ -118,6 +120,17 @@ test('Q1 the same fault coming back on the head is quarantined again, never rewo
   const at2 = h.engine.world.tick + 3; w.control.every = (r) => (r.tick === at2 ? [{code: 'stair.unsupported', message: 'forced', subjects: [Ada.entityId]}] : []); await w.tick(8);   // the wrapper fires `fault` once per runtime
   assert.ok(running(h)); assert.equal(byRung(h).halt ?? 0, 0); assert.equal(byRung(h).rewind ?? 0, 0, JSON.stringify(h.glitches));
   assert.equal(rowsOf(w).filter((r) => r.evidence?.quarantine).length, 2, JSON.stringify(rowsOf(w).map((r) => [r.rung, r.rule, r.tick, r.evidence.quarantine, String(r.evidence.reason).slice(0, 80)]))); assert.notEqual(read(w, Bo, far).code, 'world.rewound');
+});
+
+test('Q1 rung 2 restores and replays part way, rung 3 is refused: the world goes on from the head it had, not a half-replayed one', async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, {path}), h = w.f.host, {Ada, Bo} = w.souls;
+  const walk = ok(await act(w, Ada, {capability: 'walk:shed'})), far = ok(await act(w, Bo, {capability: 'walk:yard'})); await w.tick(10);
+  const head = h.engine, prog = h.engine.programOf(Bo.entityId);
+  w.control.restoreOk = 2; await unrestorable(w, Ada);   // rung 2's two plans restore and fault again in their replays; rung 3's restores are refused
+  assert.equal(w.control.restoreOk, 0, 'rung 2 really restored twice'); assert.equal(h.engine, head, 'the head engine runs');
+  assert.ok(running(h)); assert.equal(byRung(h).halt ?? 0, 0); assert.equal(read(w, Ada, walk).code, 'world.quarantined');
+  assert.equal(h.engine.programOf(Bo.entityId), prog, "Bo's programme is the one he had"); w.control.fault = () => []; await w.tick(600);
+  assert.equal(read(w, Bo, far).phase, 'completed'); h.drainInputs(); h.saveSnapshot(true); bootsAgree(w, path);
 });
 
 test('Q1 a baseline that will not materialize is no halt either', async (t) => {
@@ -144,7 +157,8 @@ test('Q4 quarantine/1 is one logged rule, adopted once', async (t) => {
 test('Q5 a refused manual snapshot is named and contained: the caller hears pending, and the world ticks on', async (t) => {
   quiet(t); const w = await world(t), h = w.f.host, before = w.f.db.latestSnapshot(worldId)?.tick ?? -1;
   const mock = t.mock.method(h.engine, 'snapshot', () => { throw new SnapshotError('snapshot.unencodable', 'fixture: a function in the state'); });
-  const r = h.saveSnapshot(true); assert.equal(r.pending, true); mock.mock.restore();
+  const seq0 = h.seq, r = h.saveSnapshot(true); assert.equal(r.pending, true); mock.mock.restore();
+  assert.ok(w.f.db.events(worldId, seq0).some((e) => e.payload?.checkpoint === 'unsnappable-head'), 'the head is logged as not durable, as for a head that cannot snapshot');
   assert.ok(running(h)); assert.deepEqual(h.glitches.byRule['durability.snapshot-skipped'], {contained: 1});
   assert.equal(w.f.db.latestSnapshot(worldId)?.tick ?? -1, before, 'nothing written');
   const t0 = h.engine.world.tick; await w.tick(30); assert.equal(h.engine.world.tick, t0 + 30);
@@ -165,13 +179,15 @@ test('Q5 a refused repair snapshot leaves the repair standing and the world runn
 const CHAOS = {
   'a body put inside another': (h, s, o) => { const e = h.engine.world.entities, p = e[o.entityId].pose.p; e[s.entityId].pose.p = [p[0] + 0.1, p[1], p[2]]; },
   'a body with a non-finite pose': (h, s) => { const e = h.engine.world.entities[s.entityId]; e.pose.p = [NaN, e.pose.p[1], Infinity]; },
-  'a body on a floor that does not exist': (h, s) => { const e = h.engine.world.entities[s.entityId]; e.human.level = 7; e.pose.p = [e.pose.p[0], 21, e.pose.p[2]]; },
   'a body whose human state is gone': (h, s) => { delete h.engine.world.entities[s.entityId].human; },
+  'a body with no human state and no pose, and no whole pose on record': (h, s, o, w) => { const e = h.engine.world.entities[s.entityId]; delete e.human; delete e.pose; w.f.host.wholePoses.delete(s.entityId); },
+  'a body whose human state holds a number that is no number': (h, s) => { h.engine.world.entities[s.entityId].human.speed = NaN; },
   'an invariant that throws whenever it reads one body': (h, s, o, w) => { w.control.every = (r) => { if (r.world.entities[s.entityId]) throw new Error('fixture.invariant-bug on one body'); return []; }; },
 };
 for (const [name, corrupt] of Object.entries(CHAOS))
   test(`chaos: ${name} never stops the tick loop`, {timeout: 300000}, async (t) => {
     quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo, Cy} = w.souls;
+    const bystander = !/inside another|throws/.test(name), far = bystander ? ok(await act(w, Bo, {capability: 'walk:yard'})) : null;
     ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
     w.control.restoreFails = true; corrupt(h, Ada, Bo, w); forgetMotion(h.engine.rt);
     const t0 = h.engine.world.tick; await w.tick(20);
@@ -181,5 +197,7 @@ for (const [name, corrupt] of Object.entries(CHAOS))
     assert.equal(h.engine.world.tick, t0 + 600, `the clock moved every tick: ${report}`); assert.ok(running(h), report);
     assert.equal(byRung(h).halt ?? 0, 0, report);
     assert.notEqual(walk.accepted, false, report); await w.tick(400); assert.equal(read(w, Cy, walk).phase, 'completed', report);
+    if (far) { const r = read(w, Bo, far); assert.equal(r.phase, 'completed', `a bystander walking all along gets there: ${JSON.stringify(r).slice(0, 300)} ${report}`); }
+    if (bystander) { const e = h.engine.world.entities[Ada.entityId]; assert.ok(e.human && e.pose.p.every(Number.isFinite), 'the broken body is whole again'); assert.ok((h.glitches.byRule['entity.corrupt']?.contained ?? 0) <= 2, report); }
     if (process.env.CHAOS_REPORT) console.info(`[chaos] ${name}: ${JSON.stringify(h.glitches.byRule)}`);
   });

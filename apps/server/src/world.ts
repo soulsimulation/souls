@@ -79,6 +79,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
    *  `untilTick`. `contained` is what the fault named: the recipe says it, so a replay never has to find it again. */
   lastRung?: { contained?: {code:string;subjects:string[]}[]; relocated?: string[]; skipped?: number[] } };
 /** #1150: a minute of world time. A fault within it of a rung 3 doesn't rewind again. */
+/** #1369: how often a world under quarantine/1 looks for a broken body that nothing has faulted on yet (one second). */
+const BROKEN_SWEEP_TICKS = 20;
 const REWIND_COOLDOWN_TICKS = 1200;
 /** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
 const glitchy = (r: EngineRefusalV1) => r.rule !== STOP_GAVE_UP.code && r.rule !== FRAME_LET_GO.code;
@@ -593,7 +595,7 @@ export class WorldHost {
     this.observeIntentActions();
     this.afterPrograms(out.programs, false);
     if (out.refusals) this.noteRefusals(out.refusals);
-    if (this.quarantineRule) this.noteWholePoses();
+    if (this.quarantineRule) { this.noteWholePoses(); if (this.engine.world.tick % BROKEN_SWEEP_TICKS === 0) this.sweepBrokenBodies(); }
     if (this.repairRules && !this.clockAvailable) return;
     this.replayDebtMs += performance.now() - tStep;
     if(this.durableClockV1){
@@ -1562,7 +1564,6 @@ export class WorldHost {
   private get repairRules(): boolean { return this.engine.rulesVersion.includes('+souls-repair/'); }
   /** #1369: quarantine/1 is adopted (a logged runtime policy the host alone reads). */
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
-  /** The bodies a fault names that are in the world, sorted. */
   /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
    *  rule names it, but it can make every step or the state hash throw). */
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
@@ -1572,7 +1573,23 @@ export class WorldHost {
   }
   /** #1369: each Soul's body's last whole pose (finite numbers), so a body whose pose breaks is held where it last stood. */
   private wholePoses = new Map<string, RecoveryPose>();
-  private noteWholePoses() { for (const [id, pose] of this.soulPoses()) if (pose.p.every(Number.isFinite) && Number.isFinite(pose.yaw) && Number.isFinite(pose.level)) this.wholePoses.set(id, pose); }
+  private noteWholePoses() {
+    const ents = this.engine.world.entities as Record<string, {pose?: {p?: number[]; yaw?: number}; human?: {level?: number}}>, ok = (n: unknown) => typeof n === 'number' && Number.isFinite(n);
+    for (const id of this.mindByEntity.keys()) { const e = ents[id], p = e?.pose?.p; if (e?.human && p?.length === 3 && p.every(ok) && ok(e.pose!.yaw ?? 0) && ok(e.human.level ?? 0)) this.wholePoses.set(id, {p: [p[0], p[1], p[2]], yaw: e.pose!.yaw ?? 0, level: e.human.level ?? 0}); }
+    if (this.wholePoses.size > this.mindByEntity.size) for (const id of this.wholePoses.keys()) if (!this.mindByEntity.has(id)) this.wholePoses.delete(id);
+  }
+  /** #1369: a body can break with nothing faulting (a pose gone: no rule reads it, but whoever reads it next throws). Once a
+   *  second, under quarantine/1, the world looks, and holds what it finds as a fault would. */
+  private sweepBrokenBodies() {
+    let corrupt: string[] = [];
+    try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch { return; }
+    if (corrupt.length && !this.heldRecently(corrupt)) this.quarantine(new Error(`entity.corrupt: ${corrupt.join(', ')}`), undefined, false);
+  }
+  /** When each broken body was last held: one that breaks again within a cooldown (a bug that breaks it every tick) is not held
+   *  again, and takes the in-place rung's once-per-cooldown report instead of a row a tick. */
+  private heldAt = new Map<string, number>();
+  private heldRecently(bodies: string[]) { const now = this.engine.world.tick; return bodies.length > 0 && bodies.every(id => now - (this.heldAt.get(id) ?? -Infinity) < REWIND_COOLDOWN_TICKS); }
+  /** The bodies a fault names that are in the world, sorted. */
   private namedBodies(error: unknown): string[] { const ents = this.engine.world.entities as Record<string, unknown>; return [...new Set(faultKeys(error).flatMap(k => k.subjects))].filter(id => id !== '*' && ents[id]).sort(); }
   /** #1369: everything a restore replaces, by reference, so a ladder whose restores all failed goes on from the head it had and
    *  never from a half-replayed one. The head's own objects are untouched by a restore: it builds new ones. */
@@ -1685,18 +1702,24 @@ export class WorldHost {
    *  no body takes the in-place rung. Only the write can fail, and that is the one halt left. */
   private quarantine(error: unknown, restoreFailure?: unknown, tell = true): void {
     const tick = this.engine.world.tick, keys = faultKeys(error), {bodies, corrupt} = this.quarantineTargets(error);
-    if (!bodies.length) return this.containInPlace(error);
+    if (restoreFailure !== undefined) this.snapshotSoon ??= 'the recovery baseline would not restore';   // a restart must not boot from it
+    if (!bodies.length || this.heldRecently(corrupt)) return this.containInPlace(error, true);
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
     const {stopped, deadlines} = this.engine.stopBodiesV1!(bodies, QUARANTINED), souls = bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
     // a broken body is held where it last stood whole; the log carries that pose, so a replay holds it in the same place
-    const held = corrupt.map(id => { const pose = this.wholePoses.get(id); return pose ? {id, pose: {p: [...pose.p] as [number, number, number], yaw: pose.yaw, level: pose.level}} : {id}; });
-    for (const h of held) try { this.engine.holdBodyV1!(h.id, h.pose); } catch (failure) { console.error('[world] a broken body could not be held:', String(failure).slice(0, 200)); }
+    // (with no whole pose on record the engine picks a free spot by the arrival); what it did is logged, so a replay does the same
+    const held = corrupt.flatMap(id => {
+      const w = this.wholePoses.get(id), pose = w ? {p: [...w.p] as [number, number, number], yaw: w.yaw, level: w.level} : undefined;
+      try { const at = this.engine.holdBodyV1!(id, pose); return at ? [{id, pose: at, ...(w ? {} : {fallback: 'arrival'})}] : []; }
+      catch (failure) { console.error('[world] a broken body could not be held:', String(failure).slice(0, 200)); return []; }
+    });
     const q = {...this.engine.containV1!(keys), bodies, souls, ...(held.length ? {held} : {}), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:quarantine', payload: {quarantineV1: q}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held: held.map(h => h.id)} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    for (const id of corrupt) this.heldAt.set(id, tick);   // held or not, a body is tried once per cooldown
+    this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
@@ -1718,8 +1741,8 @@ export class WorldHost {
    *  The event carries both, so a replay makes the same stops and the same list and reads nothing. Anything the step faulted on
    *  is off the list, so a named fault always gets here, even while steps are failing, and the list's cap per rule bounds those
    *  rows. Each stop row answers a decision that started what it stopped. A fault that only repeats is written once per cooldown. */
-  private containInPlace(error: unknown): void {
-    if (this.quarantineRule) { const t = this.quarantineTargets(error); if (t.corrupt.length || (!this.stepFailing && t.bodies.length)) return this.quarantine(error); }   // #1369: only what the fault named stops
+  private containInPlace(error: unknown, noQuarantine = false): void {
+    if (this.quarantineRule && !noQuarantine) { const t = this.quarantineTargets(error); if ((t.corrupt.length || (!this.stepFailing && t.bodies.length)) && !this.heldRecently(t.corrupt)) return this.quarantine(error); }   // #1369: only what the fault named stops
     const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
@@ -2218,7 +2241,8 @@ export class WorldHost {
     catch(error){
       if(!this.quarantineRule||!this.quarantineTargets(error).corrupt.length)throw error;
       this.quarantine(error,undefined,false);
-      return this.engine.stateHash();
+      try{return this.engine.stateHash();}
+      catch(again){throw Object.assign(new Error(`engine.unhashable: ${String(again).slice(0,300)}`,{cause:again}),{unhashable:true});}   // named for what it is: no write failed
     }
   }
   private persistClockFrontier():void {
@@ -2231,7 +2255,7 @@ export class WorldHost {
       this.clockFrontiers.write(frontier);
     }catch(error){
       this.clockFailure=error;this.paused=true;this.stop();
-      this.recordGlitch('halt',error,{rule:'durability.clock-frontier'});
+      this.recordGlitch('halt',error,{rule:(error as {unhashable?:boolean})?.unhashable?'engine.unhashable':'durability.clock-frontier'});
       for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{/* The durable fault remains the cause. */}
       throw error;
     }

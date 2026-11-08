@@ -28,6 +28,6 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string }): Promise<void> {
   await opts.after?.catch(() => undefined);
   if (opts.edge) await enableEdgeRuntimeRules(host, opts.worldKey).catch((e) => console.error('[world] an edge runtime rule could not be adopted:', String(e).slice(0, 300)));
-  await host.enableBodyStepGuardV1('world');
+  await host.enableBodyStepGuardV1('world').catch((e) => console.error('[world] body-step-guard/1 could not be adopted:', String(e).slice(0, 300)));
   await host.enableQuarantineV1('world');
 }
