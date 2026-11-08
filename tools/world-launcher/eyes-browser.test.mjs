@@ -28,7 +28,7 @@ const exe = p.join(process.env.PLAYWRIGHT_BROWSERS_PATH, 'chromium-1248/chrome-l
 
 test('without --install a missing revision is reported, exit 1, and nothing is installed', () => {
   const s = setup(), r = s.run();
-  assert.equal(r.code, 1, r.out); assert.equal(r.json.revision, '1248'); assert.match(r.json.problem, /Playwright expects chromium-1248/);
+  assert.equal(r.code, 1, r.out); assert.equal(r.json.revision, '1248'); assert.match(r.json.problem, /^no-browser: expected chromium-1248$/); assert.match(r.json.log, /install it: PLAYWRIGHT_BROWSERS_PATH=/);
   assert.equal(s.calls(), '');
 });
 
@@ -48,5 +48,11 @@ test('a failed install never stops a release: exit 0, a WARN eyes: degraded line
   const r = s.run('--install');
   assert.equal(r.code, 0, r.out);
   assert.match(r.json.degraded, /installing chromium-1248 did not give Playwright its own Chromium .*failed .*exit 1/); assert.equal(r.json.problem, undefined); assert.equal(r.json.path, null);
-  assert.match(r.out, /^WARN eyes: degraded \([^()\n]+\)$/m, 'one line ship.sh can carry into ship-result.json');
+  assert.match(r.out, /^WARN eyes: degraded \([^()\n/]+\)$/m, 'one path-free line ship.sh can carry into ship-result.json');
+});
+
+test('--warn checks only: a missing browser is WARN eyes: degraded and exit 0, and nothing is installed', () => {
+  const s = setup(), r = s.run('--warn');
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /^WARN eyes: degraded \(no-browser: expected chromium-1248\)$/m);
+  assert.equal(s.calls(), '');
 });

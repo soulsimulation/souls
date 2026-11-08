@@ -64,8 +64,8 @@ class NoBrowser extends Error {}
 async function launch() {
   if (!pick) {
     pick = process.env.EDGE_EYES_HEADLESS_SHELL === '1' && !process.env.EDGE_EYES_CHROME ? {path: null, note: 'headless shell'} : eyesExecutable((() => {try {return chromium.executablePath();} catch {return null;}})());
+    log('chromium:', pick.log ?? pick.note);   // paths only in the worker's own log, never in the public status
     if (pick.problem) throw new NoBrowser(pick.problem);
-    log('chromium:', pick.note);
   }
   for (const mode of order) {
     try {
@@ -138,4 +138,10 @@ setInterval(async () => {
   catch (e) {log(e.message); fail('page not answering');}
 }, 60_000).unref();
 // the reason is delivered before the exit, so the server shows it rather than its own placeholder
-start().catch(e => {log('eyes worker failed to start:', e.message); send({t: 'status', ready: false, renderer, detail: e.message}, () => void shutdown(e instanceof NoBrowser ? EYES_EXIT_NO_BROWSER : 1));});
+// a launch error can name paths, so only the NoBrowser reason (path-free) or a fixed text reaches the public status
+start().catch(e => {
+  log('eyes worker failed to start:', e.message);
+  const code = e instanceof NoBrowser ? EYES_EXIT_NO_BROWSER : 1, detail = e instanceof NoBrowser ? e.message : /^no headless browser with WebGL/.test(e.message) ? e.message : 'the eyes worker could not start (see the world log)';
+  setTimeout(() => void shutdown(code), 2000);   // if the parent never acknowledges the message
+  send({t: 'status', ready: false, renderer, detail}, () => void shutdown(code));
+});

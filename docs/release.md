@@ -175,7 +175,10 @@ exactly the expected revision when it is missing, with the release's own Playwri
 so no installed revision is ever removed. It then checks that Eyes launches Playwright's own Chromium. A failed install
 or check never stops a release: a network hiccup must not hold back the rest of it. It prints
 `WARN eyes: degraded (<reason>)`, which ship.sh records as `eyes` in `ship-result.json` and in its closing summary. The
-Eyes worker then retries every 30 minutes on its own. A release whose revision is already installed downloads nothing
+Eyes worker then retries every 30 minutes on its own. Under `SIM_RELEASE_NO_INSTALL=1` (a `ship.sh --no-switch` dry
+run) the step only checks and reports what a real ship would install; it writes nothing to the live browsers folder.
+The public `/v1/edge/view/status` carries only a short code and reason (`no-browser: expected chromium-1248`); paths
+and the install command go to the world log. A release whose revision is already installed downloads nothing
 ([Eyes](architecture/souls.md#eyes)).
 
 Tests run the whole command against a fake host, with the remote block under an empty environment:

@@ -29,20 +29,23 @@ export const EYES_EXIT_NO_BROWSER = 3;
  *  bumps Playwright keeps Eyes working until the new revision is installed. Never downloads. No usable browser gives
  *  `problem`, with the one install command. */
 export function eyesExecutable(expected, env = process.env, {exists = existsSync, list = (d) => readdirSync(d)} = {}) {
-  if (env.EDGE_EYES_CHROME) return exists(env.EDGE_EYES_CHROME) ? {path: env.EDGE_EYES_CHROME, source: 'EDGE_EYES_CHROME', note: `EDGE_EYES_CHROME ${env.EDGE_EYES_CHROME}`} : {path: null, problem: `EDGE_EYES_CHROME ${env.EDGE_EYES_CHROME} does not exist`};
-  if (!expected) return {path: null, problem: 'Playwright names no Chromium executable'};
-  if (exists(expected)) return {path: null, source: 'playwright', note: `Playwright's ${expected}`};
+  // `note`/`problem` are public (/v1/edge/view/status, a Soul's EyesUnavailable): revisions and setting names only, never
+  // a path. `log` carries the paths and the install command, for the worker's stderr and the operator's check tool.
+  if (env.EDGE_EYES_CHROME) return exists(env.EDGE_EYES_CHROME) ? {path: env.EDGE_EYES_CHROME, source: 'EDGE_EYES_CHROME', note: 'an explicit Chromium', log: `EDGE_EYES_CHROME ${env.EDGE_EYES_CHROME}`}
+    : {path: null, problem: 'no-browser: the explicit Chromium does not exist', log: `EDGE_EYES_CHROME ${env.EDGE_EYES_CHROME} does not exist`};
+  if (!expected) return {path: null, problem: 'no-browser: Playwright names no Chromium', log: 'Playwright names no Chromium executable'};
+  if (exists(expected)) return {path: null, source: 'playwright', note: "Playwright's own Chromium", log: `Playwright's ${expected}`};
   const m = /^(.*)[\\/]chromium-(\d+)([\\/].*)$/.exec(expected);
-  const install = (dir) => `install it: PLAYWRIGHT_BROWSERS_PATH=${dir} pnpm --filter mars-campus-viewer exec playwright install chromium (in the release, as the worlds' user)`;
-  if (!m) return {path: null, problem: `Playwright's Chromium is missing at ${expected}`};
+  if (!m) return {path: null, problem: 'no-browser: Playwright\'s Chromium is missing', log: `Playwright's Chromium is missing at ${expected}`};
   const [, dir, rev, rest] = m;
+  const install = `install it: PLAYWRIGHT_BROWSERS_PATH=${dir} pnpm --filter mars-campus-viewer exec playwright install chromium (in the release, as the worlds' user)`;
   let names = []; try {names = list(dir);} catch {/* no browsers folder */}
   const revs = names.map((n) => /^chromium-(\d+)$/.exec(n)?.[1]).filter((r) => r && r !== rev).map(Number).sort((a, b) => b - a);
   for (const r of revs) for (const sub of [rest, rest.replace('chrome-linux64', 'chrome-linux'), rest.replace(/chrome-linux(?!64)/, 'chrome-linux64')]) {
     const p = `${dir}/chromium-${r}${sub}`;
-    if (exists(p)) return {path: p, source: 'fallback', note: `Playwright expects chromium-${rev}, which is not installed; using the installed chromium-${r} (${install(dir)})`};
+    if (exists(p)) return {path: p, source: 'fallback', note: `fallback: expected chromium-${rev}, using chromium-${r}`, log: `Playwright expects ${expected}, which is not installed; using ${p} (${install})`};
   }
-  return {path: null, problem: `no Chromium for Eyes: Playwright expects chromium-${rev} at ${expected}; ${install(dir)}`};
+  return {path: null, problem: `no-browser: expected chromium-${rev}`, log: `no Chromium for Eyes: Playwright expects chromium-${rev} at ${expected}; ${install}`};
 }
 // Chrome (full, channel 'chromium') starts chrome_crashpad_handler, which needs a writable XDG config dir; under the
 // world unit's ProtectHome=true $HOME is unreadable, so the handler exits ("--database is required") and the browser closes

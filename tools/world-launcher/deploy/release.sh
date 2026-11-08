@@ -129,7 +129,9 @@ ssh "$HOST" "set -e; $INSTALL; chown -R simworlds:simworlds $REL; touch $RELROOT
 # #1340: Eyes' Chromium is the one this release's Playwright expects, installed now if the stage has Eyes on. Never fatal:
 # a failure prints `WARN eyes: degraded (...)`, which ship.sh records (ship/eyes-install.sh; nothing is ever removed).
 if [ "$STAGE" != legacy ]; then
-  ssh "$HOST" "bash -s -- $REL $STAGE" < "$ROOT/tools/world-launcher/deploy/ship/eyes-install.sh" || echo "WARN eyes: degraded (the browser step could not run on the host)"
+  # SIM_RELEASE_NO_INSTALL=1 (ship.sh --no-switch, #1410): check only; nothing is installed into the live browsers folder
+  EYES_MODE=install; [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || EYES_MODE=check
+  ssh "$HOST" "bash -s -- $REL $STAGE $EYES_MODE" < "$ROOT/tools/world-launcher/deploy/ship/eyes-install.sh" || echo "WARN eyes: degraded (the browser step could not run on the host)"
 fi
 
 if [ "$ACTIVATE" = 0 ]; then echo "uploaded $BUILD (not activated)"; exit 0; fi

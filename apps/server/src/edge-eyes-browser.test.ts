@@ -54,20 +54,22 @@ const B = '/srv/eyes/ms-playwright', WANT = `${B}/chromium-1248/chrome-linux64/c
 const io = (files: string[]) => ({exists: (p: string) => files.includes(p), list: (d: string) => {if (d !== B) throw new Error('ENOENT'); return [...new Set(files.filter(f => f.startsWith(B + '/')).map(f => f.slice(B.length + 1).split('/')[0]))];}});
 
 test('#1340 Eyes launches Playwright\'s own Chromium when it is installed, an explicit one when set', () => {
-  assert.deepEqual(eyesExecutable(WANT, {}, io([WANT])), {path: null, source: 'playwright', note: `Playwright's ${WANT}`});
+  assert.deepEqual(eyesExecutable(WANT, {}, io([WANT])), {path: null, source: 'playwright', note: "Playwright's own Chromium", log: `Playwright's ${WANT}`});
   const own = eyesExecutable(WANT, {EDGE_EYES_CHROME: '/opt/chrome/chrome'}, io([WANT, '/opt/chrome/chrome']));
-  assert.equal(own.path, '/opt/chrome/chrome'); assert.equal(own.source, 'EDGE_EYES_CHROME');
-  assert.match(eyesExecutable(WANT, {EDGE_EYES_CHROME: '/nope'}, io([WANT])).problem!, /EDGE_EYES_CHROME \/nope does not exist/);
+  assert.equal(own.path, '/opt/chrome/chrome'); assert.equal(own.source, 'EDGE_EYES_CHROME'); assert.equal(own.note, 'an explicit Chromium');
+  assert.match(eyesExecutable(WANT, {EDGE_EYES_CHROME: '/nope'}, io([WANT])).problem!, /^no-browser: the explicit Chromium does not exist$/);
+  assert.match(eyesExecutable(WANT, {EDGE_EYES_CHROME: '/nope'}, io([WANT])).log, /EDGE_EYES_CHROME \/nope does not exist/);
 });
 
 test('#1340 when the release expects a revision that is not installed, Eyes uses the newest installed one, and says so', () => {
   const r = eyesExecutable(WANT, {}, io([`${B}/chromium-1187/chrome-linux/chrome`, `${B}/chromium-1194/chrome-linux64/chrome`, `${B}/chromium_headless_shell-1194/x`, `${B}/ffmpeg-1011/ffmpeg`]));
   assert.equal(r.path, `${B}/chromium-1194/chrome-linux64/chrome`); assert.equal(r.source, 'fallback');
-  assert.match(r.note!, /expects chromium-1248, which is not installed; using the installed chromium-1194/);
+  assert.match(r.note!, /^fallback: expected chromium-1248, using chromium-1194$/);
   assert.equal(eyesExecutable(WANT, {}, io([`${B}/chromium-1187/chrome-linux/chrome`])).path, `${B}/chromium-1187/chrome-linux/chrome`, 'older layout');
   const none = eyesExecutable(WANT, {}, io([`${B}/ffmpeg-1011/ffmpeg`]));
-  assert.equal(none.path, null); assert.match(none.problem!, /Playwright expects chromium-1248 at .*; install it: PLAYWRIGHT_BROWSERS_PATH=\/srv\/eyes\/ms-playwright pnpm --filter mars-campus-viewer exec playwright install chromium/);
-  assert.match(eyesExecutable(WANT, {}, {exists: () => false, list: () => {throw new Error('ENOENT');}}).problem!, /no Chromium for Eyes/);
+  assert.equal(none.path, null); assert.match(none.log, /Playwright expects chromium-1248 at .*; install it: PLAYWRIGHT_BROWSERS_PATH=\/srv\/eyes\/ms-playwright pnpm --filter mars-campus-viewer exec playwright install chromium/);
+  assert.match(none.problem!, /^no-browser: expected chromium-1248$/);
+  assert.match(eyesExecutable(WANT, {}, {exists: () => false, list: () => {throw new Error('ENOENT');}}).problem!, /^no-browser: expected chromium-1248$/);
   // an explicit executable replaces Playwright's channel
   const launch = eyesBrowserLaunch('swiftshader', {}, 'linux', null, r.path);
   assert.equal(launch.executablePath, r.path); assert.equal(launch.channel, undefined);
@@ -75,14 +77,20 @@ test('#1340 when the release expects a revision that is not installed, Eyes uses
 
 test('#1340 a worker with no browser keeps its reason and is retried after the long backoff, not every 2 minutes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'eyes-nobrowser-')), script = join(dir, 'w.mjs'), starts = join(dir, 'starts');
-  writeFileSync(script, `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(starts)}, 'x'); process.send({t: 'status', ready: false, renderer: null, detail: 'no Chromium for Eyes: Playwright expects chromium-1248'}); setTimeout(() => process.exit(${EYES_EXIT_NO_BROWSER}), 50);`);
+  writeFileSync(script, `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(starts)}, 'x'); process.send({t: 'status', ready: false, renderer: null, detail: 'no-browser: expected chromium-1248'}); setTimeout(() => process.exit(${EYES_EXIT_NO_BROWSER}), 50);`);
   const w = new EyesWorker({viewerUrl: 'http://127.0.0.1:9/w/eden/', script, noBrowserBackoffMs: 60_000});
   try {
     await new Promise(r => setTimeout(r, 6500));
     const st = w.status();
     assert.equal(st.state, 'down');
-    assert.match(st.detail!, /^no browser \(retry in 1 min\): no Chromium for Eyes: Playwright expects chromium-1248/);
+    assert.match(st.detail!, /^no browser \(retry in 1 min\): no-browser: expected chromium-1248/);
     const {readFileSync} = await import('node:fs');
     assert.equal(readFileSync(starts, 'utf8').length, 1, 'one start, then the long wait (the ordinary backoff would retry after 5 s)');
   } finally {w.close();}
+});
+
+test('#1340 what reaches the public status (note, problem) never names a path or the install command', () => {
+  const cases = [eyesExecutable(WANT, {}, io([WANT])), eyesExecutable(WANT, {}, io([`${B}/chromium-1194/chrome-linux64/chrome`])), eyesExecutable(WANT, {}, io([])),
+    eyesExecutable(WANT, {EDGE_EYES_CHROME: '/opt/c/chrome'}, io(['/opt/c/chrome'])), eyesExecutable(WANT, {EDGE_EYES_CHROME: '/opt/c/chrome'}, io([])), eyesExecutable('/no-rev/chrome', {}, io([])), eyesExecutable(null, {}, io([]))];
+  for (const c of cases) for (const k of ['note', 'problem'] as const) if (c[k]) { assert.doesNotMatch(c[k]!, /\//, `${k}: ${c[k]}`); assert.doesNotMatch(c[k]!, /PLAYWRIGHT_BROWSERS_PATH|install it/, `${k}: ${c[k]}`); }
 });
