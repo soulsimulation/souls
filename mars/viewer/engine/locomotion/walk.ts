@@ -463,10 +463,18 @@ function segAt(segs: Seg[], s: number, tol: number): number {
   }
   return lo;
 }
-function pointAt(ex: Exec, s: number): Vec2 {
+/** #1428: where the way is at arc length `s` of the current leg. A leg with no smoothed segments is a link (a stair, a ladder,
+ *  a ramp: its way ends at the link's exit) or a walk leg not yet entered (its last point). It used to read a link leg as a
+ *  walk leg, so another walker's clear-of test (`way`, a make-way detour) threw `reading 'length'` while this one climbed. */
+export function pointAt(ex: Pick<Exec, 'segs' | 'route' | 'leg'>, s: number): Vec2 {
   if (!ex.segs.length) {
-    const leg = ex.route.legs[ex.leg] as WalkLeg;
-    return leg.points[leg.points.length - 1];
+    const legs = ex.route.legs as Leg[];
+    for (let i = Math.min(ex.leg, legs.length - 1); i >= 0; i--) {   // the current leg, else the last one before it with a place
+      const leg = legs[i];
+      if (leg?.kind === 'link') { const l = leg as LinkLeg; return l.ascending ? l.link.to.p : l.link.from.p; }
+      const pts = (leg as WalkLeg | undefined)?.points; if (pts?.length) return pts[pts.length - 1];
+    }
+    throw new Error(`walk.no-way: ${legs.length} legs, none with a place`);   // a route always has one (findRoute)
   }
   const i = segAt(ex.segs, s, 0);
   if (i >= ex.segs.length) return ex.segs[ex.segs.length - 1].b;
