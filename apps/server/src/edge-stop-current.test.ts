@@ -36,6 +36,7 @@ test('#1381 S1 S6: a walk under way stops where it is; the walk ends act.stopped
   const here = async () => ((await req('/v1/edge/here?include=doHere', token)).data.here?.doHere ?? []) as {id: string}[];
   assert.ok((await here()).some(c => c.id === 'stop:current'), 'here offers it while the walk runs');
   // resolve: the words mean it while it runs
+  assert.notEqual((await req('/v1/edge/resolve', token, {capability: 'wait'})).data.resolve.would?.capability, 'stop:current', 'bare "wait" is not a stop');
   for (const words of ['stop', 'pause', 'stop what you are doing', 'cancel', 'wait, pause']) {
     const r = (await req('/v1/edge/resolve', token, {capability: words})).data.resolve;
     assert.equal(r.would?.capability, 'stop:current', `${words}: ${JSON.stringify(r).slice(0, 300)}`);
@@ -103,4 +104,17 @@ test('#1381 S5: an owner message linked to the stopped act closes as stopped at 
   for (let i = 0; i < 100 && !row().result; i++) {await w.settle(10); await new Promise(r => setTimeout(r, 30));}
   assert.equal(row().outcome, 'failed'); assert.equal(row().result_by, 'server');
   assert.equal(row().result, `Stopped at your request before it finished: ${FAR}.`);
+});
+
+test('#1381 review: a stop that cannot be recorded is refused and stops nothing; the act runs on', {timeout: 300000}, async t => {
+  const {w, act, req, token, rec, until, receipts} = await world(t);
+  const walk = await act(FAR); assert.equal(walk.accepted, true, JSON.stringify(walk));
+  await until(() => rec(walk.receipt.id).phase === 'started' && w.host.engine.programOf(w.soul.entityId) !== null);
+  // the sequencer refuses the stop's event (as a clock that fails at the drain does): the event and its receipts are one acceptance
+  const n = receipts(), host = w.host as unknown as {enqueueChecked: (...a: unknown[]) => Promise<unknown>}, real = host.enqueueChecked;
+  host.enqueueChecked = function (kind: unknown, ...rest: unknown[]) { return kind === 'edge-stop' ? Promise.reject(new Error('engine.halted: test')) : real.call(this, kind, ...rest); };
+  let stop: any; try { stop = (await req('/v1/edge/act', token, {capability: 'stop:current'})).data; } finally { host.enqueueChecked = real; }
+  assert.equal(stop.accepted, false, JSON.stringify(stop)); assert.equal(stop.code, 'state.changed'); assert.match(stop.reason, /nothing was stopped/);
+  assert.equal(rec(walk.receipt.id).phase, 'started', 'the walk is not reported stopped'); assert.equal(receipts(), n, 'nothing written');
+  assert.ok(w.host.engine.programOf(w.soul.entityId) !== null, 'and it still runs');
 });

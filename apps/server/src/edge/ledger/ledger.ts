@@ -117,7 +117,7 @@ function countFocusMiss(mine: Map<string, unknown> | undefined, kept: {tick: num
 }
 const OPEN: EdgeReceipt['phase'][] = ['waiting', 'started'];
 /** #1381: the explicit stop of the act under way, and the words that mean it while an act is open. */
-const STOP_CURRENT = 'stop:current', STOP_WORDS = /^(?:please\s+)?(?:stop|pause|halt|cancel|wait)(?:,?\s+(?:stop|pause|it|that|now|please|what\s+(?:i'?m|you'?re|i\s+am|you\s+are)\s+doing|the\s+(?:act|action)))*[.!]*$/i;
+const STOP_CURRENT = 'stop:current', STOP_WORDS = /^(?:please\s+)?(?:stop|pause|halt|cancel|wait,?\s+(?:stop|pause))(?:,?\s+(?:stop|pause|it|that|now|please|what\s+(?:i'?m|you'?re|i\s+am|you\s+are)\s+doing|the\s+(?:act|action)))*[.!]*$/i;
 /** #1272: acts that go on over time and do nothing new when asked again. Answers, stands and hand acts do something each time. */
 const REPEATABLE = new Set(['walk', 'jog', 'run', 'stroll', 'go-near', 'hang-out', 'wander', 'swim', 'sit', 'sit-ground', 'lie', 'nap', 'rest', 'read']);
 /** An object whose place is not known: ranked after everything placed (listed only at green, if the page has room). */
@@ -2342,15 +2342,31 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // aboard a ride: the ride owns the body until it is back on the ground (as stand:here: never dropped mid-air)
     if (this.aboard(soul.entityId)) {const no = this.stepOutRefusal(soul.entityId) ?? this.rideStandRefusal(soul.entityId, this.binds(soul).caps); if (no) return stopRefuse(no.code, no.reason);}
     const row = this.rows('receipt_id=?', target.id)[0]!, programId = row.program_id, newest = open.at(-1)?.id === target.id;
-    const stop = tx(this.db.db, () => {
-      this.update(target!.id, {phase: 'failed', code: 'act.stopped', reason: 'Stopped at your request'});
-      return this.insert(soul, STOP_CURRENT, 'completed', clientRef, true, {stopped: target!.id});
-    });
+    // never an untargeted stop: an act whose decision has not started a programme yet has nothing of its own to stop
+    if (!programId && target.phase === 'waiting') return stopRefuse('act.not-started', `${target.capability} has not started yet, so there is nothing of its own to stop; ask to stop again in a moment, or act something else to replace it.`);
+    const id = 'r_' + randomUUID(), stopped = target.id;
+    const commit = () => {
+      this.update(stopped, {phase: 'failed', code: 'act.stopped', reason: 'Stopped at your request'});
+      this.insert(soul, STOP_CURRENT, 'completed', clientRef, true, {stopped}, {}, id);
+      return true as const;
+    };
+    if (!programId) tx(this.db.db, commit);   // a held act with no programme (a seat kept): its receipt ends; the body is as it is
+    else {
+      // the stop event and its receipts are one acceptance at the sequencer (as stop-carry's): both or neither. The guard
+      // re-reads the act under the write lock: one that ended or moved to another programme meanwhile is not stopped.
+      const guard = (): true => {const cur = this.rows('receipt_id=?', stopped)[0]; if (!cur || !OPEN.includes(cur.phase) || cur.program_id !== programId) throw new EdgeError(409, 'act.already-ended', 'Already ended.'); return true;};
+      try {await this.host.enqueueChecked('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, programId, why: 'act.stopped'}, guard, commit);}
+      catch (error) {
+        if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true as const, receipt: this.view(old), stopped};}
+        const cur = this.rows('receipt_id=?', stopped)[0];
+        if (error instanceof EdgeError && cur && !OPEN.includes(cur.phase)) return stopRefuse('act.already-ended', `Nothing to stop: ${cur.capability} (${stopped}) already ${cur.phase}.`);
+        if (!(error instanceof EdgeError) && !/clock/.test(String((error as Error)?.message))) console.error('[edge] stop:current not recorded', error instanceof Error ? error.message : error);
+        return stopRefuse('state.changed', 'The stop could not be recorded (the world clock may not be running); nothing was stopped. Ask to stop again in a moment.');
+      }
+    }
     if (newest) this.pending.delete(soul.soulId);
-    // the programme it ran (or, for an act still waiting on its decision, whatever that decision starts) stops safely
-    try {await this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, ...(programId ? {programId} : {}), why: 'act.stopped'});} catch {/* clock not ready: the act is ended; nothing runs for it */}
     this.comms?.fading.touch?.(soul.soulId);
-    return {accepted: true as const, receipt: this.receipt(soul.soulId, stop.id)!, stopped: target.id};
+    return {accepted: true as const, receipt: this.receipt(soul.soulId, id)!, stopped};
   }
   private async stopShared(soul: EdgeSoul, capability: string, clientRef: string | undefined): Promise<{accepted: true; receipt: EdgeReceipt} | {accepted: false; code: string; reason: string; capability: string}> {
     const refuse = (code: string, reason: string) => {this.recordRefusal(soul.soulId, 'act', capability, code, reason); return {accepted: false as const, code, reason, capability};};
