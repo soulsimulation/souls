@@ -44,6 +44,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 bash "$rel/tools/world-launcher/deploy/activate.sh" production "$rel" --reload
+# #1356: hostOk folds in <data>/host-health.json, which the health timer rewrites every 10 minutes, so a halt recorded before
+# the activation could fail the check below and roll a healthy release back. Refresh it once with the timer's own oneshot
+# (start waits for it); a failed refresh is an activation failure like any other.
+systemctl start "sim-worlds-health@${unit#sim-worlds@}.service"
 curl -fsS --max-time 20 "$origin/__sim/healthz" | python3 -c 'import json,sys;x=json.load(sys.stdin);assert x["ok"] and x["build"]==sys.argv[1] and x["worlds"]==int(sys.argv[2]) and x["hostOk"]' "$build" "$worlds"
 [ "$(systemctl show -p MainPID --value "$unit")" = "$mainpid" ]
 [ "$(sha256sum "$conf" | cut -d' ' -f1)" = "$config" ]
