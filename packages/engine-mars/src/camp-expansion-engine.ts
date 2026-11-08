@@ -17,7 +17,7 @@ export async function marsCampExpansionFactory(cfg?:MarsWorldConfig):Promise<Eng
   const next=old.rulesVersion.replace('sim-mars/1+'+m.rulesVersion,'sim-mars/1+'+rulesVersion);
   const allowed=(v:string)=>old.canReplayHistory?.(v)===true||v===next;
   const install=(engine:MarsEngine)=>{engine.installCampExpansionReader(reader);return engine;};
-  const physicalCfg=({clock,sleepBlockTicks,quietSeatCourtesy,bodyStepGuardV1,...rest}:MarsWorldConfig)=>rest;   // #1362: body-step-guard/1 is a logged runtime policy
+  const physicalCfg=({clock,sleepBlockTicks,quietSeatCourtesy,bodyStepGuardV1,refusalSettleV1,...rest}:MarsWorldConfig)=>rest;   // #1362: body-step-guard/1 is a logged runtime policy
   return {rulesVersion:old.rulesVersion,canReplayHistory:allowed,canRestoreSnapshot:v=>old.canRestoreSnapshot?.(v)===true||v===next,
     genesis:old.genesis,
     create(world){if(hashOf(world.base)!==hashOf(old.genesis('base').base))throw new Error('camp-expansion.genesis-base');return install(old.create(world) as MarsEngine);},

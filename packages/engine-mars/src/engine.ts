@@ -79,7 +79,7 @@ import {encode} from '../../../mars/viewer/engine/runtime/codec.ts';
 import { dcos,dsin,hypot } from '../../../mars/viewer/engine/core/math.ts';
 import { clearanceAt, nearestBlocker } from '../../../mars/viewer/engine/spatial/grid.ts';
 import { acknowledgeRelocation, rememberPosesAfterRestore } from '../../../mars/viewer/engine/runtime/invariants.ts';
-import { REFUSALS_ALLOWED, REFUSAL_WINDOW_TICKS, SOULS_REPAIR_POLICY, refusableRule, refusalDiag } from './refuse.ts';
+import { REFUSALS_ALLOWED, REFUSAL_WINDOW_TICKS, SOULS_REPAIR_POLICY, refusableRule, refusalDiag, settleDiag } from './refuse.ts';
 import { listTable, stableIndices, withEntityList, type EntityTable } from '../../../mars/viewer/engine/world/entity-list.ts';
 import { CATALOG, HUMAN_RADIUS } from '../../../mars/viewer/engine/world/catalog.ts';
 import { HUMAN_PROFILE as HUMAN_PROFILE_V1 } from '../../../mars/viewer/engine/spatial/types.ts';
@@ -166,7 +166,7 @@ const ASKED_STOP_QUIET_TICKS = 6000;
 const ASKED_STOP_MAX_TICKS = 36000;
 const containedByRule = (code: string) => `${code}|${ANY_SUBJECT}`;
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
-export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
+export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
 export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arrival:[0,18],arrivalPlace:'garden',reference:[0,16],grounds:{id:'grounds',name:'Ceramic garden'}};
 export const GREEN_FIELD_WORLD:MarsWorldConfig={scene:'greenfield',arrival:[0,0],arrivalPlace:'field',reference:[2,0],grounds:{id:'grounds',name:'Green field'}};
 export const EDEN_COMMONS_WORLD:MarsWorldConfig={scene:'eden-commons',arrival:[14,4],arrivalPlace:'commons',reference:[9,5],grounds:{id:'grounds',name:'Eden commons'}};
@@ -339,7 +339,7 @@ export class MarsEngine implements Engine {
   stateHash(): string { return this.stateHashWithWorld(this.rt.stateHash()); }
   /** Reuse only the native hash captured synchronously by snapshot(); never cache a live world hash across calls. */
   private stateHashWithWorld(nativeStateHash: string): string { return hashOf(this.stateHashInputs(nativeStateHash)); }
-  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
+  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
   // Preserve the contract serializer's exact bytes; only the Node digest implementation changes.
   physicalHash(): string { return createHash('sha256').update(stableStringify(physicalView(this.world))).digest('hex'); }
 
@@ -474,6 +474,67 @@ export class MarsEngine implements Engine {
     for (const id of ids) { const p = this.refusalProgramV1(id); if (p) programs.set(p.id, p); else for (const h of this.holders(id)) actions.add(h); }
     return { violation: v, rule: v.code, undo: [] as string[], relocate: ids as string[] | undefined, programs, actions, holding: [] as string[] };
   }
+  /** #1334 hold-settle/1: what answers one violation. Undo (the programme holds, or fails at its third refusal in the window),
+   *  settle (the body is stood at the nearest legal pose), the old relocation, or null: the host's repair, for this one alone. */
+  private holdSettlePlanV1<V extends { code: string; subjects?: string[] }>(v: V, copy: Map<string, RefusalCopy>, tick: number) {
+    const ents = this.ents, humans = (ids: string[]) => [...new Set(ids)].filter(id => ents[id]?.human).sort();
+    if (v.code.startsWith('carrier.')) return this.settlePlanV1(v, this.carrierRidersV1(v));
+    if (!refusableRule(v.code)) return null;
+    const moved = (id: string) => { const c = copy.get(id), e = ents[id]; return !!c && !!e && (c.pose.p.some((n, i) => n !== e.pose.p[i]) || c.level !== e.human?.level || (!e.human && c.pose.yaw !== e.pose.yaw)); };
+    const undo = new Set<string>();
+    for (const id of [...new Set(v.subjects ?? [])].sort()) { const g = this.refusalGroupV1(id); if (g.some(moved) || (v.code === 'motion.overspeed' && copy.has(id))) g.forEach(x => undo.add(x)); }
+    if (!undo.size) {
+      if (v.code === 'collision.human-static') return this.settlePlanV1(v, humans(v.subjects ?? []).filter(id => !this.standsClearV1(id)));   // the world landed on them: as the relocation, busy or not
+      if (v.code === 'collision.human-human') return this.settlePlanV1(v, humans(v.subjects ?? []).slice(1));   // the world put them together: the first stays
+      return null;
+    }
+    // a body the world carries or climbs with, or one whose last pose is itself no place to stand: undo is no answer
+    const unsafe = humans([...undo]).filter(id => { const e = ents[id], c = copy.get(id); return !c || e.human.carrier || e.human.activity?.startsWith('climb') || !bodyStandsClear(this.rt, e, [c.pose.p[0], c.pose.p[2]], c.level ?? 0); });
+    if (unsafe.length) return this.settlePlanV1(v, unsafe);
+    const programs = new Map<string, Prog>(), actions = new Set<string>(), fail = new Set<string>();
+    for (const id of [...undo].sort()) {
+      const e = ents[id]; if (!copy.has(id) || e.human?.riding || e.human?.on) return null;
+      if (!e.human) continue;
+      const p = this.refusalProgramV1(id);
+      if (p) { if (p.build) return null; programs.set(p.id, p); if ((p.refusalsV1 ?? []).filter(t => tick - t < REFUSAL_WINDOW_TICKS && t !== tick).length >= REFUSALS_ALLOWED) fail.add(p.id); continue; }
+      for (const h of this.holders(id)) { if (this.rt.live.get(h)?.cancelling) return null; actions.add(h); }
+    }
+    const holding = new Set<string>(); for (const id of undo) for (const h of this.holders(id)) holding.add(h);
+    return { violation: v, rule: v.code, undo: [...undo].sort(), relocate: undefined as string[] | undefined, settle: undefined as string[] | undefined, programs, actions, holding: [...holding].sort(), fail };
+  }
+  /** #1334: the riders a carrier rule names: a body named with a ride mark or held by a seat, and every rider not seated
+   *  in a ride named aloft (`carrier.unseated-aloft` names only the ride). */
+  private carrierRidersV1(v: { code: string; subjects?: string[] }): string[] {
+    const ents = this.ents, out = new Set<string>();
+    for (const id of v.subjects ?? []) {
+      const e = ents[id]; if (e?.human) { out.add(id); continue; }
+      const c = e?.carrier; if (!c) continue;
+      if (v.code === 'carrier.unseated-aloft') for (const a of Object.values(c.seats as Record<string, string | null>)) if (a && ents[a]?.human && ents[a].human.carrier?.phase !== 'seated') out.add(a);
+    }
+    return [...out].sort();
+  }
+  /** #1334: settle these bodies, or null when one can't be (a build crew, a cart, a structure, a berth: their marks belong elsewhere). */
+  private settlePlanV1<V extends { code: string; subjects?: string[] }>(v: V, ids: string[]) {
+    const ents = this.ents;
+    if (!ids.length || ids.some(id => { const h = ents[id]?.human; return !h || h.riding || h.on || h.sleepPose || this.refusalProgramV1(id)?.build; })) return null;
+    const programs = new Map<string, Prog>(); for (const id of ids) { const p = this.refusalProgramV1(id); if (p) programs.set(p.id, p); }
+    return { violation: v, rule: v.code, undo: [] as string[], relocate: undefined as string[] | undefined, settle: ids as string[] | undefined, programs, actions: new Set<string>(), holding: [] as string[], fail: new Set<string>() };
+  }
+  /** #1334: in this tick, each body's programme ends, whatever holds it lets go (a load is set down where it is: the
+   *  action-threw rule), its seat and ride mark are freed, and it stands at the nearest legal pose. One row, with the poses. */
+  private settleV1<V>(plan: { violation: V; rule: string; settle?: string[]; programs: Map<string, Prog> }, stuck: V[], done: Map<string, EngineRefusalV1>, tick: number) {
+    const ents = this.ents, why = settleDiag(plan.rule), poses: EngineRefusalV1['poses'] = {}, subjects = (plan.violation as { subjects?: string[] }).subjects ?? [];
+    for (const id of plan.settle!) for (const h of this.holders(id)) if (this.rt.isActive(h)) this.abandonV1(h, why.message, why, false);
+    for (const p of [...plan.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (this.programs.has(p.id)) this.end(p, 'failed', why);
+    for (const id of plan.settle!) {
+      const e = ents[id], h = e.human, b = h.carrier as { id: string; slot: string } | undefined;
+      for (const rid of new Set([...(b ? [b.id] : []), ...subjects])) { const c = ents[rid]?.carrier; if (!c) continue; for (const [slot, a] of Object.entries(c.seats as Record<string, string | null>)) if (a === id) c.seats[slot] = null; if (c.doorBy === id) c.doorBy = null; }
+      delete h.carrier; delete h.task; h.activity = 'idle'; h.speed = 0;
+      if (!this.standNearestV1(id, { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw, level: h.level }, this.bodyRadiusV1(e))) { stuck.push(plan.violation); return; }
+      poses[id] = { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: h.level };
+    }
+    done.set(`settled|${plan.rule}|${plan.settle!.join()}`, { tick, rule: plan.rule, bodies: plan.settle!, programs: [...plan.programs.keys()].sort(), poses, relocated: true });
+  }
   private relocateV1<V>(plan: { violation: V; rule: string; relocate?: string[]; programs: Map<string, Prog>; actions: Set<string> }, stuck: V[], done: Map<string, EngineRefusalV1>, tick: number) {
     for (const p of plan.programs.values()) { if (p.action && this.rt.isActive(p.action)) this.rt.cancel(p.action, relocationDiag); if (!p.action || !this.rt.isActive(p.action)) this.end(p, 'failed', relocationDiag); }
     for (const h of [...plan.actions].sort()) this.rt.cancel(h, relocationDiag);
@@ -544,7 +605,7 @@ export class MarsEngine implements Engine {
     const held = (listEntities(ents) as any[]).filter((e) => ['held', 'in-hand'].includes(e.support?.kind) && [e.support.by].flat().includes(p.actor)).sort((a, b) => (a.id < b.id ? -1 : 1));
     return [me ? at(me) : '', ...held.map((e) => `${at(e)}${isFrame(e) ? `/${frameProgress(this.rt.world, e)}` : ''}`)].join('|');
   }
-  private abandonV1(action: string, error: unknown, why: Diag = ACTION_THREW) {
+  private abandonV1(action: string, error: unknown, why: Diag = ACTION_THREW, row = true) {
     const rt = this.rt as any, records = rt.records as Map<string, { id: string; parent?: string }>, ents = this.ents;
     let root = action; for (let up = records.get(root)?.parent; up; up = records.get(root)?.parent) root = up;
     const tree = new Set([root]); for (let grew = true; grew;) { grew = false; for (const r of records.values()) if (r.parent && tree.has(r.parent) && !tree.has(r.id) && rt.isActive(r.id)) { tree.add(r.id); grew = true; } }
@@ -567,7 +628,7 @@ export class MarsEngine implements Engine {
       poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
     }
     const settled = joined.length ? settleFrames(this.rt) : [];
-    (this.out.refusals ??= []).push({ tick: rt.tick, rule: why.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200), ...(settled.length ? { settled } : {}) });
+    if (row) (this.out.refusals ??= []).push({ tick: rt.tick, rule: why.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200), ...(settled.length ? { settled } : {}) });
     // the crews holding the rest of that frame: nobody can finish it with them now, and their stop waits on a frame that won't stand
     const group = new Set(joined); for (const id of group) for (const c of ents[id]?.connections ?? []) group.add(c.to);
     for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a crew on the same frame let go: ${id}`, FRAME_LET_GO); }
@@ -625,19 +686,26 @@ export class MarsEngine implements Engine {
    *  still find after that stays in `violations`, for the host's repair. A pure function of world state and the rules. */
   private refuseV1(copy: Map<string, RefusalCopy>, seen: number) {
     const rt = this.rt, tick: number = rt.tick, ents = this.ents, fresh = rt.violations.splice(seen) as (Diag & { tick: number; subjects?: string[] })[];
-    const plans = fresh.map(v => this.refusalPlanV1(v, copy, tick));
-    if (plans.some(p => !p)) { rt.violations.push(...fresh); return; }
+    // #1334 hold-settle/1: each violation is answered on its own; without it, every one of them or none
+    const settling = this.cfg.refusalSettleV1 === true;
+    const plans = fresh.map(v => settling ? this.holdSettlePlanV1(v, copy, tick) : this.refusalPlanV1(v, copy, tick));
+    if (!settling && plans.some(p => !p)) { rt.violations.push(...fresh); return; }
+    const alone = fresh.filter((_, i) => !plans[i]);
     const done = new Map<string, EngineRefusalV1>();
     const stuck: typeof fresh = [];
     const told = new Set<string>();
-    for (const plan of plans as NonNullable<(typeof plans)[number]>[]) {
+    for (const plan of plans.filter(Boolean) as NonNullable<(typeof plans)[number]>[]) {
       if (plan.relocate) { this.relocateV1(plan, stuck, done, tick); continue; }
+      const settle = 'settle' in plan ? plan.settle as string[] | undefined : undefined, fail = 'fail' in plan ? plan.fail as Set<string> : undefined;
+      if (settle) { this.settleV1({ ...plan, settle }, stuck, done, tick); continue; }
       const why = refusalDiag(plan.rule), key = `${plan.rule}|${plan.undo.join()}`;
       for (const id of plan.undo) { const c = copy.get(id)!, e = ents[id]; e.pose = { ...c.pose, p: [...c.pose.p] }; if (e.human) { e.human.level = c.level; e.human.speed = 0; } }
       for (const h of plan.holding) { if (told.has(h)) continue; told.add(h); const l = rt.live.get(h); l?.def.refused?.(rt, l.exec); }   // once a tick: a whole crew can be named
       for (const id of [...plan.programs.keys()].sort()) {
-        const p = plan.programs.get(id)!; p.stopping = why; const seen = p.refusalsV1 ?? [];   // once a tick: one bad step can name a whole crew
+        const p = plan.programs.get(id)!, seen = p.refusalsV1 ?? [];   // once a tick: one bad step can name a whole crew
         p.refusalsV1 = [...seen.filter(t => tick - t < REFUSAL_WINDOW_TICKS && t !== tick), tick];
+        if (fail && !fail.has(id)) continue;   // #1334: held; the move is undone and the programme goes on
+        p.stopping = why;
         if (p.action && rt.isActive(p.action)) rt.cancel(p.action, why);   // refused for now (a flight)? `advance` asks again each tick
       }
       for (const h of [...plan.actions].sort()) { rt.cancel(h, why); if (rt.isActive(h) && !rt.live.get(h)?.cancelling) stuck.push(plan.violation); }   // no programme to ask again: the host's repair
@@ -647,8 +715,11 @@ export class MarsEngine implements Engine {
     (this.out.refusals ??= []).push(...done.values());
     // The moves are back; ask the invariants again. A second pass in one tick also resets the step check's memory to these poses.
     const covered = this.coveredV1();
-    withEntityList(rt.world, () => { for (const inv of rt.invariants) for (const d of inv(rt)) { if (covered(d)) continue; rt.violations.push({ ...d, tick }); rt.events.push({ tick, type: 'violation', code: d.code, message: d.message, subjects: d.subjects }); } }, listTable(ents));
+    const again = new Set<string>(), keyOf = (d: { code: string; subjects?: string[] }) => `${d.code}|${[...(d.subjects ?? [])].sort().join()}`;
+    withEntityList(rt.world, () => { for (const inv of rt.invariants) for (const d of inv(rt)) { if (covered(d)) continue; again.add(keyOf(d)); rt.violations.push({ ...d, tick }); rt.events.push({ tick, type: 'violation', code: d.code, message: d.message, subjects: d.subjects }); } }, listTable(ents));
     rt.violations.push(...stuck.filter(v => !covered(v)));
+    // #1334: what had no answer goes to the host alone, unless the second pass already found it standing
+    rt.violations.push(...alone.filter(v => !covered(v) && !again.has(keyOf(v)) && !stuck.includes(v)));
   }
 
   private emit(p: Prog, kind: ProgramEvent['kind'], d?: Diag) {
@@ -1576,6 +1647,11 @@ export class MarsEngine implements Engine {
   restoreHumanPoseV1(id: string, pose: { p: [number, number, number]; yaw?: number; level?: number }, radius: number = HUMAN_RADIUS): boolean {
     const e = this.ents[id];
     if (!e?.human || this.byActor.has(id) || this.holders(id).length || e.human.sleepPose || e.human.on || e.human.riding || e.human.carrier) return false;
+    return this.standNearestV1(id, pose, radius);
+  }
+  /** The search restoreHumanPoseV1 runs once the body is free: its floor near the pose, else the nearest free ground. */
+  private standNearestV1(id: string, pose: { p: [number, number, number]; yaw?: number; level?: number }, radius: number): boolean {
+    const e = this.ents[id];
     if (!Array.isArray(pose?.p) || pose.p.length !== 3 || !pose.p.every(Number.isFinite)) return false;
     const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
     const people = listEntities(this.ents).filter((o: any) => o.kind === 'human' && o.id !== id).map((o: any) => [o.pose.p[0], o.pose.p[2], o.human?.level ?? 0] as [number, number, number]);
@@ -2691,6 +2767,8 @@ export class MarsEngine implements Engine {
     if(policy.stairMakeWayV1===true)this.cfg={...this.cfg,stairMakeWayV1:true};
     // #1332 body-step-guard/1 (prospective): relocations, restores and stall releases stand a body only where the invariant passes it.
     if((policy as {bodyStepGuardV1?:boolean}).bodyStepGuardV1===true)this.cfg={...this.cfg,bodyStepGuardV1:true};
+    // #1334 hold-settle/1 (prospective): rung 1 holds, fails or settles; the ladder takes only what neither answers, alone
+    if((policy as {refusalSettleV1?:boolean}).refusalSettleV1===true)this.cfg={...this.cfg,refusalSettleV1:true};
     if((policy as {reflexTimeoutV1?:boolean}).reflexTimeoutV1===true)this.cfg={...this.cfg,reflexTimeoutV1:true};
     if((policy as {edgeMotionV1?:boolean}).edgeMotionV1===true)this.cfg={...this.cfg,edgeMotionV1:true};
     if(policy.spreadV2===true)this.cfg={...this.cfg,spreadV2:true};

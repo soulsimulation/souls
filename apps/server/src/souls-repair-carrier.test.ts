@@ -19,11 +19,12 @@ import {carrierDef} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 const old=await marsFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true});
 const quiet=(t:any)=>{t.mock.method(console,'warn',()=>{});t.mock.method(console,'error',()=>{});t.mock.method(console,'log',()=>{});};
 
-async function world(t:any,repair:boolean){
+async function world(t:any,repair:boolean,settle=false){
   const f=fixture(':memory:',repair?soulsRepairReaderV1(old,{adopt:true}):old,{durableClockV1:true});f.brain.quiesce();f.souls.enableLifecycle();
   t.after(()=>{f.host.stop();f.db.close();});
   const host=f.host;
   if(repair){const fact=await accept(host,host.adoptSoulsRepairV1('test'));assert.ok(fact,'adopted');assert.match(host.engine.rulesVersion,/\+souls-repair\/1/);}
+  if(settle)await accept<unknown>(host,host.enableRefusalSettleV1('test'));   // #1334 hold-settle/1, as boot adopts it
   const edge=new EdgeLedger(host,f.db,undefined,{ambient:false,sharedCarry:false}),app=new Hono();
   const comms=mountEdgeRoutes(app,{host,db:f.db,souls:f.souls,ledger:edge,soul:()=>null as any});t.after(()=>comms.close());
   const god=new GodMode(f.db,{worldId:host.worldId,ownerId:'dev:admin',tick:()=>host.engine.world.tick,emit(){}});
@@ -45,10 +46,10 @@ async function world(t:any,repair:boolean){
 
 // the cottage is building/1: it enters physics as thin wall segments and closed doors (entity-physics.ts), as Eden's library did
 const COTTAGE={w:8,d:6,floors:1,floorHeight:2.8,style:'cottage',roof:'gable',roofPitch:32,material:'plaster',front:'s',porch:0,balcony:false,windows:0.6,wallThickness:0.22};
-for(const obstacle of ['table','walls'] as const)for(const repair of [false,true])
-test(`a real balloon landing steps its rider out into ${obstacle==='table'?'a god-placed table':'the east wall of a god-built cottage it landed inside'}: ${repair?'B repair rules adopted':'A 4.16 rules'}`,{timeout:600000},async t=>{
+for(const obstacle of ['table','walls'] as const)for(const [repair,settle] of [[false,false],[true,false],[true,true]] as const)
+test(`a real balloon landing steps its rider out into ${obstacle==='table'?'a god-placed table':'the east wall of a god-built cottage it landed inside'}: ${settle?'C repair rules and hold-settle/1':repair?'B repair rules adopted':'A 4.16 rules'}`,{timeout:600000},async t=>{
   quiet(t);
-  const w=await world(t,repair),{host,edge,god,run,halted,E,Kino,Ada}=w,act=(s:any,name:string,owner:string,cap:string)=>accept(host,edge.act({...s,name,owner} as any,{capability:cap}) as Promise<any>);
+  const w=await world(t,repair,settle),{host,edge,god,run,halted,E,Kino,Ada}=w,act=(s:any,name:string,owner:string,cap:string)=>accept(host,edge.act({...s,name,owner} as any,{capability:cap}) as Promise<any>);
   const j=await act(Kino,'Kino','dev:kino','object:ride-eden-balloon:join');assert.notEqual(j.accepted,false,JSON.stringify(j));
   assert.ok(await run(3000,()=>E()[Kino.entityId].human?.carrier?.phase==='seated'),'Kino seated: '+JSON.stringify(E()[Kino.entityId].human?.carrier));
   const b=w.balloon(),home=[...b.pose.p],slot=E()[Kino.entityId].human.carrier.slot,seat=carrierDef(b)!.seats.find(s=>s.id===slot)!,d=rot2(seat.exit,b.pose.yaw);

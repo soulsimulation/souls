@@ -34,7 +34,7 @@ export async function connectedCommonsBoatFactory(options?:{helmV1?:true;bodyLoc
     restore(raw:EngineSnapshot){
       const s=structuredClone(raw) as EngineSnapshot&{physicalBinding?:string;mars:any;cfg:MarsWorldConfig;programs:any[];nextProg:number;leaving:string[];quiet?:boolean;commonsVersion?:string};
       if(s.format!=='sim-mars-snapshot/1'||s.physicalBinding!==binding.rulesVersion||s.commonsVersion!=='commons/1')throw new Error('connected-boat.snapshot-binding-differs');
-      const {clock,sleepBlockTicks,quietSeatCourtesy,bodyStepGuardV1,...physicalCfg}=s.cfg??{};   // #1362: body-step-guard/1 is a logged runtime policy
+      const {clock,sleepBlockTicks,quietSeatCourtesy,bodyStepGuardV1,refusalSettleV1,...physicalCfg}=s.cfg??{};   // #1362: body-step-guard/1 is a logged runtime policy
       if(hashOf(physicalCfg)!==hashOf(cfg))throw new Error('connected-boat.snapshot-policy-differs');
       const e=new MarsEngine(m,native.restore(s.mars),s.cfg,{programs:s.programs,nextProg:s.nextProg,leaving:s.leaving,renderPlatformsV1:(s as any).renderPlatformsV1},binding);
       if(s.quiet)e.beginQuiet();
