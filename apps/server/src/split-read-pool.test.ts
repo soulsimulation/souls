@@ -54,6 +54,14 @@ test('one worker: health, subset answers by token, lag, live.json advertises rea
     assert.equal(near.body!.tick, 8); assert.deepEqual(near.body!.here && (near.body!.here as {near: unknown}).near, [{id: 's2', dist: 1}]);
     const j = liveOf(shared, 1, Date.now());
     assert.equal(j.readPort, port); assert.deepEqual(j.read, {ports: [port], workers: 1, lagGens: 0, subset: true, routes: ['here', 'capabilities']});
+    // #1326: a worker's frames say what main's do when the clock is stalled or dilated, from the shared numbers
+    assert.equal(near.body!.world, undefined, 'a well clock adds nothing');
+    shared[S.tickAt] = Date.now() - 9000; shared[S.stallMs] = 2000;
+    const stalled = (await get(port, '/v1/edge/here', 'sim_a')).body!.world as {stalled: boolean; tick_age_ms: number};
+    assert.equal(stalled.stalled, true); assert.ok(stalled.tick_age_ms >= 9000, String(stalled.tick_age_ms));
+    shared[S.tickAt] = Date.now(); shared[S.clockRate] = 0.5; shared[S.baseRate] = 1;
+    assert.deepEqual((await get(port, '/v1/edge/capabilities', 'sim_b')).body!.world, {load: 'slowed', slowed: true, speed: 0.5});
+    shared[S.stallMs] = 0; shared[S.clockRate] = 1;
   } finally { await p.close(); }
 });
 

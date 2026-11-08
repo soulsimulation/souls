@@ -1,4 +1,5 @@
 import type {Context, Hono} from 'hono';
+import {stalledNow, whenStalled} from './load/clock-source.ts';
 import {bodyLimit} from 'hono/body-limit';
 import type {Db, UserRow} from './db.ts';
 import type {GodMode} from './god/god.ts';
@@ -131,8 +132,12 @@ export function mountAgentInbox(app: Hono, d: Deps) {
       const claim = timeout > 0 ? inbox.claimListen(s) : {signal: new AbortController().signal, release: () => {}};
       const end = inbox.listening(s);   // G4: the owner's "connected" is a listener waiting now
       let handed = false;               // MSG: an empty answer means the CLI re-polls at once (presence keeps 'listening')
+      // #1326: a Soul's listen also ends when the world's clock stalls (the frame then carries world.stalled); one already
+      // stalled holds at most 5 s, so a client listening in a loop doesn't spin
+      const stalledAtStart = kind === 'soul' && stalledNow(), stall = new AbortController();
+      const unstall = kind === 'soul' && !stalledAtStart ? whenStalled(() => stall.abort()) : () => {};
       try {
-        await inbox.listen(s, after, timeout, AbortSignal.any([c.req.raw.signal, claim.signal]));
+        await inbox.listen(s, after, stalledAtStart ? Math.min(timeout, 5000) : timeout, AbortSignal.any([c.req.raw.signal, claim.signal, stall.signal]));
         // Superseded (or the caller hung up): hand over nothing; the newer listen takes every waiting message.
         if (claim.signal.aborted) throw new ApiError(409, 'superseded', 'superseded by a newer listen for this agent; this listen has ended, do not restart it');
         if (c.req.raw.signal.aborted) throw new ApiError(499, 'closed', 'the listener hung up');
@@ -142,7 +147,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
         // An older CLI reads `latest`: the first one after its cursor, so its listen/follow loop walks the queue in order.
         if (kind === 'soul') { const backlog = inbox.takeBacklog(s, after), v = inbox.view(s); handed = backlog.length > 0; return c.json({inbox: {...v, latest: backlog[0] ?? v.latest}, backlog}); }
         return c.json({inbox: inbox.view(s)});
-      } finally { claim.release(); end(handed); }
+      } finally { unstall(); claim.release(); end(handed); }
     });
     app.post(`${path}/:id/ack`, async c => {
       const s = requireAgent(c, kind), b = await json(c); limit(`inbox-ack:${kind}:${JSON.stringify(s)}`, 120);

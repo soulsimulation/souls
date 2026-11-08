@@ -1,6 +1,7 @@
 // Core-Comms routes under /v1/edge: wait (event stream), say, subscribe, converse, objects,
 // digest, and the steward work queue under /v1/edge/steward/*.
 // Mounted by Ledger's edge/routes.ts via registerEdgeComms(app, deps).
+import {stalledNow, whenStalled} from '../../load/clock-source.ts';
 import type {Context, Hono} from 'hono';
 import type {ContentfulStatusCode} from 'hono/utils/http-status';
 import type {EdgeDeps, EdgeReceipt, EdgeSoul} from '../contract.ts';
@@ -141,22 +142,28 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     const seconds = rawTimeout === undefined ? DEFAULT_WAIT_SECONDS : Number(rawTimeout);
     if (!Number.isFinite(seconds) || seconds < 1 || seconds > 55) throw new EdgeError(400, 'invalid', 'timeout must be 1..55 seconds');
     const box = deps.ownerInbox;
-    if (!box) return streams.wait(soul.soulId, after, seconds * 1000, c.req.raw.signal);
-    // SOULSIM-H F1: a wait also ends when the owner writes (a message no listen has handed over, or one sent after
-    // `ownerSince`, the `ownerMark` of the agent's previous wait), so a Soul busy walking sees "sit on the bench" at once.
-    const rawSince = c.req.query('ownerSince'), since = rawSince === undefined ? now() : Number(rawSince);
-    if (!Number.isSafeInteger(since) || since < 0) throw new EdgeError(400, 'invalid', 'ownerSince must be an ownerMark from wait');
-    // SOULSIM-H F7: for a client that sends ownerSince (CLI 1.9.6+, which prints the messages), EVERY message not yet
-    // acknowledged ends the wait: an agent looping `wait 60` before acking "stop" slept 20 s through it. Older clients
-    // (no ownerSince, e.g. the live poll) keep the since-now rule, so a held message never spins them.
-    const scope = {scope: `soul:${soul.soulId}`, owner: soul.owner}, from = rawSince === undefined ? since : 0;
-    // D3 (playtest 2026-10-25: the card read "away" while the agent sat in `act --wait`, which does return on owner messages):
-    // a wait that ends when the owner writes is listening, so presence says the agent will see the next message
-    const end = (box as {listening?: (s: {scope: string; owner: string}) => () => void}).listening?.(scope);
-    let r: Awaited<ReturnType<typeof streams.wait>>;
-    try {r = await streams.wait(soul.soulId, after, seconds * 1000, c.req.raw.signal, () => !!box.ownerWrote(scope, from));} finally {end?.();}
-    const wrote = box.ownerWrote(scope, from);
-    return wrote ? {...r, ownerWrote: wrote.waiting, ownerMark: Math.max(since, wrote.newestAt + 1)} : {...r, ownerMark: Math.max(since, now())};
+    // #1326: a clock that stalls during the wait ends it early (the frame then carries world.stalled), never an empty answer
+    // at the timeout. One already stalled holds the wait at most 5 s, so a client polling in a loop doesn't spin.
+    const stalledAtStart = stalledNow(), ms = (stalledAtStart ? Math.min(seconds, 5) : seconds) * 1000, stalling = () => !stalledAtStart && stalledNow();
+    const unstall = stalledAtStart ? () => {} : whenStalled(() => streams.poke(soul.soulId));
+    try {
+      if (!box) return await streams.wait(soul.soulId, after, ms, c.req.raw.signal, stalling);
+      // SOULSIM-H F1: a wait also ends when the owner writes (a message no listen has handed over, or one sent after
+      // `ownerSince`, the `ownerMark` of the agent's previous wait), so a Soul busy walking sees "sit on the bench" at once.
+      const rawSince = c.req.query('ownerSince'), since = rawSince === undefined ? now() : Number(rawSince);
+      if (!Number.isSafeInteger(since) || since < 0) throw new EdgeError(400, 'invalid', 'ownerSince must be an ownerMark from wait');
+      // SOULSIM-H F7: for a client that sends ownerSince (CLI 1.9.6+, which prints the messages), EVERY message not yet
+      // acknowledged ends the wait: an agent looping `wait 60` before acking "stop" slept 20 s through it. Older clients
+      // (no ownerSince, e.g. the live poll) keep the since-now rule, so a held message never spins them.
+      const scope = {scope: `soul:${soul.soulId}`, owner: soul.owner}, from = rawSince === undefined ? since : 0;
+      // D3 (playtest 2026-10-25: the card read "away" while the agent sat in `act --wait`, which does return on owner messages):
+      // a wait that ends when the owner writes is listening, so presence says the agent will see the next message
+      const end = (box as {listening?: (s: {scope: string; owner: string}) => () => void}).listening?.(scope);
+      let r: Awaited<ReturnType<typeof streams.wait>>;
+      try {r = await streams.wait(soul.soulId, after, ms, c.req.raw.signal, () => !!box.ownerWrote(scope, from) || stalling());} finally {end?.();}
+      const wrote = box.ownerWrote(scope, from);
+      return wrote ? {...r, ownerWrote: wrote.waiting, ownerMark: Math.max(since, wrote.newestAt + 1)} : {...r, ownerMark: Math.max(since, now())};
+    } finally {unstall();}
   }));
   app.post('/v1/edge/say', route(async (c, soul) => { const out = say(core, soul, await json(c), id => objects.addressees(id)); fading.touch(soul.soulId); return out; }));
   app.post('/v1/edge/subscribe', route(async (c, soul) => webhooks.subscribe(soul, await json(c))));
