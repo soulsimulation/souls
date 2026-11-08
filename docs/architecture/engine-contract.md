@@ -88,9 +88,18 @@ A door's gap turns solid only at the close's contact, so the plan reads that gap
 
 ## Refusal
 
-With the `souls-repair/1` rules (`soulsRepairV1`: on with `SIM_SOULS_REPAIR=1` or with `SIM_SHARED_CARRY=1`, and `SIM_SOULS_REPAIR=0`
-turns it off under either; new worlds only for now: a world whose history lacks it refuses to boot with it on), a move that
-would break a rule is not applied ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+With the `souls-repair/1` rules (`soulsRepairV1`), a move that would break a rule is not applied
+([#1150](https://github.com/soulsimulation/souls/issues/1150)). Every world the server runs has them by default
+([#1323](https://github.com/soulsimulation/souls/issues/1323)). The server reads a world's history with
+`soulsRepairReaderV1` over its own reader: the history replays and restores under the rules it was written with, and a world
+whose history began without them adopts them in one logged `rules` event at its head, after replay and the clock check
+(`{soulsRepairAdoptV1: {contract: 'souls-repair-adoption/1', tick, fromRulesVersion, toRulesVersion, fromStateHash}}`). Its
+fold turns the rules on, and the world header's `rules_version` follows in the same acceptance. A new world is born without
+them and adopts at tick 0. A snapshot restores under the policy it was taken with; the state hash never names the rules
+(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (4.16,
+or `marsFactory` alone) refuses an adopted history. `SIM_SOULS_REPAIR=0` adopts nothing, still replays a logged adoption, and
+is ignored for a world that has adopted. A factory that already has the rules (`SIM_SOULS_REPAIR=1`, `SIM_SHARED_CARRY=1`, or
+`soulsRepairV1: true`) is used as it is: an old history refuses it, as before.
 
 - `Engine.step` leaves no refusable violation standing. The bodies that moved go back to their pose before the tick, and
   their programmes end `failed` with `world.refused:<rule>` and a plain reason, in that tick.
@@ -142,8 +151,8 @@ whole (`subjects: ['*']`), which absorbs only what has no plan. So a rule that n
 and stops, and a named fault always reaches the list, even while steps are failing. Each stop row answers a decision that
 started what it stopped. A body inside something is relocated once.
 
-`SIM_SHARED_CARRY` brings the ladder with it. `SIM_SOULS_REPAIR=0` keeps it off, which is how a shared world made before the
-ladder boots. A world made with the ladder can't go back: it needs these rules to replay. Under these rules an invariant that
+The ladder comes with the rules, so every world the server runs has it by default (see Refusal for adoption). A world made
+with the ladder, or that adopted it, can't go back: it needs these rules to replay. Under these rules an invariant that
 throws is a named `engine.thrown` violation, so it is contained like any other. A boot's replay survives what the live tick
 survived: a step or event that threw is reported and passed. A replay that ends somewhere other than the live world, say past
 a throw it didn't repeat, isn't refused under these rules: it is a legal world, so the boot goes on from it and reports
@@ -155,13 +164,15 @@ its Soul is told, and whatever it held is set down where it is, on the bearer's 
 set-down, because the action that would have done it is what broke. A part joined to others stays where it is and stands by
 itself, as a god's joined upright does, and the frames and beams of its group stand down with it (`settleFrames`), because laying
 it flat would keep the joints and the crew at the other end could never let go. Crews holding the rest of that frame are let go
-in the same way, since nobody can finish it with them now. What a part does to a rule after that is the ladder's like anything else.
+as `world.frame-let-go`, not counted, since nobody can finish it with them now. What a part does to a rule after that is the ladder's like anything else.
 
 **A stop the ladder asked for ends within 20 seconds.** A programme stopped by a rung 3 or a stop in place keeps its own cleanup
 that long, counted from the fault's tick, and is then abandoned the same way. So a stop that is refused
-(`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for gets the same
-deadline the next time the ladder fires, and that deadline is written in a stop-in-place row that tells nobody, so a replay has
-it. Until then it isn't bounded here.
+(`support.release-premature`) or a set-down that can't finish doesn't hold a body for good. A stop a Soul asked for that stays pending (`untilSafe` or
+a physical stop) is given up the same way, as `world.stop-gave-up`, once nothing it waits on has changed for five minutes (its
+body, what it holds and the joins of any frame held), or after half an hour whatever changes. That is world state, so a replay
+does the same. A give-up isn't a glitch, and crews on the rest of that frame are let go as `world.frame-let-go`. A stop with no deadline yet, such as a refusal's, gets one the next
+time the ladder fires, written in a stop-in-place row that tells nobody.
 
 Going back doesn't answer a rule twice: a rule a rung 3 has gone back for stays on the head after that, a thrown step counting as
 one rule, so what returns past the hold writes a small row, not a whole world. A restart allows it one more.

@@ -48,6 +48,7 @@ relax budgets, samples or gap checks to make a sweep pass.
 | `library-budgets-water-20261105.json` | in-budget water and garden revisions (garden fountain @2, watering can @3); pins nothing |
 | `library-budgets-openings-20261105.json` | in-budget curtained window @2, drawer chest @3, bell @3; pins bell@3's construction-view overruns |
 | `library-budgets-tea-20261105.json` | in-budget kettle @3 and cup @3; pins nothing |
+| `juggling-balls-20261105.json` | `core-juggling-balls@1` (three balls carried as one thing; the `juggling` tag offers `juggle:<id>`); pins nothing |
 | `openings-20261105.json` | `core-tent@2` and `core-field-gate@1` (openings worked by hand); pins nothing |
 | `chalk-20261105.json` | `core-chalk-square@1` (pavement chalk on the painting faculty); pins nothing |
 | `record-player-20261105.json` | the new record player (#431, 368 triangles); pins nothing |

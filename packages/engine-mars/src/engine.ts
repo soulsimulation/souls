@@ -2,7 +2,7 @@ import {LIE_CLEARANCE} from '../../../mars/viewer/engine/social/pose.ts';
 import {regionArrivalMask} from './region-arrival.ts';
 import { createHash } from 'node:crypto';
 import { capturePhysicalHashInput, capturedPhysicalHashSteps, physicalHashNeedsLegacyCapture } from './checkpoint-hash.ts';
-import { ACTION_THREW, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
+import { ACTION_THREW, FRAME_LET_GO, STOP_GAVE_UP, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
 import {bodyProfile} from '../../../mars/viewer/engine/bodies/navigation.ts';
 import {immutableAuthoredBoundaryFact} from '../../../mars/viewer/engine/spatial/edits.ts';
 import {keepStaticGridsForBoot,withStaticGridReadCache,type BootGridStore} from '../../../mars/viewer/engine/spatial/grid.ts';
@@ -60,7 +60,7 @@ import { disassemblyPlan, DISASSEMBLY_POLICY } from './disassembly.ts';
 import { MARS_2026_MAP, withMars2026Map } from './mars-2026-map.ts';
 import { disassemblyRegistry } from '../../../mars/viewer/engine/construction/disassembly.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { connectBeamV1, framesStand, settleFrames } from './beam-connect.ts';
+import { connectBeamV1, frameProgress, framesFell, framesStand, framesUp, isFrame, settleFrames } from './beam-connect.ts';
 import { decksBear, installJoistV1, laySheetV1 } from './deck-install.ts';
 import { installFlightV1, installTreadV1, stairsBear } from './stair-install.ts';
 import { captureRenderScene, commonsSceneMetadataV1Schema, type RenderSceneCaptureV1, type RenderScene } from '@souls/engine-contract';
@@ -69,6 +69,7 @@ import { readNativeGathering } from './gathering-observation.ts';
 import { prepareCommonsTransition } from './commons-transition.ts';
 import { commonsTransitionV1Schema,type CommonsTransitionV1,type CommonsTransitionAdmissionV1 } from '@souls/engine-contract';
 import {crewRemovalTransitionV1Schema,type CrewRemovalTransitionV1,type CrewRemovalTransitionAdmissionV1} from '@souls/engine-contract';
+import {soulsRepairAdoptionV1Schema,type SoulsRepairAdoptionV1,type SoulsRepairAdoptionAdmissionV1} from '@souls/engine-contract';
 import {commonsProvisions,COMMONS_PERSONAL_RESOURCES} from './commons-provisions.ts';
 import {commonsKitchen,COMMONS_KITCHENS,type CommonsKitchenVersion} from './commons-kitchen.ts';
 import type {RetainedCommonsShoreReader} from './retained-shore.ts';
@@ -138,6 +139,8 @@ type Prog = {
   stopping?: Diag;
   /** #1150: the tick a ladder's stop gives up waiting. A stop that was refused, or a set-down that can't finish, must not hold a body for good. */
   stopByV1?: number;
+  /** #1250: a stop a Soul asked for, and since when nothing it waits on has changed. */
+  stopQuietV1?: { key: string; since: number; from: number };
   /** PC08: stopped with `untilSafe` (a shared carry): a held-up action keeps its own hold-up diagnostic, not a retry's. */
   stopUntilSafe?: true;
   /** #1150: the ticks the world refused this programme's moves; it then ends `failed`, not `cancelled`. */
@@ -156,6 +159,11 @@ const CONTAINED_HOLD_TICKS = 1200;
 const CONTAINED_KEYS_PER_RULE = 8, ANY_SUBJECT = '*';
 /** #1150: twenty seconds for what the ladder stopped to finish its own cleanup. Past that it is abandoned, and bodies are free. */
 const LADDER_STOP_TICKS = 400;
+/** #1150, #1250: five minutes in which nothing a stop waits on moves or joins. A stop a Soul asked for that waits on a frame
+ *  nobody can finish frees the crew then; one waiting on a build that goes on keeps waiting. */
+const ASKED_STOP_QUIET_TICKS = 6000;
+/** And half an hour whatever moves, so nothing that keeps a stop's key changing can hold it for good. */
+const ASKED_STOP_MAX_TICKS = 36000;
 const containedByRule = (code: string) => `${code}|${ANY_SUBJECT}`;
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
 export type MarsWorldConfig = { /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
@@ -255,6 +263,7 @@ export class MarsEngine implements Engine {
   private takeScenes = new Map<string,RenderSceneCaptureV1>();
   private quiet = false;
   private crewRemovalTransitionReader=false;
+  private soulsRepairAdoptionReader:false|'replay'|'adopt'=false;
   private foodDeliveryReader=false;
   private foodDeliveries:CommonsFoodDeliveryV1[]=[];
   private edenGroundReader?:EdenGroundReaderV1;
@@ -330,7 +339,7 @@ export class MarsEngine implements Engine {
   stateHash(): string { return this.stateHashWithWorld(this.rt.stateHash()); }
   /** Reuse only the native hash captured synchronously by snapshot(); never cache a live world hash across calls. */
   private stateHashWithWorld(nativeStateHash: string): string { return hashOf(this.stateHashInputs(nativeStateHash)); }
-  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:this.cfg}:{}) }; }
+  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
   // Preserve the contract serializer's exact bytes; only the Node digest implementation changes.
   physicalHash(): string { return createHash('sha256').update(stableStringify(physicalView(this.world))).digest('hex'); }
 
@@ -518,15 +527,21 @@ export class MarsEngine implements Engine {
    *  Its whole tree ends here, and whatever it held is set down where it is: the one time a load is let go without a set-down,
    *  because the action that would set it down is what broke. Everything here follows from the world and the throw, so a replay
    *  of the same throw does the same. The Soul's programme ends on its next advance, as for any action that failed. */
-  private abandonV1(action: string, error: unknown) {
+  /** #1250: where the stop's body and what it holds are, and the joins of any frame held: a change is progress. */
+  private stopProgressV1(p: Prog): string {
+    const ents = this.ents, r2 = (v: number) => Math.round(v * 100), at = (e: any) => `${e.id}@${e.pose.p.map(r2).join(',')}`, me = ents[p.actor];
+    const held = (listEntities(ents) as any[]).filter((e) => ['held', 'in-hand'].includes(e.support?.kind) && [e.support.by].flat().includes(p.actor)).sort((a, b) => (a.id < b.id ? -1 : 1));
+    return [me ? at(me) : '', ...held.map((e) => `${at(e)}${isFrame(e) ? `/${frameProgress(this.rt.world, e)}` : ''}`)].join('|');
+  }
+  private abandonV1(action: string, error: unknown, why: Diag = ACTION_THREW) {
     const rt = this.rt as any, records = rt.records as Map<string, { id: string; parent?: string }>, ents = this.ents;
     let root = action; for (let up = records.get(root)?.parent; up; up = records.get(root)?.parent) root = up;
     const tree = new Set([root]); for (let grew = true; grew;) { grew = false; for (const r of records.values()) if (r.parent && tree.has(r.parent) && !tree.has(r.id) && rt.isActive(r.id)) { tree.add(r.id); grew = true; } }
     const bodies = (listEntities(ents) as any[]).filter(e => e.human?.grip && this.holders(e.id).some(h => tree.has(h))).map(e => e.id as string).sort();
     const depth = (id: string) => { let n = 0; for (let r = records.get(id); r?.parent; r = records.get(r.parent)) n++; return n; }, internal = rt.internals();
     for (const id of [...tree].sort((a, b) => depth(b) - depth(a) || (a < b ? -1 : 1))) {
-      const l = rt.live.get(id); if (!l) { rt.forceCancel?.(id, ACTION_THREW); continue; }
-      try { internal.forceFinish(l, 'failed', ACTION_THREW); } catch { rt.live.delete(id); for (const [k, list] of internal.owners) { const kept = list.filter((o: { action: string }) => o.action !== id); if (kept.length) internal.owners.set(k, kept); else internal.owners.delete(k); } }
+      const l = rt.live.get(id); if (!l) { rt.forceCancel?.(id, why); continue; }
+      try { internal.forceFinish(l, 'failed', why); } catch { rt.live.delete(id); for (const [k, list] of internal.owners) { const kept = list.filter((o: { action: string }) => o.action !== id); if (kept.length) internal.owners.set(k, kept); else internal.owners.delete(k); } }
     }
     const poses: EngineRefusalV1['poses'] = {}, spatial = this.rt.services.spatial as Spatial, joined: string[] = [];
     for (const id of bodies) {
@@ -540,11 +555,11 @@ export class MarsEngine implements Engine {
       placeOnGround(item, [x, level === 0 && this.rt.world.groundV1 && spatial.ground ? r3(standOn(spatial.ground, x, z)) : floor, z], item.pose.yaw ?? 0); acknowledgeRelocation(this.rt, item.id);
       poses[item.id] = { p: [item.pose.p[0], item.pose.p[1], item.pose.p[2]], yaw: item.pose.yaw ?? 0 };
     }
-    if (joined.length) settleFrames(this.rt);
-    (this.out.refusals ??= []).push({ tick: rt.tick, rule: ACTION_THREW.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200) });
+    const settled = joined.length ? settleFrames(this.rt) : [];
+    (this.out.refusals ??= []).push({ tick: rt.tick, rule: why.code, bodies, programs: [...this.programs.values()].filter(p => p.action && tree.has(p.action)).map(p => p.id).sort(), poses, why: String((error as Error)?.message ?? error).slice(0, 200), ...(settled.length ? { settled } : {}) });
     // the crews holding the rest of that frame: nobody can finish it with them now, and their stop waits on a frame that won't stand
     const group = new Set(joined); for (const id of group) for (const c of ents[id]?.connections ?? []) group.add(c.to);
-    for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a part of the same frame broke: ${id}`); }
+    for (const id of [...group].sort()) { const by = ents[id]?.support?.kind === 'held' ? ents[id].support.by as string[] : []; for (const body of by) for (const h of this.holders(body)) if (rt.isActive(h)) this.abandonV1(h, `a crew on the same frame let go: ${id}`, FRAME_LET_GO); }
   }
   /** Is this violation on the list, by name or by its rule? */
   private coveredV1(): (v: { code: string; subjects?: string[] }) => boolean {
@@ -648,6 +663,7 @@ export class MarsEngine implements Engine {
       // PC08: while an `untilSafe` stop's action is held up it stands still, so a retry would refuse again and only hide
       // the hold-up's own diagnostic (who is in the way); it is retried once the action moves again
       if(p.stopByV1!==undefined&&this.rt.tick>=p.stopByV1&&p.action&&this.rt.isActive(p.action))this.abandonV1(p.action,`the stop did not finish: ${p.stopping.code}`);
+      if(p.stopQuietV1&&p.action&&this.rt.isActive(p.action)){const key=this.stopProgressV1(p);if(key!==p.stopQuietV1.key)p.stopQuietV1={...p.stopQuietV1,key,since:tick};if(tick-p.stopQuietV1.since>=ASKED_STOP_QUIET_TICKS||tick-p.stopQuietV1.from>=ASKED_STOP_MAX_TICKS)this.abandonV1(p.action,`${tick-p.stopQuietV1.since>=ASKED_STOP_QUIET_TICKS?`nothing moved for ${ASKED_STOP_QUIET_TICKS} ticks`:`still pending after ${ASKED_STOP_MAX_TICKS} ticks`}: ${p.stopping.code}`,STOP_GAVE_UP);}
       if(p.action&&this.rt.isActive(p.action)){if(!(p.stopUntilSafe&&this.rt.records.get(p.action)?.status==='blocked'))this.cancelOrAbandonV1(p.action,p.stopping);return;}
       return this.end(p,p.refusalsV1&&!p.build?'failed':'cancelled',p.stopping);   // an unfinished build's failure throws
     }
@@ -656,7 +672,8 @@ export class MarsEngine implements Engine {
       if (!p.started) {
         // A program whose first step moves the body first leaves whatever seat, circle or borrowed conversation holds it.
         // One that only waits, turns, or uses this world's own verbs (eating while seated) keeps what it has.
-        if (NEEDS_BODY.has(p.steps[0]?.verb) && !this.release(p.actor, { code: 'program.replaced', message: `replaced by ${p.label}` })) {
+        // #441: whatever comes next while the balls are up waits for them to land (juggle_v1's deferred stop) before it plans.
+        if ((NEEDS_BODY.has(p.steps[0]?.verb) || this.ents[p.actor]?.human?.activity === 'juggle') && !this.release(p.actor, { code: 'program.replaced', message: `replaced by ${p.label}` })) {
           if (tick - p.since > RELEASE_TIMEOUT) return this.end(p, 'failed', { code: 'actor.busy', message: 'the actor was not released in time' });
           return;
         }
@@ -1281,7 +1298,7 @@ export class MarsEngine implements Engine {
       this.rt.cancel(p.action, { code: 'program.stopped', message: 'stopped' });
       // PC08 (#687): a shared carry's stop keeps its programme (and so the crew's borrowed bodies) until the native
       // cleanup lands, as a physical runtime does: `advance` retries a refused cancel each tick
-      if((this.physical||opts?.untilSafe===true)&&this.rt.isActive(p.action)){p.stopping={code:'program.stopped',message:'Stopped after native movement reaches safe support.'};if(opts?.untilSafe===true)p.stopUntilSafe=true;return;}
+      if((this.physical||opts?.untilSafe===true)&&this.rt.isActive(p.action)){p.stopping={code:'program.stopped',message:'Stopped after native movement reaches safe support.'};if(opts?.untilSafe===true)p.stopUntilSafe=true;if(this.cfg.soulsRepairV1===true)p.stopQuietV1??={key:this.stopProgressV1(p),since:this.rt.tick,from:this.rt.tick};return;}
     }
     this.end(p, 'cancelled', { code: 'program.stopped', message: 'stopped' });
   }
@@ -1702,7 +1719,20 @@ export class MarsEngine implements Engine {
   }
   removeEntity(id: string) {
     if(this.cfg.safeCrewRemoval)for(const p of this.programs.values())if(p.build?.crew.includes(id))this.stop(p.id);
-    const pid = this.byActor.get(id); if (pid) this.stop(pid);
+    const repair = this.cfg.soulsRepairV1 === true;
+    const pid = this.byActor.get(id); if (pid) this.stop(pid, repair ? { untilSafe: true } : undefined);
+    // #1250: under repair, a body leaving a crew (its Soul retired) is that crew's stop, kept until it lands or gives up: a
+    // cut would end the programme and leave its action holding the others, and this body, for good. What lets go (a
+    // conversation, a meal) is let go first, as `tryRemove` would; a programme whose action refuses, and still holds the
+    // body, is stopped until safe. A committed build keeps its own crew guard: its holders are never pulled here.
+    const built = this.cfg.safeCrewRemoval && [...this.programs.values()].some((p) => p.build?.crew.includes(id));
+    if (repair && !built) {
+      const records = (this.rt as any).records as Map<string, { parent?: string }>, live = (this.rt as any).live as Map<string, { cancelling?: boolean }>;
+      const rootOf = (a: string) => { let r = a; for (let up = records.get(r)?.parent; up; up = records.get(r)?.parent) r = up; return r; };
+      for (const h of this.holders(id)) this.rt.cancel(h, { code: 'actor.removed', message: 'actor removed' });
+      const crews = new Set(this.holders(id).filter((h) => this.rt.isActive(h) && !live.get(h)?.cancelling).map(rootOf));
+      for (const p of [...this.programs.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) if (p.action && p.actor !== id && crews.has(rootOf(p.action))) this.stop(p.id, { untilSafe: true });
+    }
     if (!this.tryRemove(id)&&(!this.cfg.safeCrewRemoval||!this.leaving.includes(id))) this.leaving.push(id); // finish owned obligations first
   }
 
@@ -1921,6 +1951,34 @@ export class MarsEngine implements Engine {
   /** Only the explicit dual-history factory enables this prospective reader.
    * Installing the reader itself changes no rules, body, program or hash. */
   enableCrewRemovalTransitionReaderV1(){this.crewRemovalTransitionReader=true;}
+  /** #1323: only the server's repair reader (soulsRepairReaderV1) enables this; the reader itself changes nothing. It always
+   *  replays a logged adoption; it proposes one only with `adopt` (not under `SIM_SOULS_REPAIR=0`). */
+  enableSoulsRepairAdoptionReaderV1(adopt:boolean){this.soulsRepairAdoptionReader=adopt?'adopt':'replay';}
+  /** #1323: the repair rules from here on, as an engine made or restored under them has them: the step check remembers the
+   *  poses it starts from, so a boot from this head and the live world make the same first check. */
+  private turnOnSoulsRepairV1(){this.finishRecorder();this.cfg={...this.cfg,soulsRepairV1:true};rememberPosesAfterRestore(this.rt);this.startRecorder();}
+  /** #1323: a history that began under the repair rules (made by a factory that had them) and has no adoption fact. */
+  bornUnderSoulsRepairV1(){if(this.cfg.soulsRepairV1===true)return;if(this.programs.size)throw Error('souls-repair-adoption.genesis-only');this.turnOnSoulsRepairV1();}
+  /** #1323: a snapshot taken under the repair rules, restored by a reader without them: as marsFactory's own restore. */
+  restoredUnderSoulsRepairV1(){if(this.cfg.soulsRepairV1!==true)this.turnOnSoulsRepairV1();}
+  previewSoulsRepairAdoptionV1(replaying=false):SoulsRepairAdoptionAdmissionV1{
+    const no=(code:string,message:string)=>({ok:false as const,diagnostic:{code:'souls-repair-adoption.'+code,message}});
+    if(this.cfg.soulsRepairV1===true)return no('already-adopted','souls-repair/1 is already active');
+    if(!this.soulsRepairAdoptionReader)return no('reader-unavailable','the server repair reader is required');
+    if(!replaying&&this.soulsRepairAdoptionReader!=='adopt')return no('opted-out','SIM_SOULS_REPAIR=0: a logged adoption replays, none is proposed');
+    return {ok:true,transition:soulsRepairAdoptionV1Schema.parse({contract:'souls-repair-adoption/1',tick:this.world.tick,fromRulesVersion:this.rulesVersion,
+      toRulesVersion:this.composedRules(nativeRulesVersion(this.physical?.rulesVersion??this.m.rulesVersion,{...this.cfg,soulsRepairV1:true})),fromStateHash:this.stateHash()})};
+  }
+  /** #1323: no quiet boundary is needed: a programme under way goes on under the repair rules from the next step. The fold
+   *  checks the rules versions only. Its tick and state hash are evidence: a recovery (rung 2 or 3) re-applies the fact over a
+   *  baseline from before it, at another tick or state, and the world must come out under the rules the header names. */
+  adoptSoulsRepairV1(raw:SoulsRepairAdoptionV1){
+    const fact=soulsRepairAdoptionV1Schema.parse(raw),preview=this.previewSoulsRepairAdoptionV1(true);
+    if(!preview.ok)throw Error(preview.diagnostic.code+': '+preview.diagnostic.message);
+    if(fact.fromRulesVersion!==preview.transition.fromRulesVersion||fact.toRulesVersion!==preview.transition.toRulesVersion)throw Error('souls-repair-adoption.stale-or-forged');
+    this.turnOnSoulsRepairV1();
+    if(this.rulesVersion!==fact.toRulesVersion)throw Error('souls-repair-adoption.rules-version');
+  }
   enableCommonsFoodDeliveryReaderV1(recorded:CommonsFoodDeliveryV1[]=[]){this.foodDeliveryReader=true;if(recorded.length){this.finishRecorder();this.foodDeliveries=recorded.map(d=>commonsFoodDeliveryV1Schema.parse(d));if(this.foodDeliveries.length>4||this.foodDeliveries.some((d,i)=>d.batch!==i+1))throw Error('food-delivery.snapshot-sequence');this.renderBaseKey='';this.startRecorder();}}
   commonsFoodDeliveriesV1(){return structuredClone(this.foodDeliveries);}
   previewCommonsFoodDeliveryV1(deliveryId:string){
@@ -2191,12 +2249,18 @@ export class MarsEngine implements Engine {
    *  static scene (world.entityPhysicsV1, like nav/1) and entities. The planner re-bases once; idle bodies a new solid
    *  buries step out to the nearest clear spot (edits never bury a Soul); busy ones are named in `trapped`.
    *  Returns the hash it derived so the host can check replay agreement. */
+  /** #1250: what the last edit stood down, for the god's reply. Not state: a read of what the fold did, and each edit replaces it. */
+  private settledV1:string[]=[];
+  takeSettledV1():string[]{const ids=this.settledV1;this.settledV1=[];return ids;}
   applyWorldEditV1(raw:WorldEditV1):{hash:string;relocated:string[];trapped:string[];kept:string[]}{
     if(!raw||raw.contract!=='world-edit/1'||typeof raw.set!=='object'||!Array.isArray(raw.levels))throw Error('world-edit.bad-payload');
     if(this.renderPlatformMetadata)this.finishRecorder();
     const baseKey=this.rt.world.entityPhysicsV1?.baseKey;
     const navigationChanged=worldEditChangesNavigation(this.rt.world,raw);
+    const up=this.cfg?.sharedCarryV1===true?framesUp(this.rt.world):[];
     const {physics,kept}=applyWorldEdit(this.rt.world,raw);
+    // #1250: in the same application as the edit, before any invariant looks, so extending a bay doesn't rewind the world
+    this.settledV1=this.cfg?.sharedCarryV1===true?[...new Set([...settleFrames(this.rt),...framesFell(this.rt.world,up)])].sort():[];
     this.m.canonicalEntityOrder(this.rt.world);
     // entity-world fixtures are depicted by the viewer's entity layer (entity diffs), not by engine change events or takes
     const spatial=this.rt.services.spatial as Spatial;
@@ -2868,6 +2932,11 @@ function checkedTable(t: EntityTable): EntityTable {
 }
 
 function centroid(poly: [number, number][]): [number, number] { let x = 0, z = 0; for (const p of poly) { x += p[0]; z += p[1]; } return [r3(x / poly.length), r3(z / poly.length)]; }
+/** #1323: the repair rules are named by the rules version, never by the state hash, as in an engine without a physical
+ *  binding; so an adoption leaves the hash where it was and a snapshot under them restores through the readers below them.
+ *  A config without them is the same object, so the hash of every world without the rules is unchanged. (A physically bound
+ *  world made with them, under `SIM_SHARED_CARRY=1` or `SIM_SOULS_REPAIR=1`, now hashes without the key: dev worlds only.) */
+function physicalPolicyV1(cfg:MarsWorldConfig):MarsWorldConfig{if(cfg.soulsRepairV1!==true)return cfg;const {soulsRepairV1:_,...rest}=cfg;return rest;}
 function nativeRulesVersion(version:string,cfg:MarsWorldConfig){return `sim-mars/1+${version}${cfg.safeCrewRemoval?'+crew-removal/1':''}${cfg.scene==='eden-commons'?'+commons/1':''}${cfg.safeArrivalV1?'+arrival-clearance/1':''}${cfg.walkBlockV1?'+walk-block/1':''}${cfg.disassemblyV1?'+'+DISASSEMBLY_POLICY:''}${cfg.map?'+'+cfg.map:''}${cfg.sharedCarryV1?'+'+SHARED_RAISE_POLICY+'+'+SHARED_BEAM_POLICY+'+'+SHARED_DECK_POLICY+'+'+SHARED_STAIRS_POLICY+'+'+SHARED_BAY_POLICY:''}${cfg.soulsRepairV1?'+'+SOULS_REPAIR_POLICY:''}`;}
 /** PC13 (#692): a world whose engine has the shared raise (SIM_SHARED_CARRY) says so in its rules version: a journal that
  *  names raise_hold_v1 does not replay, nor a snapshot restore, where the verb is not registered. */

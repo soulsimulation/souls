@@ -14,6 +14,7 @@ import type {NativeBoatControlsV1} from './boat.ts';
 import type {BodyLocationV1} from './body-location.ts';
 import type {CampExpansionV1,CampExpansionAdmissionV1} from './camp-expansion.ts';
 import type {CrewRemovalTransitionV1,CrewRemovalTransitionAdmissionV1} from './crew-removal-transition.ts';
+import type {SoulsRepairAdoptionV1,SoulsRepairAdoptionAdmissionV1} from './souls-repair-adoption.ts';
 export type {RenderScene} from './scene-capture.ts';
 
 /** A feasible activity for an actor, params already bound. The brain picks by id only. */
@@ -86,13 +87,17 @@ export type EngineCheckpointCapture = {
 
 /** #1150 rung 1: moves this step did not apply, by rule. Present only on a step that refused one. The log keeps them as
  *  evidence; a replay recomputes them from world state and the rules, so nothing here is an input. */
-export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true; /** What threw, for `engine.action-threw`. */ why?: string };
+export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true; /** What threw, for `engine.action-threw`. */ why?: string; /** The frames that stood down with it. */ settled?: string[] };
 
 /** #1150 decision 1: the world landed on a body, so there is no pose to go back to. The one named exception to "never teleport". */
 export const RELOCATED = { code: 'world.relocated', message: 'The world changed where you stood, so you were moved to the nearest free spot. Nothing else changed.' };
 /** #1150 rung 3: what a Soul is told when the world went back. */
 export const STEP_FAILING = { code: 'world.step-failing', message: 'The world is failing to move anything right now, so nothing you try can happen yet. You can still speak.' };
 export const ACTION_THREW = { code: 'engine.action-threw', message: 'What you were doing broke, so it ended here and anything held was let go. You can act again.' };
+/** #1150, #1250: a stop that couldn't finish, past its bound. Nothing broke: the world freed the hands it held. */
+export const STOP_GAVE_UP = { code: 'world.stop-gave-up', message: 'What you asked to stop could not finish, so your hands were freed: what you held stays where it is, standing if it is joined to something. You can act again.' };
+/** #1150, #1250: a crew on the same joined frame let go, so this one can't finish it either. */
+export const FRAME_LET_GO = { code: 'world.frame-let-go', message: 'A crew on the same frame let go, so nobody can finish it with you now: your hands were freed, and the part stands where it is. You can act again.' };
 export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again once your hands are free.' };
 
 /** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
@@ -199,6 +204,11 @@ export interface Engine {
   adoptCommonsProvisionsV1?(transition:unknown):void;
   previewCrewRemovalTransitionV1?():CrewRemovalTransitionAdmissionV1;
   adoptCrewRemovalTransitionV1?(transition:CrewRemovalTransitionV1):void;
+  /** #1323: the repair rules adopted at a history's head (a reader that allows it only). */
+  previewSoulsRepairAdoptionV1?():SoulsRepairAdoptionAdmissionV1;
+  adoptSoulsRepairV1?(transition:SoulsRepairAdoptionV1):void;
+  /** #1323: a history that began under the repair rules, with no adoption fact: its genesis engine runs them. */
+  bornUnderSoulsRepairV1?():void;
   previewCampExpansionV1?():CampExpansionAdmissionV1;
   adoptCampExpansionV1?(transition:CampExpansionV1):void;
   campAnchors?(): Anchor[];

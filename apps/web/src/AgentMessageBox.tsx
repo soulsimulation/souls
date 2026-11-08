@@ -18,7 +18,26 @@ export type AgentInbox = {
   link?: unknown;
   /** LINK: the agent's public `now` line, also on the owner view. */
   now?: unknown;
+  /** #1313: the owner view's act under way for the newest message, or thinking (read by `readDoing`). */
+  doing?: unknown;
 };
+export type Doing = {phase: 'thinking'} | {phase: 'running' | 'done' | 'failed' | 'refused' | 'cut' | 'paused'; text: string; reason?: string; step?: {n: number; of: number}};
+const PHASES = ['running', 'done', 'failed', 'refused', 'cut', 'paused'] as const;
+const PHASE_WORD: Record<(typeof PHASES)[number], string> = {running: 'running', done: 'done', failed: 'failed', refused: 'refused', cut: 'cut short', paused: 'paused'};
+/** #1313: the server's `doing`, checked field by field (anything else reads as nothing: the card never guesses). */
+export function readDoing(x: unknown): Doing | null {
+  if (!x || typeof x !== 'object') return null;
+  const d = x as Record<string, unknown>;
+  if (d.phase === 'thinking') return {phase: 'thinking'};
+  if (!PHASES.includes(d.phase as never) || typeof d.text !== 'string' || !d.text.trim()) return null;
+  const st = d.step as {n?: unknown; of?: unknown} | undefined;
+  const step = st && Number.isInteger(st.n) && Number.isInteger(st.of) && (st.n as number) >= 1 && (st.n as number) <= (st.of as number) ? {n: st.n as number, of: st.of as number} : undefined;
+  return {phase: d.phase as (typeof PHASES)[number], text: d.text.slice(0, 160), ...(typeof d.reason === 'string' && d.reason ? {reason: d.reason.slice(0, 200)} : {}), ...(step ? {step} : {})};
+}
+/** The act line: "step 2 of 3 · walk to cottage · running", "sit down · refused: no room there". */
+export function doingLine(d: Exclude<Doing, {phase: 'thinking'}>) {
+  return [d.step ? `step ${d.step.n} of ${d.step.of}` : '', d.text, `${PHASE_WORD[d.phase]}${d.reason && (d.phase === 'failed' || d.phase === 'refused') ? `: ${d.reason}` : ''}`].filter(Boolean).join(' · ');
+}
 /** A message still unread after this long says so, with its age. */
 export const NOT_PICKED_UP_MS = 10_000;
 const ago = (ms: number) => ms < 60_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 3_600_000)} h`;
@@ -73,7 +92,11 @@ export function AgentMessageBoxView({kind, inbox, prompt = '', text, sending = f
   const soul = kind === 'soul';
   const presence = !soul && inbox ? presenceLine(inbox, now) : null;
   // the owner's newest message; `queued` counts what still waits (the agent works oldest first)
-  const state = latest ? receiptState(latest, inbox?.queued ?? 0, now) : '';
+  const doing = soul && latest ? readDoing(inbox?.doing) : null;
+  // #1313: picked up and not yet answered or acted on, with the agent here: it is working on it
+  const thinking = doing?.phase === 'thinking' && latest?.state === 'delivered';
+  const act = doing && doing.phase !== 'thinking' ? doing : null;
+  const state = latest ? thinking ? receiptState(latest, inbox?.queued ?? 0, now).replace(/^Picked up/, 'Thinking…') : receiptState(latest, inbox?.queued ?? 0, now) : '';
   // D3c: until the result, the world's progress line (an act served an earlier step: "now: …; not resting yet")
   const answers = latest ? [latest.reply, latest.result ?? latest.progress].filter((x): x is string => !!x) : [];
   const receipt = latest ? [state, latest.text, ...answers].join(' · ') : '';
@@ -86,10 +109,11 @@ export function AgentMessageBoxView({kind, inbox, prompt = '', text, sending = f
       <input aria-label="Message your agent" placeholder="Message your agent…" value={text} onChange={e => onText(e.target.value)} maxLength={1000} disabled={sending} autoComplete="off"/>
       <button type="submit" disabled={sending || !text.trim()}>{sending ? 'Sending…' : 'Send'}</button>
     </form>
-    {latest && <p className="agent-message-receipt" role="status" title={receipt} data-message-state={latest.state}>
+    {latest && <p className="agent-message-receipt" role="status" title={receipt} data-message-state={latest.state} data-thinking={thinking ? '1' : undefined}>
       <span className="agent-message-state">{state}</span><span aria-hidden="true"> · </span><span className="agent-message-text">{latest.text}</span>
       {answers.map((a, i) => <span key={i} className="agent-message-answer"><span aria-hidden="true"> · </span><span className="agent-message-reply">{a}</span></span>)}
     </p>}
+    {act && <p className="agent-message-act" data-act-phase={act.phase} title={doingLine(act)}><i aria-hidden="true"/><span>{doingLine(act)}</span></p>}
     {error && <p className="agent-message-error" role="alert">{error}</p>}
     {!soul && error.startsWith('Copy unavailable') && <input className="agent-message-prompt" aria-label="Agent start prompt" value={prompt} readOnly onFocus={e => e.target.select()}/>}
   </div>;

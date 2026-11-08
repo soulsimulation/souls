@@ -3,7 +3,7 @@ import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
 import {authoredBoundariesDeclarationV1Schema,type AuthoredBoundariesDeclarationV1} from '@souls/engine-contract';
-import {ACTION_THREW,REWOUND,type EngineRefusalV1} from '@souls/engine-contract';
+import {ACTION_THREW,FRAME_LET_GO,REWOUND,STOP_GAVE_UP,type EngineRefusalV1} from '@souls/engine-contract';
 import {edenLectureV1} from '@souls/engine-mars';
 import {renderPlatformRowsV1Schema,type RenderPlatformV1} from '@souls/engine-contract';
 import {officeStairGuardsDeclarationV1Schema,type OfficeStairGuardsDeclarationV1} from '@souls/engine-contract';
@@ -80,6 +80,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
   lastRung?: { contained?: {code:string;subjects:string[]}[]; relocated?: string[]; skipped?: number[] } };
 /** #1150: a minute of world time. A fault within it of a rung 3 doesn't rewind again. */
 const REWIND_COOLDOWN_TICKS = 1200;
+/** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
+const glitchy = (r: EngineRefusalV1) => r.rule !== STOP_GAVE_UP.code && r.rule !== FRAME_LET_GO.code;
 /** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
 const STEP_FAILING_WINDOW_TICKS = 200, STEP_FAILING_FAULTS = 100;
 /** What rung 3 leaves out: decisions, and the facts that only mean something for a programme a decision started. */
@@ -249,6 +251,9 @@ export class WorldHost {
       from = 'snapshot';
     } else {
       this.engine = this.factory.create(this.factory.genesis(w.seed));
+      // #1323: a history that began under the repair rules, with no adoption in its log, ran them from genesis
+      if(w.rules_version.includes('+souls-repair/')&&!this.engine.rulesVersion.includes('+souls-repair/')&&this.engine.bornUnderSoulsRepairV1
+        &&!this.db.db.prepare("SELECT 1 FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.soulsRepairAdoptV1.contract') IS NOT NULL LIMIT 1").get(this.worldId))this.engine.bornUnderSoulsRepairV1();
       this.kernel = initKernel(this.engine, pinnedVocabulary(this.db.rulesEvents(this.worldId)));
     }
     // fast-forward: replay events logged after the snapshot, stepping the engine to their ticks
@@ -389,6 +394,34 @@ export class WorldHost {
       if(r.changes!==1)throw Error('crew-removal-transition.header-moved');return true;
     };
     return new Promise((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{crewRemovalTransition:expected},guard,journal,resolve,reject}));
+  }
+  /** #1323: the repair rules for a history that began without them: one logged fact at the head, the header in the same
+   *  acceptance (the clock frontier that follows names the new rules, and a boot replays this fact before checking it).
+   *  Resolves null when there is nothing to adopt: already adopted, or a reader that doesn't adopt. One way. */
+  adoptSoulsRepairV1(author:string):Promise<LogEvent|null>{
+    const preview=this.engine.previewSoulsRepairAdoptionV1?.();
+    if(!preview?.ok)return Promise.resolve(null);
+    if(this.stationHistoryV1())return Promise.reject(Error('souls-repair-adoption.station-carry-required'));
+    // the header names the engine's version (Eden), or an older one this reader still replays (a launcher world's first rules)
+    const expected=preview.transition,header=this.db.world(this.worldId)?.rules_version;
+    if(!header||header.includes('+souls-repair/')||this.factory.canReplayHistory?.(header)===false)return Promise.reject(Error('souls-repair-adoption.header-unreadable'));
+    const guard:AcceptanceGuard=()=>{
+      if(this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
+      const row=this.db.world(this.worldId);
+      if(row?.dt!==this.engine.dt||row.rules_version!==header)throw Error('souls-repair-adoption.header-moved');
+      const current=this.engine.previewSoulsRepairAdoptionV1?.();
+      if(!current?.ok||hashOf(current.transition)!==hashOf(expected))throw Error('souls-repair-adoption.source-moved');
+      if(this.factory.canReplayHistory?.(expected.toRulesVersion)===false||this.factory.canRestoreSnapshot?.(expected.toRulesVersion)!==true)throw Error('souls-repair-adoption.reader-unavailable');
+      return true;
+    };
+    const journal:AcceptanceJournal=()=>{
+      const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(expected.toRulesVersion,this.worldId,header);
+      if(r.changes!==1)throw Error('souls-repair-adoption.header-moved');return true;
+    };
+    // A rung 2 or 3 before the next snapshot re-applies this fact over the older baseline, which its fold allows. No eager copy
+    // of the head is taken here: boot keeps one world in memory (the snapshot's text serves as the baseline), and so does this.
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{soulsRepairAdoptV1:expected},guard,journal,
+      resolve:e=>{this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
   }
   private stationEraEvent(source:LogEvent):LogEvent|undefined {
     const old=this.stationHistoryV1();if(!old)return undefined;
@@ -548,7 +581,7 @@ export class WorldHost {
     const previousViolations = this.engine.runtime.violations.length;
     const tStep = performance.now();
     try { out = this.stepEngine(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
-    catch (error) { for (const r of out!?.refusals ?? []) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
+    catch (error) { for (const r of out!?.refusals ?? []) if (glitchy(r)) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
     this.noteCleanTick();
     this.advanceLives();
     this.kernel.tick = this.engine.world.tick;
@@ -664,7 +697,7 @@ export class WorldHost {
         if(stationEra)this.apply(stationEra,false);
         if(arrival)this.apply(arrival,false);
       } catch (error) {
-        if(arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark){
+        if(arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.soulsRepairAdoptV1||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark){
           // A committed structural pair cannot be attributed to an unrelated
           // card or filtered out by card-fault recovery. Restore exact history.
           try{
@@ -675,7 +708,7 @@ export class WorldHost {
       }
       if (this.repairRules && !this.clockAvailable) { for (const q of pending.slice(pending.indexOf(p))) q.reject?.(this.clockFailure); return; }   // nothing more may be written from this head
       const accepted=[e,...(admission?[admission]:[]),...(stationEra?[stationEra]:[]),...(arrival?[arrival]:[])];
-      if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
+      if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.soulsRepairAdoptV1||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
       // No listener can observe a physical event before its committed era fold.
       for (const fact of accepted) for (const l of this.listeners) l.onApplied?.(fact);
       if (admission && recovered) { p.reject?.(new PersistedIntentAdmissionFault(e.seq)); continue; }
@@ -926,6 +959,7 @@ export class WorldHost {
     const matchedStep = pm ? stepIndex(this, pm, (e.payload as PlayPayload).card, (e.payload as PlayPayload).target) : -1;
     if (e.kind === 'rules' && e.payload?.recovery) { this.restoreRecovery(e.payload.recovery as RecoveryRecipe); this.seq = e.seq; return; }
     if(e.kind==='rules'&&e.payload?.crewRemovalTransition&&this.stationHistoryV1())throw Error('crew-removal-transition.station-carry-required');
+    if(e.kind==='rules'&&e.payload?.soulsRepairAdoptV1&&this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
     if(e.kind==='rules'&&e.payload?.existingGreenLandmark&&this.stationHistoryV1())throw Error('green-landmark.station-carry-required');
     if(e.kind==='rules'&&e.payload?.edenGround&&this.stationHistoryV1())throw Error('eden-ground.station-carry-required');
     if(e.kind==='rules'&&e.payload?.edenLecture&&this.stationHistoryV1())throw Error('eden-lecture.station-carry-required');
@@ -1725,7 +1759,7 @@ export class WorldHost {
   /** #1150 rung 1: the engine already undid these moves. The log keeps each as evidence, in this tick; a replay recomputes
    *  them from state, so it reads these only to compare the count. */
   private noteRefusals(refusals: EngineRefusalV1[]) {
-    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); this.countRefusal(r); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }   // a replay needn't repeat the throw, so don't leave it one to repeat
+    for (const r of refusals) { void this.enqueue('rules', 'world:refusal', { refusal: r }); if (glitchy(r)) this.countRefusal(r); if (r.rule === ACTION_THREW.code) this.snapshotSoon ??= 'an action threw'; }   // a replay needn't repeat the throw, so don't leave it one to repeat
     this.drainInputs();
   }
   private countRefusal(r: EngineRefusalV1) { this.recordGlitch('refusal', JSON.stringify([{ code: r.rule, subjects: r.bodies }]), { tick: r.tick, evidence: { programs: r.programs, poses: r.poses } }); }

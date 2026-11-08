@@ -44,8 +44,10 @@ function setup() {
   writeFileSync(join(data, 'worlds.json'), JSON.stringify({ worlds: [{ slug: 'eden' }, { slug: 'mars' }] }));
   writeFileSync(join(data, 'keeper.json'), JSON.stringify({ keeper: { pid: 4242, sha: sha256(keeperSource) }, active: { build: PREV } }));
   writeFileSync(conf, 'PORT=1\n');
-  script(join(fakebin, 'systemctl'), 'echo 4242');
-  script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nprintf '{"ok":true,"hostOk":true,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$(basename "$(readlink ${root}/production)")"`);
+  // systemctl start is the health timer's oneshot (#1356): it rewrites host health, which clears a stale code unless still-halted
+  script(join(fakebin, 'systemctl'), `case "$1" in start) printf 'systemctl\\t%s\\n' "$*" >> ${log}; [ ! -e ${t}/fail-refresh ] || exit 1; [ -e ${t}/still-halted ] || rm -f ${t}/host-codes;; *) echo 4242;; esac`);
+  // host-codes (a JSON array) makes public healthz report hostOk false with those codes
+  script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nif [ -e ${t}/host-codes ]; then hc="\\"hostOk\\":false,\\"hostCodes\\":$(cat ${t}/host-codes)"; else hc='"hostOk":true'; fi\nprintf '{"ok":true,%s,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$hc" "$(basename "$(readlink ${root}/production)")"`);
   if (spawnSync('sh', ['-c', 'command -v sha256sum']).status !== 0) script(join(fakebin, 'sha256sum'), 'exec shasum -a 256 "$@"');
   // ssh and scp: an empty environment on the far side, proving the remote block needs nothing from the operator
   script(join(t, 'stubs/ssh'), `printf 'ssh\\t%s\\n' "$*" >> ${log}\nwhile [ "\${1:-}" = -o ]; do shift 2; done; shift\ncase "$*" in true) exit 0;; *" verify "*) cat > /dev/null; echo ok; exit 0;; "bash -s --"*) [ ! -e ${t}/ssh-drop ] || { cat > /dev/null; exit 255; }; [ ! -e ${t}/tamper-manifest ] || echo tampered >> ${root}/releases/${build}/RELEASE-MANIFEST.json; [ ! -e ${t}/tamper-keeper ] || echo '{"keeper":{"pid":1}}' > ${data}/keeper.json;; esac\nexec env -i PATH="${fakebin}:$PATH" HOME=/nonexistent bash -c "$*"`);
@@ -240,6 +242,47 @@ test('--from: activation can only follow a fresh probe; resuming at the walks st
   assert.equal(r.status, 0, r.stdout);
   assert.equal(s.calls().slice(before).match(/^activate\t/gm), null);
   assert.match(s.calls().slice(before), /walk\.mjs/);
+});
+
+test('#1356: a halted host refuses the snapshot unless --accept-host-codes names every code, and the activation refreshes host health', () => {
+  const halted = s => writeFileSync(join(s.t, 'host-codes'), '["halted"]');
+  // without the flag: refused at the snapshot, nothing staged
+  let s = setup(); halted(s);
+  let r = s.run(s.base);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /STOPPED at step snapshot/);
+  assert.match(r.stdout, /public healthz is not ok/);
+  assert.doesNotMatch(s.calls(), /^release\t|^activate\t/m);
+  // a code outside the accepted list still refuses
+  s = setup(); writeFileSync(join(s.t, 'host-codes'), '["halted","disk"]');
+  r = s.run([...s.base, '--accept-host-codes', 'halted']);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /host codes halted,disk, accepted only halted/);
+  assert.doesNotMatch(s.calls(), /^release\t|^activate\t/m);
+  // with the flag: recorded, and the halt the timer recorded before the activation is refreshed away before the healthz check
+  s = setup(); halted(s);
+  r = s.run([...s.base, '--accept-host-codes', 'halted']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /accepting host codes at the snapshot: halted/);
+  const snapshot = JSON.parse(readFileSync(join(s.out, 'snapshot.json'), 'utf8'));
+  assert.deepEqual(snapshot.acceptedHostCodes, ['halted']);
+  assert.deepEqual(snapshot.publicHealth.hostCodes, ['halted']);
+  assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', s.build));
+  const calls = s.calls();
+  assert.ok(calls.indexOf('activate\t') < calls.indexOf('systemctl\tstart sim-worlds-health@production.service'));
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live');
+  // the flag's format is checked
+  assert.equal(s.run([...s.base, '--accept-host-codes', 'Halted;x']).status, 2);
+});
+
+test('#1356: a failed host health refresh, or a halt the refresh still reports, rolls the activation back', () => {
+  for (const flag of ['fail-refresh', 'still-halted']) {
+    const s = setup(); writeFileSync(join(s.t, 'host-codes'), '["halted"]'); writeFileSync(join(s.t, flag), '');
+    const r = s.run([...s.base, '--accept-host-codes', 'halted']);
+    assert.equal(r.status, 1, flag);
+    assert.match(r.stdout, /failed \(exit 81\); the host rolled code back/, flag);
+    assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV), flag);
+  }
 });
 
 test('a second run into the same output folder is refused', () => {

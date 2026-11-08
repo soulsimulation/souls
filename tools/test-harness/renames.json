@@ -49,6 +49,37 @@
       "to": "use-check: every core seat has a real height, and SEAT_HEIGHTS is what the library revisions store",
       "reason": "Same test: with no comfortable seat range left (#1083), each core seat is checked for a real height instead of fitting the shortest look; the SEAT_HEIGHTS check is unchanged",
       "pr": "#1087"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "helpers: full jitter stays under the capped exponential; stated waits spread ±20 %; Retry-After from header or body",
+      "to": "helpers: full jitter stays under the capped exponential; a stated wait is a floor, spread up to 20 % above it; Retry-After from header or body",
+      "reason": "Same test, renamed when a stated Retry-After became a floor (spread up to 20 % above it) instead of ±20 %",
+      "pr": "#1185"
+    },
+    {
+      "step": "V4-web",
+      "from": "it runs from just covering the text to the corners, on any aspect ratio, and the disc is sized to cover them",
+      "to": [
+        "\\#1318: it runs from 55% of just covering the text to 60% of the way to the corners, on any aspect ratio",
+        "\\#1318: no path turns the screen white: the dissolve starts from the light, corners grey"
+      ],
+      "reason": "Replaced when the loading light became smaller and softer: its radius now runs to 60% of the way to the corners, which stay light grey",
+      "pr": "#1320"
+    },
+    {
+      "step": "V4-web",
+      "from": "VF6: a wall behind the camera while dragging pulls it in, and the asked-for distance comes back",
+      "to": "\\#1316: dragging behind a wall decouples the camera: it stays where the viewer put it; Follow again couples it",
+      "reason": "Replaced when a drag behind a wall became a pull out that decouples Follow instead of being pulled back in",
+      "pr": "#1342"
+    },
+    {
+      "step": "V4-web",
+      "from": "Dragging the camera out through a one-sided room wall pulls it back inside",
+      "to": "\\#1316: dragging the camera out through a one-sided room wall keeps it out; Follow again brings it back inside",
+      "reason": "Replaced when a drag out through a room wall became a pull out that keeps the camera outside until Follow is pressed again",
+      "pr": "#1342"
     }
   ]
 }
