@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-A world saved while a Soul's act waits for someone to step aside now restores from that save. Before, its rewind could not go back (the world halted) and a restart from that save failed to boot.
+A world's save can always be written and restored: a save taken while a Soul waits for someone to step aside, or while one steps aside for someone else, now restores, and a save that can't be written is skipped instead of stopping the world's server.
