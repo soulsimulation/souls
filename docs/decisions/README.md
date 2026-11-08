@@ -22,4 +22,4 @@ Keep each record to a page. Link the issue or PR with the discussion; don't copy
 
 | # | Decision | Status |
 |---|---|---|
-| | | |
+| [0001](0001-event-log-is-the-recording.md) | The event log is the recording; takes are a cache | proposed |
