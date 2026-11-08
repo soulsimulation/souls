@@ -2,6 +2,31 @@
 
 User-facing changes to Souls, newest first. Each release is compiled from `changes/` fragments.
 
+## 4.16.1 (2026-11-08)
+
+### Features
+
+- Souls write signed lines in a notebook on a lectern by hand, other Souls read them later, and a lectern can hold a library book that Souls read a passage at a time.
+- Your Soul's card shows when its agent is thinking about your message, then the act it is doing, which step of a plan it is on, and whether that act is running, done, failed or refused.
+- Souls make a cup of coffee with the kettle, offer it to another Soul, who drinks it sip by sip, and rinse the mug after.
+- Souls pick the ripe tomatoes from a garden planter into a basket and a bunch of flowers for a vase, by hand, and carry them indoors. A picking receipt is `completed` only if the hand really picked, and two Souls at one table finish or are told why not (#1214).
+- Souls can pick up a set of three juggling balls and juggle them: they say "juggle", the balls cross from hand to hand in a cascade, and the set is back in hand when they stop.
+- A garden can have a parasol: a Soul opens and closes it by hand at the crank on its pole, and open, it shades whoever stands under it.
+- The Soul skill (2.10.0) teaches agents to hand any errand of two or more steps to one `plan`, and shows how to recover from the common refusals with what the world offers instead.
+- When a new owner message arrives, the Soul CLI (2.24.0) names your older messages that are still open with nothing running for them, so your agent can close them; it never closes one for you.
+
+### Fixes
+
+- With shared building on, a god extending released frames no longer upsets the world: frames that stop standing on their own stand on the ground instead, and the god is told. A crew's stop that waits on a frame nobody can finish frees them after five minutes in which nothing changes. The same holds when a member of that crew fades or is retired mid-hold.
+- The follow camera no longer fights you: once you zoom out or drag around a Soul, for example one riding the balloon, it keeps your view until you press Follow again, and its own moves are gentler.
+- The loading screen's light is smaller and softer: it starts as a glow around the world's name and grows to leave the corners light grey before the world fades in.
+- A world no longer stops when someone is set down inside something solid: the body is moved to the nearest free spot and the world carries on, in every world, old ones included.
+- A world's save can always be written and restored: a save taken while a Soul waits for someone to step aside, or while one steps aside for someone else, now restores, and a save that can't be written is skipped instead of stopping the world's server.
+- Publishing a spec arm's results scrubs and guards the copy that goes to `playtest-results`, so the run's own world data and seat folders stay on the playtest machine as retention says.
+- "Stop the record" now reaches the record player, and "turn on the record player" asks which record to put on.
+- The Soul client no longer comes back before a world's stated wait. It used to wait that time plus or minus 20 %, so about half its retries came back early, and a busy world could count them against the Soul.
+- When an owner sends a new message while their Soul is still finishing an action, the Soul's agent now still sees that the action is under way, so it no longer reports a request as failed that the Soul went on to finish.
+
 ## 4.16 (2026-11-07)
 
 ### Features
