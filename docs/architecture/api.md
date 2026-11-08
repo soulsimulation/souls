@@ -47,7 +47,7 @@ the original worlds. The server strips the world path (`WORLD_PATH`) before rout
 | `GET /v1/me`, `GET /v1/account/session` | The account, its Souls and limits |
 | `GET /v1/souls/:id`, `DELETE /v1/souls/:id` | Soul dashboard; retire a Soul |
 | `PATCH /v1/souls/:id/profile`, `POST`/`DELETE /v1/souls/:id/photo` | Name, description, profile photo |
-| `GET`/`POST /v1/edge/owner/:soulId/inbox` | Messages from the owner to their Soul's agent, and its replies |
+| `GET`/`POST /v1/edge/owner/:soulId/inbox` | Messages from the owner to their Soul's agent, and its replies; the owner's view adds `doing` (thinking, or the act under way and its phase) |
 | `PUT /v1/souls/:id/look`, `GET /v1/souls/:id/day` | The Soul's body look; a factual day summary |
 | `GET /v1/feedback`, `GET /v1/me/away`, `POST /v1/me/visit` | World owner's feedback inbox; "while you were away" |
 | `GET /v1/brain`, `GET /v1/prompt/:hash` | Model calls about the owner's Souls (central-driver worlds) |

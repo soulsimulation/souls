@@ -440,6 +440,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       CREATE INDEX IF NOT EXISTS edge_receipts_v1_soul ON edge_receipts_v1 (world_id, soul_id, phase);
       CREATE TABLE IF NOT EXISTS edge_refusals_v1 (world_id TEXT NOT NULL, at INTEGER NOT NULL, tick INTEGER NOT NULL, soul_id TEXT NOT NULL, verb TEXT NOT NULL, capability TEXT NOT NULL, code TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS edge_refusals_v1_at ON edge_refusals_v1 (world_id, at);`);
+    // #1313: the owner's card reads a Soul's newest receipt and refusal since a message's pickup on every poll
+    db.db.exec(`CREATE INDEX IF NOT EXISTS edge_receipts_v1_soul_at ON edge_receipts_v1 (world_id, soul_id, created_at);
+      CREATE INDEX IF NOT EXISTS edge_refusals_v1_soul_at ON edge_refusals_v1 (world_id, soul_id, at);`);
     db.db.exec('CREATE TABLE IF NOT EXISTS edge_owner_control_v1(world_id TEXT NOT NULL,soul_id TEXT NOT NULL,until_ms INTEGER NOT NULL,PRIMARY KEY(world_id,soul_id)) WITHOUT ROWID');
     // PM-R055: a waiting act's plan is kept with its receipt so a restart re-arms it instead of losing it.
     if (!(db.db.prepare('PRAGMA table_info(edge_receipts_v1)').all() as {name: string}[]).some(c => c.name === 'plan')) db.db.exec('ALTER TABLE edge_receipts_v1 ADD COLUMN plan TEXT');
