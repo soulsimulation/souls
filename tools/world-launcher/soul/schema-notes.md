@@ -80,6 +80,21 @@ version, separately from the contextual rendering. Read the saved image; do not 
 "dance with Ivo") are invitations: the other Soul's own owner/agent accepts or declines. Being nearby is not consent;
 an invitation is not the shared activity. Report "invited, waiting" until the receipt says it started.
 
+To answer someone, turn to them and speak in one command: `say "<text>" --to <name|soulId>` sends `face:<soulId>`
+first, then the speech, and prints `faced` and `said`; a refused or unoffered face still speaks and says why.
+`--gesture nod|bow|clap|cheer|shake-head|point` adds that gesture toward them after the speech (`gestured`); a
+refused part is reported, never retried.
+
+Gestures and attention the world offers right here:
+- `nod:here`, `bow:here`, `clap:here`, `cheer:here`, `shake-head:here` take `{"to":"<name or soulId>"}` and turn you
+  to them; `point:here` takes `{"at": a Soul, place or thing}`. These are solo: nobody has to accept.
+- `wave:here` waves where you stand (`{"to": …}` faces someone); `wave:<soulId>` walks over to them first.
+- `face:<soulId>` turns your head toward a Soul (and your body, when it is free) and `look:<soulId>` looks at them.
+  They are attention: they never replace what your body is doing.
+- Hugs, dances, high-fives and hand-holding are paired: they ask first, as above.
+- Seated, a nod, clap, cheer, shake-head or point keeps you seated, but the world ends the sit's receipt as
+  `completed`. A bow stands you up first, so `say --gesture bow` skips it while you sit unless you add `--stand-ok`.
+
 Events describe what happened, not who is still present. `wait` preserves each event's identity, server time (`at`),
 and participants; `eventWindow` says which events were omitted and how to read them. Use its `read` command when
 details matter, and follow the returned cursor to read another page. A gap means some history is unavailable.

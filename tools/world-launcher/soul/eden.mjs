@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.4";
+const VERSION = "2.24.5";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -3180,21 +3180,73 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
 }
 
 // say "<text>" [--for <message-id>] [--key <k>]: with --for, the speech is what the owner asked for, so it closes that message too.
-async function say(...input) {
-  // --key only among the trailing flags (with or around --for): "--key" inside speech is words
-  let words = input, key;
-  for (let n = words.length; n >= 2; n = words.length) {
-    if (words[n - 2] === "--key" && key === undefined) { key = keyArg(words[n - 1]); words = [...words.slice(0, n - 2)]; }
-    else if (words[n - 2] === "--for" && n >= 4 && words[n - 4] === "--key" && key === undefined) { key = keyArg(words[n - 3]); words = [...words.slice(0, n - 4), ...words.slice(n - 2)]; }
+// #1354: [--to <name|soulId> [--gesture <g>] [--stand-ok]] turns to them first (face:<soulId>, attention, so it never
+// replaces what the body is doing), speaks, then gestures toward them. Each part is reported; a refused part is never
+// retried, and a refused face or gesture never unsays the speech.
+const SAY_GESTURES = ["nod", "bow", "clap", "cheer", "shake-head", "point"], STANDS_UP = new Set(["bow"]);
+export function sayFlags(words) {
+  // only among the trailing flags: "tell her --to the letter" said unquoted is speech, as "what --for means" is
+  const flags = {}, drop = new Set();
+  if (["--to", "--gesture", "--key"].includes(words.at(-1))) throw new Error(`${words.at(-1)} needs a value`);
+  for (let i = words.length - 1; i >= 0;) {
+    if (words[i] === "--stand-ok") { flags.standOk = true; drop.add(i); i -= 1; }
+    else if (["--to", "--gesture", "--key"].includes(words[i - 1])) {
+      if (flags[words[i - 1].slice(2)] !== undefined) throw new Error(`${words[i - 1]} is given twice`);
+      flags[words[i - 1].slice(2)] = words[i]; drop.add(i).add(i - 1); i -= 2;
+    }
+    else if (words[i - 1] === "--for" && /^(msg_|none$)/.test(words[i])) i -= 2;
     else break;
   }
+  return { ...flags, words: words.filter((_, i) => !drop.has(i)) };
+}
+async function say(...all) {
+  let flags;
+  try { flags = sayFlags(all); } catch (e) { throw new Error(`${e.message}. usage: say "<text>" [--to <name|soulId> [--gesture <g>] [--stand-ok]] [--for <message-id>] [--key <k>]`); }
+  const { to, gesture, standOk, words } = flags, key = flags.key === undefined ? undefined : keyArg(flags.key);
   const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
   const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>" [--for <message-id>] [--key <k>]');
+  const usage = 'usage: say "<text>" [--to <name|soulId> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for <message-id>] [--key <k>]';
+  if (!text) throw new Error(usage);
+  if ((gesture || standOk) && !to) throw new Error(`--gesture and --stand-ok go with --to. ${usage}`);
+  if (gesture && !SAY_GESTURES.includes(gesture)) throw new Error(`--gesture is one of ${SAY_GESTURES.join(", ")}. ${usage}`);
+  const target = to ? await faceTarget(to) : null;
+  const faced = target ? await sayPart(target.id ? `face:${target.id}` : null, undefined, target) : undefined;
   const w = await keyedWrite("/v1/edge/say", { text: text.slice(0, 500) }, { key });
-  if (w.unconfirmed) return unconfirmed("speech", w);
+  if (w.unconfirmed) return { ...(faced ? { faced } : {}), ...unconfirmed("speech", w) }; // no gesture after speech the world did not confirm
   const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
-  return forId ? { ...said, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : said;
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: await sayGesture(gesture, target, standOk) } : {}) };
+  return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
+}
+/** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
+async function faceTarget(to) {
+  const r = await call("/v1/edge/capabilities?all=1").catch(() => null), offers = (r?.status === 200 ? r.data?.capabilities ?? [] : []).filter((c) => c.verb === "face" && c.available !== false);
+  const nameOf = (c) => String(c.label ?? "").replace(/^Turn towards /, "").trim(), named = (c) => nameOf(c).toLowerCase();
+  const exact = offers.find((c) => c.id === `face:${to}` || c.target?.id === to);
+  const byName = exact ? [exact] : offers.filter((c) => named(c) === String(to).trim().toLowerCase());
+  if (byName.length === 1) return { id: byName[0].target?.id ?? byName[0].id.slice(5), name: nameOf(byName[0]) || to };
+  if (r?.status !== 200) return { name: to, code: "face.unknown", reason: `Could not read the offers to find ${to}, so the turn was not sent.` };
+  return byName.length ? { name: to, code: "face.ambiguous", reason: `${byName.length} Souls near you are called ${to}: use the soulId (${byName.map((c) => c.target?.id ?? c.id.slice(5)).join(", ")}).` }
+    : { name: to, code: "face.not-offered", reason: `${to} is not near enough to turn to: no face offer names them.` };
+}
+/** One strict act of say's, reported in a line: never retried after a refusal, never fatal to the speech. */
+async function sayPart(capability, params, target) {
+  if (!capability) return { to: target.name, accepted: false, code: target.code, reason: target.reason };
+  try {
+    const d = ok(await call("/v1/edge/act", { body: { capability, ...(params ? { params } : {}), strict: true, clientRef: randomUUID() } }), "act");
+    return d.accepted ? { id: capability, to: target.name, accepted: true, ...(d.receipt?.id ? { receipt: d.receipt.id } : {}) } : { id: capability, to: target.name, accepted: false, code: d.code, reason: d.reason };
+  } catch (e) { return { id: capability, to: target.name, accepted: false, code: "act.error", reason: e.message }; }
+}
+/** The gesture after the speech, toward them. A bow stands a seated or lying Soul up, so it goes only with --stand-ok. A
+ *  name that two Souls near you share would let the world pick either, so then nothing is sent. */
+const DOWN = new Set(["seated", "lying", "sleeping"]);
+async function sayGesture(g, target, standOk) {
+  const id = `${g}:here`;
+  if (target.code === "face.ambiguous") return { id, to: target.name, sent: false, reason: target.reason };
+  if (STANDS_UP.has(g) && !standOk) {
+    const r = await call("/v1/edge/here").catch(() => null), posture = r?.status === 200 ? (r.data?.here ?? r.data)?.me?.posture : undefined;
+    if (!posture || DOWN.has(posture)) return { id, to: target.name, sent: false, reason: posture ? `A ${g} would stand you up (you are ${posture}). Add --stand-ok to ${g} anyway.` : `Could not read your posture, and a ${g} stands a seated Soul up. Add --stand-ok to ${g} anyway.` };
+  }
+  return sayPart(id, { [g === "point" ? "at" : "to"]: target.id ?? target.name }, target);
 }
 
 async function converse(op, arg, ...text) {
@@ -4452,7 +4504,7 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>" [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+          say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
           (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
 owner     listen [--after id] [--once] [--take]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
