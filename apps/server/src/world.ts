@@ -251,6 +251,9 @@ export class WorldHost {
       from = 'snapshot';
     } else {
       this.engine = this.factory.create(this.factory.genesis(w.seed));
+      // #1323: a history that began under the repair rules, with no adoption in its log, ran them from genesis
+      if(w.rules_version.includes('+souls-repair/')&&!this.engine.rulesVersion.includes('+souls-repair/')&&this.engine.bornUnderSoulsRepairV1
+        &&!this.db.db.prepare("SELECT 1 FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.soulsRepairAdoptV1.contract') IS NOT NULL LIMIT 1").get(this.worldId))this.engine.bornUnderSoulsRepairV1();
       this.kernel = initKernel(this.engine, pinnedVocabulary(this.db.rulesEvents(this.worldId)));
     }
     // fast-forward: replay events logged after the snapshot, stepping the engine to their ticks
@@ -391,6 +394,34 @@ export class WorldHost {
       if(r.changes!==1)throw Error('crew-removal-transition.header-moved');return true;
     };
     return new Promise((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{crewRemovalTransition:expected},guard,journal,resolve,reject}));
+  }
+  /** #1323: the repair rules for a history that began without them: one logged fact at the head, the header in the same
+   *  acceptance (the clock frontier that follows names the new rules, and a boot replays this fact before checking it).
+   *  Resolves null when there is nothing to adopt: already adopted, or a reader that doesn't adopt. One way. */
+  adoptSoulsRepairV1(author:string):Promise<LogEvent|null>{
+    const preview=this.engine.previewSoulsRepairAdoptionV1?.();
+    if(!preview?.ok)return Promise.resolve(null);
+    if(this.stationHistoryV1())return Promise.reject(Error('souls-repair-adoption.station-carry-required'));
+    // the header names the engine's version (Eden), or an older one this reader still replays (a launcher world's first rules)
+    const expected=preview.transition,header=this.db.world(this.worldId)?.rules_version;
+    if(!header||header.includes('+souls-repair/')||this.factory.canReplayHistory?.(header)===false)return Promise.reject(Error('souls-repair-adoption.header-unreadable'));
+    const guard:AcceptanceGuard=()=>{
+      if(this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
+      const row=this.db.world(this.worldId);
+      if(row?.dt!==this.engine.dt||row.rules_version!==header)throw Error('souls-repair-adoption.header-moved');
+      const current=this.engine.previewSoulsRepairAdoptionV1?.();
+      if(!current?.ok||hashOf(current.transition)!==hashOf(expected))throw Error('souls-repair-adoption.source-moved');
+      if(this.factory.canReplayHistory?.(expected.toRulesVersion)===false||this.factory.canRestoreSnapshot?.(expected.toRulesVersion)!==true)throw Error('souls-repair-adoption.reader-unavailable');
+      return true;
+    };
+    const journal:AcceptanceJournal=()=>{
+      const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(expected.toRulesVersion,this.worldId,header);
+      if(r.changes!==1)throw Error('souls-repair-adoption.header-moved');return true;
+    };
+    // A rung 2 or 3 before the next snapshot re-applies this fact over the older baseline, which its fold allows. No eager copy
+    // of the head is taken here: boot keeps one world in memory (the snapshot's text serves as the baseline), and so does this.
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload:{soulsRepairAdoptV1:expected},guard,journal,
+      resolve:e=>{this.snapshotSoon??='the repair rules adopted';resolve(e);},reject}));
   }
   private stationEraEvent(source:LogEvent):LogEvent|undefined {
     const old=this.stationHistoryV1();if(!old)return undefined;
@@ -666,7 +697,7 @@ export class WorldHost {
         if(stationEra)this.apply(stationEra,false);
         if(arrival)this.apply(arrival,false);
       } catch (error) {
-        if(arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark){
+        if(arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.soulsRepairAdoptV1||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark){
           // A committed structural pair cannot be attributed to an unrelated
           // card or filtered out by card-fault recovery. Restore exact history.
           try{
@@ -677,7 +708,7 @@ export class WorldHost {
       }
       if (this.repairRules && !this.clockAvailable) { for (const q of pending.slice(pending.indexOf(p))) q.reject?.(this.clockFailure); return; }   // nothing more may be written from this head
       const accepted=[e,...(admission?[admission]:[]),...(stationEra?[stationEra]:[]),...(arrival?[arrival]:[])];
-      if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
+      if (!recovered||arrival||stationEra||e.payload?.soulProfileV1||e.payload?.crewRemovalTransition||e.payload?.soulsRepairAdoptV1||e.payload?.nativeSleepSnapshotPolicy||e.payload?.commonsNewcomerResources||e.payload?.commonsProvisions||e.payload?.commonsKitchen||e.payload?.retainedCommonsShore||e.payload?.commonsFoodDelivery||e.payload?.socialEden||e.payload?.edenLecture||e.payload?.edenGround||e.payload?.existingGreenLandmark) this.acc.log.push(...accepted);
       // No listener can observe a physical event before its committed era fold.
       for (const fact of accepted) for (const l of this.listeners) l.onApplied?.(fact);
       if (admission && recovered) { p.reject?.(new PersistedIntentAdmissionFault(e.seq)); continue; }
@@ -928,6 +959,7 @@ export class WorldHost {
     const matchedStep = pm ? stepIndex(this, pm, (e.payload as PlayPayload).card, (e.payload as PlayPayload).target) : -1;
     if (e.kind === 'rules' && e.payload?.recovery) { this.restoreRecovery(e.payload.recovery as RecoveryRecipe); this.seq = e.seq; return; }
     if(e.kind==='rules'&&e.payload?.crewRemovalTransition&&this.stationHistoryV1())throw Error('crew-removal-transition.station-carry-required');
+    if(e.kind==='rules'&&e.payload?.soulsRepairAdoptV1&&this.stationHistoryV1())throw Error('souls-repair-adoption.station-carry-required');
     if(e.kind==='rules'&&e.payload?.existingGreenLandmark&&this.stationHistoryV1())throw Error('green-landmark.station-carry-required');
     if(e.kind==='rules'&&e.payload?.edenGround&&this.stationHistoryV1())throw Error('eden-ground.station-carry-required');
     if(e.kind==='rules'&&e.payload?.edenLecture&&this.stationHistoryV1())throw Error('eden-lecture.station-carry-required');
@@ -1236,6 +1268,10 @@ export class WorldHost {
    *  window cut short is retried one tile wider, and a place is reported full only when people fill it. Prospective. */
   enableRouteReachV1(){if((this.extra.runtimePolicy as {routeReachV1?:boolean}|undefined)?.routeReachV1)return Promise.resolve();return this.enqueue('rules','operator:route-reach',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,routeReachV1:true},why:'route-reach/1 (#872): reachable places are planned, not refused route.unreachable or ground.too-far'});}
   enableSpreadClearV1(){if((this.extra.runtimePolicy as {spreadClearV1?:boolean}|undefined)?.spreadClearV1)return Promise.resolve();return this.enqueue('rules','operator:spread-clear',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,spreadClearV1:true},why:'walking to a place picks a free spot on clear ground inside it (a plaza round a fountain, a park round its pond), not a spot inside an obstacle, so arrivals stand in the place; retain historical replay before this event'});}
+  /** #1332 body-step-guard/1, one logged rules event (prospective): every placement the engine writes for a body (edge relocation,
+   *  recovery restore, stall release) stands it only where the static invariant passes it, at its own radius and apart from other
+   *  bodies. History before the event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
+  enableBodyStepGuardV1(author='operator:body-step-guard'){if((this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,bodyStepGuardV1:true},why:'body-step-guard/1 (#1332): a relocation, restore or stall release stands a body only where the static-clearance invariant passes it, at its own radius and apart from other bodies; retain historical replay before this event'});}
   enableReflexTimeoutV1(){if((this.extra.runtimePolicy as {reflexTimeoutV1?:boolean}|undefined)?.reflexTimeoutV1)return Promise.resolve();return this.enqueue('rules','operator:reflex-timeout',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,reflexTimeoutV1:true},why:'every reflex the runtime reports stalled on other people for 60 s (walk, seat, stair, swim, courtesy step, yield) is natively cancelled in every state, so no single body can hold another or the world; retain historical replay before this event'});}
   /** placeRegionsV1: admit W1 places (id, label, polygon) as native destination regions in one logged prospective rules fact.
    *  Only new, admissible places are written; returns what was admitted and why the rest were not. */
@@ -1999,18 +2035,35 @@ export class WorldHost {
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
     this.snapshotGeneration++;
     const t0 = performance.now(), engine = this.engine;
-    const captured = engine.captureCheckpoint?.();
-    const checkpoint = captured && !('stateHash' in captured) ? captured : undefined;
-    const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
-    const fields = this.captureHostState();
-    const physicalHash = checkpoint ? undefined : engine.physicalHash();
+    const capture = () => {
+      const captured = engine.captureCheckpoint?.();
+      const checkpoint = captured && !('stateHash' in captured) ? captured : undefined;
+      const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
+      const fields = this.captureHostState();
+      const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
+      const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
+        return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
+      })();
+      return { checkpoint, legacy, fields, steps };
+    };
+    // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
+    // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
+    // try again when the next one is due. Durable state is the event log and the last good snapshot; nothing was
+    // published for this one. Any other capture fault (corrupt state, a broken iterator) still propagates as before.
+    let parts: ReturnType<typeof capture>;
+    try { parts = capture(); }
+    catch (error) {
+      const code = (error as {code?: unknown} | null)?.code;
+      if (typeof code !== 'string' || !code.startsWith('snapshot.')) throw error;
+      this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
+      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code}});
+      return;
+    }
+    const { checkpoint, legacy, fields, steps } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
-    const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
-    const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
-      return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
-    })();
     const job = { engine, previousTick: this.lastSnapshotTick, previousDebt: { ms: this.replayDebtMs, wall: this.lastSnapshotWall, soon: this.snapshotSoon }, immediate: null as NodeJS.Immediate | null };
     this.periodicSnapshot = job;
     // Keep at most the preceding completed body while hashes are pending. It is
