@@ -308,8 +308,8 @@ export function applySnapshot(rt: Runtime, int: RuntimeInternals, snap: RuntimeS
     int.waiting.set(w.id, { rec, def, params: w.params, parent: w.parent, holds: w.holds });
   }
   for (const rec of rt.records.values())
-    if (rec.status === 'requested' && rec.phase === 'pre-empting' && !seenWaiting.has(rec.id))
-      throw new SnapshotError('snapshot.waiting-invalid', `pre-empting directive ${rec.id} is missing its waiting intent`, [rec.id]);
+    if (rec.status === 'requested' && (rec.phase === 'pre-empting' || rec.phase === 'make-way') && !seenWaiting.has(rec.id))
+      throw new SnapshotError('snapshot.waiting-invalid', `${rec.phase} directive ${rec.id} is missing its waiting intent`, [rec.id]);
   // Return intents are restricted to the original standalone seat action. They are
   // not a general deferred command queue, even if a supplied registry has more verbs.
   const returns = g.services.socialReturns;
