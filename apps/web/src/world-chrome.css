@@ -328,3 +328,19 @@ html.phone-menu .human-world:not(.has-advanced) .world-hud.slim>.hud-left dialog
 .hud-menu-worlds img{display:block;width:24px;height:24px;padding:3px;border-radius:50%;background:#000}
 .hud-menu-value{color:var(--dim);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
 @media (prefers-reduced-motion:reduce){.hud-menu-panel{transition:none}}
+/* #1391 part b: your Souls inline in the phone menu (MySouls portals into .hud-menu-souls-slot) */
+.hud-menu-souls{display:flex;flex-direction:column;gap:2px;margin-top:2px;border-top:1px solid color-mix(in srgb,var(--fg) 10%,transparent)}
+.hud-menu-soul-list{display:flex;flex-direction:column;gap:2px;animation:hud-menu-souls-in .16s ease-out}
+.human-world .hud-menu-soul-list>button:not(.hud-menu-row){display:flex;align-items:center;gap:10px;width:100%;min-height:44px;box-sizing:border-box;padding:6px 12px;border:0;border-radius:10px;background:transparent;color:var(--fg);font:500 14px/1.2 system-ui,sans-serif;text-align:left;cursor:pointer;position:relative}
+.human-world .hud-menu-soul-list>button:not(.hud-menu-row):hover,.human-world .hud-menu-soul-list>button:not(.hud-menu-row):focus-visible{background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.hud-menu-soul-list .soul-avatar{width:28px;height:28px;flex:none;border-radius:50%;font-size:10px}
+.hud-menu-soul-list>button>span:not(.soul-avatar){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hud-menu-soul-list .my-souls-away{opacity:.72}
+.human-world .hud-menu-souls-more{color:var(--dim);font-weight:600;font-size:13px}
+@keyframes hud-menu-souls-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.hud-menu-soul-list{animation:none}}
+.human-world:not(.has-advanced) .world-hud.slim .hud-left .hud-menu-new-soul .bring-agent-open{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;height:auto;box-sizing:border-box;padding:6px 12px;border:0;border-radius:10px;background:transparent;color:var(--fg);box-shadow:none;font:600 14px/1.2 system-ui,sans-serif;text-decoration:none;justify-content:flex-start;white-space:nowrap}
+.human-world:not(.has-advanced) .world-hud.slim .hud-left .hud-menu-new-soul .bring-agent-open:hover{background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
+.human-world:not(.has-advanced) .world-hud.slim .hud-left .hud-menu-new-soul .bring-agent-open>span{position:static;width:auto;height:auto;overflow:visible;clip-path:none}
+.human-world:not(.has-advanced) .world-hud.slim .hud-left .hud-menu-new-soul .bring-agent-open svg{width:20px;height:20px;margin:0 4px;flex:none}
+.hud-menu-soul-list .my-souls-zz,.hud-menu-soul-list .my-souls-pair{position:static;margin-left:auto;width:auto;height:auto;padding:2px 7px;border-radius:999px;font-size:10px;line-height:14px}
