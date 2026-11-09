@@ -4,7 +4,8 @@ The [remote gate](../testing/remote-gate.md) runs the complete suite on Modal. I
 the most expensive thing the project runs routinely, so it is used sparingly and on purpose.
 
 1. **No baseline re-runs.** A gate compares a candidate with a baseline. The baseline is the cached suite result of the
-   commit that is `main` (keyed by source, harness and Node versions). If the cache lacks it, run it once and cache it.
+   commit that is `main` (keyed by source, the executed harness and Node versions). If the cache lacks it, run it once
+   and cache it. A driver-only or `renames.json`-only change keeps the cached baseline.
 2. **One full gate per release head.** Iterate with local, focused checks (`node --test`, `tsc`, walk, bundle). The full
    gate runs on the final head about to ship. A passing full gate seeds the cache for the next release.
 3. **Scoped gates for candidates.** When a candidate needs remote proof before release, use `--scope auto`, which runs
