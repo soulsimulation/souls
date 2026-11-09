@@ -15,9 +15,7 @@ import '../kit.mesh.ts';
 type Drawn = { obj: THREE.Object3D; inst?: string };
 type Inner = { model: WorldModel; ring: StreamRing; now: number; drawn: Map<string, Drawn>; draw(e: Entity, ease: boolean, force?: boolean): void; unload(id: string): void };
 
-test('actual atmosphere refreshes rotated incense smoke on redraw, removal and attachment between mature scans', async t => {
-  const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
-  globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });
+async function runtime() {
   // Keep the real generic builder and entity-layer draw/instancer path, without loading unrelated browser builders.
   const index = new URL('../index.ts', import.meta.url).href;
   const transform = new Set(['../../world-env.ts', '../../WorldGeometry.ts'].map(path => new URL(path, import.meta.url).href));
@@ -28,6 +26,13 @@ test('actual atmosphere refreshes rotated incense smoke on redraw, removal and a
   } });
   const { WorldEntityLayer } = await import('../../WorldEntityLayer.ts');
   const { createWorldAtmosphere } = await import('../../WorldAtmosphere.ts').finally(() => hook.deregister());
+  return { WorldEntityLayer, createWorldAtmosphere };
+}
+
+test('actual atmosphere refreshes rotated incense smoke on redraw, removal and attachment between mature scans', async t => {
+  const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
+  globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });
+  const { WorldEntityLayer, createWorldAtmosphere } = await runtime();
   const layer = new WorldEntityLayer(p => p), inner = layer as unknown as Inner;
   t.after(() => layer.dispose());
   const model = inner.model = new WorldModel({ constants: { ground: 'land', extent: 1000 }, seed: 'incense-smoke' }); model.library = coreLibrary();
@@ -112,4 +117,55 @@ test('actual atmosphere refreshes rotated incense smoke on redraw, removal and a
   check([east, west, ...many]);
   assert.deepEqual(Array.from(smoke.geometry.getAttribute('position').array), cappedPositions, 'periodic collection preserves the same capped source selection and order');
   layer.dispose(); check([]);
+});
+
+test('a new hidden cottage censer redrawn on a periodic scan publishes immediately when uncovered', async t => {
+  const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
+  globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });
+  const { WorldEntityLayer, createWorldAtmosphere } = await runtime();
+  const layer = new WorldEntityLayer(p => p), inner = layer as unknown as Inner & {
+    hostPass(): void; refreshVisibility(id: string, drawn: Drawn, now: number): void;
+  };
+  t.after(() => layer.dispose());
+  const model = inner.model = new WorldModel({ constants: { ground: 'land', extent: 1000 }, seed: 'incense-hidden' }); model.library = coreLibrary();
+  const act = (ops: unknown[]) => { const r = applyBatch(model, { ops }, 'god', 1); assert.equal(r.result.accepted, true, JSON.stringify(r.result)); };
+  act([{ op: 'place', def: coreRef('cottage', 1), name: 'home', p: [0, 0], params: { floors: 2 } }]);
+  const home = model.get('home')!;
+  act([{ op: 'place', def: coreRef('incense-censer', 1), name: 'inside', in: { parent: home.id, slot: 'floor-1' }, p: [0, 0, -1.1] }]);
+  const censer = model.get('home/inside')!.id;
+  inner.ring = new StreamRing({ inner: 100, outer: 150 }); inner.ring.update(0, 0); inner.now = 1000;
+  layer.active = true; layer.motionInstancing = false;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#bbddff'); scene.add(layer.group);
+  const atmosphere = createWorldAtmosphere(scene), camera = new THREE.PerspectiveCamera(); t.after(() => atmosphere.dispose());
+  const frame = (seconds: number) => atmosphere.update({ seconds, dt: .01, clock: '2026-11-09T12:00:00', daylight: 1, camera, eden: true, profile: 'world', reducedMotion: false });
+  inner.draw(home, false, true); inner.draw(model.entities.get(censer)!, false, true);
+  const interior = inner.drawn.get(home.id)!.obj.userData.interior as { floorOf: Record<string, number> };
+  assert.equal(interior.floorOf['floor-1'], 1, 'real cottage builder provides the occupied upper storey');
+  const visibility = () => { inner.hostPass(); inner.refreshVisibility(censer, inner.drawn.get(censer)!, inner.now); };
+  layer.interiorFrom = new THREE.Vector3(100, 0, 0); visibility();
+  assert.equal(inner.drawn.get(censer)!.obj.visible, false, 'supported far-interior policy hides the censer');
+  for (const seconds of [0, 1.5, 5, 12, 25, 45]) frame(seconds);
+  assert.equal(atmosphere.inspect().smokeSources, 1, 'only the real cottage chimney is burning');
+  act([{ op: 'set', id: censer, state: { on: true } }]);
+  inner.draw(model.entities.get(censer)!, false, true); visibility();
+  assert.equal(inner.drawn.get(censer)!.obj.visible, false, 'new lit redraw remains hidden');
+  const scans = atmosphere.inspect().scans;
+  frame(75); assert.equal(atmosphere.inspect().scans, scans + 1);
+  assert.equal(atmosphere.inspect().smokeSources, 1, 'periodic scan must not show the hidden new censer');
+  layer.interiorFrom = null; visibility();
+  assert.equal(inner.drawn.get(censer)!.obj.visible, true, 'supported host visibility uncovers the censer');
+  const smoke = scene.getObjectByName('atmosphere: chimney smoke') as THREE.Points<THREE.BufferGeometry>;
+  for (const seconds of [75.01, 104.99]) {
+    frame(seconds);
+    const found = findAnchors(scene, () => false, false).smoke;
+    assert.equal(found.length, 2, 'cottage chimney and uncovered incense both have live anchors');
+    assert.equal(atmosphere.inspect().smokeSources, 2, 'newly uncovered smoke reaches the actual atmosphere before the next scan');
+    assert.equal(smoke.geometry.drawRange.count, 2 * SMOKE_PER_SOURCE);
+    assert.equal(atmosphere.inspect().scans, scans + 1, 'uncovering does not add a periodic scan');
+    const positions = smoke.geometry.getAttribute('position'), actual = [];
+    for (let i = 0; i < smoke.geometry.drawRange.count; i += SMOKE_PER_SOURCE) actual.push(new THREE.Vector3().fromBufferAttribute(positions, i));
+    for (const source of found) assert.equal(actual.filter(p => p.distanceTo(source.p) < 1e-6).length, 1, 'one actual plume at each world anchor');
+  }
+  const before = atmosphere.inspect(); frame(104.995); const after = atmosphere.inspect();
+  for (const key of ['scans', 'smokeRefreshes', 'lightCollects', 'lightRefreshes'] as const) assert.equal(after[key], before[key], `unchanged visible frame leaves ${key} alone`);
 });

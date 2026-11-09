@@ -53,7 +53,8 @@ export class SmokePublishers {
   beginScan() {
     // The finder skips hidden descendants. Retain known hidden publishers so uncovering them can refresh immediately.
     for (const node of this.nodes.keys()) if (this.visibility(node) !== 1) this.nodes.delete(node);
-    this.pending.clear(); this.dirty = true;
+    // Keep queued redraws: the finder cannot discover new publishers inside hidden subtrees.
+    this.dirty = true;
   }
   capture = (node: THREE.Object3D, sources: SmokeSource[]) => {
     if (!publisher(node)) return;
