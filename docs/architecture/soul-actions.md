@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Preparing a campfire (#1640)
+
+`core/fire-laying-site@1` supplies one fixed set of stones/logs. With empty hands, `lay-campfire` approaches its worker position and runs existing garden/tool work for ten seconds. Only the completed native receipt atomically consumes supplies, records read credit and admits one existing `core/campfire@2` on its ground-height output slot. Ordinary placement/support/access still apply; an occupied or refused footprint preserves supplies. Stopping early adds no fire; duplicate completion adds no second fire. Inspect the site to find its real child campfire, then use its existing native `light` and `put-out` contacts. Existing seating slots are unchanged; no new seating behavior is introduced. Fixed clear campsite only, no freeform construction, fuel simulation, new contact key, geometry/placement authority or precision-tool claim.
