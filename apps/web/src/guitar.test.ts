@@ -13,8 +13,11 @@ test('guitar score windows compose on the absolute piano clock and the pick cros
  }
  assert.ok(pieces.size>1,'body seed selects distinct harmonic progressions');
 });
-test('the drawn guitar stays still while palms fret and strum its actual neck and six strings, at multiple scales and yaws',()=>{
+test('the drawn guitar stays still while authored distal contact goals track its neck and six strings, at multiple scales and yaws',()=>{
  const prop=makeProp('guitar'),origin=new THREE.Vector3(3,2,4),seed='h_a';
+ const drawnStrings=prop.children.filter(o=>(o as THREE.Mesh).isMesh&&Math.abs(o.position.x-.058)<1e-8&&Math.abs(o.scale.z-.002)<1e-8) as THREE.Mesh[];
+ const stringBoxes=drawnStrings.map(m=>{m.updateMatrix();m.geometry.computeBoundingBox();return m.geometry.boundingBox!.clone().applyMatrix4(m.matrix);});
+ const stringFront=Math.max(...stringBoxes.map(b=>b.max.x));
  for(const scale of [.7,1,1.3])for(const yaw of [0,.7,2.3]){
   const fwd=new THREE.Vector3(Math.cos(yaw),0,Math.sin(yaw));let before:number[]|undefined;
   for(let t=100;t<104;t+=.025){
@@ -24,8 +27,8 @@ test('the drawn guitar stays still while palms fret and strum its actual neck an
 
    const handWorld=(p:readonly number[])=>origin.clone().addScaledVector(fwd,p[0]*scale).addScaledVector(new THREE.Vector3(-fwd.z,0,fwd.x),p[1]*scale).add(new THREE.Vector3(0,p[2]*scale,0));
    const left=handWorld(pose.left).applyMatrix4(prop.matrix.clone().invert()),right=handWorld(pose.right).applyMatrix4(prop.matrix.clone().invert());
-   assert.ok(left.y>=.39&&left.y<=.49&&Math.abs(left.z)<1e-8&&Math.abs(left.x-.065)<1e-8,'fretting palm contacts the neck above its strings');
-   assert.ok(Math.abs(right.y-.04)<1e-8&&Math.abs(right.z)<=.058001&&Math.abs(right.x-.075)<1e-8,'pick hand crosses the string bed, independent of guitar frame');
+   assert.ok(left.y>=.39&&left.y<=.49&&stringBoxes.some(b=>b.distanceToPoint(left)<1e-8),'authored fretting goal lies on an actual drawn string surface');
+   assert.ok(Math.abs(right.y-.04)<1e-8&&Math.abs(right.z-left.z)<=.058001&&Math.abs(right.x-stringFront)<1e-8,'authored strum contact crosses the string bed, independent of guitar frame');
    assert.deepEqual(frame.rootHands?.[0],[pose.left[0],-pose.left[1],pose.left[2]]);
   }
  }

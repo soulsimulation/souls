@@ -67,7 +67,7 @@ import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLi
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf,GUITAR_FADE } from './piano-score.ts';
-import {GUITAR_OWNER_FIELDS,guitarOwnerStamp,guitarIdleUnderlay,placeGuitar} from './guitar-contact.ts';
+import {GUITAR_OWNER_FIELDS,guitarOwnerStamp,guitarIdleUnderlay,placeGuitar,poseGuitarHand,type GuitarViewerDiagnostic} from './guitar-contact.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -164,6 +164,7 @@ type View = {
   /** Diagnostics: per arm, shoulder→grip point distance / arm length at the last frame (null = no point). */
   reachRatio: (number | null)[];
   diag?: Diag;
+  guitarDiagnostics?:GuitarViewerDiagnostic[];
   layered: boolean;
   gaze?: { prev: number; cur: number };
   /** Body activity layer (activity-poses.ts): the engine's prop, sitting on the ground, running, and the prop mesh. */
@@ -221,6 +222,8 @@ type View = {
 };
 /** Per-frame readout of the pose layers (lab hook `bones()`, e2e). */
 export type Diag = {
+  /** Actor-local guitar adapter failures; native state and other actors continue. */
+  guitar?:GuitarViewerDiagnostic[];
   expression?: Expression;
   water?: WaterMotion;
   stairShoeCoverage?:{vertices:number;complete:boolean};
@@ -1195,6 +1198,7 @@ export class HumanViews {
     if (v.layered) for (const s of v.saved) { s.o.position.copy(s.p); s.o.quaternion.copy(s.q); }
     v.layered = false;
     v.diag = undefined;
+    v.guitarDiagnostics=undefined;
     v.stairGoals=undefined;
     v.stairResiduals=undefined;
     mixer.update(0);
@@ -1439,6 +1443,12 @@ export class HumanViews {
       if (sitW <= 0) dangle(v, pz.bend, k);
       closeHands(v, v.carryWeight === undefined ? k : k.map(x => x * v.carryWeight!));
     } else if (act?.hands) {
+      if(act.guitar&&(!v.prop||v.prop.kind!=='guitar')){
+        if(v.prop)h.remove(v.prop.obj);
+        v.prop={kind:'guitar',obj:makeProp('guitar')};h.add(v.prop.obj);
+      }
+      if(act.guitar)for(const side of [1,-1])if(!v.arms.some(arm=>arm.side===side))
+        (v.guitarDiagnostics??=[]).push({code:'guitar.pose.unsupported-rig',side:side>0?'left':'right',reason:'The guitar arm chain is not mapped on this actor.'});
       // body activity: each hand to a goal relative to its own shoulder (forward, outward, up), reach-honest IK;
       // an arm without a goal keeps the base posture (hand on thigh seated, hanging standing)
       source = 'expression';
@@ -1456,10 +1466,15 @@ export class HumanViews {
         if (t.y < floor) t.y = floor;
         if (wgt <= 0) return;
         targets[i] = t;
-        if(!act.piano)armTo(arm, t, wgt, 0.98, h, V().copy(_right).multiplyScalar(left ? -0.6 : 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
+        if(act.guitar){
+          const result=poseGuitarHand(arm,h,v.rig.model,t,_fwd,_right,wgt,gs,v.prop!.obj,act.guitar);
+          targets[i]=result.target;
+          if(result.diagnostic)(v.guitarDiagnostics??=[]).push(result.diagnostic);
+        }
+        else if(!act.piano)armTo(arm, t, wgt, 0.98, h, V().copy(_right).multiplyScalar(left ? -0.6 : 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
         for(const b of saved){b.o.position.lerpVectors(b.p,b.o.position,weight);b.o.quaternion.slerpQuaternions(b.q,b.o.quaternion.clone(),weight);}
       });
-      closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
+      if(!act.guitar)closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
       if(act.piano)v.arms.forEach((arm,i)=>{if(targets[i])posePianoHand(arm,h.position,targets[i]!,_fwd,_right,h.position.y+act.piano!.height,act.piano!.lift[armSide(v,i)==='left'?0:1],act.piano!.weight,visit=>eachSkinnedWorld(v.surf.hand.get(arm.side),V(),visit));});
     } else if (runFallback && !gait && !fp && !posed && proneW===0 && sitW===0) {
       source='expression';v.arms.forEach((arm,i)=>{const f=runFallback.hands[arm.side>0?0:1];targets[i]=arm.upper.getWorldPosition(V()).addScaledVector(_fwd,f.forward).addScaledVector(_right,-arm.side*.06).addScaledVector(UP,f.up);});reachTo(v,targets,false);closeHands(v,targets.map(()=>.45));
@@ -1548,6 +1563,10 @@ export class HumanViews {
       if(lift>0){place(v.spine.head,v.spine.head.getWorldPosition(V()).addScaledVector(UP,lift));v.spine.head.updateWorldMatrix(true,true);}
     }
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
+    if(v.guitarDiagnostics){
+      v.diag.guitar=v.guitarDiagnostics;
+      for(const arm of v.diag.arms)if(v.guitarDiagnostics.some(d=>d.side===arm.side))arm.contact=0;
+    }
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
     if(hgDiag)v.diag.handGame=hgDiag;

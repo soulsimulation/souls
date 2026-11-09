@@ -314,14 +314,29 @@ export function makeProp(kind: PropKind): THREE.Group {
       for (let i = 0; i < 3; i++) g.add(part(k.box, M.food, 0.035, 0.02, 0.03, 0.04 + i * 0.015, 0.0 + i * 0.006, (i - 1) * 0.03, 0, i)); break;
     case 'boule': g.add(part(k.sphere,M.metal,.045,.045,.045)); break;
     case 'dumbbell': g.add(part(k.cyl,M.metal,.015,.22,.015,0,0,0,Math.PI/2));for(const side of [-1,1])g.add(part(k.cyl,M.metal,.06,.045,.06,side*.1,0,0,Math.PI/2));break;
-    case 'guitar': case 'bass': {
+    case 'guitar': {
+      // Guitar-only construction: fingerboard front follows body front; strings run bridge to nut.
+      const bodyFront=.055,neckThickness=.028,neckWidth=.05,neckStart=.24,neckLength=.43;
+      const nutY=neckStart+neckLength,bridgeY=-.07,stringDiameter=.002,stringPitch=.009;
+      const stringRear=.057,stringCenter=stringRear+stringDiameter/2;
       g.add(part(k.sphere,M.wood,.055,.2,.16,0,-.035));
       g.add(part(k.sphere,M.wood,.05,.13,.12,0,.17));
-      const neck=kind==='bass'?.58:.43;
+      g.add(part(k.box,M.cover,neckThickness,neckLength,neckWidth,bodyFront-neckThickness/2,neckStart+neckLength/2));
+      g.add(part(k.box,M.wood,.035,.11,.075,bodyFront-.035/2,nutY+.11/2));
+      for(let i=0;i<6;i++)g.add(part(k.box,M.metal,stringDiameter,nutY-bridgeY,stringDiameter,stringCenter,(bridgeY+nutY)/2,(i-2.5)*stringPitch));
+      g.add(part(k.sphere,M.cover,.008,.045,.045,.058,.03));
+      const bridge=part(k.box,M.wood,stringRear,stringPitch,neckWidth,stringRear/2,bridgeY);
+      bridge.name='guitar bridge';g.add(bridge);
+      const nut=part(k.box,M.page,stringRear-bodyFront,2*stringDiameter,neckWidth,(bodyFront+stringRear)/2,nutY);
+      nut.name='guitar nut';g.add(nut);break;
+    }
+    case 'bass': {
+      g.add(part(k.sphere,M.wood,.055,.2,.16,0,-.035));
+      g.add(part(k.sphere,M.wood,.05,.13,.12,0,.17));
+      const neck=.58;
       g.add(part(k.box,M.cover,.028,neck,.05,0,.24+neck/2));
       g.add(part(k.box,M.wood,.035,.11,.075,0,.3+neck));
-      if(kind==='guitar'){for(let i=0;i<6;i++)g.add(part(k.box,M.metal,.002,.66,.002,.058,.26,(i-2.5)*.009));}
-      else g.add(part(k.box,M.metal,.006,.62,.012,.058,.24));
+      g.add(part(k.box,M.metal,.006,.62,.012,.058,.24));
       g.add(part(k.sphere,M.cover,.008,.045,.045,.058,.03));break;
     }
     case 'violin': case 'viola': case 'cello': {

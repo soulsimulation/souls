@@ -141,7 +141,7 @@ export function voiceAt(who: Accompanist | null, t: number): { open: number; bre
 }
 
 // Solo guitar on the existing absolute score clock. Sound and the right wrist consume these same strums.
-export const GUITAR_FADE = .8;
+export const GUITAR_FADE = 1;
 export type GuitarStrum = {t:number; chord:string; notes:readonly number[]; up:boolean; vel:number};
 const CHORDS:Record<number,{name:string;notes:readonly number[];fret:number}> = {
   48:{name:'C',notes:[48,52,55,60,64],fret:.40},

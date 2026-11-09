@@ -1,6 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import * as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {HumanViews,type SampledHuman} from '../../../mars/viewer/app/engine-view/humans.ts';import {templateFromGltf,type Template} from '../../../mars/viewer/app/engine-view/people.ts';import {CHARACTER_WIRE} from '../../../mars/viewer/app/engine-view/character-wire.ts';
 import {TakePeople} from '../../../mars/viewer/app/engine-view/take-replay.ts';import {Runtime} from '../../../mars/viewer/engine/runtime/runtime.ts';import {Spatial} from '../../../mars/viewer/engine/spatial/service.ts';import {emptyWorld,human} from '../../../mars/viewer/engine/world/factory.ts';import {TakeRecorder} from '../../../mars/viewer/engine/take/recorder.ts';import {openGround} from '../../../mars/viewer/engine/test/frame-fixtures.ts';
+import {assertGuitarGeometry} from './guitar-geometry.mjs';
 const ID='guitar_contact',DT=.05,templates=new Map<string,Template>();
 async function glb(file:string){
  const source=readFileSync(new URL('../../../mars/viewer/public/modular/environment/'+file,import.meta.url)),len=source.readUInt32LE(12),j=JSON.parse(source.subarray(20,20+len).toString()),bin=source.subarray(20+len);
@@ -13,15 +14,18 @@ async function template(rig:'casual'|'woman',height:number){
 async function views(rig:'casual'|'woman'='woman',height=1.75){const v=new HumanViews();v.setTemplates([await template(rig,height)]);return v;}
 const palms=(v:HumanViews)=>v.bones(ID)[ID].arms.map(a=>a.palm);
 const distance=(a:number[],b:number[])=>Math.hypot(...a.map((x,i)=>x-b[i]));
-for(const rig of ['casual','woman'] as const)for(const height of [1.65,1.85])for(const yaw of [0,1.7])test(`guitar actual rig ${rig},${height}m,yaw${yaw}: palms reach neck/strings while instrument stays fixed`,async()=>{
+for(const rig of ['casual','woman'] as const)for(const height of [1.65,1.85])for(const yaw of [0,1.7])test(`guitar actual rig ${rig},${height}m,yaw${yaw}: distal skin contacts strings and whole limbs clear solids while instrument stays fixed`,async()=>{
  const v=await views(rig,height);let matrix:number[]|undefined,maxError=0;
  for(let k=0;k<45;k++){
   const t=100+k*DT;v.setFrame([{id:ID,p:[3,.94,2],yaw,walk:0,walkDist:0,activity:'play-music',baseActivity:'idle',instrument:'guitar',activityAge:4}],t);v.render(1);
   const holder=(v as unknown as {views:Map<string,{rig:{holder:THREE.Object3D}}>}).views.get(ID)!.rig.holder;holder.updateMatrixWorld(true);const prop=holder.getObjectByName('activity prop: guitar')!;assert.ok(prop?.visible);
   if(matrix)assert.ok(prop.matrixWorld.elements.every((x,i)=>Math.abs(x-matrix![i])<1e-9),'guitar stays on torso while wrists move');matrix=[...prop.matrixWorld.elements];
-  const arms=v.bones(ID)[ID].arms;for(const arm of arms){maxError=Math.max(maxError,arm.err??0);assert.ok((arm.ratio??0)<.98,'no arm stretching');const local=new THREE.Vector3(...arm.palm).applyMatrix4(prop.matrixWorld.clone().invert());assert.ok(Math.abs(local.x-(arm.side==='left'?.065:.075))<.015,'actual palm reaches drawn guitar face');if(arm.side==='left')assert.ok(local.y>.38&&local.y<.50&&Math.abs(local.z)<.015,'fretting hand remains on neck');else assert.ok(Math.abs(local.y-.04)<.015&&Math.abs(local.z)<.075,'strumming hand crosses actual strings');}
+  const diag=v.bones(ID)[ID];assert.equal(diag.guitar,undefined,'supported rig has no local pose failure');
+  for(const arm of diag.arms){assert.ok(arm.target&&arm.err!==null&&Number.isFinite(arm.err)&&arm.ratio!==null&&Number.isFinite(arm.ratio),'genuine solver goal and finite reach diagnostics');maxError=Math.max(maxError,arm.err);assert.ok(arm.ratio<.98,'no arm stretching');}
+  const view=(v as unknown as {views:Map<string,unknown>}).views.get(ID)!;
+  assertGuitarGeometry(view,{contact:k%10===0});
  }
- assert.ok(maxError<.015,'actual palms attain instrument contacts');
+ assert.ok(maxError<.015,'actual palms attain genuine solver goals');
 });
 for(const duration of [.1,.4,4])test(`guitar entry and idle release ${duration}s: attained pose stays continuous, random access agrees`,async()=>{
  const v=await views(),end=100+duration;let previous:number[][]|undefined,maxStep=0,maxAt=0;let sample:{f:SampledHuman;t:number;palms:number[][]}|undefined;
