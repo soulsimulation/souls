@@ -35,6 +35,8 @@ export const unfinishedWay = (issue: {code: string; message?: string}): string =
 };
 /** BS3: refusals a plain walk answers with its closest approach (the fine planner's; ground.* keep their named refusals). */
 const APPROACH_CODES = new Set(['route.unreachable', 'route.goal-blocked']);
+/** nav-connect/1: a Soul is stepped out to open ground at most once in this many ticks (a minute). */
+const NAV_STEP_OUT_TICKS = 1200;
 const STUCK_RADIUS = 0.34;
 /** D2: a seat this close (m) with no enclosure boundary between is "here" for sit:here: a few steps (a fire-circle log, the
  *  bench by the fountain), never the 30 m walk to a chair in another house. 3 m failed the party and activities gates. */
@@ -964,12 +966,23 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const plan = b ? (plans ? plans.get(capId) : this.bindOne(soul, capId)?.plan) : undefined;   // L3 item 4: one offer, not the menu
     if (!b || !plan?.steps.some(s => s.verb === 'walk_to') || !engine.navEpochV1) return null;
     const [x, y, z] = b.pose.p, scope = `${engine.navEpochV1()}|${Math.round(x * 2)},${Math.round(y * 2)},${Math.round(z * 2)}`, key = `${scope}|${capId}`;
-    const hit = this.routeMemo.get(key); if (hit !== undefined) return hit;
-    const issue = this.mw.feasibility.canPerform({actor: soul.entityId, label: plan.label, steps: plan.steps}, 'route|' + scope);   // B-facade: a verdict per (nav epoch, 0.5 m cell) on a replica
-    const out = issue && ROUTE_DEAD.has(issue.code) ? {code: issue.code, reason: humanBlockedExplanationV1(issue.code, plan.label)} : null;
-    if (this.readOnly && !out) return out;   // #1281: on a replica no issue can be a verdict not yet here: keep asking
-    this.routeMemo.set(key, out); if (this.routeMemo.size > 4096) this.routeMemo.delete(this.routeMemo.keys().next().value!);
-    return out;
+    let out = this.routeMemo.get(key);
+    if (out === undefined) {
+      const issue = this.mw.feasibility.canPerform({actor: soul.entityId, label: plan.label, steps: plan.steps}, 'route|' + scope);   // B-facade: a verdict per (nav epoch, 0.5 m cell) on a replica
+      out = issue && ROUTE_DEAD.has(issue.code) ? {code: issue.code, reason: humanBlockedExplanationV1(issue.code, plan.label)} : null;
+      if (this.readOnly && !out) return out;   // #1281: on a replica no issue can be a verdict not yet here: keep asking
+      this.routeMemo.set(key, out); if (this.routeMemo.size > 4096) this.routeMemo.delete(this.routeMemo.keys().next().value!);
+    }
+    // #1287: no route because the Soul stands cut off, and the act would step it out (launch's nav-connect/1): every walk
+    // form goes, as an offered id already did, rather than the listing and the intent saying no way leads out
+    return out?.code === 'route.unreachable' && this.stepOutReady(soul) ? null : out;
+  }
+  /** #1287: launch's nav-connect/1 step-out would move this Soul now: outside its once-a-minute bound, and the engine's pure
+   *  rescue read (0 ms: never builds the labels; cold labels answer no) finds it cut off with open ground to step to. Main only. */
+  stepOutReady(soul: EdgeSoul): boolean {
+    if (this.readOnly || (this.navRescuedAt.get(soul.soulId) ?? -1e9) > this.host.engine.world.tick - NAV_STEP_OUT_TICKS) return false;
+    const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => unknown};
+    return !!engine.navRescueV1?.(soul.entityId, 0);
   }
   private routeMemo = new Map<string, {code: string; reason: string} | null>();
   private arm(p: Pending) {
@@ -2186,7 +2199,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // closed a pocket round it, a floor lost its stairs): it steps to the nearest open ground of the main area first (a
     // logged edge-relocate, at most once a minute each), then starts. A destination no walk reaches still refuses.
     let steppedOut: string | undefined;
-    if (issue?.code === 'route.unreachable' && (this.navRescuedAt.get(soul.soulId) ?? -1e9) <= this.host.engine.world.tick - 1200) {
+    if (issue?.code === 'route.unreachable' && (this.navRescuedAt.get(soul.soulId) ?? -1e9) <= this.host.engine.world.tick - NAV_STEP_OUT_TICKS) {
       const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => {to: [number, number]; code: string; level: number; seated?: true} | null};
       const r = engine.navRescueV1 ? engine.navRescueV1(soul.entityId, 100) : null;
       if (r) {
