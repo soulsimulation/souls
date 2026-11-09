@@ -709,3 +709,13 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Paper folding (#1643)
+
+A fixed `core-folding-desk@1` supplies two sheets and offers a choice of boat or bird. Existing ten-second
+native craft owns movement and timing; its small pen-shaped performance prop depicts a creasing stylus, without
+claiming separate tool custody. A completed receipt rechecks access, supply, empty output and nearby body before
+one atomic normal God batch consumes a sheet, records the maker and creates a real portable paper sculpture.
+Interrupted work creates nothing. Clear the output tray before folding again. Ordinary pickup and surface placement
+retain artwork identity. Read the desk for the selected form, maker and remaining supply; ordinary artwork description
+retains its credit. These are paper artworks, with no flying, floating, vehicle or wearable behavior.

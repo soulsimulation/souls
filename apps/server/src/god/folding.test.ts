@@ -1,0 +1,45 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {WorldModel,coreLibrary,applyBatch,type Op} from '@souls/world-compiler';
+import {createFolding} from './folding.ts';
+import type {EdgeReceipt} from '../edge/contract.ts';
+
+function setup(){
+ const model=new WorldModel({constants:{ground:'land',extent:100},seed:'folding-controls'});model.library=coreLibrary();
+ const edit=(ops:Op[])=>{const r=applyBatch(model,{ops},'god',0);assert.equal(r.result.accepted,true,JSON.stringify(r.result));};
+ edit([{op:'place',def:'core/folding-desk@1',name:'block',p:[0,0],in:{parent:'world'},mode:'strict'}]);
+ const block=[...model.entities.values()].find(e=>e.name==='block')!,body={pose:{p:[0,0,1]},human:{}};
+ let denied=false,refused=false,commits=0,logs=0;
+ const service=createFolding({model,engine:{world:{entities:{ana:body}}},levelAt:()=>0,soul:()=>({id:'s-ana',entity_id:'ana',name:'Ana'}),denied:()=>denied?{code:'object.private',reason:'Private'}:null,
+  commit(ops,_note,clientRef){commits++;assert.equal(clientRef,'folding:completed-work');if(refused)return{accepted:false};edit(ops);return{accepted:true};},log(){logs++;}});
+ const receipt={id:'completed-work',soulId:'s-ana',capability:'object:'+block.id+':fold-boat',phase:'completed',endedTick:400} as EdgeReceipt;
+ return{model,block,body,edit,service,receipt,denied:()=>{denied=true;},refused:()=>{refused=true;},commits:()=>commits,logs:()=>logs};
+}
+
+test('folding completion rechecks target, stock, access, output and actual nearby body without consuming on refusal',()=>{
+ for(const scenario of ['removed','stock-used','private','output-occupied','moved','body-away','older','refused-batch','not-completed']){
+  const x=setup();
+  if(scenario==='removed')x.edit([{op:'remove',id:x.block.id,cascade:true}]);
+  if(scenario==='stock-used')x.edit([{op:'set',id:x.block.id,state:{stock:0}}]);
+  if(scenario==='private')x.denied();
+  if(scenario==='output-occupied')x.edit([{op:'place',def:'core/paper-boat@1',name:'bowl',in:{parent:x.block.id,slot:'out'},p:[0,0],mode:'strict'}]);
+  if(scenario==='moved')x.edit([{op:'move',id:x.block.id,p:[10,0],mode:'strict'}]);
+  if(scenario==='body-away')x.body.pose.p=[8,0,8];
+  if(scenario==='older')x.edit([{op:'set',id:x.block.id,state:{lastCompletedTick:401}}]);
+  if(scenario==='refused-batch')x.refused();
+  x.service.onReceipt(scenario==='not-completed'?{...x.receipt,phase:'replaced'}:x.receipt);
+  assert.equal([...x.model.entities.values()].filter(e=>e.def==='core-paper-boat@1'&&e.name!=='bowl').length,0,scenario);
+  assert.equal(x.commits(),scenario==='refused-batch'?1:0,scenario);
+  if(!['removed','stock-used'].includes(scenario))assert.equal(x.model.entities.get(x.block.id)?.state?.stock,2,scenario);
+  if(scenario==='refused-batch')assert.equal(x.logs(),1);
+ }
+});
+
+test('one receipt atomically records credit and creates one actual child; duplicate completion cannot consume again',()=>{
+ const x=setup();x.service.onReceipt(x.receipt);assert.equal(x.commits(),1);
+ const block=x.model.entities.get(x.block.id)!;assert.equal(block.state?.stock,1);assert.equal(block.state?.lastBy,'Ana');
+ const output=[...x.model.entities.values()].find(e=>e.name==='boat-sculpture')!;assert.ok(output);assert.equal(output.in.parent,block.id);assert.equal(output.in.slot,'out');
+ x.service.onReceipt(x.receipt);assert.equal(x.commits(),1);assert.equal([...x.model.entities.values()].filter(e=>e.name==='boat-sculpture').length,1);
+});
+
+test('folding plan uses existing bounded native craft with the supplied creasing stylus',()=>{const x=setup();const plan=x.service.plan({soulId:'s-ana',entityId:'ana',name:'Ana'} as never,x.block.id,'fold-boat');assert.ok(plan&&'steps'in plan);const work=plan.steps.find(s=>s.verb==='mars:pose_v1');assert.equal(work?.params.activity,'craft');assert.equal(work?.params.seconds,10);assert.equal(work?.params.prop,'pen');});

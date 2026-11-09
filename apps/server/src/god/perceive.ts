@@ -1,3 +1,4 @@
+import type {Folding} from './folding.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -125,6 +126,8 @@ export type PerceiveHost = {
 export const GOD_PLACES = process.env.GOD_PLACES !== '0';
 
 export class GodPerceive {
+  private folding?:Folding;
+  bindFolding(service:Folding){this.folding=service;}
   private h: PerceiveHost;
   private sigs = new Map<string, string>();
   /** What each `built` object's state should be now (its kind's advance reads this). */
@@ -185,6 +188,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      folding:(soul:EdgeSoul,id:string,action:string)=>this.folding?.plan(soul,id,action)??null,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
