@@ -92,6 +92,8 @@ test('#1436 review: a stop serves an owner message only when named; the implicit
   writeFileSync(file, JSON.stringify({...state, lastAcked: 'msg_0', lastAckedAt: new Date().toISOString(), lastAckedActed: false}));   // just acked
   await cli('stop');
   assert.equal(acts[0].for, undefined, 'no link by default'); assert.equal(acts[0].forDefault, undefined);
+  await cli('act', 'walk:fire');
+  assert.equal(acts[1].capability, 'walk:fire'); assert.equal(acts[1].for, 'msg_0', 'the stop left the implicit link for the next act'); assert.equal(acts[1].forDefault, true);
   await cli('stop', '--for', 'msg_1');
-  assert.equal(acts[1].for, 'msg_1', '--for names the message');
+  assert.equal(acts[2].for, 'msg_1', '--for names the message');
 });

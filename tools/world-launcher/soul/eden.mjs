@@ -2962,7 +2962,8 @@ async function act(...argv) {
   if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { key: sideKey(w.key), ref: w.ref, once: true }); }
   if (w.unconfirmed) return unconfirmed("act", w);
   const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
-  if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
+  // a stop serves no owner message unless named, so it leaves the implicit link for the next act (#1448 review)
+  if (d.accepted && parsed.capability !== STOP_ID) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
