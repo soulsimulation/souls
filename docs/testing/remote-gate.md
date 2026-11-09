@@ -90,7 +90,11 @@ the gate runs (the step follows `one-validation.sh`), at the merge base and at t
 step fails the check until `renames.json` at the head has an entry for that step whose `from` ends with it (a
 V3-packages `from` starts with its package). A suite title that is gone needs entries for the tests under it. A test
 that newly gets an unconditional `skip` or `todo` fails until `quarantine.json` lists it. Titles built at run time are
-listed as unchecked, and replacement titles that no changed file declares are noted. To check a branch locally:
+listed as unchecked; when a step's changed files build titles at run time at the head (a table loop that replaced
+literal tests), the literal titles gone from the base are listed as unchecked too, since they may still run under the
+same name. Replacement titles that no changed file declares are noted. Known limits: a test moved from one `describe`
+to another keeps its last segment, so the check passes it and the gate reports the changed id at release; a regex
+literal containing a quote or backtick can mislead the reader for that file. To check a branch locally:
 `node .github/scripts/gate-renames.mjs --base origin/main`. The gate's own comparison stays the backstop.
 
 Add an entry in the PR that renames or replaces the test, or when a gate reports the removal, citing the PR that made

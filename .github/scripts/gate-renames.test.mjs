@@ -89,6 +89,19 @@ test('a renamed suite needs entries under it; run-time titles are reported as un
   assert.equal(dyn.ok, true); assert.match(dyn.unchecked[0].why, /built at run time/);
 });
 
+test('a literal title that becomes a run-time one (a table loop) is unchecked, not failed (review)', () => {
+  const files = [{ path: WEB, base: src("test('case a', () => {}); test('case b', () => {});"), head: src("for (const c of ['a', 'b']) test(`case ${c}`, () => {});") }];
+  const r = checkRenames(files, R(), Q);
+  assert.equal(r.ok, true, JSON.stringify(r.problems));
+  assert.deepEqual(r.unchecked.filter(u => u.side === 'base').map(u => u.why.split('"')[1]), ['case a', 'case b']);
+  // a static file elsewhere in the step does not hide a removal in a file with no run-time titles... unless the step's head has them
+  const stat = [{ path: WEB, base: src("test('gone', () => {});"), head: src('') }];
+  assert.equal(checkRenames(stat, R(), Q).ok, false);
+  // `{ skip }` shorthand is a conditional skip, noted, never failed
+  const sh = checkRenames([{ path: WEB, base: src("test('a', () => {});"), head: src("const skip = !process.env.X; test('a', { skip }, () => {});") }], R(), Q);
+  assert.equal(sh.ok, true); assert.match(sh.notes[0], /conditional skip/);
+});
+
 test('a newly unconditional skip or todo needs a quarantine entry; an existing or conditional one does not', () => {
   const skipped = [{ path: WEB, base: src("test('a', () => {});"), head: src("test('a', { skip: 'flaky' }, () => {});") }];
   const r = checkRenames(skipped, R(), Q);

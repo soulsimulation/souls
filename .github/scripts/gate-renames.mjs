@@ -83,8 +83,9 @@ export function testTitles(src) {
       if (src[k] === '{') { // the options object, up to its closing brace
         let d = 0, e = k;
         for (; e < src.length; e++) { if (src[e] === '{') d++; else if (src[e] === '}' && --d === 0) break; else if (src[e] in STRING_END) e = readString(src, e)[1] - 1; }
-        const opt = /\b(?:skip|todo)\s*:\s*([^,}]+)/.exec(src.slice(k, e));
+        const body = src.slice(k, e), opt = /\b(?:skip|todo)\s*:\s*([^,}]+)/.exec(body);
         if (opt) { const v = opt[1].trim(); skip = v === 'false' ? 'none' : v === 'true' || /^['"`]/.test(v) ? 'always' : 'conditional'; }
+        else if (/[{,]\s*(?:skip|todo)\s*(?:[,}]|$)/.test(body)) skip = 'conditional'; // `{ skip }` shorthand: a variable
       }
     }
     calls.push({ title, kind: m[1] === 'describe' || m[1] === 'suite' ? 'suite' : 'test', skip });
@@ -119,9 +120,15 @@ export function checkRenames(files, renamesJson, quarantineJson) {
   for (const g of groups.values()) {
     const inStep = e => e.step === g.step && (!g.prefix || e.from.startsWith(`${g.prefix} > `));
     const headTitles = new Set(g.head.map(c => tapTitle(c.title)));
+    // a step whose changed files build titles at run time at the head (a table loop) may still run a base title under
+    // that name; such a title cannot be listed as a rename (from must differ from to), so it is unchecked, not failed
+    const dynamicHead = unchecked.some(u => u.side === 'head' && g.files.includes(u.path));
     for (const c of g.base) {
       const t = tapTitle(c.title);
       if (headTitles.has(t) || problems.some(p => p.step === g.step && p.title === t)) continue;
+      if (dynamicHead && !renames.some(e => inStep(e) && (e.from === t || e.from.endsWith(` > ${t}`)))) {
+        unchecked.push({ path: c.path, side: 'base', why: `"${t}" is gone as a literal title; the head builds titles at run time, so it may still run` }); continue;
+      }
       const hit = c.kind === 'suite' ? renames.find(e => inStep(e) && (e.from.includes(`${t} > `) || e.from === t || e.from.endsWith(` > ${t}`)))
         : renames.find(e => inStep(e) && (e.from === t || e.from.endsWith(` > ${t}`)));
       if (hit) declared.push({ step: g.step, title: t, from: hit.from, to: hit.to, pr: hit.pr });
@@ -131,7 +138,6 @@ export function checkRenames(files, renamesJson, quarantineJson) {
           : `"${t}" (${c.path}) ran in ${g.step} at the base and is gone at the head: add a renames.json entry {step: "${g.step}", from: "${g.prefix ? g.prefix + ' > ' : ''}${t}", to, reason, pr}` });
     }
     // a declared rename's replacement should be declared by some changed file of the step
-    const dynamicHead = unchecked.some(u => u.side === 'head' && g.files.includes(u.path));
     for (const d of declared.filter(d => d.step === g.step)) for (const to of d.to)
       if (!headTitles.has(leafOf(to)) && !dynamicHead) notes.push(`renames.json: "${to}" (replacing "${d.from}") is not a test title in the changed ${g.step} files`);
     // a newly unconditional skip/todo needs its quarantine entry; the gate stops seeing CI-covered steps' skips (#1463)
