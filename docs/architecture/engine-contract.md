@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `stand-height/1` (#1454), adopted at boot last (after quarantine-mark/1), a body the engine places upstairs (a restore, a settle, a stall release not from a carrier) stands at its floor's own height, never at the height it had; without it a body caught mid-climb could be stood on a floor cell in the air. Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
@@ -159,7 +159,8 @@ is ignored for a world that has adopted. A factory that already has the rules (`
   compare the count, and a difference is reported, not fatal.
 
 **Hold or settle** (`hold-settle/1`, #1334). This is a logged runtime policy (cfg `refusalSettleV1`), and every world
-adopts it at boot after `body-step-guard/1`. It acts only under the repair rules. A history from before its event
+adopts it at boot after `body-step-guard/1`. Its adoption is refused, writing nothing, while the guard is off
+(`hold-settle.guard-required`, #1442), so settle never places a body without `bodyStandsClear`. It acts only under the repair rules. A history from before its event
 replays as it was recorded. Under it, rung 1 answers each violation on its own:
 
 - **Hold.** The moves are undone as above, and the refusal row is written, but the programme is not stopped. The third
@@ -208,6 +209,8 @@ replays as it was recorded. Under it, rung 1 answers each violation on its own:
 named, and the row or recipe carries those keys, so a replay applies them and nothing reads the invariants outside a step:
 a read there would move the step check's memory where a replay's doesn't, and the boot would differ. A rule the step check
 can only see across ticks, like `motion.teleport`, is contained the same way.
+
+**`standingHoldsV1`** (#1440, `quarantine-mark/1`, a host-only logged runtime policy adopted at boot last) is part of world state, absent when empty. Once a broken body has been held 3 times in a cooldown, the quarantine event carries `standing: [{id, pose}]`, and from then the engine itself holds that body again whenever it finds it broken, at the pose where it last stood whole (the logged pose, which the mark then follows while the body is whole), at the start and end of each step, so the host never reads it broken and logs no more holds. A mark ends when the body has stayed whole for 1200 ticks, or is gone. A replay folds the same event and keeps the same marks; without the policy, every hold is logged as before. The engine guards each runtime invariant once: a list appended to or swapped back in keeps its existing guards.
 
 An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
 once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
@@ -278,7 +281,7 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   needs, every time.
 
 **Any other number that is no number: nonfinite-hold/1 (#1496).** A logged, host-only runtime policy
-(`runtimePolicy.nonFiniteHoldV1`, adopted at boot after stair-way/1, effective only with quarantine/1). The durable clock
+(`runtimePolicy.nonFiniteHoldV1`, adopted at boot last, after quarantine-mark/1 and stand-height/1, effective only with quarantine/1). The durable clock
 hashes the head every tick. When that hash still fails on a non-finite number after quarantine/1 has held any broken body,
 for example an object's pose, a field of the world such as the weather, or a programme's own state:
 - The engine (`planNonFiniteV1`) plans for every such number in the world (every entity, every kind) and in the

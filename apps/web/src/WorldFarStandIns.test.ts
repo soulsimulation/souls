@@ -62,3 +62,13 @@ test('a mesh that cannot be photographed keeps its full detail', () => {
   standIns.apply(w.scene,w.camera,844);standIns.restore();standIns.apply(w.scene,w.camera,844);
   assert.equal(standIns.stats.cards,0);assert.equal(w.bushes.visible,true);assert.equal(w.bushes.userData.keepDetail,true);
 });
+
+test('near and card buffers carry each instance\'s exact matrix and colour, in order (PERF-CHURN #1476)', () => {
+  const w=world();frame(w,2);
+  const near=w.bushes.parent!.children.find(o=>o.name.endsWith('near')) as THREE.InstancedMesh,cards=w.standIns.group.children[0] as THREE.InstancedMesh;
+  const src=w.bushes.instanceMatrix.array,srcC=w.bushes.instanceColor!.array;
+  // the row is ordered by distance, so the first `near.count` instances are near and the rest are cards, in order
+  for(let i=0;i<near.count;i++){assert.deepEqual([...near.instanceMatrix.array.slice(i*16,i*16+16)],[...src.slice(i*16,i*16+16)]);assert.deepEqual([...near.instanceColor!.array.slice(i*3,i*3+3)],[...srcC.slice(i*3,i*3+3)]);}
+  for(let f=0;f<cards.count;f++){const i=near.count+f;assert.deepEqual([...cards.instanceColor!.array.slice(f*3,f*3+3)],[...srcC.slice(i*3,i*3+3)]);
+    const m=new THREE.Matrix4().fromArray(cards.instanceMatrix.array,f*16),p=new THREE.Vector3().setFromMatrixPosition(m);assert.ok(Math.abs(p.z-(-5-i*5))<1e-4,`card ${f} at ${p.z}`);}
+});

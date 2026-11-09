@@ -145,6 +145,8 @@ export interface Engine {
   /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
   corruptBodiesV1?(): ContainedKeyV1[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
+  /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick. */
+  markStandingV1?(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void;
   /** #1496 nonfinite-hold/1: every non-finite number in the world and the programmes, and what each is put back to: its value in
    *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A body's
    *  pose and human state are left out (quarantine/1's). Empty when anything can't be put back legally: that halts by name. */
