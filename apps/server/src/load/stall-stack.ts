@@ -13,7 +13,7 @@ import {liveOf} from './shared.ts';
 export type StallFrame = {fn: string; file: string; line: number; col: number};
 export type StallReport = {v: 1; at: number; stuckMs: number; pauseMs?: number; frames: StallFrame[]; error?: string};
 export type StallOpts = {a: Float64Array; dataDir: string; root: string; stallMs?: number; gapMs?: number; everyMs?: number; keep?: number;
-  onReport?: (r: StallReport) => void; now?: () => number};
+  onReport?: (r: StallReport) => void; onEnabled?: (ms: number, scripts: number) => void; now?: () => number};
 
 /** A frame's file as a report may show it: relative to the release root, a node: module as is, anything else by its name only. */
 export function reportFile(url: string, root: string): string {
@@ -48,8 +48,10 @@ export function startStallStack(o: StallOpts) {
     const r: StallReport = {v: 1, at: t, stuckMs: stuck, pauseMs: t - asked, frames};
     asked = 0; report(r);
   });
+  const t0 = now();
   s.post('Debugger.enable', (e) => {
     if (e) return;
+    o.onEnabled?.(now() - t0, scripts.size);
     // inactive breakpoints: a `debugger;` statement in the code never stops the world; Debugger.pause still does
     s.post('Debugger.setBreakpointsActive', {active: false}); s.post('Debugger.setPauseOnExceptions', {state: 'none'});
     ready = true;

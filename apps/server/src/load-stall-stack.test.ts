@@ -26,6 +26,8 @@ test('a main thread stuck in a busy loop: the watchdog names the looping functio
       const end = Date.now() + ms; let x = 0; while (Date.now() < end) x += token.length + body.text.length; return x;
     }
     startWatchdog({dataDir: ${JSON.stringify(dir)}, everyMs: 200, stall: {dataDir: ${JSON.stringify(dir)}, root: ${JSON.stringify(dir)}, stallMs: 600, gapMs: 60_000}});
+    // in-process only: the watchdog's session never opens the --inspect listener or any port
+    setTimeout(async () => { const {url} = await import('node:inspector'); console.log('INSPECTOR URL ' + String(url())); }, 600);
     setTimeout(() => {
       withADebuggerStatement(); console.log('DEBUGGER PASSED');
       setTimeout(() => { console.log('BUSY ' + Date.now()); stuckInTheLoop(10_000); console.log('FREE ' + Date.now()); setTimeout(() => process.exit(0), 300); }, 300);
@@ -35,6 +37,7 @@ test('a main thread stuck in a busy loop: the watchdog names the looping functio
   let out = ''; child.stdout!.on('data', (b: Buffer) => { out += b; });
   await new Promise<void>((r) => child.on('exit', () => r()));
   assert.match(out, /DEBUGGER PASSED/, 'a debugger statement did not stop the main thread');
+  assert.match(out, /INSPECTOR URL undefined/, 'no inspector listener was opened');
   const busy = Number(/BUSY (\d+)/.exec(out)![1]), free = Number(/FREE (\d+)/.exec(out)![1]);
   const files = readdirSync(dir).filter((f) => /^stall-\d+\.json$/.test(f));
   assert.equal(files.length, 1, `one capture for one stall (and none for the debugger statement): ${files.join(', ')}`);

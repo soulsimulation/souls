@@ -21,7 +21,7 @@ export function startWatchdog(opts: {dataDir: string; port?: number; everyMs?: n
     workerData: {buffer: (opts.shared ?? sharedLoad).buffer, file: join(opts.dataDir, 'live.json'), pid: process.pid, port: opts.port, everyMs: opts.everyMs, stall: opts.stall},
     execArgv: [], resourceLimits: {maxOldGenerationSizeMb: 32},
   });
-  worker.on('message', (m: {error?: string; listening?: number}) => { if (m.error) console.error(`[load] watchdog: ${m.error}`); else if (m.listening) { console.log(`[load] watchdog /healthz on 127.0.0.1:${m.listening}`); opts.onListening?.(m.listening); } });
+  worker.on('message', (m: {error?: string; listening?: number; info?: string}) => { if (m.error) console.error(`[load] watchdog: ${m.error}`); else if (m.info) console.log(`[load] watchdog: ${m.info}`); else if (m.listening) { console.log(`[load] watchdog /healthz on 127.0.0.1:${m.listening}`); opts.onListening?.(m.listening); } });
   worker.on('error', e => console.error('[load] watchdog thread failed', e));
   worker.unref();
   return worker;
