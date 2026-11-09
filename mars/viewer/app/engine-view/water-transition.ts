@@ -12,8 +12,16 @@ export type RecordedWaterPose={activity:string;contact:ShoreContactV1};
 export type WaterPoseOrigin={weight:number;pose:RecordedWaterPose|null};
 export type WaterTransition={weight:number;from:RecordedWaterPose|null;origins:WaterPoseOrigin[]};
 const smooth=(x:number)=>{const k=Math.max(0,Math.min(1,x));return k*k*(3-2*k);};
+/** The human ids of `{...finalState.entities, ...entities0}` in that object's key order, without building it: the spread
+ *  and its entries list (~4,900 entities, once a second live) were the largest allocation of a phone frame (P2 phones). */
+export function humanIdsOf(take:Pick<Take,'finalState'|'entities0'>):string[]{
+ const fs=take.finalState.entities,e0=take.entities0??{},ids:string[]=[];
+ for(const id of Object.keys(fs)){const e=Object.hasOwn(e0,id)?e0[id]:fs[id];if(e?.kind==='human')ids.push(id);}
+ for(const id of Object.keys(e0))if(!Object.hasOwn(fs,id)&&e0[id]?.kind==='human')ids.push(id);
+ return ids;
+}
 export function waterTransitions(take:Take,recorded:readonly Take[]=[]):(id:string,seconds:number)=>WaterTransition {
- const ids=Object.entries({...take.finalState.entities,...take.entities0}).filter(([,e])=>e.kind==='human').map(([id])=>id);
+ const ids=humanIdsOf(take);
  const chain:Take[]=[take];let first=take;
  // Only unique, exact adjacent recorded checkpoints can supply preceding pose history.
  while((take.startTick-first.startTick)*take.dt<WATER_ENTRY_SECONDS){const matches=recorded.filter(p=>p!==first&&p.startTick+p.ticks===first.startTick&&p.ticks>0&&p.dt===first.dt&&p.rulesVersion===first.rulesVersion&&p.finalStateHash===first.baselineStateHash&&JSON.stringify(Reflect.get(p,'renderSceneRef'))===JSON.stringify(Reflect.get(first,'renderSceneRef')));if(matches.length!==1)break;first=matches[0];chain.unshift(first);}
