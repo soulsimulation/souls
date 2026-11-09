@@ -10,6 +10,7 @@ import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {coreLibrary,WorldModel} from '../../packages/world-compiler/src/index.ts';
 
+import {HOOK_PEG,CAN_GRIP} from '../../packages/world-compiler/src/core-kit/watering-can.ts';
 import {createWeeding} from '../../apps/server/src/god/weeding.ts';
 test('weeding bed exposes finite weeds and a separate carryable output',()=>{
  const lib=coreLibrary(),block=lib.get('core-garden-planter@4'),bundle=lib.get('core-weed-bundle@1');
@@ -34,6 +35,8 @@ test('native finite weeding work clears authored weeds and creates one supported
  {op:'place',def:'core/garden-planter@4',name:'private-block',p:[x-3,z],access:'private'},
  {op:'place',def:'core/garden-planter@4',name:'occupied-block',p:[x+4,z]},
  {op:'place',def:'core/weed-bundle@1',name:'obstruction',in:{parent:'occupied-block',slot:'out'},p:[0,0]},
+ {op:'place',def:'core/can-hook@1',name:'hook',p:[x-2,z-1]},
+ {op:'place',def:'core/watering-can@3',name:'can',in:{parent:'hook',slot:'peg'},p:[HOOK_PEG[0]-CAN_GRIP[0],HOOK_PEG[1]-CAN_GRIP[1],HOOK_PEG[2]-CAN_GRIP[2]],r:Math.PI/2,state:{level:1}},
  {op:'place',def:'core/bowl@2',name:'bowl',p:[x+.5,z-.5]}]}));await tick(50);
  const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
  const bundles=()=>[...god.model.entities.values()].filter(e=>god.model.resolvedDef(e.def)?.name==='core-weed-bundle'&&e.name!=='obstruction');
@@ -60,9 +63,10 @@ test('native finite weeding work clears authored weeds and creates one supported
  const exhausted=await act(cap);assert.equal(exhausted.accepted,false);assert.match(JSON.stringify(exhausted),/no authored weeds/);
  const inspect=await(await app.request('/v1/edge/inspect/'+id('block')+'?all=1')).json();assert.ok(JSON.stringify(inspect).includes('weed-bed'));assert.ok(edge.capabilities(soul).some(c=>c.id==='read:'+id('block')&&c.label.includes('Ana')));
  await done('pick-up:'+bid);assert.equal(f.host.engine.world.entities[bid].support.kind,'in-hand');assert.equal(f.host.engine.world.entities[bid].support.by,soul.entityId);await done('put-down:here');await tick(10);assert.equal(bundles()[0].id,bid);assert.equal(f.host.engine.world.entities[bid].support.kind,'ground');
+ await done('object:'+id('block')+':water');await tick(10);assert.equal(ent('block').state.moisture,1);assert.equal(ent('block').state.growth,2);assert.equal(ent('block').state.weeds,0);assert.ok(ent('can').state.level<1);assert.equal(ent('can').in.parent,id('hook'));
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);
  for(const e of [ent('block'),bundles()[0]]){assert.deepEqual(restored.entities.get(e.id),JSON.parse(JSON.stringify(e)));assert.deepEqual(restored.worldPose(restored.entities.get(e.id)),god.model.worldPose(e));}
  assert.deepEqual(f.host.engine.runtime.violations,[]);
- const report={status:'pass',contextBytes:{absent:bytes(absent),distant100:bytes(far),nearby:bytes(await here())},activeGardenTicks:active,weeds:ent('block').state,bundle:{id:bid,pose:god.model.worldPose(bundles()[0])},checks:['native approach and10second garden/tool','no admission or early clearing/output','ordinary interruption leaves weeds unchanged','private/full hands/occupied output refusals','atomic weed clearing and one actual native supported output','duplicate receipt no additional output','selected real output pickup/putdown','credited current inspection and exhausted offer','exact snapshot identity/custody/pose','zero native violations']};
+ const report={status:'pass',contextBytes:{absent:bytes(absent),distant100:bytes(far),nearby:bytes(await here())},activeGardenTicks:active,weeds:ent('block').state,bundle:{id:bid,pose:god.model.worldPose(bundles()[0])},checks:['native approach and10second garden/tool','no admission or early clearing/output','ordinary interruption leaves weeds unchanged','private/full hands/occupied output refusals','atomic weed clearing and one actual native supported output','duplicate receipt no additional output','selected real output pickup/putdown','same weeded bed watered by actual can and hung back','credited current inspection and exhausted offer','exact snapshot identity/custody/pose','zero native violations']};
  if(process.env.SOUL_ACTIONS_OUT){mkdirSync(process.env.SOUL_ACTIONS_OUT,{recursive:true});writeFileSync(process.env.SOUL_ACTIONS_OUT+'/weeding.json',JSON.stringify(report,null,2));}console.log(JSON.stringify(report));
 });
