@@ -14,11 +14,11 @@ const env = ['--env', 'WORLD_KEY=eden', '--env', `WORLD_ID=${worldId}`, '--env',
 const rehearse = (...a) => { const r = spawnSync(process.execPath, [script, ...a], {encoding: 'utf8'}); return {code: r.status, out: r.stdout.trim() ? JSON.parse(r.stdout.trim().split('\n').at(-1)) : null, err: r.stderr}; };
 const sha = (f) => createHash('sha256').update(readFileSync(f)).digest('hex');
 
-test('a 4.16 world: the rehearsal adopts on a copy, runs it, and leaves the original and its directory alone', async (t) => {
+test('a 0.120 world: the rehearsal adopts on a copy, runs it, and leaves the original and its directory alone', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'rehearsal-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const data = join(dir, 'world'), db = join(data, 'sim.db'); mkdirSync(data);
   t.mock.method(console, 'log', () => {});
-  const f = fixture(db, await marsFactory({...GREEN_FIELD_WORLD}));   // 4.16's reader: no repair rules
+  const f = fixture(db, await marsFactory({...GREEN_FIELD_WORLD}));   // 0.120's reader: no repair rules
   f.brain.quiesce(); await invite(f, 'ada'); await accept(f.host, f.souls.create('dev:ada', {name: 'Ada', description: 'Rehearsal fixture'}));
   for (let i = 0; i < 60; i++) { f.host.tickOnce(); f.host.drainInputs(); } f.host.saveSnapshot(true);
   const oldRules = f.host.engine.rulesVersion; f.host.stop(); f.db.close();
@@ -29,7 +29,7 @@ test('a 4.16 world: the rehearsal adopts on a copy, runs it, and leaves the orig
   assert.equal(r.out.adoption.head.rules, oldRules + '+souls-repair/1'); assert.equal(r.out.adoption.header, r.out.adoption.head.rules);
   assert.equal(r.out.run.state, 'running'); assert.equal(r.out.run.ticks, 200); assert.equal(r.out.run.head.tick, r.out.adoption.head.tick + 200);
   assert.equal(sha(db), before, 'the original is untouched'); assert.equal(existsSync(scratch), false, 'the copy is removed');
-  // SIM_SOULS_REPAIR=0: the same world adopts nothing and runs as 4.16 does
+  // SIM_SOULS_REPAIR=0: the same world adopts nothing and runs as 0.120 does
   const off = rehearse('--db', db, '--scratch', join(dir, 'scratch-off'), '--ticks', '50', ...env, '--env', 'SIM_SOULS_REPAIR=0');
   assert.equal(off.code, 0, off.err + JSON.stringify(off.out)); assert.equal(off.out.adoption.result, 'none'); assert.equal(off.out.run.head.rules, oldRules);
   // a scratch inside the world's data directory is refused, before anything is copied
