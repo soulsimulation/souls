@@ -1,0 +1,21 @@
+[db] applied migrations 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+[boot] restore 7 ms from genesis tick 0 (snapshot read+decode 0 ms, 0 minds)
+[boot] replay 0 ms 0 ticks 0 events to tick 0 (0 ms/tick; recovery baseline 2 ms)
+[world] adopted the repair rules at tick 0 (one way): rules sim-mars/1+mars-engine/1+mars-assembly/3+activities/31+bodies/1+souls-repair/1
+[world] s3-reasonable-actions-1 booted from genesis, tick 0, replayed 0 events, 0 souls, rules sim-mars/1+mars-engine/1+mars-assembly/3+activities/31+bodies/1+souls-repair/1
+[auth] Privy not configured; logins disabled
+[god] entity world ready: 13 entities, 10 own defs + library core@5dd8abc8e5ee68eb (884), owner (unclaimed)
+[bridge] boot: world-edit seq 0, 9 entities, 5.5 ms
+[boot] projection 221 ms initial physics coherent at tick 1
+[boot] prepare 0 ms serving caches at tick 1
+[http] listening on http://world.invalid (public http://world.invalid), build dev, brain fake, budget $0.5/day, invites open
+[boot] listening 1.06 s after start: code 0.60, engine 0.01, the rest 0.40
+[boot] edge capability caches warm after listen: 0 ms: 0 slices (longest 0 ms) and the listing 0 ms, over 4 ms for 0 Souls from tick 1
+[bridge] activity spots: 1 spots, 0 shelves in 1 ms
+[portrait] render failed s_cdf2960729 ENOENT: no such file or directory, open '<home>/Souls/.local/playtest-home/server/mars/viewer/public/modular/humanoid/rig-masc.glb'
+[portrait] render failed s_35148f1f47 ENOENT: no such file or directory, open '<home>/Souls/.local/playtest-home/server/mars/viewer/public/modular/humanoid/rig-fem.glb'
+[activities] rowing punt installed: punt-e_27520a11-593c9c
+[activities] edge capability caches warm after listen: 5 ms: 2 slices (longest 1 ms) and the listing 4 ms, over 7 ms for 1 Souls from tick 241
+[snapshot] SIGTERM: before draining: tick 4620 in 3 ms
+[world] SIGTERM: saving snapshot at tick 4620
+[world] SIGTERM: snapshot saved in 2 ms (capture 1, write 1)

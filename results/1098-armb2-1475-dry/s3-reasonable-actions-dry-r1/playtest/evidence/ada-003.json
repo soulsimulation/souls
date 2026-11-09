@@ -1,0 +1,1177 @@
+{
+ "requestId": "ada-003",
+ "seat": "ada",
+ "soulId": "s_35148f1f47",
+ "text": "now go for a swim in the pond",
+ "channel": "card",
+ "sentAt": "2026-11-09T16:11:23.655Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T16:11:23.781Z",
+ "ackText": "Off for a swim",
+ "resultAt": "2026-11-09T16:12:09.864Z",
+ "resultText": "Swimming in the pond",
+ "resultState": "done",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T16:12:09.864Z",
+ "firstResultText": "Swimming in the pond",
+ "cardResults": [
+  {
+   "text": "Swimming in the pond",
+   "at": "2026-11-09T16:12:09.864Z",
+   "state": "done",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T16:12:13.655Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T16:11:33.616Z",
+   "mono": 91950,
+   "soulId": "s_35148f1f47",
+   "name": "Ada",
+   "tick": 1817,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 28.89105247732106,
+    "z": 17.833177323654446,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Swim in pond",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.14097222222544,
+    "hunger": 21.745138888891553,
+    "company": 36.869791666664966,
+    "restlessness": 15.565277777778412
+   },
+   "near": [
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_efaed3e0",
+     "who": "Knoll Cottage",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240683985,
+   "lastReceipt": {
+    "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+    "soulId": "s_35148f1f47",
+    "capability": "swim:pond",
+    "phase": "started",
+    "acceptedTick": 1625,
+    "startedTick": 1625,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "swim:pond",
+     "target": "e_27520a11",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to pond"
+    },
+    "now": "walking to pond; not swimming yet"
+   },
+   "receipts": [
+    {
+     "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+     "soulId": "s_35148f1f47",
+     "capability": "swim:pond",
+     "phase": "started",
+     "acceptedTick": 1625,
+     "startedTick": 1625,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "swim:pond",
+      "target": "e_27520a11",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to pond"
+     },
+     "now": "walking to pond; not swimming yet"
+    },
+    {
+     "id": "r_10c3636a-8b64-456f-bd9c-37d69ca243cb",
+     "soulId": "s_35148f1f47",
+     "capability": "sit:cottage/part-outdoor-bench",
+     "phase": "replaced",
+     "acceptedTick": 233,
+     "startedTick": 233,
+     "endedTick": 1625,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "sit:cottage/part-outdoor-bench",
+      "target": "e_8d96733f",
+      "kind": "object",
+      "seat": "e_8d96733f",
+      "slot": "e_8d96733f#seat-1"
+     },
+     "endedAt": {
+      "place": "g-knoll",
+      "placePath": [
+       "Cottage Knoll",
+       "World"
+      ],
+      "pos": [
+       39.4,
+       12.1
+      ],
+      "heading": 242,
+      "posture": "seated",
+      "seat": "e_8d96733f#seat-1"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240683657
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_a45aca91-2025-4ae2-b915-23fee3fee496",
+     "text": "now go for a swim in the pond",
+     "state": "acknowledged",
+     "sentAt": 1794240683657,
+     "deliveredAt": 1794240683658,
+     "acknowledgedAt": 1794240683781,
+     "reply": "Off for a swim"
+    }
+   },
+   "world": {
+    "tick": 1817,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 10
+   }
+  },
+  {
+   "t": "2026-11-09T16:11:43.632Z",
+   "mono": 101966,
+   "soulId": "s_35148f1f47",
+   "name": "Ada",
+   "tick": 2018,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 16.995025816627383,
+    "z": 24.35710297758882,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Swim in pond",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.84784722222571,
+    "hunger": 21.940555555558518,
+    "company": 37.079166666664776,
+    "restlessness": 14.951111111111828
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_efaed3e0",
+     "who": "Knoll Cottage",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240683985,
+   "lastReceipt": {
+    "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+    "soulId": "s_35148f1f47",
+    "capability": "swim:pond",
+    "phase": "started",
+    "acceptedTick": 1625,
+    "startedTick": 1625,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "swim:pond",
+     "target": "e_27520a11",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to pond"
+    },
+    "now": "walking to pond; not swimming yet"
+   },
+   "receipts": [
+    {
+     "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+     "soulId": "s_35148f1f47",
+     "capability": "swim:pond",
+     "phase": "started",
+     "acceptedTick": 1625,
+     "startedTick": 1625,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "swim:pond",
+      "target": "e_27520a11",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to pond"
+     },
+     "now": "walking to pond; not swimming yet"
+    },
+    {
+     "id": "r_10c3636a-8b64-456f-bd9c-37d69ca243cb",
+     "soulId": "s_35148f1f47",
+     "capability": "sit:cottage/part-outdoor-bench",
+     "phase": "replaced",
+     "acceptedTick": 233,
+     "startedTick": 233,
+     "endedTick": 1625,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "sit:cottage/part-outdoor-bench",
+      "target": "e_8d96733f",
+      "kind": "object",
+      "seat": "e_8d96733f",
+      "slot": "e_8d96733f#seat-1"
+     },
+     "endedAt": {
+      "place": "g-knoll",
+      "placePath": [
+       "Cottage Knoll",
+       "World"
+      ],
+      "pos": [
+       39.4,
+       12.1
+      ],
+      "heading": 242,
+      "posture": "seated",
+      "seat": "e_8d96733f#seat-1"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240683657
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_a45aca91-2025-4ae2-b915-23fee3fee496",
+     "text": "now go for a swim in the pond",
+     "state": "acknowledged",
+     "sentAt": 1794240683657,
+     "deliveredAt": 1794240683658,
+     "acknowledgedAt": 1794240683781,
+     "reply": "Off for a swim"
+    }
+   },
+   "world": {
+    "tick": 2018,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 25
+   }
+  },
+  {
+   "t": "2026-11-09T16:11:53.942Z",
+   "mono": 112275,
+   "soulId": "s_35148f1f47",
+   "name": "Ada",
+   "tick": 2218,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": 5.15818336817577,
+    "z": 30.848571289961438,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Swim in pond",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.55618055555931,
+    "hunger": 22.13500000000326,
+    "company": 37.28749999999792,
+    "restlessness": 14.3400000000008
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240683985,
+   "lastReceipt": {
+    "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+    "soulId": "s_35148f1f47",
+    "capability": "swim:pond",
+    "phase": "started",
+    "acceptedTick": 1625,
+    "startedTick": 1625,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "swim:pond",
+     "target": "e_27520a11",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to pond"
+    },
+    "now": "walking to pond; not swimming yet"
+   },
+   "receipts": [
+    {
+     "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+     "soulId": "s_35148f1f47",
+     "capability": "swim:pond",
+     "phase": "started",
+     "acceptedTick": 1625,
+     "startedTick": 1625,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "swim:pond",
+      "target": "e_27520a11",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to pond"
+     },
+     "now": "walking to pond; not swimming yet"
+    },
+    {
+     "id": "r_10c3636a-8b64-456f-bd9c-37d69ca243cb",
+     "soulId": "s_35148f1f47",
+     "capability": "sit:cottage/part-outdoor-bench",
+     "phase": "replaced",
+     "acceptedTick": 233,
+     "startedTick": 233,
+     "endedTick": 1625,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "sit:cottage/part-outdoor-bench",
+      "target": "e_8d96733f",
+      "kind": "object",
+      "seat": "e_8d96733f",
+      "slot": "e_8d96733f#seat-1"
+     },
+     "endedAt": {
+      "place": "g-knoll",
+      "placePath": [
+       "Cottage Knoll",
+       "World"
+      ],
+      "pos": [
+       39.4,
+       12.1
+      ],
+      "heading": 242,
+      "posture": "seated",
+      "seat": "e_8d96733f#seat-1"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240683657
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_a45aca91-2025-4ae2-b915-23fee3fee496",
+     "text": "now go for a swim in the pond",
+     "state": "acknowledged",
+     "sentAt": 1794240683657,
+     "deliveredAt": 1794240683658,
+     "acknowledgedAt": 1794240683781,
+     "reply": "Off for a swim"
+    }
+   },
+   "world": {
+    "tick": 2218,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 332
+   }
+  },
+  {
+   "t": "2026-11-09T16:12:03.690Z",
+   "mono": 122024,
+   "soulId": "s_35148f1f47",
+   "name": "Ada",
+   "tick": 2418,
+   "place": "g-pond.shore-bank",
+   "placePath": [
+    "Hamlet Pond bank",
+    "World"
+   ],
+   "pos": {
+    "x": -6.972902934144409,
+    "z": 36.767202222085565,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Swim in pond",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.2645138888929,
+    "hunger": 22.329444444448,
+    "company": 37.49583333333106,
+    "restlessness": 13.72888888888977
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240683985,
+   "lastReceipt": {
+    "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+    "soulId": "s_35148f1f47",
+    "capability": "swim:pond",
+    "phase": "started",
+    "acceptedTick": 1625,
+    "startedTick": 1625,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "swim:pond",
+     "target": "e_27520a11",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to pond"
+    },
+    "now": "walking to pond; not swimming yet"
+   },
+   "receipts": [
+    {
+     "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+     "soulId": "s_35148f1f47",
+     "capability": "swim:pond",
+     "phase": "started",
+     "acceptedTick": 1625,
+     "startedTick": 1625,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "swim:pond",
+      "target": "e_27520a11",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to pond"
+     },
+     "now": "walking to pond; not swimming yet"
+    },
+    {
+     "id": "r_10c3636a-8b64-456f-bd9c-37d69ca243cb",
+     "soulId": "s_35148f1f47",
+     "capability": "sit:cottage/part-outdoor-bench",
+     "phase": "replaced",
+     "acceptedTick": 233,
+     "startedTick": 233,
+     "endedTick": 1625,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "sit:cottage/part-outdoor-bench",
+      "target": "e_8d96733f",
+      "kind": "object",
+      "seat": "e_8d96733f",
+      "slot": "e_8d96733f#seat-1"
+     },
+     "endedAt": {
+      "place": "g-knoll",
+      "placePath": [
+       "Cottage Knoll",
+       "World"
+      ],
+      "pos": [
+       39.4,
+       12.1
+      ],
+      "heading": 242,
+      "posture": "seated",
+      "seat": "e_8d96733f#seat-1"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240683657
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_a45aca91-2025-4ae2-b915-23fee3fee496",
+     "text": "now go for a swim in the pond",
+     "state": "acknowledged",
+     "sentAt": 1794240683657,
+     "deliveredAt": 1794240683658,
+     "acknowledgedAt": 1794240683781,
+     "reply": "Off for a swim"
+    }
+   },
+   "world": {
+    "tick": 2418,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 78
+   }
+  },
+  {
+   "t": "2026-11-09T16:12:13.654Z",
+   "mono": 131988,
+   "soulId": "s_35148f1f47",
+   "name": "Ada",
+   "tick": 2618,
+   "place": "g-pond",
+   "placePath": [
+    "Hamlet Pond",
+    "Hamlet Pond bank",
+    "World"
+   ],
+   "pos": {
+    "x": -11.5,
+    "z": 38.5,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "swimming",
+   "activity": "tread",
+   "doing": "treading water",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.97451388889316,
+    "hunger": 22.523888888892742,
+    "company": 37.70416666666421,
+    "restlessness": 13.13090277777874
+   },
+   "near": [
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240683985,
+   "lastReceipt": {
+    "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+    "soulId": "s_35148f1f47",
+    "capability": "swim:pond",
+    "phase": "completed",
+    "acceptedTick": 1625,
+    "startedTick": 1625,
+    "endedTick": 2541,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "swim:pond",
+     "target": "e_27520a11",
+     "kind": "object"
+    },
+    "endedAt": {
+     "place": "g-pond",
+     "placePath": [
+      "Hamlet Pond",
+      "Hamlet Pond bank",
+      "World"
+     ],
+     "pos": [
+      -11.5,
+      38.5
+     ],
+     "heading": 225,
+     "posture": "swimming"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+     "soulId": "s_35148f1f47",
+     "capability": "swim:pond",
+     "phase": "completed",
+     "acceptedTick": 1625,
+     "startedTick": 1625,
+     "endedTick": 2541,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "swim:pond",
+      "target": "e_27520a11",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "g-pond",
+      "placePath": [
+       "Hamlet Pond",
+       "Hamlet Pond bank",
+       "World"
+      ],
+      "pos": [
+       -11.5,
+       38.5
+      ],
+      "heading": 225,
+      "posture": "swimming"
+     }
+    },
+    {
+     "id": "r_10c3636a-8b64-456f-bd9c-37d69ca243cb",
+     "soulId": "s_35148f1f47",
+     "capability": "sit:cottage/part-outdoor-bench",
+     "phase": "replaced",
+     "acceptedTick": 233,
+     "startedTick": 233,
+     "endedTick": 1625,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "sit:cottage/part-outdoor-bench",
+      "target": "e_8d96733f",
+      "kind": "object",
+      "seat": "e_8d96733f",
+      "slot": "e_8d96733f#seat-1"
+     },
+     "endedAt": {
+      "place": "g-knoll",
+      "placePath": [
+       "Cottage Knoll",
+       "World"
+      ],
+      "pos": [
+       39.4,
+       12.1
+      ],
+      "heading": 242,
+      "posture": "seated",
+      "seat": "e_8d96733f#seat-1"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240725435
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_a45aca91-2025-4ae2-b915-23fee3fee496",
+     "text": "now go for a swim in the pond",
+     "state": "acknowledged",
+     "sentAt": 1794240683657,
+     "deliveredAt": 1794240683658,
+     "acknowledgedAt": 1794240683781,
+     "reply": "Off for a swim",
+     "outcome": "done",
+     "result": "Swimming in the pond",
+     "resultAt": 1794240729864
+    }
+   },
+   "world": {
+    "tick": 2619,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "treading water",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 43
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_85f49cac-27a3-494e-acd6-0e360bbff8cb",
+   "soulId": "s_35148f1f47",
+   "capability": "swim:pond",
+   "phase": "completed",
+   "acceptedTick": 1625,
+   "startedTick": 1625,
+   "endedTick": 2541,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "swim:pond",
+    "target": "e_27520a11",
+    "kind": "object"
+   },
+   "endedAt": {
+    "place": "g-pond",
+    "placePath": [
+     "Hamlet Pond",
+     "Hamlet Pond bank",
+     "World"
+    ],
+    "pos": [
+     -11.5,
+     38.5
+    ],
+    "heading": 225,
+    "posture": "swimming"
+   }
+  },
+  {
+   "id": "r_10c3636a-8b64-456f-bd9c-37d69ca243cb",
+   "soulId": "s_35148f1f47",
+   "capability": "sit:cottage/part-outdoor-bench",
+   "phase": "replaced",
+   "acceptedTick": 233,
+   "startedTick": 233,
+   "endedTick": 1625,
+   "code": null,
+   "reason": "A newer action from this Soul replaced it.",
+   "chosen": {
+    "capability": "sit:cottage/part-outdoor-bench",
+    "target": "e_8d96733f",
+    "kind": "object",
+    "seat": "e_8d96733f",
+    "slot": "e_8d96733f#seat-1"
+   },
+   "endedAt": {
+    "place": "g-knoll",
+    "placePath": [
+     "Cottage Knoll",
+     "World"
+    ],
+    "pos": [
+     39.4,
+     12.1
+    ],
+    "heading": 242,
+    "posture": "seated",
+    "seat": "e_8d96733f#seat-1"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": "2026-11-09T16:11:43.632Z",
+ "firstBodyChangeMono": 101966,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

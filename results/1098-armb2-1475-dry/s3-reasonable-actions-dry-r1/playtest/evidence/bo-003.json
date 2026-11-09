@@ -1,0 +1,977 @@
+{
+ "requestId": "bo-003",
+ "seat": "bo",
+ "soulId": "s_cdf2960729",
+ "text": "next, walk over to the orchard",
+ "channel": "card",
+ "sentAt": "2026-11-09T16:11:25.656Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T16:11:25.744Z",
+ "ackText": "Walking to the orchard",
+ "resultAt": "2026-11-09T16:12:04.525Z",
+ "resultText": "At the orchard",
+ "resultState": "done",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T16:12:04.525Z",
+ "firstResultText": "At the orchard",
+ "cardResults": [
+  {
+   "text": "At the orchard",
+   "at": "2026-11-09T16:12:04.525Z",
+   "state": "done",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T16:12:13.699Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T16:11:33.620Z",
+   "mono": 91954,
+   "soulId": "s_cdf2960729",
+   "name": "Bo",
+   "tick": 1817,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -6.342219135345117,
+    "z": -7.027864447274319,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to orchard",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.29347222221597,
+    "hunger": 21.748055555558224,
+    "company": 36.87291666666496,
+    "restlessness": 21.716111111111147
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "h_35148f1f47",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240685917,
+   "lastReceipt": {
+    "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+    "soulId": "s_cdf2960729",
+    "capability": "walk:flag-orchard",
+    "phase": "started",
+    "acceptedTick": 1663,
+    "startedTick": 1663,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:flag-orchard",
+     "target": "e_1c39c2e1",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to orchard, 41 m left"
+    },
+    "now": "walking to orchard, 41 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+     "soulId": "s_cdf2960729",
+     "capability": "walk:flag-orchard",
+     "phase": "started",
+     "acceptedTick": 1663,
+     "startedTick": 1663,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to orchard, 41 m left"
+     },
+     "now": "walking to orchard, 41 m left; not there yet"
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240666172
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_40e20aaa-2858-4218-b8f2-ad176ee98bba",
+     "text": "next, walk over to the orchard",
+     "state": "acknowledged",
+     "sentAt": 1794240685658,
+     "deliveredAt": 1794240685658,
+     "acknowledgedAt": 1794240685744,
+     "reply": "Walking to the orchard"
+    }
+   },
+   "world": {
+    "tick": 1817,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 14
+   }
+  },
+  {
+   "t": "2026-11-09T16:11:43.633Z",
+   "mono": 101967,
+   "soulId": "s_cdf2960729",
+   "name": "Bo",
+   "tick": 2018,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -15.431962770140938,
+    "z": -17.10028306961563,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to orchard",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.00034722221623,
+    "hunger": 21.94347222222519,
+    "company": 37.08229166666477,
+    "restlessness": 21.101944444444563
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_35148f1f47",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240685917,
+   "lastReceipt": {
+    "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+    "soulId": "s_cdf2960729",
+    "capability": "walk:flag-orchard",
+    "phase": "started",
+    "acceptedTick": 1663,
+    "startedTick": 1663,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:flag-orchard",
+     "target": "e_1c39c2e1",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to orchard, 28 m left"
+    },
+    "now": "walking to orchard, 28 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+     "soulId": "s_cdf2960729",
+     "capability": "walk:flag-orchard",
+     "phase": "started",
+     "acceptedTick": 1663,
+     "startedTick": 1663,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to orchard, 28 m left"
+     },
+     "now": "walking to orchard, 28 m left; not there yet"
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240666172
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_40e20aaa-2858-4218-b8f2-ad176ee98bba",
+     "text": "next, walk over to the orchard",
+     "state": "acknowledged",
+     "sentAt": 1794240685658,
+     "deliveredAt": 1794240685658,
+     "acknowledgedAt": 1794240685744,
+     "reply": "Walking to the orchard"
+    }
+   },
+   "world": {
+    "tick": 2018,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 25
+   }
+  },
+  {
+   "t": "2026-11-09T16:11:53.962Z",
+   "mono": 112296,
+   "soulId": "s_cdf2960729",
+   "name": "Bo",
+   "tick": 2218,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -26.14383955242617,
+    "z": -24.674306243051575,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to orchard",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.70868055554983,
+    "hunger": 22.13791666666993,
+    "company": 37.29062499999792,
+    "restlessness": 20.490833333333534
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_35148f1f47",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240685917,
+   "lastReceipt": {
+    "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+    "soulId": "s_cdf2960729",
+    "capability": "walk:flag-orchard",
+    "phase": "started",
+    "acceptedTick": 1663,
+    "startedTick": 1663,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:flag-orchard",
+     "target": "e_1c39c2e1",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to orchard, 15 m left"
+    },
+    "now": "walking to orchard, 15 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+     "soulId": "s_cdf2960729",
+     "capability": "walk:flag-orchard",
+     "phase": "started",
+     "acceptedTick": 1663,
+     "startedTick": 1663,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to orchard, 15 m left"
+     },
+     "now": "walking to orchard, 15 m left; not there yet"
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240666172
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_40e20aaa-2858-4218-b8f2-ad176ee98bba",
+     "text": "next, walk over to the orchard",
+     "state": "acknowledged",
+     "sentAt": 1794240685658,
+     "deliveredAt": 1794240685658,
+     "acknowledgedAt": 1794240685744,
+     "reply": "Walking to the orchard"
+    }
+   },
+   "world": {
+    "tick": 2220,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 351
+   }
+  },
+  {
+   "t": "2026-11-09T16:12:03.690Z",
+   "mono": 122024,
+   "soulId": "s_cdf2960729",
+   "name": "Bo",
+   "tick": 2418,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": -38.81607590680137,
+    "z": -29.32057070333538,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to orchard",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.41701388888343,
+    "hunger": 22.332361111114672,
+    "company": 37.49895833333106,
+    "restlessness": 19.879722222222505
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_35148f1f47",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240685917,
+   "lastReceipt": {
+    "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+    "soulId": "s_cdf2960729",
+    "capability": "walk:flag-orchard",
+    "phase": "started",
+    "acceptedTick": 1663,
+    "startedTick": 1663,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:flag-orchard",
+     "target": "e_1c39c2e1",
+     "kind": "object"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to orchard, 1 m left"
+    },
+    "now": "walking to orchard, 1 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+     "soulId": "s_cdf2960729",
+     "capability": "walk:flag-orchard",
+     "phase": "started",
+     "acceptedTick": 1663,
+     "startedTick": 1663,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to orchard, 1 m left"
+     },
+     "now": "walking to orchard, 1 m left; not there yet"
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240666172
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_40e20aaa-2858-4218-b8f2-ad176ee98bba",
+     "text": "next, walk over to the orchard",
+     "state": "acknowledged",
+     "sentAt": 1794240685658,
+     "deliveredAt": 1794240685658,
+     "acknowledgedAt": 1794240685744,
+     "reply": "Walking to the orchard"
+    }
+   },
+   "world": {
+    "tick": 2418,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "Swim in pond",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 77
+   }
+  },
+  {
+   "t": "2026-11-09T16:12:13.698Z",
+   "mono": 132032,
+   "soulId": "s_cdf2960729",
+   "name": "Bo",
+   "tick": 2619,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": -39.36,
+    "z": -29.519999999999996,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.2266666666605,
+    "hunger": 22.527777777781637,
+    "company": 37.70833333333087,
+    "restlessness": 20.07493055555584
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_35148f1f47",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "tread"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794240685917,
+   "lastReceipt": {
+    "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+    "soulId": "s_cdf2960729",
+    "capability": "walk:flag-orchard",
+    "phase": "completed",
+    "acceptedTick": 1663,
+    "startedTick": 1663,
+    "endedTick": 2435,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:flag-orchard",
+     "target": "e_1c39c2e1",
+     "kind": "object"
+    },
+    "endedAt": {
+     "place": "world",
+     "placePath": [
+      "World"
+     ],
+     "pos": [
+      -39.4,
+      -29.5
+     ],
+     "heading": 290,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+     "soulId": "s_cdf2960729",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 1663,
+     "startedTick": 1663,
+     "endedTick": 2435,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.4,
+       -29.5
+      ],
+      "heading": 290,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240724462
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_40e20aaa-2858-4218-b8f2-ad176ee98bba",
+     "text": "next, walk over to the orchard",
+     "state": "acknowledged",
+     "sentAt": 1794240685658,
+     "deliveredAt": 1794240685658,
+     "acknowledgedAt": 1794240685744,
+     "reply": "Walking to the orchard",
+     "outcome": "done",
+     "result": "At the orchard",
+     "resultAt": 1794240724525
+    }
+   },
+   "world": {
+    "tick": 2619,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "treading water",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 85
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_a71ff6a4-5883-4e55-8e00-faf70efbe7ae",
+   "soulId": "s_cdf2960729",
+   "capability": "walk:flag-orchard",
+   "phase": "completed",
+   "acceptedTick": 1663,
+   "startedTick": 1663,
+   "endedTick": 2435,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:flag-orchard",
+    "target": "e_1c39c2e1",
+    "kind": "object"
+   },
+   "endedAt": {
+    "place": "world",
+    "placePath": [
+     "World"
+    ],
+    "pos": [
+     -39.4,
+     -29.5
+    ],
+    "heading": 290,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": "2026-11-09T16:11:43.633Z",
+ "firstBodyChangeMono": 101967,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

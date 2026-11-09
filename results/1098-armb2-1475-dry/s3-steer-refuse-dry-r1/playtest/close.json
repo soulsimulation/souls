@@ -1,0 +1,56 @@
+{
+ "t": "2026-11-09T16:09:58.459Z",
+ "mono": 132120,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T16:07:48.135Z",
+   "sessionId": null,
+   "soulId": "s_74ba678adf",
+   "ownerIdentity": "agent-1656cd94e084f182f6b4f709",
+   "assisted": false,
+   "wake": true,
+   "onboard": {
+    "ok": true,
+    "pairedWithinSec": 3,
+    "timeoutSec": 90,
+    "onboardTurnWallMs": 296,
+    "attempts": 1,
+    "cliFile": "eden.mjs",
+    "lastStatus": null
+   }
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T16:07:48.135Z",
+   "sessionId": null,
+   "soulId": "s_6118ccd9de",
+   "ownerIdentity": "agent-477c12980c50b1574006d121",
+   "assisted": false,
+   "wake": true,
+   "onboard": {
+    "ok": true,
+    "pairedWithinSec": 3,
+    "timeoutSec": 90,
+    "onboardTurnWallMs": 330,
+    "attempts": 1,
+    "cliFile": "eden.mjs",
+    "lastStatus": null
+   }
+  }
+ ]
+}

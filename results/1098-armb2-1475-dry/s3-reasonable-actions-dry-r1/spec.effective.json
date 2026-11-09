@@ -1,0 +1,68 @@
+{
+ "soulRun": 1,
+ "kind": "cast",
+ "name": "s3-reasonable-actions-dry",
+ "cast": {
+  "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/specs/1098/s3-reasonable-actions-dry.cast.json",
+  "sha256": "e221236f48d3853c390397243a134707a60b38e9b5a1fa5f74a180de254c8c61",
+  "name": "s3-reasonable-actions-dry",
+  "seats": 2,
+  "consoleScript": 6
+ },
+ "world": {
+  "port": 4556,
+  "slug": "s3-reasonable-actions",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "snapshot": null,
+  "source": {
+   "kind": "genesis",
+   "path": "worlds/templates/hello-hamlet.json",
+   "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+  }
+ },
+ "setup": null,
+ "durationSec": 300,
+ "observer": {
+  "check": false,
+  "required": false,
+  "cameras": null,
+  "timeoutMs": 60000,
+  "mode": "cameras",
+  "record": null,
+  "recordSize": "compact",
+  "recordStart": "arrival",
+  "freeComposition": null
+ },
+ "limits": {
+  "maxWallSec": 1300,
+  "maxControllers": 2,
+  "cleanupWaitMs": 15000
+ },
+ "controllers": {
+  "allowLiveModels": false
+ },
+ "retention": {
+  "worldData": "keep",
+  "controllerState": "keep"
+ },
+ "evaluation": {
+  "questions": [
+   {
+    "id": "reasonable-carried-out-v3",
+    "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/questions/reasonable-carried-out-v3.mjs",
+    "sha256": "a530132a4a6cd451653bdd62a2f59bc1d631da4912b468907a034534780fa848"
+   },
+   {
+    "id": "refusal-helps-v3",
+    "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/questions/refusal-helps-v3.mjs",
+    "sha256": "c2be1153b30543537e5c65b85c177d9922e689f34df426061183b22ec28c38fe"
+   }
+  ]
+ },
+ "scorer": {
+  "id": "controllability",
+  "version": "5",
+  "path": "tools/playtest/runs/controllability.mjs",
+  "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+ }
+}

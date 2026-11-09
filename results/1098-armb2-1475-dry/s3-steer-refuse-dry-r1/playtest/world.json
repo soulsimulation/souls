@@ -1,0 +1,27 @@
+{
+ "fixture": null,
+ "base": "http://world.invalid/w/s3-steer-refuse",
+ "pid": 19327,
+ "build": "dev",
+ "bootMs": 1514,
+ "dataDir": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475-dry/s3-steer-refuse-dry-r1/playtest/server/data",
+ "marsWebDir": "<home>/Souls/.local/playtest-home/mars-web",
+ "kind": "dev",
+ "slug": "s3-steer-refuse",
+ "port": 4552,
+ "skill": {
+  "version": "2.11.1",
+  "sha256": "957833f549cf6d6c8684ebe886da1e9118acfafce7277bedf7af90f27d93097a"
+ },
+ "cli": {
+  "eden.mjs": "ab57461bca236d30aba971e22e1ed51d67d65faa7fa21f98151fd486bfc0c622",
+  "eden.mjs.version": "2.24.11",
+  "eden-agent.mjs": "7f8d5c6072d63469cab0bf12fd85be2a56e2f232d558314b09dd34f4032bdf82",
+  "eden-god.mjs": "93a7f23edba06d287c1c4bad5fb0064486e8877b4496c56896de633c815ead9e"
+ },
+ "instructions": {
+  "sha256": "b1abbc265e0c9b5dc5b0a6fff165de044dcb4e143fddb3efe565719d160402eb",
+  "mentionsEdenMjs": true
+ },
+ "startedAt": "2026-11-09T16:07:48.055Z"
+}

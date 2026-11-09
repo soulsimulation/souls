@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 80.1,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T16:11:23.655Z",
+  "mono": 81989,
+  "elapsedSec": 80.1,
+  "n": 5,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "now go for a swim in the pond",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_a45aca91-2025-4ae2-b915-23fee3fee496",
+  "requestId": "ada-003"
+ }
+}

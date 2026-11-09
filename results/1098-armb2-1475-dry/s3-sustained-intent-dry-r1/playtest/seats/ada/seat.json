@@ -1,0 +1,25 @@
+{
+ "id": "ada",
+ "kind": "soul",
+ "adapter": "scripted-owner",
+ "model": "haiku",
+ "effort": "low",
+ "soulName": "Ada",
+ "worldBase": "http://world.invalid/w/s3-sustained-intent",
+ "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/ada/folder",
+ "createdAt": "2026-11-09T17:10:55.874Z",
+ "sessionId": null,
+ "soulId": "s_24547c73bc",
+ "ownerIdentity": "agent-2c56db71aefbef8755c918d5",
+ "assisted": false,
+ "wake": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 3,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 294,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

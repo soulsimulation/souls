@@ -1,0 +1,14 @@
+2026-11-09T15:33:07Z arm start tools 168ba5df9 server 7c4b95b2e specs: tools/playtest/runs/specs/1098/s3-steer-refuse-dry.json tools/playtest/runs/specs/1098/s3-reasonable-actions-dry.json tools/playtest/runs/specs/1098/s3-sustained-intent-dry.json
+2026-11-09T16:07:45Z start s3-steer-refuse-dry-r1 load 7.94
+2026-11-09T16:10:00Z end s3-steer-refuse-dry-r1 rc=0 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=true
+2026-11-09T16:10:00Z start s3-reasonable-actions-dry-r1 load 5.99
+2026-11-09T16:13:55Z end s3-reasonable-actions-dry-r1 rc=0 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=true
+2026-11-09T16:13:55Z start s3-sustained-intent-dry-r1 load 6.42
+2026-11-09T16:13:58Z end s3-sustained-intent-dry-r1 rc=2 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=none
+2026-11-09T16:13:58Z arm end, spent $0.0000
+2026-11-09T17:10:52Z arm start tools 168ba5df9 server 7c4b95b2e specs: tools/playtest/runs/specs/1098/s3-steer-refuse-dry.json tools/playtest/runs/specs/1098/s3-reasonable-actions-dry.json tools/playtest/runs/specs/1098/s3-sustained-intent-dry.json
+2026-11-09T17:10:52Z exists, skipped: s3-steer-refuse-dry-r1
+2026-11-09T17:10:52Z exists, skipped: s3-reasonable-actions-dry-r1
+2026-11-09T17:10:53Z start s3-sustained-intent-dry-r1 load 4.09
+2026-11-09T17:13:58Z end s3-sustained-intent-dry-r1 rc=0 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=true
+2026-11-09T17:13:58Z arm end, spent $0.0000

@@ -1,0 +1,179 @@
+{
+ "requestId": "bo-002",
+ "seat": "bo",
+ "soulId": "s_cdf2960729",
+ "text": "could you pop into the reading room?",
+ "channel": "card",
+ "sentAt": "2026-11-09T16:10:15.604Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T16:10:15.701Z",
+ "ackText": "Trying the reading room",
+ "resultAt": "2026-11-09T16:10:16.114Z",
+ "resultText": "act: unresolved {{prev.alternatives[0].id}}",
+ "resultState": "failed",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T16:10:16.114Z",
+ "firstResultText": "act: unresolved {{prev.alternatives[0].id}}",
+ "cardResults": [
+  {
+   "text": "act: unresolved {{prev.alternatives[0].id}}",
+   "at": "2026-11-09T16:10:16.114Z",
+   "state": "failed",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T16:10:23.610Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T16:10:23.609Z",
+   "mono": 21943,
+   "soulId": "s_cdf2960729",
+   "name": "Bo",
+   "tick": 417,
+   "place": "g-lab-start",
+   "placePath": [
+    "Village Green",
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0,
+    "z": 0,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.64069444444289,
+    "hunger": 20.386944444445035,
+    "company": 35.414583333332956,
+    "restlessness": 20.525138888888883
+   },
+   "near": [
+    {
+     "id": "h_35148f1f47",
+     "who": "Ada",
+     "distance": "near",
+     "doing": "walk"
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": null,
+   "lastReceipt": null,
+   "receipts": [],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794240603929
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_a7b49a3a-f9f9-4ab1-9a1d-011af9b233e0",
+     "text": "could you pop into the reading room?",
+     "state": "acknowledged",
+     "sentAt": 1794240615605,
+     "deliveredAt": 1794240615606,
+     "acknowledgedAt": 1794240615701,
+     "reply": "Trying the reading room",
+     "outcome": "failed",
+     "result": "act: unresolved {{prev.alternatives[0].id}}",
+     "resultAt": 1794240616114
+    }
+   },
+   "world": {
+    "tick": 417,
+    "souls": [
+     {
+      "id": "h_cdf2960729",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_35148f1f47",
+      "name": "Ada",
+      "doing": "walking to the spot to sit at outdoor bench",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 16
+   }
+  }
+ ],
+ "receipts": [],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

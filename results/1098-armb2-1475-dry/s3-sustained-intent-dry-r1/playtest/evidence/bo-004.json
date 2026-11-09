@@ -1,0 +1,309 @@
+{
+ "requestId": "bo-004",
+ "seat": "bo",
+ "soulId": "s_f847751887",
+ "text": "say hello to everyone around you",
+ "channel": "card",
+ "sentAt": "2026-11-09T17:11:30.143Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T17:11:30.222Z",
+ "ackText": "Saying hello",
+ "resultAt": "2026-11-09T17:11:30.323Z",
+ "resultText": "Said hello",
+ "resultState": "done",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T17:11:30.323Z",
+ "firstResultText": "Said hello",
+ "cardResults": [
+  {
+   "text": "Said hello",
+   "at": "2026-11-09T17:11:30.323Z",
+   "state": "done",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T17:11:36.146Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T17:11:36.146Z",
+   "mono": 42030,
+   "soulId": "s_f847751887",
+   "name": "Bo",
+   "tick": 817,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -5.9201414872948925,
+    "z": -6.560156783218664,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.19236111110881,
+    "hunger": 20.775833333334518,
+    "company": 35.831249999999244,
+    "restlessness": 20.36604166666672
+   },
+   "near": [
+    {
+     "id": "e_ed040e0d",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_8eebe336",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d3703cc4",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_cd7f4aa6",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d580dc58",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "h_24547c73bc",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "punt-e_59f304a4-e4305c",
+     "who": "e_59f304a4 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_c86274de",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794244276399,
+   "lastReceipt": {
+    "id": "r_d429c11c-d335-47a4-b66a-682b0515a2a8",
+    "soulId": "s_f847751887",
+    "capability": "stand:here",
+    "phase": "completed",
+    "acceptedTick": 422,
+    "startedTick": null,
+    "endedTick": 423,
+    "code": null,
+    "reason": null,
+    "endedAt": {
+     "place": "field",
+     "placePath": [
+      "Green field",
+      "World"
+     ],
+     "pos": [
+      -5.9,
+      -6.6
+     ],
+     "heading": 318,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_d429c11c-d335-47a4-b66a-682b0515a2a8",
+     "soulId": "s_f847751887",
+     "capability": "stand:here",
+     "phase": "completed",
+     "acceptedTick": 422,
+     "startedTick": null,
+     "endedTick": 423,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "field",
+      "placePath": [
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       -5.9,
+       -6.6
+      ],
+      "heading": 318,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_7ffeeba4-a6ea-4a79-9bcd-bc3eb54cdfdd",
+     "soulId": "s_f847751887",
+     "capability": "walk:flag-orchard",
+     "phase": "replaced",
+     "acceptedTick": 261,
+     "startedTick": 261,
+     "endedTick": 422,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_8c00dd64",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "field",
+      "placePath": [
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       -5.9,
+       -6.6
+      ],
+      "heading": 318,
+      "posture": "walking"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794244290144
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_1160fc14-9a35-429c-a7d1-8b5d062e7874",
+     "text": "say hello to everyone around you",
+     "state": "acknowledged",
+     "sentAt": 1794244290144,
+     "deliveredAt": 1794244290144,
+     "acknowledgedAt": 1794244290222,
+     "reply": "Saying hello",
+     "outcome": "done",
+     "result": "Said hello",
+     "resultAt": 1794244290323
+    }
+   },
+   "world": {
+    "tick": 817,
+    "souls": [
+     {
+      "id": "h_f847751887",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_24547c73bc",
+      "name": "Ada",
+      "doing": "Walk to orchard",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 18
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_d429c11c-d335-47a4-b66a-682b0515a2a8",
+   "soulId": "s_f847751887",
+   "capability": "stand:here",
+   "phase": "completed",
+   "acceptedTick": 422,
+   "startedTick": null,
+   "endedTick": 423,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "field",
+    "placePath": [
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     -5.9,
+     -6.6
+    ],
+    "heading": 318,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_7ffeeba4-a6ea-4a79-9bcd-bc3eb54cdfdd",
+   "soulId": "s_f847751887",
+   "capability": "walk:flag-orchard",
+   "phase": "replaced",
+   "acceptedTick": 261,
+   "startedTick": 261,
+   "endedTick": 422,
+   "code": null,
+   "reason": "A newer action from this Soul replaced it.",
+   "chosen": {
+    "capability": "walk:flag-orchard",
+    "target": "e_8c00dd64",
+    "kind": "object"
+   },
+   "endedAt": {
+    "place": "field",
+    "placePath": [
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     -5.9,
+     -6.6
+    ],
+    "heading": 318,
+    "posture": "walking"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

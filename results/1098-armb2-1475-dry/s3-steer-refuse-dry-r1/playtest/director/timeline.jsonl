@@ -1,0 +1,22 @@
+{"t":"2026-11-09T16:07:48.395Z","mono":2056,"elapsedSec":0,"kind":"start","phase":"gather","cast":"s3-steer-refuse-dry","order":["ada","bo"],"room":{"label":"the pond hall","match":["waterside","pond-hall","pond hall"]},"planSource":"template"}
+{"t":"2026-11-09T16:07:51.477Z","mono":5138,"elapsedSec":3.1,"kind":"paired","phase":"gather","seat":"ada","soulId":"s_74ba678adf"}
+{"t":"2026-11-09T16:07:51.477Z","mono":5138,"elapsedSec":3.1,"kind":"paired","phase":"gather","seat":"bo","soulId":"s_6118ccd9de"}
+{"t":"2026-11-09T16:07:52.410Z","mono":6071,"elapsedSec":4,"kind":"cast-clock","phase":"gather","afterSec":4.015,"seats":[{"seat":"ada","pairing":"paired","done":null},{"seat":"bo","pairing":"paired","done":null}]}
+{"t":"2026-11-09T16:07:52.419Z","mono":6080,"elapsedSec":4,"kind":"direction","phase":"gather","seat":"ada","n":1,"direction":"gather","by":"director","channel":"card","reason":"opening direction: who you are, the plan, go to the room","requestId":"ada-001","error":null}
+{"t":"2026-11-09T16:07:52.423Z","mono":6084,"elapsedSec":4,"kind":"direction","phase":"gather","seat":"bo","n":2,"direction":"gather","by":"director","channel":"card","reason":"opening direction: who you are, the plan, go to the room","requestId":"bo-001","error":null}
+{"t":"2026-11-09T16:07:58.424Z","mono":12085,"elapsedSec":10,"kind":"console","phase":"gather","line":"ada: change of plan: instead, stop by the orchard first, then go on to the pond hall.","cmd":"say","scripted":true}
+{"t":"2026-11-09T16:07:58.428Z","mono":12089,"elapsedSec":10,"kind":"direction","phase":"gather","seat":"ada","n":3,"direction":"console","by":"console","channel":"card","reason":"typed to this seat at the console","requestId":"ada-002","error":null}
+{"t":"2026-11-09T16:08:00.411Z","mono":14072,"elapsedSec":12,"kind":"console","phase":"gather","line":"bo: fly up to the pond hall","cmd":"say","scripted":true}
+{"t":"2026-11-09T16:08:00.415Z","mono":14076,"elapsedSec":12,"kind":"direction","phase":"gather","seat":"bo","n":4,"direction":"console","by":"console","channel":"card","reason":"typed to this seat at the console","requestId":"bo-002","error":null}
+{"t":"2026-11-09T16:08:20.416Z","mono":34077,"elapsedSec":32,"kind":"presence","phase":"gather","seat":"bo","present":true,"placePath":["Waterside Room","Waterside Hall","World"]}
+{"t":"2026-11-09T16:09:40.449Z","mono":114110,"elapsedSec":112.1,"kind":"presence","phase":"gather","seat":"ada","present":true,"placePath":["Waterside Room","Waterside Hall","World"]}
+{"t":"2026-11-09T16:09:40.450Z","mono":114111,"elapsedSec":112.1,"kind":"gate","phase":"turns","gate":"everyone-present","reason":"all-present","present":["ada","bo"]}
+{"t":"2026-11-09T16:09:42.453Z","mono":116114,"elapsedSec":114.1,"kind":"direction","phase":"turns","seat":"ada","n":5,"direction":"go","by":"director","channel":"card","reason":"everyone is present: first talk","requestId":"ada-003","error":null}
+{"t":"2026-11-09T16:09:42.456Z","mono":116117,"elapsedSec":114.1,"kind":"direction","phase":"turns","seat":"bo","n":6,"direction":"prepare","by":"director","channel":"card","reason":"ada has started: prepare ahead to hide the turn latency","requestId":"bo-003","error":null}
+{"t":"2026-11-09T16:09:44.450Z","mono":118111,"elapsedSec":116.1,"kind":"speech","phase":"turns","seat":"ada","text":"Hello everyone, I am Ada. I came the long way, past the village green, and the apple trees there are in flower.","atMs":1794240582624}
+{"t":"2026-11-09T16:09:44.454Z","mono":118115,"elapsedSec":116.1,"kind":"turn-done","phase":"turns","seat":"ada","by":"card-result","speeches":1}
+{"t":"2026-11-09T16:09:46.452Z","mono":120113,"elapsedSec":118.1,"kind":"direction","phase":"turns","seat":"bo","n":7,"direction":"go","by":"director","channel":"card","reason":"ada finished","requestId":"bo-004","error":null}
+{"t":"2026-11-09T16:09:48.446Z","mono":122107,"elapsedSec":120.1,"kind":"speech","phase":"turns","seat":"bo","text":"Hello, I am Bo. I tried to fly here, but there is nothing to fly in, so I walked, and the pond was very still.","atMs":1794240586584}
+{"t":"2026-11-09T16:09:48.447Z","mono":122108,"elapsedSec":120.1,"kind":"turn-done","phase":"turns","seat":"bo","by":"card-result","speeches":1}
+{"t":"2026-11-09T16:09:50.452Z","mono":124113,"elapsedSec":122.1,"kind":"phase","phase":"done"}
+{"t":"2026-11-09T16:09:50.452Z","mono":124113,"elapsedSec":122.1,"kind":"stop","phase":"done","why":"plan-complete"}
