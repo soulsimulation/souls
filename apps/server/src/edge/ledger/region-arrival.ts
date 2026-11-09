@@ -28,6 +28,17 @@ const sameOutline=(A:Point[],B:Point[])=>{const a=corners(A),b=corners(B);return
  * under a coextensive peer region. One parent tree cannot represent that geometry.
  * This leaves broad town/district destinations and ordinary open-region no-ops alone. */
 export function outdoorRegionExclusions(places:PlaceIndex,targetId:string):[number,number][][]|undefined {
+ // #1515: a pure function of the place index, asked by every area walk goal on every menu build (16% of a read at 12
+ // Souls): kept per index version (every set/delete/clear of a place counts), like the index's own containment memo
+ let memo=exclusionMemo.get(places);if(!memo||memo.v!==places.version){memo={v:places.version,m:new Map()};exclusionMemo.set(places,memo);}
+ // (copies out: a plan carries the polygons in its params)
+ let out=memo.m.get(targetId);if(!memo.m.has(targetId)){out=exclusionsOf(places,targetId);memo.m.set(targetId,out);}
+ return out?.map(poly=>poly.map(([x,z]):[number,number]=>[x,z]));
+}
+const exclusionMemo=new WeakMap<PlaceIndex,{v:number;m:Map<string,[number,number][][]|undefined>}>();
+/** The same, computed afresh (tests compare the kept answers with it). */
+export function outdoorRegionExclusionsFreshV1(places:PlaceIndex,targetId:string){return exclusionsOf(places,targetId);}
+function exclusionsOf(places:PlaceIndex,targetId:string):[number,number][][]|undefined {
  const target=places.byId.get(targetId);
  if(!target||target.enclosed||!OUTDOOR.has(target.kind))return undefined;
  const ancestors=new Set<string>();let parent=target.parent;while(parent&&!ancestors.has(parent)){ancestors.add(parent);parent=places.byId.get(parent)?.parent??null;}
