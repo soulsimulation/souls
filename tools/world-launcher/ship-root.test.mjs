@@ -75,7 +75,7 @@ process.exit(halted ? 2 : 0);`);
     SHIP_HOST_ROOT: root, SHIP_HOST_DATA: data, SHIP_HOST_CONF: conf, SHIP_HOST_TMP: join(t, 'host'), SHIP_HOST_MEMINFO: join(t, 'host/meminfo'), SHIP_SSH: join(t, 'stubs/ssh'), SHIP_SCP: join(t, 'stubs/scp'), SHIP_NODE: join(t, 'stubs/node'),
     SHIP_PYTHON: join(t, 'stubs/python'), SHIP_RELEASE_SH: join(t, 'stubs/release'), SHIP_CURL: join(fakebin, 'curl'), SHIP_WALK_SLUGS: 'eden mars' };
   const run = (args, more = {}) => spawnSync('bash', [SHIP, ...args], { env: { ...env, ...more }, encoding: 'utf8', timeout: 60_000 });
-  return { t, repo, sha, build, env, run, writeReceipts, root, out: join(t, 'out/4.16'), calls: () => readFileSync(log, 'utf8'), base: ['--label', '4.16', '--sha', sha] };
+  return { t, repo, sha, build, env, run, writeReceipts, root, out: join(t, 'out/0.123'), calls: () => readFileSync(log, 'utf8'), base: ['--label', '0.123', '--sha', sha] };
 }
 
 test('--dry-run prints every step, touches nothing remote, writes nothing and never prints the host', () => {
@@ -122,7 +122,7 @@ test('every guard refuses before anything remote', () => {
 test('a commit that is not on origin/main is refused', () => {
   const s = setup(); writeFileSync(join(s.repo, 'b'), '1'); git(s.repo, 'add', 'b'); git(s.repo, 'commit', '-qm', 'local only');
   const sha = git(s.repo, 'rev-parse', 'HEAD'); s.writeReceipts({ refs: { candidate: { sha } } }, { candidate: sha });
-  const r = s.run(['--label', '4.16', '--sha', sha]);
+  const r = s.run(['--label', '0.123', '--sha', sha]);
   assert.equal(r.status, 1);
   assert.match(r.stdout, /not an ancestor of origin\/main/);
   assert.equal(s.calls(), '');
@@ -131,7 +131,7 @@ test('a commit that is not on origin/main is refused', () => {
 test('there is no host option, and --sha must be the full commit', () => {
   const s = setup();
   assert.equal(s.run([...s.base, '--host', 'x']).status, 2);
-  assert.equal(s.run(['--label', '4.16', '--sha', s.sha.slice(0, 12)]).status, 2);
+  assert.equal(s.run(['--label', '0.123', '--sha', s.sha.slice(0, 12)]).status, 2);
   assert.equal(s.calls(), '');
 });
 
@@ -144,7 +144,7 @@ test('a full run on the fake host: every step in order, the host block under an 
   const calls = s.calls();
   assert.match(calls, /release\tproduction --no-activate base=\//);
   assert.equal(calls.match(/^activate\t/gm).length, 1);
-  assert.ok(calls.indexOf('compact-backup.sh pre-r416 production') < calls.indexOf('activate\t'));
+  assert.ok(calls.indexOf('compact-backup.sh pre-r0123 production') < calls.indexOf('activate\t'));
   assert.ok(calls.indexOf('release-probe.mjs') < calls.indexOf('activate\t'));
   const snapshot = JSON.parse(readFileSync(join(s.out, 'snapshot.json'), 'utf8'));
   assert.ok(snapshot.remote.databasePaths.includes('body-collections.sqlite'));
@@ -305,12 +305,12 @@ test('a second run into the same output folder is refused', () => {
 test('verdicts: receipts, a backup that dropped rows or missed a database, stale activation inputs', () => {
   assert.deepEqual(receiptProblems(null, null, 'a', 'b').length > 0, true);
   const snapshot = { candidate: 'a', at: new Date().toISOString(), remote: { databases: 2, databasePaths: ['accounts.sqlite', 'body-collections.sqlite'] } };
-  const log = rows => [...rows, '/b/pre-r416-production-x'].join('\n');
-  const ok = '{"dropped":{}}', quick = 'ok /b/pre-r416-production-x/accounts.sqlite\nok /b/pre-r416-production-x/body-collections.sqlite\n';
-  assert.equal(backupReceipt(log([ok, ok]), quick, snapshot, 's', '416').databases, 2);
-  assert.throws(() => backupReceipt(log([ok, '{"dropped":{"events":1}}']), quick, snapshot, 's', '416'), /dropped rows/);
-  assert.throws(() => backupReceipt(log([ok, ok]), 'ok /b/pre-r416-production-x/accounts.sqlite\nok /b/pre-r416-production-x/other.db\n', snapshot, 's', '416'), /filenames differ/);
-  assert.throws(() => backupReceipt('nothing', quick, snapshot, 's', '416'), /did not name its folder/);
+  const log = rows => [...rows, '/b/pre-r0123-production-x'].join('\n');
+  const ok = '{"dropped":{}}', quick = 'ok /b/pre-r0123-production-x/accounts.sqlite\nok /b/pre-r0123-production-x/body-collections.sqlite\n';
+  assert.equal(backupReceipt(log([ok, ok]), quick, snapshot, 's', '0123').databases, 2);
+  assert.throws(() => backupReceipt(log([ok, '{"dropped":{"events":1}}']), quick, snapshot, 's', '0123'), /dropped rows/);
+  assert.throws(() => backupReceipt(log([ok, ok]), 'ok /b/pre-r0123-production-x/accounts.sqlite\nok /b/pre-r0123-production-x/other.db\n', snapshot, 's', '0123'), /filenames differ/);
+  assert.throws(() => backupReceipt('nothing', quick, snapshot, 's', '0123'), /did not name its folder/);
   const backup = { at: snapshot.at, status: 'pass', snapshotSha256: 's', databases: 2, quickChecks: 2 }, upload = { sha: 'a', manifestSha256: 'm' };
   assert.deepEqual(activationProblems(snapshot, 's', backup, upload, 'm'), []);
   assert.ok(activationProblems(snapshot, 's', backup, upload, 'm', Date.now() + 2 * 3_600_000).length >= 2);
@@ -429,7 +429,7 @@ test('#1438 --no-eyes: the browser steps are skipped and recorded, SHIP_RELEASED
   for (const tool of ['release-probe.mjs', 'ship/walk.mjs', 'poster.mjs', 'stall.mjs']) assert.doesNotMatch(calls, new RegExp(tool.replace('.', '\\.')), tool);
   assert.match(calls, /cdn-walk\.mjs/);
   assert.equal(calls.match(/^activate\t/gm).length, 1);
-  assert.ok(calls.indexOf('compact-backup.sh pre-r416 production') < calls.indexOf('activate\t'));
+  assert.ok(calls.indexOf('compact-backup.sh pre-r0123 production') < calls.indexOf('activate\t'));
   const lines = readFileSync(join(s.out, 'STEPS.txt'), 'utf8').split('\n').filter(Boolean);
   assert.match(lines[0], / mode ship-no-eyes /);
   assert.deepEqual(lines.slice(1).map(l => l.split(' ').slice(0, 2).join(' ')), ['snapshot ok', 'stage ok', 'rehearse ok', 'backup ok', 'probe-start skipped-no-eyes', 'activate ok',

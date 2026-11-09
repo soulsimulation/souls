@@ -490,7 +490,7 @@ function scanWorld(model: WorldModel) {
     const def = model.resolvedDef(e.def); if (!def || def.form !== 'point') continue;
     const p = model.worldPose(e), b = def.size?.box ?? [1, 1, 1], tall = (b[1] ?? 1) * p.s, wide = Math.max(b[0] ?? 1, b[2] ?? 1) * p.s;
     if (tall > 1.8) obstacles.push([p.x, Math.min(3, (tall * wide) / 12), p.z]);   // weight: how much wind it blocks
-    try { ys.push(model.terrain.sample(p.x, p.z)); } catch { /* no terrain */ }
+    try { ys.push(model.terrain.peek(p.x, p.z)); } catch { /* no terrain */ }   // PERF-ARRIVAL: no tile bake per thing (as placeOf)
   }
   ys.sort((a, b) => a - b); typicalGround = ys.length ? ys[Math.floor(ys.length / 2)] : 0;
 }
