@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Under `flight-resume/1` (#1367), adopted at boot after quarantine/1, a walk that starts from a body left standing on a flight (between its landings, not at its own level's landing) resumes that flight from where the body stands, towards the landing that gives the shorter route, instead of being planned from the floor (a drop the step check refuses as `motion.teleport`, on every walk). Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `flight-resume/1` (#1367), adopted at boot last, after stair-way/1, a walk that starts from a body left standing on a flight (where its height meets the flight, within the flight's width, not at its own level's landing) resumes that flight instead of being planned from the floor, a drop the step check refuses as `motion.teleport` on every walk. It first steps back onto the flight's centre line across the step it stands on, at a climber's pace, then climbs towards the landing that gives the shorter route. Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
@@ -157,6 +157,38 @@ is ignored for a world that has adopted. A factory that already has the rules (`
   holds (below), this is the only time a body changes place without moving there.
 - `step().refusals` reports each one. The host logs it as a `rules` event from `world:refusal`. Replay reads those only to
   compare the count, and a difference is reported, not fatal.
+
+**Hold or settle** (`hold-settle/1`, #1334). This is a logged runtime policy (cfg `refusalSettleV1`), and every world
+adopts it at boot after `body-step-guard/1`. It acts only under the repair rules. A history from before its event
+replays as it was recorded. Under it, rung 1 answers each violation on its own:
+
+- **Hold.** The moves are undone as above, and the refusal row is written, but the programme is not stopped. The third
+  refusal of one programme within 5 s fails it with `world.refused:<rule>`, as one refusal does without the rule. It no
+  longer goes to the host.
+- **Settle.** Some bodies can't be answered by an undo:
+  - a body with no copy;
+  - a body whose copied pose fails `bodyStandsClear`;
+  - a moved rider or climber;
+  - a body named by `collision.human-static` or `collision.human-human` without having moved (for `human-human`,
+    every named body but the first by id);
+  - a rider named by a `carrier.*` rule.
+
+  Each of these bodies is settled in that tick:
+  1. its programme ends with `world.settled:<rule>`;
+  2. whatever action holds it is force-finished, and a held load is set down where it is (the `engine.action-threw`
+     rule);
+  3. its seat, door turn and ride mark are freed;
+  4. it stands at the nearest pose the ring search accepts. That search uses body-step-guard/1's validator
+     (`bodyStandsClear`, and keeping apart from other bodies), which is why the policy is adopted after the guard.
+
+  Every body's spot is found before anything changes, so a settle places all its bodies or none. If one can't be
+  placed, nothing is moved or ended, and the violation goes to the host as it was.
+
+  The row has `relocated: true` and the poses, so the Soul is told. Settle replaces the relocation exception above: it
+  is the one way the world moves a body without the body walking there.
+- **Still for the host, alone:** a rule outside these classes, a body on a build programme, `human.riding`, `human.on`,
+  a sleeping body, and a settle with any body no ring search can place. These are no longer a reason to send the whole tick: every
+  other violation of that tick is still held, failed or settled.
 
 ### The ladder
 
@@ -214,7 +246,7 @@ one rule, so what returns past the hold writes a small row, not a whole world. A
 
 **A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get
-anywhere, so acts are refused with `world.step-failing`, nothing rewinds, the launcher alerts as for a halt, and a due
+anywhere, so acts are refused with `world.step-failing` (under quarantine/1, only those of the bodies its faults named), nothing rewinds, the launcher alerts as for a halt, and a due
 snapshot is taken at once on a faulted tick. That snapshot is marked: it serves a boot, never a rewind, and one that won't
 capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below three quarters of that, and a clean snapshot follows at once. While it lasts a faulted tick keeps the ordinary beat of batches and heartbeats. What still reaches it is a throw outside
 any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
@@ -229,15 +261,21 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   without reading an invariant. The glitch is rung `contained`, with the restore error as evidence. Everyone else goes on.
   The quarantined Soul can act again at once: it is never held or refused for the quarantine. The rule a rung 3 went back
   for stays on the head after that, and a snapshot is taken at once, so a restart never boots from the refused baseline.
-- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies.
-  A fault that names none still stops everything in place, as above.
+- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies,
+  while steps are failing too (#1378). A fault that names none still stops everything in place, as above.
+- A body quarantined again within the cooldown is held whole (#1378): the event also contains every rule on it (key
+  `{code: '*', subjects: [body]}`), so a fault that comes back under a new rule each tick is absorbed instead of faulting
+  the step. Only a violation whose every subject is held whole is covered; one that names a free body still faults.
+- While steps are failing, only a Soul whose body a fault in the window named is refused `world.step-failing`; everyone is
+  while any fault in the window named no body (#1378). The `engine.step-failing` glitch names who is refused.
 - A broken body (`entity.corrupt`: a person with no human state, or any number in its pose or human state that is no
   finite number) can make every step or the state hash throw while no rule names it. It is found when a step faults,
   when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
   own is broken, and its last whole pose if its pose is broken. If no whole pose is on record, it goes to the nearest free
   spot by the arrival, which is loud: logged, counted and told to its Soul. The event carries the pose, so a replay holds
-  it in the same place. A body that breaks again within a cooldown is not held again: the in-place rung's once-per-cooldown
-  report takes it.
+  it in the same place. A body that breaks again within a cooldown is quarantined and held again, alone (#1377): its own
+  programmes stop and nobody else's. Its glitch row is written at most twice a cooldown; the log event, which a replay
+  needs, every time.
 
 **What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it

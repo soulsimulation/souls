@@ -467,10 +467,20 @@ function segAt(segs: Seg[], s: number, tol: number): number {
   }
   return lo;
 }
-function pointAt(ex: Exec, s: number): Vec2 {
+/** Where the way is at arc length `s` of the current leg. A leg with no smoothed segments was always read as a walk leg (its
+ *  last point). #1428 stair-way/1 (`linkWayV1`, a prospective runtime policy): a link leg (a stair, a ladder, a ramp) has no
+ *  points, so another walker's `way` clear-of test threw `reading 'length'` while this one climbed. Under the policy its way
+ *  is the link's exit, and past the route, the last place on it. Without it, exactly as before. */
+export function pointAt(ex: Pick<Exec, 'segs' | 'route' | 'leg'>, s: number, linkWayV1 = false): Vec2 {
   if (!ex.segs.length) {
-    const leg = ex.route.legs[ex.leg] as WalkLeg;
-    return leg.points[leg.points.length - 1];
+    if (!linkWayV1) { const leg = ex.route.legs[ex.leg] as WalkLeg; return leg.points[leg.points.length - 1]; }
+    const legs = ex.route.legs as Leg[];
+    for (let i = Math.min(ex.leg, legs.length - 1); i >= 0; i--) {   // the current leg, else the last one before it with a place
+      const leg = legs[i];
+      if (leg?.kind === 'link') { const l = leg as LinkLeg; return l.ascending ? l.link.to.p : l.link.from.p; }
+      const pts = (leg as WalkLeg | undefined)?.points; if (pts?.length) return pts[pts.length - 1];
+    }
+    throw new Error(`walk.no-way: ${legs.length} legs, none with a place`);   // a route always has one (findRoute)
   }
   const i = segAt(ex.segs, s, 0);
   if (i >= ex.segs.length) return ex.segs[ex.segs.length - 1].b;
@@ -1416,7 +1426,7 @@ registerClearOf('way', (rt, ref, q) => {
   if (!forEx || forEx.detour) return true;
   const need = ref.r! + forEx.profile.radius + 0.1;
   for (let s = forEx.s; ; s = Math.min(forEx.total, s + 0.2)) {
-    if (dist2(q, pointAt(forEx, s)) < need) return false;
+    if (dist2(q, pointAt(forEx, s, rt.services.stairWayV1 === true)) < need) return false;   // #1428
     if (s >= forEx.total) return true;
   }
 });

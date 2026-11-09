@@ -84,3 +84,10 @@ for(const [name,make] of readers)test(`A3 ${name}: a bound snapshot with every r
   const bad=structuredClone(snap) as unknown as {cfg:Record<string,unknown>};bad.cfg.disassemblyV1=true;
   assert.throws(()=>f.restore(bad as never),/snapshot-(binding|policy)/,name);
 });
+
+test('#1428 stair-way/1 is a state-hash input: a replay that misses its adoption diverges at once',async()=>{
+  const f=await marsFactory(),off=f.create(f.genesis('stair-way-hash')) as MarsEngine,on=f.create(f.genesis('stair-way-hash')) as MarsEngine;
+  assert.equal(on.stateHash(),off.stateHash());
+  on.configureRuntimePolicy({sleepBlockTicks:1200,stairWayV1:true} as never);off.configureRuntimePolicy({sleepBlockTicks:1200} as never);
+  assert.notEqual(on.stateHash(),off.stateHash());
+});
