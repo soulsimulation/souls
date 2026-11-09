@@ -86,8 +86,9 @@ naming it, and the gate still blocks. Several old ids may name the same new repl
 
 Add an entry in the PR that renames or replaces the test, or when a gate reports the removal, citing the PR that made
 it. An entry whose `from` still runs has no effect, and because a replacement must be absent from the baseline, an old
-entry cannot later excuse deleting a test that happens to reuse its `from` name. `renames.json` executes nowhere, but like `quarantine.json` it stays in the suite tree, so changing it re-runs
-the baseline once.
+entry cannot later excuse deleting a test that happens to reuse its `from` name. `renames.json` executes nowhere: only
+the driver reads it, to compare results. It is left out of the suite tree (`COMPARISON_ONLY`), so adding a rename keeps
+the cached baseline.
 
 ### Scope
 
@@ -114,8 +115,11 @@ only its steps against the full baseline and never enters the cache.
 
 The baseline is not re-run when the cache holds a validated run of it. The cache key is
 `<baselineSha>-<suiteTree>-node<major>`. `suiteTree` hashes the `tools/test-harness` entries that execute inside the
-containers, leaving out the driver-only files (`DRIVER_ONLY` in `release-gate.mjs`). A driver change therefore does
-not invalidate cached baselines. A hit requires unchanged file hashes and a complete, matching run. If the candidate
+containers, leaving out the driver-only files (`DRIVER_ONLY` in `release-gate.mjs`) and the files that only say how
+results are compared (`COMPARISON_ONLY`: `renames.json`). A driver or renames change therefore does not invalidate
+cached baselines; a change to anything the containers read, `quarantine.json` included, does. An entry stored under an
+earlier suite-tree definition is still found when its own harness commit recomputes to the current suite tree (the
+receipt marks it `legacyKey`). A hit requires unchanged file hashes and a complete, matching run. If the candidate
 runs a different Node or pnpm version than the cached run, the baseline is re-run. A miss runs the baseline once
 beside the candidate and caches it when it validates. Every passing full gate caches its candidate, which becomes the
 next gate's baseline once it is on `main`.
