@@ -153,6 +153,11 @@ type Prog = {
 /** #1150: an invariant that throws is a named violation, so the repair ladder sees it and the rest of the tick still runs. */
 /** #1369: every number in this value is finite (what the state hash requires). */
 const finiteDeepV1 = (v: unknown, depth = 0): boolean => typeof v === 'number' ? Number.isFinite(v) : !v || typeof v !== 'object' || depth > 8 || Object.values(v as object).every(x => finiteDeepV1(x, depth + 1));
+/** #1440: the invariants already guarded, so wrapping a list again (one appended to, or swapped back in) leaves those as they are. */
+const GUARDED_V1 = new WeakSet<object>();
+const guardInvariantOnceV1 = (inv: any) => { if (GUARDED_V1.has(inv)) return inv; const g = guardedInvariantV1(inv); GUARDED_V1.add(g); return g; };
+/** #1440: how long a body under a standing hold must stay whole before the mark ends. */
+const STANDING_HOLD_COOLDOWN_V1 = 1200;
 const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } catch (e) { return [{ code: 'engine.thrown', message: String((e as Error)?.message ?? e).slice(0, 200), subjects: [] }]; } };
 const containedKey = (v: { code: string; subjects?: string[] }) => `${v.code}|${[...(v.subjects ?? [])].sort().join()}`;
 /** #1150: how long a contained entry stays after it last fired. A rule that flickers stays contained, instead of faulting again each time it comes back. */
@@ -373,6 +378,7 @@ export class MarsEngine implements Engine {
 
   // ------------------------------------------------------------------ tick
   step() {
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();   // #1440: a body under a standing hold, broken before the step
     // Rebased physical runtimes rebuild service state; the accepted policy stays in cfg.
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
@@ -397,12 +403,15 @@ export class MarsEngine implements Engine {
     if (reuse) this.tableReusesV1++;
     const table: EntityTable = reuse ? checkedTable(cached!) : listTable(this.ents);
     this.tableCacheV1 = null;
-    if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardedInvariantV1);
+    if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardInvariantOnceV1);
     if (this.cfg.soulsRepairV1 === true) this.rt.actionThrewV1 ??= (action: string, error: unknown) => this.abandonV1(action, error);
     const refusable = this.cfg.soulsRepairV1 === true ? this.refusalCopyV1(table) : null, seen = this.rt.violations.length;
     this.m.stepCarriers(this.rt, table);   // carrier/1: rides move their seated riders first (no carriers: no effect)
     this.m.stepHandHolds(this.rt);         // entry 35: hands let go finish, a broken pair lets go (no holds: no effect)
     this.rt.step(table);
+    // #1440: a body under a standing hold, broken inside the step: held before anything reads it (the refusal pass, the take's
+    // cut, the keyframes), so no reader meets the broken pose; the trailing hold below stays for what runs after
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();
     if (refusable && this.world.containedV1) this.stillContainedV1(seen, refusable);
     if (refusable && this.rt.violations.length > seen) this.refuseV1(refusable, seen);
     const pass: EntityTable | null = (this.rt as any).passTable ?? null;
@@ -438,6 +447,7 @@ export class MarsEngine implements Engine {
       if (last && (last[1] !== now[1] || last[3] !== now[3] || last[4] !== now[4])) this.out.paths.push({ entity: id, startTick: last[0], speed: 0, waypoints: [last, now], activity: act, actionId: e.human.task ?? '' });
       this.keys.set(id, now);
     }
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();   // #1440: and broken by it, before the host reads the state
     const events = this.rt.events.slice(this.cursor) as RuntimeEvent[];
     const out = { ...this.out, events };
     this.out = { paths: [], changes: [], programs: [] };
@@ -689,6 +699,28 @@ export class MarsEngine implements Engine {
       if (!e.human || typeof e.human !== 'object' || !Array.isArray(e.pose?.p) || e.pose.p.length !== 3 || e.pose.p.some(bad) || bad(e.pose.yaw ?? 0) || bad(e.human.level ?? 0) || !finiteDeepV1(e.human)) out.push({ code: 'entity.corrupt', subjects: [e.id] });
     }
     return out.sort((a, b) => (a.subjects[0] < b.subjects[0] ? -1 : 1));
+  }
+  /** #1440 (logged in a quarantine/1 event's `standing`): a body broken again and again is held by one standing mark instead of
+   *  one logged hold a tick. While it is marked the engine holds it again, at the logged pose, whenever it is found broken (at the
+   *  start and end of each step, so the host never reads it broken); the mark ends once the body has stayed whole for a cooldown, or
+   *  is gone. World state, so a snapshot and a replay carry it. */
+  markStandingV1(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void {
+    if (!this.ents[id] || !Array.isArray(pose?.p)) return;
+    (this.world.standingHoldsV1 ??= {})[id] = { pose: { p: [...pose.p] as [number, number, number], yaw: pose.yaw, level: pose.level }, last: this.rt.tick };
+  }
+  private standingHoldsStepV1(): void {
+    const marks = this.world.standingHoldsV1 as Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; last: number }>, tick: number = this.rt.tick;
+    let bad: Set<string>;
+    try { bad = new Set(this.corruptBodiesV1().flatMap(k => k.subjects)); } catch { return; }
+    for (const id of Object.keys(marks).sort()) {
+      const m = marks[id];
+      if (!this.ents[id]) { delete marks[id]; continue; }
+      if (bad.has(id)) { try { this.holdBodyV1(id, m.pose); } catch { /* the host's sweep still finds it */ } m.last = tick; }
+      else if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) delete marks[id];
+      else { const e = this.ents[id], q = e.pose?.p, lv = e.human?.level ?? 0;   // whole: the mark follows it, so a later break holds it where it last stood whole
+        if (Array.isArray(q) && q.length === 3 && q.every(Number.isFinite) && Number.isFinite(e.pose.yaw ?? 0) && Number.isFinite(lv)) m.pose = { p: [q[0], q[1], q[2]], yaw: e.pose.yaw ?? 0, level: lv }; }
+    }
+    if (!Object.keys(marks).length) delete this.world.standingHoldsV1;
   }
   /** #1369 quarantine/1: a broken body is held where it last stood whole: its programmes stopped (by the host), a fresh human
    *  state if it lost its own, and `pose` (its last whole pose, which the host logged) if its own is no number. With no whole

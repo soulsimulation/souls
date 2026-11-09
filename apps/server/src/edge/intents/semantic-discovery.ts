@@ -112,7 +112,31 @@ export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:Ed
   if(byBase.size===1)return null;
   if(byBase.size>1){const kept=[...byBase.values()].slice(0,8),named=kept.map(c=>({capability:c.id,name:seatNames(c)[0]!,place:c.target!.id,available:c.available,...(c.blocked?{reason:c.blocked.reason}:{})}));return choice('interaction','sit',named,`Several seats are named that way (${named.map(c=>c.name).join(', ')}); choose one by its exact sit capability ID. No seat has been selected.`);}
  }
+ if(!candidates.length){const c=unresolvedCompanion(L,soul,text,caps,plans,known);if(c)return c;}
  return choice('interaction','sit',candidates,candidates.length?'Choose a bound seat by its exact sit capability ID. No seat has been selected.':'No bound sit action matches that named target; no nearby seat or walk was substituted.');
+}
+
+// #1242: "sit outside with Bo" when the words after "with" name no Soul the asker can invite (together/1 reads a Soul it can
+// invite before this, and takes the words then): the seat words alone are read, their seats are listed, never taken, and the
+// answer says who was not found (`unresolved.with`, the words as typed), so the agent can tell its owner that part instead of reporting
+// nothing. Not when the seat words name no seat ("sit with Zed on the bench": the ground is never offered for a named seat)
+// or the "with" words name a place or part ("with a view"): those keep the refusal.
+const WITH=/^(.+?)\s+(?:together\s+with|along\s+with|with)\s+(?!me\b)(.+?)[\s.!?]*$/i;
+const COMPANION_TAIL=/\s+(?:now|here|right\s+now|(?:next\s+to|near|by|beside|under|outside|inside|on|at|in)\s+.*|for\s+(?:a\s+(?:while|bit|minute|moment)|some\s+time)|so(?:\s+that)?\s+.*|to\s+.*|in\s+order\s+to\s+.*)$/i;
+function unresolvedCompanion(L:EdgeLedger,soul:EdgeSoul,text:string,caps:EdgeCapability[],plans:Parameters<EdgeLedger['resolveOnDemand']>[3],known:Place[]):VocabResult|null{
+ const m=WITH.exec(text.trim());if(!m)return null;
+ const head=m[1]!.trim(),who=m[2]!.replace(COMPANION_TAIL,'').trim();if(!who)return null;
+ const seatWords=tokens(parseCapability(head,new Set([...caps.map(c=>c.verb),'sit'])).rest).filter(w=>w!=='down');if(!seatWords.length)return null;
+ const whoWords=tokens(who);
+ if(known.some(p=>{const ws=words([...names(p),...(p.parts??[]).filter(part=>knownPart(L,soul,p,part)).flatMap(x=>[x.title,...(x.aliases??[])])]);return whoWords.some(w=>ws.has(w));}))return null;
+ // (one wording whoever is or is not in the world: the answer never says whether a Soul by that name exists anywhere,
+ // only that these words found nobody to invite from here, so `unresolved.with` is the words as typed)
+ const missing=who,say=`I couldn't find "${who}" here to invite, so nobody was invited.`;
+ const v=L.resolveOnDemand(soul,head,[...caps],new Map(plans)).v;
+ const seat=(id:string)=>id.startsWith('sit:')&&!id.endsWith(':here');
+ const candidates:Candidate[]=(v.kind!=='unknown'?(seat(v.cap.id)?[{capability:v.cap.id,name:v.cap.label,place:v.cap.target?.id??'',available:v.cap.available,...(v.cap.blocked?{reason:v.cap.blocked.reason,code:v.cap.blocked.code}:{})}]:[])
+  :v.discovery?.kind==='interaction'?((v.discovery.candidates as Candidate[]|undefined)??[]):[]).filter(c=>seat(c.capability));
+ return choice('interaction','sit',candidates,candidates.length?`${say} The seat words alone ("${head}") name ${candidates.map(c=>`${c.name} (${c.capability})`).join(', ')}: choose one by its exact sit capability ID. No seat has been selected.`:`${say} No bound sit action matches the rest either; no nearby seat or walk was substituted.`,{unresolved:{with:missing}});
 }
 
 /** Explore accepts bare purpose words as well as sentences. Bare words must all be

@@ -11,7 +11,7 @@ import {SoulMessageBox,soulStartPrompt,useSoulInbox,useWindowCode,type AgentInbo
 import {VisitorFrom} from './SoulTravel.tsx';
 import {clockAt,clockTitle,useAgentPresence,type AgentHere} from './agent-presence.ts';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
-import {WAITING_PROMPT_MS,ageText,bodyPhrase,bodyWord,holderLine,newest,ownerLink,placeOf,readBody,readNow,reconnectSentence,visitorPhrase,type Body,type Link,type Now} from './soul-state.ts';
+import {WAITING_PROMPT_MS,ageText,bodyPhrase,bodyWord,holderLine,newest,ownerLink,placeOf,readBody,readNow,reconnectSentence,readSlowed,slowedText,visitorPhrase,type Body,type Link,type Now} from './soul-state.ts';
 
 /** LINK (spec SOUL-LINK r3 §4, canvas v5): one Soul card, one frame, the status line changes shape.
  * Owner: Connected (link details inline, the agent's `now`, message box + receipt, Follow) · Disconnected (the body as a
@@ -71,6 +71,9 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
  // the waiting variant offers the prompt after a minute: re-render once then
  const [,tick]=useState(0);
  const waitingSince=view==='owner'&&link?.reason==='approved-waiting'?link.since:null;
+ // #456: while the world slows or refuses this Soul's own requests; the line goes at `until` with no event
+ const slowed=readSlowed(soul.slowed),slowedNow=slowedText(slowed,t);
+ useEffect(()=>{if(!slowed)return;const left=slowed.until-Date.now();if(left<=0)return;const k=setTimeout(()=>tick(n=>n+1),left+50);return()=>clearTimeout(k);},[slowed?.until,slowed?.reason]);
  useEffect(()=>{if(waitingSince==null)return;const left=waitingSince+WAITING_PROMPT_MS-Date.now();if(left<=0)return;const k=setTimeout(()=>tick(n=>n+1),left+50);return()=>clearTimeout(k);},[waitingSince]);
  const share=async()=>{try{await navigator.clipboard.writeText(publicSoulLink(location.origin,worldPath,soul.id,BASE));if(alive.current)setCopied('ok');}catch{if(alive.current)setCopied('failed');}};
 
@@ -93,6 +96,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
    <StatusPlace text={!owner?visitorPhrase(body,place,t):waiting?(link?.since&&t-link.since<WAITING_PROMPT_MS?'approved just now':'approved'):disconnected&&!body?(link?.since?`since ${clockAt(link.since,t)}`:''):bodyPhrase(body,place,t)} title={body?.since?clockTitle(body.since):undefined}/>
    <VisitorFrom soulId={soul.id}/>
   </p>
+  {slowedNow&&<p className="soul-slowed soul-dim" role="status" data-slowed={slowed!.reason}>{slowedNow}</p>}
   {connected&&details&&<LinkDetails name={soul.name} link={link!} here={here} prompt={prompt} disconnect={disconnect} clock={t} pairOpen={!!open?.pair}/>}
   {now&&<p className={'soul-now'+(sleeping?' soul-now-dim':'')} data-now="1"><q>{now.text}</q>{now.at>0&&<span className="soul-dim" title={clockTitle(now.at)}> · {ageText(now.at,t)}</span>}</p>}
   {waiting&&<WaitingNote name={soul.name} place={place} since={link!.since} prompt={prompt} clock={t}/>}
