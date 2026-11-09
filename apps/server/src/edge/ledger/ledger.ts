@@ -138,7 +138,8 @@ const FAR: [number, number] = [1e9, 1e9];
 const WITH_PARAM = {type: 'array', items: 'Soul id or name', optional: true, description: 'Invite Souls near you; each joins only if they accept (shared walk / ride).'};
 type Row = {created_at: number; receipt_id: string; soul_id: string; capability: string; phase: EdgeReceipt['phase']; accepted_tick: number; started_tick: number | null; ended_tick: number | null; code: string | null; reason: string | null; program_id: string | null; client_ref: string | null; plan?: string | null; detail?: string | null};
 const ARRIVAL_FRESH_MS = 10 * 60_000, MAX_DATE_MS = 8.64e15;
-type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string; navWarm?: true};
+/** failNext (#1468): a route-dead failure held to the next tick, so its alternatives are built then (one build a tick). */
+type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string; navWarm?: true; failNext?: {code: string; reason: string}};
 type StandReleaseV1={actor:string;owner:string;seats:{action:string;slot:string}[]};
 
 /** The body plans behind a Soul's offered capabilities, by capability id. */
@@ -881,6 +882,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if(this.motionWatch.size)this.motionTicks(tick);
     for (const [soulId, p] of this.pending) {
       if (this.host.quietBarrier) {p.deadline = Math.max(p.deadline, tick + WAIT_LIMIT_TICKS); continue;}   // the wait clock pauses during renewal
+      if (p.failNext) {this.failWait(soulId, p, tick, p.failNext.code, p.failNext.reason); continue;}
       if (tick > p.deadline) {this.pending.delete(soulId); this.update(p.receipt, p.navWarm ? {phase: 'failed', code: 'nav.warm-timeout', reason: 'Navigation was still not ready two minutes after this walk was asked; ask again.'} : {phase: 'failed', code: 'state.safe-stop-timeout', reason: 'The body could not reach a safe stop within a minute.'}); continue;}
       if (this.host.quietBarrier) continue;
       // nav-warm-wait/1 (#884): a walk refused while navigation was cold starts from goals made again once it is warm
@@ -890,7 +892,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         const steps = this.navReplan(p.soul, p.capability, p.steps);
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason;   // the wait's reason is over once it is warm
         if (said?.endsWith(NAV_WARM_REASON)) this.update(p.receipt, {reason: said.slice(0, -NAV_WARM_REASON.length).trim() || null});
-        if (steps && !Array.isArray(steps)) {this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt); this.failedAlternatives(p, steps.code); this.update(p.receipt, {phase: 'failed', code: steps.code, reason: steps.reason}); continue;}
+        if (steps && !Array.isArray(steps)) {this.failWait(soulId, p, tick, steps.code, steps.reason); continue;}
         if (steps) {p.steps = steps; const l = this.launched.get(p.receipt); if (l) l.steps = steps;}
       }
       const issue = this.host.engine.canPerform({actor: p.soul.entityId, label: p.label, steps: p.steps});
@@ -901,8 +903,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
         p.navWarm = true; p.deadline = Math.max(p.deadline, tick + NAV_WARM_WAIT_TICKS); this.arm(p);
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason; this.update(p.receipt, {reason: said ? `${said} ${NAV_WARM_REASON}` : NAV_WARM_REASON}); continue;
       }
+      if (issue) {this.failWait(soulId, p, tick, issue.code, humanBlockedExplanationV1(issue.code, p.label)); continue;}
       this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt);
-      if (issue) {this.failedAlternatives(p, issue.code); this.update(p.receipt, {phase: 'failed', code: issue.code, reason: humanBlockedExplanationV1(issue.code, p.label)}); continue;}
       void this.decide(p.soul, p.receipt, p.capability, p.label, p.steps).catch(() => this.update(p.receipt, {phase: 'failed', code: 'ledger.unavailable', reason: 'The world could not record this action.'}));
     }
     if (this.ambient && tick % 20 === 0) this.ambientLife(tick);
@@ -1036,6 +1038,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #1468: a walk that waited (for warm navigation or a safe stop) and then fails route-dead keeps its alternatives on the receipt.
    *  Stored before the receipt turns failed, so the emitted failed receipt and its outcome carry them (review of 1a07cae42). */
   private failedAlternatives(p: Pending, code: string) {const alternatives = this.routeDeadAlternatives(p.soul, p.capability, code); if (alternatives) this.setDetail(p.receipt, {alternatives});}
+  /** #1468: the tick on which route-dead alternatives were last built. A build costs about 25 ms on Eden 2026, so at most
+   *  one is built a tick: a second failure that tick stays pending (failNext) and fails on the next, with its own. Live
+   *  edge state only; nothing reaches the engine log. */
+  private altTick = -1;
+  /** A waited act fails (route-dead with its alternatives, stored before the receipt turns failed), or is held a tick. */
+  private failWait(soulId: string, p: Pending, tick: number, code: string, reason: string) {
+    if (ROUTE_DEAD.has(code) && !isVerificationProbe(p.soul.soulId)) {if (this.altTick === tick) {p.failNext = {code, reason}; return;} this.altTick = tick;}
+    this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt);
+    this.failedAlternatives(p, code); this.update(p.receipt, {phase: 'failed', code, reason});
+  }
   private navReplan(soul: EdgeSoul, capability: string, steps: Program['steps']): Program['steps'] | {code: string; reason: string} | null {
     try {
       const one = this.bindOne(soul, capability), w = one ? null : this.wordsMenu(soul);

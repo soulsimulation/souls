@@ -28,6 +28,7 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const La = L as unknown as { routeDeadAlternatives(...a: unknown[]): unknown }, altBuild = La.routeDeadAlternatives.bind(L), altMs: number[] = [];
   La.routeDeadAlternatives = (...a: unknown[]) => { const t0 = performance.now(); try { return altBuild(...a); } finally { altMs.push(performance.now() - t0); } };
   const bob = await soulOf('bob', 'Bob'), cy = await soulOf('cy', 'Cy'), di = await soulOf('di', 'Di');
+  const eve = await soulOf('eve', 'Eve'), fay = await soulOf('fay', 'Fay');
   await w.settle(2);
   const roof = 'walk:eden-house-3/eden-house-3-roof-planter-1', kitchen = 'walk:eden-house-3-kitchen/eden-house-3-kitchen-roof-planter-1';
   const phase = (s: { soulId: string }, id: string) => L.receipt(s.soulId, id)!;
@@ -45,6 +46,9 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   assert.equal(first.accepted && second.accepted, true, `${JSON.stringify(first)} ${JSON.stringify(second)}`);
   assert.equal(phase(bob, first.receipt!.id).phase, 'replaced');
   assert.equal(phase(bob, second.receipt!.id).phase, 'waiting');
+  // #1468: two more kitchen roof walks wait beside Bob's, so three fail when navigation warms (one alternatives build a tick)
+  const more = [] as { s: typeof bob; id: string }[];
+  for (const s of [eve, fay]) { const o = await L.act(s, { capability: kitchen }) as Out; assert.equal(o.receipt?.phase, 'waiting', JSON.stringify(o)); more.push({ s, id: o.receipt!.id }); }
   // A3: the wait is bounded: past its deadline it fails with a named code (the deadline is moved, not waited out)
   const third = await L.act(cy, { capability: roof }) as Out; assert.equal(third.receipt?.phase, 'waiting');
   const pending = (L as unknown as { pending: Map<string, { deadline: number; navWarm?: true }> }).pending;
@@ -79,6 +83,17 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const kEv = emitted.filter((r) => r.id === second.receipt!.id && r.phase === 'failed');
   assert.equal(kEv.length, 1, `one failed event: ${JSON.stringify(kEv)}`);
   assert.deepEqual(kEv[0]!.alternatives?.map((x) => x.id), kAlt!.map((x) => x.id), 'the emitted failed receipt names the same alternatives');
+  // the three kitchen walks fail on successive ticks, at most one alternatives build a tick, each event carrying its own
+  const all3 = [{ s: bob, id: second.receipt!.id }, ...more];
+  for (let i = 0; i < 6 && all3.some(({ s, id }) => phase(s, id).phase === 'waiting'); i++) w.host.tickOnce();
+  const three = all3.map(({ s, id }) => ({ r: phase(s, id), ev: emitted.filter((e) => e.id === id && e.phase === 'failed') }));
+  for (const { r, ev } of three) {
+    assert.equal(r.phase, 'failed', JSON.stringify(r)); assert.equal(r.code, 'route.unreachable');
+    assert.equal(ev.length, 1, `one failed event: ${JSON.stringify(ev)}`); assert.ok((ev[0]!.alternatives?.length ?? 0) >= 1, `the event names alternatives: ${JSON.stringify(ev[0])}`);
+  }
+  const ended = three.map(({ r }) => (r as { endedTick: number }).endedTick).sort((a, b) => a - b);
+  assert.equal(new Set(ended).size, 3, `one build a tick: ${ended}`); assert.ok(ended[2]! - ended[0]! <= 2, `all failed within 3 ticks: ${ended}`);
+  t.diagnostic(`three failed waits ended at ticks ${ended.join(', ')}`);
   t.diagnostic(`route-dead alternatives build on the tick (Eden 2026, ms each): ${altMs.map((x) => x.toFixed(1)).join(', ')}`);
   for (const x of kAlt!) {assert.notEqual(x.id, kitchen); assert.ok((L as any).bindOne(bob, x.id)?.cap.available, `${x.id} is available now`);}
   for (let i = 0; i < 4000 && phase(w.soul, ana.receipt!.id).phase !== 'completed'; i++) { w.host.tickOnce(); if (i % 20 === 0) await w.settle(1); }
