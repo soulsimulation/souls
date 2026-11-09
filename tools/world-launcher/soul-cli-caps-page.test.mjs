@@ -105,3 +105,16 @@ test('#1412: caps --search leads with the places the world names, prints its not
   assert.deepEqual(sit.offers, [], '--verb still filters the places out');
   assert.equal(sit.placesMatched, 1); assert.match(sit.note, /knows a place named "library", but none is among --verb sit/, 'never "nothing matches" beside placesMatched 1');
 });
+
+// #1445 review: a world that sends both a page's omitted note and a search note: both reach the agent, the page's first.
+test('#1445: an omitted note and a search note are both kept', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'capsboth-'));
+  const server = createServer((req, res) => {res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({tick: 1, capabilities: [near],
+    omitted: {count: 3, note: 'farther offers still work by id or in words.'}, search: {query: 'zeppelin', places: [], placesMatched: 0, truncated: false, note: 'No place you know is named "zeppelin".'}}));});
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
+  writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: 'http://127.0.0.1:' + server.address().port, soul: 's_pip', token: 'sim_fixture'}));
+  const out = await new Promise((resolve, reject) => execFile(process.execPath, [CLI, 'caps', '--search', 'zeppelin'], {cwd: dir}, (err, o, e) => err ? reject(new Error(e)) : resolve(JSON.parse(o))));
+  assert.equal(out.notListed, 3);
+  assert.equal(out.note, 'farther offers still work by id or in words. No place you know is named "zeppelin".');
+});

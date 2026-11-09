@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.7";
+const VERSION = "2.24.8";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2814,9 +2814,10 @@ async function caps(...args) {
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
     ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
-    ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
+    ...(d.omitted ? { notListed: d.omitted.count } : {}),
     ...(seen && Number.isFinite(seen.placesMatched) ? { placesMatched: seen.placesMatched } : {}),
-    ...(note ? { note } : {}),
+    // #1445 review: a page's omitted note and a search note are both kept, joined, the page's first
+    ...((d.omitted?.note || note) ? { note: [d.omitted?.note, note].filter(Boolean).join(" ") } : {}),
     offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
@@ -2961,13 +2962,14 @@ async function act(...argv) {
   if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { key: sideKey(w.key), ref: w.ref, once: true }); }
   if (w.unconfirmed) return unconfirmed("act", w);
   const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
-  if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
+  // a stop serves no owner message unless named, so it leaves the implicit link for the next act (#1448 review)
+  if (d.accepted && parsed.capability !== STOP_ID) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
     return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
+  let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
@@ -2982,6 +2984,43 @@ async function act(...argv) {
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// 2.24.8 (#1381, #1420): `stop [receiptId]` cancels this Soul's own act under way with the world's stop:current: the act's
+// receipt ends failed/act.stopped, the body stays where it is, keeps its posture, and nothing else starts. It is an act
+// like any other (strict, keyed, linked to an owner message as act is), so the world's answer is printed as act prints
+// it, refusals included: act.none-running (nothing runs; it names the last act), act.already-ended, act.not-started,
+// receipt.unknown, act.shared (a shared carry: `next` names its stop-carry offer) and a ride's own refusal while aloft.
+// A world without stop:current answers capability.unknown: that is said in words, and nothing else is sent.
+export const STOP_ID = "stop:current";
+export function stopAnswer(out) {
+  if (!out || out.accepted !== false) return out;
+  // a world before stop:current: `capability.unknown`, or for a body that cannot take a `stop:` verb, `body.unsupported`
+  // (a world with stop:current answers it before any body check, so neither comes from one)
+  if (out.code === "capability.unknown" || out.code === "body.unsupported") return { accepted: false, code: "stop.unsupported", worldCode: out.code,
+    reason: "This world has no stop:current yet, so nothing was stopped. Here the act under way ends on its own, or is replaced by the next act you send." };
+  if (out.code === "act.shared") {
+    const offered = (out.did_you_mean ?? []).find((d) => /^stop-carry:/.test(d?.id ?? ""))?.id;
+    const carry = offered ?? /\bstop-carry:[^\s"'`,;)]+/.exec(String(out.reason ?? ""))?.[0]?.replace(/[.!?]+$/, "");
+    return carry ? { ...out, next: carry } : out;
+  }
+  return out;
+}
+const STOP_USAGE = "usage: stop [receiptId] [--for <message-id>|none] [--key <k>] [--wait [seconds]] [--json]";
+async function stop(...argv) {
+  const receipt = argv[0] && !argv[0].startsWith("--") ? argv.shift() : undefined;
+  // checked before anything is sent: only stop's own flags, a value only where one belongs (--wait takes a number)
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--json") continue;
+    if (a === "--for" || a === "--key") { if (argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error(`${a} needs a value. ${STOP_USAGE}`); i++; continue; }
+    if (a === "--wait") { if (/^\d+$/.test(argv[i + 1] ?? "")) i++; continue; }
+    throw new Error(`stop takes no "${a}". ${STOP_USAGE}`);
+  }
+  // A stop serves an owner message only when named (--for): an implicit link would let a stop close the message the
+  // agent is about to act on ("come to the fire" while wandering). The world closes the stopped act's own message.
+  const rest = argv.includes("--for") ? argv : [...argv, "--for", "none"];
+  return stopAnswer(await act(STOP_ID, ...(receipt ? [JSON.stringify({ receipt })] : []), ...rest));
 }
 
 // #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
@@ -3081,7 +3120,7 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.stopped ? { stopped: out.stopped } : {}), ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
   // #1337: where the world adjusted what was asked (a landing moved to clear ground, words read as another id), one sentence;
@@ -4575,6 +4614,7 @@ look      here   observe   around|explore [place]   caps [--search w] [--verb v]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+          stop [receiptId]   (ends your own act under way, where you are; nothing else starts)
           say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
           (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
 owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
@@ -4714,7 +4754,7 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
+const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
@@ -4732,7 +4772,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const fn = commands[cmd];
   if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;
-  try { argv = ["act", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
+  try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null;
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
