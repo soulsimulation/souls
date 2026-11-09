@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {writeFileSync,mkdirSync} from 'node:fs';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture,invite,accept,factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {coreLibrary,WorldModel} from '../../packages/world-compiler/src/index.ts';
+
+test('native supplied chalk transforms only after complete work and persists readable stages',{timeout:60000},async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
+ const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});
+ installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
+ t.after(()=>{comms.close();f.host.stop();f.db.close();});
+ const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};
+ const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};
+ await tick(5);await invite(f,'ana');const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Preparing pigment'}));soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick(5);
+ const body=()=>f.host.engine.world.entities[soul.entityId],[x,,z]=body().pose.p;
+ const here=async()=>await(await app.request('/v1/edge/here?include=doHere')).json(),bytes=h=>JSON.stringify(h.here).length;
+ const absent=await here();ok(god.act({ops:[{op:'define',def:coreLibrary().get('core-pigment-tray@1')}]}));ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/pigment-tray@1',name:'distant-'+i,p:[x+120+i%10*3,z+120+Math.floor(i/10)*3]}))}));await tick(50);const far=await here();assert.equal(bytes(far),bytes(absent));
+ ok(god.act({ops:[{op:'place',def:'core/pigment-tray@1',name:'tray',p:[x+2,z]},{op:'place',def:'core/pigment-tray@1',name:'private',p:[x-3,z],access:'private'},{op:'place',def:'core/bowl@2',name:'bowl',p:[x+.5,z-.5]}]}));await tick(50);
+ const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=n=>ent(n).id,act=(capability,params={})=>accept(f.host,edge.act(soul,{capability,params}));
+ const finish=async r=>{ok(r);for(let n=0;n<2000;n++){const end=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(end.phase))return end;await tick();}assert.fail('finite action did not end');};
+ const done=async cap=>{const r=await finish(await act(cap));assert.equal(r.phase,'completed',JSON.stringify(r));return r;},cap=a=>'object:'+id('tray')+':'+a;
+ assert.equal((await act('object:'+id('private')+':crush')).accepted,false);assert.equal((await act(cap('grind'))).accepted,false);
+ await done('pick-up:'+id('bowl'));assert.equal((await act(cap('crush'))).accepted,false);await done('put-down:here');
+ const cut=ok(await act(cap('crush')));for(let i=0;i<800&&body().human?.activity!=='craft';i++)await tick();assert.equal(body().human?.activity,'craft');await tick(100);assert.equal(ent('tray').state.stage,0);await done('stand:here');await tick(20);assert.notEqual(edge.receipt(soul.soulId,cut.receipt.id).phase,'completed');assert.equal(ent('tray').state.stage,0);
+ let active=0;const first=ok(await act(cap('crush')));for(let i=0;i<1400&&edge.receipt(soul.soulId,first.receipt.id).phase!=='completed';i++){if(body().human?.activity==='craft'){active++;assert.equal(ent('tray').state.stage,0);}await tick();}assert.equal((await finish(first)).phase,'completed');assert.ok(active>=199);assert.equal(ent('tray').state.stage,1);assert.match(JSON.stringify(await done('read:'+id('tray'))),/Coarse pigment/);
+ await done(cap('grind'));assert.equal(ent('tray').state.stage,2);assert.equal(ent('tray').state.lastBy,'Ana');assert.match(JSON.stringify(await done('read:'+id('tray'))),/Fine pigment powder/);assert.equal((await act(cap('grind'))).accepted,false);assert.equal((await act(cap('crush'))).accepted,false);
+ const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.deepEqual(restored.entities.get(id('tray')),JSON.parse(JSON.stringify(ent('tray'))));assert.deepEqual(f.host.engine.runtime.violations,[]);
+ const report={status:'pass',contextBytes:{absent:bytes(absent),distant100:bytes(far)},activeCraftTicks:active,stage:ent('tray').state.stage,worker:ent('tray').state.lastBy,checks:['public definition admission','100 distant trays zero incremental bytes','access and held-hand refusal','native10s completed-only material transformation','early interruption preserves chunks','coarse then fine ordinary read','finished work refused','same material entity snapshot persistence','zero native violations']};if(process.env.SOUL_ACTIONS_OUT){mkdirSync(process.env.SOUL_ACTIONS_OUT,{recursive:true});writeFileSync(process.env.SOUL_ACTIONS_OUT+'/pigment.json',JSON.stringify(report,null,2));}console.log(JSON.stringify(report));
+});
