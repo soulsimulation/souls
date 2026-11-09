@@ -709,3 +709,14 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+
+### Weaving portable cloth
+
+`core/table-loom@1` supplies two thread portions and offers `weave-stripes` and `weave-checks`.
+Each uses ten seconds of existing native craft with empty hands; its completed receipt atomically consumes
+one portion and places a real credited striped or checked cloth in the output tray. Early stopping leaves
+stock and output unchanged, and an occupied tray blocks another weave. The offered loom read reports the
+last selected pattern, maker and remaining stock; each artifact also keeps pattern/maker state and ordinary
+object description credit. Normal pickup and surface placement move the same item. These are portable
+artworks, not wearable equipment; there is no textile physics or arbitrary pattern editor.

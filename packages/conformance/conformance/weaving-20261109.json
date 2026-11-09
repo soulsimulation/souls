@@ -1,0 +1,40 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "pins": [
+    {
+      "def": "core-table-loom@1",
+      "hash": "4ddec5b4c722b472eca7c36e4ba7eaf75aabbfdbec69e87014a7758f15bff1ea"
+    },
+    {
+      "def": "core-striped-cloth@1",
+      "hash": "668c29586e1b8ca25fe4c60fbc200d67b023b92a5f33e8b8196a0286235b8a4f"
+    },
+    {
+      "def": "core-checked-cloth@1",
+      "hash": "79cfb4cf20e3724ebe43483d6d7ce7bc78448710394b50ad8b87f0eb1c2dd912"
+    }
+  ],
+  "reproduction": {
+    "seed": "EF4",
+    "k": 2,
+    "changedDefs": 3,
+    "changedDefSamples": 15,
+    "commands": [
+      "node packages/conformance/bin/conformance.mjs --filter cloth --k 2",
+      "node packages/conformance/bin/conformance.mjs --filter table-loom --k 2"
+    ],
+    "broaderFilterFindings": [
+      {
+        "def": "core-clothes-rail@1",
+        "hash": "2c6afdfa40613657240512ce4c44d78dbe245f7ac1f8ea04d8ef98f2feeff9f2",
+        "field": "params.condition=construction",
+        "stage": "gallery-budget",
+        "code": "draws",
+        "detail": "9 > 4"
+      }
+    ]
+  },
+  "findings": [],
+  "qualificationGaps": [],
+  "note": "#1627: new finite weaving tool and two selected-pattern portable cloth artworks. Existing budgets unchanged; no allowances. Scoped cloth substring also reproduces an unrelated older clothes-rail construction draw finding, retained separately."
+}
