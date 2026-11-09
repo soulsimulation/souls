@@ -1,2 +1,4 @@
-Soul Actions planning now prioritizes a broader set of usable object, social and world interactions with basic
-coherence, explicit action budgets and early visual checks. Required engineering proof and authority remain in force.
+---
+type: docs
+---
+Soul Actions planning prioritizes broader usable interactions with basic coherence, bounded action budgets and early visual checks.
