@@ -1,3 +1,4 @@
+import {correspondenceAdmission} from './correspondence.ts';
 // VOCAB-MECH: def actuators as Soul actions. A def's declarative `actions` (vocab ACTUATORS: switch-on/off, open/close,
 // lock/unlock, fill/empty, light/put-out, play/stop — or any def/1 action with `when` and `then` on its own state) become
 // actions of the god thing's `built` object (perceive.ts), so a Soul near a lamp is offered
@@ -81,6 +82,9 @@ export type ActuatorHost = {
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   deferContacts?: boolean;
+  /** Exact correspondence operation requires the target to be set down. */
+  correspondenceHeld?(id:string):boolean;
+  correspondenceSameFloor?(soul:EdgeSoul,id:string):boolean;
   contactPlan?(soul:EdgeSoul,target:string,action:string,params?:Record<string,unknown>):{params:Record<string,unknown>;root:[number,number,number];level?:number;face?:[number,number];/** entry 32: where to step back to afterwards (a knock) */after?:[number,number];/** #1070: a close with nowhere to stand once it is shut */noRoom?:boolean}|null;
   /** Commit a state change of a god thing as an engine edit. */
   commit(id: string, patch: Record<string, unknown>, note: string): { accepted: boolean };
@@ -345,6 +349,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       if (d > ACT_SIGHT) return { code: 'object.out-of-reach', reason: `${nameOf(s)} is ${Math.round(d)} m away; walk closer first.` };
       const denied = s.key ? host.access?.(s.key, ctx.soul) : null; if (denied) return denied;
       const busy = s.key ? host.busy?.(s.key, a.name) : null; if (busy) return busy;
+      const correspondence=def.name==='core-sealed-correspondence'&&def.version===1?correspondenceAdmission(def,a.name,d,!!host.water?.held(ctx.soul),ACT_REACH,!!(s.key&&host.correspondenceHeld?.(s.key)),!!(s.key&&host.correspondenceSameFloor?.(ctx.soul,s.key))):null;if(correspondence)return correspondence;
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
       if(host.deferContacts&&a.name==='close'&&def.components.opening&&s.key&&host.contactPlan?.(ctx.soul,s.key,a.name)?.noRoom)return {code:'contact.no-room',reason:'There is nowhere to stand clear of it once it is shut.'};
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
@@ -390,7 +395,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         const ap = far && s.key ? host.approach?.(s.key, ctx.soul, front, contact ? .75 : undefined) : null;
         const walk = !far ? [] : ap ? [ap.level === 0 ? { verb: 'walk_to', params: { to: ap.p, standoff: 0 } } : { verb: 'mars:walk_to', params: { x: ap.p[0], z: ap.p[1], level: ap.level } }] : [{ verb: 'walk_to', params: { to, standoff: 0.5 } }];
         // #428: a notebook's lines come with a read, not with the answer to writing one
-        return { state: s, result: { action: a.name, ...(def.tags?.includes('notebook') ? {} : { set: patch }), ...(water && !isRefusal(water) ? { summary: water.summary } : {}) }, bodies: [{ label: `${a.label}`, steps: contact ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'operate',seconds:1.2,face:s.at!}}] : [...walk, { verb: 'wave', params: { at: s.key, seconds: 1 } }] }] };
+        return { state: s, result: { action: a.name, ...(def.tags?.includes('notebook') ? {} : { set: patch }), ...(water && !isRefusal(water) ? { summary: water.summary } : {}) }, bodies: [{ label: `${a.label}`, steps: contact ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'operate',seconds:1.2,face:s.at!}}] : def.name==='core-sealed-correspondence'&&def.version===1 ? [...walk,{verb:'mars:pose_v1',params:{activity:'craft',seconds:2,face:s.at!}}] : [...walk, { verb: 'wave', params: { at: s.key, seconds: 1 } }] }] };
       },
     };
   }
