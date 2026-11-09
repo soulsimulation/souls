@@ -41,7 +41,11 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 
 1. **Gate receipt.** The candidate commit has a clean full-scope receipt from the
    [remote gate](testing/remote-gate.md) (`tools/test-harness/release-gate.sh`), combined with the V7 browser walk
-   into a ship receipt (`tools/test-harness/ship-receipt.mjs`). Clean means no new failures, no blockers and no
+   into a ship receipt (`tools/test-harness/ship-receipt.mjs`). Start the gate after the head's push-to-main CI run is
+   green: the gate takes V1, V2-build-root, V3-client-cli, V3-launcher-unit, V4-web and V5 from that run and runs only
+   V2-build-worlds, V3-harness, V3-walk, V3-bundle, V3-packages, V3-mars-engine and the V6 scenarios on Modal, about 30
+   minutes, while V7 runs locally ([CI evidence](testing/remote-gate.md#ci-evidence)). Without a green CI run at the
+   head it runs the whole contract on Modal. Clean means no new failures, no blockers and no
    unexpected skips. A scoped candidate gate (`--scope auto`) is useful during development but never makes a ship
    receipt.
 2. **Build exactly HEAD of a clean tree.** `release.sh` refuses uncommitted tracked changes and ships `git archive
