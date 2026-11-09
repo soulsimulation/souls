@@ -1281,8 +1281,18 @@ function sameBodyPlane(me:Entity,other:Entity):boolean {
 
 /** A person that moving from `from` to `to` on a flight would bring `me` within 2r of (and closer). Also used by the carry climb. */
 export function stairBlocker(rt: Runtime, me: Entity, from: number[], to: number[], r: number): string | null {
+  const spacing = rt.services.climbSpacingV1 === true;
   for (const o of entitiesOf(rt)) {
     if (o.id === me.id || o.kind !== 'human') continue;
+    // #1530 climb-spacing/1 (logged policy): also the separation invariant's own read (collision.human-human: the same level id,
+    // within 1 m in height, horizontally closer than both radii less 0.08 m), with a 2 cm margin. The ellipsoid below lets a
+    // follower close under a climber ahead to dy ~0.99 m at 0.22 m across, which that invariant flags. A step the invariant
+    // would flag is refused unless it moves the two apart by the invariant's measure (the horizontal gap grows).
+    if (spacing && o.human && me.human && o.human.level === me.human.level) {
+      const sep = r + bodyProfile(o).radius - 0.08 + 0.02, hTo = hypot(o.pose.p[0] - to[0], o.pose.p[2] - to[2]), hFrom = hypot(o.pose.p[0] - from[0], o.pose.p[2] - from[2]);
+      const flagged = (h: number, y: number) => Math.abs(o.pose.p[1] - y) <= 1.0 + 0.02 && h < sep;
+      if (flagged(hTo, to[1]) && (!flagged(hFrom, from[1]) || hTo <= hFrom)) return o.id;
+    }
     const floater=me.body?.family==='floater';
     const dyTo=Math.abs(o.pose.p[1]-to[1]),dyFrom=Math.abs(o.pose.p[1]-from[1]);
     const dTo = floater && dyTo<=1.1?hypot(o.pose.p[0]-to[0],o.pose.p[2]-to[2]):hypot(o.pose.p[0] - to[0], (o.pose.p[1] - to[1]) * 0.5, o.pose.p[2] - to[2]);
