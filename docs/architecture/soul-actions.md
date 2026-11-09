@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Portable area irrigation (#1651)
+
+`core/garden-sprinkler@2` adds opt-in two-hand upright carry to the unchanged sprinkler. Carry it to a chosen clear place, set it down, then switch it on by hand. At that contact, the existing irrigation faculty wets the actual planters in its forward arc within reach, from its current world pose. Turn it off and move the same entity to tend another patch. Moisture and sprinkler placement/state persist; this is contact-time watering, not continuous irrigation or a new water-supply simulation. Existing @1 remains fixed. No new contact, placement, ownership or native movement path is introduced.
