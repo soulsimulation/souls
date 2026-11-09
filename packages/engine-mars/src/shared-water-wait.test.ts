@@ -93,3 +93,31 @@ test('/3 reads a blocker as queued only while it has an active native movement o
  assert.equal(e.sharedWaterQueuedV3('h_actor',{...d,subjects:['h_actor']}),false,'no other body named, no queue');
  finish(e,p.id);assert.equal(e.sharedWaterQueuedV3('h_actor',d),false,'parked again once its walk ends');
 });
+test('/3: a walk held past the 180 s cap is stopped (shore.wait-capped) and the swim ends shore.occupied-route, naming the cap',()=>{
+ const e=setup(),stationary=structuredClone(e.world.entities.h_actor.human),p=e.perform({actor:'h_actor',label:'walk held at the cap',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);
+ e.step();e.step();const prog=(e as any).programs.get(p.id);assert.ok(prog?.action,'native action has actually been submitted');lateHuman(e,'h_crossing',stationary);
+ // The step's first wait began a full cap ago (as for a walk resubmitted at 179 s): the live, held walk must stop now.
+ prog.waterWait={step:prog.index,since:e.world.tick-3600,attempts:1};
+ const rt=(e as any).rt,cancels:string[]=[],cancel=rt.cancel.bind(rt);rt.cancel=(id:string,why:any)=>{cancels.push(why?.code);return cancel(id,why);};
+ const initial=[...e.world.entities.h_actor.pose.p],start=e.world.tick;let terminal:any;
+ for(let i=0;i<400&&!terminal;i++){const r=e.step();terminal=r.programs.find(x=>x.id===p.id&&x.kind!=='step');assert.deepEqual(e.runtime.violations,[]);}
+ assert.ok(cancels.includes('shore.wait-capped'),JSON.stringify(cancels));assert.equal(terminal?.kind,'failed',JSON.stringify(terminal));assert.equal(terminal.code,'shore.occupied-route');
+ assert.match(terminal.message,/180 s limit at the shore/);assert.ok(e.world.tick-start<=400,'stops within seconds of the cap, not a minute-long walk timeout');
+ assert.ok(Math.hypot(e.world.entities.h_actor.pose.p[0]-initial[0],e.world.entities.h_actor.pose.p[2]-initial[2])<.25,'never through the crowd');
+});
+test('/3 gate-cycle yield: make-way counts only when its native walk runs; with no room the wait is noted and retried after 1 s',()=>{
+ const e=setup(false) as any,p=e.perform({actor:'h_actor',label:'yield bookkeeping',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}}]});assert.ok(p.ok);
+ e.spawnHuman({id:'h_other',label:'other swimmer',soul:'fixture'});
+ const prog=e.programs.get(p.id),d={code:'shore.occupied-route',message:'h_actor must wait for h_other',subjects:['h_actor','h_other'],details:{cycleYield:true}};
+ const real=e.m.makeWay;
+ // no free spot: make-way submits nothing
+ e.m={...e.m,makeWay:()=>{}};prog.waterWait={step:prog.index,since:e.world.tick,attempts:0};
+ assert.equal(e.sharedWaterMakeWayV3(prog,d),false);assert.equal(prog.waterWait.note,'shore.cycle-yield-no-room');
+ // make-way's walk is refused by the native runtime: still not a step aside
+ e.m={...e.m,makeWay:(rt:any,who:string)=>{rt.submit('walk_to',{actor:who,x:1e6,z:1e6},{id:`${who}:make-way:${rt.tick}`});}};
+ assert.equal(e.sharedWaterMakeWayV3(prog,d),false);assert.equal(prog.waterWait.note,'shore.cycle-yield-no-room');
+ // through the retry path the no-room yield waits 1 s, not the 3 s of a real step aside
+ e.m={...e.m,makeWay:()=>{}};const at=prog.index;assert.equal(e.retrySharedWaterV1(prog,d),true);assert.deepEqual(prog.ops,[{wait:20}]);prog.index=at;
+ e.m={...e.m,makeWay:real};assert.deepEqual(e.runtime.violations,[]);
+ // (a real step aside with room is the pinned four-swims set in apps/server/src/edge-ledger-swim.test.ts)
+});

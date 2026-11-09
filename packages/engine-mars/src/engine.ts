@@ -136,7 +136,7 @@ type Prog = {
   blockedSince?: number;
   quietHeldSince?: number;
   spreadWaits?: number;
-  waterWait?: {step: number; since: number; attempts: number; note?: string};
+  waterWait?: {step: number; since: number; attempts: number; note?: string; capped?: true};
   walkStopping?: Diag;
   waterStopRetry?: Diag;
   walkResume?: true;
@@ -806,6 +806,8 @@ export class MarsEngine implements Engine {
     this.out.programs.push({ tick: this.rt.tick, id: p.id, actor: p.actor, kind, step: kind === 'step' ? p.index : -1, ...(d ? { code: d.code, message: d.message } : {}) });
   }
   private end(p: Prog, kind: 'completed' | 'failed' | 'cancelled', d?: Diag) {
+    // shared-water-wait/3: a swim ended by its 180 s cap says so (and when it found no room to step aside)
+    if (kind === 'failed' && d?.code === 'shore.occupied-route' && p.waterWait?.capped && p.waterWait.step === p.index) d = {...d, message: `${d.message}; waited the 180 s limit at the shore${p.waterWait.note === 'shore.cycle-yield-no-room' ? ' with no room to step aside' : ''}, so try the swim again once the way is clear`};
     if (p.build && kind === 'failed' && unsafeConstruction(this.rt.world)) throw new Error(`construction.unsafe-failure: ${d?.code}: ${d?.message}; restore the accepted quiet baseline`);
     if (p.build?.stopping && kind === 'completed') { kind = 'cancelled'; d = p.build.stopping; }
     this.programs.delete(p.id); if (this.byActor.get(p.actor) === p.id) this.byActor.delete(p.actor);
@@ -1080,9 +1082,9 @@ export class MarsEngine implements Engine {
   }
   private retrySharedWaterV1(p:Prog,d:Diag):boolean{
     if(!this.sharedWaterStep(p.steps[p.index])||!this.waterBodyObstruction(d,p.actor))return false;
-    const tick=this.rt.tick,wait=p.waterWait?.step===p.index?p.waterWait:{step:p.index,since:tick,attempts:0};
+    const tick=this.rt.tick,wait:NonNullable<Prog['waterWait']>=p.waterWait?.step===p.index?p.waterWait:{step:p.index,since:tick,attempts:0};
     p.waterWait=wait;const policy=p.steps[p.index]?.params?.spreadWaitPolicy;
-    if(policy===SHARED_WATER_WAIT_POLICY_V3){if(tick-wait.since>=SHARED_WATER_WAIT_CAP_V3)return false;if(this.sharedWaterQueuedV3(p.actor,d))wait.attempts=0;}
+    if(policy===SHARED_WATER_WAIT_POLICY_V3){if(tick-wait.since>=SHARED_WATER_WAIT_CAP_V3){wait.capped=true;return false;}if(this.sharedWaterQueuedV3(p.actor,d))wait.attempts=0;}
     if(++wait.attempts>60)return false;
     const yielded=policy===SHARED_WATER_WAIT_POLICY_V3&&d.details?.cycleYield===true?this.sharedWaterMakeWayV3(p,d):(policy===SHARED_WATER_WAIT_POLICY_V2||policy===SHARED_WATER_WAIT_POLICY_V3)&&this.sharedWaterYieldV2(p,d);
     p.index--;p.ops=[{wait:yielded?3*TPS:TPS}];return true;
@@ -1098,28 +1100,38 @@ export class MarsEngine implements Engine {
    * (the runtime's deadlock.cycle, published after DEADLOCK_TICKS) would each stay held until the minute-long walk
    * timeout, twice over. As soon as the cycle is published, the larger entity id among its humans (the /2 rule) stops
    * its walk with the named cancel `shore.cycle-yield`, then steps aside by native make-way and retries the same step.
-   * The programme continues; the others go on through the gate. Only /3 shared-water steps; plain walks are untouched.
+   * The programme continues; the others go on. Any /3 shared-water step (the gate walk or an in-water lap); plain walks
+   * are untouched.
    * It also keeps the 180 s cap exact for a walk resubmitted just before it (`shore.wait-capped`). */
   private sharedWaterCycleYieldV3(p:Prog,rec:ActionRecord):boolean{
     const step=p.steps[p.index];if(step?.params?.spreadWaitPolicy!==SHARED_WATER_WAIT_POLICY_V3||!this.sharedWaterStep(step)||!this.rt.isActive(rec.id))return false;
-    // The hard cap holds for a walk resubmitted just before it, too: held or blocked past the cap, it stops and the step fails.
-    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&(rec.status==='blocked'||this.ents[p.actor]?.human?.activity==='wait')){
-      const water=this.sharedWaterBlockingAction(p,rec);if(!water)return false;
-      this.rt.cancel(rec.id,{code:'shore.wait-capped',message:'the shore wait reached its 180 s cap'});p.walkStopping=water;p.waterStopRetry=water;return true;}
-    let cycle:Diag|undefined=rec.diagnostic?.code==='deadlock.cycle'?rec.diagnostic:undefined;
-    const owned=new Set([rec.id]);for(let depth=0;depth<4&&!cycle;depth++){let added=false;for(const child of this.rt.records.values())if(child.parent&&owned.has(child.parent)&&!owned.has(child.id)&&this.rt.isActive(child.id)){owned.add(child.id);added=true;if(child.diagnostic?.code==='deadlock.cycle'){cycle=child.diagnostic;break;}}if(!added)break;}
+    // The hard cap holds for a walk resubmitted just before it, too: once past the cap, a walk that is not moving stops
+    // whatever holds it, and the step fails shore.occupied-route naming the body it waited for (when one is named).
+    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&(this.ents[p.actor]?.human?.speed??0)<0.02){
+      const blocker=this.sharedWaterBlockingAction(p,rec)?.subjects?.find(id=>id!==p.actor&&!!this.ents[id]?.human)??this.sharedWaterSubjectsV3(rec).find(id=>id!==p.actor&&!!this.ents[id]?.human);
+      const water:Diag={code:'shore.occupied-route',message:blocker?`${p.actor} must wait for ${blocker}`:`${p.actor} is held on the way into the water`,subjects:[p.actor,...(blocker?[blocker]:[])]};
+      p.waterWait.capped=true;this.rt.cancel(rec.id,{code:'shore.wait-capped',message:'the shore wait reached its 180 s cap',subjects:water.subjects});p.walkStopping=water;p.waterStopRetry=water;return true;}
+    const cycle=this.sharedWaterTreeV3(rec).find(r=>r.diagnostic?.code==='deadlock.cycle')?.diagnostic;
     if(!cycle)return false;
     const others=(cycle.subjects??[]).filter(id=>id!==p.actor&&!!this.ents[id]?.human).sort();if(!others.length||others.some(id=>id>p.actor))return false;
-    const why={code:'shore.cycle-yield',message:`making way for ${others.join(', ')} at the shore gate; ${p.actor} tries again in a few seconds`,subjects:[p.actor,...others]};
+    const why={code:'shore.cycle-yield',message:`making way for ${others.join(', ')} on the way into the water; ${p.actor} tries again in a few seconds`,subjects:[p.actor,...others]};
     this.rt.cancel(rec.id,why);
     p.walkStopping=why;p.waterStopRetry={code:'shore.occupied-route',message:`${p.actor} must wait for ${others[0]}`,subjects:[p.actor,...others],details:{cycleYield:true}};
     return true;
   }
-  /** The step aside of a gate-cycle yield, once the walk has stopped. When make-way finds no free spot nearby, the
-   * swimmer keeps the plain /3 wait (1 s retries, bounded by the cap) and its wait records `shore.cycle-yield-no-room`. */
+  /** A /3 swim's live record and its active descendants (connected children carry the native waits). */
+  private sharedWaterTreeV3(rec:ActionRecord):ActionRecord[]{
+    const out=[rec],owned=new Set([rec.id]);
+    for(let depth=0;depth<4;depth++){let added=false;for(const child of this.rt.records.values())if(child.parent&&owned.has(child.parent)&&!owned.has(child.id)&&this.rt.isActive(child.id)){owned.add(child.id);out.push(child);added=true;}if(!added)break;}
+    return out;
+  }
+  private sharedWaterSubjectsV3(rec:ActionRecord):string[]{return this.sharedWaterTreeV3(rec).flatMap(r=>r.diagnostic?.subjects??[]);}
+  /** The step aside of a gate-cycle yield, once the walk has stopped. It counts only when make-way's own native walk is
+   * running; when there is no free spot (or the walk is refused) the swimmer keeps the plain /3 wait (1 s retries,
+   * bounded by the cap), its wait notes `shore.cycle-yield-no-room`, and a capped refusal says so. */
   private sharedWaterMakeWayV3(p:Prog,d:Diag):boolean{
     const other=d.subjects?.find(id=>id!==p.actor&&!!this.ents[id]?.human),at=other?this.pos(other):undefined;
-    if(at){this.m.makeWay(this.rt,p.actor,at);if(this.rt.records.has(`${p.actor}:make-way:${this.rt.tick}`)){if(p.waterWait)delete p.waterWait.note;return true;}}
+    if(at){const id=`${p.actor}:make-way:${this.rt.tick}`;this.m.makeWay(this.rt,p.actor,at);if(this.rt.records.has(id)&&this.rt.isActive(id)){if(p.waterWait)delete p.waterWait.note;return true;}}
     if(p.waterWait)p.waterWait.note='shore.cycle-yield-no-room';
     return false;
   }
