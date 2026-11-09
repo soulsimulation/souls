@@ -455,6 +455,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
 | Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
 
+`core/candle-stand@2` adds existing two-hand upright carrying to the hand-lit floor candle. Carry real stands to
+chosen clear places, arrange them, then light or put out each at its relocated wick. Their identities, positions
+and independent on/off states persist. The authored candle/flame/light and old fixed revision remain unchanged.
+
 ## Making: paintings and chalk
 
 - **Painting at an easel.** `core-easel@2` is a painting workstation. The `paint:` offer at its spot takes an optional

@@ -17,6 +17,7 @@ import { BOOK_DEFS } from './books.ts';
 import { HAND_WATER } from './hand-water.ts';
 import { HAND_MUSIC } from './hand-music.ts';
 import { HAND_FIRE } from './hand-fire.ts';
+import { MOVABLE_CANDLE_STAND } from './movable-candles.ts';
 import { HAND_COVERINGS } from './hand-coverings.ts';
 import { HAND_CABINETS } from './hand-cabinets.ts';
 import { HAND_DRAWERS } from './hand-drawers.ts';
@@ -65,7 +66,7 @@ import figures from './figures.json' with { type: 'json' };
 import meshLods from '../core-mesh-lods.json' with { type: 'json' };
 import type { DefInput } from '../schemas.ts';
 
-export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
+export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, MOVABLE_CANDLE_STAND, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
   const lod = def.make.kind === 'mesh' ? (meshLods as Record<string, { lod1: string }>)[def.make.asset] : undefined;
   return lod ? { ...def, make: { ...def.make, ...lod } } as DefInput : def;
 });
