@@ -480,6 +480,9 @@ receipt and placement persist. Occupied benches and full hands retain existing c
 put it in the vase, or retrieve that particular stem; nearby contents name the actual items. Individual identities,
 petal colors and placement persist. The stationary vase has an open mouth on a pedestal; heads remain above its rim.
 This is separate from the existing harvested preset bunch and adds no growth or wilting.
+`core/candle-stand@2` adds existing two-hand upright carrying to the hand-lit floor candle. Carry real stands to
+chosen clear places, arrange them, then light or put out each at its relocated wick. Their identities, positions
+and independent on/off states persist. The authored candle/flame/light and old fixed revision remain unchanged.
 
 ## Making: paintings and chalk
 
