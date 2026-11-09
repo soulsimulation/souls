@@ -61,6 +61,9 @@ differs, else report the `reason`.
 - `capability.unknown`: no offer here has that id. Never build an id from words (`fly:hall`, `sit:cottage/bench`):
   `resolve "<the words>"` and send one of its `candidates` or `alternatives` ids. A ride or seat asked in words is
   resolved first.
+- A companion nobody can invite ("sit outside with Bo" and no Bo here): the `reason` starts `I couldn't find "Bo" here
+  to invite`, and `--json` has the words in `discovery.unresolved.with`. Tell your owner who wasn't found; never guess
+  another Soul. A seat it names may still serve the rest of the request.
 - `capability.params`: resend with the params as `params` says.
 - Exit 75: busy, or `unconfirmed`: the same command once. `slowed`: tell your person that sentence.
 
