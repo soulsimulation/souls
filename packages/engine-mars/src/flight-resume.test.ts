@@ -243,3 +243,13 @@ test('#1453 the static check exempts only a body on the flight\'s profile and wi
   e.world.entities.other=m.human('other',p[0]+.1,p[2],{level:0,y:p[1]});
   assert.ok(humanHumanSeparation((e as any).rt).some((d:any)=>d.subjects.includes('climber')&&d.subjects.includes('other')),'two bodies on the flight are still kept apart');
 });
+
+// #1453 known limit, pinned: the exemption ends where the body reaches past the flight's width (offset + radius > width/2 +
+// 0.05; on this 1 m flight with a 0.28 m body, 0.27 m off the line). Past that the body is checked as any body, so under the
+// repair rules its relocation is the repair's own (nearestStandV1), not the capped landing search. The release never stands a
+// body there under the policy; such a body comes from an older history or an off-line climb force-ended at that offset.
+test('#1453 known limit: a body more than 0.27 m off this 1 m flight\'s line is checked as any body (the repair, uncapped, may move it)',()=>{
+  const flagged=(e:MarsEngine)=>humanStaticClearance((e as any).rt).some((d:any)=>d.subjects.includes('climber'));
+  const e=stranded(true),c=e.world.entities.climber,p=[...c.pose.p] as [number,number,number];
+  for(const [off,want] of [[.26,false],[.27,false],[.28,true],[.3,true]] as const){c.pose.p=[p[0]+off,p[1],p[2]];assert.equal(flagged(e),want,`${off} m off the line`);}
+});
