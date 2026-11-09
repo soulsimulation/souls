@@ -6,7 +6,7 @@ import { tmpdir, homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { CI_COVERED, ciEvidence, cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
+import { CI_COVERED, ciEvidence, ciLogSkips, cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
 import { combineReceipts, publicReceipt } from './ship-receipt.mjs';
 import { receiptProblems, releaseReceiptProblems } from '../world-launcher/deploy/ship/root-release.mjs';
 import { JOBS } from '../../.github/scripts/ci-scope.mjs';
@@ -804,18 +804,23 @@ test('cache: an entry stored under the old suite-tree definition is found when i
 // ── CI evidence (#1463) ──
 const CI_STEPS = ['V1-types', 'V2-build-root', 'V3-client-cli', 'V3-launcher-unit', 'V4-web', 'V5-server-full'];
 const here = p => readFileSync(new URL(p, import.meta.url), 'utf8');
-function fakeGithub({ sha, runs, jobs }) {
+const tapLog = (names = ['works'], skipped = []) => [...names.map((n, i) => `2026-11-09T02:37:10.7160585Z ok ${i + 1} - ${n}`),
+  ...skipped.map((n, i) => `2026-11-09T02:37:10.7160585Z ok ${names.length + i + 1} - ${n} # SKIP fixture`),
+  `2026-11-09T02:37:10.7Z # tests ${names.length + skipped.length}`, '2026-11-09T02:37:10.7Z # pass 1', `2026-11-09T02:37:10.7Z # skipped ${skipped.length}`, '2026-11-09T02:37:10.7Z # todo 0'].join('\n');
+const allJobs = { 'types-web': 'success', 'client-cli': 'success', launcher: 'success', web: 'success', latency: 'success', 'server-0': 'success', 'server-1': 'success', 'server-2': 'success', packages: 'success', native: 'success' };
+function fakeGithub({ sha, runs, jobs, logs = {} }) {
   const calls = [];
+  const ids = {};
   const api = path => { calls.push(path);
     if (path.includes('/workflows/ci.yml/runs?head_sha=')) return { workflow_runs: runs };
-    const id = Number(/\/runs\/(\d+)\/jobs/.exec(path)?.[1]); return { jobs: Object.entries(jobs[id] || {}).map(([name, conclusion]) => ({ name, conclusion })) }; };
+    const id = Number(/\/runs\/(\d+)\/jobs/.exec(path)?.[1]); return { jobs: Object.entries(jobs[id] || {}).map(([name, conclusion], i) => { ids[1000 + i] = name; return { id: 1000 + i, name, conclusion }; }) }; };
+  const log = id => { const name = ids[id]; if (logs[name] instanceof Error) throw logs[name]; return logs[name] ?? tapLog(); };
   const files = { '.github/workflows/ci.yml': here('../../.github/workflows/ci.yml'), '.github/scripts/server-test-files.mjs': 'export const SERVER_SHARDS = 3;\n',
-    'package.json': here('../../package.json'), 'tools/test-harness/web-suite.sh': here('./web-suite.sh') };
-  const trusted = { ...files };
-  return { api, calls, file: p => files[p] ?? null, trusted: p => trusted[p] ?? null, files, sha };
+    '.github/scripts/ci-scope.mjs': '// picker\n', 'package.json': here('../../package.json'), 'tools/test-harness/web-suite.sh': here('./web-suite.sh'), 'tools/test-harness/web-loader.mjs': '// loader\n' };
+  const base = { ...files };
+  return { api, log, calls, files, base, args: (extra = {}) => ({ repo: 'o/r', api, log, file: p => files[p] ?? null, baselineFile: p => base[p] ?? null, ...extra }) };
 }
 const ciRun = (sha, extra = {}) => ({ id: 7, head_sha: sha, event: 'push', head_branch: 'main', status: 'completed', conclusion: 'success', path: '.github/workflows/ci.yml', html_url: 'https://github.com/o/r/actions/runs/7', ...extra });
-const allJobs = { 'types-web': 'success', 'client-cli': 'success', launcher: 'success', web: 'success', latency: 'success', 'server-0': 'success', 'server-1': 'success', 'server-2': 'success', packages: 'success', native: 'success' };
 
 test('CI evidence: the covered table is exact, and ci.yml still runs each covered command with those jobs', () => {
   assert.deepEqual(Object.keys(CI_COVERED).sort(), [...CI_STEPS].sort());
@@ -824,6 +829,9 @@ test('CI evidence: the covered table is exact, and ci.yml still runs each covere
     assert.ok(ci.includes(c.command), `${step}: ci.yml runs ${c.command}`);
     for (const j of c.jobs) assert.ok(j === 'server-*' ? names.has('server-0') : names.has(j), `${step}: CI job ${j}`);
   }
+  // the package.json scripts CI calls are the gate's commands today (one-validation.sh)
+  const scripts = JSON.parse(here('../../package.json')).scripts, ov = here('./one-validation.sh').replaceAll(' --test-reporter=tap', '');
+  assert.ok(ov.includes(scripts.typecheck)); assert.ok(ov.includes(scripts['test:client']));
   // the gate commands CI does not run the same way (one-validation.sh) stay on Modal
   for (const step of ['V2-build-worlds', 'V3-harness', 'V3-walk', 'V3-bundle', 'V3-packages', 'V3-mars-engine', ...REQUIRED_STEPS.filter(s => s.startsWith('V6-'))]) assert.ok(!CI_COVERED[step], step);
 });
@@ -831,46 +839,82 @@ test('CI evidence: the covered table is exact, and ci.yml still runs each covere
 test('CI evidence: only a successful push-to-main or merge_group ci.yml run at the exact sha, and only steps whose jobs all succeeded', () => {
   const sha = 'a'.repeat(40);
   const full = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } });
-  const r = ciEvidence(sha, { repo: 'o/r', api: full.api, file: full.file, trusted: full.trusted });
-  assert.deepEqual(r.covered, CI_STEPS); assert.equal(r.run.id, 7); assert.equal(r.run.event, 'push'); assert.equal(ciEvidence(sha, { repo: 'o/r', api: fakeGithub({ sha, runs: [ciRun(sha, { run_attempt: 2 })], jobs: { 7: allJobs } }).api, file: full.file, trusted: full.trusted }).run.attempt, 2);
+  const r = ciEvidence(sha, full.args());
+  assert.deepEqual(r.covered, CI_STEPS, JSON.stringify(r.notCovered)); assert.equal(r.run.id, 7); assert.equal(r.run.event, 'push');
   assert.match(full.calls[1], /runs\/7\/jobs\?filter=latest/);
+  const again = fakeGithub({ sha, runs: [ciRun(sha, { run_attempt: 2 })], jobs: { 7: allJobs } });
+  assert.equal(ciEvidence(sha, again.args()).run.attempt, 2);
   // a failed or missing server shard keeps V5 on Modal; other steps stay covered
   const shard = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: { ...allJobs, 'server-2': 'cancelled' } } });
-  const s2 = ciEvidence(sha, { repo: 'o/r', api: shard.api, file: shard.file, trusted: shard.trusted });
+  const s2 = ciEvidence(sha, shard.args());
   assert.ok(!s2.covered.includes('V5-server-full')); assert.match(s2.notCovered['V5-server-full'], /server-2=cancelled/);
-  // the shard plan is pinned to the gate's harness commit: a candidate that changes it is not covered
-  const fewer = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); fewer.files['.github/scripts/server-test-files.mjs'] = 'export const SERVER_SHARDS = 4;\n';
-  assert.match(ciEvidence(sha, { repo: 'o/r', api: fewer.api, file: fewer.file, trusted: fewer.trusted }).notCovered['V5-server-full'], /server-test-files\.mjs at the commit differs/);
-  assert.match(ciEvidence(sha, { repo: 'o/r', api: fewer.api, file: fewer.file, trusted: p => fewer.file(p) }).notCovered['V5-server-full'], /server-3=absent/);
-  // what CI runs through candidate files must still be the gate's command: package.json scripts and web-suite.sh
-  const scripted = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } });
-  scripted.files['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(scripted.files['package.json']).scripts, typecheck: 'true' } });
-  scripted.files['tools/test-harness/web-suite.sh'] = 'exit 0\n';
-  const sc = ciEvidence(sha, { repo: 'o/r', api: scripted.api, file: scripted.file, trusted: scripted.trusted });
-  assert.match(sc.notCovered['V1-types'], /package.json script typecheck/); assert.match(sc.notCovered['V4-web'], /web-suite\.sh at the commit differs/);
-  assert.ok(sc.covered.includes('V3-client-cli'));
-  // a command named only in a comment does not count
-  const commented = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } });
-  commented.files['.github/workflows/ci.yml'] = commented.files['.github/workflows/ci.yml'].replaceAll('pnpm test:client', 'pnpm test:other') + '\n# pnpm test:client\n';
-  assert.match(ciEvidence(sha, { repo: 'o/r', api: commented.api, file: commented.file, trusted: commented.trusted }).notCovered['V3-client-cli'], /no longer runs/);
   // a path-scoped merge-group run covers what it ran
   const mg = fakeGithub({ sha, runs: [ciRun(sha, { id: 8, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 8: { 'types-web': 'success', web: 'success' } } });
-  assert.deepEqual(ciEvidence(sha, { repo: 'o/r', api: mg.api, file: mg.file, trusted: mg.trusted }).covered, ['V1-types', 'V2-build-root', 'V4-web']);
+  assert.deepEqual(ciEvidence(sha, mg.args()).covered, ['V1-types', 'V2-build-root', 'V4-web']);
   // a push run is preferred over a newer merge-group run
   const both = fakeGithub({ sha, runs: [ciRun(sha), ciRun(sha, { id: 9, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 7: allJobs, 9: {} } });
-  assert.equal(ciEvidence(sha, { repo: 'o/r', api: both.api, file: both.file, trusted: both.trusted }).run.id, 7);
+  assert.equal(ciEvidence(sha, both.args()).run.id, 7);
   // refused: failed, in progress, another sha, a pull_request run, a push to another branch, another workflow file
   for (const bad of [{ conclusion: 'failure' }, { status: 'in_progress', conclusion: null }, { head_sha: 'b'.repeat(40) }, { event: 'pull_request' },
     { head_branch: 'feature' }, { path: '.github/workflows/other.yml' }]) {
     const g = fakeGithub({ sha, runs: [ciRun(sha, bad)], jobs: { 7: allJobs } });
-    const e = ciEvidence(sha, { repo: 'o/r', api: g.api, file: g.file, trusted: g.trusted });
+    const e = ciEvidence(sha, g.args());
     assert.deepEqual(e.covered, [], JSON.stringify(bad)); assert.match(e.reason, /no successful push\/merge_group ci.yml run/);
   }
-  // the commit's own ci.yml no longer running a command drops that step
-  const edited = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); edited.files['.github/workflows/ci.yml'] = edited.files['.github/workflows/ci.yml'].replace('pnpm test:client', 'pnpm test:other');
-  assert.match(ciEvidence(sha, { repo: 'o/r', api: edited.api, file: edited.file, trusted: edited.trusted }).notCovered['V3-client-cli'], /no longer runs/);
-  assert.match(ciEvidence(sha, { repo: null, api: full.api, file: full.file, trusted: full.trusted }).reason, /no GitHub repository/);
-  assert.match(ciEvidence(sha, { repo: 'o/r', api: () => { throw Error('HTTP 403'); }, file: full.file }).reason, /could not read CI runs: HTTP 403/);
+  assert.match(ciEvidence(sha, full.args({ repo: null })).reason, /no GitHub repository/);
+  assert.match(ciEvidence(sha, full.args({ api: () => { throw Error('HTTP 403'); } })).reason, /could not read CI runs: HTTP 403/);
+});
+
+test('CI evidence is bound to the baseline\'s CI definitions: each weakening probe falls back to Modal (#1463 review)', () => {
+  const sha = 'a'.repeat(40);
+  const probe = edit => { const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); edit(g.files); return ciEvidence(sha, g.args()); };
+  const yml = f => f['.github/workflows/ci.yml'];
+  const workflowProbes = {
+    'web-suite.sh || true': f => { f['.github/workflows/ci.yml'] = yml(f).replace('bash tools/test-harness/web-suite.sh', 'bash tools/test-harness/web-suite.sh || true'); },
+    'continue-on-error': f => { f['.github/workflows/ci.yml'] = yml(f).replace('    timeout-minutes: ${{ matrix.kind', '    continue-on-error: true\n    timeout-minutes: ${{ matrix.kind'); },
+    'test name filter': f => { f['.github/workflows/ci.yml'] = yml(f).replace('node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', 'node --test --test-name-pattern=nothing --test-concurrency=1 tools/world-launcher/*.test.mjs'); },
+    'echo of the command': f => { f['.github/workflows/ci.yml'] = yml(f).replace('              pnpm typecheck\n', '              echo "pnpm typecheck"\n'); },
+  };
+  for (const [name, edit] of Object.entries(workflowProbes)) {
+    const r = probe(edit);
+    assert.deepEqual(r.covered, [], name);
+    for (const step of CI_STEPS) assert.match(r.notCovered[step], /CI definitions differ from the baseline's: ci\.yml|does not run/, `${name}: ${step}`);
+  }
+  // a file one step depends on drops only that step
+  const one = (edit, step, why) => { const r = probe(edit); assert.deepEqual(r.covered, CI_STEPS.filter(s => s !== step), step); assert.match(r.notCovered[step], why); };
+  one(f => { f['tools/test-harness/web-suite.sh'] += 'exit 0\n'; }, 'V4-web', /web-suite\.sh/);
+  one(f => { f['tools/test-harness/web-loader.mjs'] += '// changed\n'; }, 'V4-web', /web-loader\.mjs/);
+  one(f => { f['.github/scripts/server-test-files.mjs'] = 'export const SERVER_SHARDS = 4;\n'; }, 'V5-server-full', /server-test-files\.mjs/);
+  one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, typecheck: 'true' } }); }, 'V1-types', /package\.json#typecheck/);
+  one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, 'test:client': 'true' } }); }, 'V3-client-cli', /package\.json#test:client/);
+  // the job picker and a missing baseline definition drop everything; comments and the repo job do not count
+  assert.deepEqual(probe(f => { f['.github/scripts/ci-scope.mjs'] += '// changed\n'; }).covered, []);
+  const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); delete g.base['.github/workflows/ci.yml'];
+  assert.deepEqual(ciEvidence(sha, g.args()).covered, []);
+  assert.deepEqual(probe(f => { f['.github/workflows/ci.yml'] = yml(f).replace('  repo:\n', '  repo:\n    # a comment\n').replace('timeout-minutes: 10\n', 'timeout-minutes: 11\n'); }).covered, CI_STEPS);
+});
+
+test('CI evidence refuses a covered job whose log shows an unquarantined skip or todo, or no complete test summary', () => {
+  const sha = 'a'.repeat(40);
+  const real = here('../world-launcher/backup-restic.test.mjs').includes("'backup, version history, restore by night, retention, off-box copy'");
+  assert.ok(real, 'the launcher test the CI job used to skip');
+  const skip = 'backup, version history, restore by night, retention, off-box copy';
+  const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs }, logs: { launcher: tapLog(['works'], [skip]), 'server-1': '2026-11-09T02:37:10.7Z no tests ran\n' } });
+  const r = ciEvidence(sha, g.args());
+  assert.match(r.notCovered['V3-launcher-unit'], /unquarantined skip "backup, version history/);
+  assert.match(r.notCovered['V5-server-full'], /server-1: incomplete node test summaries/);
+  assert.deepEqual(r.covered, ['V1-types', 'V2-build-root', 'V3-client-cli', 'V4-web']);
+  // a quarantined skip is evidence, and is listed
+  const q = { entries: [{ step: 'V3-launcher-unit', id: skip, status: 'skip', reason: 'fixture', owner: 'fixture' }] };
+  const ok = ciEvidence(sha, g.args({ quarantine: q }));
+  assert.ok(ok.covered.includes('V3-launcher-unit')); assert.equal(ok.quarantinedSkips['V3-launcher-unit'][0].id, skip);
+  // a summary that does not add up, or an unreadable log, is not evidence
+  const odd = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs }, logs: { web: tapLog(['a']).replace('# skipped 0', '# skipped 2'), 'client-cli': new Error('HTTP 410 gone') } });
+  const o = ciEvidence(sha, odd.args());
+  assert.match(o.notCovered['V4-web'], /incomplete/); assert.match(o.notCovered['V3-client-cli'], /log unreadable \(HTTP 410 gone\)/);
+  // the real CI log shapes (TAP behind timestamps, nested and escaped titles) parse
+  const parsed = ciLogSkips(['2026-11-09T02:37:10.7Z     ok 3 - \\#12 nested # TODO later', '2026-11-09T02:37:10.7Z not ok 4 - flaky # SKIP off', '2026-11-09T02:37:10.7Z # tests 4', '2026-11-09T02:37:10.7Z # skipped 1', '2026-11-09T02:37:10.7Z # todo 1'].join('\n'));
+  assert.deepEqual(parsed, { skipped: [{ id: '\\#12 nested', status: 'todo' }, { id: 'flaky', status: 'skip' }], summaries: 1, complete: true });
 });
 
 test('CI evidence gate: Modal runs only the uncovered steps against the cached full baseline; the receipt keeps its verdict and ships', async t => {

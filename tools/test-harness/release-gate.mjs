@@ -745,33 +745,73 @@ export function scopeFor(files) {
 // ── CI evidence for the pinned commit (#1463) ──────────────────────────────────────────────────────────────────────
 // Every PR and the merge queue run CI on the exact commits, and each push to main runs every ci.yml job. A full gate
 // takes the successful ci.yml run (event push to main, or merge_group) whose head is exactly the candidate as evidence
-// for the contract steps CI runs with the same command, and runs on Modal only the rest. A step is covered only when
-// every job below succeeded in that run and the candidate's own ci.yml still runs the command. CI runs Node 22, so
-// another --node takes no evidence. Not covered, on purpose: V2-build-worlds (CI builds only the root base),
-// V3-harness, V3-walk (no CI job), V3-bundle (CI runs the budget comparison, not the bundle tests), V3-packages (CI's
-// `pnpm -r test` misses protocol and engine-native), V3-mars-engine (CI skips the full campus re-extraction), V6 (no
-// CI job runs the scenarios).
-// `scripts`: the candidate's package.json script must still be exactly the gate's command (one-validation.sh).
-// `pinned`: files CI runs from the candidate that must be byte-identical to the gate's own harness commit.
+// for the contract steps CI runs with the same command, and runs on Modal only the rest. A step is covered only when:
+//   - every job below succeeded in that run;
+//   - the CI definitions it depends on (CI_DEFINITIONS) are identical at the candidate and at the baseline, the live
+//     release whose own gate ran them: a candidate cannot weaken what CI proves (`|| true`, continue-on-error, a test
+//     name filter, an echo of the command) and still count it, because the gate runs from the candidate's harness;
+//   - each job's log shows complete node test summaries, and every skipped or todo test in it is quarantined for the
+//     step (a skip passes CI, but the gate counts it as unproved).
+// CI runs Node 22, so another --node takes no evidence. Not covered, on purpose: V2-build-worlds (CI builds only the
+// root base), V3-harness, V3-walk (no CI job), V3-bundle (CI runs the budget comparison, not the bundle tests),
+// V3-packages (CI's `pnpm -r test` misses protocol and engine-native), V3-mars-engine (CI skips the full campus
+// re-extraction), V6 (no CI job runs the scenarios).
 export const CI_COVERED = {
-  'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', scripts: { typecheck: 'pnpm -r exec tsc --noEmit -p .' } },
-  'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build' },
-  'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', scripts: { 'test:client': 'node --test --test-concurrency=1 tools/edge-skill/*.test.mjs tools/client-eval/*.test.mjs' } },
-  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs' },
-  'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', pinned: ['tools/test-harness/web-suite.sh'] },
+  'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
+  'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
+  'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
+  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', defs: [], tests: true },
+  'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
   'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
-    pinned: ['.github/scripts/server-test-files.mjs'] },
+    defs: ['.github/scripts/server-test-files.mjs'], tests: true },
 };
+/** Definitions every covered step depends on: the workflow (without its comments and the `repo` and `smoke` jobs, which
+ * run no contract step) and the job picker. */
+export const CI_COMMON_DEFINITIONS = ['ci.yml', '.github/scripts/ci-scope.mjs'];
 export const CI_EVENTS = ['push', 'merge_group'];
+/** One CI definition's comparable text at a commit (`file` reads a path there; null when absent). */
+export function ciDefinition(name, file) {
+  if (name === 'ci.yml') {
+    const text = file('.github/workflows/ci.yml');
+    if (text === null) return null;
+    const out = []; let drop = false;
+    for (const line of text.split('\n')) {
+      if (/^\s*#/.test(line)) continue;
+      if (/^ {2}\S/.test(line)) drop = /^ {2}(repo|smoke):/.test(line);
+      else if (/^\S/.test(line)) drop = false;
+      if (!drop) out.push(line.trimEnd());
+    }
+    return out.join('\n');
+  }
+  const script = /^package\.json#(.+)$/.exec(name);
+  if (script) { try { return JSON.parse(file('package.json')).scripts?.[script[1]] ?? null; } catch { return null; } }
+  return file(name);
+}
+/** Node test results in one CI job log (TAP, as node --test prints without a terminal): the skipped and todo test
+ * names, and whether the summaries account for all of them. */
+export function ciLogSkips(text) {
+  const lines = text.split('\n').map(l => l.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, '').replace(/\u001b\[[0-9;]*m/g, ''));
+  const skipped = [];
+  let summaries = 0, counted = 0;
+  for (const line of lines) {
+    const m = /^\s*(?:not )?ok \d+ - (.*?)\s+# (SKIP|TODO)\b/.exec(line);
+    if (m) skipped.push({ id: m[1], status: m[2] === 'SKIP' ? 'skip' : 'todo' });
+    const c = /^# (tests|skipped|todo) (\d+)$/.exec(line.trim());
+    if (c) { if (c[1] === 'tests') summaries++; else counted += Number(c[2]); }
+  }
+  return { skipped, summaries, complete: summaries > 0 && counted === skipped.length };
+}
 const ghApi = path => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'] }));
+const ghLog = (repo, id) => execFileSync('gh', ['api', '--allow-escape-sequences', `repos/${repo}/actions/jobs/${id}/logs`], { encoding: 'utf8', maxBuffer: 4 * MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'] });
 export function repoSlug(root = ROOT) {
   if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
   try { return gitAt(root, 'remote', 'get-url', 'origin').replace(/\.git$/, '').match(/[:/]([^/:]+\/[^/]+)$/)?.[1] || null; } catch { return null; }
 }
-/** The CI evidence for one commit: { covered, notCovered: {step: why}, run, jobs } or { covered: [], reason }. `api` reads
- * the GitHub REST API (gh api by default); `file` reads a path at the commit (null when absent). */
-export function ciEvidence(sha, { repo, api = ghApi, file, trusted = () => null }) {
+/** The CI evidence for one commit: { covered, notCovered: {step: why}, run, jobs } or { covered: [], reason }. `api`
+ * reads the GitHub REST API and `log` one job's log (gh by default); `file` and `baselineFile` read a path at the
+ * candidate and at the baseline; `quarantine` is the gate's quarantine.json. */
+export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id), file, baselineFile, quarantine = { entries: [] } }) {
   const none = reason => ({ covered: [], reason });
   if (!repo) return none('no GitHub repository (origin) to read CI from');
   let runs;
@@ -779,35 +819,46 @@ export function ciEvidence(sha, { repo, api = ghApi, file, trusted = () => null 
   catch (e) { return none(`could not read CI runs: ${String(e.message).split('\n')[0]}`); }
   const ok = runs.filter(r => r.head_sha === sha && CI_EVENTS.includes(r.event) && r.status === 'completed' && r.conclusion === 'success'
     && r.path === '.github/workflows/ci.yml' && (r.event !== 'push' || r.head_branch === 'main'));
-  // a push to main runs every job; prefer it, then the newest
+  // a push to main runs every job; prefer it, then the newest. A run that went green on a re-run of failed jobs counts
+  // (it ran at this sha); its attempt is recorded.
   const run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
   if (!run) return none(`no successful push/merge_group ci.yml run at ${sha} (${runs.length} run(s) at this sha)`);
   let jobs;
   try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
   catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
-  const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion]));
-  // the command must be on a line that runs it, not in a comment
-  const ciYml = (file('.github/workflows/ci.yml') || '').split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
-  let scripts = {};
-  try { scripts = JSON.parse(file('package.json') || '{}').scripts || {}; } catch { /* none */ }
+  const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion])), jobId = Object.fromEntries(jobs.map(j => [j.name, j.id]));
+  const ciYml = ciDefinition('ci.yml', file) || '';
   const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);
-  const covered = [], notCovered = {};
+  const drifted = name => { const now = ciDefinition(name, file), then = ciDefinition(name, baselineFile); return now === null || then === null || now !== then; };
+  const logs = new Map(), readLog = name => {
+    if (!logs.has(name)) { try { logs.set(name, ciLogSkips(log(jobId[name]))); } catch (e) { logs.set(name, { error: String(e.message).split('\n')[0] }); } }
+    return logs.get(name);
+  };
+  const quarantined = (step, t) => (quarantine.entries || []).some(e => e.step === step && e.status === t.status && (e.id === t.id || e.id.endsWith(` > ${t.id}`)));
+  const covered = [], notCovered = {}, skips = {};
   for (const step of REQUIRED_STEPS) {
     const c = CI_COVERED[step];
     if (!c) { notCovered[step] = 'CI does not run this step with the gate command'; continue; }
-    if (!ciYml.includes(c.command)) { notCovered[step] = `the commit's ci.yml no longer runs \`${c.command}\``; continue; }
-    const script = Object.entries(c.scripts || {}).find(([k, v]) => scripts[k] !== v);
-    if (script) { notCovered[step] = `the commit's package.json script ${script[0]} is not \`${script[1]}\``; continue; }
-    const drift = (c.pinned || []).find(f => { const t = trusted(f); return t === null || file(f) !== t; });
-    if (drift) { notCovered[step] = `${drift} at the commit differs from the gate's harness commit`; continue; }
+    if (!ciYml.includes(c.command)) { notCovered[step] = `the commit's ci.yml does not run \`${c.command}\``; continue; }
+    const changed = [...CI_COMMON_DEFINITIONS, ...c.defs].filter(drifted);
+    if (changed.length) { notCovered[step] = `CI definitions differ from the baseline's: ${changed.join(', ')}`; continue; }
     const names = c.jobs.flatMap(j => j === 'server-*' ? (Number.isInteger(shards) && shards > 0 ? Array.from({ length: shards }, (_, i) => `server-${i}`) : [null]) : [j]);
     if (names.includes(null)) { notCovered[step] = 'SERVER_SHARDS unreadable at the commit'; continue; }
     const bad = names.filter(n => conclusion[n] !== 'success');
-    if (bad.length) notCovered[step] = `job(s) not successful in run ${run.id}: ${bad.map(n => `${n}=${conclusion[n] ?? 'absent'}`).join(', ')}`;
-    else covered.push(step);
+    if (bad.length) { notCovered[step] = `job(s) not successful in run ${run.id}: ${bad.map(n => `${n}=${conclusion[n] ?? 'absent'}`).join(', ')}`; continue; }
+    if (c.tests) {
+      const problem = names.map(n => { const l = readLog(n);
+        if (l.error) return `${n}: log unreadable (${l.error})`;
+        if (!l.complete) return `${n}: incomplete node test summaries in the log`;
+        const open = l.skipped.filter(t => !quarantined(step, t));
+        if (l.skipped.length) skips[step] = [...(skips[step] || []), ...l.skipped.map(t => ({ job: n, ...t }))];
+        return open.length ? `${n}: unquarantined ${open.map(t => `${t.status} "${t.id}"`).join(', ')}` : null; }).filter(Boolean);
+      if (problem.length) { notCovered[step] = problem.join('; '); continue; }
+    }
+    covered.push(step);
   }
   return { covered, notCovered, run: { id: run.id, attempt: run.run_attempt ?? null, event: run.event, headSha: run.head_sha, headBranch: run.head_branch, conclusion: run.conclusion, url: run.html_url },
-    jobs: conclusion, ...(!covered.length && { reason: 'no contract step covered by that run' }) };
+    jobs: conclusion, ...(Object.keys(skips).length && { quarantinedSkips: skips }), ...(!covered.length && { reason: 'no contract step covered by that run' }) };
 }
 
 export const USAGE = `usage: release-gate.sh <candidate-ref> [--baseline <ref>] [--out <dir>] [--node 22|26]
@@ -900,7 +951,7 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     if (scopeMode === 'full' && !flags.has('--no-ci-evidence') && !options['--candidate-results'] && !options['--baseline-bundle-carry']) {
       const at = ref => path => { try { return execFileSync('git', ['-C', root, 'show', `${ref}:${path}`], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
       ci = node !== '22' ? { covered: [], reason: `CI runs Node 22; this gate runs Node ${node}` }
-        : (deps.ciEvidence || ciEvidence)(candidateSha, { repo: 'repo' in deps ? deps.repo : repoSlug(root), file: at(candidateSha), trusted: at(harnessRef) });
+        : (deps.ciEvidence || ciEvidence)(candidateSha, { repo: 'repo' in deps ? deps.repo : repoSlug(root), file: at(candidateSha), baselineFile: at(baselineSha), quarantine: manifest });
     }
     const ciCovered = ci?.covered || [];
     const scoped = scope.resolved === 'scoped', partial = !scoped && ciCovered.length > 0;

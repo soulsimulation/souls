@@ -29,11 +29,24 @@ from the CPU gate.
 Every PR and the merge queue run CI on the exact commits, and each push to `main` runs every `ci.yml` job. A full gate
 (#1463) takes the successful `ci.yml` run whose head is exactly the candidate (event `push` to `main`, preferred, or
 `merge_group`) as evidence for the steps CI runs with the same command, and runs only the rest on Modal. A step counts
-as covered only when every CI job that runs it succeeded in that run and the candidate's own `ci.yml` still runs the
-command on a line that is not a comment (`CI_COVERED` in `release-gate.mjs`; a harness test fails if `ci.yml` drifts
-from the table). What CI runs through the candidate's own files is pinned too: the `typecheck` and `test:client`
-scripts in `package.json` must be the gate's commands, and `tools/test-harness/web-suite.sh` and
-`.github/scripts/server-test-files.mjs` must equal the gate's harness commit, or the step stays on Modal.
+as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `release-gate.mjs`):
+
+- every CI job that runs it succeeded in that run, and the commit's `ci.yml` runs the step's command;
+- the CI definitions it depends on are identical at the candidate and at the baseline, the live release: `ci.yml`
+  (without comments and the `repo` and `smoke` jobs, which run no contract step), `.github/scripts/ci-scope.mjs`, and
+  per step the `typecheck` or `test:client` script in `package.json`, `tools/test-harness/web-suite.sh` and
+  `web-loader.mjs`, or `.github/scripts/server-test-files.mjs`. The gate runs from the candidate's harness, so a
+  candidate that weakens CI (`|| true`, `continue-on-error`, a test-name filter, an `echo` of the command) cannot have
+  it counted; any change to these files since the baseline runs the affected steps on Modal for that release;
+- each covered job's log has complete node test summaries, and every test it skipped or marked todo is in
+  `quarantine.json` for the step. A skip passes CI, but the gate counts it as unproved, so an unquarantined one sends
+  the step to Modal, whose comparison reports it.
+
+A run that went green on a re-run of failed jobs counts (it ran at this sha); `ciEvidence.run.attempt` records it.
+CI runs everything a covered step needs: the `launcher` job installs the gate's pinned restic for
+`backup-restic.test.mjs` (x86_64 runners; elsewhere it skips and the step goes to Modal) and the `web` job builds the
+root web app before the web tests, as V2-build-root does in the gate. A harness test fails if `ci.yml` drifts from the
+table.
 
 | Step | Source | Why |
 | --- | --- | --- |
@@ -53,10 +66,9 @@ scripts in `package.json` must be the gate's commands, and `tools/test-harness/w
 
 The Modal steps run with `--only` and are compared assertion by assertion with the baseline: removed assertions,
 renames, new failures, skips and quarantine work as before. For the CI-covered steps a green CI means every test
-passed, but a green run does not show a deleted or newly skipped test. Those are caught when the PR is made: the
-PR-time [renames](#renames) check (#1462) requires a `renames.json` entry for a removed or renamed test title and a
-`quarantine.json` entry for a newly unconditional skip or todo. Runtime `t.skip()` calls and titles built at run time
-are outside that check, so on the CI-covered steps they are not seen at release. From the 4.16.1 gate's step timings the Modal part is about 30 minutes (the longest
+passed and the log check above found no unquarantined skip or todo. A deleted or renamed test is not visible in a
+green run; it is caught when the PR is made, by the [renames](#renames) check (#1462). Titles built at run time are
+outside that check, so on the CI-covered steps their removal is not seen at release. From the 4.16.1 gate's step timings the Modal part is about 30 minutes (the longest
 container: V3-walk 138 s, V3-mars-engine 578 s and the V6 scenarios about 840 s, plus image and install), against about
 75 to 90 minutes for the whole contract; V5 alone was 46 minutes in its longest shard.
 
