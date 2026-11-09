@@ -1311,13 +1311,17 @@ export class EngineBridge {
   /** #1548: a relabel spread over ticks is cancelled by each static change, so while the static world keeps changing (Souls
    *  through a busy door) a waiting Soul could stay cut off for good. Once Souls have waited NAV_STUCK_TICKS with the labels
    *  cold and the static world has changed in that time, one relabel runs whole in this tick (nothing moves inside one call),
-   *  at most NAV_FORCED_MS, at most once per NAV_STUCK_TICKS a world, and is logged with its ms. A quiet world never takes it:
+   *  with a budget of NAV_FORCED_MS (about 250 ms: a slice can run a little past its budget), at most once per NAV_STUCK_TICKS a world, and is logged with its ms. A quiet world never takes it:
    *  there the re-warm finishes on its own. True when the labels are warm after it. */
   private navForceRelabel(E: { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number }, waiting: number): boolean {
     const tick = this.engine.world.tick, epoch = E.navEpochV1?.() ?? 0;
     if (!this.navStuckSince) { this.navStuckSince = { tick, epoch }; return false; }
+    // Two rate limits, both needed: the window (waited NAV_STUCK_TICKS since it was opened or last reset) keeps a forced call from
+    // following a fresh cold read, and navForcedAt caps the world at one forced call per NAV_STUCK_TICKS even when several Souls'
+    // waits overlap or a warm read in between reopens the window early.
     if (tick - this.navStuckSince.tick < NAV_STUCK_TICKS || epoch === this.navStuckSince.epoch || tick - this.navForcedAt < NAV_STUCK_TICKS) return false;
     const t0 = performance.now(), warm = !!E.navWarmV1?.(NAV_FORCED_MS), ms = Math.round(performance.now() - t0);
+    // the window restarts here, so a call that left the labels cold is not repeated until another NAV_STUCK_TICKS of churn
     this.navForcedAt = tick; this.navStuckSince = { tick, epoch: E.navEpochV1?.() ?? epoch };
     this.log(`nav rescue: forced relabel ${ms} ms, ${warm ? 'warm' : 'still cold'}, ${waiting} waiting`);
     if (warm) { this.nav.forgetWarm(); this.edge?.navRelabelled(); this.navCold = false; this.navColdSlices = 0; }
