@@ -66,3 +66,38 @@ test('#1521 the adoption repair leaves a body that is busy (a programme) or held
   const r=e.perform({actor:'body',label:'walk',steps:[{verb:'mars:walk_to',params:{x:AT[0]+3,z:AT[1],level:0}}]});assert.equal(r.ok,true);
   assert.deepEqual(e.planAboveFloorV2(),[],'a body with a programme is never moved by the repair');
 });
+
+test('#1521 review: a plan that moves a body off its own point never reorders the entity table; a fold-only replay ends identical', () => {
+  const w = commons.genesis('stand-height-ground') as any;
+  w.entities.h_a = m.human('h_a', AT[0], AT[1], { level: 0, y: AIR }); w.entities.h_b = m.human('h_b', AT[0] + .5, AT[1], { level: 0 }); w.entities.h_c = m.human('h_c', AT[0] - 3, AT[1] + 3, { level: 0 });
+  const e = commons.create(w) as MarsEngine; e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true, standHeightV1: true, standHeightV2: true } as never);
+  const replay = commons.restore(e.snapshot()) as MarsEngine, before = Object.keys(e.world.entities);
+  const plan = e.planAboveFloorV2();
+  assert.deepEqual(plan.map(x => x.id), ['h_a']); assert.ok(Math.hypot(plan[0].p[0] - AT[0], plan[0].p[2] - AT[1]) > 0, 'moved off its own point (h_b is 0.5 m away)');
+  assert.deepEqual(Object.keys(e.world.entities), before, 'planning is a pure read: the table keeps its order');
+  e.standOnFloorV2(plan); replay.standOnFloorV2(structuredClone(plan));
+  assert.deepEqual(Object.keys(e.world.entities), Object.keys(replay.world.entities), 'live and replay have the same key order');
+  assert.equal(e.stateHash(), replay.stateHash());
+});
+
+test('#1521 review: two bodies moved in one plan never get overlapping spots', () => {
+  const w = commons.genesis('stand-height-ground') as any;
+  w.entities.h_a = m.human('h_a', AT[0], AT[1], { level: 0, y: AIR }); w.entities.h_b = m.human('h_b', AT[0] + .3, AT[1], { level: 0, y: AIR });
+  const e = commons.create(w) as MarsEngine; e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true, standHeightV2: true } as never);
+  const plan = e.planAboveFloorV2();
+  assert.equal(plan.length, 2, JSON.stringify(plan));
+  assert.ok(Math.hypot(plan[0].p[0] - plan[1].p[0], plan[0].p[2] - plan[1].p[2]) >= .8, JSON.stringify(plan));
+});
+
+for (const ownClear of [true, false])
+  test(`#1521 review: a stall release with nowhere clear near ${ownClear ? 'stands the body on the floor at its own point' : 'and its own point not clear leaves it held (stall.no-floor-spot), never released in the air'}`, (t) => {
+    t.mock.method(console, 'warn', () => {});
+    const e = world(true), b = e.world.entities.body as any;
+    const r = e.perform({ actor: 'body', label: 'walk', steps: [{ verb: 'mars:walk_to', params: { x: AT[0] - .5, z: AT[1], level: 0 } }] }); assert.equal(r.ok, true);
+    e.step(); b.pose.p = [b.pose.p[0], AIR, b.pose.p[2]];
+    t.mock.method(e as any, 'freeStandingNearV1', () => null);   // nothing clear anywhere near
+    if (!ownClear) t.mock.method(e as any, 'placeClearV1', () => false);
+    const rel = (e as any).stallReleaseV1('body', { code: 'stall.released', message: 'test' });
+    if (ownClear) { assert.ok(rel, 'released'); assert.equal(b.pose.p[1], 0, 'on its floor'); }
+    else { assert.equal(rel, null, 'not released'); assert.ok(e.programOf('body'), 'still held by its programme'); }
+  });

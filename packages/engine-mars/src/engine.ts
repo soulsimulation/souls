@@ -1518,10 +1518,20 @@ export class MarsEngine implements Engine {
     const floorY=upper&&xz&&from.y===undefined&&this.cfg.standHeightV1===true?(()=>{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(level,xz);return g&&clearanceAt(g,xz)>0?g.y:undefined;})():undefined;   // only on a cell of that floor (with the guard off, xz is where the body stood: a flight or the air)
     // #1521 stand-height/2: on level 0 of a world with no ground field, at that level's floor height (a mid-climb height left the
     // body in the air, and the first tick of every walk, dropping it to the floor, was refused motion.teleport); off, as recorded
-    const groundY=!upper&&xz&&!f&&from.y===undefined&&this.cfg.standHeightV2===true?this.floorHeightV2(xz):undefined;
-    const y=xz&&f?standOn(f,xz[0],xz[1]):(from.y??floorY??groundY??a.pose.p[1]);
+    let xz2=xz;
+    if(!xz2&&!upper&&!f&&from.y===undefined&&this.cfg.standHeightV2===true){
+      // nothing clear near: never released in the air. Its own point on the floor if that is clear; else it stays held, named
+      const at:[number,number]=[r3(a.pose.p[0]),r3(a.pose.p[2])],floor=this.floorHeightV2(at);
+      if(a.pose.p[1]-floor>MAX_HUMAN_STEP_PER_TICK){
+        const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(0,at),radius=guard?this.bodyRadiusV1(a):a.body?.radius??HUMAN_RADIUS;
+        if(g&&clearanceAt(g,at)>=radius&&(!guard||this.placeClearV1(a,at[0],at[1],0,this.guardBodiesV1())))xz2=at;
+        else{console.warn(`[engine] stall.no-floor-spot: ${actor} is not released: nowhere clear on its floor near it, and it is above the floor`);return null;}
+      }
+    }
+    const groundY=!upper&&xz2&&!f&&from.y===undefined&&this.cfg.standHeightV2===true?this.floorHeightV2(xz2):undefined;
+    const y=xz2&&f?standOn(f,xz2[0],xz2[1]):(from.y??floorY??groundY??a.pose.p[1]);
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
-    const r=releaseBody(this.rt,actor,xz?[r3(xz[0]),r3(y),r3(xz[1])]:null,reason);
+    const r=releaseBody(this.rt,actor,xz2?[r3(xz2[0]),r3(y),r3(xz2[1])]:null,reason);
     if(r&&pp&&own)this.end(pp,'failed',reason);
     return r;
   }
@@ -1533,7 +1543,7 @@ export class MarsEngine implements Engine {
    *  a held body uses, never through geometry). A body with nowhere clear is left out. The host logs what this returns. */
   planAboveFloorV2(): { id: string; p: [number, number, number] }[] {
     if (this.rt.world.groundV1) return [];
-    const out: { id: string; p: [number, number, number] }[] = [], guard = this.cfg.bodyStepGuardV1 === true;
+    const out: { id: string; p: [number, number, number] }[] = [], guard = this.cfg.bodyStepGuardV1 === true, planned: [number, number][] = [];
     for (const a of (listEntities(this.ents) as any[]).filter(o => o.kind === 'human').sort((x, y) => (x.id < y.id ? -1 : 1))) {
       const h = a.human, p = a.pose?.p;
       if (!h || (h.level ?? 0) !== 0 || !Array.isArray(p) || !p.every(Number.isFinite)) continue;
@@ -1542,9 +1552,12 @@ export class MarsEngine implements Engine {
       const floor = this.floorHeightV2([p[0], p[2]]); if (p[1] - floor <= MAX_HUMAN_STEP_PER_TICK) continue;   // within a step: the step check lets the next tick reach the floor
       const radius = guard ? this.bodyRadiusV1(a) : a.body?.radius ?? HUMAN_RADIUS, sp = this.rt.services.spatial as Spatial; sp.sync(this.rt.world);
       const g = sp.levelAt(0, [p[0], p[2]]), others = (listEntities(this.ents) as any[]).filter(o => o.kind === 'human' && o.id !== a.id && (o.human?.level ?? 0) === 0);
-      const here = !!g && clearanceAt(g, [p[0], p[2]]) >= radius && !others.some(o => hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < 0.8) && (!guard || this.placeClearV1(a, p[0], p[2], 0, this.guardBodiesV1()));
-      const xz = here ? [p[0], p[2]] as [number, number] : (() => { delete this.ents[a.id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([r3(p[0]), r3(p[2])], radius, guard ? a : undefined); } catch { return null; } finally { this.ents[a.id] = a; this.tableCacheV1 = null; } })();
+      const here = !!g && clearanceAt(g, [p[0], p[2]]) >= radius && !others.some(o => hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < 0.8) && !planned.some(([x, z]) => hypot(x - p[0], z - p[2]) < 0.8) && (!guard || this.placeClearV1(a, p[0], p[2], 0, this.guardBodiesV1()));
+      // a pure read: the body's own place is skipped, never taken out of the table (that reorders the live table, and a replay
+      // only folds the logged result: #1522 review); spots already planned keep clear of each other
+      const xz = here ? [p[0], p[2]] as [number, number] : (() => { try { return this.freeStandingNearV1([r3(p[0]), r3(p[2])], radius, guard ? a : undefined, { skip: a.id, also: planned }); } catch { return null; } })();
       if (!xz) continue;
+      planned.push([xz[0], xz[1]]);
       out.push({ id: a.id, p: [r3(xz[0]), this.floorHeightV2(xz), r3(xz[1])] });
     }
     return out;
@@ -1940,11 +1953,13 @@ export class MarsEngine implements Engine {
   }
   /** birth-near/1: the nearest ground point (rings of 0.25 m out to 12 m) with a clear standing disc, nobody within
    * 0.8 m and no deep water. Walkability from there is proved by the caller's own physical walk, never assumed. */
-  private freeStandingNearV1(at: [number, number], radius: number, who?: any): [number, number] | null {
+  /** `opts` (#1521): `skip` a body's own place without taking it out of the table (a plan must not reorder it), and keep clear of
+   *  `also`, spots already promised in the same plan. Without them, as before. */
+  private freeStandingNearV1(at: [number, number], radius: number, who?: any, opts?: { skip?: string; also?: [number, number][] }): [number, number] | null {
     if (!Array.isArray(at) || at.length !== 2 || !at.every(Number.isFinite)) return null;
     const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
     const f = this.rt.world.groundV1 ? spatial.ground?.field : undefined;
-    const people = Object.values(this.ents).filter((e: any) => e.kind === 'human' && (e.human?.level ?? 0) === 0).map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]), bodies = who ? this.guardBodiesV1() : [];
+    const people = [...Object.values(this.ents).filter((e: any) => e.kind === 'human' && (e.human?.level ?? 0) === 0 && e.id !== opts?.skip).map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]), ...(opts?.also ?? [])], bodies = who ? this.guardBodiesV1() : [];
     for (let ring = 0; ring <= 48; ring++) { const n = Math.max(1, ring * 8); for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2, x = r3(at[0] + dcos(ang) * ring * 0.25), z = r3(at[1] + dsin(ang) * ring * 0.25);
       const grid = spatial.levelAt(0, [x, z]);

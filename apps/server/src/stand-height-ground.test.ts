@@ -5,6 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { marsFactory, EDEN_SAFE_COMMONS_WORLD } from '@souls/engine-mars';
 import { WorldHost } from './world.ts';
+import { EdgeLedger } from './edge/ledger/ledger.ts';
+import { STOOD_ON_FLOOR } from '@souls/engine-contract';
 import { fixture, invite, accept, seed, worldId } from '../test/native-owner-fixture.ts';
 
 const factory = await marsFactory({ ...EDEN_SAFE_COMMONS_WORLD, walkBlockV1: true, soulsRepairV1: true });
@@ -45,4 +47,17 @@ test('#1521 with nobody in the air, the adoption logs no repair', async (t) => {
   await accept<unknown>(f.host, f.host.enableStandHeightV2('test'));
   assert.equal(repairs(f).length, 0);
   assert.equal((f.db.events(worldId, 0) as any[]).filter(e => e.payload?.runtimePolicy?.standHeightV2).length, 1);
+});
+
+test('#1521 review: each Soul the repair stands is told: its open act ends world.stood-on-floor and the notice is delivered to its stream', async (t) => {
+  const { f, ada, ents } = await world(t);
+  const edge = new EdgeLedger(f.host, f.db, undefined, { ambient: false }), delivered: [string, string][] = [];
+  edge.attachComms({ streams: { headCursor: () => '0', deliver: (soulId: string, kind: string) => { delivered.push([soulId, kind]); return null; } }, fading: { status: () => null } } as never);
+  const soulId = [...f.host.minds.values()].find(m => m.entityId === ada)!.soulId;
+  f.db.db.prepare('INSERT INTO edge_receipts_v1 (world_id, receipt_id, soul_id, capability, phase, accepted_tick, created_at) VALUES (?,?,?,?,?,?,?)').run(f.host.worldId, 'r_open', soulId, 'walk:commons', 'waiting', f.host.engine.world.tick, Date.now());   // an act it was still waiting on
+  const [x, , z] = ents()[ada].pose.p; ents()[ada].pose.p = [x, 0.24, z];
+  await accept<unknown>(f.host, f.host.enableStandHeightV2('test'));
+  assert.deepEqual(delivered, [[soulId, STOOD_ON_FLOOR.code]], 'the notice reached its stream');
+  const r = edge.receipt(soulId, 'r_open')!;
+  assert.deepEqual([r.phase, r.code], ['failed', STOOD_ON_FLOOR.code], 'its open act ended by name');
 });
