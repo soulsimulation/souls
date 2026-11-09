@@ -40,7 +40,7 @@ test('A1: the middleware reports refusals addressed to a Soul token (slow-down, 
   const auth = {headers: {authorization: 'Bearer sim_a_1'}};
   const first = app.request('/v1/edge/here', auth); await tick();
   assert.equal((await app.request('/v1/edge/here', auth)).status, 429, 'soul.busy');
-  assert.deepEqual(seen, [], 'soul.busy is the agent overlapping itself, not the world slowing it');
+  assert.equal(seen.length, 0, 'soul.busy is the agent overlapping itself, not the world slowing it');
   release(); await first;
   level = 'black'; adm.setLoadLevel('black');
   assert.equal((await app.request('/v1/edge/here', auth)).status, 503);
