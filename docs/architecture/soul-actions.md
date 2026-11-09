@@ -12,6 +12,12 @@ context-size checks below), regression runs, and an uncut real-client recording 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
   `upright-carry`, containers with an `inside`, the tea defs, and so on). Older revisions of a def keep their old,
   hand-free behaviour, so existing worlds do not change until a god places the new revision.
+- **Campsite table setup ([#1605](https://github.com/soulsimulation/souls/issues/1605)).** `core-table@2` is a solo,
+  two-hand carry revision of the fixed table. Carry it empty to a named clear place, then use the existing `put-on`
+  and `pick-up` offers to stage and retrieve real bowls, lanterns and other fitting items on its relocated surface.
+  Native support and persistent parent/slot placement follow the same table identity. Unload before moving it again:
+  the native fixture mover refuses a loaded table (`move_fixture.contents`). It does not fold, and the fixed `@1`
+  table and the heavier crew work table are unchanged.
 - **Storage with and without a door ([#435](https://github.com/soulsimulation/souls/issues/435)).** A container with an
   `inside` (entry 42) is open only while its door or drawer is, if its def declares an `open` state. One that declares
   none has no door: `core-swap-shelf@1` is always open, so what is on it is seen nearby and taken without an open step,
