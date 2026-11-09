@@ -55,6 +55,12 @@ test('mural offer paints a real permitted wall, preserves cancellation/refusals 
   const capId = `paint:paint.${target}`, caps = edge.capabilities(soul), cap = caps.find(c => c.id === capId)!;
   assert.ok(cap?.available); assert.match(cap.label, /^Paint a mural/);
   assert.match((cap.params!.painting as { description: string }).description, /512×512.*64.*rect.*ellipse.*line/);
+  const inspected = await app.request(`/v1/edge/inspect/${encodeURIComponent(cap.target!.id)}`);
+  assert.equal(inspected.status, 200);
+  const spot = (await inspected.json()).inspect as { offers: { id: string; label: string; params?: { painting?: unknown } }[] };
+  const inspectedPaint = spot.offers.find(o => o.id === capId);
+  assert.ok(inspectedPaint, 'inspect the activity spot named by its paint offer');
+  assert.match(inspectedPaint.label, /^Paint a mural/); assert.ok(inspectedPaint.params?.painting);
   assert.ok(!caps.some(c => c.verb === 'paint' && c.id.includes(plainId)), 'ordinary walls offer no painting');
   const nearBlank = await here();
   const act = async (capability: string, params?: Record<string, unknown>) => await accept(host, edge.act(soul, { capability, ...(params ? { params } : {}) }));
