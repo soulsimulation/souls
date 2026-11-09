@@ -386,3 +386,9 @@ reachable. The step-out happens at most once a minute for each Soul. A Soul cut 
 the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
 not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
 isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
+
+A Soul a god edit closed in while it walked waits until the walk ends, then is asked again with warm labels. The tick loop
+relabels in slices, and each static change (a door worked by a Soul, a ride landing, an edit) cancels the slice in
+progress. So once a Soul has waited 200 ticks (10 s) on cold labels while the static world kept changing, one relabel runs
+whole in a single tick, at most 250 ms and at most once per 200 ticks a world. The server log says
+`nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it (#1548).
