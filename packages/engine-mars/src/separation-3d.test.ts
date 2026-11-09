@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {marsFactory,EDEN_SAFE_COMMONS_WORLD,type MarsEngine} from './engine.ts';
 import {loadMars} from './load.ts';
+import {creatureBody} from '../../../mars/viewer/engine/bodies/index.ts';
 
 const m=await loadMars();
 const commons=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true});
@@ -44,4 +45,15 @@ test('#1455 under body-separation-3d/1 a body on the same floor at the spot is s
   const e=world(true,{other:[1,9,-2.6,DECK]},[1,8,-2.6,DECK]);
   assert.equal(e.restoreHumanPoseV1('body',{p:[9,DECK,-2.6],level:1}),true);
   assert.ok(apart(e,'body','other')>=.5,`apart: ${apart(e,'body','other')}`);
+});
+
+test('#1455 under body-separation-3d/1 a stall release of a dog on the deck keeps clear of a body of its level 0.95 m above it, as collision.human-human reads (review)',()=>{
+  const w=commons.genesis('separation-3d') as any;
+  w.entities.body=m.human('body',9,-2.6,{level:1,y:DECK});w.entities.body.body=creatureBody('dog');
+  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,separation3dV1:true});
+  const r=e.perform({actor:'body',label:'walk',steps:[{verb:'mars:walk_to',params:{x:8.6,z:-1.6,level:1}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  e.step();const at=[...e.world.entities.body.pose.p];
+  e.world.entities.above=m.human('above',at[0],at[2],{level:1,y:at[1]+.95});   // a body shorter than 1 m: no height overlap, still flagged
+  assert.ok((e as any).stallReleaseV1('body',{code:'stall.released',message:'test'}),'released');
+  const d=apart(e,'body','above');assert.ok(d>=.5,`apart: ${d}`);
 });

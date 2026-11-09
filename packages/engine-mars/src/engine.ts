@@ -596,7 +596,9 @@ export class MarsEngine implements Engine {
       // level id (a climber on a flight carries a landing's), and not those of the same level id above or below it
       const sp = this.rt.services.spatial as Spatial; sp.sync(this.rt.world);
       const y = level === 0 && this.rt.world.groundV1 && sp.ground ? sp.ground.standY(x, z) : sp.levelAt(level, [x, z])?.y ?? 0, h = bodyProfile(e).height;
-      return !bodies.some((o: any) => o.id !== e.id && o.pose.p[1] < y + h && y < o.pose.p[1] + bodyProfile(o).height && hypot(o.pose.p[0] - x, o.pose.p[2] - z) < r + this.bodyRadiusV1(o));
+      // also what collision.human-human reads (same level id within 1 m of height), so a body shorter than 1 m (a creature) is never
+      // stood where the invariant would flag it (review)
+      return !bodies.some((o: any) => o.id !== e.id && ((o.pose.p[1] < y + h && y < o.pose.p[1] + bodyProfile(o).height) || ((o.human?.level ?? 0) === level && Math.abs(o.pose.p[1] - y) <= 1.0)) && hypot(o.pose.p[0] - x, o.pose.p[2] - z) < r + this.bodyRadiusV1(o));
     }
     return !bodies.some((o: any) => o.id !== e.id && (o.human?.level ?? 0) === level && hypot(o.pose.p[0] - x, o.pose.p[2] - z) < r + this.bodyRadiusV1(o));
   }
