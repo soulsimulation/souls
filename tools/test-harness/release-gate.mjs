@@ -751,14 +751,17 @@ export function scopeFor(files) {
 // V3-harness, V3-walk (no CI job), V3-bundle (CI runs the budget comparison, not the bundle tests), V3-packages (CI's
 // `pnpm -r test` misses protocol and engine-native), V3-mars-engine (CI skips the full campus re-extraction), V6 (no
 // CI job runs the scenarios).
+// `scripts`: the candidate's package.json script must still be exactly the gate's command (one-validation.sh).
+// `pinned`: files CI runs from the candidate that must be byte-identical to the gate's own harness commit.
 export const CI_COVERED = {
-  'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck' },
+  'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', scripts: { typecheck: 'pnpm -r exec tsc --noEmit -p .' } },
   'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build' },
-  'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client' },
+  'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', scripts: { 'test:client': 'node --test --test-concurrency=1 tools/edge-skill/*.test.mjs tools/client-eval/*.test.mjs' } },
   'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs' },
-  'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh' },
+  'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', pinned: ['tools/test-harness/web-suite.sh'] },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
-  'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';" },
+  'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
+    pinned: ['.github/scripts/server-test-files.mjs'] },
 };
 export const CI_EVENTS = ['push', 'merge_group'];
 const ghApi = path => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'] }));
@@ -768,7 +771,7 @@ export function repoSlug(root = ROOT) {
 }
 /** The CI evidence for one commit: { covered, notCovered: {step: why}, run, jobs } or { covered: [], reason }. `api` reads
  * the GitHub REST API (gh api by default); `file` reads a path at the commit (null when absent). */
-export function ciEvidence(sha, { repo, api = ghApi, file }) {
+export function ciEvidence(sha, { repo, api = ghApi, file, trusted = () => null }) {
   const none = reason => ({ covered: [], reason });
   if (!repo) return none('no GitHub repository (origin) to read CI from');
   let runs;
@@ -783,20 +786,27 @@ export function ciEvidence(sha, { repo, api = ghApi, file }) {
   try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
   catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
   const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion]));
-  const ciYml = file('.github/workflows/ci.yml') || '';
+  // the command must be on a line that runs it, not in a comment
+  const ciYml = (file('.github/workflows/ci.yml') || '').split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
+  let scripts = {};
+  try { scripts = JSON.parse(file('package.json') || '{}').scripts || {}; } catch { /* none */ }
   const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);
   const covered = [], notCovered = {};
   for (const step of REQUIRED_STEPS) {
     const c = CI_COVERED[step];
     if (!c) { notCovered[step] = 'CI does not run this step with the gate command'; continue; }
     if (!ciYml.includes(c.command)) { notCovered[step] = `the commit's ci.yml no longer runs \`${c.command}\``; continue; }
+    const script = Object.entries(c.scripts || {}).find(([k, v]) => scripts[k] !== v);
+    if (script) { notCovered[step] = `the commit's package.json script ${script[0]} is not \`${script[1]}\``; continue; }
+    const drift = (c.pinned || []).find(f => { const t = trusted(f); return t === null || file(f) !== t; });
+    if (drift) { notCovered[step] = `${drift} at the commit differs from the gate's harness commit`; continue; }
     const names = c.jobs.flatMap(j => j === 'server-*' ? (Number.isInteger(shards) && shards > 0 ? Array.from({ length: shards }, (_, i) => `server-${i}`) : [null]) : [j]);
     if (names.includes(null)) { notCovered[step] = 'SERVER_SHARDS unreadable at the commit'; continue; }
     const bad = names.filter(n => conclusion[n] !== 'success');
     if (bad.length) notCovered[step] = `job(s) not successful in run ${run.id}: ${bad.map(n => `${n}=${conclusion[n] ?? 'absent'}`).join(', ')}`;
     else covered.push(step);
   }
-  return { covered, notCovered, run: { id: run.id, event: run.event, headSha: run.head_sha, headBranch: run.head_branch, conclusion: run.conclusion, url: run.html_url },
+  return { covered, notCovered, run: { id: run.id, attempt: run.run_attempt ?? null, event: run.event, headSha: run.head_sha, headBranch: run.head_branch, conclusion: run.conclusion, url: run.html_url },
     jobs: conclusion, ...(!covered.length && { reason: 'no contract step covered by that run' }) };
 }
 
@@ -888,9 +898,9 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     // A full gate takes CI's successful run at the candidate as evidence for the steps CI runs identically (#1463)
     let ci = null;
     if (scopeMode === 'full' && !flags.has('--no-ci-evidence') && !options['--candidate-results'] && !options['--baseline-bundle-carry']) {
-      const file = path => { try { return execFileSync('git', ['-C', root, 'show', `${candidateSha}:${path}`], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+      const at = ref => path => { try { return execFileSync('git', ['-C', root, 'show', `${ref}:${path}`], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
       ci = node !== '22' ? { covered: [], reason: `CI runs Node 22; this gate runs Node ${node}` }
-        : (deps.ciEvidence || ciEvidence)(candidateSha, { repo: 'repo' in deps ? deps.repo : repoSlug(root), file });
+        : (deps.ciEvidence || ciEvidence)(candidateSha, { repo: 'repo' in deps ? deps.repo : repoSlug(root), file: at(candidateSha), trusted: at(harnessRef) });
     }
     const ciCovered = ci?.covered || [];
     const scoped = scope.resolved === 'scoped', partial = !scoped && ciCovered.length > 0;
@@ -958,7 +968,8 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     if (base.source === 'cached' && candidate.metadata && runtime(baseline) !== runtime(candidate)) {
       if (bundleCarry) baseline.errors.push(`bundle baseline carry: runtime ${runtime(baseline)} differs from the candidate's ${runtime(candidate)}; baseline fallback forbidden`);
       else {
-        receipt.baseline = { ...receipt.baseline, source: 'run', cacheRejected: `runtime ${runtime(baseline)} differs from the candidate's ${runtime(candidate)}`, cachedDir: base.dir, dir: join(out, 'baseline') };
+        receipt.baseline = { ...receipt.baseline, source: 'run', cacheRejected: `runtime ${runtime(baseline)} differs from the candidate's ${runtime(candidate)}`, cachedDir: base.dir, dir: join(out, 'baseline'),
+          only: partial ? only : undefined, cacheKey: cacheKey({ sourceSha: baselineSha, suiteTree: suite, node, ...(partial && { only }) }) };
         base = { source: 'run', dir: join(out, 'baseline'), exact: true, ...(partial && { only }) };
         drivers.baseline = await runRemote(base.dir, baselineSha, harnessRef, node, root, base.only || []);
         baseline = readBaseline();
