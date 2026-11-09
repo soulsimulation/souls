@@ -16,6 +16,9 @@ export type ReceiptPhase = 'pending' | 'waiting' | 'started' | 'completed' | 'fa
 export type EdgeReceipt = {id: string; soulId: string; capability: string; phase: ReceiptPhase; acceptedTick: number; startedTick: number | null; endedTick: number | null; code: string | null; reason: string | null; programId: string | null;
   /** Core-A (EDGE-CONTRACT-v1 §8): body | attention | none; what an intent chose; where the body ended (terminal receipts). */
   channel?: string; chosen?: unknown; endedAt?: unknown;outcome?:EdgeOutcomeV1;
+  /** #790 (D021): `startedTick` is when the body program started; this is the first tick at or after it at which the body
+   *  visibly began (its activity changed or it moved more than 5 cm). Absent until then, and on receipts with no body program. */
+  firstMotionTick?: number;
   /** #1381: a stop:current receipt names the receipt it stopped. */
   stopped?: string;
   /** An open paired gesture/give nobody has accepted yet: the receipt reads `waiting` until a guest accepts. */

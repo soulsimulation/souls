@@ -464,10 +464,15 @@ export const SUCCESS = new Set(['pass', 'quarantined']);
  * else (modal_suite.py, remote-suite.sh, one-validation.sh, package-suite.sh, quarantine.json, step scripts,
  * v5-durations.json, campus-assets.json, …) stays in the key. */
 export const DRIVER_ONLY = ['release-gate.mjs', 'ship-receipt.mjs', 'release-gate.test.mjs', 'ship-receipt.test.mjs', 'release-no-delete.test.mjs', 'REMOTE-SUITE.md'];
+/** Files that say how the driver compares results, not what runs (#1461): renames.json is read only by compareRuns on the
+ * laptop, so adding a reviewed rename never invalidates a cached baseline. quarantine.json stays in the key: the
+ * containers' own harness self-tests read it. */
+export const COMPARISON_ONLY = ['renames.json'];
+const outsideSuite = path => DRIVER_ONLY.includes(path) || COMPARISON_ONLY.includes(path);
 export function suiteTree(root, ref) {
   const lines = execFileSync('git', ['-C', root, 'ls-tree', '-r', '--full-tree', ref, '--', 'tools/test-harness'], { encoding: 'utf8', maxBuffer: MAX_BUFFER })
     .split('\n').filter(Boolean).map(line => { const [meta, path] = line.split('\t'); return [meta, path.slice('tools/test-harness/'.length)]; })
-    .filter(([, path]) => !DRIVER_ONLY.includes(path)).sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
+    .filter(([, path]) => !outsideSuite(path)).sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
   if (!lines.length) throw Error(`no tools/test-harness in ${ref}`);
   return sha256(lines.map(([meta, path]) => `${meta}\t${path}\n`).join(''));
 }
@@ -500,9 +505,28 @@ function retire(path) {
   renameSync(path, join(trash, `${basename(path)}-${Date.now()}`));
 }
 
+/** An entry stored under an earlier suiteTree definition (before #1461 left renames.json out) whose own harness commit
+ * recomputes to this suite tree: the same executed suite under its old name. */
+function legacyEntry(cacheDir, { sourceSha, suiteTree: suite, node }, root) {
+  const name = new RegExp(`^${sourceSha}-[0-9a-f]{64}-node${String(node).split('.')[0]}$`);
+  let names = [];
+  try { names = readdirSync(cacheDir).filter(n => name.test(n)).sort(); } catch { return null; }
+  for (const n of names) {
+    try {
+      const entry = JSON.parse(readFileSync(join(cacheDir, n, 'CACHE.json'), 'utf8'));
+      if (entry.key === n && /^[0-9a-f]{40}$/.test(entry.harnessRef || '') && suiteTree(root, entry.harnessRef) === suite) return n;
+    } catch { /* not this one */ }
+  }
+  return null;
+}
+
 export function lookupCache(cacheDir, identity, manifest, requiredSteps = REQUIRED_STEPS, readOptions = {}, root = ROOT) {
-  const key = cacheKey(identity), dir = join(cacheDir, key);
-  if (!existsSync(join(dir, 'CACHE.json'))) return { hit: false, key, dir, reason: 'no cached run' };
+  let key = cacheKey(identity), dir = join(cacheDir, key), legacy = false;
+  if (!existsSync(join(dir, 'CACHE.json'))) {
+    const old = legacyEntry(cacheDir, identity, root);
+    if (!old) return { hit: false, key, dir, reason: 'no cached run' };
+    key = old; dir = join(cacheDir, old); legacy = true;
+  }
   let entry;
   try { entry = JSON.parse(readFileSync(join(dir, 'CACHE.json'), 'utf8')); } catch (e) { return { hit: false, key, dir, reason: `unreadable CACHE.json: ${e.message}` }; }
   if (entry.key !== key) return { hit: false, key, dir, reason: 'cache entry key mismatch' };
@@ -511,10 +535,10 @@ export function lookupCache(cacheDir, identity, manifest, requiredSteps = REQUIR
   const recorded = entry.files || {};
   const changed = [...new Set([...Object.keys(recorded), ...Object.keys(now)])].filter(f => recorded[f] !== now[f]);
   if (!Object.keys(recorded).length || changed.length) return { hit: false, key, dir, reason: `cache entry changed since it was stored: ${changed.slice(0, 3).join(', ') || 'no file list'}` };
-  if (entry.suiteTree !== identity.suiteTree) return { hit: false, key, dir, reason: 'cache entry suite tree mismatch' };
+  if (!legacy && entry.suiteTree !== identity.suiteTree) return { hit: false, key, dir, reason: 'cache entry suite tree mismatch' };
   const run = readSuiteRun(dir, identity, manifest, root, requiredSteps, readOptions);
   if (run.errors.length) return { hit: false, key, dir, reason: `cached run does not validate: ${run.errors.slice(0, 3).join('; ')}` };
-  return { hit: true, key, dir, run, entry };
+  return { hit: true, key, dir, run, entry, ...(legacy && { legacyKey: true }) };
 }
 
 const BUNDLE_BASELINE = 'bundle-budget/baseline.json';
@@ -533,7 +557,8 @@ export async function prepareBundleBaselineCarry(dir, { sourceSha, harnessRef, n
   dir = resolve(dir);
   const manifestPath = join(dir, 'CACHE.json'), manifestBytes = readFileSync(manifestPath), entry = JSON.parse(manifestBytes);
   carryRequire(entry.sourceSha === sourceSha && entry.node === node, 'cached source/Node major differs from the named baseline');
-  const cached = lookupCache(dirname(dir), { sourceSha, suiteTree: entry.suiteTree, node }, manifest, REQUIRED_STEPS, {}, root);
+  // the suite tree recomputed from the entry's own harness commit, so an entry stored before #1461 is still found
+  const cached = lookupCache(dirname(dir), { sourceSha, suiteTree: suiteTree(root, entry.harnessRef), node }, manifest, REQUIRED_STEPS, {}, root);
   carryRequire(cached.hit && resolve(cached.dir) === dir, `original cache invalid: ${cached.reason || 'directory/key mismatch'}`);
   const original = cached.run, m = original.metadata;
   for (const field of ['sourceSha', 'harnessRef', 'harnessTree', 'harnessArchiveSha256', 'sourceArchiveSha256', 'node', 'nodeVersion', 'pnpmVersion'])
@@ -554,7 +579,7 @@ export async function prepareBundleBaselineCarry(dir, { sourceSha, harnessRef, n
 
   const oldEntries = harnessEntries(root, m.harnessRef), newEntries = harnessEntries(root, harnessRef);
   const changed = [...new Set([...oldEntries.keys(), ...newEntries.keys()])].filter(path => oldEntries.get(path) !== newEntries.get(path)).sort();
-  const suiteChanges = changed.filter(path => !DRIVER_ONLY.includes(path));
+  const suiteChanges = changed.filter(path => !outsideSuite(path));
   carryRequire(equalJson(suiteChanges, [BUNDLE_BASELINE]), 'only bundle-budget/baseline.json may change in the executed suite');
   const gitBytes = (ref, path) => execFileSync('git', ['-C', root, 'show', `${ref}:tools/test-harness/${path}`], { maxBuffer: MAX_BUFFER });
   const beforeBytes = gitBytes(m.harnessRef, BUNDLE_BASELINE), afterBytes = gitBytes(harnessRef, BUNDLE_BASELINE);
@@ -816,11 +841,11 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       base = { source: 'cached', dir: bundleCarry.provenance.originalCacheDir, cacheKey: bundleCarry.provenance.originalCacheKey,
         bundleExpectationCarry: bundleCarry.provenance };
     } else if (options['--baseline-results']) base = { source: 'imported', dir: resolve(options['--baseline-results']), exact: pairImport };
-    else if (useCache && (cached = lookupCache(cacheDir, { sourceSha: baselineSha, suiteTree: suite, node }, manifest, REQUIRED_STEPS, {}, root)).hit) base = { source: 'cached', dir: cached.dir, cacheKey: cached.key };
+    else if (useCache && (cached = lookupCache(cacheDir, { sourceSha: baselineSha, suiteTree: suite, node }, manifest, REQUIRED_STEPS, {}, root)).hit) base = { source: 'cached', dir: cached.dir, cacheKey: cached.key, ...(cached.legacyKey && { legacyKey: true }) };
     else base = { source: 'run', dir: join(out, 'baseline'), exact: true, cacheKey: cacheKey({ sourceSha: baselineSha, suiteTree: suite, node }), cacheMiss: useCache ? cached.reason : 'cache disabled (--no-cache)' };
     const candidateDir = pairImport ? resolve(options['--candidate-results']) : join(out, 'candidate');
     const plan = { refs: receipt.refs, harness: { ...receipt.harness, clean: harnessClean }, node, scope: receipt.scope, cache: useCache ? cacheDir : null,
-      baseline: { source: base.source, dir: base.dir, cacheKey: base.cacheKey, cacheMiss: base.cacheMiss,
+      baseline: { source: base.source, dir: base.dir, cacheKey: base.cacheKey, cacheMiss: base.cacheMiss, ...(base.legacyKey && { legacyKey: true }),
         ...(bundleCarry && { bundleExpectationCarry: bundleCarry.provenance }) },
       candidate: { source: pairImport ? 'imported' : 'run', dir: candidateDir },
       modalRuns: [...(pairImport ? [] : ['candidate']), ...(base.source === 'run' ? ['baseline'] : [])] };
@@ -830,7 +855,7 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       return 0;
     }
     receipt.importedResults = pairImport;
-    receipt.baseline = { source: base.source, dir: base.dir, ...(base.cacheKey && { cacheKey: base.cacheKey }), ...(base.cacheMiss && { cacheMiss: base.cacheMiss }),
+    receipt.baseline = { source: base.source, dir: base.dir, ...(base.cacheKey && { cacheKey: base.cacheKey }), ...(base.legacyKey && { legacyKey: true }), ...(base.cacheMiss && { cacheMiss: base.cacheMiss }),
       ...(bundleCarry && { bundleExpectationCarry: bundleCarry.provenance }) };
     const drivers = {};
     const runs = [];

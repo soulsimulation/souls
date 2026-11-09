@@ -6,7 +6,7 @@ import { tmpdir, homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cacheAdd, cacheKey, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
+import { cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
 import { combineReceipts } from './ship-receipt.mjs';
 
 // Preserve fixture artifacts under the same no-delete rule as release work.
@@ -116,10 +116,10 @@ test('renames: the list is strict about its fields, steps, PR and duplicates', (
   assert.throws(() => renamesOf(rename('a', 'b'), rename('a', 'c')), /duplicate rename/);
   assert.deepEqual(renamesOf(rename('a', 'b')).get(`V4-web\u0000a`).to, ['b']);
 });
-test('renames: the committed list validates, and stays in the suite cache key like quarantine.json', () => {
+test('renames: the committed list validates, and is left out of the suite cache key, unlike quarantine.json (#1461)', () => {
   const list = JSON.parse(readFileSync(new URL('./renames.json', import.meta.url), 'utf8'));
   assert.ok(validateRenames(list).size >= 1);
-  assert.ok(!DRIVER_ONLY.includes('renames.json'));
+  assert.ok(COMPARISON_ONLY.includes('renames.json') && !COMPARISON_ONLY.includes('quarantine.json') && !DRIVER_ONLY.includes('quarantine.json'));
 });
 test('skip and TODO changes cannot turn failures into success', () => {
   for (const status of ['skip', 'todo']) {
@@ -758,6 +758,46 @@ test('suite tree: a driver-only edit keeps the cache key and reuses the baseline
   const out3 = join(repo.dir, '.lane/g3');
   await gate(repo, [c3, '--baseline', c2, '--out', out3, '--cache', cache], fakeModal(calls));
   assert.equal(receiptOf(out3).baseline.source, 'run'); assert.deepEqual(calls.sort(), [c2, c3].sort());
+});
+test('suite tree: a renames-only change keeps the cached baseline; a quarantine change still re-runs it (#1461)', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const list = entries => JSON.stringify({ schemaVersion: 1, entries }) + '\n';
+  repo.commit('tools/test-harness/renames.json', list([]));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), before = suiteTree(repo.dir, 'HEAD');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
+  repo.commit('tools/test-harness/renames.json', list([{ step: 'V4-web', from: 'old', to: 'works', reason: 'fixture rename', pr: '#3' }]));
+  assert.equal(suiteTree(repo.dir, 'HEAD'), before);
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'), calls = [], out = join(repo.dir, '.lane/g2');
+  const { rc } = await gate(repo, [c2, '--baseline', c1, '--out', out, '--cache', cache], fakeModal(calls));
+  const r = receiptOf(out);
+  assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(calls, [c2]); assert.equal(r.baseline.source, 'cached');
+  assert.equal(r.renamesSha256, shaOf(Buffer.from(list([{ step: 'V4-web', from: 'old', to: 'works', reason: 'fixture rename', pr: '#3' }]))));
+  // a file the containers read (quarantine.json, read by the harness self-tests) changes the key: the baseline runs again
+  repo.commit('tools/test-harness/quarantine.json', JSON.stringify({ ...manifest(), note: 'edited' }));
+  assert.notEqual(suiteTree(repo.dir, 'HEAD'), before);
+  const c3 = repo.commit('apps/web/src/c.ts', 'three\n'); calls.length = 0;
+  const out3 = join(repo.dir, '.lane/g3');
+  await gate(repo, [c3, '--baseline', c2, '--out', out3, '--cache', cache], fakeModal(calls));
+  assert.equal(receiptOf(out3).baseline.source, 'run'); assert.deepEqual(calls.sort(), [c2, c3].sort());
+});
+test('cache: an entry stored under the old suite-tree definition is found when its harness recomputes to the current tree (#1461)', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), tree = suiteTree(repo.dir, 'HEAD');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
+  // what an entry keyed before #1461 looks like: the same run under another suite-tree hash in its name and CACHE.json
+  const now = cacheKey({ sourceSha: c1, suiteTree: tree, node: '22' }), oldKey = cacheKey({ sourceSha: c1, suiteTree: 'e'.repeat(64), node: '22' });
+  renameSync(join(cache, now), join(cache, oldKey));
+  const entryPath = join(cache, oldKey, 'CACHE.json'), entry = JSON.parse(readFileSync(entryPath, 'utf8'));
+  writeFileSync(entryPath, JSON.stringify({ ...entry, key: oldKey, suiteTree: 'e'.repeat(64) }));
+  const hit = lookupCache(cache, { sourceSha: c1, suiteTree: tree, node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir);
+  assert.equal(hit.hit, true, hit.reason); assert.equal(hit.legacyKey, true); assert.equal(hit.key, oldKey);
+  assert.match(lookupCache(cache, { sourceSha: c1, suiteTree: 'f'.repeat(64), node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir).reason, /no cached run/);
+  assert.match(lookupCache(cache, { sourceSha: c1, suiteTree: tree, node: '26' }, manifest(), REQUIRED_STEPS, {}, repo.dir).reason, /no cached run/);
+  // through the gate: the old-key entry is the baseline, no baseline run
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'), calls = [], out = join(repo.dir, '.lane/g2');
+  const { rc } = await gate(repo, [c2, '--baseline', c1, '--out', out, '--cache', cache], fakeModal(calls));
+  const r = receiptOf(out);
+  assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(calls, [c2]); assert.equal(r.baseline.source, 'cached'); assert.equal(r.baseline.legacyKey, true);
 });
 test('against a cached baseline with other driver files, only their own removed self-tests are not lost coverage', () => {
   const harness = (names, source) => { const p = parseTap(tap(names.map(name => ({ name, source }))), 'V3-harness');

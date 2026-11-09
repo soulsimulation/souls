@@ -93,6 +93,7 @@ const NAV_WARM_WAIT_TICKS = 20 * 120;
 const NAV_ACT_WARM_MS = 150, NAV_TICK_WARM_MS = 10;
 const NAV_WARM_REASON = 'Navigation is still getting ready after the world started: this walk is planned again and starts once it is ready.';
 const WALK_VERBS = new Set(['walk_to', 'mars:walk_to']);
+const MOTION_M = 0.05;   // #790: a root displacement (m, ground plane) larger than this is first motion
 /** #1327: how long an act waits for the world to record what it handed over before it answers `pending` (HTTP 202). A
  *  slowed clock still drains every tick; only a clock that stopped after the hand-off reaches this. */
 const actCommitWaitMs = () => Number(process.env.SIM_ACT_COMMIT_WAIT_MS) > 0 ? Number(process.env.SIM_ACT_COMMIT_WAIT_MS) : 10_000;
@@ -640,6 +641,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if(patch.phase==='completed'&&next.capability==='stand:here')this.ownerControlGrace(next.soul_id);
     if (patch.phase && !OPEN.includes(patch.phase)) next.detail = this.setDetail(id, {endedAt: bodyEnd(this, cur.soul_id)});   // strict/1: where the body ended up
     if(patch.phase&&!OPEN.includes(patch.phase))this.finishOutcome(next);});
+    if (patch.phase && !OPEN.includes(patch.phase)) this.motionWatch.delete(id);
+    else if (next.phase === 'started' && patch.program_id && next.program_id && !cur.program_id) this.watchMotion(id, next.soul_id);
     if (patch.phase && patch.phase !== cur.phase) this.emit(this.view(next));
   }
   /** Called only inside the original terminal phase transaction. Replay only reads the immutable result. */
@@ -827,6 +830,24 @@ export class EdgeLedger implements EdgeLedgerHooks {
     else this.update(r.receipt_id, {phase: 'failed', code: ev.code ?? 'action.failed', reason: ev.message ?? humanBlockedExplanationV1(ev.code, 'That action')});
   }
   private contactPending=new Set<string>();
+  /** #790 (D021): receipts whose body program started but whose body has not visibly begun yet. `started` stays the
+   *  engine's program start; the first tick after it at which the body's activity changes or its root moves more than
+   *  MOTION_M is kept as the receipt's `firstMotionTick` (detail). A body with no human state is judged by displacement
+   *  only. In memory only: a receipt restored as still running after a restart is not watched again (its pre-restart
+   *  state is unknown, so a later change would be a false first motion) and keeps no `firstMotionTick` unless set before. */
+  private motionWatch=new Map<string,{entityId:string;activity:string;p:[number,number]}>();
+  private watchMotion(id:string,soulId:string){
+    const m=this.host.minds.get(soulId),e=m?(this.mw.world as NativeWorld).entities[m.entityId]:undefined;if(!m||!e)return;
+    this.motionWatch.set(id,{entityId:m.entityId,activity:String(e.human?.activity??''),p:[e.pose.p[0],e.pose.p[2]]});
+  }
+  private motionTicks(tick:number){
+    const world=this.mw.world as NativeWorld;
+    for(const [id,w] of this.motionWatch){
+      const e=world.entities[w.entityId];if(!e){this.motionWatch.delete(id);continue;}
+      if(String(e.human?.activity??'')===w.activity&&Math.hypot(e.pose.p[0]-w.p[0],e.pose.p[2]-w.p[1])<=MOTION_M)continue;
+      this.motionWatch.delete(id);this.setDetail(id,{firstMotionTick:tick});
+    }
+  }
   /** entry 31: passage contacts already applied (receipt|hand action), before their commit's detail write lands. */
   private passageApplied=new Set<string>();
   private contactTicks(tick:number){
@@ -857,6 +878,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   private afterTick(tick: number) {
     if(this.contactPending.size)this.contactTicks(tick);
+    if(this.motionWatch.size)this.motionTicks(tick);
     for (const [soulId, p] of this.pending) {
       if (this.host.quietBarrier) {p.deadline = Math.max(p.deadline, tick + WAIT_LIMIT_TICKS); continue;}   // the wait clock pauses during renewal
       if (tick > p.deadline) {this.pending.delete(soulId); this.update(p.receipt, p.navWarm ? {phase: 'failed', code: 'nav.warm-timeout', reason: 'Navigation was still not ready two minutes after this walk was asked; ask again.'} : {phase: 'failed', code: 'state.safe-stop-timeout', reason: 'The body could not reach a safe stop within a minute.'}); continue;}
@@ -3439,9 +3461,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
 }
 
 /** Receipt detail (Core-A): channel (body | attention | none), chosen (what an intent picked), endedAt (terminal). */
-function detailOf(r: Row): {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string} {
+function detailOf(r: Row): {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string; firstMotionTick?: number} {
   if (!r.detail) return {};
-  try {const d = JSON.parse(r.detail) as {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string}; return {...(typeof d.stopped === 'string' ? {stopped: d.stopped} : {}), ...(d.channel ? {channel: d.channel} : {}), ...(d.chosen ? {chosen: d.chosen} : {}), ...(d.endedAt ? {endedAt: d.endedAt} : {}), ...(d.alternatives ? {alternatives: d.alternatives} : {}), ...(d.meal ? {meal: d.meal} : {}), ...(d.approach ? {approach: d.approach} : {})};}
+  try {const d = JSON.parse(r.detail) as {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string; firstMotionTick?: unknown}; return {...(Number.isSafeInteger(d.firstMotionTick) ? {firstMotionTick: d.firstMotionTick as number} : {}), ...(typeof d.stopped === 'string' ? {stopped: d.stopped} : {}), ...(d.channel ? {channel: d.channel} : {}), ...(d.chosen ? {chosen: d.chosen} : {}), ...(d.endedAt ? {endedAt: d.endedAt} : {}), ...(d.alternatives ? {alternatives: d.alternatives} : {}), ...(d.meal ? {meal: d.meal} : {}), ...(d.approach ? {approach: d.approach} : {})};}
   catch {return {};}
 }
 
