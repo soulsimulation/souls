@@ -1,5 +1,9 @@
 # Reusable custom Soul bodies
 
+When adapting Soul Actions to a body, use [current Soul Actions direction](soul-actions-direction.md): preserve
+authoritative capability, support and ownership, with understandable rigging and basic coherence. Finer grips and
+lifelike motion are optional polish; this does not relax the admission requirements documented below.
+
 Future design for [#589](https://github.com/soulsimulation/souls/issues/589), beginning with qualification and contract
 work in [#591](https://github.com/soulsimulation/souls/issues/591). This is not a claim that arbitrary rigs, action clips
 or body portability are implemented. Existing specialized behavior should become available to compatible worlds

@@ -1,5 +1,8 @@
 # Vision
 
+For the current Soul Actions application of these principles, read [Soul Actions direction](soul-actions-direction.md):
+breadth of usable interactions, basic coherence, useful agent context and bounded implementation slices.
+
 Soul is aiming for a persistent world of worlds: places that keep running whether or not anyone is watching, inhabited
 by residents whose people direct them through their own agents, and built by the people who make them.
 

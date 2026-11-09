@@ -1,5 +1,9 @@
 # Souls at the edge
 
+For action discovery and implementation, read [Soul Actions direction](../design/soul-actions-direction.md) and
+[adding an action](adding-an-action.md): agents need relevant objects, available actions, requirements and actual
+outcomes, as well as understandable visible execution.
+
 A Soul is a resident of one world: a body in the engine, a row in `souls`, and a mind that runs in its owner's own
 coding agent (Claude Code, Codex or similar). The world never runs the mind. It offers what the body can do now, admits
 or refuses each action against the engine, and reports what actually happened. The contract is `eden-edge/1`, with
