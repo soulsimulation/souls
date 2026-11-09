@@ -65,6 +65,26 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
   The launcher restarts a halted world once per breaker window (30 min), since a restart boots from the log; a second halt
   in the same window stays halted for an operator ([#1326](https://github.com/soulsimulation/souls/issues/1326)).
+- **What each halt becomes** ([#1511](https://github.com/soulsimulation/souls/issues/1511); each path is tested in
+  `apps/server/src/halt-paths.test.ts`). Every one stops the clock (or, for step-failing, refuses acts) and sets
+  `live.json` `halted`, which the launcher's guard acts on. None is silent.
+
+  | Halt (glitch rule) | Where | In the process | Then |
+  |---|---|---|---|
+  | `durability.clock-frontier`, `engine.unhashable` | `persistClockFrontier` on the tick | the tick throws: the process exits | the launcher restarts it from the log (backoff; 5 failures in 30 min: `held`) |
+  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s), once per 30 min |
+  | `durability.repair`, `durability.checkpoint` | `failCheckpoint` | clock stopped, process up, `halted` | as above |
+  | `engine.halted` | `haltOnFault` (edge worlds) | clock stopped, process up, `halted` | as above |
+  | `engine.step-failing` | steps faulting | clock runs, acts refused, `halted` | as above |
+
+  **Still a frozen world:** a second halt inside the same 30-minute window is not restarted. The world stays halted
+  (visitors get 503) until an operator acts or a fix ships. The alert is the only exit, so it has to be loud:
+  - the world's `halted` problem code makes `hostOk` false;
+  - `host-health.log` gets an ALERT line, and the health page shows the world as `halted`;
+  - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).
+
+  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until it is resumed. Outside the launcher
+  (local dev, tests), a halted process stays up with its clock stopped.
 - `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
   `stalled` and, while the clock is dilated, `slowed`. A world is `stalled` when its clock owes ticks and the last one is
   older than 2 s, or 10 of its expected tick intervals when it runs at a reduced pace; paused, halted and rate-0 worlds
