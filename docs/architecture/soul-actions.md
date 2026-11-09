@@ -489,6 +489,9 @@ This is separate from the existing harvested preset bunch and adds no growth or 
 `core/candle-stand@2` adds existing two-hand upright carrying to the hand-lit floor candle. Carry real stands to
 chosen clear places, arrange them, then light or put out each at its relocated wick. Their identities, positions
 and independent on/off states persist. The authored candle/flame/light and old fixed revision remain unchanged.
+### Hand-rung chime
+
+`core-wind-chime@2` reuses the finite bell pull: a Soul pulls its wooden pendant once, rings a short two-tone chime and returns to rest. Each completed pull increments the persistent `rings` count; cancellation before the peal leaves it unchanged. It is silent at rest. The original `@1` retains its ambient wind sound.
 
 ## Making: paintings and chalk
 
