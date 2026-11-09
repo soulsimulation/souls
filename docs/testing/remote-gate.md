@@ -84,6 +84,15 @@ TODO, or already ran in the baseline, the id stays under `removed` with `rename.
 naming it, and the gate still blocks. Several old ids may name the same new replacement (tests merged into one). Anything unlisted blocks as before. The receipt lists
 `renamed` and records `renamesSha256` beside `quarantineSha256`.
 
+**Declared in the PR (#1462).** CI's `repo` job runs `.github/scripts/gate-renames.mjs` on every pull request and merge
+group. It reads the literal titles of `test()`, `it()`, `describe()`, `suite()` and `t.test()` in each changed test file
+the gate runs (the step follows `one-validation.sh`), at the merge base and at the head. A title that is gone from its
+step fails the check until `renames.json` at the head has an entry for that step whose `from` ends with it (a
+V3-packages `from` starts with its package). A suite title that is gone needs entries for the tests under it. A test
+that newly gets an unconditional `skip` or `todo` fails until `quarantine.json` lists it. Titles built at run time are
+listed as unchecked, and replacement titles that no changed file declares are noted. To check a branch locally:
+`node .github/scripts/gate-renames.mjs --base origin/main`. The gate's own comparison stays the backstop.
+
 Add an entry in the PR that renames or replaces the test, or when a gate reports the removal, citing the PR that made
 it. An entry whose `from` still runs has no effect, and because a replacement must be absent from the baseline, an old
 entry cannot later excuse deleting a test that happens to reuse its `from` name. `renames.json` executes nowhere, but like `quarantine.json` it stays in the suite tree, so changing it re-runs
