@@ -709,3 +709,13 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Chosen wax mixtures (#1661)
+
+`core/wax-bench@1` supplies three red, yellow and blue portions each. Existing ten-second native craft
+completion consumes one chosen portion, updates mixture counts and its displayed color, or molds the mixture
+into a real `core/wax-medallion@1`. Normal God batches keep consumption/output atomic. Read the bench for
+actual proportions, color, stock and maker; the portable artwork's description retains its recipe and maker.
+Stopping early consumes nothing. Clear the output surface before molding; carried-item and existing access
+checks still apply. This is idealized weighted-channel color blending, without heat or pigment chemistry.
+The small mixing spoon is a cosmetic performance prop, not a borrowed physical tool. No new native contract.
