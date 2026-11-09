@@ -14,7 +14,7 @@ import {parentPort, workerData, type MessagePort} from 'node:worker_threads';
 import {createServer, type IncomingMessage, type ServerResponse} from 'node:http';
 import {threadCpuUsage} from 'node:process';
 import {ReadModel, type WorldDelta, type WorldInit} from './read-model.ts';
-import {classify, worldBlock, type PortDone, type Refusal} from '../load/admission.ts';
+import {classify, soulWaitHeader, worldBlock, type PortDone, type Refusal} from '../load/admission.ts';
 import {clockBlockOf, clockOf, LEVELS, S, type Level} from '../load/shared.ts';
 import {stripWorldRequestPath} from '../world-request-path.ts';
 import {readFileSync} from 'node:fs';
@@ -268,7 +268,7 @@ async function forward(req: IncomingMessage, res: ServerResponse, url: string, p
   const d = await done; res.off('close', gone);
   if (res.destroyed) return;
   if (d.dropped) {res.destroy(); return;}
-  if (d.refusal) {const x: Refusal = d.refusal; send(res, x.status, {contract: CONTRACT, error: {code: x.code, message: x.message}, world: worldBlock(level(), x.retryAfterS)}, {'retry-after': String(x.retryAfterS)}); return;}
+  if (d.refusal) {const x: Refusal = d.refusal, wait = soulWaitHeader(x); send(res, x.status, {contract: CONTRACT, error: {code: x.code, message: x.message}, world: worldBlock(level(), x.retryAfterS)}, {'retry-after': String(x.retryAfterS), ...(wait ? {'x-sim-soul-wait': wait} : {})}); return;}
   if (d.error || !d.result) {send(res, 502, {ok: false, code: 'world.unavailable', message: 'the read worker could not reach the world'}); return;}
   const r = d.result as Forwarded, h: Record<string, string> = {};
   for (const [k, v] of r.headers) if (k !== 'content-length' && k !== 'transfer-encoding' && k !== 'connection') h[k] = v;

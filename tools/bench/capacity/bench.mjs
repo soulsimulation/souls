@@ -3,7 +3,7 @@
 // One fresh world per (arm, repeat), fake minds only ($0), scripted Souls running the world's own eden.mjs.
 //
 //   node tools/bench/capacity/bench.mjs --root <sim checkout> --fixture <compact sim.db | genesis:eden-2026> --out <dir>
-//        [--arms n1,n6,n12,n24,incident,hostile] [--repeats 2] [--port 5151] [--heap-mb 768] [--host-label laptop]
+//        [--arms n1,n6,n12,n24,incident,hostile,hammer] [--repeats 2] [--port 5151] [--heap-mb 768] [--host-label laptop]
 //        [--slice "systemd-run --scope -p AllowedCPUs=6-7 -p MemoryMax=4G --uid=simworlds --gid=simworlds"]
 //        [--world-user simworlds] [--world-key eden-2026] [--world-id <id; default: read from the fixture>] [--short]
 //        [--cli <eden.mjs the world serves; default the root's own>]
@@ -351,6 +351,44 @@ function hostile(run, soul) {   // 4 parallel loops that ignore Retry-After and 
   })();
 }
 
+// #459 hammer arm: ONE extra Soul (its own address) with the hostile loops, beside N honest Souls; every answer is kept
+// with who gave it (launcher: its own body; world: the world's eden-edge body, main's admission decided it even when a read
+// worker relayed it) and its wall time, so the hammer's refusal latency and who answered them are measured per window
+function hammer(run, soul) {
+  const H = { authorization: `Bearer ${soul.token}`, 'x-forwarded-for': '10.66.1.1' };
+  const reqs = [
+    ['GET', '/v1/edge/here?include=doHere'], ['GET', '/v1/edge/capabilities'],
+    ['POST', '/v1/edge/act', () => ({ capability: `go to ${pick(TARGETS)}`, params: {} })], ['POST', '/v1/edge/say', () => ({ text: 'hammer bench' })],
+  ];
+  for (let k = 0; k < 4; k++) (async () => {
+    let j = k;
+    while (!run.stopped) {
+      if (run.mode === 'idle') { await sleep(200); continue; }
+      const [method, path, body] = reqs[j++ % 4], t = now(); let x;
+      try {
+        const r = await fetch(`${BASE}${path}`, { method, headers: { ...H, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body()) : undefined, signal: AbortSignal.timeout(30_000) });
+        const d = await r.json().catch(() => ({})), code = d?.error?.code ?? d?.code ?? null, refused = (r.status === 429 || r.status === 503) && BUSY.test(String(code));
+        x = { at: t, ms: now() - t, status: r.status, outcome: r.ok ? 'ok' : refused ? 'refused' : 'other', ...(refused ? { by: d?.contract ? 'world' : 'launcher', code, retry: Number(r.headers.get('retry-after')) || null } : {}) };
+      } catch { x = { at: t, ms: now() - t, status: 0, outcome: 'failed' }; }
+      run.hammer.push(x);
+      await new Promise((r) => setImmediate(r));
+    }
+  })();
+}
+function hammerSummary(run, windows) {
+  const out = {};
+  for (const wd of windows.filter((x) => x.name !== 'warm')) {
+    const v = run.hammer.filter((x) => x.at >= wd.from && x.at <= wd.to), ref = v.filter((x) => x.outcome === 'refused'), by = {};
+    for (const x of ref) { const k = `${x.by}:${x.code}`; by[k] = (by[k] ?? 0) + 1; }
+    const of = (who) => ref.filter((x) => x.by === who).map((x) => x.ms);
+    out[wd.name] = { requests: v.length, ok: v.filter((x) => x.outcome === 'ok').length, refused: ref.length, other: v.filter((x) => x.outcome === 'other').length, failed: v.filter((x) => x.outcome === 'failed').length,
+      refusedBy: by, launcherShare: ref.length ? +(of('launcher').length / ref.length).toFixed(3) : null, worldRefused: of('world').length,
+      refusedP50Ms: pct(ref.map((x) => x.ms), 0.5), refusedP99Ms: pct(ref.map((x) => x.ms), 0.99), launcherRefusedP99Ms: pct(of('launcher'), 0.99), worldRefusedP99Ms: pct(of('world'), 0.99),
+      noRetryAfter: ref.filter((x) => !(x.retry >= 1)).length };
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ Stage B load (METRICS.md v2): raw-HTTP Souls, worker stats, oracle sample
 // A raw Soul sends exactly the CLI's requests (eden.mjs here/observe/caps --search/resolve/around/act/say) with its retry
 // etiquette (6 tries with full jitter on no answer; up to 3 waits of the stated Retry-After on a designed busy answer), one
@@ -465,7 +503,7 @@ const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y)
 async function oneRun(arm, rep, mode = null) {
   const key = mode ? `${arm}@${mode}` : arm, dir = join(OUT, `${arm}${mode ? `-${mode}` : ''}-r${rep}`); mkdirSync(dir, { recursive: true });
   const N = arm.startsWith('n') ? Number(arm.slice(1)) : 6, hello = await helloText(), SB = LOAD === 'stageb', cliN = !SB ? N : arm === 'incident' ? N : Math.min(N, CLI_SOULS);
-  const run = { dir, stopped: false, mode: 'join', procs: new Set(), sockets: [], wsBytes: 0, maxListens: {}, listenExits: [], hostile: { ok: 0, refused: 0, error5xx: 0, other4xx: 0, failed: 0, ms: [] }, rec: null };
+  const run = { dir, stopped: false, mode: 'join', procs: new Set(), sockets: [], wsBytes: 0, maxListens: {}, listenExits: [], hostile: { ok: 0, refused: 0, error5xx: 0, other4xx: 0, failed: 0, ms: [] }, hammer: [], rec: null };
   const cmds = [], health = [], heap = [], proc = [], wstats = [];
   const loadBefore = loadavg();
   log(`${key} r${rep}: boot`);
@@ -483,7 +521,9 @@ async function oneRun(arm, rep, mode = null) {
   const souls = [];
   try {
     const tj = now();
-    for (let i = 0; i < N; i += JOIN_PAR) souls.push(...await Promise.all(Array.from({ length: Math.min(JOIN_PAR, N - i) }, (_, k) => join_(run, i + k))));
+    const NJ = N + (arm === 'hammer' ? 1 : 0);   // #459: the hammer is one more Soul, outside the N honest ones
+    for (let i = 0; i < NJ; i += JOIN_PAR) souls.push(...await Promise.all(Array.from({ length: Math.min(JOIN_PAR, NJ - i) }, (_, k) => join_(run, i + k))));
+    const hammerSoul = arm === 'hammer' ? souls.pop() : null;
     souls.forEach((s) => { s.cli = s.i < cliN; }); run.joinS = (now() - tj) / 1000;
     log(`${key} r${rep}: ${N} Souls joined (${cliN} CLI, ${N - cliN} raw)`);
     if (cliN) await learnWalkIds(souls.find((s) => s.cli));
@@ -495,7 +535,7 @@ async function oneRun(arm, rep, mode = null) {
     const window = async (name, s, m) => { phase = name; run.mode = m; const m0 = mode ? await launcherReadMetrics() : null, t = now(); await sleep(s * 1000); const m1 = mode ? await launcherReadMetrics() : null;
       return { name, from: t, to: now(), ...(m0 && m1 ? { routed: m1.routed - m0.routed, fallback: m1.fallback - m0.fallback } : {}) }; };
     // warm-up (load on), idle (load off), then two active windows
-    run.mode = 'active'; if (arm === 'hostile') for (const s of souls) hostile(run, s);
+    run.mode = 'active'; if (arm === 'hostile') for (const s of souls) hostile(run, s); if (hammerSoul) hammer(run, hammerSoul);
     const windows = [await window('warm', PH.warm, 'active'), await window('idle', PH.idle, 'idle'), await window('activeA', PH.active, 'active'), await window('activeB', PH.active, 'active')];
     if (relauncher) clearInterval(relauncher);
     run.stopped = true; phase = 'drain';
@@ -504,6 +544,7 @@ async function oneRun(arm, rep, mode = null) {
     if (arm === 'n1') calibration = await calibrate(souls[0], w, proc, windows.find((x) => x.name === 'idle'), (p) => { phase = p; });
     const result = summarize({ arm, rep, N, w, windows, cmds, health, proc, run, calibration, loadBefore, loadAfter: loadavg() });
     if (SB) Object.assign(result, stagebSummary({ key, mode, cliN, windows, cmds, proc, wstats, run, w }));
+    if (hammerSoul) result.hammer = hammerSummary(run, windows);
     if (VIA) result.launcher = await launcherView();
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1));
     log(`${key} r${rep}: ${JSON.stringify(result.headline)}${result.stageb ? ` ${JSON.stringify(result.stageb.headline)}` : ''}`);
@@ -653,7 +694,7 @@ for (let rep = 1; rep <= REPEATS; rep++) for (const arm of ARMS) for (const mode
   try { const r = await oneRun(arm, rep, mode); r.key = key; r.mode = mode; results.push(r); } catch (e) { log(`${key} r${rep}: FAILED ${e.message}`); results.push({ arm, key, mode, rep, failed: String(e.message) }); }
 }
 const receipt = { v: LOAD === 'stageb' ? 2 : 1, metrics: `tools/bench/capacity/METRICS.md ${LOAD === 'stageb' ? 'v2 (Stage B)' : 'v1'}`, at: new Date().toISOString(), host, arms: KEYS, repeats: REPEATS,
-  results: results.map((r) => ({ arm: r.key ?? r.arm, rep: r.rep, failed: r.failed, headline: r.headline, ...(r.stageb ? { stageb: r.stageb.headline } : {}) })) };
+  results: results.map((r) => ({ arm: r.key ?? r.arm, rep: r.rep, failed: r.failed, headline: r.headline, ...(r.stageb ? { stageb: r.stageb.headline } : {}), ...(r.hammer ? { hammer: r.hammer } : {}) })) };
 writeFileSync(join(OUT, 'receipt.json'), JSON.stringify(receipt, null, 1));
 writeFileSync(join(OUT, 'REPORT.md'), report(receipt, results));
 log(`done: ${join(OUT, 'REPORT.md')}`);

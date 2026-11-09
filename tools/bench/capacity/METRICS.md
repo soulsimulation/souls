@@ -33,6 +33,7 @@ Soul. Commands are spread over the minute with ±30 % jitter.
 | `n1`, `n6`, `n12`, `n24` | 1, 6, 12, 24 | the load above |
 | `incident` | 6 | tonight's pattern: every command wrapped in the old user script (up to 6 tries, 15 s apart, on any non-zero exit); 3 of the 6 Souls get a **new** `listen` every 20 s without the old one being stopped |
 | `hostile` | 6 | the load above **plus** 4 parallel raw-HTTP loops per Soul (`here`, `capabilities`, `act`, `say` round-robin) that ignore Retry-After and retry instantly on any answer or failure |
+| `hammer` | 6 + 1 | the load above for 6 honest Souls **plus** one more Soul (its own address) running the `hostile` loops; `result.hammer` per window: its requests, refusals by who answered them (`launcher` or `world`, from the body's shape) and code, refusal p50/p99 overall and by who, and refusals without Retry-After (#459) |
 
 Two repeats of every arm; results are reported as the range of the two (min–max), never one picked number.
 

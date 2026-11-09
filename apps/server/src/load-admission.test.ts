@@ -3,7 +3,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
-import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, type RouteClass, type Ticket} from './load/admission.ts';
+import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, soulWaitHeader, type Refusal, type RouteClass, type Ticket} from './load/admission.ts';
 import type {Level} from './load/shared.ts';
 import {testPort} from '../test/test-port.ts';
 const TEST_PORT=await testPort();
@@ -103,8 +103,11 @@ test('budget: under contention a read over its Soul budget gets soul.slow-down +
   // (re-pinned by srv-admission-calib: strikes count only impolite requests)
   for (let i = 0; i < 4; i++) { const x = f.ask('A', route('GET', '/v1/edge/here')); if (typeof x.result === 'object') slow.push(x.result as never); }
   assert.equal(slow.length, 4, JSON.stringify(slow)); assert.equal(slow[0].code, 'soul.slow-down'); assert.ok(slow[0].retryAfterS >= 1);
+  // #459: what each wait covers, for the launcher (x-sim-soul-wait): a read budget covers reads, a cool-down everything
+  assert.equal(soulWaitHeader(slow[0] as Refusal), `${slow[0].retryAfterS} reads`);
   const cooled = f.ask('A', route('POST', '/v1/edge/act'));
   assert.deepEqual([(cooled.result as {code: string}).code, (cooled.result as {retryAfterS: number}).retryAfterS], ['soul.slow-down', 60], 'cooled: even acts wait out the minute');
+  assert.equal(soulWaitHeader(cooled.result as Refusal), '60 all');
   f.advance(5000); const other = f.ask('B', route('GET', '/v1/edge/here')); await tick();
   assert.equal(other.result, 'run', 'another Soul is not affected');
   f.advance(61_000); f.adm.setLoadLevel('green');
@@ -148,6 +151,7 @@ test('busy signal: X-Sim-Load on every edge answer; refusals carry Retry-After a
   const second = await app.request('/v1/edge/here', auth);
   assert.equal(second.status, 429); assert.equal(second.headers.get('retry-after'), '1'); assert.equal(second.headers.get('x-sim-load'), 'green');
   assert.deepEqual(await second.json(), {contract: 'eden-edge/1', error: {code: 'soul.busy', message: 'a previous request from this Soul is still being answered'}, world: {load: 'green', retry_after_s: 1}});
+  assert.equal(second.headers.get('x-sim-soul-wait'), null, '#459: soul.busy (the Soul overlapping itself) asks no wait of the launcher');
   release(); const ok = await first;
   assert.equal(ok.status, 200); assert.equal(ok.headers.get('x-sim-load'), 'green'); assert.deepEqual(await ok.json(), {here: 1});
   level = 'amber';
@@ -159,6 +163,23 @@ test('busy signal: X-Sim-Load on every edge answer; refusals carry Retry-After a
   assert.equal(shed.status, 503); const body = await shed.json() as {error: {code: string}; world: {load: string; note: string}};
   assert.equal(body.error.code, 'world.busy'); assert.equal(body.world.load, 'black');
   assert.ok(!/\b(should|try|please|wait)\b/i.test(body.world.note), 'a world fact, not advice');
+  adm.close();
+});
+
+test('#459: a cooled Soul\'s refusal tells the launcher its wait (x-sim-soul-wait: 60 all), over HTTP; other Souls\' answers carry none', async () => {
+  const adm = new Admission(), app = new Hono();
+  app.use('*', admissionMiddleware(adm, () => 'green', c => c.req.header('authorization')?.replace(/^Bearer\s+/i, '')));
+  let release!: () => void; const gate = new Promise<void>(r => { release = r; });
+  app.get('/v1/edge/here', async c => { if (c.req.header('authorization') === 'Bearer sim_h_1') await gate; return c.json({here: 1}); });
+  const hammer = {headers: {authorization: 'Bearer sim_h_1'}};
+  const held = app.request('/v1/edge/here', hammer); await tick();
+  for (let i = 0; i < 20; i++) assert.equal((await app.request('/v1/edge/here', hammer)).status, 429);   // 20 overlaps in a minute: cooled
+  release(); await held;
+  const cooled = await app.request('/v1/edge/here', hammer);
+  assert.equal(cooled.status, 429); assert.equal(cooled.headers.get('x-sim-soul-wait'), '60 all'); assert.equal(cooled.headers.get('retry-after'), '60');
+  assert.equal(((await cooled.json()) as {error: {code: string}}).error.code, 'soul.slow-down');
+  const honest = await app.request('/v1/edge/here', {headers: {authorization: 'Bearer sim_o_1'}});
+  assert.equal(honest.status, 200); assert.equal(honest.headers.get('x-sim-soul-wait'), null);
   adm.close();
 });
 

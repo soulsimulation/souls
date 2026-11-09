@@ -11,7 +11,13 @@ import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
 export type RouteClass = {cls: Cls; id: string; god: boolean; deadlineMs: number};
-export type Refusal = {status: 429 | 503; code: 'soul.busy' | 'soul.slow-down' | 'world.busy'; retryAfterS: number; message: string};
+/** `wait` (#459): a refusal that asks this one Soul to wait (soul.slow-down) says what the wait covers: every heavy request
+ *  (`all`, a cool-down) or its reads (`reads`, over its read budget). The HTTP answer carries it in `x-sim-soul-wait`, which
+ *  the launcher reads and strips: it answers that Soul itself until the wait elapses, so a client that ignores Retry-After
+ *  costs the world's main thread nothing more (LOAD-CONTRACT §2b). */
+export type Refusal = {status: 429 | 503; code: 'soul.busy' | 'soul.slow-down' | 'world.busy'; retryAfterS: number; message: string; wait?: 'all' | 'reads'};
+/** The `x-sim-soul-wait` header of a refusal, or null: `<seconds> <all|reads>`. */
+export const soulWaitHeader = (x: Refusal): string | null => x.wait && x.code === 'soul.slow-down' ? `${x.retryAfterS} ${x.wait}` : null;
 
 const C1_MS = 20_000, GOD_C1_MS = 30_000, C2_MS = 8_000;
 const EDGE_READ = /^\/v1\/edge\/(here|observe|capabilities|view|objects(?:\/[^/]+)?)$/;
@@ -135,7 +141,7 @@ export class Admission {
   request(r: {key: string; god: boolean; route: RouteClass; hintMs?: number; closed?: () => boolean}): Ticket {
     const now = this.now(), read = r.route.cls === 'C2';
     const cool = this.cooling(r.key, now);
-    if (cool) { this.shed.slow++; if (read) this.shed.reads++; else this.shed.acts++; return {refusal: {status: 429, code: 'soul.slow-down', retryAfterS: cool, message: 'this Soul has asked for too much in a short time; the world answers it again in a minute'}}; }
+    if (cool) { this.shed.slow++; if (read) this.shed.reads++; else this.shed.acts++; return {refusal: {status: 429, code: 'soul.slow-down', retryAfterS: cool, message: 'this Soul has asked for too much in a short time; the world answers it again in a minute', ...(r.god ? {} : {wait: 'all' as const})}}; }
     if (this.outstanding.has(r.key)) { this.shed.busy++; if (read) this.shed.reads++; this.strike(r.key, r.god, 'busy', now); return this.told(r.key, r.god, now, {status: 429, code: 'soul.busy', retryAfterS: 1, message: 'a previous request from this Soul is still being answered'}); }
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
@@ -146,7 +152,7 @@ export class Admission {
       // (eden2, 2026-10-31: honest Souls collected 3 strikes and a 60 s cool-down, 45-59 % of all read wall time)
       this.shed.slow++; this.shed.reads++; if (this.impolite(r.key, now)) this.strike(r.key, r.god, 'slow', now);
       const rate = this.refill(r.god);
-      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((est - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
+      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((est - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly', ...(r.god ? {} : {wait: 'reads' as const})});
     }
     const deadline = now + Math.min(r.route.deadlineMs, r.hintMs && r.hintMs > 0 ? r.hintMs : Infinity);
     // a read that cannot start before its deadline (the time already queued, paid at the frame budget) is answered now,
@@ -310,6 +316,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const env = c.env as {incoming?: {socket?: {destroyed?: boolean}}} | undefined, hint = Number(c.req.header('x-sim-timeout-ms'));
     const t = adm.request({key: r.god ? 'god' : 'soul:' + token, god: r.god, route: r, hintMs: Number.isFinite(hint) ? hint : undefined, closed: () => env?.incoming ? env.incoming.socket?.destroyed === true : c.req.raw.signal?.aborted === true});
     const refuse = (x: Refusal) => { adm.refused(r.god ? 'god' : 'soul:' + token, r.god, x.code, x.retryAfterS); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
+      const wait = soulWaitHeader(x); if (wait) c.header('x-sim-soul-wait', wait);
       return c.json({contract: 'eden-edge/1', error: {code: x.code, message: x.message}, world: worldBlock(lv, x.retryAfterS)}, x.status); };
     if ('refusal' in t) return refuse(t.refusal);
     const v = await t.turn;
