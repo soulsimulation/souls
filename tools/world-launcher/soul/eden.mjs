@@ -3875,7 +3875,8 @@ function serveHolder() {
 // Each writer has its own temporary name: two serves started together never rename each other's bytes into the lock (#1244).
 function writeServeLock(start) { const tmp = `${SERVE_LOCK}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(tmp, SERVE_LOCK); }
 /** The lock file was just created and is not yet written: another serve is a moment into taking it. */
-const serveLockFresh = () => { try { const st = lstatSync(SERVE_LOCK); return st.size === 0 && Date.now() - st.mtimeMs < SERVE_STALE_MS; } catch { return false; } };
+// A writer fills it within moments, so an empty file older than 5 s is a start that died there, and counts for nothing.
+const serveLockFresh = () => { try { const st = lstatSync(SERVE_LOCK); return st.size === 0 && Date.now() - st.mtimeMs < 5_000; } catch { return false; } };
 function takeServeLock(start) {
   try { closeSync(openSync(SERVE_LOCK, "wx", 0o600)); }
   catch (e) {
@@ -4539,13 +4540,15 @@ async function serve(...args) {
   child.once("exit", (code, signal) => { exited = { code, signal }; });
   const up = (a) => ({ ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` });
   const limit = Date.now() + SERVE_START_MS * TIME_SCALE;
-  let other = null;   // a serve this command didn't start, which took the folder's lock first
+  let other = null, heldAt = 0;   // a serve this command didn't start, which took the folder's lock first
   while (Date.now() < limit) {
     await sleep(50);
     const a = await askServe({ op: "status" });
     if (a?.serving) return other || a.pid !== child.pid ? { ...a, alreadyServing: true } : up(a);
-    if (exited) {
+    if (exited && Date.now() - heldAt >= 1_000) {
       // A child that lost the lock to a concurrent serve exits too: that one is followed until it answers, never signalled.
+      // Who holds the lock is asked about once a second (it runs ps and lsof), not at every poll.
+      heldAt = Date.now();
       const h = serveHolder();
       other = h && h.pid !== child.pid ? h : serveLockFresh() ? { pid: "unknown" } : null;
       if (!other) throw new Error(`serve did not start: it exited (${exited.signal ?? `code ${exited.code}`}); see ${SERVE_LOG}`);
