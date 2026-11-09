@@ -458,7 +458,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     souls: () => [...this.host.minds.values()].filter(m => !!m.owner).map(m => ({soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner})),
     probe: id => this.host.engine.stallProbeV1?.(id) ?? null,
     release: (soul, reason) => this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, stallReleaseV1: reason}),
-    record: (soul, reason, detail) => {const r = this.insert(soul, 'stall:released', 'started', undefined, true, detail); this.update(r.id, {phase: 'completed', code: 'stall.released', reason});},
+    record: (soul, reason, detail, held) => {const r = this.insert(soul, 'stall:released', 'started', undefined, true, detail); this.update(r.id, held ? {phase: 'failed', code: 'stall.no-floor-spot', reason} : {phase: 'completed', code: 'stall.released', reason});},
   });
   readonly spotsRefused: string[];
   /** Stage B (split/read-host.ts): a read worker's ledger over a read-only host. The read code runs unchanged; the
@@ -2255,7 +2255,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (plan.stop) {const stepOut = this.stepOutRefusal(soul.entityId); if (stepOut) return {...refuse(stepOut.code, stepOut.reason), ...resolved};}
     if (plan.stop) {const seated = this.rideStandRefusal(soul.entityId, partial && this.aboard(soul.entityId) ? menu().caps : caps); if (seated) return {...refuse(seated.code, seated.reason), ...resolved};}
     if (plan.stop) {
-      await this.stallGuard.ownerStand(soul);   // stall-guard/1 (b): the owner's stand always wins over a stalled holder
+      if (await this.stallGuard.ownerStand(soul) === 'held') return {...refuse('stall.no-floor-spot', 'Nowhere clear on the floor near this body to set it down; it stays where it is.'), ...resolved};   // stall-guard/1 (b): the owner's stand always wins over a stalled holder; #1521: unless the world cannot set it down
       const program = this.host.engine.programOf(soul.entityId), h = this.body(soul.entityId)?.human;
       // A finite sit timer does not own the lasting native seat. Release the real claim,
       // including fixture-param seats, through a strict tracked action rather than edge-stop.

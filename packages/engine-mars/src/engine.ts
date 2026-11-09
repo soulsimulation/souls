@@ -1518,16 +1518,10 @@ export class MarsEngine implements Engine {
     const floorY=upper&&xz&&from.y===undefined&&this.cfg.standHeightV1===true?(()=>{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(level,xz);return g&&clearanceAt(g,xz)>0?g.y:undefined;})():undefined;   // only on a cell of that floor (with the guard off, xz is where the body stood: a flight or the air)
     // #1521 stand-height/2: on level 0 of a world with no ground field, at that level's floor height (a mid-climb height left the
     // body in the air, and the first tick of every walk, dropping it to the floor, was refused motion.teleport); off, as recorded
-    let xz2=xz;
-    if(!xz2&&!upper&&!f&&from.y===undefined&&this.cfg.standHeightV2===true){
-      // nothing clear near: never released in the air. Its own point on the floor if that is clear; else it stays held, named
-      const at:[number,number]=[r3(a.pose.p[0]),r3(a.pose.p[2])],floor=this.floorHeightV2(at);
-      if(a.pose.p[1]-floor>MAX_HUMAN_STEP_PER_TICK){
-        const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(0,at),radius=guard?this.bodyRadiusV1(a):a.body?.radius??HUMAN_RADIUS;
-        if(g&&clearanceAt(g,at)>=radius&&(!guard||this.placeClearV1(a,at[0],at[1],0,this.guardBodiesV1())))xz2=at;
-        else{console.warn(`[engine] stall.no-floor-spot: ${actor} is not released: nowhere clear on its floor near it, and it is above the floor`);return null;}
-      }
-    }
+    const xz2=xz;
+    // #1521 review: nowhere clear near (not even its own point, which `xz` already tries), and above its floor: never released in
+    // the air. It stays held, named; the stall guard tells the owner once (stall.no-floor-spot)
+    if(!xz2&&!upper&&!f&&from.y===undefined&&this.cfg.standHeightV2===true&&a.pose.p[1]-this.floorHeightV2([r3(a.pose.p[0]),r3(a.pose.p[2])])>MAX_HUMAN_STEP_PER_TICK){console.warn(`[engine] stall.no-floor-spot: ${actor} is not released: nowhere clear on its floor near it, and it is above the floor`);return null;}
     const groundY=!upper&&xz2&&!f&&from.y===undefined&&this.cfg.standHeightV2===true?this.floorHeightV2(xz2):undefined;
     const y=xz2&&f?standOn(f,xz2[0],xz2[1]):(from.y??floorY??groundY??a.pose.p[1]);
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);

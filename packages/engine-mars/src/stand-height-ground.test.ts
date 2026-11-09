@@ -90,7 +90,7 @@ test('#1521 review: two bodies moved in one plan never get overlapping spots', (
 });
 
 for (const ownClear of [true, false])
-  test(`#1521 review: a stall release with nowhere clear near ${ownClear ? 'stands the body on the floor at its own point' : 'and its own point not clear leaves it held (stall.no-floor-spot), never released in the air'}`, (t) => {
+  test(`#1521 review: a stall release with no free spot near ${ownClear ? 'stands the body on the floor at its own point (when that is clear)' : 'and its own point not clear leaves it held (stall.no-floor-spot), never released in the air'}`, (t) => {
     t.mock.method(console, 'warn', () => {});
     const e = world(true), b = e.world.entities.body as any;
     const r = e.perform({ actor: 'body', label: 'walk', steps: [{ verb: 'mars:walk_to', params: { x: AT[0] - .5, z: AT[1], level: 0 } }] }); assert.equal(r.ok, true);
