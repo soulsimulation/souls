@@ -497,6 +497,18 @@ to play"). Reading gives the players, whose move it is or who won, the pieces le
 "jump c3 to e5, then e5 to g7" makes the first jump now and says to act again for the rest. "read the checkers board"
 is still a walk to it, as with the other boards; `read:<board>` (or its offered read) reads it.
 
+### Fixed campsite provision rack (#1490)
+
+`core-camp-provision-rack@1` stocks a campsite's small supplies in an open green tray on two timber trestles. Three
+separate shelf places stand at 1.015 m behind a low front rail; each fits a thing up to 0.3 × 0.28 × 0.3 m. It uses the
+pantry's existing container faculty: discover `put-in:<rack>` while holding something, or `pick-up:<item>` to take a
+stored thing, then act with that offered id and no parameters. The recorded hand crosses the rail and releases the
+real item at its shelf place. Nearby `holds` names the contents, which persist with their item ids and slots.
+
+The rack is fixed campsite furniture. It has no carrying, packing, deployment or cooling action. A fourth item,
+an item too large for a place, and a non-owner using a private rack receive the existing storage refusals. It adds no
+idle clock work, new refusal type or custody rule; existing library revisions keep their bytes.
+
 ### Openings: a tent flap and a field gate (#427)
 
 Both are data on contacts that already exist; neither has code of its own.

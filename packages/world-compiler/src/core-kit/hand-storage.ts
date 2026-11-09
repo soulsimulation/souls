@@ -154,4 +154,32 @@ const pantry: DefInput = {
   size: { box: [W, H, D] },
 } as DefInput;
 
-export const HAND_STORAGE: DefInput[] = [drawerChest, lockers, { ...drawerChest3, version: 3 } as DefInput, swapShelf, lostAndFound, hollowStump, wallNiche, pantry];
+// #1490: a fixed camp kitchen rack, not a portable container. An open provision tray sits on two timber trestles;
+// its three places reuse the pantry's hand transfer over a front rail. No lid, stretch, idle work or new custody rule.
+const campProvisionRack: DefInput = {
+  schema: 'def/1', name: 'core-camp-provision-rack', version: 1,
+  description: 'A fixed campsite provision rack: an open green tray on two timber trestles, with three separate places at 1.015 m for small supplies (each up to 0.3 m across and 0.28 m tall). A Soul stocks and retrieves real things by hand over its low front rail; nearby you see what it holds.',
+  tags: ['furniture', 'storage', 'camp', 'kitchen', 'local-fixture', 'hand-operated', 'storage-inside'],
+  synonyms: ['camp provision rack', 'camp rack', 'provision rack', 'camp pantry'], form: 'point',
+  make: { kind: 'gen', gen: 'kit/2', args: { round: 0, shapes: [
+    // Each end trestle has two splayed legs and a crosspiece; the bay above them stays open on top.
+    ...[-0.48, 0.48].flatMap(x => [
+      { ...box([x, 0.49, -0.115], [0.055, 1.01, 0.055], 'timber'), pitch: 0.23 },
+      { ...box([x, 0.49, 0.115], [0.055, 1.01, 0.055], 'timber'), pitch: -0.23 },
+      box([x, 0.42, 0], [0.065, 0.055, 0.4], 'timber'),
+    ]),
+    box([0, 0.45, -0.15], [1.03, 0.055, 0.055], 'timber'),
+    box([0, 1.0, 0], [1.2, 0.03, 0.54], 'tray'),
+    box([-0.585, 1.105, 0], [0.03, 0.18, 0.54], 'tray'),
+    box([0.585, 1.105, 0], [0.03, 0.18, 0.54], 'tray'),
+    box([0, 1.105, -0.255], [1.14, 0.18, 0.03], 'tray'),
+    box([0, 1.055, 0.255], [1.14, 0.08, 0.03], 'rim'),
+  ] } },
+  params: { timber: { type: 'color', default: '#98734c', doc: 'trestle timber colour' }, tray: { type: 'color', default: '#617453', doc: 'provision tray colour' }, rim: { type: 'color', default: '#34442e', doc: 'front rail colour' } },
+  palette: { timber: '#98734c', tray: '#617453', rim: '#34442e' },
+  slots: [shelf('in-1', [-0.36, 1.015, 0], 'rack'), shelf('in-2', [0, 1.015, 0], 'rack'), shelf('in-3', [0.36, 1.015, 0], 'rack')] as DefInput['slots'],
+  components: { container: { capacity: 3, inside: { lip: 1.095, face: 0.27, stand: [0, 0.87], fit: [0.3, 0.28, 0.3], word: 'rack' } } } as DefInput['components'],
+  size: { box: [1.2, 1.195, 0.54] },
+} as DefInput;
+
+export const HAND_STORAGE: DefInput[] = [drawerChest, lockers, { ...drawerChest3, version: 3 } as DefInput, swapShelf, lostAndFound, hollowStump, wallNiche, pantry, campProvisionRack];
