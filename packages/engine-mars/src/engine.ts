@@ -22,6 +22,7 @@ import {angleDelta,type OBB2} from '../../../mars/viewer/engine/core/math.ts';
 import {settleBeside,bodyStandsClear} from '../../../mars/viewer/engine/runtime/static-step.ts';
 import {publishedWaitsFor} from '../../../mars/viewer/engine/runtime/waits.ts';
 import {inShoreDomain} from '../../../mars/viewer/engine/locomotion/connected-shore.ts';
+import {strandedOnFlight} from '../../../mars/viewer/engine/locomotion/walk.ts';
 import {rerouteCarrier,setCarrierRoute,type CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {puntCandidates,previewPunt,PuntSearch} from './punt.ts';
 import {probeBody,releaseBody,setDownFrom} from './stall.ts';
@@ -1477,6 +1478,10 @@ export class MarsEngine implements Engine {
    *  waiting for the body starts on the next tick. Null when bodiless, not held, or exempt (aloft, construction). */
   stallReleaseV1(actor:string,reason:{code:string;message:string}){
     const p=probeBody(this.rt,actor),a:any=this.ents[actor];if(!p||!a||p.exempt||!p.held)return null;
+    // #1367 flight-resume/1: a body on a flight between its landings is stood on a landing's floor at that floor's height (the
+    // nearer landing, else the farther), or left where it stands on the flight; never a floor cell at flight height (in the air)
+    const flight=this.cfg.flightResumeV1===true?strandedOnFlight(this.rt,a):null;
+    if(flight)return this.releaseFromFlightV1(actor,a,p,flight,reason);
     const from=setDownFrom(this.rt,actor),upper=(a.human?.level??0)!==0;
     const guard=this.cfg.bodyStepGuardV1===true,level=a.human?.level??0;
     // #1332 body-step-guard/1: its own radius, and upstairs the nearest spot on its floor the invariant passes (rings of 0.4 m to
@@ -1489,6 +1494,32 @@ export class MarsEngine implements Engine {
     const r=releaseBody(this.rt,actor,xz?[r3(xz[0]),r3(y),r3(xz[1])]:null,reason);
     if(r&&pp&&own)this.end(pp,'failed',reason);
     return r;
+  }
+  /** #1367 flight-resume/1: stallReleaseV1 for a body standing on a flight. Each landing in turn (nearer first): the nearest
+   *  spot to its point on its level, rings of 0.4 m out to 2 m, where the static invariant passes the body standing and no other
+   *  body (whatever its level) overlaps it, stood at that floor's own height and on that level. Neither: released where it
+   *  stands (flight-resume/1 resumes its next walk from there). */
+  private releaseFromFlightV1(actor:string,a:any,p:{holders:{id:string}[]},flight:NonNullable<ReturnType<typeof strandedOnFlight>>,reason:{code:string;message:string}){
+    const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);
+    const f=this.rt.world.groundV1?sp.ground?.field:undefined,me=bodyProfile(a),r=this.bodyRadiusV1(a);
+    const others=listEntities(this.ents).filter((o:any)=>o.kind==='human'&&o.human&&o.id!==actor);
+    const ends=flight.t<=flight.total-flight.t?[flight.link.from,flight.link.to]:[flight.link.to,flight.link.from];
+    let spot:{p:[number,number,number];level:number}|null=null;
+    for(const end of ends){
+      for(let ring=0;ring<=5&&!spot;ring++){const n=Math.max(1,ring*8);for(let k=0;k<n;k++){
+        const ang=(k/n)*Math.PI*2,x=r3(end.p[0]+dcos(ang)*ring*.4),z=r3(end.p[1]+dsin(ang)*ring*.4),g=sp.levelAt(end.level,[x,z]);
+        if(!g||!bodyStandsClear(this.rt,a,[x,z],end.level)||(end.level===0&&f&&f.medium(x,z)>1))continue;
+        const y=r3(g.level===0&&sp.ground?sp.ground.standY(x,z):g.y);if(!Number.isFinite(y))continue;
+        if(others.some((o:any)=>o.pose.p[1]<y+me.height&&y<o.pose.p[1]+bodyProfile(o).height&&hypot(o.pose.p[0]-x,o.pose.p[2]-z)<r+this.bodyRadiusV1(o)))continue;
+        spot={p:[x,y,z],level:end.level};break;
+      }}
+      if(spot)break;
+    }
+    const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
+    const res=releaseBody(this.rt,actor,spot?spot.p:null,reason);
+    if(res&&spot){a.human.level=spot.level;res.at=[a.pose.p[0],a.pose.p[1],a.pose.p[2]];}
+    if(res&&pp&&own)this.end(pp,'failed',reason);
+    return res;
   }
   /** #1332 body-step-guard/1: the nearest point to `at` on upper `level` where the invariant passes body `a` standing (rings of
    *  0.4 m out to 2 m, as a restore keeps a body on its floor), or null. */

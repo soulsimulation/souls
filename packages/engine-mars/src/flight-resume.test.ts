@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {marsFactory,EDEN_SAFE_COMMONS_WORLD,GREEN_FIELD_WORLD,type MarsEngine} from './engine.ts';
 import {loadMars} from './load.ts';
+import {clearanceAt} from '../../../mars/viewer/engine/spatial/grid.ts';
 
 const m=await loadMars();
 const commons=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true});
@@ -98,3 +99,53 @@ for(const [name,dz] of [['on the line just up the flight',-.5]] as const)
       assert.ok(c.pose.p[1]<.01||Math.abs(c.pose.p[1]-.24)<.05,`on a floor: ${c.pose.p[1]}`);
     }
   });
+
+/** A climber walking down from the deck, stopped by a stall release partway down the flight (level 1, at neither landing's
+ *  height). `blockers`: bodies stood idle once it is on the flight (level, x, z, y). */
+function releasedOnFlight(policy:boolean,blockers:[number,number,number,number][]=[]){
+  const w=commons.genesis('flight-release') as any;w.entities.climber=m.human('climber',9,-2.2,{level:1,y:.24,yaw:Math.PI/2});
+  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,...(policy?{flightResumeV1:true}:{})});
+  const r=e.perform({actor:'climber',label:'down to the lawn',steps:[{verb:'mars:walk_to',params:{x:9,z:2,level:0}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  const c=e.world.entities.climber;
+  for(let i=0;i<400&&!(c.human!.activity==='climb-down'&&c.pose.p[1]<.18);i++)e.step();
+  assert.equal(c.human!.activity,'climb-down','the climber is on the flight');
+  // only where that floor is open (none under the deck, where no one stands)
+  const sp=(e as any).rt.services.spatial;sp.sync(e.world);
+  blockers.filter(([level,x,z])=>clearanceAt(sp.levelAt(level,[x,z]),[x,z])>.2).forEach(([level,x,z,y],i)=>{e.world.entities[`b${i}`]=m.human(`b${i}`,x,z,{level,y});});
+  const before=[...c.pose.p],rel=(e as any).stallReleaseV1('climber',{code:'stall.released',message:'test: released mid-flight'});
+  assert.ok(rel,'released');(e.runtime.violations as unknown[]).length=0;
+  return {e,c,before};
+}
+
+test('#1367 without flight-resume/1 a stall release on a flight keeps the flight height on a floor cell (the fault, as recorded)',()=>{
+  const {c}=releasedOnFlight(false);
+  assert.equal(c.human!.level,1);
+  assert.ok(Math.abs(c.pose.p[1]-.24)>.03,`stood on level 1 at a height that is not its floor's: ${c.pose.p[1]}`);
+});
+
+test('#1367 under flight-resume/1 a stall release on a flight stands the body on the nearer landing, at that floor, and it walks on',()=>{
+  const {e,c}=releasedOnFlight(true);
+  assert.equal(c.human!.level,0);assert.ok(Math.abs(c.pose.p[1])<1e-9,`at the foot's floor height: ${c.pose.p[1]}`);
+  assert.ok(Math.hypot(c.pose.p[0]-9,c.pose.p[2]+.4)<=2,'near the foot landing');
+  walk(e,9,2,0);
+  let done=false;
+  for(let i=0;i<600&&!done;i++){const b=[...c.pose.p];e.step();
+    assert.deepEqual(e.runtime.violations.filter((d:any)=>(d.subjects??[]).includes('climber')).map((d:any)=>d.code),[],`tick ${i}`);
+    assert.ok(Math.hypot(c.pose.p[0]-b[0],c.pose.p[1]-b[1],c.pose.p[2]-b[2])<=.15,`no jump at step ${i}`);done=i>0&&!c.human!.task;}
+  assert.ok(done,'the walk ended');assert.ok(Math.hypot(c.pose.p[0]-9,c.pose.p[2]-2)<.3,`arrived: ${JSON.stringify(c.pose.p)}`);
+});
+
+test('#1367 under flight-resume/1 a release whose nearer landing is crowded takes the farther one, at its floor',()=>{
+  // bodies on the lawn round the foot landing, out past 2 m
+  const crowd:[number,number,number,number][]=[];
+  for(let x=6.5;x<=11.5;x+=.5)for(let z=-2.4;z<=2.1;z+=.5)crowd.push([0,x,z,0]);
+  const {c}=releasedOnFlight(true,crowd);
+  assert.equal(c.human!.level,1,JSON.stringify(c.pose.p));assert.ok(Math.abs(c.pose.p[1]-.24)<.03,`on the deck floor: ${c.pose.p[1]}`);
+});
+
+test('#1367 under flight-resume/1 a release with both landings crowded leaves the body where it stands on the flight',()=>{
+  const crowd:[number,number,number,number][]=[];
+  for(let x=6.5;x<=11.5;x+=.5){for(let z=-2.4;z<=2.1;z+=.5)crowd.push([0,x,z,0]);for(let z=-1.4;z>=-3.9;z-=.5)crowd.push([1,x,z,.24]);}
+  const {c,before}=releasedOnFlight(true,crowd);
+  assert.deepEqual(c.pose.p.map(v=>+v.toFixed(3)),before.map(v=>+v.toFixed(3)),'not moved');assert.equal(c.human!.level,1);
+});

@@ -1813,7 +1813,7 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
  *  stall-guard/1 does when both landings stay blocked), and how far along its ascending path. Such a body's level is a landing's,
  *  but it is not on that floor: a walk planned from the floor drops it to the floor in one tick (`motion.teleport`, refused, every
  *  walk). Null without the policy, or for a body at the height of its own level's landing (on that floor). Reads the world only. */
-function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: number; total: number; off: Vec2 } | null {
+export function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: number; total: number; off: Vec2 } | null {
   if (rt.services.flightResumeV1 !== true || !a.human || a.human.riding || a.human.carrier) return null;
   const lv = a.human.level, p = a.pose.p, sp = spatial(rt, a.id);
   sp.sync(rt.world);
