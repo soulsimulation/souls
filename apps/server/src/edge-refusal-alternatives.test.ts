@@ -161,6 +161,7 @@ test('#1468: an available offer the planner refuses route-dead names alternative
   const avail = new Set(caps.filter(c => c.available).map(c => c.id)), sits = caps.filter(c => c.available && c.verb === 'sit' && !c.id.endsWith(':here'));
   assert.ok(sits.length >= 2, `two free seats to choose between: ${sits.map(c => c.id)}`);
   const engine = w.host.engine as any, real = engine.canPerform.bind(engine);
+  assert.ok(engine.navWarmV1(Infinity), 'warm: a cold refused walk waits for navigation instead (#884)');
   for (const [code, named] of [['route.unreachable', true], ['route.goal-blocked', true], ['seat.none-free', false]] as const) {
     // the planner seam, for this act's seat only: every other check is real
     engine.canPerform = (p: {actor: string; steps: {verb: string}[]}) => p.actor === w.soul.entityId && p.steps.some(s => /sit/.test(s.verb)) ? {code, message: `stubbed ${code}`} : real(p);
