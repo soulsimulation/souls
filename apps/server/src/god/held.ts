@@ -56,7 +56,7 @@ export function installHeld(L: EdgeLedger, h: HeldHost) {
     // #1261 review: not while riding, as the edge's own put-down (now that plain words reach this offer too)
     const ride = L.aboard(soul.entityId), aloft = !!ride;
     caps.push({ id: 'put-down:here', verb: 'put-down', label, target: { id: x.id, kind: 'item' }, available: face !== undefined && !aloft,
-      ...(aloft ? { blocked: { code: 'ride.aboard', reason: rideDownReason(ride!.id) } } : face === undefined ? { blocked: { code: 'item.no-room', reason: 'No clear ground around you to put it on; step somewhere more open first.' } } : {}) });
+      ...(aloft ? { blocked: { code: 'ride.aboard', reason: rideDownReason(ride!.phase, []) } } : face === undefined ? { blocked: { code: 'item.no-room', reason: 'No clear ground around you to put it on; step somewhere more open first.' } } : {}) });
     if (face !== undefined && !aloft) plans.set('put-down:here', { label, steps: [...(seated ? [{ verb: 'stand', params: {} }] : []),
       ...(face !== yaw0 ? [{ verb: 'mars:walk_to', params: { x: p[0], z: p[2], level, face: Math.atan2(Math.sin(face), Math.cos(face)) } }] : []),
       { verb: 'mars:put_item', params: { item: x.id, surfaceSlot: 'ground' } }] });

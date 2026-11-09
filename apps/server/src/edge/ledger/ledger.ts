@@ -58,7 +58,7 @@ import type {ContactActuatorIntent,ContactActuatorService} from '../../god/conta
 import type {DoorPassage,DoorPassageRefusal} from '../../god/door-passage.ts';
 import type {PaintingIntent, PaintingService} from '../../art/painting-completion.ts';
 import {humanoidDims} from '../../../../../mars/viewer/engine/bodies/humanoid.ts';
-import {Together, PAIRED, listed, togetherMayOffer, type Prepared, type TogetherPlan} from './together.ts';
+import {Together, PAIRED, listed, togetherMayOffer, rideDownReason, type Prepared, type TogetherPlan} from './together.ts';
 import {semanticDiscovery, PURPOSE} from '../intents/semantic-discovery.ts';
 import {knownPart} from '../intents/resolved-parts.ts';
 import {Intents,walkWithDestinationWords,walkWithFallback, attentionWords, offeredAttention, type IntentInput} from '../intents/intents.ts';
@@ -1336,6 +1336,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     {const open = this.openReceipts(soul.soulId).at(-1); if (open) {
       const no = this.together.sharedRunning(soul.soulId) ? {code: 'act.shared', reason: 'A shared carry is under way; its stop-carry offer stops it safely.'} : ride ? stepping ?? this.rideStandRefusal(soul.entityId, caps) : null;
       caps.unshift({id: STOP_CURRENT, verb: 'stop', label: `Stop what you are doing now (${open.capability}); you stay as you are, nothing else starts`, available: !no, ...(no ? {blocked: {code: no.code, reason: no.reason}} : {}), params: {receipt: {type: 'string', maxLength: 100, optional: true, description: 'stop only this act (its receipt id)'}}});}}
+    // #1261: riding, a put-down names the ride's leave as this menu offers it (the offer was blocked before the menu was whole)
+    if (ride) {const pd = caps.findIndex(c => c.id === 'put-down:here' && c.blocked?.code === 'ride.aboard'); if (pd >= 0) caps[pd] = {...caps[pd]!, blocked: {code: 'ride.aboard', reason: rideDownReason(ride.phase, caps)}};}
     if (ride && !stepping) {const seated = this.rideStandRefusal(soul.entityId, caps), i = seated ? caps.findIndex(c => c.id === 'stand:here') : -1; if (i >= 0) caps[i] = {...caps[i]!, available: false, blocked: seated!};}
     shapeRigidCapabilities(me, caps, plans as never, {seconds: {type: 'integer', min: 1, max: 600, default: 60}});
     if(me?.body?.motion?.dance||hasDeclaredProfile(me?.body))for(const c of caps){if(!['dance:here','rest:here','nap:here','lie:here'].includes(c.id))continue;const p=plans.get(c.id);if(p){const issue=this.mw.feasibility.canPerform({actor:soul.entityId,label:p.label,steps:p.steps});if(issue){c.available=false;c.blocked={code:issue.code,reason:issue.message};}}}

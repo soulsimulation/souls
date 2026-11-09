@@ -127,10 +127,15 @@ const SHARED_RAISE_REFUSED = new Set(['raise.arc-blocked', 'raise.station-blocke
 /** PC14 (#693): what the native beam plan refuses before anyone is asked (not bodies: someone busy waits for the commit). */
 const SHARED_BEAM_REFUSED = new Set(['beam.misaligned', 'beam.seat-taken', 'beam.no-seat', 'beam.not-staged', 'beam.not-beam', 'beam.not-upright', 'beam.upright-not-standing', 'beam.upright-unsupported', 'beam.station-unreachable', 'reach.too-high', 'lift.path-blocked']);
 const SHARED_ROUTE_REFUSED = new Set(['carry.no-route', 'carry.clearance', 'carry.target-blocked', 'carry.pickup-blocked']);
+/** #1261 review: what a put-down while riding says, naming the next step: the ride's own leave as the menu offers it
+ *  (its object id, not the carrier's engine id), as rideStandRefusal names it; aloft, the ride lands by itself first. */
+export const rideDownReason = (phase: string, caps: readonly {id: string; available: boolean}[]): string => {
+  if (phase === 'aloft') return 'Not while riding: it lands by itself and you step out then; put it down after that.';
+  const leave = caps.find(c => /^object:[^:]+:leave$/.test(c.id) && c.available);
+  return `Not while riding: disembark first${leave ? ` (${leave.id} while it is on the ground)` : ''}, then put it down.`;
+};
 /** PC07 (#686): a native hold-up shorter than this is part of ordinary motion; one that lasts this long is reported as
  *  `lasting` (the crew still holds the load: nobody lets go on a timeout, PC02 §3). Ticks at 20 Hz. */
-/** #1261 review: what a put-down while riding says, naming the next step (the ride's own leave). */
-export const rideDownReason = (ride: string) => `Not while riding: disembark first (object:${ride}:leave, once the ride is parked), then put it down.`;
 const SHARED_BLOCK_TICKS = 10, SHARED_LASTING_TICKS = 600;
 /** PC07: the closed hold-up intervals an operation keeps (the most recent; a long carry in a crowd stays bounded). */
 const SHARED_BLOCKS_KEPT = 20;
@@ -503,7 +508,7 @@ export class Together {
     }
     // items: what is in my hand, or what I can pick up
     if (held) {
-      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: rideDownReason(aloft.id)}} : {})},
+      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: rideDownReason(aloft.phase, [])}} : {})},
         {label: `Put down ${held.name}`, steps: [pose('put-down', 1.5, {prop: held.kind, release: true})], together: {kind: 'item', op: 'put-down', item: held.id}});
       if (held.kind === 'food' || held.kind === 'cup') {
         const verb = held.kind === 'food' ? 'eat' : 'drink';
