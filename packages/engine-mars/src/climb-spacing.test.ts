@@ -18,7 +18,7 @@ function house(seed: string, policy: boolean, width = 1.1) {
     links: [{ id: 'h:stairs', kind: 'stairs', from: { level: 0, p: [cx + 1.5, cz + RUN / 2], y: 0 }, to: { level: 1, p: [cx + 1.5, cz - RUN / 2], y: 2.85 }, width, heading: -Math.PI / 2,
       path: Array.from({ length: 17 }, (_, i) => [cx + 1.5, (2.85 * i) / 16, cz + RUN / 2 - (RUN * i) / 16]), usable: true }] } } as unknown as WorldEditV1['set'];
   const g = emptyGround(2000); g.extent = [-200, -1000, 1800, 1000];
-  const e = factory.create(factory.genesis(seed)) as MarsEngine & Record<string, any>;
+  const e = factory.create(factory.genesis(seed)) as any;
   e.installGroundV1(groundFact(g, 1, { paged: true }));
   const ev: WorldEditV1 = { contract: 'world-edit/1', seq: 1, hash: '', levels: [{ id: 1, y: 2.85, label: 'floor' }], set, assets: {} } as never; ev.hash = nextEntityPhysics(undefined, ev).hash; e.applyWorldEditV1(ev);
   e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true, refusalSettleV1: true, ...(policy ? { climbSpacingV1: true } : {}) } as never);
@@ -33,7 +33,7 @@ function queue(seed: string, policy: boolean) {
   walk(e, 'h_lead', cx - 2, cz, 1); for (let k = 0; k < 600 && e.world.entities.h_lead.human.activity !== 'climb-wait'; k++) e.step();
   assert.equal(e.world.entities.h_lead.human.activity, 'climb-wait', 'the leader waits on the flight below it');
   const foll = walk(e, 'h_foll', cx - 2, cz + 1, 1);
-  return { e, foll, F: e.world.entities.h_foll, L: e.world.entities.h_lead };
+  return { e, foll, F: e.world.entities.h_foll as any, L: e.world.entities.h_lead as any };
 }
 const hh = (e: any) => e.runtime.violations.filter((d: any) => d.code === 'collision.human-human');
 
