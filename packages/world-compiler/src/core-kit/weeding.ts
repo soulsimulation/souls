@@ -5,9 +5,9 @@ const bed=structuredClone(WATERING_CAN.find(d=>d.name==='core-garden-planter'&&d
 const shapes=(bed.make as unknown as {args:{shapes:Record<string,unknown>[]}}).args.shapes;
 shapes.push({kind:'box',at:[.57,.36,0],size:[.32,.05,.42],tint:'wood'},
  ...[-.27,0,.27].flatMap((x,i)=>[
-  {kind:'box',at:[x,.54,0],size:[.035,.34,.035],tint:'weed',when:'@weeds>0',collide:false},
-  {kind:'box',at:[x-.06,.56,.04],size:[.18,.035,.1],roll:.6,tint:'weed',when:'@weeds>0',collide:false},
-  {kind:'box',at:[x+.06,.63,-.03],size:[.18,.035,.1],roll:-.6,tint:'weed',when:'@weeds>0',collide:false},
+  {kind:'box',at:[x,.54,0],size:[.035,.34,.035],tint:'weed',round:0,when:'@weeds>0',collide:false},
+  {kind:'box',at:[x-.06,.56,.04],size:[.18,.035,.1],roll:.6,tint:'weed',round:0,when:'@weeds>0',collide:false},
+  {kind:'box',at:[x+.06,.63,-.03],size:[.18,.035,.1],roll:-.6,tint:'weed',round:0,when:'@weeds>0',collide:false},
  ]));
 export const WEEDING_DEFS:DefInput[]=[{...bed,version:4,
  description:'A planted raised garden bed with one authored patch of weeds. With empty hands, weed it using ten seconds of ordinary garden/tool work. Natural completion clears this patch and leaves one real weed bundle on the side ledge to collect. Stopping early preserves the weeds. Existing plants still need ordinary watering; no terrain clearing, regrowth or compost simulation.',
