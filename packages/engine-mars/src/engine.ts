@@ -1098,9 +1098,14 @@ export class MarsEngine implements Engine {
    * (the runtime's deadlock.cycle, published after DEADLOCK_TICKS) would each stay held until the minute-long walk
    * timeout, twice over. As soon as the cycle is published, the larger entity id among its humans (the /2 rule) stops
    * its walk with the named cancel `shore.cycle-yield`, then steps aside by native make-way and retries the same step.
-   * The programme continues; the others go on through the gate. Only /3 shared-water steps; plain walks are untouched. */
+   * The programme continues; the others go on through the gate. Only /3 shared-water steps; plain walks are untouched.
+   * It also keeps the 180 s cap exact for a walk resubmitted just before it (`shore.wait-capped`). */
   private sharedWaterCycleYieldV3(p:Prog,rec:ActionRecord):boolean{
     const step=p.steps[p.index];if(step?.params?.spreadWaitPolicy!==SHARED_WATER_WAIT_POLICY_V3||!this.sharedWaterStep(step)||!this.rt.isActive(rec.id))return false;
+    // The hard cap holds for a walk resubmitted just before it, too: held or blocked past the cap, it stops and the step fails.
+    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&(rec.status==='blocked'||this.ents[p.actor]?.human?.activity==='wait')){
+      const water=this.sharedWaterBlockingAction(p,rec);if(!water)return false;
+      this.rt.cancel(rec.id,{code:'shore.wait-capped',message:'the shore wait reached its 180 s cap'});p.walkStopping=water;p.waterStopRetry=water;return true;}
     let cycle:Diag|undefined=rec.diagnostic?.code==='deadlock.cycle'?rec.diagnostic:undefined;
     const owned=new Set([rec.id]);for(let depth=0;depth<4&&!cycle;depth++){let added=false;for(const child of this.rt.records.values())if(child.parent&&owned.has(child.parent)&&!owned.has(child.id)&&this.rt.isActive(child.id)){owned.add(child.id);added=true;if(child.diagnostic?.code==='deadlock.cycle'){cycle=child.diagnostic;break;}}if(!added)break;}
     if(!cycle)return false;
@@ -1114,7 +1119,7 @@ export class MarsEngine implements Engine {
    * swimmer keeps the plain /3 wait (1 s retries, bounded by the cap) and its wait records `shore.cycle-yield-no-room`. */
   private sharedWaterMakeWayV3(p:Prog,d:Diag):boolean{
     const other=d.subjects?.find(id=>id!==p.actor&&!!this.ents[id]?.human),at=other?this.pos(other):undefined;
-    if(at){this.m.makeWay(this.rt,p.actor,at);if(this.rt.records.has(`${p.actor}:make-way:${this.rt.tick}`))return true;}
+    if(at){this.m.makeWay(this.rt,p.actor,at);if(this.rt.records.has(`${p.actor}:make-way:${this.rt.tick}`)){if(p.waterWait)delete p.waterWait.note;return true;}}
     if(p.waterWait)p.waterWait.note='shore.cycle-yield-no-room';
     return false;
   }

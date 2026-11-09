@@ -59,7 +59,7 @@ async function fourSwims(t:any,birthIds?:string[],refused=false,o:{policy?:strin
 // #1291: pinned, because a random draw can land on a set where one swim is refused (below): that made this test fail by chance
 test('four edge swims at once all complete; peak simultaneous swimmers >= 3',{timeout:300000},async t=>fourSwims(t,['s_a1b2c3d4e5','s_0f1e2d3c4b','s_5a6b7c8d9e','s_e5d4c3b2a1']));
 // #1291: on this set two swimmers lock at the shore gate (deadlock.cycle) and a third waits behind them. Under /2 the
-// lock lasts about 115 s and the third swim fails; /3's gate-cycle yield frees the lock and the parked-only budget keeps the third waiting.
+// lock lasts about 115 s and the third swim fails. /3's gate-cycle yield frees the lock in seconds, so the third's ordinary budget is enough.
 test('#1291 under shared-water-wait/2 this set still refuses one swim shore.occupied-route after a long wait, and that Soul ends free',{timeout:300000},async t=>fourSwims(t,['s_8a2bc731f9','s_e066ece6c6','s_eb878d9395','s_d78ac3585a'],true,{policy:'shared-water-wait/2',cycle:{minTicks:1000,yields:false}}));
 // Bound: no swimmer stays in a mutual wait for more than 15 s (300 ticks): 10 s for the runtime to publish the cycle, then the step aside.
 test('#1291 under shared-water-wait/3 this set completes all four swims and its gate cycle resolves within 15 s',{timeout:300000},async t=>fourSwims(t,['s_8a2bc731f9','s_e066ece6c6','s_eb878d9395','s_d78ac3585a'],false,{cycle:{maxTicks:300,yields:true},replay:[900,1400]}));

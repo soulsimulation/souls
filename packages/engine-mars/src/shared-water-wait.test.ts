@@ -76,11 +76,20 @@ test('/3: behind bodies that stay active movers the wait still ends at the 180 s
  // every blocker counts as an active mover, the budget never runs out, and only the hard cap ends the wait.
  (e as any).sharedWaterQueuedV3=()=>true;
  const begin=e.world.tick,terminal=finish(e,p.id);assert.equal(terminal.kind,'failed');assert.equal(terminal.code,'shore.occupied-route');
- const waited=e.world.tick-begin;assert.ok(waited>1201&&waited<=3600+40,String(waited));
+ const waited=e.world.tick-begin;assert.ok(waited>=3600-20&&waited<=3600+40,String(waited));
  assert.ok(Math.hypot(e.world.entities.h_actor.pose.p[0]-initial[0],e.world.entities.h_actor.pose.p[2]-initial[2])<.25,'never through the crowd');assert.deepEqual(e.runtime.violations,[]);
 });
 test('/3: a snapshot taken mid-wait restores and steps state-hash identical',()=>{
  const e=setup(false),p=e.perform({actor:'h_actor',label:'/3 snapshot',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);lateHuman(e);for(let i=0;i<45;i++)e.step();
  const snap=e.snapshot(),copy=factory.restore(snap);assert.equal(copy.stateHash(),e.stateHash());leave(e);leave(copy);let terminal=false;
  for(let i=0;i<1500&&!terminal;i++){const a=e.step(),b=copy.step();assert.equal(copy.stateHash(),e.stateHash());assert.deepEqual(b.programs,a.programs);terminal=a.programs.some(x=>x.id===p.id&&x.kind==='completed');}assert.ok(terminal);
+});
+test('/3 reads a blocker as queued only while it has an active native movement of its own',()=>{
+ const e=setup(false) as any;e.spawnHuman({id:'h_walker',label:'dry walker',soul:'fixture'});
+ const w=e.world.entities.h_walker,d={code:'shore.occupied-route',message:'h_actor must wait for h_walker',subjects:['h_actor','h_walker']};
+ assert.equal(e.sharedWaterQueuedV3('h_actor',d),false,'a parked body is not a queue');
+ const p=e.perform({actor:'h_walker',label:'a real native walk',steps:[{verb:'walk_to',params:{to:[w.pose.p[0]+6,w.pose.p[2]]}}]});assert.ok(p.ok,JSON.stringify(p));e.step();e.step();
+ assert.equal(e.sharedWaterQueuedV3('h_actor',d),true,'a body on its own native walk is a queue');
+ assert.equal(e.sharedWaterQueuedV3('h_actor',{...d,subjects:['h_actor']}),false,'no other body named, no queue');
+ finish(e,p.id);assert.equal(e.sharedWaterQueuedV3('h_actor',d),false,'parked again once its walk ends');
 });
