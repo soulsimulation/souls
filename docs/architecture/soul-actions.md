@@ -709,3 +709,13 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Intention paper ritual (#1655)
+
+`core-intention-burner@1` combines existing native hand writing and action-specific fire contact on one fixed
+stand. A permitted Soul supplies words, reads them, then lights the paper's lower edge. Contact commits `on`
+and irreversible `spent` state with a released status; conditional kit geometry replaces the supplied paper with
+charred material. Putting out the tray removes the flame and preserves that material/status. Spent paper cannot
+be rewritten or relit. Existing sign read exposes words/status; rendered glyphs, refill, a removable output,
+progressive combustion, fire spread and mental-state effects are not claimed. Earlier words may remain in world history;
+this is not secure erasure. No contact or reader registry changes.
