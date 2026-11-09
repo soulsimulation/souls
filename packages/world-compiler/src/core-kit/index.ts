@@ -1,4 +1,5 @@
 import {FLUTE_STAND} from './flute-stand.ts';
+import {PORTABLE_SPRINKLER} from './portable-irrigation.ts';
 // Core-kit families as data. Owner: L4 (library & creatures) for the JSON files; L5 owns mesh.json
 // (pack imports). Each file is an array of def/1 inputs named `core-<name>` (resolvable as
 // `core/<name>@<version>`). Search them with GET /v1/god/defs?q=…; never author what exists.
@@ -76,7 +77,7 @@ import figures from './figures.json' with { type: 'json' };
 import meshLods from '../core-mesh-lods.json' with { type: 'json' };
 import type { DefInput } from '../schemas.ts';
 
-export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [FLUTE_STAND, PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, MOVABLE_CHALKBOARD, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, MENDABLE_TENT, SEWING_AWL, CAMP_BENCH, ...HAND_MUSIC, ...HAND_FIRE, MOVABLE_CANDLE_STAND, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, CAMP_TABLE, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, HAND_CHIME, ...TEA_DEFS, ...HAND_STORAGE, FRIDGE_STORAGE_DEF, HAND_BOOKCASE_DEF, ...HAND_LITTER, ...HARVEST_DEFS, ...FLOWER_ARRANGING], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
+export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [FLUTE_STAND, PORTABLE_SPRINKLER, PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, MOVABLE_CHALKBOARD, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, MENDABLE_TENT, SEWING_AWL, CAMP_BENCH, ...HAND_MUSIC, ...HAND_FIRE, MOVABLE_CANDLE_STAND, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, CAMP_TABLE, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, HAND_CHIME, ...TEA_DEFS, ...HAND_STORAGE, FRIDGE_STORAGE_DEF, HAND_BOOKCASE_DEF, ...HAND_LITTER, ...HARVEST_DEFS, ...FLOWER_ARRANGING], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
   const lod = def.make.kind === 'mesh' ? (meshLods as Record<string, { lod1: string }>)[def.make.asset] : undefined;
   return lod ? { ...def, make: { ...def.make, ...lod } } as DefInput : def;
 });
