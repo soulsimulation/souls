@@ -102,17 +102,18 @@ const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unp
  *  "wall") are left out: "the shopping list note", "the log cabin", "the book fair" are what a note or poster is about. */
 const KIND_WORDS: Record<string, string> = {notebook: 'notebook', journal: 'notebook', logbook: 'notebook', diary: 'diary', guestbook: 'notebook', guest: 'notebook', visitors: 'notebook', visitor: 'notebook',
   board: 'board', noticeboard: 'board', pinboard: 'board', corkboard: 'board', sheet: 'sheet'};
-const TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'from', 'inside', 'off']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'page']);
+const BOOK_ONLY = new Set(['guest', 'visitors', 'visitor']), TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'from', 'inside', 'off']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'page']);
 // (the def's own noun, "the notebook stand", or where it is, "the board by the door", also ends the phrase that names it)
 const PHRASE_END = new Set(['now', 'please', 'here', 'then', 'and', 'for', 'too', 'again', 'stand', 'by', 'in', 'on', 'at', 'near', 'next', 'beside', 'inside', 'outside', 'over', 'behind']);
 /** Kind words where the words put a target: the last word of a phrase led by in/from/inside/off, at most two words between
  *  ("from the wanted board", "in the guest book", not "from the board games corner"), or right before note/line ("my
  *  journal note"). Each run comes back with the words it is made of ("guest book": guest, book). */
 const targetKindWords = (ws: string[]): string[][] => {
-  const out: string[][] = [], kind = (w?: string) => !!w && Object.hasOwn(KIND_WORDS, w);
+  // ("guest" and "visitor" name the guest book only with "book": "the note from the guest" names a person)
+  const out: string[][] = [], kind = (w?: string, next?: string) => !!w && Object.hasOwn(KIND_WORDS, w) && (!BOOK_ONLY.has(w) || next === 'book');
   for (let i = 0; i < ws.length; i++) {
-    if (!kind(ws[i]) || (i > 0 && kind(ws[i - 1]))) continue;
-    let j = i; while (j + 1 < ws.length && (kind(ws[j + 1]) || (ws[j + 1] === 'book' && ['guest', 'visitors', 'visitor'].includes(ws[j]!)))) j++;
+    if (!kind(ws[i], ws[i + 1]) || (i > 0 && kind(ws[i - 1], ws[i]))) continue;
+    let j = i; while (j + 1 < ws.length && (kind(ws[j + 1], ws[j + 2]) || (ws[j + 1] === 'book' && ['guest', 'visitors', 'visitor'].includes(ws[j]!)))) j++;
     const next = ws[j + 1], led = ws.slice(Math.max(0, i - 3), i).some(w => TARGET_LEAD.has(w)) && (next === undefined || PHRASE_END.has(next)), before = TARGET_NOUN.has(next ?? '');
     if (led || before) out.push(ws.slice(i, j + 1));
     i = j;
@@ -701,8 +702,13 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     if (named.length) {
       const fit = (ws: string[], c: EdgeCapability) => {const own = rawWords([c.label, thing(c)].join(' ')); return ws.some(w => tokenHit(w, own) || tokenHit((Object.hasOwn(KIND_WORDS, w) ? KIND_WORDS[w] : undefined) ?? w, own));};
       const kept = first.filter(c => named.every(ws => fit(ws, c)));
-      if (!kept.length) {const absent = named.find(ws => !first.some(c => fit(ws, c))) ?? named[0]!;
-        return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to take down or remove goes by "${absent.join(' ')}", so nothing was done.`, didYouMean: []};}
+      if (!kept.length) {
+        const offered = first.slice(0, 5).map(c => ({id: c.id, label: c.label})), absent = named.find(ws => !first.some(c => fit(ws, c)));
+        if (absent) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to take down or remove goes by "${absent.join(' ')}", so nothing was done. What can be taken down here is listed.`, didYouMean: offered};
+        // (each word names an offer here, but different ones: "my journal note from the board")
+        const each = first.filter(c => named.some(ws => fit(ws, c))).slice(0, 5);
+        return {kind: 'unknown', code: 'capability.choose', reason: `${named.map(ws => `"${ws.join(' ')}"`).join(' and ')} name different things here, so nothing was done; choose one by its id.`, didYouMean: each.map(c => ({id: c.id, label: c.label}))};
+      }
       // (the words name exactly one take-down, which takes no words of its own: that one, as its id would)
       if (kept.length === 1 && !kept[0]!.params && kept.length < first.length) return {kind: 'alias', cap: kept[0]!, note: `${input} is ${kept[0]!.id} (${kept[0]!.label}).`};
       if (kept.length < first.length) {const drop = new Set(first.filter(c => !kept.includes(c)).map(c => c.id)); ctx = {...ctx, caps: ctx.caps.filter(c => !drop.has(c.id))};}

@@ -135,6 +135,12 @@ test('#1229: take down and remove refuse a thing that is not offered, and keep t
   assert.equal(resolve('take down my line in the notebook', [pin, unpin, nbPin, nbUnpin]), nbUnpin.id);
   assert.notEqual(resolve('remove my journal note', [pin, unpin, nbPin, nbUnpin]), unpin.id, 'the board note stays');
   assert.equal(resolve('take down my note from the notice board', [pin, unpin, nbPin, nbUnpin]), unpin.id);
+  // steward: a guest or visitor is a person unless "book" follows; two words that name two different offers are a choice
+  for (const w of ['remove the note from the guest', 'take down my line from the visitor']) assert.notEqual(resolve(w, [nbPin, nbUnpin]), 'capability.unknown', w);
+  const both2 = (input: string) => resolveCapability(input, { caps: [pin, unpin, nbPin, nbUnpin], target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any;
+  const two = both2('take down my journal note from the board'); assert.equal(two.code, 'capability.choose'); assert.deepEqual(two.didYouMean.map((d: any) => d.id).sort(), [nbUnpin.id, unpin.id].sort()); assert.match(two.reason, /"journal" and "board" name different things here/);
+  const none = resolveCapability('take down my note from the guest book', { caps: [pin, unpin], target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any;
+  assert.deepEqual(none.didYouMean.map((d: any) => d.id), [unpin.id], 'the refusal lists what can be taken down');
   // A2: as on main
   assert.equal(resolve('take down my note', [pin, unpin]), unpin.id);
   assert.equal(resolve('take down my note from the wanted board now', [pin, unpin]), unpin.id);

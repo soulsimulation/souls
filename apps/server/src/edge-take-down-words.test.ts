@@ -36,6 +36,10 @@ test('#1229: take down and remove on real board, notebook and poster wall offers
   // (a stand named with no kind words: the kit's synonyms, not its name, make it the guest book or visitors book)
   takes('take down my note from the guest book', all, notebook); takes('take down my line in the visitors book', nbOnly, notebook); takes('remove my line from the logbook', nbOnly, notebook);
   takes('remove my note from the pinboard', boardOnly, board);
+  // steward: two offers named by two words is a choice listing both; a guest without "book" is a person
+  { const r: any = (w.edge as any).coreA.resolveText(w.soul, 'take down my journal note from the board', all); assert.equal(r.code, 'capability.choose', JSON.stringify(r)); assert.deepEqual(r.didYouMean.map((d: any) => d.id).sort(), [board, notebook].sort()); }
+  { const r: any = (w.edge as any).coreA.resolveText(w.soul, 'take down my note from the guest book', boardOnly); assert.ok(r.didYouMean.some((d: any) => d.id === board), 'the refusal lists the board'); }
+  assert.notDeepEqual(say('remove the note from the guest', nbOnly), { code: 'capability.unknown', reason: 'Nothing here to take down or remove goes by "guest", so nothing was done. What can be taken down here is listed.' });
   // ... and with two of them here, the word names one: "in the notebook" is the notebook's line, never the board's note
   takes('take down my note in the notebook', all, notebook);
   const journal: any = say('remove my journal note', all); assert.notDeepEqual(journal, { id: board }, 'the board note stays');
