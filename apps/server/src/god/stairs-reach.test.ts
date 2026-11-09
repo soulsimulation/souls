@@ -6,8 +6,8 @@
 import test, {type TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {buildingPhysics} from '@sim/generators';
-import {coreRef} from '@sim/world-compiler';
+import {buildingPhysics} from '@souls/generators';
+import {coreRef} from '@souls/world-compiler';
 import {fixture, factory} from '../../test/native-owner-fixture.ts';
 import {EdgeLedger} from '../edge/ledger/ledger.ts';
 import {GodMode} from './god.ts';
@@ -91,7 +91,7 @@ test('taller towers, turned and off the grid: every room of 2 to 6 floors walks 
   }
 });
 
-// Release 1.1 walk (world release-check-1015, launcher "+ New world", template "Empty plain"): every upper floor of a
+// Release 0.1 walk (world release-check-1015, launcher "+ New world", template "Empty plain"): every upper floor of a
 // 4-floor lighthouse and a 2-floor cottage had "no standing room" (walk: NOT WALKABLE, reach.bad-to / bad-from) until the
 // world restarted. An empty world on paged ground has no static entities, so the planner kept its pre-edit windows when a
 // new floor height re-based it (mars/viewer/engine/spatial/service.ts syncPaged). Each building in its own edit, as the god does.
@@ -109,7 +109,7 @@ test('an empty plain on its ground (a new launcher world): a lighthouse and a co
   }
 });
 
-// R2F: when the engine has no floor to stand on in a room (the release 1.1 walk: its paged windows had not taken in the new
+// R2F: when the engine has no floor to stand on in a room (the release 0.1 walk: its paged windows had not taken in the new
 // floors, reach.bad-to in / reach.bad-from out), describe --json carries where it looked and the CLI says so plainly.
 test('describe --json names the end the engine could not stand at; the CLI says "no floor to stand on in room X (floor n)"', {timeout: 60_000}, async t => {
   const w = world(t); await w.settle(2);

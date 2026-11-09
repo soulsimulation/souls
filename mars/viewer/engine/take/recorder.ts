@@ -43,6 +43,7 @@ function takeHands(e: Entity): TakeHands | undefined {
 }
 
 const FIELDS: [string, (e: Entity) => unknown][] = [
+  ['bodyMotionV1', e => e.human?.bodyMotionV1],
   ['body', e => e.body], // BODY-v1: discrete admitted model/family swaps, never interpolated
   ['shore', e => e.human?.shore], // opt-in shore/1: discrete actual support/depth
   ['boat', e => e.boat],
@@ -64,6 +65,7 @@ const FIELDS: [string, (e: Entity) => unknown][] = [
   ['handActuator', e=>e.human?.handActuator], // one finite native contact timeline; never controller context
   ['wateringV1', e=>e.human?.wateringV1],
   ['letGoV1', e=>e.human?.letGoV1], // Soul Actions 43: a let-go before a reach
+  ['juggleV1', e=>e.human?.juggleV1], // #441: a juggling run; balls and hands are pure functions of it and the tick
   ['cupV1', e=>e.human?.cupV1], // Soul Actions 44: a mug drunk from or rinsed
   ['handTransferV1', e=>e.human?.handTransferV1], // Soul Actions 34: a handle-held item's reach / release timeline // Soul Actions 34: one finite watering-can stage; never controller context
   ['hands', takeHands], // human.hands, integer mm (hand-up, items, eating, paint)

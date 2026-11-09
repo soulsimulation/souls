@@ -7,7 +7,8 @@
 //   - pick-up / put-on / put-down receipts: outcome.changed names what is now held or where it was put;
 //   - `put-down:here` (on the ground in front of you) while holding a god thing.
 import type { EdgeLedger } from '../edge/ledger/ledger.ts';
-import type { WorldModel } from '@sim/world-compiler';
+import { rideDownReason } from '../edge/ledger/together.ts';
+import type { WorldModel } from '@souls/world-compiler';
 import { groundPutDistance, groundPutNeed } from '../../../../mars/viewer/engine/items/actions.ts';
 
 type Ents = Record<string, any>;
@@ -26,6 +27,8 @@ export function installHeld(L: EdgeLedger, h: HeldHost) {
   const tog = (L as any).together, observe = tog.observe.bind(tog);
   // entry 41: a hand-over names the thing by its own name ("the lantern"), not its path under the body holding it
   tog.thingName = (id: string) => String(h.model.entities.get(id)?.name ?? ents()[id]?.label ?? id);
+  // PC05 (#684): a shared load's identity is its placed def ref with revision (null once the thing is gone)
+  tog.thingDef = (id: string) => h.model.entities.get(id)?.def ?? null;
   tog.observe = (soul: { entityId: string }) => {
     const o = observe(soul);
     if (!o.holding) { const all=ents(),gripped=all[soul.entityId]?.human?.grip?.entity; const x = heldGodThing(all, soul.entityId) ?? (typeof gripped==='string'&&all[gripped]?.tags?.includes('entity-world')?all[gripped]:null); if (x) o.holding = { id: x.id, kind: 'item', name: name(x.id) }; }
@@ -50,9 +53,11 @@ export function installHeld(L: EdgeLedger, h: HeldHost) {
     const clear = (yaw: number) => !!h.engine.standableNearV1?.([p[0] + Math.cos(yaw) * ahead, p[2] + Math.sin(yaw) * ahead], level, soul.entityId, need, 0);
     const face = [0, 1, -1, 2, -2, 3, -3, 4].map((k) => yaw0 + (k * Math.PI) / 4).find(clear);
     const label = `Put ${name(x.id)} down on the ground here`;
-    caps.push({ id: 'put-down:here', verb: 'put-down', label, target: { id: x.id, kind: 'item' }, available: face !== undefined,
-      ...(face === undefined ? { blocked: { code: 'item.no-room', reason: 'No clear ground around you to put it on; step somewhere more open first.' } } : {}) });
-    if (face !== undefined) plans.set('put-down:here', { label, steps: [...(seated ? [{ verb: 'stand', params: {} }] : []),
+    // #1261 review: not while riding, as the edge's own put-down (now that plain words reach this offer too)
+    const ride = L.aboard(soul.entityId), aloft = !!ride;
+    caps.push({ id: 'put-down:here', verb: 'put-down', label, target: { id: x.id, kind: 'item' }, available: face !== undefined && !aloft,
+      ...(aloft ? { blocked: { code: 'ride.aboard', reason: rideDownReason(ride!.phase, []) } } : face === undefined ? { blocked: { code: 'item.no-room', reason: 'No clear ground around you to put it on; step somewhere more open first.' } } : {}) });
+    if (face !== undefined && !aloft) plans.set('put-down:here', { label, steps: [...(seated ? [{ verb: 'stand', params: {} }] : []),
       ...(face !== yaw0 ? [{ verb: 'mars:walk_to', params: { x: p[0], z: p[2], level, face: Math.atan2(Math.sin(face), Math.cos(face)) } }] : []),
       { verb: 'mars:put_item', params: { item: x.id, surfaceSlot: 'ground' } }] });
   };
@@ -100,7 +105,7 @@ export function installHeld(L: EdgeLedger, h: HeldHost) {
     } else if(kind==='carry') {
       const x=ents()[target];
       const place=x&&L.places.containing(x.pose.p[0],x.pose.p[2],0).find(p=>p.parent!==null),where=place?` in ${place.name}`:'';
-      if(x?.support?.kind==='ground'&&x.phase!=='carried')eff={...effects,summary:`Carried ${name(target)} upright and set it down on the ground${where}; your hands are free.`,changed:[...(effects.changed??[]),{id:target,kind:'item-placed',summary:`${name(target)} is on the ground${where} at (${x.pose.p[0].toFixed(1)}, ${x.pose.p[2].toFixed(1)}).`,source:`item:${target}:placed`}],detail:{...(effects.detail??{}),placed:{id:target,name:name(target),at:[...x.pose.p],...(place?{place:{id:place.id,name:place.name}}:{})}}};
+      if(x?.support?.kind==='ground'&&x.phase!=='carried')eff={...effects,summary:`Carried ${name(target)}${x.kind==='component'?'':' upright'} and ${x.kind==='component'?'laid it':'set it down'} on the ground${where}; your hands are free.`,changed:[...(effects.changed??[]),{id:target,kind:'item-placed',summary:`${name(target)} is on the ground${where} at (${x.pose.p[0].toFixed(1)}, ${x.pose.p[2].toFixed(1)}).`,source:`item:${target}:placed`}],detail:{...(effects.detail??{}),placed:{id:target,name:name(target),at:[...x.pose.p],...(place?{place:{id:place.id,name:place.name}}:{})}}};
     } else {
       const id = putting.get(ctx.soulId), x = id ? ents()[id] : undefined;
       if (x && !(x.support?.kind === 'in-hand' && x.support.by === body)) {

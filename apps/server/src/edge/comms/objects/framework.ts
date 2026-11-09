@@ -103,10 +103,28 @@ export class Objects {
       const prior = this.core.db.prepare('SELECT MAX(version) AS version FROM edge_comms_object_log WHERE world_id=? AND object_id=?').get(this.core.worldId, input.id) as {version: number | null};
       const o: ObjectRecord = {id: input.id, kind: input.kind, name: input.name.slice(0, 100), description: (input.description ?? kind.description).slice(0, 4000), placeId: input.placeId, version: (prior.version ?? 0) + 1, state, createdAt: this.core.now()};
       this.save(o); this.log(o, null, 'create', input.params ?? {});
+      this.core.db.prepare('DELETE FROM edge_comms_object_tombstones_v1 WHERE world_id = ? AND id = ?').run(this.core.worldId, input.id);
       return o;
     });
   }
-  remove(id: string) { this.core.db.prepare('DELETE FROM edge_comms_objects WHERE world_id = ? AND id = ?').run(this.core.worldId, id); this.table.removed(id); }
+  remove(id: string) {
+    const o = this.row(id);
+    tx(this.core.db, () => {
+      // #1139: memory points at objects by id; a removed one leaves its last name, so the pointer degrades instead of breaking
+      if (o) this.core.db.prepare('INSERT OR REPLACE INTO edge_comms_object_tombstones_v1 (world_id, id, kind, name, listed, state, gone_at, gone_tick) VALUES (?,?,?,?,?,?,?,?)').run(this.core.worldId, id, o.kind, o.name, this.kinds.get(o.kind)?.listed ? 1 : 0, JSON.stringify(o.state), this.core.now(), this.core.tick());
+      this.core.db.prepare('DELETE FROM edge_comms_objects WHERE world_id = ? AND id = ?').run(this.core.worldId, id);
+    });
+    this.table.removed(id);
+  }
+  /** The last name of a removed object, for a Soul that could have known it: any listed kind, else one that held a role
+   *  in it or acted on it. */
+  tombstone(id: string, soulId: string) {
+    if (!OBJECT_ID.test(id) || this.row(id)) return null;
+    const t = this.core.db.prepare('SELECT kind, name, listed, state, gone_at, gone_tick FROM edge_comms_object_tombstones_v1 WHERE world_id = ? AND id = ?').get(this.core.worldId, id) as {kind: string; name: string; listed: number; state: string; gone_at: number; gone_tick: number} | undefined;
+    if (!t) return null;
+    if (!t.listed && !this.kinds.get(t.kind)?.rolesOf(JSON.parse(t.state), soulId).length && !this.core.db.prepare('SELECT 1 FROM edge_comms_object_log WHERE world_id = ? AND object_id = ? AND soul_id = ? LIMIT 1').get(this.core.worldId, id, soulId)) return null;
+    return {id, kind: t.kind, lastName: t.name, goneAt: t.gone_at, goneTick: t.gone_tick};
+  }
 
   private inPlace(soulId: string, placeId: string): boolean {
     try { return this.core.deps.ledger.placePathOf(soulId).some(p => p.id === placeId); } catch { return false; }
@@ -123,7 +141,8 @@ export class Objects {
   private ctx(o: ObjectRecord, kind: ObjectKind, soul: EdgeSoul, inPlace: (placeId: string) => boolean = id => this.inPlace(soul.soulId, id)): ActionCtx {
     return {soul, roles: kind.rolesOf(o.state, soul.soulId), tick: this.core.tick(), now: this.core.now(), nameOf: this.core.nameOf, inPlace: inPlace(o.placeId), carrier: this.carrierRead,
       steerTarget: (id, spec) => this.core.deps.ledger.steerTarget?.(soul.soulId, id, spec) ?? {ok: false, code: 'steer.unavailable', reason: 'Steering is not available here.'},
-      steerCheck: (carrier, step) => this.core.deps.ledger.steerCheck?.(soul.entityId, carrier, step) ?? null};
+      steerCheck: (carrier, step) => this.core.deps.ledger.steerCheck?.(soul.entityId, carrier, step) ?? null,
+      steerLanding: (carrier, step) => this.core.deps.ledger.steerLanding?.(soul.entityId, carrier, step) ?? null};
   }
   /** Apply time-driven transitions and persist them (with their events). */
   private advanced(o: ObjectRecord,persist=true,pre?:ReturnType<NonNullable<ObjectKind['advance']>>): ObjectRecord {
@@ -207,9 +226,12 @@ export class Objects {
     return Object.entries(kind.actions).flatMap(([name, a]) => {
       if (a.roles !== 'anyone' && !a.roles.some(r => ctx.roles.includes(r))) return [];
       const blocked: Refusal | null = a.reach === 'place' && !ctx.inPlace ? {code: 'object.out-of-reach', reason: `Go to ${o.placeId} first.`} : a.available?.(o.state, ctx) ?? null;
-      return [{action: name, label: a.labelFor?.(o.state) ?? a.label, params: a.params, available: !blocked, ...(blocked ? {blocked} : {})}];
+      return [{action: name, label: a.labelFor?.(o.state, ctx) ?? a.label, params: a.params, available: !blocked, ...(blocked ? {blocked} : {})}];
     });
   }
+
+  /** Taken down by its maker: what a public record stops showing. */
+  isRemoved(id: string) { return (this.row(id)?.state as {removed?: boolean} | undefined)?.removed === true; }
 
   get(id: string, soul: EdgeSoul) {
     if (!OBJECT_ID.test(id)) throw new EdgeError(404, 'not-found', 'no such object');
@@ -349,7 +371,8 @@ export function checkParams(specs: Record<string, ParamSpec>, params: Record<str
     const v = params[key];
     if (v === undefined) { if (spec.optional) continue; return {code: 'capability.params', reason: `${key} is required.`}; }
     if (spec.type === 'string') {
-      if (typeof v !== 'string' || v.length > (spec.maxLength ?? 500)) return {code: 'capability.params', reason: `${key} must be a string.`};
+      if (typeof v !== 'string') return {code: 'capability.params', reason: `${key} must be a string.`};
+      if (v.length > (spec.maxLength ?? 500)) return {code: 'capability.params', reason: `${key} is too long: at most ${spec.maxLength ?? 500} characters (yours is ${v.length}).`};
       if (spec.enum && !spec.enum.includes(v)) return {code: 'capability.params', reason: `${key} must be one of ${spec.enum.join(', ')}.`};
       if (spec.pattern && !new RegExp(spec.pattern).test(v)) return {code: 'capability.params', reason: `${key} is not in the expected form.`};
     } else if (spec.type === 'integer') {

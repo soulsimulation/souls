@@ -24,9 +24,9 @@ import { stationCueV2Schema,stationAnchorV2Schema,type StationLiveV2 } from './s
 import type { StationLiveContract } from './station-era-v1.ts';
 import type {MeLiveDescriptorV1,MeLiveViewV1} from './me-live.ts';
 import { z } from 'zod';
-import type { ChangeEvent, Entity, Environment, PathCommit, PoseSample, Region } from '@sim/engine-contract';
-import { hashOf, samplePath } from '@sim/engine-contract';
-import type { Change, KState, LinkKind, MintedCard } from '@sim/kernel';
+import type { ChangeEvent, Entity, Environment, PathCommit, PoseSample, Region } from '@souls/engine-contract';
+import { hashOf, samplePath } from '@souls/engine-contract';
+import type { Change, KState, LinkKind, MintedCard } from '@souls/kernel';
 import { intentReceivedPayloadV2Schema, intentHistoryFactV2, intentAdmissionFactV2, intentControllerFactV2, publicIntentHistoryEventV2 } from './intent-v2.ts';
 
 export const PROTO = 1;
@@ -134,6 +134,8 @@ export type PublicSoul = {
    *  idle reflex runs; zombie = disconnected, shuffling; asleep = disconnected, still. `doing` is the posture word (null when
    *  directed); `since` (ms) when the state began. Edge worlds only. */
   body?: {state: 'awake' | 'idle' | 'zombie' | 'asleep'; doing: 'standing' | 'sitting' | 'dozing' | 'drifting' | 'floating' | null; since: number};
+  /** #456: present only while the world slows or refuses this Soul's own requests: the refusal's code and when (ms) it ends. */
+  slowed?: {reason: 'soul.slow-down' | 'world.busy' | 'world.crowded'; until: number};
 };
 export type BrainCall = {
   id: number; tick: number; at: number; tier: 'mid' | 'translate' | 'director' | 'narrator' | 'shot' | 'compile' | 'talk' | 'attune' | 'reflection';

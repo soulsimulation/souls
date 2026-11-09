@@ -5,19 +5,21 @@ import { rewritePhasedHtml } from './src/phased-entry.ts';
 import { anonymousHello } from '../../packages/client/src/hello.ts';
 import { PWA_MANIFEST, pwaHeadTags, pwaManifest, type PwaIcons } from './src/pwa-manifest.ts';
 import { changelogHtml } from './src/changelog-page.ts';
+import { buildDocs } from './src/docs-site.ts';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolve as resolvePath } from 'node:path';
+import { join, relative, resolve as resolvePath } from 'node:path';
 
 // Lane L3h: a new world's /v1/world/snapshot GET leaves from index.html's head, before any chunk downloads
 // (src/snapshot-prefetch.ts); WorldEntityLayer.start takes that response. The workbench page has no world.
-// Lane W1: the same script GETs /v1/config and opens the world's socket with the anonymous hello useSim's Connection sends
+// Lane W1: the same script GETs /v1/config and opens the world's socket with the anonymous hello useSouls's Connection sends
 // (packages/client/src/hello.ts, one definition); the Connection adopts that socket.
 function snapshotPrefetch(): Plugin {
   let base = '';
   return {
-    name: 'sim-snapshot-prefetch',
+    name: 'souls-snapshot-prefetch',
     configResolved(c) { base = c.base.replace(/\/+$/, ''); },
     // after <title>: the charset meta stays first, and the script runs before the stylesheet links (a classic script
     // after one would wait for it) and the module script Vite adds to the head
@@ -34,7 +36,7 @@ function snapshotPrefetch(): Plugin {
 // poster's critical path. Build only; the GLB worker's fetches share the page's connection pool.
 function cdnPreconnect(): Plugin {
   return {
-    name: 'sim-cdn-preconnect',
+    name: 'souls-cdn-preconnect',
     apply: 'build',
     transformIndexHtml(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path) || process.env.SIM_ASSETS_CDN_ENABLED !== '1') return;
@@ -49,7 +51,7 @@ function cdnPreconnect(): Plugin {
 // (rollupOptions.input `early`); this replaces Vite's module script and modulepreload tags with the loader. Build only.
 function phasedEntry(): Plugin {
   return {
-    name: 'sim-phased-entry',
+    name: 'souls-phased-entry',
     apply: 'build',
     transformIndexHtml: { order: 'post', handler(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path)) return;
@@ -60,7 +62,13 @@ function phasedEntry(): Plugin {
       const imports: string[] = [], seen = new Set<string>();
       const walk = (f: string) => { for (const i of byFile.get(f)?.imports ?? []) if (!seen.has(i)) { seen.add(i); walk(i); imports.push(i); } };
       walk(early.fileName);
-      return rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports);
+      // #1266: the bytes of every file the page names (its code and style), for the boot light's first share of the bar
+      const out = rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports), sizes: Record<string, number> = {};
+      for (const [, url, file] of out.matchAll(/["'(]((?:[^"'()]*\/)?(assets\/[\w.-]+\.(?:js|css)))["')]/g)) {
+        const item = ctx.bundle?.[file]; if (!item) continue;
+        sizes[url.startsWith('/') ? url : '/' + url] = Buffer.byteLength(item.type === 'chunk' ? item.code : typeof item.source === 'string' ? item.source : Buffer.from(item.source));
+      }
+      return out.replace('</head>', `    <script>window.__simCodeBytes=${JSON.stringify(sizes)}</script>\n  </head>`);
     } },
   };
 }
@@ -74,7 +82,7 @@ function pwa(): Plugin {
   const hashed = (name: string, data: Buffer) => { const file = `${name}-${createHash('sha256').update(data).digest('hex').slice(0, 10)}.png`; icons.set(file, data); return file; };
   let names: PwaIcons;
   return {
-    name: 'sim-pwa',
+    name: 'souls-pwa',
     apply: 'build',
     configResolved(c) {
       base = c.base;
@@ -103,12 +111,41 @@ function changelogPage(): Plugin {
   const file = process.env.SIM_CHANGELOG_FILE ? resolvePath(process.env.SIM_CHANGELOG_FILE) : fileURLToPath(new URL('../../CHANGELOG.md', import.meta.url));
   const journalFile = fileURLToPath(new URL('../../tools/changelog/public-journal.json', import.meta.url));
   return {
-    name: 'sim-changelog-page',
+    name: 'souls-changelog-page',
     configResolved(c) { base = c.base; },
     configureServer(server) { server.watcher.add([file, journalFile]); },
     transformIndexHtml(html, ctx) {
       if (!/(^|\/)changelog\.html$/.test(ctx.path)) return;
-      return changelogHtml(html, readFileSync(file, 'utf8'), base, JSON.parse(readFileSync(journalFile, 'utf8')));
+      // #896: the page names its Markdown twin (changelog.md, emitted by docsSite) for agents
+      const page = changelogHtml(html, readFileSync(file, 'utf8'), base, JSON.parse(readFileSync(journalFile, 'utf8')));
+      return page.replace('</title>', `</title>\n    <link rel="alternate" type="text/markdown" href="${base}changelog.md" />`);
+    },
+  };
+}
+
+// #896 (#890 M3): the public docs, docs/site/**/*.md, rendered into this build beside the changelog: per page
+// docs/<slug>/index.html and its Markdown twin docs/<slug>.md (/docs: docs/index.html and docs.md), llms.txt, llms-full.txt,
+// docs/pages.json (the launcher's sitemap) and changelog.md (the changelog page's own source). Static files, no script, no
+// chunk: the viewer bundle is untouched. SIM_SITE_ORIGIN (default https://soul.game) is the origin canonical URLs and
+// llms.txt name. docs/site/WRITING.md is the writing guide, not a page. #898: the reference pages' generated part is not
+// in the tree; tools/docs/generate.mjs writes it here from the server's own modules, and a build it can't serve in full fails.
+function docsSite(): Plugin {
+  let base = '/';
+  const dir = fileURLToPath(new URL('../../docs/site', import.meta.url)), template = fileURLToPath(new URL('./docs-template.html', import.meta.url));
+  const changelog = process.env.SIM_CHANGELOG_FILE ? resolvePath(process.env.SIM_CHANGELOG_FILE) : fileURLToPath(new URL('../../CHANGELOG.md', import.meta.url));
+  const origin = (process.env.SIM_SITE_ORIGIN ?? 'https://soul.game').replace(/\/+$/, '');
+  const files = (d: string): string[] => readdirSync(d).sort().flatMap((e) => { const f = join(d, e); return statSync(f).isDirectory() ? files(f) : f.endsWith('.md') ? [f] : []; });
+  return {
+    name: 'souls-docs-site',
+    apply: 'build',
+    configResolved(c) { base = c.base; },
+    generateBundle() {
+      const t0 = performance.now();
+      const generated: Record<string, string> = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../../tools/docs/generate.mjs', import.meta.url)), '--json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+      const { pages, out } = buildDocs({ files: files(dir).map((f) => relative(dir, f)), read: (r) => generated[r] ?? readFileSync(join(dir, r), 'utf8'), template: readFileSync(template, 'utf8'),
+        changelog: readFileSync(changelog, 'utf8'), base, origin });
+      for (const [fileName, source] of out) this.emitFile({ type: 'asset', fileName, source });
+      this.info(`docs: ${pages.length} pages (${pages.filter((p) => !p.stub).length} published) in ${(performance.now() - t0).toFixed(0)} ms`);
     },
   };
 }
@@ -117,7 +154,7 @@ function changelogPage(): Plugin {
 // phase-two chunk, and no stable chunk (vendor*, app-shared) imports main, whose hash changes with every app change.
 function checkChunks(): Plugin {
   return {
-    name: 'sim-check-chunks',
+    name: 'souls-check-chunks',
     apply: 'build',
     generateBundle(_o, bundle) {
       const chunks = Object.values(bundle).flatMap((c) => (c.type === 'chunk' ? [c] : []));
@@ -174,7 +211,7 @@ function vendorGroups() {
     const inVendor = (m: string) => (pkg(m) === 'zod' || (pkg(m) === 'three' && !m.includes('/examples/'))) ? phaseOne.has(m) : pkg(m) === 'three' && surely.has(m);
     const earlyFollow = (id: string, dyn: readonly string[]) => (id === earlyEntry ? dyn.filter(isEarlyRender) : []);
     // The module graph keeps edges the bundle's tree-shaking drops, so it over-states what phase one loads: a barrel's
-    // unused re-exports (phase one imports @sim/world-compiler's index, which re-exports core-kit.ts, which main loads), and
+    // unused re-exports (phase one imports @souls/world-compiler's index, which re-exports core-kit.ts, which main loads), and
     // modules something imports dynamically. `phaseOne` (walk into both) is a superset of the truth: nothing in it leaves
     // for a phase-two chunk. `surely` (walk into neither) is what phase one certainly loads.
     const every = closure([mainEntry, earlyEntry, workbench], (_id, dyn) => dyn);
@@ -219,7 +256,7 @@ function remoteInlineConfig(): Plugin {
     } catch { next(); }
   };
   return {
-    name: 'sim-remote-inline-config',
+    name: 'souls-remote-inline-config',
     configureServer(server) { if (remote) server.middlewares.use(serve(async (url) => server.transformIndexHtml(url, readFileSync(resolvePath(server.config.root, 'index.html'), 'utf8')))); },
     configurePreviewServer(server) { if (remote) server.middlewares.use(serve(async () => { try { return readFileSync(resolvePath(server.config.root, server.config.build.outDir, 'index.html'), 'utf8'); } catch { return null; } })); },
   };
@@ -229,7 +266,7 @@ function remoteInlineConfig(): Plugin {
 // variable, default 4500; WEB_PORT moves Vite off :5173). Under a world's path (/w/toy/) everything but the page itself is
 // the server's: /w/toy/v1/config, the socket. At the root: the API, and the Mars web assets the server serves from
 // mars/viewer/dist/client (src/mars-static.ts), among them the people's character set under /modular.
-// PERF-EDEN: `SIM_DEV_API=https://souls.game pnpm --filter @sim/web dev` points the same proxy at a deployed site, so a local
+// PERF-EDEN: `SIM_DEV_API=https://souls.game pnpm --filter @souls/web dev` points the same proxy at a deployed site, so a local
 // build can be measured against a live world (as an anonymous visitor) without copying its data.
 function devProxy() {
   // One RegExp key (a key starting with ^ is one) matching whole path segments: /history/… goes to the server, a page
@@ -242,7 +279,7 @@ function devProxy() {
 }
 
 export default defineConfig({
-  plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), react(), remoteInlineConfig()],
+  plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig()],
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
     __SIM_ASSETS_CDN_ENABLED__: process.env.SIM_ASSETS_CDN_ENABLED==='1',
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)

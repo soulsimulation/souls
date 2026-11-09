@@ -2,7 +2,7 @@
 // Replica (plus this lane's `menu` section, split/verdict-pump.ts), it holds (a) the replicated plain state, (b) B-spatial's
 // SpatialReplica built from the engine's static scene export and the replicated bodies, (c) the verdict table, and
 // answers the Soul read code as a `ReplicaMenuWorld` (split/menu-world.ts). Never touches an engine.
-import type {ProgramAction, RuntimeView} from '@sim/engine-contract';
+import type {ProgramAction, RuntimeView} from '@souls/engine-contract';
 import type {WorldState as NativeWorld} from '../../../../mars/viewer/engine/world/types.ts';
 import type {StaticExportV1} from '../../../../mars/viewer/engine/spatial/service.ts';
 import type {TileRect} from '../../../../mars/viewer/engine/spatial/tiled.ts';
@@ -38,6 +38,8 @@ export class ReplicaWorld {
   /** a pump's menu section has been seen (main runs a VerdictPump) */
   private pumped = false;
   private sceneKey = '';
+  /** #1515: scenes built or taken in place (the replica's staticEpochV1). */
+  private staticSeq = 0;
   private worldView: NativeWorld;
   private runtimeView: RuntimeView;
   /** One per init/apply: the time and what changed (cost in the worker). */
@@ -55,6 +57,9 @@ export class ReplicaWorld {
       'standableNearV1', 'clearSpotsV1', 'dryGroundAtV1', 'lyingRoomAtV1', 'standYAtV1', 'nativeSeatLevelsV1'] as const;
     const spatial: Record<string, unknown> = {};
     for (const k of spatialNames) spatial[k] = (...a: unknown[]) => {const f = (sp as Record<string, unknown>)[k]; if (typeof f !== 'function') throw new Error(`replica: no spatial service yet (${k})`); return (f as (...x: unknown[]) => unknown)(...a);};
+    // #1515: the replica's static epoch moves with every scene it builds or takes in place (a rebuild can come at the same
+    // exported epoch, on a new physicsHash): read code keys what it keeps from static geometry on it (GodNav.connOk)
+    spatial.staticEpochV1 = () => {if (!this.spatial) throw new Error('replica: no spatial service yet (staticEpochV1)'); return this.staticSeq;};
     this.mw = new ReplicaMenuWorld({
       world: () => this.worldView, runtime: () => this.runtimeView,
       // the pump's action rows are complete every tick (B-delta's ProgramRow is re-read only when a tick names the body)
@@ -133,7 +138,7 @@ export class ReplicaWorld {
   private syncSpatial() {
     const R = this.R;
     if (R.sceneKey !== this.sceneKey && R.scene) {
-      this.sceneKey = R.sceneKey;
+      this.sceneKey = R.sceneKey; this.staticSeq++;
       if (!this.spatial) {this.spatial = SpatialReplica.fromStaticScene(R.scene as StaticExportV1, this.humans(), {fixture: this.fixture}); this.cost.spatialBuilds++;}
       else {this.spatial.rebuild(R.scene as StaticExportV1); this.cost.spatialRebuilds++;}
     }

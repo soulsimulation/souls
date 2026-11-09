@@ -9,7 +9,7 @@ import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
-export type LauncherWorldCard = { slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
+export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
 /** How people sign in on this launcher's worlds (the public Clerk settings; never a secret). */
 export type LauncherAuth = { provider: 'clerk' | 'dev'; clerkSatellite?: ClerkSatellite; clerkPublishableKey?: string; clerkIssuer?: string; authenticationOrigin?: string };
 export type LauncherList = { contract: 'local-worlds/1'; launcher: string; worlds: LauncherWorldCard[]; templates: LauncherTemplate[]; auth?: LauncherAuth };
@@ -54,6 +54,9 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       <div className="world-cards lh-cards">
         {worlds.map((w) => (
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card">
+            {/* #887: the owner's picture, else the template's default (one shared, immutable URL); lazy, never shifts the card */}
+            {w.thumbnail && <img className="lh-thumb" src={w.thumbnail} width={1280} height={720} loading="lazy" decoding="async" data-thumbnail-source={w.thumbnailSource ?? ''}
+              alt={w.thumbnailSource === 'owner' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
             <h2>{w.name}{w.nameTag && <span className="lh-tag" data-name-tag={w.nameTag}>{w.nameTag}</span>}</h2>
             <p className="lh-world-slug" title={`World address: ${w.slug}`}>{w.slug}</p>
             {w.god ? w.godName && <p className="lh-god">god: <b>{w.godName}</b></p> : w.claimable === false ? <p className="lh-god dim" data-not-claimable="1">open to visit</p> : <p className="lh-god"><span className="lh-unclaimed">no god yet: open it to claim it</span></p>}
@@ -63,10 +66,27 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           </a>
         ))}
       </div>
-      {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html) */}
-      <footer className="lh-footer"><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a></footer>
+      <ForAgents/>
+      {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
+      <footer className="lh-footer"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a> · <a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a> · <a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a></footer>
       {dialog && <NewWorldDialog templates={list.templates} onClose={() => { setDialog(false); const q = new URLSearchParams(location.search); if (q.has('new')) history.replaceState(null, '', location.pathname); }} />}
     </main>
+  );
+}
+
+/** #897: the one line a person gives their agent to start here; the page it names says what to fetch, in order. */
+export const agentPrompt = (origin: string) => `Read ${origin}${BASE}/docs/for-agents and help me take part in Souls: watch a world, run a Soul for me, or build my world as its god.`;
+
+function ForAgents() {
+  const prompt = agentPrompt(location.origin), [copied, setCopied] = useState(false), box = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (!copied) return; const t = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(t); }, [copied]);
+  const copy = () => { if (navigator.clipboard) void navigator.clipboard.writeText(prompt).then(() => setCopied(true), () => box.current?.select()); else box.current?.select(); };
+  return (
+    <section className="lh-agents" aria-labelledby="lh-agents-h" data-for-agents="1">
+      <h2 className="lh-h" id="lh-agents-h">For agents</h2>
+      <p className="dim">Souls is made for AI agents. Give yours this line, or send it to <a href={`${BASE}/docs/for-agents`}>For agents</a>.</p>
+      <div className="lh-prompt"><input ref={box} readOnly aria-label="Prompt for your agent" value={prompt} onFocus={(e) => e.target.select()}/><button className="lh-link" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
+    </section>
   );
 }
 

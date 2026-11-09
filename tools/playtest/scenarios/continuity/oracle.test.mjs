@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {observedHolds,scoreContinuity,scoreDisturbance,fieldReturnLocation} from './oracle.mjs';
+import {observedHolds,scoreContinuity,scoreDisturbance,fieldReturnLocation,locationMatches} from './oracle.mjs';
+import {insidePolygon} from '../../review/journey-oracles.mjs';
 const bindings={chair:{entityId:'e_chair',slot:'seat',capabilities:{read:['read:read.e_chair']}}};
 const phase={region:{pos:[0,0],radiusM:2},holdSec:30,postures:['seated'],activities:['read'],requireSeatRefs:['chair'],receipt:{verb:'read',targetRefs:['chair']}};
 const receipt={id:'r1',capability:'read:read.e_chair',acceptedAtUtc:0,phase:'started'};
@@ -180,7 +181,7 @@ test('complete audience attendance outside actual native performance fails inste
   const performer=actor.role==='performer',start=performer?300:400,end=performer?340:430;
   participants[actor.id]={coverageComplete:true,samples:Array.from({length:901-actor.releaseOffsetSec},(_,n)=>{const i=n+actor.releaseOffsetSec,present=i>=start&&i<=end;return {t:i*1000,pos:{x:present?performer?37.6:40:0,z:present?performer?-25.4:-30:0,src:'here'},posture:present&&performer?'busy':'standing',activity:present&&performer?'play-music':'idle',instrument:present&&performer?'violin':null};}),receipts:[performer?{id:actor.id+'-play',capability:'play-music:violin',acceptedAtUtc:300000,endedAtUtc:340000,phase:'completed'}:{id:actor.id+'-arrive',capability:'walk:bandstand',acceptedAtUtc:300000,endedAtUtc:350000,phase:'completed'},{id:actor.id+'-return',capability:'walk:field',acceptedAtUtc:500000,endedAtUtc:550000,phase:'completed'}]};
  }
- const evidence={scenarioId:scenario.id,bindings,participants,semantic:{closureAt:450000}};
+ const evidence={scenarioId:scenario.id,fixtureVersion:scenario.fixtureVersion,bindings,participants,semantic:{closureAt:450000}};
  assert.equal(resultRow(score(evidence),'guest-1:actual-performance-overlap').status,'fail');
  delete bindings['bandstand-violin-1'];assert.equal(resultRow(score(evidence),'guest-1:actual-performance-overlap').status,'unknown');
 });
@@ -338,3 +339,27 @@ test('compound native reading retains simultaneous distinct-seat overlap require
  e.participants['reader-b'].receipts[1].nativeReadLifecycles[0].event.at=260000;e.participants['reader-b'].receipts[1].nativeReadLifecycles[0].event.observedAt=260000;
  assert.equal(resultRow(score(e),'simultaneous-distinct-seat-reading').status,'fail','late actual read transition cannot manufacture thirty seconds overlap');
 });
+
+test('#473: a place the world puts inside the field counts as the field; an unrelated, enclosed or unbound one does not',()=>{
+ const scenario=frozenFixtures.scenarios.find(s=>s.id==='eden-walk-three'),fire={placeId:'fire-circle',containedBy:'field',level:0,kind:'walkable',enclosed:false};
+ const run=children=>fieldReturnLocation({scenario,evidence:{worldId:'world-test',fieldReturnBinding:{...fieldBinding(),children}},t0:0});
+ assert.equal(scenario.fixtureVersion,3);assert.match(scenario.fixtureVersion3Note,/#473/);
+ const bound=run([fire]);assert.equal(bound.status,'pass',bound.detail);assert.deepEqual(bound.placeIds,['field','fire-circle']);
+ const phase={...bound,receipt:{verb:'walk'}},sample=(place,pos=[24,0,-7])=>({pos,place,placeProvenance:'explicit-native-most-specific-place'});
+ assert.equal(locationMatches(sample('fire-circle'),phase),true,'returned to the child');
+ assert.equal(locationMatches(sample('library'),phase),false,'an unrelated place');
+ assert.equal(locationMatches(sample('fire-circle',[80,0,0]),phase),false,'outside the field polygon');
+ for(const [change,detail] of [[{containedBy:'orchard'},/not inside a bound field/],[{enclosed:true},/enclosed/],[{kind:'building'},/non-field venue/],[{level:1},/level/]])assert.match(run([{...fire,...change}]).detail,detail);
+ assert.equal(run([fire,fire]).status,'fail','one place, once');
+ assert.equal(run(undefined).placeIds.length,1,'no children, the field alone');
+ const reading=frozenFixtures.scenarios.find(s=>s.id==='eden-reading-duo');
+ assert.equal(fieldReturnLocation({scenario:reading,evidence:{worldId:'world-test',fieldReturnBinding:{...fieldBinding(),children:[fire]}},t0:0}).status,'fail','only the version that declares it');});
+
+test('#479: the bandstand walk ends outside every exclusion zone',()=>{
+ // Measured: a Soul's native walk:eden-bandstand on eden-2026 ends at this position. A geometry fact about the world, not a target.
+ const walkEnd=[38.4,-26.3],scenario=frozenFixtures.scenarios.find(s=>s.id==='eden-bandstand-five'),{audienceRegion}=scenario.venue;
+ assert.equal(scenario.fixtureVersion,2);assert.match(scenario.fixtureVersionNote,/#479/);
+ assert.equal(insidePolygon(walkEnd,audienceRegion.excludePolygon),false);
+ assert.equal(insidePolygon([37.6,-25.4],audienceRegion.excludePolygon),true,'the instrument\'s own region stays excluded');
+});
+

@@ -6,18 +6,19 @@
 // Env: EDGE_EYES_URL (viewer URL, e.g. http://127.0.0.1:4970/w/eden/), EDGE_EYES_GPU=auto|metal|gl|swiftshader,
 // EDGE_EYES_PLAYWRIGHT (a package.json whose node_modules has @playwright/test; default: this checkout's mars/viewer),
 // PLAYWRIGHT_BROWSERS_PATH, EDGE_EYES_RELOAD_HOURS (default 6), EDGE_EYES_HEADLESS_SHELL=1 (old headless shell),
-// EDGE_EYES_NICE (default 10), EDGE_EYES_CPUS (taskset CPU list), EDGE_EYES_CHROME_ARGS (extra --switches).
+// EDGE_EYES_NICE (default 10), EDGE_EYES_CPUS (taskset CPU list), EDGE_EYES_CHROME_ARGS (extra --switches),
+// EDGE_EYES_CHROME (an explicit Chromium executable instead of Playwright's own; #1340, browser-config.mjs eyesExecutable).
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {setPriority, tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {mkdtempSync, readdirSync, readFileSync, rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
-import {EYES_UA_TAG, eyesBrowserLaunch, eyesBrowserModes, eyesCpus, eyesNice} from './browser-config.mjs';
+import {EYES_EXIT_NO_BROWSER, EYES_UA_TAG, eyesBrowserLaunch, eyesBrowserModes, eyesCpus, eyesExecutable, eyesNice} from './browser-config.mjs';
 
 const viewer = process.env.EDGE_EYES_URL;
 const from = process.env.EDGE_EYES_PLAYWRIGHT || fileURLToPath(new URL('../../../../../mars/viewer/package.json', import.meta.url));
-const send = m => {try {process.send?.(m);} catch {/* parent gone */}};
+const send = (m, done) => {try {process.send?.(m, done ? () => done() : undefined);} catch {done?.();/* parent gone */}};
 const log = (...a) => console.error(new Date().toISOString(), ...a);
 if (!viewer || !process.send) {log('eyes worker needs EDGE_EYES_URL and an IPC parent'); process.exit(2);}
 const {chromium} = createRequire(from)('@playwright/test');
@@ -57,10 +58,18 @@ process.on('exit', () => {try {rmSync(home, {recursive: true, force: true});} ca
 let browser = null, page = null, renderer = null, ready = false, closing = false, loadedAt = 0, busy = false;
 const queue = [];
 
+// #1340: which Chromium (an explicit one, Playwright's own, or an installed older revision when a release bumped Playwright)
+let pick = null;
+class NoBrowser extends Error {}
 async function launch() {
+  if (!pick) {
+    pick = process.env.EDGE_EYES_HEADLESS_SHELL === '1' && !process.env.EDGE_EYES_CHROME ? {path: null, note: 'headless shell'} : eyesExecutable((() => {try {return chromium.executablePath();} catch {return null;}})());
+    log('chromium:', pick.log ?? pick.note);   // paths only in the worker's own log, never in the public status
+    if (pick.problem) throw new NoBrowser(pick.problem);
+  }
   for (const mode of order) {
     try {
-      const b = await chromium.launch(eyesBrowserLaunch(mode, process.env, process.platform, home));
+      const b = await chromium.launch(eyesBrowserLaunch(mode, process.env, process.platform, home, pick.path));
       const probe = await b.newPage(), ua = await probe.evaluate(() => navigator.userAgent); await probe.close();
       const p = await b.newPage({viewport: {width: 512, height: 320}, deviceScaleFactor: 1, userAgent: `${ua} ${EYES_UA_TAG}`});
       const gl = await p.evaluate(() => {const c = document.createElement('canvas').getContext('webgl2'); if (!c) return null; const x = c.getExtension('WEBGL_debug_renderer_info'); return x ? c.getParameter(x.UNMASKED_RENDERER_WEBGL) : c.getParameter(c.RENDERER);});
@@ -73,7 +82,7 @@ async function launch() {
       return;
     } catch (e) {log('launch failed', mode, e.message.split('\n')[0]);}
   }
-  throw new Error('no headless browser with WebGL could be started');
+  throw new Error(`no headless browser with WebGL could be started${pick?.source === 'fallback' ? ` (${pick.note})` : ''}`);
 }
 async function load() {
   ready = false; send({t: 'status', ready: false, renderer, detail: 'loading the viewer'});
@@ -87,7 +96,7 @@ async function load() {
   }
   // one throwaway frame compiles the shaders before the first real request
   try {await page.evaluate(() => window.edenEyes.capture({mode: 'eyes', w: 320, h: 180, quality: 0.5, pose: {p: [9, 1.6, 12], yaw: -Math.PI / 2, pitch: -0.06, vfov: 1}, self: '', show: []}));} catch (e) {log('warm-up frame failed', e.message.split('\n')[0]);}
-  renice(); loadedAt = Date.now(); ready = true; send({t: 'status', ready: true, renderer, detail: null}); log('viewer ready');
+  renice(); loadedAt = Date.now(); ready = true; send({t: 'status', ready: true, renderer, detail: pick?.source === 'fallback' ? pick.note : null}); log('viewer ready');
 }
 let failing = false;
 async function fail(why) {
@@ -128,4 +137,11 @@ setInterval(async () => {
   try {await Promise.race([page.evaluate(() => window.edenEyes?.ready?.()), new Promise((_, r) => setTimeout(() => r(new Error('page not answering')), 15_000))]);}
   catch (e) {log(e.message); fail('page not answering');}
 }, 60_000).unref();
-start().catch(e => {log('eyes worker failed to start:', e.message); send({t: 'status', ready: false, renderer, detail: e.message}); void shutdown(1);});
+// the reason is delivered before the exit, so the server shows it rather than its own placeholder
+// a launch error can name paths, so only the NoBrowser reason (path-free) or a fixed text reaches the public status
+start().catch(e => {
+  log('eyes worker failed to start:', e.message);
+  const code = e instanceof NoBrowser ? EYES_EXIT_NO_BROWSER : 1, detail = e instanceof NoBrowser ? e.message : /^no headless browser with WebGL/.test(e.message) ? e.message : 'the eyes worker could not start (see the world log)';
+  setTimeout(() => void shutdown(code), 2000);   // if the parent never acknowledges the message
+  send({t: 'status', ready: false, renderer, detail}, () => void shutdown(code));
+});

@@ -35,8 +35,9 @@ import {openClientLiving,unresolvedBindingSteps} from './client-living.mjs';
 import {publishCompletedOwnerQueue} from './client-owner-result.mjs';
 import {openClientMemory} from './client-memory.mjs';
 import {travelCommand} from './client-travel.mjs';
+import {bodyKit} from './client-body-kit.mjs';
 
-export const SKILL_VERSION='1.9.19';
+export const SKILL_VERSION='1.9.21';
 export const CONTRACT='eden-edge/1';
 export const API_CONTRACT='eden-edge/1.1'; // Additive support; preserve legacy wire contract.
 const STATE='.eden-agent.json';
@@ -104,6 +105,20 @@ const hinted=o=>o&&o.accepted===false&&HINTS[o.code]?{...o,hint:HINTS[o.code]}:o
 function need(s,k,hint){if(!s[k])throw new Error(`No ${k} yet. ${hint}`);return s[k];}
 
 /** as: 'owner' (identity bearer) | 'soul' (Soul token) | 'none' */
+/** 1.9.21 (#1372, LOAD-CONTRACT v1 §3): a busy world sheds a read with 503/429, a busy code and a stated wait (Retry-After,
+ *  or retry_after / retryAfterMs in the body). The wait is a floor (#1182): the read is asked again after it, up to 20 % more,
+ *  at most READ_BUSY_WAITS times. No stated wait, or any other answer: null, and the answer stands. Writes never come here. */
+export const READ_BUSY_CODES=new Set(['world.busy','soul.busy','soul.slow-down','world.starting','world.crowded','rate-limited','client.rate','account.rate']);
+export const READ_BUSY_WAITS=3;
+export function shedReadWaitMs(status,headers,data){
+ if(status!==503&&status!==429)return null;
+ if(!READ_BUSY_CODES.has(data?.error?.code??data?.code))return null;
+ const h=headers?.get?.('retry-after');let ms=null;
+ if(h){const n=Number(h);if(Number.isFinite(n)&&n>=0)ms=n*1000;else{const at=Date.parse(h);if(Number.isFinite(at))ms=Math.max(0,at-Date.now());}}
+ if(ms==null)for(const v of [data?.retryAfterMs,data?.error?.retryAfterMs])if(Number.isFinite(v)&&v>=0){ms=v;break;}
+ if(ms==null)for(const v of [data?.retry_after,data?.error?.retry_after,data?.retry_after_s,data?.error?.retry_after_s])if(Number.isFinite(v)&&v>=0){ms=v*1000;break;}
+ return ms==null?null:Math.min(ms,60_000);
+}
 async function call(path,{body,method,as='soul',timeoutMs=90_000,signal,extraHeaders={}}={}){
  assertLiveDispatch(IN_LIVE,leaseHeld,method??(body?'POST':'GET'));
  const s=load(),headers={'content-type':'application/json',...extraHeaders};
@@ -111,10 +126,18 @@ async function call(path,{body,method,as='soul',timeoutMs=90_000,signal,extraHea
  if(as==='owner'&&s.accountAuth){path=delegatedOwnerPath(path,need(s,'soul','Complete an account approval first.'));if(s.token)headers.authorization=`Bearer ${s.token}`;}
  else if(as==='owner'&&s.identity)headers.authorization=`Bearer dev:${s.identity}`;
  if(as==='soul'&&s.token)headers.authorization=`Bearer ${s.token}`;
- const url=need(s,'world','Run: node eden-agent.mjs register <world-url>')+path;
- let r;try{r=await fetch(url,{method:method??(body?'POST':'GET'),headers,body:body?JSON.stringify(body):undefined,signal:signal&&AbortSignal.any?AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]):AbortSignal.timeout(timeoutMs)});}
- catch(e){return {status:0,data:{error:{code:signal?.aborted?'aborted':'unreachable',message:String(e.message)}}};}
- const text=await r.text();let data;try{data=JSON.parse(text);}catch{data={raw:text.slice(0,200)};}
+ const url=need(s,'world','Run: node eden-agent.mjs register <world-url>')+path,verb=method??(body?'POST':'GET');
+ let r,text,data;
+ for(let waits=0;;waits++){
+  try{r=await fetch(url,{method:verb,headers,body:body?JSON.stringify(body):undefined,signal:signal&&AbortSignal.any?AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]):AbortSignal.timeout(timeoutMs)});}
+  catch(e){return {status:0,data:{error:{code:signal?.aborted?'aborted':'unreachable',message:String(e.message)}}};}
+  text=await r.text();try{data=JSON.parse(text);}catch{data={raw:text.slice(0,200)};}
+  // 1.9.21 (#1372): a read the world sheds with a stated wait is asked again after that wait, never before it.
+  const ms=verb==='GET'&&waits<READ_BUSY_WAITS&&!signal?.aborted?shedReadWaitMs(r.status,r.headers,data):null;
+  if(ms==null)break;
+  process.stderr.write(`The world asked me to wait ${Math.max(1,Math.round(ms/1000))} s before reading again; waiting.\n`);
+  await sleep(ms*(1+0.2*Math.random()));
+ }
  if(headers.authorization&&!path.startsWith('/v1/edge/inbox/')){noticeInboxHeader(r.headers);noticeOwnerInbox(data);}
  const bytes=Buffer.byteLength(text);telemetry?.({fetch:{path,status:r.status,bytes}});
  return {status:r.status,data,bytes,headers:{etag:r.headers.get('etag')}};
@@ -1195,11 +1218,24 @@ export async function cost(){return costLine(readCostLog(),liveOptions([]));}
 /** BODY-v1: owner-scoped GLBs; identity is consumed internally, never output. */
 export async function body(cmd,...args){
  if(!cmd)return ok(await call('/v1/edge/body'),'body');
+ if(cmd==='list'){const r=ok(await call('/v1/edge/body'),'body');return {selection:r.selection,presets:r.presets,uploads:r.uploads};}
  if(cmd==='presets')return (ok(await call('/v1/edge/body'),'body')).presets;
+ if(cmd==='kit')return bodyKit(args,{load,call}); // a local authoring directory: contract, validator, one starter (no credentials)
  if(cmd==='set'){
-  const id=args[0];if(!id||args.length!==1)throw new Error('usage: body set <preset|assetId>');
-  return ok(await call('/v1/edge/body',{method:'PUT',body:/^body_[a-f0-9]{64}$/.test(id)?{assetId:id}:{preset:id}}),'body');
+  const id=args[0];if(!id||args.length!==1)throw new Error('usage: body set <preset|assetId|ref>');
+  if(!/^body_[a-f0-9]{64}$/.test(id))return ok(await call('/v1/edge/body',{method:'PUT',body:{preset:id}}),'body');
+  // an owner upload in this world first; otherwise the explicit public reference (body-library/1, #717)
+  const own=await call('/v1/edge/body',{method:'PUT',body:{assetId:id}});
+  return ok(own.status===403&&own.data?.error?.code==='body.not-owned'?await call('/v1/edge/body',{method:'PUT',body:{ref:id}}):own,'body');
  }
+ // body-library/1 (#717): bounded pages of core presets or this owner's saved bodies across worlds; lookup by reference
+ if(cmd==='library'){const scope=args[0]&&!args[0].startsWith('--')?args.shift():'mine',q=new URLSearchParams({scope});
+  for(let i=0;i<args.length;i++){if(args[i]==='--q'||args[i]==='--cursor'||args[i]==='--limit'){const v=args[++i];if(v===undefined)throw new Error(`usage: body library [core|mine] [--q text] [--cursor c] [--limit n]`);q.set(args[i-1].slice(2),v);}else throw new Error('usage: body library [core|mine] [--q text] [--cursor c] [--limit n]');}
+  return ok(await call('/v1/edge/body/library?'+q),'body library');}
+ if(cmd==='publish'||cmd==='unpublish'){const ref=args[0];if(!ref||args.length!==1||!/^body_[a-f0-9]{64}$/.test(ref))throw new Error(`usage: body ${cmd} <ref>`);
+  return ok(await call('/v1/edge/body/library/'+ref+'/public',{method:cmd==='publish'?'PUT':'DELETE'}),'body '+cmd);}
+ if(cmd==='show'||cmd==='save'||cmd==='forget'){const ref=args[0];if(!ref||args.length!==1||!/^[a-z0-9_-]{1,80}(@[1-9][0-9]{0,5})?$/.test(ref))throw new Error(`usage: body ${cmd} <ref>`);
+  return ok(await call('/v1/edge/body/library/'+ref,cmd==='show'?{}:{method:cmd==='save'?'PUT':'DELETE'}),'body '+cmd);}
  if(cmd==='look'){ // core/humanoid@2: read, randomize or edit this Soul's look (paint only; same body and rig)
   if(!args.length){const r=ok(await call('/v1/edge/body'),'body');return {look:r.look,choices:r.lookChoices};}
   let look;const flag=args.shift();
@@ -1216,16 +1252,16 @@ export async function body(cmd,...args){
   if(flag==='--upload'&&args.length===2)return clientProfile(load().soul,['photo',args[1]],{call});
   throw new Error('usage: body photo [--auto | --upload portrait.png]');
  }
- if(cmd!=='upload')throw new Error('usage: body [presets|set <preset|assetId>|look [--random|--set k=v ...|--set outfit=<preset>]|photo [--auto|--upload x.png]|upload path.glb --type ceramic --license owned --rights-confirmed]');
- const path=args.shift(),opts={};if(!path)throw new Error('body upload needs a GLB path');
- while(args.length){const flag=args.shift();if(flag==='--rights-confirmed')opts.rightsConfirmed=true;else if(flag==='--type'||flag==='--license'){const value=args.shift();if(!value||value.startsWith('--'))throw new Error(flag+' needs a value');opts[flag.slice(2)]=value;}else throw new Error('Unknown body upload argument: '+flag);}
+ if(cmd!=='upload')throw new Error('usage: body [presets|library [core|mine] [--q text] [--cursor c]|show|save|forget|publish|unpublish <ref>|kit <dir> [--starter rigid|humanoid|rolling] [--force]|set <preset|assetId|ref>|look [--random|--set k=v ...|--set outfit=<preset>]|photo [--auto|--upload x.png]|upload path.glb --type ceramic --license owned --rights-confirmed]');
+ const path=args.shift();let opts={};if(!path)throw new Error('body upload needs a GLB path');
+ while(args.length){const flag=args.shift();if(flag==='--manifest'){const file=args.shift();if(!file||file.startsWith('--'))throw new Error('--manifest needs a JSON file');opts=JSON.parse(readFileSync(file,'utf8'));}else if(flag==='--rights-confirmed')opts.rightsConfirmed=true;else if(flag==='--type'||flag==='--license'){const value=args.shift();if(!value||value.startsWith('--'))throw new Error(flag+' needs a value');opts[flag.slice(2)]=value;}else throw new Error('Unknown body upload argument: '+flag);}
  if(!['humanoid','ceramic','floater'].includes(opts.type)||!['CC0','owned'].includes(opts.license)||!opts.rightsConfirmed)throw new Error('Upload requires --type humanoid|ceramic|floater --license CC0|owned --rights-confirmed');
- const size=statSync(path);if(!size.isFile()||size.size>16*1024*1024)throw new Error('Use a GLB file no larger than 16 MiB');
+ const size=statSync(path);if(!size.isFile()||size.size>4*1024*1024)throw new Error('Use a GLB file no larger than 4 MiB');
  if(opts.type==='humanoid')opts.rig='quaternius/1';
  const form=new FormData();form.set('manifest',JSON.stringify(opts));form.set('model',new Blob([readFileSync(path)],{type:'model/gltf-binary'}),'body.glb');
  const state=load(),world=need(state,'world','Register this folder first'),token=need(state,'token','Pair your Soul first');
  const response=await fetch(world+'/v1/edge/body/uploads',{method:'POST',headers:{authorization:'Bearer '+token},body:form,signal:AbortSignal.timeout(90000)});
- const data=await response.json().catch(()=>({}));noticeInboxHeader(response.headers);noticeOwnerInbox(data);if(!response.ok)throw new Error((data.error?.code??'body.unavailable')+': '+(data.error?.message??'Body upload refused'));return data.asset;
+ const data=await response.json().catch(()=>({}));noticeInboxHeader(response.headers);noticeOwnerInbox(data);if(!response.ok)throw new Error((data.error?.code??'body.unavailable')+': '+(data.error?.message??'Body upload refused')+(data.error?.details?' '+JSON.stringify(data.error.details):''));return data.asset;
 }
 /** travel [<world>|home]: go to another world of this site (or home); this folder follows the Soul there. */
 export async function travel(...args){return travelCommand(args,{load,save,live:()=>!!liveRunning()});}

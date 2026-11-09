@@ -55,7 +55,7 @@ test('far bodies stay drawn but stop casting shadows on phones; near bodies and 
   const phone=new WorldDistanceDetail(PHONE_DETAIL);phone.apply(s.root,s.camera,844);
   assert.equal(s.body.visible,true);assert.equal(s.body.castShadow,false);assert.equal(nearBody.castShadow,true);assert.equal(phone.stats.bodyShadowsSkipped,1);
   phone.restore();assert.equal(s.body.castShadow,true,'restored after the frame');
-  // PERF-EDEN: the desktop tier too stops a body 300 m away from casting (beyond 60 m); the release-3.1 tier (?desktopDetail=1) keeps every body's shadow
+  // PERF-EDEN: the desktop tier too stops a body 300 m away from casting (beyond 60 m); the release-0.6 tier (?desktopDetail=1) keeps every body's shadow
   const desk=new WorldDistanceDetail(pickQualityTier({search:'',coarsePointer:false,screen:[1440,900]}).detail!);desk.apply(s.root,s.camera,900);
   assert.equal(s.body.castShadow,false);assert.equal(nearBody.castShadow,true);assert.equal(desk.stats.bodyShadowsSkipped,1);desk.restore();assert.equal(s.body.castShadow,true);
   const old=new WorldDistanceDetail(pickQualityTier({search:'?desktopDetail=1',coarsePointer:false,screen:[1440,900]}).detail!);old.apply(s.root,s.camera,900);
@@ -106,4 +106,43 @@ test('ancestor memo preserves scan ownership and parent-mesh culling, then repla
   hidden.add(mesh);root.updateMatrixWorld(true);detail.apply(root,camera,844);assert.equal(mesh.visible,false,'between scans, ancestry follows the existing candidate inventory');detail.restore();
   detail.apply(root,camera,844);assert.equal(mesh.visible,true,'new scan sees the hidden parent and skips the mesh');assert.equal(child.castShadow,true);detail.dispose();
   assert.equal((detail as unknown as {candidates:unknown[]}).candidates.length,0,'disposing releases the candidate-owned ancestor memo');
+});
+
+function pool(){
+  const root=new THREE.Scene(),camera=new THREE.PerspectiveCamera(45,1,0.1,2400);camera.position.set(0,2,5);camera.lookAt(0,2,0);
+  const mesh=new THREE.InstancedMesh(new THREE.SphereGeometry(.08,8,4),new THREE.MeshBasicMaterial(),8);mesh.count=1;mesh.frustumCulled=true;root.add(mesh);root.updateMatrixWorld(true);
+  return {root,camera,mesh};
+}
+const options={minRadiusPx:1,shadowNear:40,shadowPerMetre:20,shadowMaxRadius:6,standInDistance:Infinity,rescanFrames:90};
+
+test('distance detail: an instanced pool hidden at scale 0 during a scan is drawn as soon as it is shown again, with no new scan', () => {
+  const {root,camera,mesh}=pool(),detail=new WorldDistanceDetail(options);
+  mesh.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,2,0),0);   // every instance at scale 0: what EntityInstancer.updateBounds leaves
+  detail.apply(root,camera,800);assert.equal(mesh.visible,false,'nothing to draw while it has no size');detail.restore();
+  mesh.boundingSphere.radius=.16;                                     // shown again, 1 frame after the scan
+  detail.apply(root,camera,800);assert.equal(mesh.visible,true,'drawn on the next frame');detail.restore();
+});
+
+test('distance detail: an instanced pool is judged where its instances are now, not where the scan saw them', () => {
+  const {root,camera,mesh}=pool(),detail=new WorldDistanceDetail(options);
+  mesh.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,2,-3000),.16);
+  detail.apply(root,camera,800);assert.equal(mesh.visible,false,'far away: under a pixel');detail.restore();
+  mesh.boundingSphere.center.set(0,2,0);
+  detail.apply(root,camera,800);assert.equal(mesh.visible,true,'carried here since the scan');detail.restore();
+});
+
+test('P2 churn: render-time lists are reused across frames, every change is undone and no mesh is held after restore', () => {
+  const s=scene(),detail=new WorldDistanceDetail(PHONE_DETAIL);s.body.castShadow=true;
+  const thing=new THREE.Group();s.root.add(thing);thing.add(s.bench);thing.userData.frozenDrawn={frozen:[]};s.root.updateMatrixWorld(true);
+  const lists=detail as unknown as {hidden:unknown[];noShadow:unknown[]};
+  for(let frame=0;frame<5;frame++){
+    detail.apply(s.root,s.camera,844);
+    assert.deepEqual([s.far.visible,s.bench.castShadow,s.body.castShadow],[false,false,false],'frame '+frame);
+    assert.deepEqual([detail.stats.culled,detail.stats.shadowSkipped,detail.stats.bodyShadowsSkipped],[1,1,1]);
+    detail.restore();
+    assert.deepEqual([s.far.visible,s.bench.castShadow,s.body.castShadow],[true,true,true],'restored '+frame);
+    assert.ok([...lists.hidden,...lists.noShadow].every(m=>m===null),'no mesh retained after restore');
+  }
+  const hiddenStore=lists.hidden;detail.apply(s.root,s.camera,844);assert.equal(lists.hidden,hiddenStore,'the same array, not a regrown one');
+  detail.dispose();assert.equal(s.far.visible,true);assert.equal(lists.hidden.length,0);
 });

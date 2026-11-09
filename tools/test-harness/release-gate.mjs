@@ -137,6 +137,26 @@ export function validateQuarantine(manifest) {
   return new Map(manifest.entries.map(e => [key(e.step, e.id), e]));
 }
 
+/** renames.json: reviewed renames and replacements of baseline assertions. A listed baseline id that is gone from the
+ * candidate is satisfied only when every replacement id ran and passed there (compareRuns); nothing unlisted is. */
+export function validateRenames(manifest) {
+  if (manifest?.schemaVersion !== 1 || !Array.isArray(manifest.entries)) throw Error('renames.json must use schemaVersion 1 and entries[]');
+  const text = v => typeof v === 'string' && v.trim().length > 0;
+  const out = new Map();
+  for (const e of manifest.entries) {
+    const to = typeof e.to === 'string' ? [e.to] : e.to;
+    if (![e.step, e.from, e.reason].every(text) || !Array.isArray(to) || !to.length || !to.every(text)) throw Error('every rename needs step, from, to (an id or a list of ids) and reason');
+    if (typeof e.pr !== 'string' || !/^#\d+$/.test(e.pr)) throw Error(`rename ${e.step}/${e.from}: pr must be "#<number>"`);
+    if (!REQUIRED_STEPS.includes(e.step)) throw Error(`unknown rename step ${e.step}`);
+    if (CASE_STEPS.has(e.step)) throw Error(`V6 scenarios cannot be renamed away: ${e.step}`);
+    if (to.includes(e.from) || new Set(to).size !== to.length) throw Error(`rename ${e.step}/${e.from}: replacements must be distinct from it and from each other`);
+    const k = key(e.step, e.from);
+    if (out.has(k)) throw Error(`duplicate rename ${e.step}/${e.from}`);
+    out.set(k, { ...e, to });
+  }
+  return out;
+}
+
 /** Validate a returned Modal directory; exported for synthetic, port-free proof. */
 export function readRun(dir, expected, manifest, requiredSteps = REQUIRED_STEPS, options = {}) {
   const errors = [], steps = {}, evidence = {};
@@ -334,14 +354,17 @@ function recoverAssetCollisions(dir, m, requiredSteps, read, root) {
 }
 
 /** options.driverTestsChanged: the cached baseline ran other laptop-side driver files (same suite tree, see DRIVER_ONLY);
- * their own V3-harness self-tests may then be renamed or removed without that counting as lost coverage. */
+ * their own V3-harness self-tests may then be renamed or removed without that counting as lost coverage.
+ * options.renames: validateRenames() of renames.json; a listed baseline id gone from the candidate is renamed, not
+ * removed, only when every replacement id is new (absent from the baseline) and ran and passed in the candidate's same step. */
 export function compareRuns(baseline, candidate, manifest, candidateSourceFiles = new Set(), options = {}) {
   const q = validateQuarantine(manifest);
   const blockers = [...baseline.errors.map(e => `baseline: ${e}`), ...candidate.errors.map(e => `candidate: ${e}`)];
   if (baseline.metadata && candidate.metadata) for (const field of ['nodeVersion', 'pnpmVersion']) {
     if (baseline.metadata[field] !== candidate.metadata[field]) blockers.push(`baseline/candidate runtime mismatch: ${field}`);
   }
-  const fixed = [], quarantined = [], newFailures = [], removed = [], unexpectedSkips = [], added = [], driverTestsRemoved = [];
+  const fixed = [], quarantined = [], newFailures = [], removed = [], unexpectedSkips = [], added = [], driverTestsRemoved = [], renamed = [];
+  const renames = options.renames ?? new Map();
   for (const [step, b] of Object.entries(baseline.steps)) {
     const c = candidate.steps[step]; if (!c) continue;
     if (b.exit === 'QUARANTINE' || c.exit === 'QUARANTINE') {
@@ -361,8 +384,14 @@ export function compareRuns(baseline, candidate, manifest, candidateSourceFiles 
         continue;
       }
       if (!now) {
+        const rename = renames.get(key(step, t.id));
         if (options.driverTestsChanged && step === 'V3-harness' && DRIVER_ONLY.some(f => t.source === `tools/test-harness/${f}`)) driverTestsRemoved.push({ step, id: t.id, source: t.source });
-        else removed.push({ step, id: t.id });
+        else if (rename) {
+          // a replacement must be new: folding a deleted assertion onto one the baseline already ran is coverage loss
+          const notPassing = rename.to.filter(id => ct.get(id)?.status !== 'pass'), inBaseline = rename.to.filter(id => bt.has(id));
+          if (notPassing.length || inBaseline.length) removed.push({ step, id: t.id, rename: { to: rename.to, notPassing, inBaseline } });
+          else renamed.push({ step, from: t.id, to: rename.to, reason: rename.reason, pr: rename.pr });
+        } else removed.push({ step, id: t.id });
         continue;
       }
       if (t.status === 'fail' && !t.aggregate) {
@@ -395,7 +424,7 @@ export function compareRuns(baseline, candidate, manifest, candidateSourceFiles 
   if (newFailures.length) blockers.push(`${newFailures.length} new test failure(s)`);
   if (removed.length) blockers.push(`${removed.length} baseline assertions removed`);
   if (unexpectedSkips.length) blockers.push(`${unexpectedSkips.length} unexpected test skip(s)/TODO(s)`);
-  return { status: blockers.length ? 'blocked' : quarantined.length ? 'quarantined' : 'pass', blockers, fixed, quarantined, newFailures, removed, unexpectedSkips, added, ...(options.driverTestsChanged && { driverTestsRemoved }) };
+  return { status: blockers.length ? 'blocked' : quarantined.length ? 'quarantined' : 'pass', blockers, fixed, quarantined, newFailures, removed, renamed, unexpectedSkips, added, ...(options.driverTestsChanged && { driverTestsRemoved }) };
 }
 
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -435,18 +464,24 @@ export const SUCCESS = new Set(['pass', 'quarantined']);
  * else (modal_suite.py, remote-suite.sh, one-validation.sh, package-suite.sh, quarantine.json, step scripts,
  * v5-durations.json, campus-assets.json, …) stays in the key. */
 export const DRIVER_ONLY = ['release-gate.mjs', 'ship-receipt.mjs', 'release-gate.test.mjs', 'ship-receipt.test.mjs', 'release-no-delete.test.mjs', 'REMOTE-SUITE.md'];
+/** Files that say how the driver compares results, not what runs (#1461): renames.json is read only by compareRuns on the
+ * laptop, so adding a reviewed rename never invalidates a cached baseline. quarantine.json stays in the key: the
+ * containers' own harness self-tests read it. */
+export const COMPARISON_ONLY = ['renames.json'];
+const outsideSuite = path => DRIVER_ONLY.includes(path) || COMPARISON_ONLY.includes(path);
 export function suiteTree(root, ref) {
   const lines = execFileSync('git', ['-C', root, 'ls-tree', '-r', '--full-tree', ref, '--', 'tools/test-harness'], { encoding: 'utf8', maxBuffer: MAX_BUFFER })
     .split('\n').filter(Boolean).map(line => { const [meta, path] = line.split('\t'); return [meta, path.slice('tools/test-harness/'.length)]; })
-    .filter(([, path]) => !DRIVER_ONLY.includes(path)).sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
+    .filter(([, path]) => !outsideSuite(path)).sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
   if (!lines.length) throw Error(`no tools/test-harness in ${ref}`);
   return sha256(lines.map(([meta, path]) => `${meta}\t${path}\n`).join(''));
 }
-export const cacheKey = ({ sourceSha, suiteTree, node }) => `${sourceSha}-${suiteTree}-node${String(node).split('.')[0]}`;
+/** A run of only some contract steps (a CI-evidence gate, #1463) is keyed by its step set too, so it is never read as full. */
+export const cacheKey = ({ sourceSha, suiteTree, node, only }) => `${sourceSha}-${suiteTree}-node${String(node).split('.')[0]}${only?.length ? `-only-${sha256(only.join(',')).slice(0, 12)}` : ''}`;
 /** Read a run for reuse under a suite identity: source, Node major and complete contract by readRun; the suite tree from
  * the run's own harness commit, which must also match the run's recorded full harnessTree. */
-export function readSuiteRun(dir, { sourceSha, suiteTree: suite, node }, manifest, root = ROOT, requiredSteps = REQUIRED_STEPS, readOptions = {}) {
-  const run = readRun(dir, { schemaVersion: 1, sourceSha, node }, manifest, requiredSteps, { ...readOptions, root });
+export function readSuiteRun(dir, { sourceSha, suiteTree: suite, node, only }, manifest, root = ROOT, requiredSteps = only?.length ? only : REQUIRED_STEPS, readOptions = {}) {
+  const run = readRun(dir, { schemaVersion: 1, sourceSha, node, ...(only?.length && { only }) }, manifest, requiredSteps, { ...readOptions, root });
   const ref = run.metadata?.harnessRef;
   try {
     verifyHarnessArchive(run.metadata, root);
@@ -471,9 +506,28 @@ function retire(path) {
   renameSync(path, join(trash, `${basename(path)}-${Date.now()}`));
 }
 
-export function lookupCache(cacheDir, identity, manifest, requiredSteps = REQUIRED_STEPS, readOptions = {}, root = ROOT) {
-  const key = cacheKey(identity), dir = join(cacheDir, key);
-  if (!existsSync(join(dir, 'CACHE.json'))) return { hit: false, key, dir, reason: 'no cached run' };
+/** An entry stored under an earlier suiteTree definition (before #1461 left renames.json out) whose own harness commit
+ * recomputes to this suite tree: the same executed suite under its old name. */
+function legacyEntry(cacheDir, { sourceSha, suiteTree: suite, node }, root) {
+  const name = new RegExp(`^${sourceSha}-[0-9a-f]{64}-node${String(node).split('.')[0]}$`);
+  let names = [];
+  try { names = readdirSync(cacheDir).filter(n => name.test(n)).sort(); } catch { return null; }
+  for (const n of names) {
+    try {
+      const entry = JSON.parse(readFileSync(join(cacheDir, n, 'CACHE.json'), 'utf8'));
+      if (entry.key === n && /^[0-9a-f]{40}$/.test(entry.harnessRef || '') && suiteTree(root, entry.harnessRef) === suite) return n;
+    } catch { /* not this one */ }
+  }
+  return null;
+}
+
+export function lookupCache(cacheDir, identity, manifest, requiredSteps = identity.only?.length ? identity.only : REQUIRED_STEPS, readOptions = {}, root = ROOT) {
+  let key = cacheKey(identity), dir = join(cacheDir, key), legacy = false;
+  if (!existsSync(join(dir, 'CACHE.json'))) {
+    const old = !identity.only?.length && legacyEntry(cacheDir, identity, root);
+    if (!old) return { hit: false, key, dir, reason: 'no cached run' };
+    key = old; dir = join(cacheDir, old); legacy = true;
+  }
   let entry;
   try { entry = JSON.parse(readFileSync(join(dir, 'CACHE.json'), 'utf8')); } catch (e) { return { hit: false, key, dir, reason: `unreadable CACHE.json: ${e.message}` }; }
   if (entry.key !== key) return { hit: false, key, dir, reason: 'cache entry key mismatch' };
@@ -482,10 +536,10 @@ export function lookupCache(cacheDir, identity, manifest, requiredSteps = REQUIR
   const recorded = entry.files || {};
   const changed = [...new Set([...Object.keys(recorded), ...Object.keys(now)])].filter(f => recorded[f] !== now[f]);
   if (!Object.keys(recorded).length || changed.length) return { hit: false, key, dir, reason: `cache entry changed since it was stored: ${changed.slice(0, 3).join(', ') || 'no file list'}` };
-  if (entry.suiteTree !== identity.suiteTree) return { hit: false, key, dir, reason: 'cache entry suite tree mismatch' };
+  if (!legacy && entry.suiteTree !== identity.suiteTree) return { hit: false, key, dir, reason: 'cache entry suite tree mismatch' };
   const run = readSuiteRun(dir, identity, manifest, root, requiredSteps, readOptions);
   if (run.errors.length) return { hit: false, key, dir, reason: `cached run does not validate: ${run.errors.slice(0, 3).join('; ')}` };
-  return { hit: true, key, dir, run, entry };
+  return { hit: true, key, dir, run, entry, ...(legacy && { legacyKey: true }) };
 }
 
 const BUNDLE_BASELINE = 'bundle-budget/baseline.json';
@@ -504,7 +558,8 @@ export async function prepareBundleBaselineCarry(dir, { sourceSha, harnessRef, n
   dir = resolve(dir);
   const manifestPath = join(dir, 'CACHE.json'), manifestBytes = readFileSync(manifestPath), entry = JSON.parse(manifestBytes);
   carryRequire(entry.sourceSha === sourceSha && entry.node === node, 'cached source/Node major differs from the named baseline');
-  const cached = lookupCache(dirname(dir), { sourceSha, suiteTree: entry.suiteTree, node }, manifest, REQUIRED_STEPS, {}, root);
+  // the suite tree recomputed from the entry's own harness commit, so an entry stored before #1461 is still found
+  const cached = lookupCache(dirname(dir), { sourceSha, suiteTree: suiteTree(root, entry.harnessRef), node }, manifest, REQUIRED_STEPS, {}, root);
   carryRequire(cached.hit && resolve(cached.dir) === dir, `original cache invalid: ${cached.reason || 'directory/key mismatch'}`);
   const original = cached.run, m = original.metadata;
   for (const field of ['sourceSha', 'harnessRef', 'harnessTree', 'harnessArchiveSha256', 'sourceArchiveSha256', 'node', 'nodeVersion', 'pnpmVersion'])
@@ -525,7 +580,7 @@ export async function prepareBundleBaselineCarry(dir, { sourceSha, harnessRef, n
 
   const oldEntries = harnessEntries(root, m.harnessRef), newEntries = harnessEntries(root, harnessRef);
   const changed = [...new Set([...oldEntries.keys(), ...newEntries.keys()])].filter(path => oldEntries.get(path) !== newEntries.get(path)).sort();
-  const suiteChanges = changed.filter(path => !DRIVER_ONLY.includes(path));
+  const suiteChanges = changed.filter(path => !outsideSuite(path));
   carryRequire(equalJson(suiteChanges, [BUNDLE_BASELINE]), 'only bundle-budget/baseline.json may change in the executed suite');
   const gitBytes = (ref, path) => execFileSync('git', ['-C', root, 'show', `${ref}:tools/test-harness/${path}`], { maxBuffer: MAX_BUFFER });
   const beforeBytes = gitBytes(m.harnessRef, BUNDLE_BASELINE), afterBytes = gitBytes(harnessRef, BUNDLE_BASELINE);
@@ -587,13 +642,14 @@ export async function prepareBundleBaselineCarry(dir, { sourceSha, harnessRef, n
 export function storeCache(cacheDir, run, provenance = {}, root = ROOT) {
   const m = run.metadata;
   if (!m || run.errors.length) return { stored: false, reason: 'run has validation errors' };
-  if (m.only !== undefined) return { stored: false, reason: 'scoped run (only full runs are cached)' };
+  // a CI-evidence gate's run covers only the steps CI does not (#1463); it is stored under a key naming them
+  if (m.only !== undefined && !provenance.ciEvidence) return { stored: false, reason: 'scoped run (only full runs are cached)' };
   let suite;
   try {
     if (gitAt(root, 'rev-parse', `${m.harnessRef}:tools/test-harness`) !== m.harnessTree) return { stored: false, reason: 'run harnessTree differs from its harness commit' };
     suite = suiteTree(root, m.harnessRef);
   } catch (e) { return { stored: false, reason: `unverifiable harness ${m.harnessRef}: ${e.message.split('\n')[0]}` }; }
-  const key = cacheKey({ sourceSha: m.sourceSha, suiteTree: suite, node: m.node }), dir = join(cacheDir, key);
+  const key = cacheKey({ sourceSha: m.sourceSha, suiteTree: suite, node: m.node, only: m.only }), dir = join(cacheDir, key);
   if (existsSync(dir)) return { stored: false, key, dir, reason: 'already cached' };
   mkdirSync(cacheDir, { recursive: true });
   const tmp = mkdtempSync(join(cacheDir, `.incoming-${m.sourceSha.slice(0, 9)}-`));
@@ -606,7 +662,7 @@ export function storeCache(cacheDir, run, provenance = {}, root = ROOT) {
       if (files[rel] !== hash) throw Error(`copy differs from the validated evidence: ${rel}`);
     }
     writeFileSync(join(tmp, 'CACHE.json'), JSON.stringify({ schemaVersion: 1, key, sourceSha: m.sourceSha, suiteTree: suite, harnessTree: m.harnessTree, harnessRef: m.harnessRef,
-      harnessArchiveSha256: m.harnessArchiveSha256, sourceArchiveSha256: m.sourceArchiveSha256, node: m.node, nodeVersion: m.nodeVersion, pnpmVersion: m.pnpmVersion,
+      harnessArchiveSha256: m.harnessArchiveSha256, sourceArchiveSha256: m.sourceArchiveSha256, node: m.node, nodeVersion: m.nodeVersion, pnpmVersion: m.pnpmVersion, ...(m.only && { only: m.only }),
       from: run.dir, storedAt: new Date().toISOString(), provenance, files }, null, 2) + '\n');
     renameSync(tmp, dir);
   } catch (e) { try { retire(tmp); } catch {} return { stored: false, key, dir, reason: e.message }; }
@@ -666,6 +722,8 @@ export const SCOPE_RULES = [
   ['tools/client-eval/', ['V3-client-cli']],
   ['tools/world-launcher/', ['V3-launcher-unit', 'V6']],
   ['tools/god-skill/', ['V6']],
+  // The server builds the pinned shared presets (Pip, monster, ghost, centaur) from this source and refuses drifted bytes
+  ['tools/body-authoring/', ['V5']],
   ['tools/', []],
   ['docs/', []],
 ];
@@ -684,9 +742,128 @@ export function scopeFor(files) {
   return { resolved: 'scoped', steps: REQUIRED_STEPS.filter(step => picked.has(step)), diff };
 }
 
+// ── CI evidence for the pinned commit (#1463) ──────────────────────────────────────────────────────────────────────
+// Every PR and the merge queue run CI on the exact commits, and each push to main runs every ci.yml job. A full gate
+// takes the successful ci.yml run (event push to main, or merge_group) whose head is exactly the candidate as evidence
+// for the contract steps CI runs with the same command, and runs on Modal only the rest. A step is covered only when:
+//   - every job below succeeded in that run;
+//   - the CI definitions it depends on (CI_DEFINITIONS) are identical at the candidate and at the baseline, the live
+//     release whose own gate ran them: a candidate cannot weaken what CI proves (`|| true`, continue-on-error, a test
+//     name filter, an echo of the command) and still count it, because the gate runs from the candidate's harness;
+//   - each job's log shows complete node test summaries, and every skipped or todo test in it is quarantined for the
+//     step (a skip passes CI, but the gate counts it as unproved).
+// CI runs Node 22, so another --node takes no evidence. Not covered, on purpose: V2-build-worlds (CI builds only the
+// root base), V3-harness, V3-walk (no CI job), V3-bundle (CI runs the budget comparison, not the bundle tests),
+// V3-packages (CI's `pnpm -r test` misses protocol and engine-native), V3-mars-engine (CI skips the full campus
+// re-extraction), V6 (no CI job runs the scenarios).
+export const CI_COVERED = {
+  'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
+  'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
+  'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
+  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', defs: [], tests: true },
+  'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
+  // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
+  'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
+    defs: ['.github/scripts/server-test-files.mjs'], tests: true },
+};
+/** Definitions every covered step depends on: the workflow (without its comments and the `repo` and `smoke` jobs, which
+ * run no contract step) and the job picker. */
+export const CI_COMMON_DEFINITIONS = ['ci.yml', '.github/scripts/ci-scope.mjs'];
+export const CI_EVENTS = ['push', 'merge_group'];
+/** One CI definition's comparable text at a commit (`file` reads a path there; null when absent). */
+export function ciDefinition(name, file) {
+  if (name === 'ci.yml') {
+    const text = file('.github/workflows/ci.yml');
+    if (text === null) return null;
+    const out = []; let drop = false;
+    for (const line of text.split('\n')) {
+      if (/^\s*#/.test(line)) continue;
+      if (/^ {2}\S/.test(line)) drop = /^ {2}(repo|smoke):/.test(line);
+      else if (/^\S/.test(line)) drop = false;
+      if (!drop) out.push(line.trimEnd());
+    }
+    return out.join('\n');
+  }
+  const script = /^package\.json#(.+)$/.exec(name);
+  if (script) { try { return JSON.parse(file('package.json')).scripts?.[script[1]] ?? null; } catch { return null; } }
+  return file(name);
+}
+/** Node test results in one CI job log (TAP, as node --test prints without a terminal): the skipped and todo test
+ * names, and whether the summaries account for all of them. */
+export function ciLogSkips(text) {
+  const lines = text.split('\n').map(l => l.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, '').replace(/\u001b\[[0-9;]*m/g, ''));
+  const skipped = [];
+  let summaries = 0, counted = 0;
+  for (const line of lines) {
+    const m = /^\s*(?:not )?ok \d+ - (.*?)\s+# (SKIP|TODO)\b/.exec(line);
+    if (m) skipped.push({ id: m[1], status: m[2] === 'SKIP' ? 'skip' : 'todo' });
+    const c = /^# (tests|skipped|todo) (\d+)$/.exec(line.trim());
+    if (c) { if (c[1] === 'tests') summaries++; else counted += Number(c[2]); }
+  }
+  return { skipped, summaries, complete: summaries > 0 && counted === skipped.length };
+}
+const ghApi = path => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'] }));
+const ghLog = (repo, id) => execFileSync('gh', ['api', '--allow-escape-sequences', `repos/${repo}/actions/jobs/${id}/logs`], { encoding: 'utf8', maxBuffer: 4 * MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'] });
+export function repoSlug(root = ROOT) {
+  if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
+  try { return gitAt(root, 'remote', 'get-url', 'origin').replace(/\.git$/, '').match(/[:/]([^/:]+\/[^/]+)$/)?.[1] || null; } catch { return null; }
+}
+/** The CI evidence for one commit: { covered, notCovered: {step: why}, run, jobs } or { covered: [], reason }. `api`
+ * reads the GitHub REST API and `log` one job's log (gh by default); `file` and `baselineFile` read a path at the
+ * candidate and at the baseline; `quarantine` is the gate's quarantine.json. */
+export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id), file, baselineFile, quarantine = { entries: [] } }) {
+  const none = reason => ({ covered: [], reason });
+  if (!repo) return none('no GitHub repository (origin) to read CI from');
+  let runs;
+  try { runs = api(`repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`).workflow_runs || []; }
+  catch (e) { return none(`could not read CI runs: ${String(e.message).split('\n')[0]}`); }
+  const ok = runs.filter(r => r.head_sha === sha && CI_EVENTS.includes(r.event) && r.status === 'completed' && r.conclusion === 'success'
+    && r.path === '.github/workflows/ci.yml' && (r.event !== 'push' || r.head_branch === 'main'));
+  // a push to main runs every job; prefer it, then the newest. A run that went green on a re-run of failed jobs counts
+  // (it ran at this sha); its attempt is recorded.
+  const run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
+  if (!run) return none(`no successful push/merge_group ci.yml run at ${sha} (${runs.length} run(s) at this sha)`);
+  let jobs;
+  try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
+  catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
+  const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion])), jobId = Object.fromEntries(jobs.map(j => [j.name, j.id]));
+  const ciYml = ciDefinition('ci.yml', file) || '';
+  const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);
+  const drifted = name => { const now = ciDefinition(name, file), then = ciDefinition(name, baselineFile); return now === null || then === null || now !== then; };
+  const logs = new Map(), readLog = name => {
+    if (!logs.has(name)) { try { logs.set(name, ciLogSkips(log(jobId[name]))); } catch (e) { logs.set(name, { error: String(e.message).split('\n')[0] }); } }
+    return logs.get(name);
+  };
+  const quarantined = (step, t) => (quarantine.entries || []).some(e => e.step === step && e.status === t.status && (e.id === t.id || e.id.endsWith(` > ${t.id}`)));
+  const covered = [], notCovered = {}, skips = {};
+  for (const step of REQUIRED_STEPS) {
+    const c = CI_COVERED[step];
+    if (!c) { notCovered[step] = 'CI does not run this step with the gate command'; continue; }
+    if (!ciYml.includes(c.command)) { notCovered[step] = `the commit's ci.yml does not run \`${c.command}\``; continue; }
+    const changed = [...CI_COMMON_DEFINITIONS, ...c.defs].filter(drifted);
+    if (changed.length) { notCovered[step] = `CI definitions differ from the baseline's: ${changed.join(', ')}`; continue; }
+    const names = c.jobs.flatMap(j => j === 'server-*' ? (Number.isInteger(shards) && shards > 0 ? Array.from({ length: shards }, (_, i) => `server-${i}`) : [null]) : [j]);
+    if (names.includes(null)) { notCovered[step] = 'SERVER_SHARDS unreadable at the commit'; continue; }
+    const bad = names.filter(n => conclusion[n] !== 'success');
+    if (bad.length) { notCovered[step] = `job(s) not successful in run ${run.id}: ${bad.map(n => `${n}=${conclusion[n] ?? 'absent'}`).join(', ')}`; continue; }
+    if (c.tests) {
+      const problem = names.map(n => { const l = readLog(n);
+        if (l.error) return `${n}: log unreadable (${l.error})`;
+        if (!l.complete) return `${n}: incomplete node test summaries in the log`;
+        const open = l.skipped.filter(t => !quarantined(step, t));
+        if (l.skipped.length) skips[step] = [...(skips[step] || []), ...l.skipped.map(t => ({ job: n, ...t }))];
+        return open.length ? `${n}: unquarantined ${open.map(t => `${t.status} "${t.id}"`).join(', ')}` : null; }).filter(Boolean);
+      if (problem.length) { notCovered[step] = problem.join('; '); continue; }
+    }
+    covered.push(step);
+  }
+  return { covered, notCovered, run: { id: run.id, attempt: run.run_attempt ?? null, event: run.event, headSha: run.head_sha, headBranch: run.head_branch, conclusion: run.conclusion, url: run.html_url },
+    jobs: conclusion, ...(Object.keys(skips).length && { quarantinedSkips: skips }), ...(!covered.length && { reason: 'no contract step covered by that run' }) };
+}
+
 export const USAGE = `usage: release-gate.sh <candidate-ref> [--baseline <ref>] [--out <dir>] [--node 22|26]
          [--baseline-results <dir> [--candidate-results <dir>]] [--cache <dir> | --no-cache] [--scope full|auto] [--dry-run]
-         [--baseline-bundle-carry <qualified-cache-dir>]
+         [--baseline-bundle-carry <qualified-cache-dir>] [--no-ci-evidence]
        release-gate.sh cache-add <completed-run-dir> [--cache <dir>]
 The baseline (default main) comes from the gate cache when a validated run of it exists for this harness tree and Node
 major; otherwise it runs once on Modal beside the candidate and is cached. A passing gate caches its candidate run.
@@ -694,9 +871,11 @@ major; otherwise it runs once on Modal beside the candidate and is cached. A pas
 status not-gated); the default --scope full is the release head's gate. Only full gates qualify a ship or fill the cache.
 --baseline-bundle-carry explicitly retains an original qualified cache across only new bundle-key registrations;
 old execution stays unchanged, derived expectations are labelled separately, and no baseline fallback is allowed.
---dry-run prints the plan (refs, scope, cache hit/miss, Modal runs) without contacting Modal or writing anything.`;
+A full gate takes the successful push/merge_group ci.yml run at the candidate as evidence for the steps CI runs with the
+same command (CI_COVERED) and runs only the rest on Modal; --no-ci-evidence runs the whole contract there.
+--dry-run prints the plan (refs, scope, CI evidence, cache hit/miss, Modal runs) without contacting Modal or writing anything.`;
 const VALUE_OPTIONS = ['--out', '--baseline', '--baseline-results', '--candidate-results', '--node', '--cache', '--scope', '--baseline-bundle-carry'];
-const FLAG_OPTIONS = ['--dry-run', '--no-cache'];
+const FLAG_OPTIONS = ['--dry-run', '--no-cache', '--no-ci-evidence'];
 export function parseArgs(args) {
   args = [...args];
   const candidateRef = args.shift();
@@ -755,17 +934,33 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     const manifestBytes = execFileSync('git', ['-C', root, 'show', `${harnessRef}:tools/test-harness/quarantine.json`]);
     const manifest = JSON.parse(manifestBytes);
     validateQuarantine(manifest);
+    // An older harness without renames.json has no reviewed renames; an empty list only ever keeps removals blocking.
+    let renamesBytes = Buffer.from('{"schemaVersion":1,"entries":[]}\n');
+    try { renamesBytes = execFileSync('git', ['-C', root, 'show', `${harnessRef}:tools/test-harness/renames.json`], { stdio: ['ignore', 'pipe', 'ignore'] }); } catch {}
+    const renames = validateRenames(JSON.parse(renamesBytes));
     const node = options['--node'] || '22';
     if (!['22', '26'].includes(node)) throw Error('supported Node versions: 22, 26');
     receipt = { ...receipt, refs: { baseline: { ref: baselineRef, sha: baselineSha }, candidate: { ref: candidateRef, sha: candidateSha } },
-      harness: { ref: harnessRef, tree: harnessTree, suiteTree: suite, archiveSha256: sha256(harnessArchive) }, quarantineSha256: sha256(manifestBytes), node, exclusions: EXPECTED_SKIP, scopeExclusions: manifest.scopeExclusions };
+      harness: { ref: harnessRef, tree: harnessTree, suiteTree: suite, archiveSha256: sha256(harnessArchive) }, quarantineSha256: sha256(manifestBytes), renamesSha256: sha256(renamesBytes), node, exclusions: EXPECTED_SKIP, scopeExclusions: manifest.scopeExclusions };
     const identity = { schemaVersion: 1, harnessRef, harnessTree, harnessArchiveSha256: sha256(harnessArchive), node };
     const scopeMode = options['--scope'] || 'full';
     const scope = scopeMode === 'full' ? { resolved: 'full', steps: [...REQUIRED_STEPS] }
       : scopeFor(git('diff', '--name-only', baselineSha, candidateSha).split('\n'));
-    receipt.scope = { mode: scopeMode, resolved: scope.resolved, steps: scope.steps, ...(scope.diff && { diff: { range: `${baselineSha}..${candidateSha}`, ...scope.diff } }) };
-    const scoped = scope.resolved === 'scoped', only = scoped ? scope.steps : [];
-    const candidateIdentity = { ...identity, sourceSha: candidateSha, ...(scoped && { only }) };
+    // A full gate takes CI's successful run at the candidate as evidence for the steps CI runs identically (#1463)
+    let ci = null;
+    if (scopeMode === 'full' && !flags.has('--no-ci-evidence') && !options['--candidate-results'] && !options['--baseline-bundle-carry']) {
+      const at = ref => path => { try { return execFileSync('git', ['-C', root, 'show', `${ref}:${path}`], { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+      ci = node !== '22' ? { covered: [], reason: `CI runs Node 22; this gate runs Node ${node}` }
+        : (deps.ciEvidence || ciEvidence)(candidateSha, { repo: 'repo' in deps ? deps.repo : repoSlug(root), file: at(candidateSha), baselineFile: at(baselineSha), quarantine: manifest });
+    }
+    const ciCovered = ci?.covered || [];
+    const scoped = scope.resolved === 'scoped', partial = !scoped && ciCovered.length > 0;
+    const only = scoped ? scope.steps : partial ? REQUIRED_STEPS.filter(step => !ciCovered.includes(step)) : [];
+    const runSteps = only.length ? only : scope.steps;
+    receipt.scope = { mode: scopeMode, resolved: scope.resolved, steps: scope.steps, ...(scope.diff && { diff: { range: `${baselineSha}..${candidateSha}`, ...scope.diff } }),
+      ...(ci && { executed: runSteps, ciCovered }) };
+    if (ci) receipt.ciEvidence = ci;
+    const candidateIdentity = { ...identity, sourceSha: candidateSha, ...(only.length && { only }) };
     if (scope.resolved === 'none') {
       if (dryRun) { log(JSON.stringify({ refs: receipt.refs, scope: receipt.scope, modalRuns: [] }, null, 2)); log(`RELEASE_GATE_PLAN candidate=${candidateSha} baseline=${baselineSha} scope=none modal_runs=0`); return 0; }
       receipt = { ...receipt, status: 'not-gated', endedAt: new Date().toISOString() };
@@ -781,45 +976,53 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       base = { source: 'cached', dir: bundleCarry.provenance.originalCacheDir, cacheKey: bundleCarry.provenance.originalCacheKey,
         bundleExpectationCarry: bundleCarry.provenance };
     } else if (options['--baseline-results']) base = { source: 'imported', dir: resolve(options['--baseline-results']), exact: pairImport };
-    else if (useCache && (cached = lookupCache(cacheDir, { sourceSha: baselineSha, suiteTree: suite, node }, manifest, REQUIRED_STEPS, {}, root)).hit) base = { source: 'cached', dir: cached.dir, cacheKey: cached.key };
-    else base = { source: 'run', dir: join(out, 'baseline'), exact: true, cacheKey: cacheKey({ sourceSha: baselineSha, suiteTree: suite, node }), cacheMiss: useCache ? cached.reason : 'cache disabled (--no-cache)' };
+    else if (useCache && (cached = lookupCache(cacheDir, { sourceSha: baselineSha, suiteTree: suite, node }, manifest, REQUIRED_STEPS, {}, root)).hit) base = { source: 'cached', dir: cached.dir, cacheKey: cached.key, ...(cached.legacyKey && { legacyKey: true }) };
+    // a CI-evidence gate compares only the steps it executes: a cached baseline of exactly those steps serves too
+    else if (useCache && partial && (cached = { full: cached, part: lookupCache(cacheDir, { sourceSha: baselineSha, suiteTree: suite, node, only }, manifest, only, {}, root) }).part.hit)
+      base = { source: 'cached', dir: cached.part.dir, cacheKey: cached.part.key, only };
+    else {
+      const miss = !useCache ? 'cache disabled (--no-cache)' : partial ? `${cached.full.reason}; steps-only: ${cached.part.reason}` : cached.reason;
+      base = { source: 'run', dir: join(out, 'baseline'), exact: true, ...(partial && { only }), cacheKey: cacheKey({ sourceSha: baselineSha, suiteTree: suite, node, ...(partial && { only }) }), cacheMiss: miss };
+    }
     const candidateDir = pairImport ? resolve(options['--candidate-results']) : join(out, 'candidate');
     const plan = { refs: receipt.refs, harness: { ...receipt.harness, clean: harnessClean }, node, scope: receipt.scope, cache: useCache ? cacheDir : null,
-      baseline: { source: base.source, dir: base.dir, cacheKey: base.cacheKey, cacheMiss: base.cacheMiss,
+      baseline: { source: base.source, dir: base.dir, cacheKey: base.cacheKey, cacheMiss: base.cacheMiss, ...(base.legacyKey && { legacyKey: true }), steps: base.only ? 'executed' : 'full',
         ...(bundleCarry && { bundleExpectationCarry: bundleCarry.provenance }) },
-      candidate: { source: pairImport ? 'imported' : 'run', dir: candidateDir },
+      candidate: { source: pairImport ? 'imported' : 'run', dir: candidateDir, steps: runSteps },
+      ...(ci && { ciEvidence: ci }),
       modalRuns: [...(pairImport ? [] : ['candidate']), ...(base.source === 'run' ? ['baseline'] : [])] };
     if (dryRun) {
       log(JSON.stringify(plan, null, 2));
-      log(`RELEASE_GATE_PLAN candidate=${candidateSha} baseline=${baselineSha} scope=${scope.resolved} steps=${scope.steps.length} baseline_source=${base.source} modal_runs=${plan.modalRuns.length}${harnessClean ? '' : ' harness=DIRTY(would block)'}`);
+      log(`RELEASE_GATE_PLAN candidate=${candidateSha} baseline=${baselineSha} scope=${scope.resolved} steps=${scope.steps.length} executed=${runSteps.length} ci_covered=${ciCovered.length} baseline_source=${base.source} modal_runs=${plan.modalRuns.length}${harnessClean ? '' : ' harness=DIRTY(would block)'}`);
       return 0;
     }
     receipt.importedResults = pairImport;
-    receipt.baseline = { source: base.source, dir: base.dir, ...(base.cacheKey && { cacheKey: base.cacheKey }), ...(base.cacheMiss && { cacheMiss: base.cacheMiss }),
+    receipt.baseline = { source: base.source, dir: base.dir, ...(base.only && { only: base.only }), ...(base.cacheKey && { cacheKey: base.cacheKey }), ...(base.legacyKey && { legacyKey: true }), ...(base.cacheMiss && { cacheMiss: base.cacheMiss }),
       ...(bundleCarry && { bundleExpectationCarry: bundleCarry.provenance }) };
     const drivers = {};
     const runs = [];
     if (!pairImport) runs.push(runRemote(candidateDir, candidateSha, harnessRef, node, root, only).then(d => { drivers.candidate = d; }));
-    if (base.source === 'run') runs.push(runRemote(base.dir, baselineSha, harnessRef, node, root).then(d => { drivers.baseline = d; }));
+    if (base.source === 'run') runs.push(runRemote(base.dir, baselineSha, harnessRef, node, root, base.only || []).then(d => { drivers.baseline = d; }));
     await Promise.all(runs);
     if (bundleCarry) {
       const rechecked = await prepareBundleBaselineCarry(base.dir, carryOptions);
       if (rechecked.pinsSha256 !== bundleCarry.pinsSha256) throw Error('bundle baseline carry: original evidence or expectations changed during candidate execution; no baseline fallback allowed');
       bundleCarry = rechecked;
     }
-    const readBaseline = () => bundleCarry ? bundleCarry.originalRun : base.source === 'cached' || (base.source === 'imported' && !base.exact) ? readSuiteRun(base.dir, { sourceSha: baselineSha, suiteTree: suite, node }, manifest, root)
-      : readRun(base.dir, { ...identity, sourceSha: baselineSha }, manifest, REQUIRED_STEPS, { root });
+    const readBaseline = () => bundleCarry ? bundleCarry.originalRun : base.source === 'cached' || (base.source === 'imported' && !base.exact) ? readSuiteRun(base.dir, { sourceSha: baselineSha, suiteTree: suite, node, only: base.only }, manifest, root)
+      : readRun(base.dir, { ...identity, sourceSha: baselineSha, ...(base.only && { only: base.only }) }, manifest, base.only || REQUIRED_STEPS, { root });
     let baseline = readBaseline();
-    const candidate = readRun(candidateDir, candidateIdentity, manifest, scope.steps, { root });
+    const candidate = readRun(candidateDir, candidateIdentity, manifest, runSteps, { root });
     if (drivers.candidate && (drivers.candidate.exit !== 0 || drivers.candidate.timedOut)) candidate.errors.push(`Modal driver failed (${drivers.candidate.timedOut ? 'timeout' : drivers.candidate.exit})`);
     // A cached baseline is only comparable on the candidate's exact runtime (the node:<major> image can move its patch).
     const runtime = r => r.metadata && `${r.metadata.nodeVersion}/${r.metadata.pnpmVersion}`;
     if (base.source === 'cached' && candidate.metadata && runtime(baseline) !== runtime(candidate)) {
       if (bundleCarry) baseline.errors.push(`bundle baseline carry: runtime ${runtime(baseline)} differs from the candidate's ${runtime(candidate)}; baseline fallback forbidden`);
       else {
-        receipt.baseline = { ...receipt.baseline, source: 'run', cacheRejected: `runtime ${runtime(baseline)} differs from the candidate's ${runtime(candidate)}`, cachedDir: base.dir, dir: join(out, 'baseline') };
-        base = { source: 'run', dir: join(out, 'baseline'), exact: true };
-        drivers.baseline = await runRemote(base.dir, baselineSha, harnessRef, node, root);
+        receipt.baseline = { ...receipt.baseline, source: 'run', cacheRejected: `runtime ${runtime(baseline)} differs from the candidate's ${runtime(candidate)}`, cachedDir: base.dir, dir: join(out, 'baseline'),
+          only: partial ? only : undefined, cacheKey: cacheKey({ sourceSha: baselineSha, suiteTree: suite, node, ...(partial && { only }) }) };
+        base = { source: 'run', dir: join(out, 'baseline'), exact: true, ...(partial && { only }) };
+        drivers.baseline = await runRemote(base.dir, baselineSha, harnessRef, node, root, base.only || []);
         baseline = readBaseline();
       }
     }
@@ -828,13 +1031,13 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     const suiteReuse = base.source === 'cached' || (base.source === 'imported' && !base.exact);
     const driverTestsChanged = suiteReuse && !baseline.errors.length && baseline.suiteTree === suite && baseline.metadata?.harnessTree !== harnessTree;
     if (suiteReuse) receipt.baseline = { ...receipt.baseline, harnessRef: baseline.metadata?.harnessRef, harnessTree: baseline.metadata?.harnessTree, suiteTree: baseline.suiteTree, driverTestsChanged };
-    receipt = { ...receipt, ...compareRuns(bundleCarry ? bundleCarry.comparisonRun : baseline, candidate, manifest, candidateSourceFiles, { driverTestsChanged }), drivers,
+    receipt = { ...receipt, ...compareRuns(bundleCarry ? bundleCarry.comparisonRun : baseline, candidate, manifest, candidateSourceFiles, { driverTestsChanged, renames }), drivers,
       runs: { baseline, candidate } };
     // Cache what this gate proved: a fresh baseline run that validated, and the candidate of a passing gate
     // (the next gate's baseline once it becomes main).
     if (useCache) {
       receipt.cache = { dir: cacheDir, stored: [], notStored: [] };
-      const keep = (label, run) => { const r = storeCache(cacheDir, run, { via: 'gate', label, gate: out, status: receipt.status }, root);
+      const keep = (label, run) => { const r = storeCache(cacheDir, run, { via: 'gate', label, gate: out, status: receipt.status, ...(partial && { ciEvidence: true }) }, root);
         (r.stored ? receipt.cache.stored : receipt.cache.notStored).push({ label, key: r.key, dir: r.dir, ...(r.stored ? {} : { reason: r.reason }) }); };
       if (base.source === 'run' && !baseline.errors.length) keep('baseline', baseline);
       if (SUCCESS.has(receipt.status) && !scoped) keep('candidate', candidate);

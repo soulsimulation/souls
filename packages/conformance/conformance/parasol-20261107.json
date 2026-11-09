@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-07 #427 a garden parasol. core-parasol@1 is a new immutable revision on the drawn-covering contact, with a new kit role `canopy` and a new optional component `shade`. No existing def's bytes changed (hand-coverings.ts only appends it). A narrow run (`conformance.mjs --k 2 --filter core-parasol`, which also matches core-parasol-table) baked, placed and rendered all 10 samples with 0 findings and 0 qualification gaps, so this supplement adds no findings.",
+  "findings": []
+}

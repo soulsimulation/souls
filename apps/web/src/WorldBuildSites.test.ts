@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { registerHooks } from 'node:module';
 import { readFileSync } from 'node:fs';
-import { WorldModel, type Entity, type OBB } from '@sim/world-compiler';
+import { WorldModel, type Entity, type OBB } from '@souls/world-compiler';
 import { WorldBuildSites, parseBuildFeed, SITE_REFINEMENT, thingEnvelope, type PublicSite, type SiteDelta, type SiteModel } from './WorldBuildSites.ts';
 
 const SERVER_NOW = 1_800_000_000_000;
@@ -235,7 +235,7 @@ for (const skew of [-600_000, 600_000]) test(`pause and alive deadline use serve
   } finally { h.sites.dispose(); Date.now = realDateNow; }
 });
 
-// Release 1.1 walk: after `build step --say` the label grew to two lines on the same CanvasTexture; Chrome refused the
+// Release 0.1 walk: after `build step --say` the label grew to two lines on the same CanvasTexture; Chrome refused the
 // upload (glCopySubTextureCHROMIUM: Offset overflow) and a visitor kept the old one-line "paused" label, stretched.
 test('a label that changes size gets a fresh texture (the old one disposed once) carrying exactly the new text', () => {
   const painted: string[][] = []; let frame: string[] = [];

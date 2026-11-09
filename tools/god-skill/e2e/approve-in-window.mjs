@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { clickNewSoulEntry } from './window-entry.mjs';
+import { clickNewSoulEntry, waitAccountReady } from './window-entry.mjs';
 import { windowCheck, startWindowListener } from './window-fixture.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -90,7 +90,7 @@ async function context(browser, sub, { viewport, dpr, mobile, colorScheme } = {}
   await ctx.route(/clerk\.example\.test/, (r) => r.abort());
   return ctx;
 }
-const loaded = () => window.__simEntity?.layer?.active === true && !document.querySelector('.viewer-arrival:not([data-done="true"])');
+const loaded = () => window.__soulsEntity?.layer?.active === true && !document.querySelector('.viewer-arrival:not([data-done="true"])');
 async function openWorld(ctx, base, errors) {
   const page = await ctx.newPage(); page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 200)));
   await page.goto(base + '/', { waitUntil: 'commit' });
@@ -110,7 +110,7 @@ const where = () => {
 const topRight = (w) => w.present && w.onTop && w.rightGap <= 40 && (w.vw <= 460 ? w.box[1] + w.box[3] >= w.vh - 40 : w.box[1] <= 170) && (w.vw < 600 || w.box[0] > w.vw / 2);
 async function windowCode(page) {
   const state = () => page.evaluate(() => ({clerkLoaded: !!window.Clerk?.loaded, clerkStatus: window.Clerk?.status,
-    accountMenu: !!document.querySelector('summary.account-avatar'), explanation: !!document.querySelector('[data-new-soul-explain]'),
+    accountMenu: !!document.querySelector('summary.account-avatar'), phoneMenu: document.documentElement.classList.contains('phone-menu'), explanation: !!document.querySelector('[data-new-soul-explain]'),
     currentURL: location.href, godOpen: !!document.querySelector('[data-god-modal][open]'),
     promptHref: document.querySelector('.bring-agent-prompt a')?.getAttribute('href') ?? null}));
   const attempt = {at: new Date().toISOString(), before: await state(), responses: []};
@@ -120,7 +120,8 @@ async function windowCode(page) {
   try {
     // World drawing can finish before the deferred auth bridge. This scenario is explicitly signed in.
     // Wait for its real account UI before New Soul; otherwise the correct signed-out explanation opens.
-    await page.locator('summary.account-avatar').waitFor({state: 'visible', timeout: 20_000});
+    // On a phone (#1433) the account UI sits behind the hamburger: New Soul then goes through the menu.
+    await waitAccountReady(page, 20_000);
     attempt.signedIn = await state();
     await clickNewSoulEntry(page, (event, detail) => {
       if (event === 'entry') attempt.entry = detail;

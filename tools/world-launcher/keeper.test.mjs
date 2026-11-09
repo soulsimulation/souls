@@ -10,9 +10,10 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { testPort } from '../../apps/server/test/test-port.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.KEEPER_TEST_PORT ?? 6017), RANGE = `${PORT + 1}-${PORT + 2}`;   // a lane may move it into its own range
+const PORT = Number(process.env.KEEPER_TEST_PORT ?? await testPort(6)), RANGE = `${PORT + 1}-${PORT + 2}`;   // a lane may move it into its own range
 const dir = mkdtempSync(join(tmpdir(), 'keeper-test-'));
 const data = join(dir, 'data'), link = join(dir, 'current');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -21,6 +22,8 @@ function release(name, { brokenLauncher = false, brokenWorlds = false, loadMs = 
   mkdirSync(join(r, 'apps/server/src'), { recursive: true }); mkdirSync(join(r, 'worlds/templates'), { recursive: true });
   mkdirSync(join(r, 'apps/web/dist'), { recursive: true }); writeFileSync(join(r, 'apps/web/dist/index.html'), `<!doctype html><title>${name}</title>`);
   cpSync(here, join(r, 'tools/world-launcher'), { recursive: true, filter: (f) => !f.includes('/deploy/') && !f.endsWith('.test.mjs') });
+  // the launcher's upload gate for world thumbnails (#887) is the server's own moderation module
+  cpSync(join(here, '../../apps/server/src/moderation'), join(r, 'apps/server/src/moderation'), { recursive: true, filter: (f) => !f.endsWith('.test.ts') });
   // loadMs: the release's code takes that long to load (the part a pre-warmed take-over hides)
   writeFileSync(join(r, 'apps/server/src/main.ts'), brokenWorlds ? 'process.exit(5);\n' : `process.env.FAKE_LOAD_MS ??= '${loadMs}';\n` + readFileSync(join(here, 'fake-world.mjs')));
   if (brokenLauncher) writeFileSync(join(r, 'tools/world-launcher/launcher.mjs'), 'process.exit(3);\n');

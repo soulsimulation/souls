@@ -8,7 +8,7 @@
 // The read code reaches it through `menuWorldOf(host)` (one LiveMenuWorld per engine, unless a worker registered a
 // replica for its read-only host with `setMenuWorld`): dependency injection without threading a parameter through
 // every reader. Grep test: apps/server/src/split/menu-world.test.ts (no `host.engine` reach in read code).
-import type {Anchor, Program, ProgramAction, RuntimeView, VerbInfo} from '@sim/engine-contract';
+import type {Anchor, Program, ProgramAction, RuntimeView, VerbInfo} from '@souls/engine-contract';
 import type {WorldState as NativeWorld} from '../../../../mars/viewer/engine/world/types.ts';
 import type {ConnPoint, ConnVerdict} from '../../../../mars/viewer/engine/spatial/connectivity.ts';
 
@@ -71,6 +71,9 @@ export interface MenuWorld {
   bodyWaterDepthV1?(actor: string): number;
   /** intents.ts eta: the walk planner's route length from the body to a point */
   routeEstimateV1?(actor: string, to: V2, level?: number): {ok: true; metres: number} | {ok: false; code: string; message: string};
+  /** #1287 ledger stepOutWait: the engine's nav-connect rescue read (0 ms: never builds the labels). Main only: a replica
+   *  has none, so it reads as not cut off (the split-menu answer stays as before the step-out). */
+  navRescueV1?(actor: string, budgetMs?: number): unknown;
   // (c)
   readonly feasibility: Feasibility;
 }
@@ -135,6 +138,8 @@ export class LiveMenuWorld implements MenuWorld {
   programOf(actor: string) {return this.engine.programOf(actor);}
   /** Looked up per read, not bound at construction: the engine's own (possibly replaced) method, or absent. */
   get nativeSeatHoldsV1(): MenuWorld['nativeSeatHoldsV1'] {const f = (this.engine as {nativeSeatHoldsV1?: MenuWorld['nativeSeatHoldsV1']}).nativeSeatHoldsV1; return typeof f === 'function' ? f.bind(this.engine) : undefined;}
+  /** #1287: per read too (a test may wrap the engine's rescue to count its calls). */
+  get navRescueV1(): MenuWorld['navRescueV1'] {const f = (this.engine as {navRescueV1?: MenuWorld['navRescueV1']}).navRescueV1; return typeof f === 'function' ? f.bind(this.engine) : undefined;}
 }
 export interface LiveMenuWorld extends Pick<MenuWorld, typeof OPTIONAL[number]> {}
 

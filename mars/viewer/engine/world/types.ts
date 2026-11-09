@@ -49,6 +49,7 @@ export type ComponentPhase =
   | 'installed'; // connected and self-supporting under the assembly rules
 
 export type HumanState = {
+  bodyMotionV1?: import('../bodies/motion.ts').BodyMotionState;
   /** Opt-in stopped-dock boarding and finite boat passenger frame. */
   boatPassenger?: { boatId: string; slotId: string; phase: 'boarding' | 'seated' | 'leaving'; localRoot: Vec3; relativeYaw: number };
   boatTransit?: { from: Vec3; to: Vec3; t: number; supportId: string };
@@ -66,6 +67,8 @@ export type HumanState = {
   wateringV1?: import('../items/watering.ts').WateringMotion;
   /** Soul Actions 34: a handle-held item being taken or put by hand (the arm blends in and out on this timeline). */
   handTransferV1?: import('../items/watering.ts').HandTransfer;
+  /** #441 (W107): the juggling run on this body (items/juggle.ts); stays after it ended for the receipt's count. */
+  juggleV1?: import('../items/juggle.ts').JuggleV1;
   /** Soul Actions 43: the last let-go before a reach (an idle gesture fades out on it); never controller context. */
   letGoV1?: import('../items/let-go.ts').LetGoV1;
   /** Soul Actions 44: one recorded mug stage (drinking in sips, rinsing at a tap); never controller context. */
@@ -154,7 +157,7 @@ export type Body = { family: 'humanoid' | 'floater'; type?: 'humanoid' | 'cerami
   avatar?: {kind:'body'; modelUrl:string; bodyType:'humanoid'|'ceramic'|'floater'}; radius?: number; hoverHeight?: number;
   /** core/humanoid@2 look params (compact), with `model` = the look key `humanoid2-<sha16>`. Height, build and walkSpeed
    *  are physical (bodies/humanoid.ts: radius, eye height, seat fit, walking speed); the rest is paint. */
-  params?: Record<string, string | number> };
+  actionProfile?: import('../bodies/action-profile.ts').ActionProfile; params?: Record<string, string | number>; motion?: import('../bodies/motion.ts').BodyMotion };
 
 export type Entity = {
   /** carrier/1 (vehicles/carrier.ts): a ride with seats that carries its riders along a deterministic route. */
@@ -237,6 +240,10 @@ export type Environment = {
 };
 
 export type WorldState = {
+  /** #1150 rung 3: rule breaks the world could not repair, kept visible. */
+  containedV1?: { code: string; subjects: string[]; until?: number }[];
+  /** #1440: bodies held by a standing mark (quarantine/1 `standing`), absent when none. */
+  standingHoldsV1?: Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; last: number }>;
   schema: typeof WORLD_SCHEMA;
   base: BaseRef;
   tick: number;

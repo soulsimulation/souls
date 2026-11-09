@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
 import {Hono} from 'hono';
-import {coreRef} from '@sim/world-compiler';
+import {coreRef} from '@souls/world-compiler';
 import {fixture,factory,invite,accept} from '../../test/native-owner-fixture.ts';
 import {EdgeLedger} from '../edge/ledger/ledger.ts';
 import {GodMode} from './god.ts';
@@ -166,9 +166,9 @@ test('canonical omitted area keeps exact legacy on-demand cap/plan and native re
  edge.invalidateBodies();let lists=0;const binds=(edge as any).binds.bind(edge);(edge as any).binds=(...a:any[])=>{lists++;return binds(...a);};
  const out=await accept(f.host,edge.act(soul,{capability:'walk:place-field',clientRef:'omitted-area'}));assert.equal(out.accepted,true,JSON.stringify(out));if(!out.accepted)return;assert.equal(lists,0);
  assert.deepEqual(out.receipt.chosen,{capability:'walk:place-field',target:'g-place-field',kind:'place',place:'g-place-field'});
- const prior=(edge as any).exactWalkBindings;(edge as any).exactWalkBindings=()=>null;
+ const prior=(edge as any).exactWalkBindings,repeatOf=(edge as any).repeatOf;(edge as any).exactWalkBindings=()=>null;(edge as any).repeatOf=()=>null;   // #1272: the walk is under way, and this asks the legacy path itself
  const legacy=await accept(f.host,edge.act(soul,{capability:'walk:place-field',clientRef:'legacy-area'}));assert.equal(legacy.accepted,true,JSON.stringify(legacy));if(legacy.accepted)assert.deepEqual(legacy.receipt.chosen,out.receipt.chosen);
- (edge as any).exactWalkBindings=prior;(edge as any).binds=binds;
+ (edge as any).exactWalkBindings=prior;(edge as any).repeatOf=repeatOf;(edge as any).binds=binds;
  edge.knowledge.setSecret('g-place-field',true);const replay=await edge.act(soul,{capability:'walk:place-field',clientRef:'omitted-area'});assert.equal(replay.accepted,true);if(replay.accepted)assert.equal(replay.receipt.id,out.receipt.id);
  assert.equal(w.sparse('walk:place-field'),null,'unknown secret area cannot use sparse admission');edge.knowledge.setSecret('g-place-field',false);
  const active=bridge.layers.active.bind(bridge.layers),refuse=bridge.layers.constructionRefusal.bind(bridge.layers);bridge.layers.active=()=>true;bridge.layers.constructionRefusal=()=>({code:'site.under-construction',reason:'Native fixture closes this route'});
