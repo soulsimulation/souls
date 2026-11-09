@@ -133,6 +133,12 @@ export class Seat {
     // #1098: a live seat with no real cost report (Codex) can't be held to the world budget, so under one it is refused
     const noCost = this.budget && this.info.adapter !== 'claude-headless' ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
     const ctxBefore = this.info.sessionContextTokens ?? null;   // the session's context at its last call (null: no call yet)
+    if (this.info.seatCheck && !this.info.seatCheck.ok) {   // #1687: a seat that failed its first-call check takes no further live turn
+      const ended = now(); this.inTurn = false;
+      const rec = { turn: n, reason, startedAt: started.t, endedAt: ended.t, startMono: started.mono, endMono: ended.mono, wallMs: 0, usage: null, finalText: null, toolCalls: [], exit: null, timedOut: false, endedAfterResult: null, refused: 'seat-check', seatCheck: this.info.seatCheck };
+      appendJsonl(join(this.dir, 'turns.jsonl'), rec);
+      return rec;
+    }
     const hold = noCost ?? (this.budget ? await this.budget.reserve(this.seat.id, { contextTokens: ctxBefore }) : null);
     if (hold && !hold.ok) {   // #1098: refused before any provider call; recorded as a turn with no model use
       const ended = now(); this.budgetRefused = hold.reason; this.inTurn = false;
@@ -203,10 +209,11 @@ export class Seat {
     if (r.cumulative) this.cumulative = r.cumulative;
     if (r.sessionId && r.sessionId !== this.info.sessionId) { this.info.sessionId = r.sessionId; }
     if (this.info.effortApplied === undefined && r.effortApplied !== null) this.info.effortApplied = r.effortApplied;
+    if (r.seatCheck) this.info.seatCheck = r.seatCheck;   // #1687: a new session's first-call context, and whether it passed
     this.save();
     for (const e of r.stream) appendJsonl(join(this.dir, 'transcript.jsonl'), { turn: n, ...e });
     const rec = { turn: n, reason, startedAt: started.t, endedAt: ended.t, startMono: started.mono, endMono: ended.mono, wallMs: r.wallMs, usage: r.usage ? { ...r.usage, costUsd: turnCost, ...(sessionCost != null ? { sessionCostUsd: sessionCost } : {}) } : r.usage, finalText: r.finalText,
-      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null };
+      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null, ...(r.seatCheck ? { seatCheck: r.seatCheck } : {}) };
     appendJsonl(join(this.dir, 'turns.jsonl'), rec);
     const u = r.usage ?? {};
     appendJsonl(join(this.dir, 'cost.jsonl'), { t: ended.t, mono: ended.mono, turn: n, inputTokens: u.inputTokens ?? null, cachedTokens: u.cachedTokens ?? null,

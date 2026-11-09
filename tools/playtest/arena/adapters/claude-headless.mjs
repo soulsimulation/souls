@@ -80,19 +80,38 @@ export function renderChat(stream) {
   return out.join('\n\n') + '\n';
 }
 
+// #1687: a seat starts from these variables only. Anything else in the launcher's environment (an agent session's
+// CLAUDE_CODE_* host variables, ANTHROPIC_BASE_URL, ...) can turn on tools or context the seat would not have on the
+// playtest machine: on #1098 it added 3 tools and ~14k tokens to every first call. More names: PLAYTEST_SEAT_ENV_PASS.
+export const SEAT_ENV_KEEP = ['HOME', 'PATH', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'SHELL', 'TMPDIR', 'CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+/** seatEnv(src) → the seat's environment: SEAT_ENV_KEEP plus the names in src.PLAYTEST_SEAT_ENV_PASS (comma or space separated). */
+export function seatEnv(src = process.env) {
+  const pass = String(src.PLAYTEST_SEAT_ENV_PASS ?? '').split(/[\s,]+/).filter(Boolean);
+  return Object.fromEntries([...SEAT_ENV_KEEP, ...pass].filter((k) => src[k] != null).map((k) => [k, src[k]]));
+}
+/** The first-call context limit for a new session (PLAYTEST_SEAT_CTX_MAX, tokens; 0 turns the check off). #1098 CTRL: 17.4k. */
+export const seatCtxMax = (src = process.env) => { const v = Number(src.PLAYTEST_SEAT_CTX_MAX ?? 20000); return Number.isFinite(v) && v >= 0 ? v : 20000; };
+const callCtx = (u) => (u?.input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0);
+
 /** turn({cwd, sessionId, resume, model, effort, text, allowedTools, maxWallSec}) → {stream, usage, finalText, sessionId, exit, wallMs, timedOut, toolCalls, effortApplied} */
-export async function turn({ cwd, sessionId, resume = false, model = 'haiku', effort = null, text, allowedTools = DEFAULT_ALLOWED, maxWallSec = 240, resultGraceMs = 3000, maxBudgetUsd = null, maxOutputTokens = null }) {
+export async function turn({ cwd, sessionId, resume = false, model = 'haiku', effort = null, text, allowedTools = DEFAULT_ALLOWED, maxWallSec = 240, resultGraceMs = 3000, maxBudgetUsd = null, maxOutputTokens = null, ctxMax = seatCtxMax() }) {
   const effortOk = effort ? await supportsEffort() : false;
   const args = buildArgs({ sessionId, resume, model, effort, text, allowedTools, effortOk, maxBudgetUsd });
   // CLAUDE_CODE_DISABLE_CLAUDE_MDS: a seat must not load the user's or a parent folder's CLAUDE.md (--setting-sources does not stop it).
-  const env = { ...process.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' }; delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
+  const env = { ...seatEnv(), CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' };
   if (maxOutputTokens != null) env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(maxOutputTokens);   // #1098: bounds the one call that can land past the turn's cap
   const stream = [{ type: 'harness_user', text, _rx: Date.now() }];
   // `claude -p` does not exit while the agent's own background Bash tasks (its `listen`) run: the turn is over at the final
   // result event, so after a short grace the harness ends the process group (the wake loop's listen takes over).
-  let grace = null, endedAfterResult = false;
+  let grace = null, endedAfterResult = false, seatCheck = null;
   const h = startTurn('claude', args, { cwd, env, maxWallSec, onLine: (l) => {
     const e = parseLine(l); if (!e) return; e._rx = Date.now(); stream.push(e);
+    // #1687 seat check: a new session's first call shows the seat's fixed context; above the limit the turn ends here.
+    if (!resume && !seatCheck && e.type === 'assistant' && e.message?.usage) {
+      const firstCallTokens = callCtx(e.message.usage);
+      seatCheck = { ok: !(ctxMax > 0 && firstCallTokens > ctxMax), firstCallTokens, max: ctxMax };
+      if (!seatCheck.ok) { stream.push({ type: 'harness_seat_check', ...seatCheck, _rx: Date.now() }); h.kill(); return; }
+    }
     if (grace && e.type === 'assistant') { clearTimeout(grace); grace = null; }
     if (isFinalResult(e)) { clearTimeout(grace); grace = setTimeout(() => { endedAfterResult = true; h.kill(); }, resultGraceMs); }
   } });
@@ -103,7 +122,7 @@ export async function turn({ cwd, sessionId, resume = false, model = 'haiku', ef
   if (r.code !== 0 && r.stderr && !endedAfterResult) stream.push({ type: 'harness_stderr', text: r.stderr.slice(-2000), _rx: Date.now() });
   const s = summarize(stream);
   return { stream, usage: s.usage, finalText: s.finalText, sessionId: s.sessionId ?? sessionId, exit: endedAfterResult ? 0 : r.code, rawExit: r.code, wallMs: r.wallMs, timedOut, endedAfterResult,
-    toolCalls: s.toolCalls, effortApplied: effort ? effortOk : null };
+    toolCalls: s.toolCalls, effortApplied: effort ? effortOk : null, seatCheck };
 }
 
 /** proc.run with an external kill handle: {done: Promise<{code, signal, stdout, stderr, wallMs, timedOut}>, kill()}. */
@@ -111,7 +130,7 @@ function startTurn(cmd, args, { cwd, env, maxWallSec, onLine }) {
   let killFn = () => {};
   const t0 = Date.now(); let timedOut = false;
   const done = new Promise((resolve) => {
-    const p = start(cmd, args, { cwd, env, onLine, onExit: ({ code, signal, stdout, stderr }) => { clearTimeout(timer); resolve({ code, signal, stdout, stderr, wallMs: Date.now() - t0, timedOut }); } });
+    const p = start(cmd, args, { cwd, env, envExact: true, onLine, onExit: ({ code, signal, stdout, stderr }) => { clearTimeout(timer); resolve({ code, signal, stdout, stderr, wallMs: Date.now() - t0, timedOut }); } });
     const hardKill = () => { p.kill('SIGTERM'); setTimeout(() => p.kill('SIGKILL'), 5000); };
     killFn = hardKill;
     const timer = setTimeout(() => { timedOut = true; hardKill(); }, maxWallSec * 1000);

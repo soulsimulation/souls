@@ -79,6 +79,14 @@ and when it exits with messages the harness wakes the seat with that output, as 
 background task. Codex seats wake only when `wake: true`. An optional god seat sets itself up from the world's
 served god skill.
 
+A Claude seat starts from a clean environment, not the launcher's (#1687). It gets HOME, PATH, USER, LOGNAME, LANG,
+LC_ALL, TERM, SHELL, TMPDIR, CLAUDE_CONFIG_DIR, ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN, plus the seat's own
+settings. Add further names with `PLAYTEST_SEAT_ENV_PASS` (comma- or space-separated). An agent session's own variables
+can turn on extra tools: on #1098 they added about 14k tokens to every call. **Seat check:** when a new session's first
+call carries more input context than `PLAYTEST_SEAT_CTX_MAX` (default 20000 tokens; 0 turns the check off), that
+turn ends at once. The seat then takes no further live turn, and `turns.jsonl` records `seatCheck`. `run-specs.sh` stops
+the arm after such a run (exit 8). For #1098's CTRL the first call carried 17.4k.
+
 ### Personas
 
 `personas/*.md` are character sheets: newcomer, casual, social, spectator, storyteller, boundary, pinkteam, expert,
