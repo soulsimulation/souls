@@ -709,3 +709,12 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Botanical flower press
+
+`core/flower-press@1` is a fixed hinged press with authored botanical material on its backing paper.
+`object:<press-id>:close` preserves the material at native close contact (`pressed=true`);
+`object:<press-id>:open` reveals the flattened artwork again; `read:<press-id>` reads its lasting status label.
+These actions use empty parameters and existing access, state and interruption rules. An approach interrupted before contact leaves raw material.
+The preserved state survives reopening and persistence. This is a compact art-making interaction, with no
+botanical drying-time simulation or removable output item.
