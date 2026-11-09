@@ -5,6 +5,7 @@ import {WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 // and whether the engine camera is on can never change what is shown at a
 // given t (spec §18: the take plays identically with any camera).
 import {PIANO_FADE} from './activity-poses.ts';
+import {GUITAR_FADE} from './piano-score.ts';
 import {recordedBody,admittedBodyUrl} from './recorded-body.ts';
 import {recordedGame} from './recorded-games.ts';
 import {projectPlatformFrame} from './recorded-platforms.ts';
@@ -323,9 +324,9 @@ export class TakePeople {
     let b:string|null=null;for(let i=a.bt.length-1;i>=0;i--)if(a.bt[i]<a.t[k]){b=a.bv[i];break;}
     const age=(tick-a.t[k])*this.take.dt;
     const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'>={ ...wave, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
-    if(age<PIANO_FADE&&(history.prevActivity==='play-piano'||history.prevActivity==='play-music'&&a.it)){
+    if(age<Math.max(PIANO_FADE,GUITAR_FADE)&&(history.prevActivity==='play-piano'||history.prevActivity==='play-music'&&a.it)){
       let instrument:string|null=null;for(let i=(a.it?.length??0)-1;i>=0;i--)if(a.it![i]<a.t[k]){instrument=a.iv![i];break;}
-      if(history.prevActivity==='play-piano'||instrument==='piano'||instrument==='keyboard'){
+      if(history.prevActivity==='play-piano'||instrument==='piano'||instrument==='keyboard'||instrument==='guitar'){
         history.prevActivityDuration=(a.t[k]-a.t[k-1])*this.take.dt;if(instrument)history.prevInstrument=instrument;
       }
     }
@@ -368,7 +369,7 @@ export class TakePeople {
       let found=false;
       for(const [tick,id,field,value]of take.changes){
         if(field!=='activity'&&field!=='baseActivity'&&field!=='instrument')continue;
-        if(field==='instrument'&&value!=='piano'&&value!=='keyboard'&&!this.acts.get(id)?.it)continue;
+        if(field==='instrument'&&value!=='piano'&&value!=='keyboard'&&value!=='guitar'&&!this.acts.get(id)?.it)continue;
         let a=this.acts.get(id);if(!a)this.acts.set(id,(a={t:[],v:[],bt:[],bv:[]}));
         if(field==='activity'){
           if(value==='wave')found=true;

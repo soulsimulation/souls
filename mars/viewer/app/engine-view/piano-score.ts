@@ -139,3 +139,38 @@ export function voiceAt(who: Accompanist | null, t: number): { open: number; bre
   const release = Math.max(0, 1 - after / 0.12);
   return { open: n.breath ? release : 1, breath: n.breath ? Math.sin(Math.PI * Math.min(1, Math.max(0, (after - 0.02) / (rest - 0.04)))) : 0 };
 }
+
+// Solo guitar on the existing absolute score clock. Sound and the right wrist consume these same strums.
+export const GUITAR_FADE = .8;
+export type GuitarStrum = {t:number; chord:string; notes:readonly number[]; up:boolean; vel:number};
+const CHORDS:Record<number,{name:string;notes:readonly number[];fret:number}> = {
+  48:{name:'C',notes:[48,52,55,60,64],fret:.40},
+  45:{name:'Am',notes:[45,52,57,60,64],fret:.43},
+  53:{name:'F',notes:[41,48,53,57,60,65],fret:.46},
+  55:{name:'G',notes:[43,47,50,55,59,67],fret:.48},
+};
+function chordAt(seed:string,t:number){
+  const bar=Math.floor(t/(PIANO_STEP*8))*PIANO_STEP*8;
+  const root=pianoNotes(seed,bar,bar+1e-6).find(n=>n.hand===0)?.midi??48;
+  return CHORDS[root]??CHORDS[48];
+}
+/** Half-beat strums, on the piano grid; a short upstroke answers each downstroke. Windows compose without state. */
+export function guitarStrums(seed:string,a:number,b:number):GuitarStrum[]{
+  const out:GuitarStrum[]=[];
+  for(let k=Math.ceil(a/(PIANO_STEP*2)-1e-9);k*PIANO_STEP*2<b;k++){
+    const t=k*PIANO_STEP*2,up=((k%2)+2)%2===1,c=chordAt(seed,t);
+    out.push({t,chord:c.name,notes:up?[...c.notes].reverse().slice(0,3):c.notes,up,vel:up?.42:.72});
+  }
+  return out;
+}
+/** Signed travel across the strings. At the audible onset the pick crosses their centre, then returns for the next hit. */
+export function guitarStroke(seed:string,t:number):number{
+  const strum=guitarStrums(seed,t-.5,t+1e-6).at(-1);
+  if(!strum)return -1;
+  return (strum.up?-1:1)*Math.sin(Math.PI*(t-strum.t)/.5);
+}
+/** Neck contact moves smoothly during the final .18 s before a chord boundary. */
+export function guitarFret(seed:string,t:number):number{
+  const next=(Math.floor(t/2)+1)*2,k=Math.max(0,Math.min(1,(t-next+.18)/.18)),s=k*k*(3-2*k);
+  return chordAt(seed,t).fret+(chordAt(seed,next).fret-chordAt(seed,t).fret)*s;
+}

@@ -22,6 +22,7 @@
 import {audioSettings,setAudioSettings,subscribeAudioSettings} from '../audio-settings.ts';
 import { kettleHeat, type WorldModel } from '@souls/world-compiler';
 import { accompanistOf, crackle, drumHits, PIANO_FADE, pianoEndAt, pianoNotes, pianoReadyAt, recordNotes, sungNotes, type Accompanist } from '../../../../mars/viewer/app/engine-view/piano-score.ts';
+import {GuitarAudio} from './guitar.ts';
 import { RADIO_STATIONS, stationEvents, TUNE, type RadioEvent } from './radio-stations.ts';
 import { makeSinger, micChain, type Singer } from './voice.ts';
 import { ambienceAt, condition, distanceTo, emittersOf, exposureAt, falloff, Movement, notesToSound, QueuedNotes, treeIndex, treesOf, type Emitter, type Resident, type SoundKind, type Source, type TreeIndex } from './sound-plan.ts';
@@ -81,11 +82,14 @@ function pianoKey(c: AudioContext, out: AudioNode, at: number, midi: number, pea
 const PIANO_RADIUS = 24, PIANO_VOLUME = 0.55, PIANO_AHEAD = 0.35, pianoDone = new Map<string, number>();
 const pianoQueued = new QueuedNotes<OscillatorNode>();
 let pianoNear = false, audioNow = 0;
+const guitar=new GuitarAudio();
 function playPianos(host: Host, x: number, y: number, z: number) {
   pianoNear = false;
   const now = host.worldSeconds; if (typeof now !== 'number' || !ctx || !master) return;
   const playing = new Set<string>();
+  guitar.begin(now,audioNow);
   for (const r of host.residents?.() ?? []) {
+    if(r.activity==='play-music'&&r.instrument==='guitar'){guitar.resident(r,falloff(Math.hypot(r.p[0]-x,r.p[1]-y,r.p[2]-z),PIANO_RADIUS,PIANO_VOLUME),ctx,master);continue;}
     if (r.activity !== 'play-piano' || !r.body) continue;
     playing.add(r.body);
     const g = falloff(Math.hypot(r.p[0] - x, r.p[1] - y, r.p[2] - z), PIANO_RADIUS, PIANO_VOLUME); if (g <= 0.001) continue;
@@ -98,6 +102,7 @@ function playPianos(host: Host, x: number, y: number, z: number) {
       pianoQueued.add(r.body, at, pianoKey(ctx, master, at, n.midi, g * n.vel * 0.5)); if (n.hand === 1) pianoAt.set(`${r.body}:${n.t}`, at);
     }
   }
+  guitar.finish();
   for (const o of pianoQueued.settle(audioNow, playing)) o.disconnect(); // the player stopped before this note began: it never sounds
   for (const [k, t] of pianoDone) if (t < now - 2) pianoDone.delete(k);
   for (const [k] of pianoAt) if (Number(k.slice(k.lastIndexOf(':') + 1)) < now - 4) pianoAt.delete(k);
@@ -518,7 +523,7 @@ const musicOn = () => settings.music;
 // after the last near tick (hysteresis) and the music ramps the change over ~1 s (music.ts), so it breathes instead of
 // stepping.
 const DUCK_HOLD_MS = 2500; let duckHeldUntil = 0;
-const musicDuck = () => { const now = performance.now(); if (pianoNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
+const musicDuck = () => { const now = performance.now(); if (pianoNear || guitar.near || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
 const musicSync = () => syncMusic({ on: musicOn(), station: settings.station, audible: audible(), volume: settings.volume * musicDuck(), unlocked: !!ctx && ctx.state === 'running' });
 function unlock() {
   // #1389: a tap also wakes a context the browser suspended or interrupted (iOS after the page was in the background);
@@ -548,7 +553,7 @@ function step(host: Host) {
   // entry 36: one audio clock reading per tick for every instrument and the voice (ctx.currentTime moves in 128-sample
   // steps while the tick runs: read per instrument, the voice landed up to one step (2.9 ms) off the piano's note)
   audioNow = ctx?.currentTime ?? 0;
-  if (!settings.muted) { playPianos(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { pianoNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
+  if (!settings.muted) { playPianos(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { guitar.begin(host.worldSeconds??0,audioNow);guitar.finish();pianoNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
   const heard: Heard[] = [], playlist = musicPlaying();
   for (const e of [...objects, ...ambient, ...people]) {
     if (e.spec.kind === 'music' && (jukeboxIds.has(e.id) || radioIds.has(e.id))) continue;   // a jukebox plays its song (playJukeboxes), a radio its station (playRadios)
@@ -622,7 +627,7 @@ export function startSoundLayer() {
   subscribeAudioSettings(()=>{settings=audioSettings();applyMaster();lastAmb=0;musicSync();});
   const w = window as unknown as { __soulsEntity?: Host; __edenSound?: unknown };
   w.__edenSound = {
-    state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, piano: { near: pianoNear, scheduled: pianoDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
+    state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, guitar:guitar.state(), piano: { near: pianoNear, scheduled: pianoDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
       radio: { near: radioNear, ids: radioIds.size, scheduled: radioDone.size, radios: [...radios].map(([id, r]) => ({ id, on: r.on, station: r.station, gain: +r.gain.toFixed(3), tunes: r.tunes, tuning: typeof w.__soulsEntity?.worldSeconds === 'number' && w.__soulsEntity.worldSeconds - r.tunedAt < TUNE.toLocked, hiss: +r.hiss.gain.value.toFixed(3) })) }, voice: { near: voiceNear, singers: [...singers].map(([id, s]) => ({ id, with: s.with })), scheduled: voiceLog.length },
       world: { trees: trees.count, exposure: +exposure.toFixed(2), night: +night.toFixed(2), typicalGround: +typicalGround.toFixed(1) },
       emitters: [...objects, ...ambient, ...people].map((e) => ({ id: e.id, kind: e.spec.kind, variant: e.spec.variant ?? 0, source: e.source, when: e.spec.when ?? null, on: condition(e.spec.when, e.state, night) })),

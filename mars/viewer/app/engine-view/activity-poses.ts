@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PIANO_FADE, PIANO_STEP, drumHands, pianoHands, pianoLanes, voiceAt, type Accompanist } from './piano-score.ts';
+import {guitarPose,type GuitarPose} from './guitar-contact.ts';
 import {gameContact,type RecordedGame} from './recorded-games.ts';
 import {rowingStroke} from './rowing-motion.ts';
 import {seesawAngle, swingAngle} from './play-motion.ts';
@@ -57,6 +58,7 @@ export type ActivityFrame = {
   handWeights?:[number,number];
   /** Piano contact plane and per-hand lift above it, from the shared audible score. */
   piano?:{height:number;lift:[number,number];weight:number};
+  guitar?:GuitarPose;
   hands: [HandGoal | null, HandGoal | null] | null;
   /** Feet apart (metres each side) and pelvis lift (metres, a hop) for standing cycles. */
   feetOut: number; hop: number;
@@ -187,6 +189,7 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     case 'play-music': { const s = Math.sin(t * 6) * 0.06;
       // Entry 26: the sticks meet the drums at the drum part's own hits (the sound the visitor hears), lifting between them
       if(opts.instrument==='drums'){const [l,r]=drumHands(opts.actorId ?? id,seconds);f.hands=[[.38,.05,-.26+l.lift*.16],[.38+r.reach*.06,.05+r.reach*.1,-.26+r.lift*.16+r.reach*.04]];f.look=.18;}
+      else if(opts.instrument==='guitar'){const g=guitarPose(opts.actorId??id,seconds,opts.since,opts.released,opts.priorAge);f.guitar=g;f.hands=[[0,0,0],[0,0,0]];f.rootHands=[[g.left[0],-g.left[1],g.left[2]],[g.right[0],g.right[1],g.right[2]]];f.handW=[g.weight,g.weight];f.curl=[.65,.25];f.look=.14;return f;}
       else if(opts.instrument==='keyboard'||opts.instrument==='piano')return activityFrame('play-piano',base,seconds,id,opts);
       else if(['violin','viola'].includes(opts.instrument??'')){f.hands=[[.24,.1,.12],[.25,.2+s*2,-.05]];f.look=.14;}
       else if(opts.instrument==='cello'){f.hands=[[.3,-.02,-.14],[.38,.12+s*2,-.4]];f.look=.2;}
@@ -317,7 +320,8 @@ export function makeProp(kind: PropKind): THREE.Group {
       const neck=kind==='bass'?.58:.43;
       g.add(part(k.box,M.cover,.028,neck,.05,0,.24+neck/2));
       g.add(part(k.box,M.wood,.035,.11,.075,0,.3+neck));
-      g.add(part(k.box,M.metal,.006,.62,.012,.058,.24));
+      if(kind==='guitar'){for(let i=0;i<6;i++)g.add(part(k.box,M.metal,.002,.66,.002,.058,.26,(i-2.5)*.009));}
+      else g.add(part(k.box,M.metal,.006,.62,.012,.058,.24));
       g.add(part(k.sphere,M.cover,.008,.045,.045,.058,.03));break;
     }
     case 'violin': case 'viola': case 'cello': {

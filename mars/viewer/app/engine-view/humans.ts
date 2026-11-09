@@ -66,7 +66,8 @@ import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
-import { accompanistOf } from './piano-score.ts';
+import { accompanistOf,GUITAR_FADE } from './piano-score.ts';
+import {placeGuitar} from './guitar-contact.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -194,7 +195,7 @@ type View = {
   restFrom?: number;
   /** Idle variety weight drawn at the last render (Idle_Neutral + variant; diagnostics only). */
   variety?: number;
-  /** Entry 36: the idle-variety onset level when the body last stood idle (a singer's gesture fades out from it). */
+  /** Entry 36: the idle-variety onset level when the body last stood idle (singing/guitar gestures fade out from it). */
   singOnset?: number;
   /** Seconds since the current walk began (its weight left 0), and the rest clock then; undefined: not walking / long ago. */
   walkAge?: number;
@@ -1009,9 +1010,11 @@ export class HumanViews {
     // entry 36: a singer sings along with the nearest player (her head and breath follow the sung notes); just after her
     // singing ends, the singing frame eases out (the hand lets go of the mic) instead of snapping to the base posture
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
+    const guitarRelease=v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='guitar'&&v.since!==undefined&&v.since<GUITAR_FADE;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
     const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
+      : guitarRelease ? activityFrame('play-music',v.prevBase??'idle',tSec-v.since!,pairPhase,{actorId:h.name,instrument:'guitar',released:v.since,priorAge:v.prevDuration})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
@@ -1054,6 +1057,8 @@ export class HumanViews {
     // gesture fades out over GESTURE_FADE from the singing's start, at the onset level it had then (it was cut: 0.175 m
     // per 50 ms in take 3), while the arm eases onto the mic
     const singFade = v.activity === 'sing' && v.singOnset !== undefined && (v.since ?? 9) < GESTURE_FADE ? 1 - smooth((v.since ?? 9) / GESTURE_FADE) : 0;
+    // A guitar's hands likewise enter from the idle clip already playing, rather than cutting its wrist pose at onset.
+    const guitarFade=v.activity==='play-music'&&v.instrument==='guitar'&&v.singOnset!==undefined&&(v.since??9)<GUITAR_FADE?1-smooth((v.since??9)/GUITAR_FADE):0;
     // entry 35: a hand game holds idle gestures off, fading them out from its start and back in after it (no pop at a
     // join, a count's start or a release); rps keeps the variety layer for that fade
     const hgOff = handGameSuppress(v), gT = handGameGestureClock(v, tSec);
@@ -1063,7 +1068,7 @@ export class HumanViews {
     // Entry 7 (frisbee clear-v1): the arms lower out of the game on its own recorded clock; idle variety fades in under them
     const gameBlend = v.game?.flightPolicy === 'clear-v1' ? gameArmBlend(v.game, v.gameTick ?? 0, v.gameDt ?? .05) : 1;
     const gameShare = v.activity === 'idle' || v.game?.flightPolicy !== 'clear-v1' ? 1 : 1 - gameBlend;
-    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
+    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || guitarFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
     // Entry 43 (entry 41's M04 finding): a let-go before a reach fades the gesture out on its own clock; the reach after
     // it then fades none of its own (its gesture is already gone), and the act's own return of the idle (after the arm is
     // down) still applies. A reach with no let-go keeps the fade over the reach. A put of a handle-held item starts
@@ -1089,15 +1094,15 @@ export class HumanViews {
     // the idle handoff fading in after it ends, instead of switching idle variety on at full weight (a 0.31 m palm jump, take 5)
     const after = !handoff && v.lastHandActuator ? handActuatorFrame(v.lastHandActuator, (v.handActuatorTime ?? tSec) - v.lastHandActuator.startTick * DT).idleBlend : 1;
     if (after >= 1) v.lastHandActuator = undefined;
-    const idleHandoff = Math.min(putReturn, letGoing ? letIdle : v.itemPose ? (letGone && v.itemPose.take ? 0 : v.itemPose.idleBlend) : (handoff ? (reachS < 0 ? 1 : Math.max(handoff.idleBlend, fadeOut)) : v.transfer?.endTick !== undefined ? smooth(((v.transferTime ?? tSec) - v.transfer.endTick * DT) / TRANSFER_HANDOFF) : v.transfer && transferS >= 0 ? fadeOut : singFade > 0 ? singFade : after));
+    const idleHandoff = Math.min(putReturn, letGoing ? letIdle : v.itemPose ? (letGone && v.itemPose.take ? 0 : v.itemPose.idleBlend) : (handoff ? (reachS < 0 ? 1 : Math.max(handoff.idleBlend, fadeOut)) : v.transfer?.endTick !== undefined ? smooth(((v.transferTime ?? tSec) - v.transfer.endTick * DT) / TRANSFER_HANDOFF) : v.transfer && transferS >= 0 ? fadeOut : singFade > 0 ? singFade : guitarFade > 0 ? guitarFade : after));
     v.idleLast = idleHandoff;
     // Idle variety (Idle_Neutral, fold arms, look around) fades in from when the body came to rest: switched on at full
     // weight it raised or crossed the arms in one frame whenever a walk ended inside a person's variety window
     // (entry 29's shared idle-onset fix, carried by entry 33: a hand-to-hair flash at each walk stop before a reach).
     const normalRestOnset=sample.kind==='sampled'&&sample.restOnset!==undefined?sample.restOnset:v.restAge===undefined?1:smooth(v.restAge/IDLE_VARIETY_ONSET);
     const waveRestOnset=v.waveRestAge===undefined?1:smooth(v.waveRestAge/IDLE_VARIETY_ONSET);
-    const restOnset = waveActive ? waveRestOnset : singFade > 0 ? v.singOnset! : normalRestOnset;
-    if (v.activity === 'idle') v.singOnset = restOnset; else if (v.activity !== 'sing') v.singOnset = undefined;
+    const restOnset = waveActive ? waveRestOnset : singFade > 0 || guitarFade > 0 ? v.singOnset! : normalRestOnset;
+    if (v.activity === 'idle') v.singOnset = restOnset; else if (v.activity !== 'sing'&&!(v.activity==='play-music'&&v.instrument==='guitar')) v.singOnset = undefined;
     const neutralW = extra.idleNeutral && idleFree ? (1 - w) * neutralWeight(h.name, gT) * idleHandoff * restOnset * (1 - hgOff) * idleShare * gameShare * (waveActive?1-waveBlend:1) : 0;
     const variant = idleFree ? idleVariant(h.name, gT) : null, variantA = variant ? libAction(v.rig, variant.clip) : null;
     const variantW = variantA ? (1 - w - neutralW) * variant!.w * idleHandoff * restOnset * (1 - hgOff) * idleShare * gameShare * (waveActive?1-waveBlend:1) : 0;
@@ -1184,7 +1189,7 @@ export class HumanViews {
     const waterOrigins=!lib.water&&!hasHands&&!gripping&&!v.grip&&!v.on&&!gait&&!fp&&proneW===0&&sitW===0&&warmW===0&&!posed&&v.waterTransition&&v.waterTransition.weight<1?v.waterTransition.origins:[];
     const waterFrom=waterOrigins.some(x=>x.pose!==null);
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
-    const wantProp = !hasHands && !gripping && proneW === 0 ? propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    const wantProp = !hasHands && !gripping && proneW === 0 ? propFor(guitarRelease&&act?'play-music':act || clipBody || lib.cur ? v.activity : '', v.propWanted,guitarRelease&&act?'guitar':v.instrument) : null;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && ['idle', 'walk', 'run', 'jog'].includes(v.activity);
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
@@ -1420,7 +1425,8 @@ export class HumanViews {
         const saved=weight<1?[arm.upper,arm.lower,arm.hand].map(o=>({o,p:o.position.clone(),q:o.quaternion.clone()})):[];
         arm.upper.getWorldPosition(_s);
         // entry 36: a goal on a fixed thing (the mic's grip) is placed from the body root at its own height above the floor
-        const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]).addScaledVector(_right, (left ? -1 : 1) * r[1]).addScaledVector(UP, r[2])
+        const gs=act.guitar?(v.rig.template.bodyScale??1):1;
+        const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]*gs).addScaledVector(_right, (left ? -1 : 1) * r[1]*gs).addScaledVector(UP, r[2]*gs)
           : V().copy(_s).addScaledVector(_fwd, q![0]).addScaledVector(_right, (left ? -1 : 1) * q![1]).addScaledVector(UP, q![2]);
         if (t.y < floor) t.y = floor;
         if (wgt <= 0) return;
@@ -1484,7 +1490,8 @@ export class HumanViews {
         for (const k of [0.2, 0.4, 0.6, 0.8]) { const p = clipProbe(v.rig.template, lib.cur.clip, Math.round(d * k * 10) / 10); if (p) up += p.wristL.y - p.wristR.y; }
         if (up > 0) [L, R] = [R, L];
       }
-      placeProp(v.prop.obj, wantProp, L, R, V().copy(_fwd));
+      if(wantProp==='guitar'&&act?.guitar)placeGuitar(v.prop.obj,h.position,_fwd,act.guitar,v.rig.template.bodyScale??1);
+      else placeProp(v.prop.obj, wantProp, L, R, V().copy(_fwd));
       // placeProp wrote a world matrix: express it in the holder's frame (the prop is the holder's child)
       v.prop.obj.matrix.premultiply(_inv.copy(h.matrixWorld).invert());
     }
