@@ -1,0 +1,18 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1661,
+  "reason": "Chosen finite wax portions use existing native craft completion and normal God atomic batches. Two new definitions, ten production K=2 samples with zero findings/gaps; real registered builder and existing raw library budget tests separately cover material colors and supplied shapes. No older pins, budgets or baselines change.",
+  "definitions": [
+    {
+      "ref": "core-wax-bench@1",
+      "hash": "21af2e4e782753d6b7c7ae40a3e2aa803679a255d43724482b30e8a30690ab6c"
+    },
+    {
+      "ref": "core-wax-medallion@1",
+      "hash": "cb407be4936206fb2e62db8d61519114fe8400a1879df3e5a4a91e88f5d04183"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}
