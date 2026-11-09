@@ -5,7 +5,8 @@ export const PIANO_STEP = 0.25;            // s per step (eighth notes at 120 bp
 const BAR = 32;                            // steps per phrase (8 s), then the piece repeats
 export type PianoNote = { t: number; midi: number; hand: 0 | 1; vel: number };
 // Melodies: semitones above C5 (null = rest). Chords: bass roots above C3, one per 8 steps.
-const PIECES: { melody: (number | null)[]; roots: number[] }[] = [
+type PianoPiece = { melody: (number | null)[]; roots: number[] };
+const PIECES: PianoPiece[] = [
   { melody: [0, null, 4, 7, 9, null, 7, 4, 2, null, 4, 2, 0, null, null, null, 4, null, 7, 9, 12, null, 9, 7, 4, null, 2, 4, 0, null, null, null], roots: [0, -3, 5, 7] },
   { melody: [7, null, 9, 12, 9, null, 7, null, 4, null, 7, 9, 7, null, null, null, 2, 4, 7, null, 9, null, 7, 4, 2, null, 0, null, null, null, null, null], roots: [0, 5, -3, 7] },
   { melody: [-3, null, 0, 2, 4, null, 2, 0, -3, null, null, -5, -3, null, null, null, 0, 2, 4, null, 7, null, 4, 2, 0, null, -3, null, null, null, null, null], roots: [-3, 5, 0, 7] },
@@ -18,7 +19,10 @@ export const PIECE_COUNT = PIECES.length;
 export function pianoNotes(seed: string, a: number, b: number): PianoNote[] { return pieceNotes(hash(seed) % PIECES.length, a, b); }
 /** #431: the notes of one piece by its index (a record sleeve's place in its record player's list), on the same clock. */
 export function pieceNotes(piece: number, a: number, b: number): PianoNote[] {
-  const p = PIECES[((Math.floor(piece) % PIECES.length) + PIECES.length) % PIECES.length], out: PianoNote[] = [];
+  return notesFor(PIECES[((Math.floor(piece) % PIECES.length) + PIECES.length) % PIECES.length], a, b);
+}
+function notesFor(p: PianoPiece, a: number, b: number): PianoNote[] {
+  const out: PianoNote[] = [];
   for (let k = Math.ceil(a / PIANO_STEP - 1e-9); k * PIANO_STEP < b; k++) {
     const i = ((k % BAR) + BAR) % BAR, t = k * PIANO_STEP, m = p.melody[i];
     if (i % 4 === 0) out.push({ t, midi: 48 + p.roots[Math.floor(i / 8)] + (i % 8 === 4 ? 7 : 0), hand: 0, vel: 0.7 });
@@ -26,9 +30,17 @@ export function pieceNotes(piece: number, a: number, b: number): PianoNote[] {
   }
   return out;
 }
+// #1615: two original eight-second record phrases, separate from the frozen seeded-piano repertoire.
+const EXTRA_RECORDS: Record<string, PianoPiece> = {
+  'Paper Lanterns': { melody: [0, null, 3, 7, 10, null, 7, 3, 5, null, 8, 7, 3, null, 2, null, 0, 3, 7, null, 10, null, 12, 10, 7, null, 5, 3, 2, null, 0, null], roots: [0, 8, 5, 7] },
+  'Open Window': { melody: [4, 7, null, 9, 12, null, 11, 7, 9, null, 5, 2, 7, null, 4, null, 5, 9, null, 12, 14, null, 12, 9, 7, null, 4, 2, 0, null, null, null], roots: [0, 2, 5, 7] }
+};
 /** #431: a record player's song: the record's place among its sleeves names the piece; a record it does not have plays nothing. */
 export function recordNotes(sleeves: readonly string[], record: string, a: number, b: number): PianoNote[] {
-  const i = sleeves.indexOf(record); return i < 0 ? [] : pieceNotes(i, a, b);
+  const i = sleeves.indexOf(record); if (i < 0) return [];
+  // Additional repertoire is named explicitly: adding records must never change a seeded pianist's original four pieces.
+  const extra = i >= PIECE_COUNT && Object.hasOwn(EXTRA_RECORDS, record) ? EXTRA_RECORDS[record] : undefined;
+  return extra ? notesFor(extra, a, b) : pieceNotes(i, a, b);
 }
 /** #431: whether a record's surface clicks at crackle step `k` (an eighth of a second of world time): the same for everyone. */
 export function crackle(k: number): boolean { return (Math.imul(Math.floor(k), 2654435761) >>> 0) % 7 === 0; }

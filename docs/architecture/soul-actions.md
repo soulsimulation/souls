@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Expanded record repertoire (content)
+
+`core/record-player@2` retains the existing record-selection action and four original choices, adding two original eight-second scores: `Paper Lanterns` and `Open Window`. Select with `put-on-record` and its `record` parameter; normal hand contact starts the chosen shared-clock piece. Stop at the existing power knob. The selected title persists. The new console uses simpler geometry while retaining the original tonearm/knob locations; the first revision stays unchanged. This is new playable music content, not a new Soul action or arbitrary user-authored notation. Original seeded piano behavior is unchanged.
