@@ -764,3 +764,11 @@ the world creator can place or mark a tent with `broken: true`.
 ### Expanded record repertoire (content)
 
 `core/record-player@2` retains the existing record-selection action and four original choices, adding two original eight-second scores: `Paper Lanterns` and `Open Window`. Select with `put-on-record` and its `record` parameter; normal hand contact starts the chosen shared-clock piece. Stop at the existing power knob. The selected title persists. The new console uses simpler geometry while retaining the original tonearm/knob locations; the first revision stays unchanged. This is new playable music content, not a new Soul action or arbitrary user-authored notation. Original seeded piano behavior is unchanged.
+### Botanical flower press
+
+`core/flower-press@1` is a fixed hinged press with authored botanical material on its backing paper.
+`object:<press-id>:close` preserves the material at native close contact (`pressed=true`);
+`object:<press-id>:open` reveals the flattened artwork again; `read:<press-id>` reads its lasting status label.
+These actions use empty parameters and existing access, state and interruption rules. An approach interrupted before contact leaves raw material.
+The preserved state survives reopening and persistence. This is a compact art-making interaction, with no
+botanical drying-time simulation or removable output item.
