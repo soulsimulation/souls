@@ -4798,6 +4798,8 @@ export function enterHome(argv) {
   if (first && commands[first] && commands[second] && soulHome.looksLikeSelector(cfg, first)) throw new Error(`${first} is a command and a Soul here. For the Soul use its address: ${HOME.principals().find((p) => soulHome.norm(p.name) === first)?.address ?? `${first}@<world>`}`);
   const cmd = line[0];
   if (cmd === "upgrade" && selector) throw new Error(`upgrade goes by the world's name, not a Soul's or an @: ${CLI} upgrade <world>`);
+  // help <topic> after a Soul's name reads that Soul's world's reference, not the home's current world (#1471)
+  if (cmd === "help" && line[1] && selector && !AT_WORLD) { const id = soulHome.selectSoul(cfg, selector, { cmd }); if (!id) throw new Error(`No Soul here answers to ${selector}.`); AT_WORLD = cfg.souls[id].world ?? null; }
   if (!cmd || !commands[cmd] || soulHome.HOME_COMMANDS.has(cmd)) return line;
   if (process.env.SOULS_PRINCIPAL) { SEAT = HOME.soul(process.env.SOULS_PRINCIPAL); process.chdir(SEAT.dir); return line; }
   const registering = cmd === "register" && WORLD_URL.test(line[1] ?? "") ? line[1].replace(/\/+$/, "") : null;

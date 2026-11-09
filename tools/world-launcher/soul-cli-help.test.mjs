@@ -63,3 +63,26 @@ test('A3: an unknown topic lists the topics and asks nothing; a missing section 
   assert.equal(d.code, 1); assert.match(d.err, /could not read this world's reference .*HTTP 404/);
   assert.equal(d.out, '');
 });
+
+test('A3 in a .souls home: a named Soul reads its own world\'s reference, @world that world\'s, none the current one', async (t) => {
+  const { mkdirSync } = await import('node:fs');
+  const serve = (tag) => new Promise((r) => { const s = createServer((q, a) => { a.writeHead(200); a.end(`# R\n\n## Rides\n\nfrom ${tag}\n`); }); s.listen(0, '127.0.0.1', () => r(s)); });
+  const A = await serve('A'), B = await serve('B');
+  const dir = mkdtempSync(join(tmpdir(), 'souls-help-home-')), root = join(dir, '.souls');
+  t.after(() => { A.close(); B.close(); rmSync(dir, { recursive: true, force: true }); });
+  mkdirSync(join(root, 'souls'), { recursive: true });
+  const home = (worlds, currentWorld) => {
+    writeFileSync(join(root, 'config.json'), JSON.stringify({ version: 1, client: null, default: null, currentWorld, worlds, souls: { s_mira: { name: 'Mira', world: 'b', state: 'active' } }, gods: {} }));
+    writeFileSync(join(root, 'credentials.json'), JSON.stringify({ version: 1, souls: {}, worlds: {}, approvals: {}, gods: {} }));
+  };
+  home({ a: { url: `http://127.0.0.1:${A.address().port}/w/a` }, b: { url: `http://127.0.0.1:${B.address().port}/w/b` } }, 'a');
+  const run = (...args) => new Promise((done) => { const c = spawn(process.execPath, [cli, ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; c.stdout.on('data', (x) => { out += x; }); c.stderr.on('data', (x) => { err += x; }); c.on('exit', (code) => done({ code, out, err })); });
+  assert.match((await run('Mira', 'help', 'rides')).out, /from B/, 'Mira lives in world b');
+  assert.match((await run('@b', 'help', 'rides')).out, /from B/);
+  assert.match((await run('help', 'rides')).out, /from A/, 'no name: the home\'s current world');
+  const nobody = await run('Ivo', 'help', 'rides');
+  assert.notEqual(nobody.code, 0); assert.doesNotMatch(nobody.out, /from/);
+  home({}, null);
+  const none = await run('help', 'rides');
+  assert.equal(none.code, 1); assert.match(none.err, /no world is set here: .* register <world-url> first/);
+});
