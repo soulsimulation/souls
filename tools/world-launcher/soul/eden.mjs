@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.9";
+const VERSION = "2.24.10";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -4644,10 +4644,37 @@ do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [-
 owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
+help      help [topic]   (one section of this world's reference: ${HELP_TOPICS.join(", ")})
 resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
 ${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
+
+// help <topic>: one section of the world's reference (/schema.md), so the skill's core can stay short (#1471). A topic names a
+// section by a word of its heading ("rides" is "## Rides"); the reference is the folder's world's own, read when asked.
+export const HELP_TOPICS = ["refusals", "rides", "plans", "messages", "listening", "talking", "memory"];
+const stem = (w) => w.toLowerCase().replace(/[^a-z-]/g, "");   // the whole word: "messages" is not "message"
+/** Pure: the section of a markdown reference whose `## ` heading has the topic as a word, through the line before the next heading. */
+export function referenceSection(text, topic) {
+  const lines = String(text).split("\n"), want = stem(topic);
+  const at = lines.findIndex((l) => l.startsWith("## ") && l.slice(3).split(/\s+/).some((w) => stem(w) === want));
+  if (at < 0) return null;
+  const end = lines.findIndex((l, i) => i > at && /^#{1,2} /.test(l));
+  return lines.slice(at, end < 0 ? undefined : end).join("\n").trim() + "\n";
+}
+async function helpTopic(topic, ...rest) {
+  if (rest.length) throw new Error("usage: help [topic]");
+  const list = `Topics: ${HELP_TOPICS.join(", ")}.`;
+  if (!HELP_TOPICS.includes(topic.toLowerCase())) throw new Error(`no help topic "${topic}". ${list}`);
+  const s = load(), base = s.world ?? (HOME ? HOME.config().worlds?.[AT_WORLD ?? HOME.config().currentWorld]?.url : null);
+  if (!base) throw new Error(`help ${topic} reads this world's reference, and no world is set here: ${CLI} register <world-url> first`);
+  let text;
+  try { const r = await fetch(`${base}/schema.md`, { signal: AbortSignal.timeout(25_000) }); if (!r.ok) throw new Error(`HTTP ${r.status}`); text = await r.text(); }
+  catch (e) { throw new Error(`could not read this world's reference (${base}/schema.md): ${e.message}`); }
+  const section = referenceSection(text, topic);
+  if (!section) throw new Error(`this world's reference has no "${topic}" section; all of it is at ${base}/schema.md`);
+  return section;
+}
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
@@ -4778,7 +4805,7 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
+const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async (topic, ...rest) => (topic ? helpTopic(topic, ...rest) : help()) };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
