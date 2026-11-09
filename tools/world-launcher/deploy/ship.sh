@@ -4,7 +4,7 @@
 #
 #   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--no-eyes] [--from <step>] [--out <dir>]
 #                                       [--accept-host-codes <code,...>]
-#     --label    the release, such as 4.16. Backups are pre-r416-production-*, the outputs <out>
+#     --label    the release, such as 0.123. Backups are pre-r0123-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
 #     --no-switch  every step for real except the backup and the activation: stage (without install.sh), rehearse, the probe

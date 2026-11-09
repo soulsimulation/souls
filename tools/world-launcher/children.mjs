@@ -556,7 +556,9 @@ export class ChildPool {
     const c = k.child, g = this.g;
     if (!c || k.wedging) return;
     k.wedging = { reason: why, at: Date.now() }; this.o.onChange?.(k.slug);
-    this.log(`world ${k.slug} wedged (${why}): SIGUSR2, SIGTERM after ${g.usr2WaitMs / 1000} s, SIGKILL ${g.termGraceMs / 1000} s later`);
+    // #457: the frame the world's watchdog caught its main thread stuck in (live.json `stall`, fresh: within this stall)
+    const st = k.live?.stall, frame = st && typeof st.top === 'string' && Date.now() - st.at < 120_000 ? `; stuck in ${st.top}` : '';
+    this.log(`world ${k.slug} wedged (${why}${frame}): SIGUSR2, SIGTERM after ${g.usr2WaitMs / 1000} s, SIGKILL ${g.termGraceMs / 1000} s later`);
     const exited = () => c.exitCode !== null || c.signalCode !== null;
     const exit = exited() ? Promise.resolve() : new Promise((r) => c.once('exit', r));
     try { c.kill('SIGUSR2'); } catch { /* gone */ }

@@ -36,10 +36,10 @@ function toldBefore(steps, id) {
 
 export default {
   id: 'reunion-recall',
-  version: 5,
+  version: 6,
   question: 'On the second day, in a new chat, did both Souls finish a walk to the place they named on the first day, each using the other\'s name in what it said?',
   assumptions: [
-    'Each seat\'s last two cards are the two days; the second names neither the other Soul nor a place.',
+    'Each seat\'s last card is the second day and names neither the other Soul nor a place; every earlier card is the first day.',
     'The agreed place is the walk id each Soul said after "Tomorrow at" on the first day; a plan not stated by both, or not the same, is unknown, not a failure of memory.',
     'A Soul that never finished a walk away from that place on the first day proves nothing by being there: unknown.',
     'Keeping the plan is a walk to that id the world finished that day, in a receipt the seat read. Leaving afterwards changes nothing.',
@@ -73,8 +73,9 @@ export default {
     if (rows.some((r) => !r.secondDay)) return unknown('a seat never reached the second day');
     if (rows.some(({ days: d }) => (d.first !== null && d.last !== null && d.first !== d.last) || (d.last !== null && d.next !== null && d.next <= d.last))) return unknown('the world day did not turn between the two cards');
     const [a, b] = rows;
-    if (!a.plan || a.plan !== b.plan) return unknown('the two Souls stated no shared plan on the first day');
-    if (rows.some((r) => !r.parted)) return unknown('a Soul never walked away from the agreed place on the first day');
+    // #1606: a first day that didn't happen is its own outcome, so an arm can stop before paying for a second day it can't read
+    if (!a.plan || a.plan !== b.plan) return unknown('invalid-day-1: the two Souls stated no shared plan on the first day');
+    if (rows.some((r) => !r.parted)) return unknown('invalid-day-1: a Soul never walked away from the agreed place on the first day');
     if (rows.some((r) => r.retold)) return unknown('the world showed a Soul the plan before it set off');
     const kept = rows.every((r) => r.kept), greeted = rows.every((r) => r.greeted);
     if (!kept && rows.every((r) => r.kept || r.open)) return unknown('a Soul\'s move has no end this question can read');
