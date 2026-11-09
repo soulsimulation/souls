@@ -15,11 +15,12 @@ import { createSwarm } from './orchestrator.mjs';
 import { parseScript, stdinConsole } from './console.mjs';
 import { worldTruth } from './truth.mjs';
 import { verifyRun } from './verify.mjs';
-import { REPO_ROOT, scratchDir } from '../../../lib/paths.mjs';
+import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { readFinalCards, writeFinalCards } from '../../runs/final-cards.mjs';
+import { outsideCheckout } from '../../arena/seat-home.mjs';
 
 const DEFAULT_SERVER_ROOT = process.env.PLAYTEST_SERVER_ROOT ?? REPO_ROOT;
-const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? scratchDir('playtest/runs');
+const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? outsideCheckout('souls-playtest-runs');   // #1098 arm B2: live seats never inside a checkout
 const receipt = (runDir, n, step, data) => writeJson(join(runDir, 'receipts', `${n}-${step}.json`), { step, ...now(), ...data });
 const infoOf = (s) => (typeof s?.info === 'function' ? s.info() : s?.info ?? {});
 

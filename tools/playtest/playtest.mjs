@@ -12,11 +12,12 @@ import { quota, quotaAllows } from './lib/quota.mjs';
 import { sha256, rng } from './lib/hash.mjs';
 import { tickValidity } from './tick-validity.mjs';
 import { freeMemGb, resolvePlaywright } from './lib/platform.mjs';
-import { REPO_ROOT, scratchDir } from '../lib/paths.mjs';
+import { REPO_ROOT } from '../lib/paths.mjs';
+import { outsideCheckout } from './arena/seat-home.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SERVER_ROOT = process.env.PLAYTEST_SERVER_ROOT ?? REPO_ROOT;
-const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? scratchDir('playtest/runs');
+const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? outsideCheckout('souls-playtest-runs');   // #1098 arm B2: live seats never inside a checkout
 const FROZEN_BUNDLE = join(here, 'frozen/frozen.json');
 const STEPS = ['preflight', 'provision', 'seats', 'play', 'close', 'review', 'develop', 'report'];
 
