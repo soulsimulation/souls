@@ -37,6 +37,17 @@ test('#1443 ground-swap/1 adopted on a world that already installed its ground m
   const before = e.stateHash();
   e.configureRuntimePolicy({ sleepBlockTicks: 1200, groundSwapV1: true } as never); e.step();
   assert.equal(flat(e), 0, 'swapped at the adoption'); assert.notEqual(e.stateHash(), before);
-  const snap = e.snapshot(), g = f.restore(snap) as MarsEngine; g.step();
-  assert.equal(flat(g), 0, 'a restored world keeps the ground variants');
 });
+
+// The divergence the policy closes: a restore attaches the ground to a fresh, unguarded list, so a world rebooted from a snapshot
+// taken after a mid-life install already runs the ground invariants, flag or not; the live process (and a replay through the
+// install) ran the flat ones. Under the policy the live path matches the restored one.
+for (const policy of [false, true])
+  test(`#1443 a world restored after a mid-life ground install runs the ground invariants (live ${policy ? 'matches it under the policy' : 'diverges from it without the policy, as recorded'})`, () => {
+    const e = world(policy);
+    e.installGroundV1(groundFact(emptyGround(256), 1, { paged: true })); e.step();
+    const g = f.restore(e.snapshot()) as MarsEngine; g.step();
+    assert.equal(flat(g), 0, 'restored: the ground variants run');
+    assert.equal(flat(e), policy ? 0 : 2, policy ? 'live: the same' : 'live: still the flat ones');
+  });
+
