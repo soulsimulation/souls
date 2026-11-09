@@ -658,7 +658,7 @@ export async function openLauncher(cfg = {}) {
       // back on (forward() closes after its response; Node lets a user connection header override that)
       const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, 'x-sim-soul-wait': wait, ...headers } = r.headers;
       if (soul && account) ceilings.learn(soul, account);   // lane L1: the account a Soul token belongs to (never shown to the client)
-      if (soul && wait) ceilings.told(soul, wait);   // #459: the world asked this Soul to wait; answered here until then
+      if (soul && wait && slug) ceilings.told(slug, soul, wait);   // #459: the world asked this Soul to wait; answered here until then
       if (slug) sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
@@ -788,7 +788,7 @@ export async function openLauncher(cfg = {}) {
       if (opts.worldDeferred && r.headers['x-sim-read'] !== 'worker') { ceilings.chargeWorld(slug, { force: true }); st.mainAnswered++; }
       const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, 'x-sim-soul-wait': wait, ...headers } = r.headers;
       if (opts.soul && account) ceilings.learn(opts.soul, account);
-      if (opts.soul && wait) ceilings.told(opts.soul, wait);
+      if (opts.soul && wait) ceilings.told(slug, opts.soul, wait);
       sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, robotsOf(slug, headers));
       r.pipe(res);

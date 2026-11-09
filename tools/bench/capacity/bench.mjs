@@ -355,8 +355,8 @@ function hostile(run, soul) {   // 4 parallel loops that ignore Retry-After and 
 }
 
 // #459 hammer arm: ONE extra Soul (its own address) with the hostile loops, beside N honest Souls; every answer is kept
-// with who gave it (launcher: its own body; world: the world's eden-edge body, main's admission decided it even when a read
-// worker relayed it) and its wall time, so the hammer's refusal latency and who answered them are measured per window
+// with who gave it (launcher: a body with `limit`, its own or the eden-edge one it answers for the world inside a wait the world set;
+// world: an eden-edge body without `limit`, main's admission decided it even when a read worker relayed it) and its wall time, so the hammer's refusal latency and who answered them are measured per window
 function hammer(run, soul) {
   const H = { authorization: `Bearer ${soul.token}`, 'x-forwarded-for': '10.66.1.1' };
   const reqs = [
@@ -371,7 +371,7 @@ function hammer(run, soul) {
       try {
         const r = await fetch(`${BASE}${path}`, { method, headers: { ...H, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body()) : undefined, signal: AbortSignal.timeout(30_000) });
         const d = await r.json().catch(() => ({})), code = d?.error?.code ?? d?.code ?? null, refused = (r.status === 429 || r.status === 503) && BUSY.test(String(code));
-        x = { at: t, ms: now() - t, status: r.status, outcome: r.ok ? 'ok' : refused ? 'refused' : 'other', ...(refused ? { by: d?.contract ? 'world' : 'launcher', code, retry: Number(r.headers.get('retry-after')) || null } : {}) };
+        x = { at: t, ms: now() - t, status: r.status, outcome: r.ok ? 'ok' : refused ? 'refused' : 'other', ...(refused ? { by: d?.contract && !d?.limit ? 'world' : 'launcher', code, retry: Number(r.headers.get('retry-after')) || null } : {}) };
       } catch { x = { at: t, ms: now() - t, status: 0, outcome: 'failed' }; }
       run.hammer.push(x);
       await new Promise((r) => setImmediate(r));

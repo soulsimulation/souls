@@ -9,8 +9,6 @@ import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
-export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
-export type RouteClass = {cls: Cls; id: string; god: boolean; deadlineMs: number};
 /** `wait` (#459): a refusal that asks this one Soul to wait (soul.slow-down) says what the wait covers: every heavy request
  *  (`all`, a cool-down) or its reads (`reads`, over its read budget). The HTTP answer carries it in `x-sim-soul-wait`, which
  *  the launcher reads and strips: it answers that Soul itself until the wait elapses, so a client that ignores Retry-After
@@ -19,33 +17,8 @@ export type Refusal = {status: 429 | 503; code: 'soul.busy' | 'soul.slow-down' |
 /** The `x-sim-soul-wait` header of a refusal, or null: `<seconds> <all|reads>`. */
 export const soulWaitHeader = (x: Refusal): string | null => x.wait && x.code === 'soul.slow-down' ? `${x.retryAfterS} ${x.wait}` : null;
 
-const C1_MS = 20_000, GOD_C1_MS = 30_000, C2_MS = 8_000;
-const EDGE_READ = /^\/v1\/edge\/(here|observe|capabilities|view|objects(?:\/[^/]+)?)$/;
-const EDGE_WRITE = /^\/v1\/edge\/(act|say|converse|objects\/[^/]+\/act|plan(?:\/[^/]+)?)$/;
-const PUBLIC = /^\/v1\/(?:edge\/(?:map|rides|items|platforms)|world\/snapshot)$/;
-const GOD_READ = /^\/v1\/god\/(mirror|doctor|trace|recommend|layers|layers\/zone-suggest|defs\/unused)$/;
-const GOD_FREE = /^\/v1\/god\/(?:pair\/|claim$|answer$|inbox\/|pray$|assets$|visitors$)/;   // auth flows, uploads, Souls' prayers
-/** The request class of a route (§2); null = not admitted here (passes straight through). Paths are world-relative. */
-export function classify(method: string, path: string): RouteClass | null {
-  if (path === '/healthz' || path === '/v1/config') return {cls: 'C0', id: path, god: false, deadlineMs: 0};
-  if (PUBLIC.test(path)) return method === 'GET' ? {cls: 'C3', id: path, god: false, deadlineMs: 0} : null;
-  let m: RegExpExecArray | null;
-  if (path.startsWith('/v1/edge/')) {
-    // `around` explores: it records the places found and invalidates menus (around.ts), so it is a write (C1), not a read
-    if (method === 'GET' && path === '/v1/edge/around') return {cls: 'C1', id: 'edge:around', god: false, deadlineMs: C1_MS};
-    if (method === 'GET' && (m = EDGE_READ.exec(path))) return {cls: 'C2', id: 'edge:' + m[1].replace(/\/.*/, '/:id'), god: false, deadlineMs: C2_MS};
-    if (method === 'POST' && path === '/v1/edge/resolve') return {cls: 'C2', id: 'edge:resolve', god: false, deadlineMs: C2_MS};
-    if (method !== 'GET' && (m = EDGE_WRITE.exec(path))) return {cls: 'C1', id: 'edge:' + m[1].replace(/\/[^/]+/, '/:id'), god: false, deadlineMs: C1_MS};
-    return null;
-  }
-  if (path.startsWith('/v1/god/')) {
-    if (method === 'GET' && (m = GOD_READ.exec(path))) return {cls: 'C2', id: 'god:' + m[1], god: true, deadlineMs: C2_MS};
-    if (method === 'POST' && path === '/v1/god/query') return {cls: 'C2', id: 'god:query', god: true, deadlineMs: C2_MS};
-    if (method !== 'GET' && !GOD_FREE.test(path)) return {cls: 'C1', id: 'god:' + path.slice(8).replace(/\/[0-9a-z_-]{8,}(?=\/|$)/gi, '/:id'), god: true, deadlineMs: GOD_C1_MS};
-    return null;
-  }
-  return null;
-}
+export {classify, type Cls, type RouteClass} from './classes.ts';
+import {classify, type RouteClass} from './classes.ts';
 
 /** Dial values (LOAD-CONTRACT §1, §2b). Frame budget: request ms per 50 ms frame. These are the caps (tuned on the laptop);
  *  the budget a world gets is calibrated to what its own tick leaves of the frame (frameBudgetMs below). */
