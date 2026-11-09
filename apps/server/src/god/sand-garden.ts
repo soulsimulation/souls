@@ -1,4 +1,4 @@
-// #1675: native paint/brush owns timing; completed work alone reshapes the same sand.
+// #1675: native craft/brush owns timing; completed work alone reshapes the same sand.
 import {opSchema,type Op,type StoredDef,type WorldModel} from '@souls/world-compiler';
 import type {EdgeReceipt,EdgeSoul} from '../edge/contract.ts';
 import {ACT_REACH} from './actuators.ts';
@@ -38,7 +38,7 @@ export function createSandGarden(h:SandGardenHost){
   if(h.engine.clearanceAtV1&&h.engine.clearanceAtV1(x,z,level)<.4)return{code:'object.state',reason:'There is no clear standing room at this sand garden.'};
   return{summary:'Completed ten seconds of sand work; read the garden for its actual cell pattern and worker.',steps:[
    {verb:'stand',params:{}},{verb:'mars:walk_to',params:{x,z,level}},
-   {verb:'mars:pose_v1',params:{activity:'paint',seconds:10,prop:'brush',face:[p.x,p.z]}},{verb:'stand',params:{}},
+   {verb:'mars:pose_v1',params:{activity:'craft',seconds:10,prop:'brush',face:[p.x,p.z]}},{verb:'stand',params:{}},
   ]};
  }
  function onReceipt(r:EdgeReceipt){
