@@ -9,7 +9,7 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, type Admission} from './load/admission.ts';
-import {SoulSlowed} from './load/soul-slowed.ts';
+import {slowedFromRefusals} from './load/soul-slowed.ts';
 import type {LoadMonitor} from './load/monitor.ts';
 import {clockNow, setClockSource} from './load/clock-source.ts';
 import {clockBlockOf} from './load/shared.ts';
@@ -137,11 +137,10 @@ export function buildApp(d: Deps) {
   });
   if (d.edge) { const edge = d.edge; app.use('/v1/edge/*', servingWait(() => edge.whenServing())); }
   // srv-load (LOAD-CONTRACT §2): heavy Soul/god requests queue for the admission dispatcher; edge answers carry X-Sim-Load
-  // #456: the public Soul's `slowed`, from refusals addressed to that Soul; a change re-sends its card
-  const slowed = new SoulSlowed(); slowed.onChange = id => d.host.markSoulDirty(id); d.host.publicSlowedOf = id => slowed.get(id);
+  // #456: the public Soul's `slowed`, from the admission's refusals addressed to that Soul (load/soul-slowed.ts)
+  slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
-    load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined,
-    (t, code, after) => { const id = d.souls.soulFromToken(t)?.id; if (id) slowed.note(id, code, after); })); }
+    load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
   const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
