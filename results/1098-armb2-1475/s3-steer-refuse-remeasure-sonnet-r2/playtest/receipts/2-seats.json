@@ -1,0 +1,41 @@
+{
+ "step": "seats",
+ "t": "2026-11-09T17:27:18.316Z",
+ "mono": 1738,
+ "ok": true,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T17:27:18.315Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-1bba5b6c1c00ee28cb662bee",
+   "assisted": false,
+   "wake": true
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T17:27:18.316Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-33ba9f350a287e126d46bb38",
+   "assisted": false,
+   "wake": true
+  }
+ ],
+ "onboarding": "parallel, during play"
+}

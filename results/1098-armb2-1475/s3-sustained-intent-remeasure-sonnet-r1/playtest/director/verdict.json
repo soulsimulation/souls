@@ -1,0 +1,93 @@
+{
+ "pass": false,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T17:26:43.686Z)"
+  },
+  "eachPresented": {
+   "pass": false,
+   "detail": "1/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": false,
+   "detail": "spoken order ada"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T17:26:45.691Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 254,
+   "firstAt": "2026-11-09T17:27:00.317Z",
+   "text": "Good morning, everyone. I'm Ada, and I keep bees. My errand this morning took me across the green toward the orchard, checking where the blossom is thickest so the hives can follow it. Then I was called here to the pond hall, and I'm glad of the company.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T17:27:03.709Z",
+   "presented": false,
+   "lines": 0,
+   "chars": 0,
+   "firstAt": null,
+   "text": "",
+   "inRoomWhenSpeaking": null,
+   "outOfTurn": [],
+   "beforeTurns": 1
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T17:26:43.686Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 50,
+    "cachedTokens": 1088011,
+    "cacheCreationTokens": 27322,
+    "outputTokens": 5221,
+    "costUsd": 0.3052,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 34,
+    "cachedTokens": 675388,
+    "cacheCreationTokens": 24172,
+    "outputTokens": 3882,
+    "costUsd": 0.2031,
+    "turns": 2,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 84,
+   "cachedTokens": 1763399,
+   "cacheCreationTokens": 51494,
+   "outputTokens": 9103,
+   "costUsd": 0.5083,
+   "turns": 5,
+   "unknownTurns": 0
+  }
+ }
+}

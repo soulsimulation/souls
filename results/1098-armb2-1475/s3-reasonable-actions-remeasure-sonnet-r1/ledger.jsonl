@@ -1,0 +1,10 @@
+{"at":"2026-11-09T17:17:45.550Z","event":"borrow","seq":1,"kind":"checkout","id":"server-root","owner":"borrowed","meta":{"path":"<home>/Souls/.local/playtest-home/server","use":"read-only source and web build"}}
+{"at":"2026-11-09T17:17:45.551Z","event":"borrow","seq":2,"kind":"port-range","id":"host","owner":"borrowed","meta":{"note":"other services on this host are never stopped"}}
+{"at":"2026-11-09T17:17:45.801Z","event":"own","seq":3,"kind":"world","id":"s3-reasonable-actions","owner":"run","meta":{"pid":95247,"port":4456,"dataDir":"<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-reasonable-actions-remeasure-sonnet-r1/playtest/server/data"}}
+{"at":"2026-11-09T17:17:47.385Z","event":"own","seq":4,"kind":"controller","id":"ada","owner":"run","meta":{"dir":"<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-reasonable-actions-remeasure-sonnet-r1/playtest/seats/ada","adapter":"claude-headless","model":"sonnet"}}
+{"at":"2026-11-09T17:17:47.385Z","event":"own","seq":5,"kind":"controller","id":"bo","owner":"run","meta":{"dir":"<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-reasonable-actions-remeasure-sonnet-r1/playtest/seats/bo","adapter":"claude-headless","model":"sonnet"}}
+{"at":"2026-11-09T17:17:47.564Z","event":"own","seq":6,"kind":"browser","id":"observer","owner":"run","meta":{"gpu":"metal"}}
+{"at":"2026-11-09T17:22:37.927Z","event":"release","seq":6,"kind":"browser","id":"observer","owner":"run","state":"released","releaseMs":0}
+{"at":"2026-11-09T17:22:37.927Z","event":"release","seq":5,"kind":"controller","id":"bo","owner":"run","state":"released","releaseMs":0}
+{"at":"2026-11-09T17:22:37.927Z","event":"release","seq":4,"kind":"controller","id":"ada","owner":"run","state":"released","releaseMs":0}
+{"at":"2026-11-09T17:22:37.927Z","event":"release","seq":3,"kind":"world","id":"s3-reasonable-actions","owner":"run","state":"released","releaseMs":0}

@@ -1,0 +1,93 @@
+{
+ "pass": false,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T17:35:22.968Z)"
+  },
+  "eachPresented": {
+   "pass": false,
+   "detail": "1/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": false,
+   "detail": "spoken order ada"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T17:35:24.975Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 228,
+   "firstAt": "2026-11-09T17:35:33.021Z",
+   "text": "Good morning, everyone! I'm Ada, and I keep bees, so my morning started early. I wandered the green at dawn, rested a while on a seat by the cottage, then took a cool swim in the pond. Now I'm here, happy to hear how yours went.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T17:35:36.976Z",
+   "presented": false,
+   "lines": 0,
+   "chars": 0,
+   "firstAt": null,
+   "text": "",
+   "inRoomWhenSpeaking": null,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T17:35:22.968Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 50,
+    "cachedTokens": 1115983,
+    "cacheCreationTokens": 30665,
+    "outputTokens": 4046,
+    "costUsd": 0.3019,
+    "turns": 4,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 36,
+    "cachedTokens": 731143,
+    "cacheCreationTokens": 24953,
+    "outputTokens": 3533,
+    "costUsd": 0.2083,
+    "turns": 3,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 86,
+   "cachedTokens": 1847126,
+   "cacheCreationTokens": 55618,
+   "outputTokens": 7579,
+   "costUsd": 0.5102,
+   "turns": 7,
+   "unknownTurns": 0
+  }
+ }
+}

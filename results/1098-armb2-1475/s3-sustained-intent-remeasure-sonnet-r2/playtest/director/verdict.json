@@ -1,0 +1,93 @@
+{
+ "pass": false,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T17:39:35.297Z)"
+  },
+  "eachPresented": {
+   "pass": false,
+   "detail": "1/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": false,
+   "detail": "spoken order ada"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T17:39:37.307Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 299,
+   "firstAt": "2026-11-09T17:39:42.496Z",
+   "text": "Good morning, everyone. My errand this morning was to walk over to the orchard and then rest on the bench outside the cottage, and I kept my bees in mind the whole way. Bees love an orchard at dawn, so I stopped to listen for them. Then my plans changed and I came here to the pond hall to join you.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T17:39:45.307Z",
+   "presented": false,
+   "lines": 0,
+   "chars": 0,
+   "firstAt": null,
+   "text": "",
+   "inRoomWhenSpeaking": null,
+   "outOfTurn": [],
+   "beforeTurns": 1
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T17:39:35.297Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 46,
+    "cachedTokens": 991577,
+    "cacheCreationTokens": 27960,
+    "outputTokens": 5551,
+    "costUsd": 0.2666,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 36,
+    "cachedTokens": 730252,
+    "cacheCreationTokens": 23828,
+    "outputTokens": 4023,
+    "costUsd": 0.2086,
+    "turns": 2,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 82,
+   "cachedTokens": 1721829,
+   "cacheCreationTokens": 51788,
+   "outputTokens": 9574,
+   "costUsd": 0.4752,
+   "turns": 5,
+   "unknownTurns": 0
+  }
+ }
+}

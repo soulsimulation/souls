@@ -1,0 +1,351 @@
+{
+ "soulRun": 1,
+ "runId": "s3-sustained-intent-remeasure-sonnet-r1",
+ "status": "completed",
+ "startedAt": "2026-11-09T17:22:41.434Z",
+ "spec": {
+  "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/specs/1098/s3-sustained-intent-remeasure-sonnet.json",
+  "sha256": "ff4970e2d54441ccadd6dc6a523be39a7678071338932880844b2f912f8d1402",
+  "effective": {
+   "soulRun": 1,
+   "kind": "cast",
+   "name": "s3-sustained-intent-remeasure-sonnet",
+   "cast": {
+    "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/specs/1098/s3-sustained-intent-candidate-sonnet.cast.json",
+    "sha256": "f2de1845b58dc18a48815e5377b292bb09869f62460da1e77efa7171b90b93d3",
+    "name": "s3-sustained-intent-live-sonnet",
+    "seats": 2,
+    "consoleScript": 9
+   },
+   "world": {
+    "port": 4458,
+    "slug": "s3-sustained-intent",
+    "genesis": "worlds/templates/hello-hamlet.json",
+    "snapshot": null,
+    "source": {
+     "kind": "genesis",
+     "path": "worlds/templates/hello-hamlet.json",
+     "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+    }
+   },
+   "setup": null,
+   "durationSec": 300,
+   "observer": {
+    "check": false,
+    "required": false,
+    "cameras": null,
+    "timeoutMs": 60000,
+    "mode": "cameras",
+    "record": null,
+    "recordSize": "compact",
+    "recordStart": "arrival",
+    "freeComposition": null
+   },
+   "limits": {
+    "maxWallSec": 1300,
+    "maxControllers": 2,
+    "cleanupWaitMs": 15000
+   },
+   "controllers": {
+    "allowLiveModels": true
+   },
+   "retention": {
+    "worldData": "keep",
+    "controllerState": "keep"
+   },
+   "evaluation": {
+    "questions": [
+     {
+      "id": "errand-kept-through-burst",
+      "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/questions/errand-kept-through-burst.mjs",
+      "sha256": "24f0279d7ca3850b34a0e8eb5d18c40243ef99d06c201d538418843581d9520a"
+     },
+     {
+      "id": "cancel-not-resumed",
+      "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/questions/cancel-not-resumed.mjs",
+      "sha256": "1f7df3c4aafafcf4fd0e7050e3844c4b248fb7ce573ec199c515da9ccad05603"
+     },
+     {
+      "id": "reasonable-carried-out-v3",
+      "path": "<home>/Souls/.local/playtest-home/playtest/tools/playtest/runs/questions/reasonable-carried-out-v3.mjs",
+      "sha256": "a530132a4a6cd451653bdd62a2f59bc1d631da4912b468907a034534780fa848"
+     }
+    ]
+   },
+   "scorer": {
+    "id": "controllability",
+    "version": "5",
+    "path": "tools/playtest/runs/controllability.mjs",
+    "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+   }
+  }
+ },
+ "source": {
+  "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+  "dirtyTrackedFiles": 0,
+  "node": "v26.8.2",
+  "serverRoot": {
+   "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+   "dirtyTrackedFiles": 0
+  },
+  "tools": {
+   "commit": "168ba5df9d1543fc30611ce0abc8de5038dd2c96",
+   "dirtyTrackedFiles": 0
+  }
+ },
+ "controllers": [
+  {
+   "id": "ada",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low"
+  },
+  {
+   "id": "bo",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low"
+  }
+ ],
+ "preflight": {
+  "files": {
+   "server": true,
+   "webDist": true,
+   "controllerCli": true
+  },
+  "portFree": true,
+  "scenario": {
+   "ok": true,
+   "allow": {
+    "allowed": true,
+    "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+   },
+   "checks": {
+    "quota": {
+     "ok": false,
+     "skipped": true,
+     "fiveH": null,
+     "week": null,
+     "fable": null,
+     "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+    },
+    "serverRoot": true,
+    "webDist": true,
+    "controllerCli": true,
+    "playwright": "server root mars/viewer",
+    "claude": "2.1.319 (Claude Code)",
+    "codex": null,
+    "providersOk": true,
+    "live": {
+     "eden-2026": {
+      "ok": true,
+      "build": "we-0d48d8f4c6fc",
+      "tickMs": {
+       "avg": 7.5,
+       "max": 78.7,
+       "n": 365
+      },
+      "clients": 1
+     },
+     "godmode-lab": {
+      "ok": true,
+      "build": "we-0d48d8f4c6fc",
+      "tickMs": {
+       "avg": 0.7,
+       "max": 9.1,
+       "n": 294
+      },
+      "clients": 0
+     }
+    },
+    "laptopLoad": [
+     12.2,
+     13.5,
+     10.4
+    ],
+    "freeGb": 16.3,
+    "machineOk": false
+   }
+  }
+ },
+ "references": {
+  "runDir": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1",
+  "playtestDir": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest",
+  "ledger": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/ledger.jsonl",
+  "cast": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/cast.effective.json",
+  "journal": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/director/commands.jsonl"
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "retention": {
+  "evidence": {
+   "kept": true,
+   "path": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1"
+  },
+  "worldData": {
+   "paths": [
+    "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/server/data"
+   ],
+   "sensitive": false,
+   "action": "kept by retention; use cleanup"
+  },
+  "controllerState": {
+   "paths": [
+    "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/seats/ada",
+    "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/seats/bo"
+   ],
+   "sensitive": true,
+   "publish": false,
+   "action": "kept by retention; use cleanup"
+  }
+ },
+ "exit": 0,
+ "endedAt": "2026-11-09T17:27:13.996Z",
+ "resources": {
+  "ok": true,
+  "owned": 4,
+  "released": 4,
+  "failed": [],
+  "borrowed": 2,
+  "entries": [
+   {
+    "seq": 1,
+    "kind": "checkout",
+    "id": "server-root",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "path": "<home>/Souls/.local/playtest-home/server",
+     "use": "read-only source and web build"
+    }
+   },
+   {
+    "seq": 2,
+    "kind": "port-range",
+    "id": "host",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "note": "other services on this host are never stopped"
+    }
+   },
+   {
+    "seq": 3,
+    "kind": "world",
+    "id": "s3-sustained-intent",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "pid": 28884,
+     "port": 4458,
+     "dataDir": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/server/data"
+    }
+   },
+   {
+    "seq": 4,
+    "kind": "controller",
+    "id": "ada",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/seats/ada",
+     "adapter": "claude-headless",
+     "model": "sonnet"
+    }
+   },
+   {
+    "seq": 5,
+    "kind": "controller",
+    "id": "bo",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/seats/bo",
+     "adapter": "claude-headless",
+     "model": "sonnet"
+    }
+   },
+   {
+    "seq": 6,
+    "kind": "browser",
+    "id": "observer",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 1,
+    "meta": {
+     "gpu": "metal"
+    }
+   }
+  ]
+ },
+ "cost": {
+  "wallMs": 272562,
+  "executeMs": 272441,
+  "lifecycleOverheadMs": 121,
+  "runnerCpuUserMs": 1587,
+  "runnerCpuSystemMs": 535,
+  "runnerMaxRssMb": 278,
+  "runDirBytes": 3801078,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 138,
+   "classes": {
+    "browser": {
+     "cpuSec": 0.2,
+     "peakRssMb": 119,
+     "processes": 3
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 13.6,
+     "peakRssMb": 730,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 11.8,
+     "peakRssMb": 856,
+     "processes": 193
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (197 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ },
+ "evidence": {
+  "receipts": [
+   "0-preflight.json",
+   "1-provision.json",
+   "2-seats.json",
+   "3-play.json",
+   "4-close.json",
+   "5-review.json",
+   "6-develop.json",
+   "7-report.json"
+  ],
+  "verdict": {
+   "pass": false,
+   "checks": {
+    "allPresent": true,
+    "eachPresented": false,
+    "inOrder": false,
+    "eachOnce": true,
+    "redirect": true
+   }
+  },
+  "report": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/REPORT.md",
+  "build": "dev",
+  "skill": "2.11.1",
+  "cli": "2.24.11",
+  "tickValidity": null,
+  "infrastructureInvalid": false
+ }
+}

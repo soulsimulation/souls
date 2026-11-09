@@ -1,0 +1,243 @@
+{
+ "requestId": "bo-001",
+ "seat": "bo",
+ "soulId": "s_ce5ab3310e",
+ "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+ "channel": "card",
+ "sentAt": "2026-11-09T17:18:55.627Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": null,
+ "ackText": null,
+ "resultAt": null,
+ "resultText": null,
+ "resultState": null,
+ "resultBy": null,
+ "firstResultAt": null,
+ "firstResultText": null,
+ "cardResults": [],
+ "cutoffAt": "2026-11-09T17:19:03.631Z",
+ "cutoffReason": "next-direction",
+ "samples": [
+  {
+   "t": "2026-11-09T17:18:57.587Z",
+   "mono": 71971,
+   "soulId": "s_ce5ab3310e",
+   "name": "Bo",
+   "tick": 1417,
+   "place": "g-lab-start",
+   "placePath": [
+    "Village Green",
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0.79,
+    "z": 0.431,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.59798611110982,
+    "hunger": 20.397638888889496,
+    "company": 35.42604166666628,
+    "restlessness": 20.281527777777796
+   },
+   "near": [
+    {
+     "id": "h_240d808a94",
+     "who": "Ada",
+     "distance": "here",
+     "doing": "idle"
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794244720897,
+   "lastReceipt": {
+    "id": "r_ad76129b-973c-4b46-b9ff-6b0ca5f9226e",
+    "soulId": "s_ce5ab3310e",
+    "capability": "wave:here",
+    "phase": "completed",
+    "acceptedTick": 1082,
+    "startedTick": 1082,
+    "endedTick": 1143,
+    "code": null,
+    "reason": null,
+    "endedAt": {
+     "place": "g-lab-start",
+     "placePath": [
+      "Village Green",
+      "Green field",
+      "World"
+     ],
+     "pos": [
+      0.8,
+      0.4
+     ],
+     "heading": 90,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_ad76129b-973c-4b46-b9ff-6b0ca5f9226e",
+     "soulId": "s_ce5ab3310e",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 1082,
+     "startedTick": 1082,
+     "endedTick": 1143,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0.8,
+       0.4
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794244718753
+   },
+   "inbox": {
+    "presence": "working",
+    "connected": true,
+    "queued": 1,
+    "latest": {
+     "id": "msg_2b14ab7d-f238-483f-b8ce-fe453725d342",
+     "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "delivered",
+     "sentAt": 1794244735629,
+     "deliveredAt": 1794244735630
+    }
+   },
+   "world": {
+    "tick": 1417,
+    "souls": [
+     {
+      "id": "h_240d808a94",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_ce5ab3310e",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 5
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_ad76129b-973c-4b46-b9ff-6b0ca5f9226e",
+   "soulId": "s_ce5ab3310e",
+   "capability": "wave:here",
+   "phase": "completed",
+   "acceptedTick": 1082,
+   "startedTick": 1082,
+   "endedTick": 1143,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "g-lab-start",
+    "placePath": [
+     "Village Green",
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0.8,
+     0.4
+    ],
+    "heading": 90,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

@@ -1,0 +1,53 @@
+{
+ "ok": true,
+ "allow": {
+  "allowed": true,
+  "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+ },
+ "checks": {
+  "quota": {
+   "ok": false,
+   "skipped": true,
+   "fiveH": null,
+   "week": null,
+   "fable": null,
+   "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+  },
+  "serverRoot": true,
+  "webDist": true,
+  "controllerCli": true,
+  "playwright": "server root mars/viewer",
+  "claude": "2.1.319 (Claude Code)",
+  "codex": null,
+  "providersOk": true,
+  "live": {
+   "eden-2026": {
+    "ok": true,
+    "build": "we-0d48d8f4c6fc",
+    "tickMs": {
+     "avg": 7.5,
+     "max": 78.7,
+     "n": 365
+    },
+    "clients": 1
+   },
+   "godmode-lab": {
+    "ok": true,
+    "build": "we-0d48d8f4c6fc",
+    "tickMs": {
+     "avg": 0.7,
+     "max": 9.1,
+     "n": 294
+    },
+    "clients": 0
+   }
+  },
+  "laptopLoad": [
+   12.2,
+   13.5,
+   10.4
+  ],
+  "freeGb": 16.3,
+  "machineOk": false
+ }
+}

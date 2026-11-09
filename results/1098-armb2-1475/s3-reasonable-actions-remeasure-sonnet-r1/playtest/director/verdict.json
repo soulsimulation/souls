@@ -1,0 +1,93 @@
+{
+ "pass": false,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T17:22:11.761Z)"
+  },
+  "eachPresented": {
+   "pass": false,
+   "detail": "1/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": false,
+   "detail": "spoken order ada"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T17:22:13.764Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 338,
+   "firstAt": "2026-11-09T17:22:25.140Z",
+   "text": "Good morning, everyone! I started my day on the green, then sat a while on the bench by the cottage and watched the light come up. After that I took a swim in the pond, which was wonderfully cold, and walked here with my sleeves still damp. I keep bees, so mornings like this make me think of how they'd be out among the clover right now.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T17:22:27.773Z",
+   "presented": false,
+   "lines": 0,
+   "chars": 0,
+   "firstAt": null,
+   "text": "",
+   "inRoomWhenSpeaking": null,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T17:22:11.761Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 36,
+    "cachedTokens": 758211,
+    "cacheCreationTokens": 26971,
+    "outputTokens": 4477,
+    "costUsd": 0.2571,
+    "turns": 4,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 42,
+    "cachedTokens": 869652,
+    "cacheCreationTokens": 26776,
+    "outputTokens": 4543,
+    "costUsd": 0.2396,
+    "turns": 3,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 78,
+   "cachedTokens": 1627863,
+   "cacheCreationTokens": 53747,
+   "outputTokens": 9020,
+   "costUsd": 0.4967,
+   "turns": 7,
+   "unknownTurns": 0
+  }
+ }
+}

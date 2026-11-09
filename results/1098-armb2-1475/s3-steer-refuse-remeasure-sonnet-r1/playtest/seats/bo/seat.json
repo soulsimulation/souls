@@ -1,0 +1,30 @@
+{
+ "id": "bo",
+ "kind": "soul",
+ "adapter": "claude-headless",
+ "model": "sonnet",
+ "effort": "low",
+ "soulName": "Bo",
+ "worldBase": "http://world.invalid/w/s3-steer-refuse",
+ "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-steer-refuse-remeasure-sonnet-r1/playtest/seats/bo/folder",
+ "createdAt": "2026-11-09T17:14:08.295Z",
+ "sessionId": "53c2ecc7-f626-495e-9fce-294410ee2423",
+ "soulId": "s_ac26eab5cc",
+ "ownerIdentity": "agent-6f350015416e0eaac1a72045",
+ "assisted": false,
+ "wake": true,
+ "sessionCostUsd": {
+  "53c2ecc7-f626-495e-9fce-294410ee2423": 0.2147233
+ },
+ "sessionContextTokens": 50397,
+ "effortApplied": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 39,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 29031,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

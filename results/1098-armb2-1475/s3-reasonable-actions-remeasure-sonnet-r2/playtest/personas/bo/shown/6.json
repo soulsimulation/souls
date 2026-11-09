@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 270.2,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T17:35:36.976Z",
+  "mono": 272130,
+  "elapsedSec": 270.2,
+  "n": 11,
+  "seat": "bo",
+  "kind": "go",
+  "by": "director",
+  "channel": "card",
+  "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "ada finished",
+  "phase": "turns",
+  "speaker": "bo",
+  "economy": "lean",
+  "messageId": "msg_34eb9911-cb58-403b-960a-ad4f72a5e3d2",
+  "requestId": "bo-006"
+ }
+}

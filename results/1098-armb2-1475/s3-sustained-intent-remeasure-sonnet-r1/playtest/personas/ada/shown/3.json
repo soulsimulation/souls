@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 90,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T17:24:13.617Z",
+  "mono": 92100,
+  "elapsedSec": 90,
+  "n": 5,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "lovely morning!",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_151dc112-db84-4a89-b3dd-bd64a764da6f",
+  "requestId": "ada-003"
+ }
+}

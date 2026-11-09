@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 92.1,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T17:37:23.205Z",
+  "mono": 94014,
+  "elapsedSec": 92.1,
+  "n": 9,
+  "seat": "bo",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "say hello to everyone around you",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_43b0f426-3132-41cf-a2c8-da224b1fdc44",
+  "requestId": "bo-004"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "step": "play",
+ "t": "2026-11-09T17:35:46.890Z",
+ "mono": 282042,
+ "ok": true,
+ "stoppedBy": "world-budget",
+ "elapsedSec": 280,
+ "phase": "turns",
+ "gateReason": "all-present"
+}

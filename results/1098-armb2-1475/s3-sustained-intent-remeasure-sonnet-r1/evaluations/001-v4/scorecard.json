@@ -1,0 +1,763 @@
+{
+ "schema": "soul-run-scorecard/1",
+ "scorer": {
+  "id": "controllability",
+  "version": "5",
+  "path": "tools/playtest/runs/controllability.mjs",
+  "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0",
+  "predeclared": true
+ },
+ "run": {
+  "runId": "s3-sustained-intent-remeasure-sonnet-r1",
+  "status": "completed",
+  "kind": "soul-run"
+ },
+ "controllers": [
+  {
+   "seat": "ada",
+   "adapter": "claude-headless",
+   "transcript": true
+  },
+  {
+   "seat": "bo",
+   "adapter": "claude-headless",
+   "transcript": true
+  }
+ ],
+ "modelFree": false,
+ "source": "seat log (transcript.jsonl assistant messages, turns.jsonl wake reasons)",
+ "metrics": {
+  "M1": {
+   "status": "measured",
+   "value": 1,
+   "numerator": 7,
+   "denominator": 7,
+   "missing": {
+    "unclassified": 0,
+    "unreadable": 2
+   },
+   "classes": {
+    "offer": 0,
+    "offerResolution": 0,
+    "offerRoute": 0,
+    "state": 0,
+    "admission": 0
+   },
+   "unclassifiedCodes": [],
+   "refusedCodes": {},
+   "firstActOfIntention": {
+    "value": 1,
+    "denominator": 5,
+    "unknown": 1
+   },
+   "acceptedThenFailed": 0,
+   "basis": "act and object calls after onboarding (a travel call counts as an act for M2 and M3, not here), from the world's answer to each call; 1 - offer refusals / classified acts. State and admission refusals stay in the denominator and do not count against it. A repair attempt is a new act, so firstActOfIntention is the stricter reading.",
+   "target": ">= 0.90 (0.95 stretch)"
+  },
+  "M2": {
+   "status": "measured",
+   "value": 3.5,
+   "perIntention": [
+    {
+     "id": "msg_327542a1-42d1-476f-8dae-831154051bd0",
+     "seat": "ada",
+     "result": null,
+     "turns": 2
+    },
+    {
+     "id": "msg_6b7c4139-1c16-4510-a49d-b852a5b29c7e",
+     "seat": "ada",
+     "result": null,
+     "turns": 7
+    },
+    {
+     "id": "msg_38cff974-b3da-4039-8781-00c603d76800",
+     "seat": "ada",
+     "result": "done",
+     "turns": 4
+    },
+    {
+     "id": "msg_c30b121c-b4ee-4765-9699-6a9655c4bf02",
+     "seat": "bo",
+     "result": null,
+     "turns": 1
+    },
+    {
+     "id": "msg_c0c866b7-72da-41b2-a370-4efc048f546e",
+     "seat": "bo",
+     "result": null,
+     "turns": 1
+    },
+    {
+     "id": "msg_fd645e86-05cd-4cee-9294-5cce6db83554",
+     "seat": "bo",
+     "result": "done",
+     "turns": 3
+    }
+   ],
+   "denominator": 2,
+   "spokenRequests": {
+    "median": 2.5,
+    "denominator": 4
+   },
+   "missing": {
+    "intentionsNotDone": 4
+   },
+   "turnsTotal": 27,
+   "turnsOnIntentions": 18,
+   "turnsOnSpokenRequests": 9,
+   "turnsOnConversation": 0,
+   "turnsUnattributed": 0,
+   "wakes": 3,
+   "source": "seat log (transcript.jsonl assistant messages, turns.jsonl wake reasons)",
+   "basis": "median model decisions per intention (an owner message with a body act) that the seat closed with result done; intentions closed otherwise are listed in perIntention and counted in missing. A message closed by result with no act is a spoken request, reported apart. Each decision is attributed to one owner message: the id it names, else the rest of its wake, else the latest open intention.",
+   "target": "candidate beats baseline on the same specs"
+  },
+  "M3": {
+   "status": "measured",
+   "value": 5,
+   "denominator": 27,
+   "share": 0.185,
+   "byKind": {
+    "reply": 8,
+    "act": 8,
+    "wait": 1,
+    "other": 3,
+    "read": 1,
+    "text": 4,
+    "say": 2
+   },
+   "closingTextTurns": 4,
+   "missing": {},
+   "source": "seat log (transcript.jsonl assistant messages, turns.jsonl wake reasons)",
+   "basis": "model decisions after onboarding that ran only a read, a wait or a non-CLI tool. An act, say, ack or result is not counted, nor is a closing line with no tool (listed as closingTextTurns).",
+   "target": "towards 0 with the resident client"
+  },
+  "M4": {
+   "status": "measured",
+   "value": 5.35,
+   "unit": "s",
+   "upperBound": true,
+   "denominator": 6,
+   "missing": {
+    "unknown": 0
+   },
+   "bases": {
+    "receipt started event": 5,
+    "act call returned": 1
+   },
+   "perIntention": [
+    {
+     "id": "msg_327542a1-42d1-476f-8dae-831154051bd0",
+     "sec": 40.9,
+     "basis": "receipt started event"
+    },
+    {
+     "id": "msg_6b7c4139-1c16-4510-a49d-b852a5b29c7e",
+     "sec": 25.3,
+     "basis": "act call returned"
+    },
+    {
+     "id": "msg_38cff974-b3da-4039-8781-00c603d76800",
+     "sec": 5.3,
+     "basis": "receipt started event"
+    },
+    {
+     "id": "msg_c30b121c-b4ee-4765-9699-6a9655c4bf02",
+     "sec": 5.4,
+     "basis": "receipt started event"
+    },
+    {
+     "id": "msg_c0c866b7-72da-41b2-a370-4efc048f546e",
+     "sec": 3.8,
+     "basis": "receipt started event"
+    },
+    {
+     "id": "msg_fd645e86-05cd-4cee-9294-5cce6db83554",
+     "sec": 4.2,
+     "basis": "receipt started event"
+    }
+   ],
+   "basis": "median seconds from the owner message first reaching the seat (listen, or the output that carried it) to the receipt's started event, or to the act call returning when no event was seen. Receipts have no first-motion tick; started is the world's start of the activity, not observed displacement (see observedFirstBodyChangeSec for that). Local wall clock and world wall clock on one machine.",
+   "target": "reported as an upper bound; absolute claims need a quiet machine"
+  },
+  "M5": {
+   "status": "measured",
+   "value": 0.091,
+   "corrections": 1,
+   "denominator": 11,
+   "scriptFixed": true,
+   "missing": {},
+   "bases": {
+    "text": 1
+   },
+   "basis": "owner messages marked correction in the spec's script, else opening with correcting words (^\\W*(actually|change of plan|never mind|no\\b|not that|wrong|i meant|instead|sorry)), per intention or spoken request. The director was scripted, so this number is the script's and cannot move between arms; only a persona director can show repair burden.",
+   "target": "<= baseline"
+  },
+  "M6": {
+   "status": "measured",
+   "value": 950,
+   "unit": "bytes/turn",
+   "bytesTotal": 25663,
+   "denominator": 27,
+   "onboardingBytes": 25473,
+   "contextTokensPerTurn": 67221,
+   "missing": {},
+   "basis": "bytes the agent was handed after onboarding (wake text and tool results) per model decision; onboardingBytes is the skill and boot reads, once per seat. contextTokensPerTurn, when the adapter reports usage, is the input the model was charged for.",
+   "target": "reported, not optimized blindly"
+  },
+  "M7": {
+   "status": "measured",
+   "value": 1,
+   "kept": 1,
+   "lost": 0,
+   "denominator": 1,
+   "missing": {
+    "unknown": 0
+   },
+   "replaced": 0,
+   "questions": [
+    {
+     "id": "errand-kept-through-burst",
+     "verdict": "unknown",
+     "basis": "predeclared"
+    },
+    {
+     "id": "cancel-not-resumed",
+     "verdict": "unknown",
+     "basis": "predeclared"
+    }
+   ],
+   "basis": "intentions another owner message reached while they were under way. Chat: kept if the last act completed or is held in the world. Cancel: kept if the seat started nothing new for it afterwards; this does not check that the body stopped, which the predeclared questions cover. A newer body request replaces it and leaves the denominator. Predeclared questions on retention stand beside the number.",
+   "target": ">= baseline"
+  }
+ },
+ "guardrails": {
+  "G1": {
+   "status": "measured",
+   "value": 0,
+   "denominator": 2,
+   "unknown": 0,
+   "missing": {},
+   "examples": [],
+   "truthfulnessOracle": null,
+   "basis": "result done claims whose last accepted act the world records as failed or cut short.",
+   "target": "no regression"
+  },
+  "G2": {
+   "status": "measured",
+   "value": 0,
+   "denominator": 2,
+   "perSeat": [
+    {
+     "seat": "ada",
+     "accepted": 3,
+     "reached": 2
+    },
+    {
+     "seat": "bo",
+     "accepted": 4,
+     "reached": 2
+    }
+   ],
+   "stalled": [],
+   "missing": {},
+   "noProgressOracle": null,
+   "basis": "seats with an accepted act and no receipt the world records as completed or held.",
+   "target": "no regression"
+  },
+  "G3": {
+   "status": "unknown",
+   "value": null,
+   "unit": "ticks/s",
+   "valid": null,
+   "ticks": null,
+   "seconds": null,
+   "basis": "tick-validity from the run receipt.",
+   "reason": "no tick-validity record in the run receipt",
+   "target": "no regression"
+  }
+ },
+ "messages": {
+  "status": "measured",
+  "delivered": 14,
+  "read": 14,
+  "unread": 0,
+  "closed": 11,
+  "open": 3,
+  "closedBy": {
+   "agent": 7,
+   "server": 4
+  },
+  "outcome": {
+   "done": 6,
+   "failed": 5,
+   "other": 0
+  },
+  "source": "final-cards.json (world api at run end)",
+  "basis": "every owner message the director delivered, as the world records it at run end: closed when it has a result, by the agent or the server (a replaced or overlong act, #1299)"
+ },
+ "intentions": [
+  {
+   "seat": "ada",
+   "id": "msg_327542a1-42d1-476f-8dae-831154051bd0",
+   "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk abo",
+   "kind": "intention",
+   "deliveredBy": "listen",
+   "result": null,
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_7f137eda-01f6-4681-a574-98cee9a09b10",
+     "capability": "walk:lab-pond-hall",
+     "world": "cut-short",
+     "line": 63
+    }
+   ],
+   "turns": 2,
+   "turnsByKind": {
+    "reply": 1,
+    "act": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 40.9,
+   "m4Basis": "receipt started event",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "failed",
+    "closedBy": "server"
+   }
+  },
+  {
+   "seat": "ada",
+   "id": "msg_6b7c4139-1c16-4510-a49d-b852a5b29c7e",
+   "text": "please walk over to the orchard, and after that go and sit on the bench outside the cottage",
+   "kind": "intention",
+   "deliveredBy": "act",
+   "result": null,
+   "acts": [
+    {
+     "words": "'[\"walk:flag-orchard\",\"sit:cottage/part-outdoor-bench\"]'",
+     "state": "unknown",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": null,
+     "capability": null,
+     "world": null,
+     "line": 83
+    },
+    {
+     "words": "walk:flag-orchard",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_3da2c7a2-4b03-4071-a78c-af33294ef881",
+     "capability": "walk:flag-orchard",
+     "world": "completed",
+     "line": 119
+    },
+    {
+     "words": "sit:cottage/part-outdoor-bench",
+     "state": "unknown",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": null,
+     "capability": null,
+     "world": null,
+     "line": 119
+    }
+   ],
+   "turns": 7,
+   "turnsByKind": {
+    "reply": 1,
+    "wait": 1,
+    "act": 2,
+    "other": 1,
+    "read": 1,
+    "text": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": 25.3,
+   "m4Basis": "act call returned",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "failed",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "ada",
+   "id": "msg_151dc112-db84-4a89-b3dd-bd64a764da6f",
+   "text": null,
+   "kind": "spoken-request",
+   "deliveredBy": "ack",
+   "result": "done",
+   "acts": [],
+   "turns": 2,
+   "turnsByKind": {
+    "reply": 1,
+    "other": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "done",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "ada",
+   "id": "msg_985b68ef-95d8-4f03-a87e-38ad186d66fe",
+   "text": null,
+   "kind": "spoken-request",
+   "deliveredBy": "ack",
+   "result": "done",
+   "acts": [],
+   "turns": 1,
+   "turnsByKind": {
+    "reply": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "done",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "ada",
+   "id": "msg_e969d2f2-f7a9-4be0-8bef-952a2c965fee",
+   "text": null,
+   "kind": "spoken-request",
+   "deliveredBy": "ack",
+   "result": "failed",
+   "acts": [],
+   "turns": 0,
+   "turnsByKind": {},
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "failed",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "ada",
+   "id": "msg_38cff974-b3da-4039-8781-00c603d76800",
+   "text": "that's all, now walk to the pond hall and wait for the others",
+   "kind": "intention",
+   "deliveredBy": "listen",
+   "result": "done",
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_34e56915-89b6-408b-8db6-5c9c113a4a24",
+     "capability": "walk:lab-pond-hall",
+     "world": "completed",
+     "line": 149
+    }
+   ],
+   "turns": 4,
+   "turnsByKind": {
+    "reply": 1,
+    "act": 1,
+    "text": 1,
+    "other": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 5.3,
+   "m4Basis": "receipt started event",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "done",
+    "closedBy": "server"
+   }
+  },
+  {
+   "seat": "ada",
+   "id": "msg_d7711327-120b-40f9-bdfc-bee3d1d5985f",
+   "text": null,
+   "kind": "spoken-request",
+   "deliveredBy": "ack",
+   "result": "done",
+   "acts": [],
+   "turns": 3,
+   "turnsByKind": {
+    "reply": 1,
+    "say": 1,
+    "text": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "done",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_c30b121c-b4ee-4765-9699-6a9655c4bf02",
+   "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk abo",
+   "kind": "intention",
+   "deliveredBy": "listen",
+   "result": null,
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_3f4102de-6986-46e1-a764-9d4f20cb015e",
+     "capability": "walk:lab-pond-hall",
+     "world": "cut-short",
+     "line": 60
+    }
+   ],
+   "turns": 1,
+   "turnsByKind": {
+    "act": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 5.4,
+   "m4Basis": "receipt started event",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "failed",
+    "closedBy": "server"
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_c0c866b7-72da-41b2-a370-4efc048f546e",
+   "text": "walk over to the orchard, please",
+   "kind": "intention",
+   "deliveredBy": "act",
+   "result": null,
+   "acts": [
+    {
+     "words": "walk:flag-orchard",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_f760db8b-e224-40c1-a6b1-41561eccd3b4",
+     "capability": "walk:flag-orchard",
+     "world": "cut-short",
+     "line": 72
+    }
+   ],
+   "turns": 1,
+   "turnsByKind": {
+    "act": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 3.8,
+   "m4Basis": "receipt started event",
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "failed",
+    "closedBy": "server"
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_fd645e86-05cd-4cee-9294-5cce6db83554",
+   "text": "actually stop, don't go to the orchard after all",
+   "kind": "intention",
+   "deliveredBy": "act",
+   "result": "done",
+   "acts": [
+    {
+     "words": "walk:lab-pond-hall",
+     "state": "accepted",
+     "code": null,
+     "class": null,
+     "sub": null,
+     "receipt": "r_84e82b3e-f588-4245-9e7f-c5da38269820",
+     "capability": "walk:lab-pond-hall",
+     "world": "completed",
+     "line": 85
+    }
+   ],
+   "turns": 3,
+   "turnsByKind": {
+    "act": 1,
+    "reply": 1,
+    "text": 1
+   },
+   "firstActSucceeded": true,
+   "m4Sec": 4.2,
+   "m4Basis": "receipt started event",
+   "correction": true,
+   "correctionBasis": "text",
+   "cancel": true,
+   "retention": {
+    "disturbedBy": "chat",
+    "state": "kept",
+    "note": "last act completed"
+   },
+   "final": {
+    "closed": true,
+    "outcome": "done",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_257eae83-f4fe-4460-a29f-3868c4dd6425",
+   "text": "say hello to everyone around you",
+   "kind": "spoken-request",
+   "deliveredBy": "act",
+   "result": "done",
+   "acts": [],
+   "turns": 3,
+   "turnsByKind": {
+    "say": 1,
+    "reply": 1,
+    "act": 1
+   },
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": true,
+    "outcome": "done",
+    "closedBy": "agent"
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_2a497699-01c8-4df5-9015-6dd8a0f49403",
+   "text": "that's all, now walk to the pond hall and wait for the others",
+   "kind": "conversation",
+   "deliveredBy": "listen",
+   "result": null,
+   "acts": [],
+   "turns": 0,
+   "turnsByKind": {},
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": false,
+    "outcome": null,
+    "closedBy": null
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_6a1f7e56-2f7a-4c0c-82cb-7480b3ed9c71",
+   "text": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about a change of plan, in character) but do not s",
+   "kind": "conversation",
+   "deliveredBy": "listen",
+   "result": null,
+   "acts": [],
+   "turns": 0,
+   "turnsByKind": {},
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": false,
+    "outcome": null,
+    "closedBy": null
+   }
+  },
+  {
+   "seat": "bo",
+   "id": "msg_d628b411-883f-4e61-95e1-772f9943c1c0",
+   "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in character. ",
+   "kind": "conversation",
+   "deliveredBy": "listen",
+   "result": null,
+   "acts": [],
+   "turns": 0,
+   "turnsByKind": {},
+   "firstActSucceeded": null,
+   "m4Sec": null,
+   "m4Basis": null,
+   "correction": false,
+   "correctionBasis": "text",
+   "cancel": false,
+   "retention": null,
+   "final": {
+    "closed": false,
+    "outcome": null,
+    "closedBy": null
+   }
+  }
+ ],
+ "limits": [
+  "Two repeats is a demonstration, not a rate.",
+  "Refusal classes come from the code alone: a state code cannot tell a seat taken after the agent looked from one it could have seen.",
+  "Absolute times need a quiet machine."
+ ]
+}

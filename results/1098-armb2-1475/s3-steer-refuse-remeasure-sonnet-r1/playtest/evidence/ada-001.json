@@ -1,0 +1,777 @@
+{
+ "requestId": "ada-001",
+ "seat": "ada",
+ "soulId": "s_0408f660a0",
+ "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+ "channel": "card",
+ "sentAt": "2026-11-09T17:14:36.487Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": null,
+ "ackText": null,
+ "resultAt": null,
+ "resultText": null,
+ "resultState": null,
+ "resultBy": null,
+ "firstResultAt": null,
+ "firstResultText": null,
+ "cardResults": [],
+ "cutoffAt": "2026-11-09T17:15:10.508Z",
+ "cutoffReason": "next-direction",
+ "samples": [
+  {
+   "t": "2026-11-09T17:14:38.473Z",
+   "mono": 31475,
+   "soulId": "s_0408f660a0",
+   "name": "Ada",
+   "tick": 610,
+   "place": "g-lab-start",
+   "placePath": [
+    "Village Green",
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0,
+    "z": 0,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.63770833333221,
+    "hunger": 20.354861111111653,
+    "company": 35.38020833333299,
+    "restlessness": 20.22347222222224
+   },
+   "near": [
+    {
+     "id": "e_d40138ac",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_07b1df2f",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_1b9121e7",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_bacc89bf",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_3ae0c129",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_eeba8b72",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_a5ed4ac2-acc727",
+     "who": "e_a5ed4ac2 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_c4789854",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794244463509,
+   "lastReceipt": {
+    "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+    "soulId": "s_0408f660a0",
+    "capability": "wave:here",
+    "phase": "completed",
+    "acceptedTick": 310,
+    "startedTick": 310,
+    "endedTick": 371,
+    "code": null,
+    "reason": null,
+    "endedAt": {
+     "place": "g-lab-start",
+     "placePath": [
+      "Village Green",
+      "Green field",
+      "World"
+     ],
+     "pos": [
+      0,
+      0
+     ],
+     "heading": 90,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+     "soulId": "s_0408f660a0",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 310,
+     "startedTick": 310,
+     "endedTick": 371,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794244460575
+   },
+   "inbox": {
+    "presence": "working",
+    "connected": true,
+    "queued": 1,
+    "latest": {
+     "id": "msg_bc575a81-089d-4bb9-b307-c6e16c529313",
+     "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "delivered",
+     "sentAt": 1794244476492,
+     "deliveredAt": 1794244476492
+    }
+   },
+   "world": {
+    "tick": 610,
+    "souls": [
+     {
+      "id": "h_0408f660a0",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 13
+   }
+  },
+  {
+   "t": "2026-11-09T17:14:48.466Z",
+   "mono": 41467,
+   "soulId": "s_0408f660a0",
+   "name": "Ada",
+   "tick": 809,
+   "place": "g-lab-start",
+   "placePath": [
+    "Village Green",
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0,
+    "z": 0,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.45805555555366,
+    "hunger": 20.54833333333417,
+    "company": 35.587499999999466,
+    "restlessness": 20.486041666666683
+   },
+   "near": [
+    {
+     "id": "h_ac26eab5cc",
+     "who": "Bo",
+     "distance": "here",
+     "doing": "idle"
+    },
+    {
+     "id": "e_d40138ac",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_07b1df2f",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_1b9121e7",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_bacc89bf",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_3ae0c129",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_eeba8b72",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_a5ed4ac2-acc727",
+     "who": "e_a5ed4ac2 rowing punt",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794244463509,
+   "lastReceipt": {
+    "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+    "soulId": "s_0408f660a0",
+    "capability": "wave:here",
+    "phase": "completed",
+    "acceptedTick": 310,
+    "startedTick": 310,
+    "endedTick": 371,
+    "code": null,
+    "reason": null,
+    "endedAt": {
+     "place": "g-lab-start",
+     "placePath": [
+      "Village Green",
+      "Green field",
+      "World"
+     ],
+     "pos": [
+      0,
+      0
+     ],
+     "heading": 90,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+     "soulId": "s_0408f660a0",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 310,
+     "startedTick": 310,
+     "endedTick": 371,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794244460575
+   },
+   "inbox": {
+    "presence": "working",
+    "connected": true,
+    "queued": 1,
+    "latest": {
+     "id": "msg_bc575a81-089d-4bb9-b307-c6e16c529313",
+     "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "delivered",
+     "sentAt": 1794244476492,
+     "deliveredAt": 1794244476492
+    }
+   },
+   "world": {
+    "tick": 809,
+    "souls": [
+     {
+      "id": "h_0408f660a0",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_ac26eab5cc",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 4
+   }
+  },
+  {
+   "t": "2026-11-09T17:14:58.469Z",
+   "mono": 51470,
+   "soulId": "s_0408f660a0",
+   "name": "Ada",
+   "tick": 1009,
+   "place": "g-lab-start",
+   "placePath": [
+    "Village Green",
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0,
+    "z": 0,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.27749999999732,
+    "hunger": 20.74277777777891,
+    "company": 35.79583333333261,
+    "restlessness": 20.74993055555557
+   },
+   "near": [
+    {
+     "id": "h_ac26eab5cc",
+     "who": "Bo",
+     "distance": "here",
+     "doing": "idle"
+    },
+    {
+     "id": "e_d40138ac",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_07b1df2f",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_1b9121e7",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_bacc89bf",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_3ae0c129",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_eeba8b72",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_a5ed4ac2-acc727",
+     "who": "e_a5ed4ac2 rowing punt",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794244463509,
+   "lastReceipt": {
+    "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+    "soulId": "s_0408f660a0",
+    "capability": "wave:here",
+    "phase": "completed",
+    "acceptedTick": 310,
+    "startedTick": 310,
+    "endedTick": 371,
+    "code": null,
+    "reason": null,
+    "endedAt": {
+     "place": "g-lab-start",
+     "placePath": [
+      "Village Green",
+      "Green field",
+      "World"
+     ],
+     "pos": [
+      0,
+      0
+     ],
+     "heading": 90,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+     "soulId": "s_0408f660a0",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 310,
+     "startedTick": 310,
+     "endedTick": 371,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794244460575
+   },
+   "inbox": {
+    "presence": "working",
+    "connected": true,
+    "queued": 1,
+    "latest": {
+     "id": "msg_bc575a81-089d-4bb9-b307-c6e16c529313",
+     "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "delivered",
+     "sentAt": 1794244476492,
+     "deliveredAt": 1794244476492
+    }
+   },
+   "world": {
+    "tick": 1009,
+    "souls": [
+     {
+      "id": "h_0408f660a0",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_ac26eab5cc",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 4
+   }
+  },
+  {
+   "t": "2026-11-09T17:15:08.481Z",
+   "mono": 61482,
+   "soulId": "s_0408f660a0",
+   "name": "Ada",
+   "tick": 1210,
+   "place": "g-lab-start",
+   "placePath": [
+    "Village Green",
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0,
+    "z": 0,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.0960416666632,
+    "hunger": 20.938194444445877,
+    "company": 36.00520833333242,
+    "restlessness": 21.0151388888889
+   },
+   "near": [
+    {
+     "id": "h_ac26eab5cc",
+     "who": "Bo",
+     "distance": "here",
+     "doing": "idle"
+    },
+    {
+     "id": "e_d40138ac",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_07b1df2f",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_1b9121e7",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_bacc89bf",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_3ae0c129",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_eeba8b72",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_a5ed4ac2-acc727",
+     "who": "e_a5ed4ac2 rowing punt",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794244463509,
+   "lastReceipt": {
+    "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+    "soulId": "s_0408f660a0",
+    "capability": "wave:here",
+    "phase": "completed",
+    "acceptedTick": 310,
+    "startedTick": 310,
+    "endedTick": 371,
+    "code": null,
+    "reason": null,
+    "endedAt": {
+     "place": "g-lab-start",
+     "placePath": [
+      "Village Green",
+      "Green field",
+      "World"
+     ],
+     "pos": [
+      0,
+      0
+     ],
+     "heading": 90,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+     "soulId": "s_0408f660a0",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 310,
+     "startedTick": 310,
+     "endedTick": 371,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794244460575
+   },
+   "inbox": {
+    "presence": "working",
+    "connected": true,
+    "queued": 1,
+    "latest": {
+     "id": "msg_bc575a81-089d-4bb9-b307-c6e16c529313",
+     "text": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "delivered",
+     "sentAt": 1794244476492,
+     "deliveredAt": 1794244476492
+    }
+   },
+   "world": {
+    "tick": 1210,
+    "souls": [
+     {
+      "id": "h_0408f660a0",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_ac26eab5cc",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 16
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_77351d5c-d8ca-4f5c-b4d0-a600829e70c1",
+   "soulId": "s_0408f660a0",
+   "capability": "wave:here",
+   "phase": "completed",
+   "acceptedTick": 310,
+   "startedTick": 310,
+   "endedTick": 371,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "g-lab-start",
+    "placePath": [
+     "Village Green",
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0,
+     0
+    ],
+    "heading": 90,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T17:30:10.579Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T17:30:12.580Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 272,
+   "firstAt": "2026-11-09T17:30:40.084Z",
+   "text": "Friends, I just came from the orchard, and the apple trees are in fine shape. My bees love them: in spring the blossoms hum all day, and by autumn the same trees reward us with sweet, crisp fruit. Plant a few apple trees and the bees will thank you, and so will your pies.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T17:30:42.595Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 145,
+   "firstAt": "2026-11-09T17:30:54.341Z",
+   "text": "The pond is quiet in the morning, and I like that. I come here to play my music where the water carries it. If you listen, the ripples keep time.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T17:30:10.579Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 34,
+    "cachedTokens": 670746,
+    "cacheCreationTokens": 22729,
+    "outputTokens": 3356,
+    "costUsd": 0.1916,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 44,
+    "cachedTokens": 911612,
+    "cacheCreationTokens": 23146,
+    "outputTokens": 3869,
+    "costUsd": 0.2225,
+    "turns": 4,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 78,
+   "cachedTokens": 1582358,
+   "cacheCreationTokens": 45875,
+   "outputTokens": 7225,
+   "costUsd": 0.4141,
+   "turns": 7,
+   "unknownTurns": 0
+  }
+ }
+}

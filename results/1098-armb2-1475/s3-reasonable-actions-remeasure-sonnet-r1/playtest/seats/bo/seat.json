@@ -1,0 +1,30 @@
+{
+ "id": "bo",
+ "kind": "soul",
+ "adapter": "claude-headless",
+ "model": "sonnet",
+ "effort": "low",
+ "soulName": "Bo",
+ "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+ "folder": "<home>/Souls/.local/playtest-home/results/1098-armb2-1475/s3-reasonable-actions-remeasure-sonnet-r1/playtest/seats/bo/folder",
+ "createdAt": "2026-11-09T17:17:47.385Z",
+ "sessionId": "96d75246-3943-4ade-bbe8-b49aad1a8df8",
+ "soulId": "s_ce5ab3310e",
+ "ownerIdentity": "agent-849e0fed30abfae35e456b23",
+ "assisted": false,
+ "wake": true,
+ "sessionCostUsd": {
+  "96d75246-3943-4ade-bbe8-b49aad1a8df8": 0.2395832
+ },
+ "sessionContextTokens": 52837,
+ "effortApplied": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 51,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 31215,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

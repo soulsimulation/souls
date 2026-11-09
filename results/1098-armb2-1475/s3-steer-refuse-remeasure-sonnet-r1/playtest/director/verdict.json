@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T17:16:58.550Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T17:17:00.554Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 268,
+   "firstAt": "2026-11-09T17:17:07.184Z",
+   "text": "Hello, neighbours! I keep bees, so I spend a lot of time among the apple trees in spring. When the blossoms open, my bees work them from dawn, and that is why the autumn apples come out so sweet. A good orchard and a good hive need each other, and I love tending both.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T17:17:10.557Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 165,
+   "firstAt": "2026-11-09T17:17:33.559Z",
+   "text": "Um… hi. The pond is quiet in the morning, mostly. I play music near it sometimes, soft things, because the water seems to listen. I think it's the nicest place here.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T17:16:58.550Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 32,
+    "cachedTokens": 633142,
+    "cacheCreationTokens": 23966,
+    "outputTokens": 3291,
+    "costUsd": 0.1922,
+    "turns": 2,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 36,
+    "cachedTokens": 726659,
+    "cacheCreationTokens": 22932,
+    "outputTokens": 3132,
+    "costUsd": 0.2147,
+    "turns": 3,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 68,
+   "cachedTokens": 1359801,
+   "cacheCreationTokens": 46898,
+   "outputTokens": 6423,
+   "costUsd": 0.4069,
+   "turns": 5,
+   "unknownTurns": 0
+  }
+ }
+}
