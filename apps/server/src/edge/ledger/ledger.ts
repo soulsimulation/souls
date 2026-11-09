@@ -890,7 +890,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         const steps = this.navReplan(p.soul, p.capability, p.steps);
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason;   // the wait's reason is over once it is warm
         if (said?.endsWith(NAV_WARM_REASON)) this.update(p.receipt, {reason: said.slice(0, -NAV_WARM_REASON.length).trim() || null});
-        if (steps && !Array.isArray(steps)) {this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt); this.update(p.receipt, {phase: 'failed', code: steps.code, reason: steps.reason}); this.failedAlternatives(p, steps.code); continue;}
+        if (steps && !Array.isArray(steps)) {this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt); this.failedAlternatives(p, steps.code); this.update(p.receipt, {phase: 'failed', code: steps.code, reason: steps.reason}); continue;}
         if (steps) {p.steps = steps; const l = this.launched.get(p.receipt); if (l) l.steps = steps;}
       }
       const issue = this.host.engine.canPerform({actor: p.soul.entityId, label: p.label, steps: p.steps});
@@ -902,7 +902,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason; this.update(p.receipt, {reason: said ? `${said} ${NAV_WARM_REASON}` : NAV_WARM_REASON}); continue;
       }
       this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt);
-      if (issue) {this.update(p.receipt, {phase: 'failed', code: issue.code, reason: humanBlockedExplanationV1(issue.code, p.label)}); this.failedAlternatives(p, issue.code); continue;}
+      if (issue) {this.failedAlternatives(p, issue.code); this.update(p.receipt, {phase: 'failed', code: issue.code, reason: humanBlockedExplanationV1(issue.code, p.label)}); continue;}
       void this.decide(p.soul, p.receipt, p.capability, p.label, p.steps).catch(() => this.update(p.receipt, {phase: 'failed', code: 'ledger.unavailable', reason: 'The world could not record this action.'}));
     }
     if (this.ambient && tick % 20 === 0) this.ambientLife(tick);
@@ -1033,7 +1033,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
       return alt?.length ? alt : undefined;
     } catch (e) {console.error('[edge] route-dead alternatives', e instanceof Error ? e.message : e); return undefined;}   // a local failure: the refusal stands without them
   }
-  /** #1468: a walk that waited (for warm navigation or a safe stop) and then fails route-dead keeps its alternatives on the receipt. */
+  /** #1468: a walk that waited (for warm navigation or a safe stop) and then fails route-dead keeps its alternatives on the receipt.
+   *  Stored before the receipt turns failed, so the emitted failed receipt and its outcome carry them (review of 1a07cae42). */
   private failedAlternatives(p: Pending, code: string) {const alternatives = this.routeDeadAlternatives(p.soul, p.capability, code); if (alternatives) this.setDetail(p.receipt, {alternatives});}
   private navReplan(soul: EdgeSoul, capability: string, steps: Program['steps']): Program['steps'] | {code: string; reason: string} | null {
     try {

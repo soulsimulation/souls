@@ -21,6 +21,12 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
     const row = await accept(w.host, w.souls.create(`dev:${owner}`, { name, description: 'curious' })) as { id: string; entity_id: string; name: string; owner: string };
     return { soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner };
   };
+  // #1468 (review of 1a07cae42): what receipt listeners (the Soul's stream, outcomes) are handed, and the cost of the
+  // failed wait's alternatives on the tick
+  const emitted: { id: string; phase: string; alternatives?: { id: string }[] }[] = [];
+  L.onReceipt((r) => emitted.push(structuredClone(r) as never));
+  const La = L as unknown as { routeDeadAlternatives(...a: unknown[]): unknown }, altBuild = La.routeDeadAlternatives.bind(L), altMs: number[] = [];
+  La.routeDeadAlternatives = (...a: unknown[]) => { const t0 = performance.now(); try { return altBuild(...a); } finally { altMs.push(performance.now() - t0); } };
   const bob = await soulOf('bob', 'Bob'), cy = await soulOf('cy', 'Cy'), di = await soulOf('di', 'Di');
   await w.settle(2);
   const roof = 'walk:eden-house-3/eden-house-3-roof-planter-1', kitchen = 'walk:eden-house-3-kitchen/eden-house-3-kitchen-roof-planter-1';
@@ -69,6 +75,11 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const kAlt = (k as {alternatives?: {id: string; why: string}[]}).alternatives;
   assert.ok(kAlt && kAlt.length >= 1 && kAlt.length <= 3, `1-3 alternatives on the failed receipt: ${JSON.stringify(k)}`);
   t.diagnostic(`kitchen roof alternatives: ${JSON.stringify(kAlt!.map(x => [x.id, x.why]))}`);
+  // the one failed event a listener gets carries them too (the stream dedups per receipt and phase: no later event corrects it)
+  const kEv = emitted.filter((r) => r.id === second.receipt!.id && r.phase === 'failed');
+  assert.equal(kEv.length, 1, `one failed event: ${JSON.stringify(kEv)}`);
+  assert.deepEqual(kEv[0]!.alternatives?.map((x) => x.id), kAlt!.map((x) => x.id), 'the emitted failed receipt names the same alternatives');
+  t.diagnostic(`route-dead alternatives build on the tick (Eden 2026, ms each): ${altMs.map((x) => x.toFixed(1)).join(', ')}`);
   for (const x of kAlt!) {assert.notEqual(x.id, kitchen); assert.ok((L as any).bindOne(bob, x.id)?.cap.available, `${x.id} is available now`);}
   for (let i = 0; i < 4000 && phase(w.soul, ana.receipt!.id).phase !== 'completed'; i++) { w.host.tickOnce(); if (i % 20 === 0) await w.settle(1); }
   const done = phase(w.soul, ana.receipt!.id), body = w.host.engine.world.entities[w.soul.entityId] as { human?: { level?: number } };
