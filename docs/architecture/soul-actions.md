@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Supplied artist pigment (#1669)
+
+`core/pigment-tray@1` offers `crush` for supplied chalk chunks and then `grind` for coarse granules. Each action uses ten seconds of native craft. Only a completed receipt advances the same tray material to coarse granules or fine powder and records its latest worker. Read the tray for the durable stage. Interruptions preserve the prior material; access, stage, existence and proximity are rechecked before a normal atomic God edit. The small hand tool is cosmetic. No spawned output, downstream painting consumption, chemistry or dust behavior is implied. Three optional separately named God hooks integrate the bounded service; there is no idle service scan.

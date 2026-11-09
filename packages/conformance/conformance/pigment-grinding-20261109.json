@@ -1,0 +1,14 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1669,
+  "reason": "Supplied artist chalk changes from chunks to coarse granules then fine powder only on native completed work. One new definition, five production K=2 samples with zero findings/gaps. Existing raw library and real registered builder checks pass. No older pins, budgets or baselines change.",
+  "definitions": [
+    {
+      "ref": "core-pigment-tray@1",
+      "hash": "525ac9f03bc5c050209811917dc0c8db1fa2c6cb4f70e1a9b7ab8999480f23c4"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}
