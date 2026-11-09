@@ -2,6 +2,57 @@
 
 User-facing changes to Souls, newest first. Each release is compiled from `changes/` fragments.
 
+## 4.17 (2026-11-09)
+
+### Features
+
+- A Soul can be told to stop what it is doing right now and stays where it is; asked to stop with nothing under way, it says so and names what it last did.
+- On a phone, the screen stays awake while you watch a world, and still sleeps after 30 minutes without a touch.
+- On phones the world page shows one menu button instead of floating controls; its menu holds Worlds, the time, search, your Souls, god mode, music, the camera and your account.
+- The phone menu lists your Souls inline, up to five with Show more, with New Soul right under them.
+- The world page shows a single "Live" pill, with the day and time in the panel it opens; a previewed hour turns the circle orange, and the top-left controls read live, camera, sound, search, god mode, Souls.
+- The audio menu has previous and next track buttons; with music off they choose the track that plays when you turn it on.
+- A Soul's agent can `stop` its own act under way: the Soul stays where it is, keeps its posture, and nothing else starts; a world without it says so.
+- Souls on the older eden-agent CLI get the body library and kit too: `body library`, `show`, `save`, `forget`, `publish`, `unpublish`, `kit` and `upload --manifest`, and `body set` takes a body from another world.
+- An agent whose host streams command output can keep one `listen --follow` open: each owner message arrives as a line, with no listen to restart between messages.
+- A Soul with its agent's serve running turns toward anyone who speaks to it at once, before its agent has read what was said.
+- A Soul can answer someone by turning to them and speaking in one command, `say "…" --to <name>`, and add a nod, clap, cheer, bow, head shake or point toward them; the reference now lists the gestures the world offers and which keep a seated Soul seated.
+
+### Fixes
+
+- An act the world took is never answered as a failure: if the world's clock has stopped it says nothing was done, and if it took the act but couldn't record it yet it answers "pending" with the act's receipt, so a retry never does it twice. (#1382)
+- Asking your Soul for a ride no longer closes your message the moment it boards: the message stays open ("aboard") until the Soul is back on the ground, then says how the ride went. (#1383)
+- A world whose clock has stopped moving now says so: its health check shows how long since the last tick, agents' reads say the world is stalled instead of answering with an old tick, actions are refused until it runs again, and a world that halts is restarted once by itself.
+- Searching a Soul's offers by a place's name now finds a walk to that place even when it is far away, and says when there are more matches than it lists.
+- A Soul sitting in a balloon or punt is told it is already there (0 m), and everyone else gets the distance to where the ride is now, not to where it boards.
+- A Soul the world moves (back to its start, out of a stall, after a recovery) is stood only where its own body fits, never half inside a wall.
+- A Soul whose step is refused waits and tries again instead of losing what it was doing, and a Soul the world leaves somewhere it cannot stand is moved to the nearest free spot at once, without stopping anyone else.
+- Souls in Eden can see again: the eyes renderer finds its browser after a browser-library update.
+- A world built on the Eden commons keeps restarting and welcoming new Souls after it turns on any of its newer movement rules.
+- A Soul whose body keeps breaking is set right each time on its own, and everyone else keeps walking.
+- One Soul that keeps breaking no longer stops every other Soul in the world from acting.
+- A world whose latest save won't load starts anyway, from an earlier save or from the beginning of its history, and reaches the same moment.
+- When a world's clock fails just after a Soul acts, the Soul is told so instead of being left waiting; searching the offers by place name has its own fair-use limit.
+- A signed-out visit to a world on soul.game loads once: the page no longer runs its loading bar to the end, reloads and loads again.
+- On a phone, pressing and holding on a world no longer highlights or selects the screen in blue.
+- On a phone, a faint ring in the lower left shows where to drag to move; dragging anywhere else turns the view, every time.
+- On a phone, the touch-controls hint stays up long enough to read instead of vanishing the moment you start dragging.
+- Music on a phone no longer goes silent while it says On: if the browser holds it back, the menu says "Tap to play" and a tap starts it.
+- The old address sim.eden.art now sends you to soul.game, at the same page; signing in keeps working.
+- A Soul stepping aside for someone on a stair no longer has its walk break.
+- A Soul's `caps --search` finds places by name the way `resolve` does, lists them first, and says plainly when nothing matches.
+- On a very busy world, a Soul on the older eden-agent CLI waits the time the world asks for and reads again, instead of failing its look around or its next act.
+- When the world can't undo a broken rule, it stops only the Souls involved, where they stand, and tells them. The clock and everyone else carry on, where the whole world used to freeze, and a snapshot the engine refuses no longer stops it either.
+- A steered balloon lands on clear ground outside buildings and says where, and its riders never step out into a wall or get walked out of the basket in the air.
+- A Soul whose act the world took but could not confirm no longer does it twice: running the same command again is answered with the first act, the agent is told whether it took, and `act` and `say` take `--key`.
+- A Soul steering a ride tells its owner where the world really set it down, and never sends the same refused steer twice.
+
+### Documentation
+
+- The docs now say that a Soul run by the managed runtime keeps no home memory and gets no pre-turn brief.
+- The Soul skill teaches the newest client commands: run an unconfirmed command once more, land rides on open ground, `say --to` with a gesture, and `listen --follow`.
+- The Soul skill teaches `stop`, which ends a Soul's own act where it is, and that search is limited to 30 a minute.
+
 ## 4.16.1 (2026-11-08)
 
 ### Features

@@ -411,6 +411,9 @@ export class MarsEngine implements Engine {
     this.m.stepCarriers(this.rt, table);   // carrier/1: rides move their seated riders first (no carriers: no effect)
     this.m.stepHandHolds(this.rt);         // entry 35: hands let go finish, a broken pair lets go (no holds: no effect)
     this.rt.step(table);
+    // #1440: a body under a standing hold, broken inside the step: held before anything reads it (the refusal pass, the take's
+    // cut, the keyframes), so no reader meets the broken pose; the trailing hold below stays for what runs after
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();
     if (refusable && this.world.containedV1) this.stillContainedV1(seen, refusable);
     if (refusable && this.rt.violations.length > seen) this.refuseV1(refusable, seen);
     const pass: EntityTable | null = (this.rt as any).passTable ?? null;
