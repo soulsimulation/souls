@@ -7,6 +7,8 @@
 // continuous (the origin is moved so the phase is unchanged). Edge minds: the brain runs nothing on a clock.
 import type { WorldHost } from '../world.ts';
 import type { GodMode } from './god.ts';
+import { config } from '../config.ts';
+import { REALIGN_MS, REAL_DAY_TICKS, defaultTimeZone, isTimeZone, realClockConfig, realClockDriftMs, realTimeEnabled } from './real-clock.ts';
 
 /** The rules payload that (re)starts the clock at `tick` with `dayTicks`, continuing from `prev` when given. */
 export function clockConfig(tick: number, dayTicks: number, prev?: { origin: number; dayTicks: number }) {
@@ -47,7 +49,11 @@ const synchronizers = new WeakMap<GodMode, () => Promise<void>>();
 /** Wait for the logged clock configuration to reach the engine before reporting its applied time. */
 export async function syncWorldClock(god: GodMode): Promise<void> { await synchronizers.get(god)?.(); }
 
-export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string) => void = () => {}) {
+/** #1649 options: real time (default SIM_REAL_TIME=1), the world's slug (its migration zone), and test seams. */
+export type WorldClockOptions = { realTime?: boolean; slug?: string; now?: () => number; checkMs?: number };
+
+export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string) => void = () => {}, o: WorldClockOptions = {}) {
+  if (o.realTime ?? realTimeEnabled()) return installRealClock(host, god, log, { slug: config.worldSlug ?? config.worldKey, ...o });
   const want = () => {
     const t = god.model.state.time as { dayTicks?: number; paused?: boolean; set?: { hour: number; n: number } | null } | undefined;
     const d = Number(t?.dayTicks);
@@ -68,4 +74,46 @@ export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string
   const schedule = () => { void sync().catch((e: Error) => log(`world clock: ${e.message}`)); };
   schedule();
   god.onCommit(schedule);
+}
+
+/** The world's time zone: its own (`time.timeZone`), else its migration default. */
+export function worldTimeZone(god: GodMode, slug?: string): string {
+  const z = (god.model.state.time as { timeZone?: string | null } | undefined)?.timeZone;
+  return isTimeZone(z) ? z : defaultTimeZone(slug);
+}
+
+/** #1649: the clock on real time in the world's zone. At install, a world without a zone is given its migration zone
+ *  (one engine edit, recorded; a later boot finds it and writes nothing). The clock is (re)aligned to the wall at boot,
+ *  when the zone changes, and when a watched world has drifted REALIGN_MS from the wall; a world nobody watches (slowed
+ *  by attention.ts) or an admin-paused world is left alone until it runs at full pace again. A god pause still stops it. */
+function installRealClock(host: WorldHost, god: GodMode, log: (m: string) => void, o: WorldClockOptions) {
+  const now = o.now ?? Date.now;
+  const own = (god.model.state.time as { timeZone?: string | null } | undefined)?.timeZone;
+  if (!isTimeZone(own)) {
+    const zone = defaultTimeZone(o.slug);
+    const r = god.engineAct([{ op: 'world', state: { time: { timeZone: zone } } }] as never, `world clock: time zone ${zone} (real-time migration, #1649)`);
+    if (r.accepted) log(`world clock: time zone ${zone} (migrated)`); else log(`world clock: migration to ${zone} refused: ${JSON.stringify(r.failures ?? [])}`);
+  }
+  let pending: Promise<void> | undefined;
+  const sync = (): Promise<void> => {
+    if (pending) return pending.then(sync);
+    const l = host.living as (NonNullable<WorldHost['living']> & { zone?: string }) | undefined, tick = host.engine.world.tick;
+    const paused = (god.model.state.time as { paused?: boolean } | undefined)?.paused === true, zone = worldTimeZone(god, o.slug);
+    let payload: { dayConfig: Record<string, unknown>; why: string };
+    if (paused) {
+      if (l && l.dayTicks === PAUSED_DAY_TICKS) return Promise.resolve();
+      payload = envClockConfig(tick, { dayTicks: REAL_DAY_TICKS, paused: true }, l);
+    } else {
+      if (l && l.zone === zone && Math.abs(realClockDriftMs(l, tick, now(), zone)) < REALIGN_MS) return Promise.resolve();
+      payload = realClockConfig(tick, now(), zone);
+    }
+    pending = host.enqueue('rules', 'world', payload).then(() => {}).finally(() => { pending = undefined; });
+    return pending.then(sync);
+  };
+  synchronizers.set(god, sync);
+  const schedule = () => { void sync().catch((e: Error) => log(`world clock: ${e.message}`)); };
+  schedule();
+  god.onCommit(schedule);
+  const timer = setInterval(() => { if (host.pace >= 1 && !host.paused && host.running) schedule(); }, o.checkMs ?? 15_000);
+  timer.unref?.();
 }

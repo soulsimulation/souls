@@ -1,6 +1,7 @@
 import {closeContextViews} from './god/context-views.ts';
 import { Attention, unwatchedPace } from './attention.ts';
 import { ClockCatchUp } from './clock-catchup.ts';
+import { realTimeEnabled } from './god/real-clock.ts';
 import { bootPhase } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
@@ -258,7 +259,8 @@ server.on('request', (req, res) => {
 // ...and when somebody comes back, the world's time of day jumps to now (clock-catchup.ts; lane SLEEP): also after the
 // launcher let the world exit while asleep, so this boot may itself be the return. Not in LivingWorld worlds (their
 // dayConfig also restarts the day's events), which the launcher never runs.
-const catchUp = process.env.SIM_UNWATCHED_PACE && !living ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
+// #1649: a real-time clock re-aligns itself to the wall when the world is watched again (god/world-clock.ts), so no catch-up.
+const catchUp = process.env.SIM_UNWATCHED_PACE && !living && !realTimeEnabled() ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
 if (process.env.SIM_UNWATCHED_PACE) new Attention((watched) => { host.setPace(watched ? 1 : unwatchedPace()); if (watched) void catchUp?.watched()?.catch(() => {}); else catchUp?.unwatched(); }).watch(server);
 // SIM_BOOT_HASH=1 (measurement only): the engine state this boot restored, to compare with the one its last stop saved
 if (process.env.SIM_BOOT_HASH === '1') console.log(`[boot] state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
