@@ -928,7 +928,7 @@ export class GodNav {
   private epochMemo: { at: string; ep: number | undefined } | null = null;
   /** #1515: navCheckV1's verdict for one standing point (joined to the main area both ways), kept per static epoch. The
    *  verdict reads only the published connectivity labels, which the engine derives from the static world alone (no
-   *  bodies), and staticEpochV1 moves exactly when that changes (a god commit, a layer or def change, a construction
+   *  bodies), and that world's staticEpochV1 moves exactly when that changes (a god commit, a layer or def change, a construction
    *  phase, a ride's platform moving, a replaced spatial service); a check also drains any pending relabel first, so a
    *  point's verdict at one static epoch is always the same. The epoch is read on every call (after the caller's own
    *  warm poll has synced the planner, an integer compare): never a per-tick memo, so an edit within a tick is seen.
@@ -937,14 +937,16 @@ export class GodNav {
   private connOk(id: string, g: { p: Vec2; level: number }): boolean | undefined {
     const E = this.E; if (!E.navCheckV1) return undefined;
     const ep = E.staticEpochV1?.(); if (ep === undefined) return E.navCheckV1([{ id, p: g.p, level: g.level }])[0]?.ok;
-    if (this.connMemo?.ep !== ep) this.connMemo = { ep, m: new Map() };
+    // (the world read as well as its epoch: each engine counts its epochs from 1, and a rollback, a recovery rewind or a
+    // held head swaps the engine under this GodNav; one MenuWorld per engine, menuWorldOf)
+    if (this.connMemo?.ep !== ep || this.connMemo.of !== E) this.connMemo = { of: E, ep, m: new Map() };
     const k = `${g.level}|${g.p[0]},${g.p[1]}`, m = this.connMemo.m;
     if (m.has(k)) return m.get(k);
     const ok = E.navCheckV1([{ id, p: g.p, level: g.level }])[0]?.ok;
     if (m.size >= 50_000) m.clear();
     m.set(k, ok); return ok;
   }
-  private connMemo: { ep: number; m: Map<string, boolean | undefined> } | null = null;
+  private connMemo: { of: MenuWorld; ep: number; m: Map<string, boolean | undefined> } | null = null;
   private navEpoch(): number | undefined {
     const at = `${this.E.world.tick}|${this.h.version?.() ?? this.h.model.editSeq}`;
     if (this.epochMemo?.at !== at) this.epochMemo = { at, ep: this.E.navEpochV1?.() };

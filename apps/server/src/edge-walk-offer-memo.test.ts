@@ -10,6 +10,7 @@ import {existsSync} from 'node:fs';
 import {setImmediate} from 'node:timers/promises';
 import {accept, invite} from '../test/native-owner-fixture.ts';
 import {bootEden} from '../test/eden-capabilities-timing.ts';
+import {coreRef} from '@souls/world-compiler';
 import {outdoorRegionExclusions, outdoorRegionExclusionsFreshV1} from './edge/ledger/region-arrival.ts';
 import {GodNav} from './god/nav.ts';
 import type {EdgeCapability, EdgeSoul} from './edge/contract.ts';
@@ -20,7 +21,9 @@ type Eng = {navWarmV1(ms: number): boolean; staticEpochV1(): number; readPassV1<
 
 test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, across walks, a god edit and a ride', {timeout: 900_000, skip: NO_EDEN}, async t => {
   const w = await bootEden(); t.after(() => w.close());
-  const host = w.host, E = host.engine as unknown as Eng, nav = w.bridge.nav, kept = nav as unknown as Kept, L = w.edge;
+  const host = w.host, nav0 = w.bridge.nav;
+  let E = host.engine as unknown as Eng;
+  const nav = nav0, kept = nav as unknown as Kept, L = w.edge;
   const run = async (n: number) => {for (let i = 0; i < n; i++) {host.tickOnce(); if (i % 10 === 0) {await setImmediate(); host.drainInputs();}} await setImmediate(); host.drainInputs();};
   const souls: EdgeSoul[] = [w.soul];
   for (const name of ['bea', 'cy']) {
@@ -65,6 +68,7 @@ test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, a
   for (let i = 0; i < 4; i++) {await run(30); check(`walking (${i})`);}
   // a god edit over a point whose verdict is kept (main ground, away from the Souls): a new static epoch, new places,
   // new things, and that point no longer standing room
+  const priv = host as unknown as {captureBody(): unknown; restoreBody(b: unknown): void}, before = priv.captureBody();
   const ep0 = E.staticEpochV1(), bodies = souls.map(s => host.engine.world.entities[s.entityId]!.pose.p);
   const under = [...kept.connMemo!.m].map(([k, ok]) => ({k, ok, p: k.split('|')[1]!.split(',').map(Number) as [number, number]}))
     .find(x => x.ok && x.k.startsWith('0|') && bodies.every(b => Math.hypot(b[0] - x.p[0], b[2] - x.p[1]) > 15));
@@ -81,6 +85,7 @@ test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, a
   check('after a god edit (as soon as seen)');
   for (let i = 0; i < 4000 && !E.navWarmV1(0); i++) host.tickOnce();
   check('after a god edit (warm again)');
+  const after = priv.captureBody();
   // a ride moving (#901): the static epoch moves and the labels go cold, then warm again
   const ents = host.engine.world.entities as Record<string, {pose: {p: number[]}}>;
   const ride = ['eden-balloon', 'resort-carousel', 'resort-ferris-wheel'].map(id => ents[id]).find(Boolean);
@@ -90,6 +95,33 @@ test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, a
   check('a ride moved (cold)');
   for (let i = 0; i < 4000 && !E.navWarmV1(0); i++) host.tickOnce();
   check('a ride moved (warm again)');
+  // an interior added inside an outdoor region (a new building place): that region's interiors change, the place index
+  // version moves
+  const region = [...L.places.byId.values()].find(p => p.id !== 'world' && !p.enclosed && p.kind === 'outdoor' && p.polygon.length >= 3)!;
+  assert.ok(region, 'an outdoor region');
+  const was = JSON.stringify(outdoorRegionExclusions(L.places, region.id)), mid = region.polygon.reduce((a, q) => [a[0] + q[0] / region.polygon.length, a[1] + q[1] / region.polygon.length], [0, 0]);
+  const hall = w.god.act({ops: [{op: 'place', def: coreRef('pavilion'), name: 'memo-oracle-pavilion', p: mid}]} as never) as {accepted: boolean};
+  assert.ok(hall.accepted, `the pavilion is placed: ${JSON.stringify(hall).slice(0, 300)}`);
+  for (let i = 0; i < 40 && JSON.stringify(outdoorRegionExclusionsFreshV1(L.places, region.id)) === was; i++) await run(10);
+  assert.notEqual(JSON.stringify(outdoorRegionExclusionsFreshV1(L.places, region.id)), was, `${region.id} has a new interior`);
+  check('an interior added inside an outdoor region');
+  // the engine swapped under the same GodNav (a decision rollback, a recovery rewind, a held head: WorldHost.restoreBody):
+  // each engine counts its static epochs from 1, so a verdict kept for one engine must not answer for the next
+  const connOk = (id: string, g: {p: [number, number]; level: number}) => (nav as unknown as {connOk(id: string, g: {p: [number, number]; level: number}): boolean | undefined}).connOk(id, g);
+  connOk('oracle', {p: under.p, level: 0});
+  const swap = async (body: unknown, what: string) => {
+    priv.restoreBody(body); E = host.engine as unknown as Eng;
+    for (let i = 0; i < 4000 && !E.navWarmV1(0); i++) host.tickOnce();
+    const fresh = E.navCheckV1([{id: 'oracle', p: under.p, level: 0}])[0]?.ok;
+    assert.equal(connOk('oracle', {p: under.p, level: 0}), fresh, `${what}: the kept verdict is this engine's`);
+    check(what);
+    // the point asked again (kept for this engine, at its epoch) after the oracle's own fresh build replaced what was kept,
+    // so the next engine meets it
+    connOk('oracle', {p: under.p, level: 0}); t.diagnostic(`${what}: static epoch ${E.staticEpochV1()}`);
+    return fresh;
+  };
+  assert.equal(await swap(before, 'the engine from before the block'), true, 'before the block the point is main ground');
+  assert.notEqual(await swap(after, 'the engine with the block'), true, 'with the block it is not');
   t.diagnostic(`${steps} oracle steps, ${verdicts} kept verdicts checked against the engine`);
 });
 
@@ -107,4 +139,17 @@ test('GodNav.connOk: one engine check per point and static epoch; a new epoch as
   epoch = 2; assert.equal(nav.connOk('a', {p: [1, 2], level: 0}), true); assert.equal(calls, 4, 'a new static epoch asks the engine again');
   const plain = new GodNav({engine: {...engine, staticEpochV1: undefined}} as never) as unknown as typeof nav;
   plain.connOk('a', {p: [1, 2], level: 0}); plain.connOk('a', {p: [1, 2], level: 0}); assert.equal(calls, 6, 'no static epoch: never kept');
+});
+
+test('GodNav.servicesIn: kept per service list and room; a new list (a station moved) is read again', () => {
+  let points: {id: string; at: [number, number]; level: number}[] = [{id: 'cook.a', at: [1, 1], level: 0}, {id: 'cook.b', at: [9, 9], level: 0}];
+  const nav = new GodNav({engine: {world: {tick: 1, entities: {}, regions: {}}}, serviceStandingPoints: () => points} as never) as unknown as
+    {refreshServicePoints(): void; servicesIn(room: unknown, level: number): {id: string; at: [number, number]}[]};
+  const room = {kind: 'room', ref: 'hall/kitchen', poly: [[0, 0], [4, 0], [4, 4], [0, 4]]};
+  nav.refreshServicePoints();
+  assert.deepEqual(nav.servicesIn(room, 0).map(p => p.id), ['cook.a']);
+  assert.deepEqual(nav.servicesIn(room, 1), [], 'another level');
+  points = [{id: 'cook.a', at: [6, 1], level: 0}, {id: 'cook.b', at: [2, 2], level: 0}];   // the stations moved: a new list
+  nav.refreshServicePoints();
+  assert.deepEqual(nav.servicesIn(room, 0).map(p => p.id), ['cook.b'], 'the new list is read');
 });
