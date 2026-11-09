@@ -2,6 +2,36 @@
 
 User-facing changes to Souls, newest first. Each release is compiled from `changes/` fragments.
 
+## 4.18 (2026-11-09)
+
+### Features
+
+- An action receipt now says when the body visibly began (`firstMotionTick`) separately from when its program started, and the control-episode readout shows both, so the time to a Soul actually moving can be measured.
+- When the world slows or refuses a Soul's own requests, its card and phone chip say so ("waiting: the world is busy") until it ends.
+
+### Fixes
+
+- "Take down" and "remove" no longer take down a note, line or poster when the words name a different board or book, and say what they could not find.
+- "Sit outside with Bo" when Bo cannot be invited now offers the outdoor bench and says Bo was not found, instead of saying nothing can be done.
+- "Put down the bowl", "put it down" and "drop it" now put down a thing the world's builder placed, instead of saying the hand is empty.
+- A Soul whose body a bug keeps breaking is held by one standing mark instead of one log entry per tick, so the world log no longer grows without bound while the bug lasts.
+- When the world sets a Soul down upstairs, after a fault or after freeing it when stuck, it now stands on the floor, never hanging in the air at the height it had.
+- When a Soul's act is refused because no walk reaches it at that moment, the refusal now suggests what the Soul can do instead, even if the action was listed as available a moment earlier.
+- A world no longer goes down when it saves itself at the moment a Soul's body is broken; the body is held and the world runs on.
+- Souls are told the truth about roofs and other raised places all the time, not only right after a world starts: a moving ride no longer leaves the world's sense of what is reachable out of date.
+- A Soul shut in a room with no way out now steps out to open ground and goes when asked to walk to a place by name, as a walk to a flag already did, and is told it was moved.
+- A walk to a roof with a stair is no longer refused as unreachable in the first moments after a world starts.
+- A dining chair boxed in by its table can now be walked to: Souls go to the open floor of the room beside it instead of stopping outside.
+- `serve` waits for the client it starts for as long as that client is still starting (up to 60 s), fails at once if it exits, and stops it if the limit runs out, so it never reports a failure while a serve comes up behind it.
+- A walk asked in the first seconds after a world starts, before its navigation is ready, now waits and then walks instead of being refused as unreachable.
+
+### Performance
+
+- Worlds open on phones with a shorter freeze before the first view appears.
+- Worlds use about 120 MB less memory on phones, so large worlds like Eden are less likely to be closed by the browser.
+- When a world has just started, walks asked while it was still getting ready start without stalling the world clock for everyone.
+- Orbiting the camera on a phone produces less garbage, so it stutters less from memory clean-up pauses.
+
 ## 4.17 (2026-11-09)
 
 ### Features
