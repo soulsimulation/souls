@@ -2014,8 +2014,11 @@ export class WorldHost {
       intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(m.energy), doing: this.doingOfV1(m),
       ...this.publicNow(m.soulId),
       ...(this.publicBodyOf?.(m.soulId) ? {body: this.publicBodyOf(m.soulId)!} : {}),
+      ...(this.publicSlowedOf?.(m.soulId) ? {slowed: this.publicSlowedOf(m.soulId)!} : {}),
     };
   }
+  /** #456: while the world slows or refuses this Soul's own requests (load/soul-slowed.ts). Re-sent via markSoulDirty. */
+  publicSlowedOf?:(soulId:string)=>NonNullable<PublicSoul['slowed']>|null;
   /** LINK BODY: the body rule's public state for a Soul (edge worlds; the Ledger sets it). Re-sent via markSoulDirty. */
   publicBodyOf?:(soulId:string)=>NonNullable<PublicSoul['body']>|null;
   /** A human-readable name for a kernel thing id, an engine entity id or a region id. */
