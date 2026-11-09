@@ -54,7 +54,7 @@ await test('rendered HTML escapes entry text, renders `code`, anchors each relea
   assert.ok(!html.includes('<script>'), 'an entry never becomes markup');
   assert.match(html, /Doors &lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; &quot;quotes&quot; stay text\./);
   assert.match(html, /paint with <code>brush<\/code> colours/);
-  assert.match(html, /<section class="cl-release" id="v4\.1"[^>]*>\s*<h2 id="v4\.1-h"><a class="cl-v" href="#v4\.1">4\.1<\/a> <time datetime="2026-11-02">November 2, 2026<\/time>/);
+  assert.match(html, /<section class="cl-release" id="v0\.2"[^>]*>\s*<h2 id="v0\.2-h"><a class="cl-v" href="#v0\.2">0\.2<\/a> <time datetime="2026-11-02">November 2, 2026<\/time>/);
   assert.ok(html.indexOf('id="v0.2"') < html.indexOf('id="v0.1"'), 'newest first, as the file lists them');
   assert.match(html, /<a href="\/worlds\/">← Worlds<\/a>/);
   assert.match(html, /<h2>Earlier<\/h2>/);
