@@ -80,3 +80,12 @@ test('#1442 hold-settle/1 is refused while body-step-guard/1 is off: a boot whos
   assert.equal((ev.payload as { runtimePolicy: Record<string, unknown> }).runtimePolicy.bodyStepGuardV1, true, 'the adoption event carries the guard');
   assert.equal(cfg().refusalSettleV1, true); assert.equal(cfg().bodyStepGuardV1, true);
 });
+
+test('#1442 a world that adopted hold-settle/1 before the guard (an older log) says so at each boot while the guard is still off', async (t) => {
+  const warns: string[] = []; t.mock.method(console, 'warn', (...a: unknown[]) => { warns.push(a.map(String).join(' ')); });
+  const f = fixture(':memory:'); t.after(() => { f.host.stop(); f.db.close(); });
+  // as an older history recorded it: settle adopted with no guard
+  await accept<unknown>(f.host, f.host.enqueue('rules', 'world', { runtimePolicy: { sleepBlockTicks: 1200, ...policy(f), refusalSettleV1: true }, why: 'test: an older adoption' }) as Promise<unknown>);
+  await accept<unknown>(f.host, f.host.enableRefusalSettleV1('world'));
+  assert.ok(warns.some((l) => /hold-settle\.unguarded/.test(l)), warns.join('\n'));
+});
