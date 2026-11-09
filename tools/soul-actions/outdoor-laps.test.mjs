@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {setImmediate} from 'node:timers/promises';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture, invite, accept, factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {WorldModel} from '../../packages/world-compiler/src/model.ts';
+
+test('a solo outdoor route records only whole native laps and survives restoration', {timeout:180000}, async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
+ const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});
+ t.after(()=>{comms.close();f.host.stop();f.db.close();});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});
+ installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
+ const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};
+ await tick(5);await invite(f,'quiet');const row=await accept(f.host,f.souls.create('dev:quiet',{name:'Ana',description:'Quiet practice test'}));await tick(5);
+ soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};
+ const body=()=>f.host.engine.world.entities[soul.entityId], here=async()=> (await (await app.request('/v1/edge/here?include=doHere')).json()).here;
+ const absent=await here(),strip=h=>JSON.stringify({...h,tick:0});
+ assert.equal(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/outdoor-laps@1',name:`far-mat-${i}`,p:[120+i%10*3,120+Math.floor(i/10)*3]}))}).accepted,true);await tick(45);
+ const distant=await here();assert.equal(strip(distant),strip(absent));assert.ok(!edge.capabilities(soul).some(c=>c.id.endsWith(':walk-lap')&&c.available));
+ const [x,,z]=body().pose.p;assert.equal(god.act({ops:[{op:'place',def:'core/outdoor-laps@1',name:'lap-marker',p:[x,z+2.6]}]}).accepted,true);await tick(45);
+ const e=()=>god.model.get('lap-marker'),cap=`object:${e().id}:walk-lap`;
+ const offer=edge.capabilities(soul).find(c=>c.id===cap);assert.ok(offer?.available,JSON.stringify(offer));assert.deepEqual(offer.params??{},{});
+ const act=async(capability)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability})}));return r.json();};
+ const cut=await act(cap);assert.equal(cut.accepted,true,JSON.stringify(cut));await tick(100);assert.equal(e().state.lastReceipt,'');assert.equal((await act('stand:here')).accepted,true);await tick(90);assert.equal(e().state.lastReceipt,'');assert.notEqual(edge.receipt(soul.soulId,cut.receipt.id).phase,'completed');
+ const run=await act(cap);assert.equal(run.accepted,true,JSON.stringify(run));const samples=[];
+ for(let i=0;i<1500;i++){samples.push({p:[...body().pose.p],activity:body().human?.activity,gait:body().human?.gait});if(['completed','failed','cancelled','replaced'].includes(edge.receipt(soul.soulId,run.receipt.id)?.phase))break;await tick();}
+ const receipt=edge.receipt(soul.soulId,run.receipt.id);assert.equal(receipt.phase,'completed',JSON.stringify(receipt));assert.equal(e().state.completedLaps,1);assert.equal(e().state.lastBy,'Ana');assert.equal(e().state.lastGait,'walk');assert.equal(e().state.lastReceipt,receipt.id);assert.equal(e().state.lastCompletedTick,receipt.endedTick);
+ const route=god.model.worldPose(e());assert.ok(Math.min(...samples.map(s=>s.p[0]))<route.x-2.5);assert.ok(Math.max(...samples.map(s=>s.p[0]))>route.x+2.5);assert.ok(Math.min(...samples.map(s=>s.p[2]))<route.z-1.5);assert.ok(Math.max(...samples.map(s=>s.p[2]))>route.z+1.5);
+ assert.ok(Math.hypot(body().pose.p[0]-route.x,body().pose.p[2]-(route.z-2))<.2);assert.equal(body().human.activity,'idle');
+ const inspected=await (await app.request(`/v1/edge/inspect/${e().id}`)).json();assert.match(inspected.inspect.state.practice,/Completed laps: 1.*Last gait: walk.*Ana.*tick/);
+ const again=await act(cap.replace(':walk-lap',':jog-lap'));assert.equal(again.accepted,true);let jogTicks=0;for(let i=0;i<1200;i++){if(body().human?.activity==='jog')jogTicks++;if(['completed','failed','cancelled','replaced'].includes(edge.receipt(soul.soulId,again.receipt.id)?.phase))break;await tick();}assert.equal(edge.receipt(soul.soulId,again.receipt.id).phase,'completed');assert.ok(jogTicks>0);assert.equal(e().state.completedLaps,2);assert.equal(e().state.lastGait,'jog');assert.equal(e().state.lastReceipt,again.receipt.id);
+ const [rx,,rz]=body().pose.p;assert.equal(god.act({ops:[{op:'place',def:'core/outdoor-laps@1',name:'scaled-course',p:[rx+12,rz],r:Math.PI/2,s:2}]}).accepted,true);await tick(45);
+ const scaled=()=>god.model.get('scaled-course'),scaledCap=`object:${scaled().id}:jog-lap`,scaledRun=await act(scaledCap);assert.equal(scaledRun.accepted,true,JSON.stringify(scaledRun));
+ for(let i=0;i<2200;i++){if(['completed','failed','cancelled','replaced'].includes(edge.receipt(soul.soulId,scaledRun.receipt.id)?.phase))break;await tick();}
+ assert.equal(edge.receipt(soul.soulId,scaledRun.receipt.id).phase,'completed');assert.equal(scaled().state.completedLaps,1);assert.equal(scaled().state.lastGait,'jog');assert.ok(Math.hypot(body().pose.p[0]-(rx+8),body().pose.p[2]-rz)<.2);
+ const scaledInspect=await(await app.request(`/v1/edge/inspect/${scaled().id}`)).json();assert.match(scaledInspect.inspect.state.practice,/12 by 8 metre.*Completed laps: 1/);
+ const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.deepEqual(restored.get('lap-marker').state,e().state);assert.deepEqual(f.host.engine.runtime.violations,[]);
+ const report={status:'pass',state:e().state,receipt:receipt.phase,sampleCount:samples.length,jogTicks,rotatedDoubleScale:{completed:scaled().state.completedLaps,endpoint:[...body().pose.p]},interruption:edge.receipt(soul.soulId,cut.receipt.id).phase,hereBytes:{absent:strip(absent).length,distant100:strip(distant).length},inspected};
+ if(process.env.SOUL_ACTIONS_OUT){mkdirSync(process.env.SOUL_ACTIONS_OUT,{recursive:true});writeFileSync(`${process.env.SOUL_ACTIONS_OUT}/summary.json`,JSON.stringify(report,null,2));}console.log(JSON.stringify(report));
+});
