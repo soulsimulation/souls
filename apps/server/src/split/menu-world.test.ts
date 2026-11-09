@@ -100,3 +100,10 @@ test('VerdictTable: a shipped verdict answers; a miss answers feasible and is qu
   assert.equal(t.canPerform(p, 'route|1|0,0,1'), null, 'another cell is another verdict');
   t.forget('a'); assert.equal(t.canPerform(p, 'route|1|0,0,0'), null);
 });
+
+test('#1287: navRescueV1 is the engine\'s own, looked up per read (a wrapped rescue is seen); absent stays absent', () => {
+  const {e} = fakeEngine(), mw = new LiveMenuWorld(e as never);
+  assert.equal(mw.navRescueV1, undefined);
+  (e as Record<string, unknown>).navRescueV1 = function (this: unknown, id: string) {return this === e ? {id} : null;};
+  assert.deepEqual(mw.navRescueV1!('a', 0), {id: 'a'});
+});

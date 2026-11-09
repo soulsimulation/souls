@@ -990,12 +990,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  0 when it would step out now; null when it would not (not cut off, labels cold, a replica, no open ground found). */
   stepOutWait(soul: EdgeSoul): number | null {
     if (this.readOnly) return null;
-    const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => unknown}, tick = this.host.engine.world.tick;
+    const mw = this.mw, tick = mw.world.tick;   // B-facade: a replica has no navRescueV1 (not cut off)
     // (memoised per Soul a tick: a `here` frame asks for every exit; the body and the labels do not change within the tick)
     let cut = this.stepOutSeen.get(soul.soulId);
-    if (cut?.tick !== tick) {cut = {tick, cut: !!engine.navRescueV1?.(soul.entityId, 0)}; this.stepOutSeen.set(soul.soulId, cut);}
+    if (cut?.tick !== tick) {cut = {tick, cut: !!mw.navRescueV1?.(soul.entityId, 0)}; this.stepOutSeen.set(soul.soulId, cut);}
     if (!cut.cut) return null;
-    const left = (this.navRescuedAt.get(soul.soulId) ?? -1e9) + NAV_STEP_OUT_TICKS - this.host.engine.world.tick;
+    const left = (this.navRescuedAt.get(soul.soulId) ?? -1e9) + NAV_STEP_OUT_TICKS - tick;
     return left <= 0 ? 0 : Math.max(1, Math.ceil(left * 60 / NAV_STEP_OUT_TICKS));
   }
   /** #1287: launch's nav-connect/1 step-out would move this Soul now: outside its once-a-minute bound, and the engine's pure

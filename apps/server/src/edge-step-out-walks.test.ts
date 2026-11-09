@@ -121,3 +121,29 @@ test('#1287 (#1501 re-review): from open ground, a sit in a locked yard (more th
   assert.doesNotMatch(r.reason, /locked|It was not opened/, r.reason); assert.match(r.reason, /no walkable route reaches it/);
   assert.equal(steps().length, 0);
 });
+
+test('#1508: from open ground, a pick-up whose nearest shelf is in a locked yard not hers takes the reachable shelf, with no step-out and no door refusal', {timeout: 300000}, async t => {
+  const {w, put, act, steps} = await world(t);
+  // the locked yard's front (key side) faces out: from outside, not Zed's, door passage refuses the way in
+  const [x, z] = [30, 30];
+  const built = w.god.act({ops: [
+    {op: 'place', def: 'core/garden-wall@1', name: 'lock-yard', shape: {path: [[x - 0.6, z], [x - 4, z], [x - 4, z + 6], [x + 4, z + 6], [x + 4, z], [x + 0.6, z]]}},
+    {op: 'place', def: 'core/door@3', name: 'lock-door', p: [x, z], r: Math.PI, owner: 'soul:Zed', state: {locked: true}}]} as never) as any;
+  assert.equal(built.accepted, true, JSON.stringify(built.failures)); await w.settle(8);
+  // two book shelves: the nearer inside the yard, the other on open ground
+  const E = w.edge as any, prev = E.spotsProvider, inYard: [number, number] = [x, z + 3], outside: [number, number] = [x + 9, z - 4];
+  const extra = {contract: 'activity-spots/1', spots: [], shelves: [{id: 'in-yard', at: inYard}, {id: 'outside', at: outside}], interiors: [], solids: [], rings: [], platforms: []};
+  E.spotsProvider = () => {const p = prev?.(); return p ? {...p, shelves: [...p.shelves, ...extra.shelves]} : extra;};
+  E.bumpStatic(); w.edge.map?.();
+  assert.equal((w.host.engine as any).navWarmV1(Infinity), true); await w.settle(2);
+  await put([x, z - 4]);
+  assert.equal(w.edge.stepOutWait(w.soul as never), null, 'on open ground: not cut off');
+  const r = await act({capability: 'pick-up:book'});
+  t.diagnostic(`outcome: ${JSON.stringify({accepted: r.accepted, code: r.code, reason: r.reason ?? r.receipt?.reason})}`);
+  assert.equal(r.accepted, true, JSON.stringify(r));
+  assert.doesNotMatch(String(r.receipt?.reason ?? ''), /lock-door|locked|open ground/);
+  const plan = JSON.parse((w.db.db.prepare('SELECT plan FROM edge_receipts_v1 WHERE world_id=? AND receipt_id=?').get(w.host.worldId, r.receipt.id) as {plan: string}).plan);
+  const to = plan.steps.find((s: any) => s.verb === 'walk_to')?.params?.to as [number, number];
+  assert.ok(to && Math.hypot(to[0] - outside[0], to[1] - outside[1]) < Math.hypot(to[0] - inYard[0], to[1] - inYard[1]), `walks to the shelf on open ground: ${JSON.stringify(plan.steps)}`);
+  assert.equal(steps().length, 0, 'no step-out');
+});
