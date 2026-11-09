@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Assembling a trail sign (#1659)
+
+`core/trail-sign-site@1` supplies one fixed set of timber. With empty hands, `assemble-sign` approaches its worker position and runs the existing native garden/tool activity for ten seconds. Only natural completion atomically consumes supplies, records read credit, and admits one immutable `core/notice-board@2` at its authored ground output. Ordinary access, support and placement still apply; interruption, an occupied output or refused placement preserves supplies. Duplicate completion adds no second board. Inspect the site to find its child sign, then use the existing write/read/erase contacts to leave attributed route guidance. The output's ordinary `about` records maker and material provenance. Existing public-board editing policy applies; no new author-only erase rule is introduced. One fixed output only: no carrying, repeating production, new contact key or placement authority.
