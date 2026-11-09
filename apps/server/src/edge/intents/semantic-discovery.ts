@@ -118,7 +118,7 @@ export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:Ed
 
 // #1242: "sit outside with Bo" when the words after "with" name no Soul the asker can invite (together/1 reads a Soul it can
 // invite before this, and takes the words then): the seat words alone are read, their seats are listed, never taken, and the
-// answer says which names were not found (`unresolved.with`), so the agent can tell its owner that part instead of reporting
+// answer says who was not found (`unresolved.with`, the words as typed), so the agent can tell its owner that part instead of reporting
 // nothing. Not when the seat words name no seat ("sit with Zed on the bench": the ground is never offered for a named seat)
 // or the "with" words name a place or part ("with a view"): those keep the refusal.
 const WITH=/^(.+?)\s+(?:together\s+with|along\s+with|with)\s+(?!me\b)(.+?)[\s.!?]*$/i;
@@ -129,10 +129,9 @@ function unresolvedCompanion(L:EdgeLedger,soul:EdgeSoul,text:string,caps:EdgeCap
  const seatWords=tokens(parseCapability(head,new Set([...caps.map(c=>c.verb),'sit'])).rest).filter(w=>w!=='down');if(!seatWords.length)return null;
  const whoWords=tokens(who);
  if(known.some(p=>{const ws=words([...names(p),...(p.parts??[]).filter(part=>knownPart(L,soul,p,part)).flatMap(x=>[x.title,...(x.aliases??[])])]);return whoWords.some(w=>ws.has(w));}))return null;
- // (each name the way together/1 splits them; a name no Soul in this world has is named as missing, alone)
- const list=who.split(/\s*(?:,|\band\b|&)\s*/i).map(x=>x.trim()).filter(Boolean),minds=[...L.host.minds.values()].filter(x=>x.soulId!==soul.soulId);
- const unknown=list.filter(n=>{const w=n.toLowerCase().replace(/^(?:the|my)\s+/,'');return !minds.some(x=>x.soulId===w||x.name.toLowerCase()===w);});
- const missing=unknown.length?unknown.join(', '):who,say=unknown.length?`"${missing}" is not read: no Soul you can invite from here is called that, and no seat is described that way. Nobody was invited.`:`"${who}" could not all be invited from here, so nobody was invited.`;
+ // (one wording whoever is or is not in the world: the answer never says whether a Soul by that name exists anywhere,
+ // only that these words found nobody to invite from here, so `unresolved.with` is the words as typed)
+ const missing=who,say=`I couldn't find "${who}" here to invite, so nobody was invited.`;
  const v=L.resolveOnDemand(soul,head,[...caps],new Map(plans)).v;
  const seat=(id:string)=>id.startsWith('sit:')&&!id.endsWith(':here');
  const candidates:Candidate[]=(v.kind!=='unknown'?(seat(v.cap.id)?[{capability:v.cap.id,name:v.cap.label,place:v.cap.target?.id??'',available:v.cap.available,...(v.cap.blocked?{reason:v.cap.blocked.reason,code:v.cap.blocked.code}:{})}]:[])
