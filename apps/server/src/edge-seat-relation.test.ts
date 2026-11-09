@@ -48,7 +48,7 @@ test('#1242: a missing companion leaves the seat words a choice and is named; a 
   for (const [words, who] of [['sit outside with Bo', 'Bo'], ['sit outside with a friend', 'a friend']]) {
     const r = dry(words); assert.equal(r.ok, false, JSON.stringify(r)); assert.equal(r.code, 'capability.choose', JSON.stringify(r));
     assert.deepEqual(r.did_you_mean.map((d: any) => d.id), ['sit:cottage/part-outdoor-bench'], words);
-    assert.deepEqual(r.discovery.unresolved, {with: who}); assert.ok(r.reason.includes(`"${who}" names no Soul you can invite from here`), r.reason);
+    assert.deepEqual(r.discovery.unresolved, {with: who}); assert.ok(r.reason.includes(`"${who}" is not read: no Soul you can invite from here is called that`), r.reason);
   }
   const act = await accept(w.host, w.edge.act(w.soul, {capability: 'sit outside with Bo'})) as any;
   assert.equal(act.accepted, false, 'an act on the words takes no seat'); assert.equal(act.code, 'capability.choose');
@@ -56,5 +56,9 @@ test('#1242: a missing companion leaves the seat words a choice and is named; a 
   for (const words of ['sit outside near the orchard', 'sit on the bench outside the presentation hall with Bo']) {const r = dry(words); assert.equal(r.ok, false, words); assert.deepEqual((r.did_you_mean ?? []).map((d: any) => d.id).filter((id: string) => id.startsWith('sit:')), [], `${words}: ${JSON.stringify(r)}`);}
   await invite(w, 'bo'); await accept(w.host, w.souls.create('dev:bo', {name: 'Bo', description: 'a friend'})); await w.settle(3);
   const known = dry('sit outside with Bo'); assert.equal(known.discovery?.unresolved, undefined, JSON.stringify(known));
-  assert.ok(!JSON.stringify(known).includes('names no Soul'), 'a Soul who can be invited is not reported missing');
+  assert.ok(!JSON.stringify(known).includes('is not read'), 'a Soul who can be invited is not reported missing');
+  const bo = [...w.host.minds.values()].find(m => m.name === 'Bo')!, invited = dry('sit on the outdoor bench with Bo');
+  assert.equal(invited.ok, true, JSON.stringify(invited)); assert.equal(invited.would.capability, 'sit:cottage/part-outdoor-bench'); assert.deepEqual(invited.would.params?.with, [bo.soulId], 'the invite still goes with the seat');
+  // review blocker: a seat named after the companion is never answered with the ground
+  const after = dry('sit with Zed on the outdoor bench'); assert.ok(!(after.did_you_mean ?? []).some((d: any) => d.id === 'sit:here') && after.would?.capability !== 'sit:here', JSON.stringify(after));
 });
