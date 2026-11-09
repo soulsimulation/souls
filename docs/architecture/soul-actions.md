@@ -709,3 +709,9 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Plant supplied seedlings
+
+`core/garden-planter@3` starts unsown with one supplied seedling tray. Its `plant-seedlings` offer requires empty hands and uses an ordinary ten-second native craft/tool routine. Only a completed receipt consumes the tray, starts the sprout stage and records the planter's credit. Stopping early leaves the supplied stock intact. A changed, removed or inaccessible target prevents the result; current inspection and the existing `read:<bed>` status remain authoritative.
+
+The same planted bed accepts the existing watering-can action and then grows or wilts through the existing daily garden pass; unsown beds dry but do not grow. `read:<bed>` explains the supplied stock before planting and preserves planting credit afterwards; compact garden facts still report stage/dryness. One supplied tray, fixed bed and clear level-zero garden are supported, without arbitrary seed inventory, instant harvest or a physiology simulation. Duplicate completion is covered; actual God undo plus redelivery is not newly qualified. Older bed revisions keep their definitions and daily behavior.
