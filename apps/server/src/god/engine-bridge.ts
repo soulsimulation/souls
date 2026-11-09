@@ -1290,7 +1290,9 @@ export class EngineBridge {
       const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
       const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
       if (!souls.length) return;
-      if (!E.navWarmV1?.(0)) { this.navWarm = false; return; }   // stale labels answer "not cut off": navStep warms them, and they stay queued
+      // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them. Marked cold, not unwarmed:
+      // navWarm=false would put the first-build path back on 20 ms a tick and undo the re-warm's back-off (#1499)
+      if (!E.navWarmV1?.(0)) { if (this.navCold === false) this.navCold = true; return; }
       this.navRescueSouls(0, souls);
     } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
   }

@@ -12,7 +12,7 @@ type SchedulerState = {
   reconciled: boolean; navWarm: boolean; navPending: boolean; navDeferred: Point[]; navLater: string[];
   reconcile(): void; flush(): void; writeBack(): void; perceiveStep(tick: number): void;
   spotsStep(): void; layersStep(): void; flushMapNotices(): void; evacuateSites(): void; rescueTrapped(): void;
-  navRescueSouls(): number; navLines(spots: Point[], stepped: number): string[];
+  navRescueSouls(): number; navLines(spots: Point[], stepped: number): string[]; navWaiting: Set<string>; navCold: boolean | null;
 };
 /** Exercise the installed listener and real navStep through completed host ticks. Only the engine's readiness
  * interface and unrelated bridge jobs are controlled; the cadence, readiness/error transitions and edit re-arm are real. */
@@ -139,4 +139,22 @@ test('#901: a re-warm error is logged once and the poll stops until the first-bu
   assert.equal(w.calls.length, 3, 'an edit re-arms the first-build path'); assert.equal(w.state.navPending, false);
   while (w.host.engine.world.tick < 45) w.tick();
   assert.equal(w.calls.at(-1)!.tick, 45, 'and the completed build re-arms the poll');
+});
+
+test('#1499: a rescue waiting while a ride keeps moving reads cold without resetting the re-warm back-off', t => {
+  let warm = true;
+  const w = fixture(t, () => warm);
+  const minds = w.host.minds as unknown as Map<string, { entityId: string }>;
+  minds.set('s_waiting', { entityId: 'no-such-body' }); t.after(() => minds.delete('s_waiting'));
+  const upTo = (n: number) => { while (w.host.engine.world.tick < n) w.tick(); };
+  upTo(4); warm = false; w.state.navWaiting.add('s_waiting');   // a ride moves every slice; a Soul waits on a rescue
+  upTo(200);
+  const after = w.calls.slice(1);
+  assert.equal(w.state.navWarm, true, 'the first-build path stays done'); assert.equal(w.state.navCold, true);
+  assert.ok(after.every(c => c.budget <= 10), `no 20 ms first-build slice after the build: ${after.filter(c => c.budget > 10).map(c => c.tick)}`);
+  const sliced = after.filter(c => c.budget > 0).map(c => c.tick);
+  assert.deepEqual(sliced.slice(0, 30), Array.from({ length: 30 }, (_, i) => 5 + i), 'the burst');
+  assert.deepEqual(sliced.slice(30), Array.from({ length: 17 }, (_, i) => 35 + 10 * i), 'then one slice per poll, rescue or not');
+  assert.ok(after.some(c => c.budget === 0 && c.tick % 10 === 3), 'the rescue did read the labels');
+  assert.ok(w.state.navWaiting.has('s_waiting'), 'and the Soul stays queued while they are cold');
 });
