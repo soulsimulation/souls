@@ -20,6 +20,7 @@ import { readOnlyObjectAdvance, refreshOnlyObjectAdvance } from '../edge/comms/o
 import type { NearFilter, Objects } from '../edge/comms/objects/framework.ts';
 import { canonicalJson, stateDigest } from '../edge/comms/objects/table.ts';
 import { actionsOf, actuatedState, keptShut, kindActions, wrapAct, type Thing } from './actuators.ts';
+import type { ExerciseCircuit } from './exercise-circuit.ts';
 import type { Meditation } from './meditation.ts';
 import { heldGodThing } from './held.ts';
 import { waterRole, wordOf } from './water.ts';
@@ -126,6 +127,8 @@ export type PerceiveHost = {
 export const GOD_PLACES = process.env.GOD_PLACES !== '0';
 
 export class GodPerceive {
+  private exerciseCircuit?: ExerciseCircuit;
+  bindExerciseCircuit(service: ExerciseCircuit) { this.exerciseCircuit = service; }
   private meditation?: Meditation;
   bindMeditation(service: Meditation) { this.meditation = service; }
   private h: PerceiveHost;
@@ -188,6 +191,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      exerciseCircuit: (soul: EdgeSoul, id: string, action: string) => this.exerciseCircuit?.plan(soul, id, action) ?? null,
       meditation: (soul: EdgeSoul, id: string, action: string) => this.meditation?.plan(soul, id, action) ?? null,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
