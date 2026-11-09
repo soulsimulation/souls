@@ -161,21 +161,23 @@ test('#1499: a rescue waiting while a ride keeps moving reads cold without reset
 
 test('#1499: after a re-warm error a waiting rescue still gets the labels relabelled, and the re-warm comes back with a fresh burst', t => {
   let fail = false, warm = true, slices = 0;
-  const w = fixture(t, budget => { if (fail) { fail = false; throw new Error('controlled re-warm failure'); } if (!warm && budget > 0 && --slices <= 0) warm = true; return warm; });
+  const w = fixture(t, budget => { if (fail && budget > 0) { fail = false; throw new Error('controlled re-warm failure'); } if (!warm && budget > 0 && --slices <= 0) warm = true; return warm; });
   const minds = w.host.minds as unknown as Map<string, { entityId: string }>;
   minds.set('s_waiting', { entityId: 'no-such-body' }); t.after(() => minds.delete('s_waiting'));
   const upTo = (n: number) => { while (w.host.engine.world.tick < n) w.tick(); };
-  upTo(4); fail = true; warm = false; slices = 3; w.state.navWaiting.add('s_waiting');
-  upTo(5); assert.equal(w.state.navCold, null, 'the re-warm failed at its poll');
-  upTo(13); assert.equal(w.rescues(), 1, 'only the first build so far');
-  upTo(17);
-  const relabel = w.calls.filter(c => c.tick > 5 && c.budget > 0).map(c => c.tick);
-  assert.deepEqual(relabel, [14, 15, 16], 'the rescue read at 13 found them cold; the first-build path relabelled them');
+  const sliced = (from: number, to: number) => w.calls.filter(c => c.tick >= from && c.tick <= to && c.budget > 0).map(c => c.tick);
+  // cold past the whole burst first, so the count the error leaves behind is 30 and more
+  upTo(4); warm = false; slices = 1e9; upTo(62);
+  assert.deepEqual(sliced(5, 62).length, 30 + 3, 'a burst of 30, then one a poll (35, 45, 55)');
+  fail = true; w.state.navWaiting.add('s_waiting'); upTo(65);
+  assert.equal(w.state.navCold, null, 'the re-warm failed at its poll at 65');
+  slices = 3; upTo(73); assert.equal(w.rescues(), 1, 'only the first build so far');
+  upTo(77);
+  assert.deepEqual(sliced(66, 77), [74, 75, 76], 'the rescue read at 73 found them cold; the first-build path relabelled them');
   assert.equal(w.rescues(), 2, 'its completion stepped the Souls out');
   assert.equal(w.state.navCold, false, 'and re-armed the re-warm'); assert.equal(w.state.navPending, false);
-  upTo(40); assert.deepEqual(w.logs, ['nav re-warm: controlled re-warm failure']);
-  warm = false; slices = 1e9; upTo(80);   // cold again for good: the rescue read at 43 finds it
-  const burst = w.calls.filter(c => c.tick > 40 && c.budget > 0).map(c => c.tick);
-  assert.deepEqual(burst.slice(0, 30), Array.from({ length: 30 }, (_, i) => 44 + i), 'a fresh burst of 30, not the count left from before the error');
-  assert.ok(w.calls.filter(c => c.tick > 40).every(c => c.budget <= 10), 'and no first-build slice while the re-warm works');
+  assert.deepEqual(w.logs, ['nav re-warm: controlled re-warm failure']);
+  warm = false; slices = 1e9; upTo(120);   // cold again for good: the rescue read at 83 finds it
+  assert.deepEqual(sliced(78, 120).slice(0, 30), Array.from({ length: 30 }, (_, i) => 84 + i), 'a fresh burst of 30, not the 33 left from before the error');
+  assert.ok(w.calls.filter(c => c.tick > 77).every(c => c.budget <= 10), 'and no first-build slice while the re-warm works');
 });
