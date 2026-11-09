@@ -105,3 +105,31 @@ test('F5 (#376): a bound seat whose own name holds every word keeps the vocabula
  assert.deepEqual(many.didYouMean.map((c:any)=>c.id),['sit:e_presenter-box-1','sit:e_presenter-spare-box']);assert.match(many.reason,/presenter-box-1, presenter-spare-box/);
  const none=run('sit on the auditorium sofa',[seat('presenter-timber-box')]);assert.equal(none.code,'capability.unavailable');assert.equal(none.didYouMean.length,0);
 });
+
+test('#1242: "sit outside with <someone unknown>" lists the outdoor seat, chooses nothing, and names who was not found',()=>{
+ const {L}=setup(),soul={soulId:'s'} as any,bench={id:'sit:e_bench',verb:'sit',label:'commons-bench (a bench, 20 m)',target:{kind:'object',id:'commons'},available:true};
+ L.places.byId.set('cottage',{id:'cottage',ref:'cottage',name:'Knoll Cottage',aliases:['cottage'],parent:'world',parts:[{id:'outdoor-bench',title:'Outdoor Bench',sit:'sit:cottage/part-outdoor-bench',target:{entity:'bench',ref:'bench',slot:'seat'}}]});
+ // (as the ledger does: words go through discovery, then the vocabulary, here the nearest bench for a generic bench)
+ L.resolveOnDemand=(_:unknown,text:string,caps:any[],plans:any)=>{const c=caps.find(x=>x.id===text);if(c||text.includes(':'))return {v:{kind:'exact',cap:c??{id:text,verb:'sit',available:true}}};
+  return {v:semanticDiscovery(L,soul,text,caps,plans)??(/\bbench\b/.test(text)&&caps[0]?{kind:'alias',cap:caps[0],note:''}:{kind:'unknown',reason:'none',didYouMean:[]})};};
+ L.host={minds:new Map()};const run=(s:string,caps:any[]=[])=>semanticDiscovery(L,soul,s,caps,new Map()) as any;
+ for(const [text,who] of [['sit outside with Bo','Bo'],['sit outside with Zed.','Zed'],['sit outside with a friend','a friend'],['take a seat outside along with Bo and Zed','Bo and Zed'],['sit outside with Bo now','Bo'],['sit outside with Bo for a minute','Bo'],['sit outside with Bo next to the fire','Bo']]){
+  const r=run(text);assert.equal(r.kind,'unknown',text);assert.equal(r.code,'capability.choose',text);
+  assert.deepEqual(r.didYouMean.map((x:any)=>x.id),['sit:cottage/part-outdoor-bench'],text);
+  assert.deepEqual(r.discovery.unresolved,{with:who},text);assert.ok(r.reason.startsWith(`I couldn't find "${who}" here to invite, so nobody was invited.`),text);assert.match(r.reason,/No seat has been selected/,text);
+ }
+ // the seat named by its own words alone is still only listed (never an alias) while a companion is missing
+ const own=run('sit on the outdoor bench with Bo');assert.equal(own.code,'capability.choose');assert.deepEqual(own.didYouMean.map((x:any)=>x.id),['sit:cottage/part-outdoor-bench']);
+ // a generic seat with a missing companion lists the seat the plain words resolve to, and takes nothing
+ const generic=run('sit on the bench with Zed',[bench]);assert.equal(generic.code,'capability.choose');assert.deepEqual(generic.didYouMean.map((x:any)=>x.id),['sit:e_bench']);assert.deepEqual(generic.discovery.unresolved,{with:'Zed'});
+ // A3: words that name a different place still refuse; nothing nearby is substituted (and the missing Soul is still said)
+ for(const text of ['sit outside near the orchard','sit at the podium desk outside Chiba'])assert.equal(run(text).didYouMean.length,0,text);
+ const elsewhere=run('sit at the podium desk outside Chiba with Bo');assert.equal(elsewhere.code,'capability.unavailable');assert.equal(elsewhere.didYouMean.length,0);assert.deepEqual(elsewhere.discovery.unresolved,{with:'Bo'});
+ // review: a seat named after "with" is not swapped for the ground; "with" words that name a part ("a sunset view") keep the refusal
+ for(const text of ['sit with Zed on the outdoor bench','sit down with Zed on the outdoor bench','sit outside with a sunset view']){const r=run(text,[{id:'sit:here',verb:'sit',label:'Sit down on the ground here',available:true}]);assert.ok(!r||!r.didYouMean.some((x:any)=>x.id==='sit:here'),text);assert.equal(r?.discovery?.unresolved,undefined,text);}
+ // steward: one wording whether or not a Soul by that name exists anywhere (the answer never tells which)
+ const absent=run('sit outside with Bo and Zed');L.host.minds.set('s_bo',{soulId:'s_bo',name:'Bo'});const present=run('sit outside with Bo and Zed');
+ assert.equal(present.reason,absent.reason);assert.deepEqual(present.discovery.unresolved,absent.discovery.unresolved);assert.deepEqual(present.discovery.unresolved,{with:'Bo and Zed'});
+ // A4: unchanged readings without a companion
+ assert.equal(run('sit outside').code,'capability.choose');assert.equal(run('sit outside').discovery.unresolved,undefined);
+});
