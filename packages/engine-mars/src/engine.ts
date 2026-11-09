@@ -713,36 +713,61 @@ export class MarsEngine implements Engine {
     rememberPosesAfterRestore(this.rt);
     return { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: e.human.level ?? 0 };
   }
-  /** #1496 nonfinite-hold/1 (see the contract): a pure read of this head and `baseline`. A number at a path is put back to the
-   *  baseline's finite number there; an object whose pose has none is set down at the arrival (the eject, named `arrival`); a
-   *  body's pose, yaw or level is quarantine/1's and is left out; anything else with none is `zero`. Walks are capped. */
+  /** #1496 nonfinite-hold/1 (see the contract): a pure read of this head and `baseline`, all or nothing.
+   *  - A body's pose and human state are quarantine/1's and never patched here; its other fields are, as below.
+   *  - An entity's pose is one unit: when any number in it is no number, the whole baseline pose comes back, and only if its
+   *    support is the same as then, nothing rides it and it stands clear of every body. Else a free item (a component on the
+   *    ground, a surface or in a hand, joined to nothing, carrying nothing) is set down at a free spot by the arrival
+   *    (`arrival`, the eject; its holder lets go). Anything else (a carrier, a ride, a frame part) is not patched: it halts.
+   *  - Any other number goes back to the baseline's number at that path, else `zero`.
+   *  More than CAP numbers, or a pose that can't be put back, plans nothing for the rest to halt on by name. */
   planNonFiniteV1(baseline?: MarsEngine | null): NonFinitePatchV1[] {
-    const out: NonFinitePatchV1[] = [], placed = new Set<string>(), CAP = 64, DEPTH = 12;
-    const roots = (e: MarsEngine | null | undefined) => e ? { world: e.rt.world as unknown, programme: Object.fromEntries(e.programs) as unknown } : undefined;
-    const head = roots(this)!, base = roots(baseline);
+    const out: NonFinitePatchV1[] = [], CAP = 64, DEPTH = 12, fin = (v: unknown) => finiteDeepV1(v);
+    let found = 0, stuck = false;
     const at = (root: unknown, path: string[]) => { let v: any = root; for (const k of path) { if (!v || typeof v !== 'object') return undefined; v = v[k]; } return v; };
-    const visit = (root: 'world' | 'programme', v: unknown, path: string[]) => {
-      if (out.length >= CAP) return;
+    const base = baseline ? { world: baseline.rt.world as unknown, programme: Object.fromEntries(baseline.programs) as unknown } : undefined;
+    const numbers = (root: 'world' | 'programme', v: unknown, path: string[], skip?: (path: string[]) => boolean) => {
+      if (skip?.(path)) return;
       if (typeof v === 'number') {
         if (Number.isFinite(v)) return;
+        if (++found > CAP) return;
         const was = base ? at(base[root], path) : undefined;
-        if (typeof was === 'number' && Number.isFinite(was)) { out.push({ root, path, from: 'baseline', value: was }); return; }
-        const id = root === 'world' && path[0] === 'entities' ? path[1] : undefined, e = id ? this.ents[id] : undefined;
-        if (e && path[2] === 'pose') {
-          if (e.kind === 'human') return;   // quarantine/1 holds a body; never a forced move from here
-          if (placed.has(id!)) return; placed.add(id!);
-          const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0], spatial = this.rt.services.spatial as Spatial;
-          const y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, ax, az)) : 0;
-          out.push({ root, path: ['entities', id!], from: 'arrival', place: { p: [ax, y, az], yaw: 0 } }); return;
-        }
-        if (e?.kind === 'human' && path[2] === 'human' && path[3] === 'level') return;
-        out.push({ root, path, from: 'zero', value: 0 }); return;
+        out.push(typeof was === 'number' && Number.isFinite(was) ? { root, path, from: 'baseline', value: was } : { root, path, from: 'zero', value: 0 }); return;
       }
       if (!v || typeof v !== 'object' || path.length > DEPTH) return;
-      for (const k of Object.keys(v).sort()) visit(root, (v as any)[k], [...path, k]);
+      for (const k of Object.keys(v).sort()) numbers(root, (v as any)[k], [...path, k], skip);
     };
-    visit('world', head.world, []); visit('programme', head.programme, []);
-    return out;
+    const w = this.rt.world as any;
+    for (const k of Object.keys(w).sort()) if (k !== 'entities') numbers('world', w[k], [k]);
+    for (const id of Object.keys(this.ents).sort()) {
+      const e = this.ents[id];
+      if (e.kind === 'human') { numbers('world', e, ['entities', id], p => p[2] === 'pose' || p[2] === 'human'); continue; }   // quarantine/1's
+      numbers('world', e, ['entities', id], p => p[2] === 'pose');
+      if (!e.pose || fin(e.pose)) continue;
+      if (++found > CAP) continue;
+      const pose = this.nonFinitePoseV1(id, baseline);
+      if (pose) out.push(pose); else stuck = true;
+    }
+    numbers('programme', Object.fromEntries(this.programs), []);
+    return found > CAP || stuck ? [] : out;
+  }
+  /** #1496: what puts back an entity whose pose is no number, or null when nothing legal can (it then halts by name). */
+  private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
+    const e = this.ents[id], was = baseline?.ents[id], ents = Object.values(this.ents) as any[];
+    const rides = ents.some(o => o.kind === 'human' && [o.human?.carrier?.id, o.human?.riding, o.human?.on].includes(id)) || ents.some(o => o.id !== id && o.support?.on === id);
+    if (rides) return null;
+    const radius = typeof e.body?.radius === 'number' && Number.isFinite(e.body.radius) ? e.body.radius : 0.3;
+    const clear = (p: number[]) => !ents.some(o => o.kind === 'human' && Array.isArray(o.pose?.p) && o.pose.p.every(Number.isFinite) && hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < radius + HUMAN_RADIUS && Math.abs(o.pose.p[1] - p[1]) < 1.5);
+    if (was?.pose && finiteDeepV1(was.pose) && Array.isArray(was.pose.p) && was.pose.p.length === 3 && stableStringify(was.support ?? null) === stableStringify(e.support ?? null) && clear(was.pose.p))
+      return { root: 'world', path: ['entities', id, 'pose'], from: 'baseline', pose: structuredClone(was.pose) };
+    const free = e.kind === 'component' && !e.connections?.length && !e.carrier && !e.vehicle && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind);
+    if (!free) return null;
+    const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0];
+    const spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius); } catch { return null; } finally { this.ents[id] = e; this.tableCacheV1 = null; } })();   // the search reads everything but this
+    if (!spot) return null;
+    const spatial = this.rt.services.spatial as Spatial, y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, spot[0], spot[1])) : 0;
+    const held = ['held', 'in-hand'].includes(e.support?.kind) ? [e.support.by].flat().filter((b: unknown): b is string => typeof b === 'string').sort() : [];
+    return { root: 'world', path: ['entities', id], from: 'arrival', place: { p: [spot[0], y, spot[1]], yaw: 0 }, ...(held.length ? { release: held } : {}) };
   }
   /** #1496 nonfinite-hold/1: writes the logged patches and stops what they touched. Never throws: a patch whose place is gone
    *  costs only itself, live and in a replay alike. */
@@ -755,15 +780,15 @@ export class MarsEngine implements Engine {
         if (id && e?.kind === 'human') bodies.add(id);
         if (q.place) {
           if (!e) continue;
-          if (['held', 'in-hand'].includes(e.support?.kind)) for (const by of [e.support.by].flat()) if (typeof by === 'string') bodies.add(by);
-          placeOnGround(e, [...q.place.p], q.place.yaw); moved.add(id!); continue;
+          for (const by of q.release ?? []) { const h = this.ents[by]?.human; bodies.add(by); if (h && h.grip?.entity === id) { delete h.grip; delete h.task; h.activity = 'idle'; } }   // the holder lets go, as abandonV1
+          delete e.reservedBy; placeOnGround(e, [...q.place.p], q.place.yaw); moved.add(id!); continue;
         }
+        if (q.pose) { if (!e) continue; e.pose = structuredClone(q.pose); moved.add(id!); continue; }
         let v: any = q.root === 'world' ? this.rt.world : this.programs.get(q.path[0]);
         const rest = q.root === 'world' ? q.path : q.path.slice(1);
         for (const k of rest.slice(0, -1)) { if (!v || typeof v !== 'object') { v = undefined; break; } v = v[k]; }
         if (!v || typeof v !== 'object' || typeof q.value !== 'number') continue;
         v[rest[rest.length - 1]] = q.value;
-        if (id && q.path[2] === 'pose') moved.add(id);
       } catch (failure) { console.error('[engine] a non-finite patch could not be applied:', String(failure).slice(0, 200)); }
     }
     for (const id of [...moved].sort()) try { acknowledgeRelocation(this.rt, id); } catch { /* the patch stands */ }

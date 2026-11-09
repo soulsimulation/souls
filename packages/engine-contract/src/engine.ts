@@ -106,11 +106,11 @@ export const REWOUND = { code: 'world.rewound', message: 'The world went back to
 
 /** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
 export type ContainedKeyV1 = { code: string; subjects: string[] };
-/** #1496 nonfinite-hold/1: one number put right, as logged. `path` runs from its root (`world`: the engine's world, every
- *  entity included; `programme`: a programme by id, then its fields). `from`: where the value came from, the last good
- *  snapshot (`baseline`) or the named fallback (`zero`; `arrival`: an object set down on the ground at the world's arrival,
- *  `place` carrying its pose, the eject when no good value exists). */
-export type NonFinitePatchV1 = { root: 'world' | 'programme'; path: string[]; from: 'baseline' | 'zero' | 'arrival'; value?: number; place?: { p: [number, number, number]; yaw: number } };
+/** #1496 nonfinite-hold/1: one thing put right, as logged. `path` runs from its root (`world`: the engine's world, every
+ *  entity included; `programme`: a programme by id, then its fields). `from`: where it came from, the last good snapshot
+ *  (`baseline`: a number, or an entity's whole `pose`) or the named fallback (`zero`; `arrival`: a free item set down at a
+ *  free spot by the world's arrival, `place` carrying its pose and `release` the bodies that held it: the eject). */
+export type NonFinitePatchV1 = { root: 'world' | 'programme'; path: string[]; from: 'baseline' | 'zero' | 'arrival'; value?: number; pose?: Record<string, unknown>; place?: { p: [number, number, number]; yaw: number }; release?: string[] };
 
 export interface Engine {
   readonly rulesVersion: string;
@@ -146,8 +146,8 @@ export interface Engine {
   corruptBodiesV1?(): ContainedKeyV1[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
   /** #1496 nonfinite-hold/1: every non-finite number in the world and the programmes, and what each is put back to: its value in
-   *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A
-   *  number it can't put right (a body's pose, which quarantine/1 holds) is left out. */
+   *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A body's
+   *  pose and human state are left out (quarantine/1's). Empty when anything can't be put back legally: that halts by name. */
   planNonFiniteV1?(baseline?: Engine | null): NonFinitePatchV1[];
   /** #1496: writes those patches (as logged; a replay passes the same ones back and reads nothing) and stops, with `why`, the
    *  programmes they touched: a programme whose own state was patched, and those of a body patched or holding a set-down object. */

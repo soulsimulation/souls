@@ -2352,11 +2352,19 @@ export class WorldHost {
   /** #1496 nonfinite-hold/1: every non-finite number the engine can put right goes back to its value in the last good snapshot
    *  (the recovery baseline; with none there, the named fallback), and what it touched stops. One logged event carries the
    *  exact patches, so a replay writes the same ones and reads nothing. False when there was nothing to patch or the write failed. */
+  /** #1496: the engine restored from the recovery baseline for the last hold, kept while that baseline is the same object. */
+  private nonFiniteBase: {body: SnapshotBody; engine: Engine | null} | null = null;
+  /** #1496: each set of fields' holds within the current cooldown, for the glitch row's rate. */
+  private nonFiniteRepeats = new Map<string, {since: number; n: number}>();
   private holdNonFinite(error: unknown): boolean {
     const engine = this.engine; if (!engine.planNonFiniteV1 || !engine.applyNonFiniteV1) return false;
-    let base: Engine | null = null;
-    try { if (this.recoveryBaseline) base = this.factory.restore(structuredClone(this.recoveryBaseline.runtime)); }
-    catch (failure) { console.error('[world] the last good snapshot would not restore for a non-finite hold:', String(failure).slice(0, 200)); }
+    let base: Engine | null = null;   // only read, so one restore serves every hold until the baseline changes
+    if (this.recoveryBaseline && this.nonFiniteBase?.body === this.recoveryBaseline) base = this.nonFiniteBase.engine;
+    else if (this.recoveryBaseline) {
+      try { base = this.factory.restore(structuredClone(this.recoveryBaseline.runtime)); }
+      catch (failure) { console.error('[world] the last good snapshot would not restore for a non-finite hold:', String(failure).slice(0, 200)); }
+      this.nonFiniteBase = {body: this.recoveryBaseline, engine: base};
+    }
     let patches: NonFinitePatchV1[];
     try { patches = engine.planNonFiniteV1(base); } catch (failure) { console.error('[world] could not look for non-finite numbers:', String(failure).slice(0, 200)); return false; }
     if (!patches.length) return false;
@@ -2367,7 +2375,11 @@ export class WorldHost {
     if (!this.writeRepair(e)) return false;
     this.seq = e.seq; this.acc.log.push(e);
     const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
-    this.recordGlitch('contained', error, {rule: NONFINITE_HELD.code, tick, bodies: done.bodies, evidence: {seq: e.seq, fields, stopped: done.stopped, programmes: done.programmes, ...(patches.some(p => p.from === 'arrival') ? {arrival: patches.filter(p => p.from === 'arrival').map(p => p.path[1])} : {})}});
+    // as quarantine/1 (#1377): the event every time (a replay needs it), the row at most twice a cooldown for the same fields
+    const key = fields.map(f => f.field).join('|'), r = this.nonFiniteRepeats.get(key), loud = !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2;
+    this.nonFiniteRepeats.set(key, r && tick - r.since < REWIND_COOLDOWN_TICKS ? {since: r.since, n: r.n + 1} : {since: tick, n: 1});
+    if (this.nonFiniteRepeats.size > 256) for (const [k, v] of this.nonFiniteRepeats) if (tick - v.since >= REWIND_COOLDOWN_TICKS) this.nonFiniteRepeats.delete(k);
+    if (loud) this.recordGlitch('contained', error, {rule: NONFINITE_HELD.code, tick, bodies: done.bodies, evidence: {seq: e.seq, fields, stopped: done.stopped, programmes: done.programmes, ...(patches.some(p => p.from === 'arrival') ? {arrival: patches.filter(p => p.from === 'arrival').map(p => p.path[1])} : {})}});
     for (const id of done.bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a non-finite hold:', String(failure).slice(0, 200)); }
     return true;

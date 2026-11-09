@@ -33,6 +33,9 @@ async function world(t: any, opts: { hold?: boolean; baseline?: boolean } = {}) 
   const boot = () => { const next = new WorldHost(f.db, repair, seed, 1e9, worldId, { durableClockV1: true }); next.boot(); return next; };
   return { f, h, ents, tick, ada: row.entity_id, boot };
 }
+/** One tick with `brk` run at the end of the engine's own step, as a bug outside any rule would leave the head: the next
+ *  reader is the frontier hash (a break before the step can be undone, or faulted on, by the step itself). */
+const tickBroken = (f: any, brk: () => void) => { const e = f.host.engine, step = e.step; e.step = (...a: unknown[]) => { e.step = step; const out = step.apply(e, a); brk(); return out; }; return f.host.tickOnce(); };
 const held = (f: any) => rowsOf(f.db).filter((r: any) => r.rule === 'state.non-finite') as any[];
 const events = (f: any) => f.db.events(worldId, 0).filter((e: any) => e.payload?.nonFiniteHoldV1);
 
@@ -41,10 +44,11 @@ test('#1496 an object whose pose is NaN goes back to its last good pose: no thro
   const was = ents().bowl1.pose.p[0];
   ents().bowl1.pose.p[0] = NaN;   // between ticks, as a bug outside any rule would leave it
   assert.doesNotThrow(() => f.host.tickOnce(), 'the tick never throws');
-  assert.equal(ents().bowl1.pose.p[0], was, 'back to its last good value');
+  assert.equal(ents().bowl1.pose.p[0], was, 'back to its last good pose, whole');
   assert.equal(f.host.clockAvailable, true, 'the clock goes on');
   const [row] = held(f);
-  assert.deepEqual(row?.evidence?.fields, [{ field: 'world:entities.bowl1.pose.p.0', from: 'baseline' }], JSON.stringify(row));
+  assert.deepEqual(row?.evidence?.fields, [{ field: 'world:entities.bowl1.pose', from: 'baseline' }], JSON.stringify(row));
+  assert.deepEqual(events(f)[0].payload.nonFiniteHoldV1.patches[0].pose, h.nonFiniteBase.engine.world.entities.bowl1.pose, 'the whole baseline pose, never a mix');
   assert.equal(events(f).length, 1, 'one logged event');
   assert.equal(h.seq, events(f)[0].seq, 'the frontier is written through the patch');
   tick(5);
@@ -94,6 +98,7 @@ test('#1496 with no last good value an object is set down at the arrival, logged
   const [row] = held(f);
   assert.equal(ents().bowl2.support?.kind, 'ground', JSON.stringify(row));
   assert.notDeepEqual(ents().bowl2.pose.p, was.p, 'moved: the forced move is the eject');
+  for (const o of Object.values(ents())) if (o.kind === 'human') assert.ok(Math.hypot(o.pose.p[0] - ents().bowl2.pose.p[0], o.pose.p[2] - ents().bowl2.pose.p[2]) >= 0.8, `clear of ${o.id}`);
   assert.deepEqual(row?.evidence?.fields, [{ field: 'world:entities.bowl2', from: 'arrival' }]);
   assert.deepEqual(row?.evidence?.arrival, ['bowl2']);
   assert.equal(boot().engine.stateHash(), f.host.engine.stateHash(), 'a boot from the log agrees');
@@ -114,4 +119,105 @@ test('#1496 a non-finite number outside what the engine can put back (the kernel
   assert.equal(f.host.clockAvailable, false, 'halted, never ticking on corrupt state');
   assert.ok(f.host.glitches.byRule['durability.clock-frontier']?.halt, JSON.stringify(f.host.glitches.byRule));
   assert.equal(held(f).length, 0, 'nothing patched: no frontier over corrupt state');
+});
+
+test('#1496 a held object with no good pose is set down clear and its holder lets go, named and told', async (t) => {
+  const { f, ents, ada } = await world(t, { baseline: false });
+  assert.doesNotThrow(() => tickBroken(f, () => { Object.assign(ents().bowl3, { support: { kind: 'held', by: [ada] } }); ents()[ada].human.grip = { entity: 'bowl3' }; ents().bowl3.pose.p[0] = NaN; }));   // as a carry leaves it, then a bug
+  assert.equal(ents().bowl3.support?.kind, 'ground');
+  assert.equal(ents()[ada].human.grip, undefined, 'the holder let go');
+  const q = events(f)[0].payload.nonFiniteHoldV1;
+  assert.deepEqual([q.patches[0].from, q.patches[0].release, q.bodies], ['arrival', [ada], [ada]]);
+  assert.equal(q.souls.length, 1, 'its Soul is told');
+});
+
+test('#1496 a body\'s pose is never patched here, even with a good value in the baseline; a pitch quarantine/1 does not hold halts by name', async (t) => {
+  const { f, h, ents, ada } = await world(t);
+  const base = h.factory.restore(structuredClone(h.recoveryBaseline.runtime));
+  ents()[ada].pose.p[0] = NaN; ents()[ada].pose.pitch = Infinity;
+  const plan = f.host.engine.planNonFiniteV1!(base);
+  assert.deepEqual(plan, [], 'nothing for a body\'s pose, and nothing at all while one is left: ' + JSON.stringify(plan));
+  // pitch is not one quarantine/1 holds: nothing puts it back here, so it halts by name (the process restarts from the log)
+  assert.throws(() => f.host.tickOnce(), /non-finite number/);
+  assert.equal(events(f).length, 0, 'no non-finite patch for a body pose');
+});
+
+test('#1496 a field of a body outside its pose and human state goes back to the baseline, and that Soul stops and is named', async (t) => {
+  const { f, h, ents, ada } = await world(t, { baseline: false });
+  ents()[ada].body = { radius: 0.25 };
+  f.host.requestSnapshot('test'); f.host.tickOnce(); f.host.drainInputs();
+  for (let i = 0; i < 200 && (h.periodicSnapshot || !h.recoveryBaseline); i++) await setImmediate();
+  assert.doesNotThrow(() => tickBroken(f, () => { ents()[ada].body.radius = NaN; }));
+  assert.equal(ents()[ada].body.radius, 0.25);
+  const q = events(f)[0].payload.nonFiniteHoldV1;
+  assert.deepEqual([q.patches.map((p: any) => p.path.join('.')), q.bodies], [[`entities.${ada}.body.radius`], [ada]]);
+});
+
+test('#1496 something carrying a body, or with something resting on it, is never moved here: it halts by name', async (t) => {
+  const { f, ents, ada } = await world(t, { baseline: false });
+  assert.throws(() => tickBroken(f, () => { ents()[ada].human.carrier = { id: 'bowl1', slot: 's0', phase: 'seated' }; ents().bowl1.pose.p[0] = NaN; }), /non-finite number/);   // a rider, as a carrier's seat leaves it
+  assert.equal(events(f).length, 0, 'nothing moved');
+  assert.ok(f.host.glitches.byRule['engine.unhashable']?.halt, JSON.stringify(f.host.glitches.byRule));
+});
+
+test('#1496 more numbers than the cap are not patched in part: it halts by name', async (t) => {
+  const { f } = await world(t);
+  const w = f.host.engine.world as any; for (let i = 0; i < 65; i++) w.env.weather[`x${i}`] = NaN;
+  assert.throws(() => f.host.tickOnce(), /non-finite number/);
+  assert.equal(events(f).length, 0);
+});
+
+test('#1496 a break that comes back every tick restores the baseline once and writes its row at most twice a cooldown', async (t) => {
+  const { f, h, ents } = await world(t);
+  const restore = t.mock.method(h.factory, 'restore');
+  for (let i = 0; i < 10; i++) { tickBroken(f, () => { ents().bowl1.pose.p[0] = NaN; }); f.host.drainInputs(); }
+  assert.equal(restore.mock.callCount(), 1, 'one restore of the baseline');
+  assert.equal(events(f).length, 10, 'the event every time: a replay needs it');
+  assert.equal(held(f).length, 2, 'the row twice a cooldown');
+});
+
+test('#1496 without the durable clock a capture skipped as snapshot.non-finite puts the number back, and the next capture is taken', async (t) => {
+  t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {}); t.mock.method(console, 'log', () => {});
+  const f = fixture(':memory:', repair, { durableClockV1: false }); f.brain.quiesce();
+  t.after(() => { try { f.host.stop(); f.db.close(); } catch { /* closed */ } });
+  for (let i = 0; i < 5; i++) { f.host.tickOnce(); f.host.drainInputs(); }
+  await accept<unknown>(f.host, f.host.enableQuarantineV1('test')); await accept<unknown>(f.host, f.host.enableNonFiniteHoldV1('test'));
+  const h = f.host as any, ents = f.host.engine.world.entities as any;
+  f.host.requestSnapshot('test'); f.host.tickOnce(); for (let i = 0; i < 200 && h.periodicSnapshot; i++) await setImmediate();
+  const was = ents.bowl1.pose.p[0];
+  ents.bowl1.pose.p[0] = NaN; f.host.requestSnapshot('test');
+  assert.doesNotThrow(() => f.host.tickOnce());
+  assert.ok(rowsOf(f.db).some((r: any) => r.rule === 'durability.snapshot-skipped' && r.evidence?.code === 'snapshot.non-finite'), 'the capture was skipped by name');
+  assert.equal(ents.bowl1.pose.p[0], was, 'and the number put back');
+  const before = h.lastSnapshotTick;
+  for (let i = 0; i < 5; i++) { f.host.tickOnce(); f.host.drainInputs(); }
+  for (let i = 0; i < 200 && h.periodicSnapshot; i++) await setImmediate();
+  assert.ok(h.lastSnapshotTick > before, 'the next capture was taken');
+});
+
+test('#1496 a carrier (a real balloon) whose pose breaks is never moved from here: with no good pose to stop at, it halts by name', async (t) => {
+  const { f, ents, ada } = await world(t, { baseline: false });
+  const [x, , z] = ents()[ada].pose.p;
+  await accept<unknown>(f.host, f.host.installCarrierV1({ id: 'test-balloon', def: 'hot-air-balloon', label: 'Balloon', at: [x + 16, z], yaw: Math.PI, route: 'commons-hop', waitSeconds: 600 } as any));
+  for (let i = 0; i < 3; i++) { f.host.tickOnce(); f.host.drainInputs(); }
+  assert.ok(ents()['test-balloon']?.carrier, 'installed');
+  const was = [...ents()['test-balloon'].pose.p];
+  assert.throws(() => tickBroken(f, () => { ents()['test-balloon'].pose.p[0] = NaN; }), /non-finite number/);
+  assert.equal(events(f).length, 0, 'never set down at the arrival');
+  void was;
+});
+
+test('#1496 a parked carrier with nobody aboard and a good pose in the baseline gets that whole pose back', async (t) => {
+  const { f, h, ents, ada, boot } = await world(t);
+  const [x, , z] = ents()[ada].pose.p;
+  await accept<unknown>(f.host, f.host.installCarrierV1({ id: 'test-balloon', def: 'hot-air-balloon', label: 'Balloon', at: [x + 16, z], yaw: Math.PI, route: 'commons-hop', waitSeconds: 600 } as any));
+  f.host.requestSnapshot('test'); f.host.tickOnce(); f.host.drainInputs();
+  for (let i = 0; i < 200 && h.periodicSnapshot; i++) await setImmediate();
+  const was = structuredClone(ents()['test-balloon'].pose);
+  assert.doesNotThrow(() => tickBroken(f, () => { ents()['test-balloon'].pose.p[0] = NaN; }));
+  assert.deepEqual(ents()['test-balloon'].pose, was);
+  assert.equal(events(f)[0].payload.nonFiniteHoldV1.patches[0].from, 'baseline');
+  for (let i = 0; i < 3; i++) { f.host.tickOnce(); f.host.drainInputs(); }
+  assert.ok(!Object.keys(f.host.glitches.byRule).some(r => r.startsWith('motion.')), 'no teleport: ' + JSON.stringify(f.host.glitches.byRule));
+  assert.equal(boot().engine.stateHash(), f.host.engine.stateHash(), 'a boot from the log agrees');
 });
