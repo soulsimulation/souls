@@ -47,6 +47,9 @@ const MARS_WEB = opt('mars-web', join(ROOT, 'mars/viewer/dist'));
 const CLI_FILE = resolve(opt('cli', join(ROOT, 'tools/world-launcher/soul/eden.mjs')));
 if (VIA && CLI_FILE !== resolve(join(ROOT, 'tools/world-launcher/soul/eden.mjs'))) throw new Error('--via-launcher: the launcher serves its own root\'s eden.mjs; drop --cli');
 if (VIA && SLICE) throw new Error('--via-launcher with --slice is not built yet (the slice would wrap the launcher, not the world); use --cpus');
+// --soul-limits '{"ipPer10s":1000000}': more of the world's registry limits (flood.mjs SOUL_CEILINGS names), e.g. to keep the
+// hammer arm's one client under its address and account ceilings, as on a box where main answers slowly (#459)
+const SOUL_LIMITS = opt('soul-limits', '') ? JSON.parse(opt('soul-limits', '')) : null;
 const LOAD = opt('load', 'v1'), RW_MODES = opt('read-worker', '').split(',').filter(Boolean), RW_N = Number(opt('read-workers', 1)), CLI_SOULS = Number(opt('cli-souls', 3));
 const VIEWERS = Number(opt('viewers', 6)), BUDGET = ((b) => (b === 'default' ? '' : b))(opt('world-budget-rps', LOAD === 'stageb' ? '200' : '')), ORACLE_RATE = Number(opt('oracle-rate', 0.01)), JOIN_PAR = Number(opt('join-concurrency', LOAD === 'stageb' ? 4 : 1)), CPUS = opt('cpus', '');
 // r3 (2026-10-31): the active windows start only once the world has been green for GREEN_HOLD_S (Souls connected and listening,
@@ -156,7 +159,7 @@ async function bootLauncher(dir, { settle = true, rw = null } = {}) {
   const template = genesis ? FIXTURE.slice(8) : existsSync(join(ROOT, 'worlds/templates', `${SLUG}.json`)) ? SLUG : 'empty';
   // Stage B: the registry fields op.mjs set-read-workers / set-limits write (readWorkers 0 = off even if the env says 1)
   const row = { slug: SLUG, name: 'Capacity bench', template, port: null, createdAt: Date.now(), unlisted: true, worldHeapMb: HEAP_MB,
-    ...(rw ? { readWorkers: rw === 'on' ? RW_N : 0 } : {}), ...(BUDGET ? { limits: { worldBudgetRps: Number(BUDGET) } } : {}) };
+    ...(rw ? { readWorkers: rw === 'on' ? RW_N : 0 } : {}), ...(BUDGET || SOUL_LIMITS ? { limits: { ...(BUDGET ? { worldBudgetRps: Number(BUDGET) } : {}), ...(SOUL_LIMITS ?? {}) } } : {}) };
   writeFileSync(join(ldata, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', worlds: [row] }, null, 2) + '\n');
   mkdirSync(join(dir, 'home'), { recursive: true });
   if (WORLD_USER) sh('chown', ['-R', `${WORLD_USER}:${WORLD_USER}`, dir]);
