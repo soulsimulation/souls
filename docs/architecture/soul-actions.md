@@ -18,6 +18,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
   and the viewer draws it as an ordinary thing. A container whose def declares a `leftBy` state field records who left
   each thing in it (item id = Soul id, set when the thing comes to rest from a Soul's hand, pruned to what is still
   inside). Nearby perception and the take offer name the leaver; god-placed things have none.
+- **Actual bookcase stock ([#1578](https://github.com/soulsimulation/souls/issues/1578)).** `core-bookcase@2` removes the
+  decorative books and provides three places on its waist-height shelf for real books or small items. Souls shelve and
+  retrieve each entity by hand; nearby context names the actual contents. Item identity, appearance and existing metadata
+  persist. This adds no authored-passage reading contract. Other shelves remain empty; the old decorative revision is unchanged.
 - **Litter and bins ([#1088](https://github.com/soulsimulation/souls/issues/1088), W065).** `core-bin@2` and `core-wheelie-bin@2`
   are the street bins, open at the top, on the same container faculty with data only: three places down inside at the
   level of the rubbish already in them, reached over the rim. `core-wrapper@1` is a small thing to pick up. "put the
