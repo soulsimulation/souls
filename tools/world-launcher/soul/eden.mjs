@@ -2994,15 +2994,32 @@ async function act(...argv) {
 export const STOP_ID = "stop:current";
 export function stopAnswer(out) {
   if (!out || out.accepted !== false) return out;
-  if (out.code === "capability.unknown") return { accepted: false, code: "stop.unsupported", worldCode: out.code,
+  // a world before stop:current: `capability.unknown`, or for a body that cannot take a `stop:` verb, `body.unsupported`
+  // (a world with stop:current answers it before any body check, so neither comes from one)
+  if (out.code === "capability.unknown" || out.code === "body.unsupported") return { accepted: false, code: "stop.unsupported", worldCode: out.code,
     reason: "This world has no stop:current yet, so nothing was stopped. Here the act under way ends on its own, or is replaced by the next act you send." };
-  if (out.code === "act.shared") { const carry = /\bstop-carry:[^\s"'`,;)]+/.exec(String(out.reason ?? ""))?.[0]; return carry ? { ...out, next: carry } : out; }
+  if (out.code === "act.shared") {
+    const offered = (out.did_you_mean ?? []).find((d) => /^stop-carry:/.test(d?.id ?? ""))?.id;
+    const carry = offered ?? /\bstop-carry:[^\s"'`,;)]+/.exec(String(out.reason ?? ""))?.[0]?.replace(/[.!?]+$/, "");
+    return carry ? { ...out, next: carry } : out;
+  }
   return out;
 }
+const STOP_USAGE = "usage: stop [receiptId] [--for <message-id>|none] [--key <k>] [--wait [seconds]] [--json]";
 async function stop(...argv) {
   const receipt = argv[0] && !argv[0].startsWith("--") ? argv.shift() : undefined;
-  if (argv.some((a, i) => !a.startsWith("--") && !["--for", "--key", "--wait"].includes(argv[i - 1]))) throw new Error("usage: stop [receiptId] [--for <message-id>|none] [--key <k>] [--json]");
-  return stopAnswer(await act(STOP_ID, ...(receipt ? [JSON.stringify({ receipt })] : []), ...argv));
+  // checked before anything is sent: only stop's own flags, a value only where one belongs (--wait takes a number)
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--json") continue;
+    if (a === "--for" || a === "--key") { if (argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error(`${a} needs a value. ${STOP_USAGE}`); i++; continue; }
+    if (a === "--wait") { if (/^\d+$/.test(argv[i + 1] ?? "")) i++; continue; }
+    throw new Error(`stop takes no "${a}". ${STOP_USAGE}`);
+  }
+  // A stop serves an owner message only when named (--for): an implicit link would let a stop close the message the
+  // agent is about to act on ("come to the fire" while wandering). The world closes the stopped act's own message.
+  const rest = argv.includes("--for") ? argv : [...argv, "--for", "none"];
+  return stopAnswer(await act(STOP_ID, ...(receipt ? [JSON.stringify({ receipt })] : []), ...rest));
 }
 
 // #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
