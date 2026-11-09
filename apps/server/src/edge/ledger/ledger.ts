@@ -1093,12 +1093,14 @@ export class EdgeLedger implements EdgeLedgerHooks {
     try {
       const verb = capability.includes(':') ? capability.slice(0, capability.indexOf(':')) : capability;
       // the tick path never builds a menu (a cold build is ~400 ms on Eden 2026, and it would block the clock): it reads the
-      // Soul's kept menu, stale or not (every pick is bound again below and kept only if available now), or names none
-      const w = keptOnly ? this.keptMenu(soul) : this.wordsMenu(soul);
+      // Soul's kept menu, stale or not (every pick is bound again below and kept only if available now), or names none.
+      // #1503: an act reads the kept menu too; only a Soul with none gets a menu built, and then a focused one (the refused
+      // verb and the walks, which the alternatives are chosen from), never the whole menu inside the request (76-750 ms)
+      const w = this.keptMenu(soul) ?? (keptOnly ? null : this.bindFocus(soul, {ids: new Set<string>(), verbs: new Set([verb, 'walk']), targets: new Set<string>()}));
       if (!w) return 'no-menu';
       // the refused offer itself, bound exactly or (an on-demand walk, as a roof planter's) resolved as navReplan does
       const cap = this.bindOne(soul, capability)?.cap ?? this.resolveOnDemand(soul, capability, [...w.caps], new Map(w.plans)).caps.find(c => c.id === capability);
-      const alt = this.withAlternatives(soul, verb, {code, reason: ''}, w.caps, cap, keptOnly).alternatives?.filter(x => x.id !== capability);
+      const alt = this.withAlternatives(soul, verb, {code, reason: ''}, w.caps, cap, true).alternatives?.filter(x => x.id !== capability);
       return alt?.length ? alt : undefined;
     } catch (e) {console.error('[edge] route-dead alternatives', e instanceof Error ? e.message : e); return undefined;}   // a local failure: the refusal stands without them
   }
@@ -2972,7 +2974,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  already read (one per verb). Nothing available: no field. */
   /** CTRL-3 (#1095): what serves the same intent with a different binding, at most 3, nearest first within that class: never
    *  a different verb, never a different destination, never the refused act. Information for the agent, never a default. */
-  /** `keptOnly` (#1468, the tick path): read only `caps`, never build this Soul's menu. */
+  /** `keptOnly` (#1468, the tick path; #1503, a route-dead act too): read only `caps`, never build this Soul's menu. */
   withAlternatives<T extends {code: string; reason: string; did_you_mean?: {id: string; label: string}[]}>(soul: EdgeSoul, words: string, out: T, caps: EdgeCapability[], blocked?: EdgeCapability, keptOnly = false): T & {alternatives?: Alternative[]} {
     const asked = words.trim(), seen = new Set([asked, ...(out.did_you_mean ?? []).map(d => d.id)]), picks: {c: EdgeCapability; why: string; partial?: true}[] = [];
     const add = (c: EdgeCapability | undefined, why: string, partial?: boolean) => {if (c?.available && !seen.has(c.id) && picks.length < ALTERNATIVES * 2) {seen.add(c.id); picks.push({c, why, ...(partial ? {partial: true as const} : {})});}};
@@ -3000,7 +3002,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (verb !== 'sit' && named) {
       // the walk those words resolve to, as `walk <words>` would (a named region's walk is often its building's: "the pond
       // hall" is walk:lab-pond-hall). Walking is only part of "fly there".
-      const r = resolveCapability(`walk:${named.join(' ')}`, caps.some(c => c.verb === 'walk') ? ctx : this.vocabulary(soul, this.wordsMenu(soul).caps));
+      const r = resolveCapability(`walk:${named.join(' ')}`, caps.some(c => c.verb === 'walk') || keptOnly ? ctx : this.vocabulary(soul, this.wordsMenu(soul).caps));
       if (r.kind !== 'unknown' && r.cap.verb === 'walk') add(r.cap, `walks to ${named.join(' ')}`, verb !== 'walk');
       // that walk is what was refused: somewhere inside or beside the same place, which only partly serves
       if (place && !picks.length) {

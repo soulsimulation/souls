@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {fixture, invite, accept} from '../test/native-owner-fixture.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {bootEden} from '../test/eden-capabilities-timing.ts';
+import {menuStats} from './edge/ledger/menu-stats.ts';
 
 test('#824: refusals name bounded, available alternatives; other answers carry none', {timeout: 300000}, async t => {
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
@@ -181,4 +182,28 @@ test('#1468: an available offer the planner refuses route-dead names alternative
   assert.ok(r.alternatives?.length >= 1, `${walk.id}: ${JSON.stringify(r)}`);
   for (const x of r.alternatives) {assert.notEqual(x.id, walk.id); assert.ok(avail.has(x.id)); assert.equal(x.partial, true, `${x.id} only partly serves`); assert.doesNotMatch(x.why, /^walks to /, `no place named by the id's own words: ${x.why}`);}
   t.diagnostic(`${walk.id}: ${JSON.stringify(r.alternatives.map((x: any) => [x.id, x.why]))}`);
+});
+
+// #1503 (#1502 A2): an act-time route-dead refusal names its alternatives from the Soul's kept menu, or from a focused build
+// when it has none, never from a whole menu built inside the request (76-750 ms on Eden 2026, the clock blocked meanwhile)
+test('#1503: an act-time route-dead refusal builds no whole menu, with a kept menu or with none', {timeout: 300000}, async t => {
+  const w = await bootEden(() => {}, new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url)); t.after(w.close);
+  const L = w.edge as unknown as {capCache: Map<string, unknown>; wordsCache: Map<string, unknown>; focusCache: Map<string, unknown>; lastMenu: Map<string, unknown>};
+  const caps = w.edge.capabilitiesPage(w.soul, {all: true}).capabilities as {id: string; verb: string; available: boolean}[];
+  const avail = new Set(caps.filter(c => c.available).map(c => c.id)), walks = caps.filter(c => c.available && c.verb === 'walk');
+  assert.ok(walks.length >= 4, 'walks to choose between');
+  const engine = w.host.engine as any, real = engine.canPerform.bind(engine);
+  assert.ok(engine.navWarmV1(Infinity), 'warm: a cold refused walk waits for navigation instead (#884)');
+  for (const [menu, walk] of [['kept', walks[1]!], ['none', walks[2]!]] as const) {
+    if (menu === 'none') {L.capCache.clear(); L.wordsCache.clear(); L.focusCache.clear(); L.lastMenu.clear();}
+    const whole0 = menuStats.cap.miss, words0 = menuStats.words.built;
+    engine.canPerform = (p: {actor: string; steps: {verb: string}[]}) => p.actor === w.soul.entityId && p.steps.some(s => s.verb === 'walk_to') ? {code: 'route.unreachable', message: 'stubbed'} : real(p);
+    let r: any; try {r = await accept(w.host, w.edge.act(w.soul, {capability: walk.id}));} finally {engine.canPerform = real;}
+    assert.equal(r.code, 'route.unreachable', JSON.stringify(r));
+    assert.equal(menuStats.cap.miss - whole0, 0, `${menu}: no whole menu built in the request`);
+    assert.equal(menuStats.words.built - words0, 0, `${menu}: no words menu built in the request`);
+    assert.ok(r.alternatives?.length >= 1 && r.alternatives.length <= 3, `${menu}: 1-3 alternatives ${JSON.stringify(r)}`);
+    for (const x of r.alternatives) {assert.ok(avail.has(x.id), `${menu}: ${x.id} is available now`); assert.notEqual(x.id, walk.id, 'never the refused act');}
+    t.diagnostic(`${menu} menu, ${walk.id}: ${JSON.stringify(r.alternatives.map((x: any) => x.id))}`);
+  }
 });
