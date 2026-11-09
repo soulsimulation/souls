@@ -476,6 +476,10 @@ persist together. Earlier chalkboard revisions remain fixed; writing still requi
 `core/bench@3` combines the repairable bench with existing two-hand upright carrying. Carry the damaged bench to a
 chosen campsite, fetch a hammer and repair it there, then use its native seats at that new position. Damage, repair
 receipt and placement persist. Occupied benches and full hands retain existing carry refusals; earlier revisions stay fixed.
+`core/arranging-vase@1` holds up to three real `core/cut-flower@1` stems in distinct native slots. Pick a chosen stem,
+put it in the vase, or retrieve that particular stem; nearby contents name the actual items. Individual identities,
+petal colors and placement persist. The stationary vase has an open mouth on a pedestal; heads remain above its rim.
+This is separate from the existing harvested preset bunch and adds no growth or wilting.
 
 ## Making: paintings and chalk
 
