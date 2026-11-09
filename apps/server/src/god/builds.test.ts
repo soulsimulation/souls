@@ -201,7 +201,7 @@ test('batch echo, rev and receipt share one commit; retry does not count again; 
   }
 });
 
-// R2F (release 1.1 walk, release-check-1015): a visitor's feed while the lead narrates after a pause, then commits.
+// R2F (release 0.1 walk, release-check-1015): a visitor's feed while the lead narrates after a pause, then commits.
 // Production defaults (10 min pause, 30 min closure). `walk` in fixtures/build-messages.json is this feed as the viewer
 // replays it (apps/web/src/WorldBuildSites.test.ts); BUILD_EXPORT_FIXTURES=1 rewrites it. Only the replay projection is
 // stored and compared: a diff's catalog defs (core-bench's description, defaults, hash) and an upsert's default params

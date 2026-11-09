@@ -2,7 +2,7 @@
 // background-task plumbing played by the harness (the wake loop). DESIGN §4.1, §6.
 // The harness writes `.eden-agent.json` ONLY before register (the identity seed) and never reads it.
 import { join } from 'node:path';
-import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, renameSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { run, start } from '../lib/proc.mjs';
@@ -55,6 +55,16 @@ export class Seat {
       wake: (seat.adapter ?? 'claude-headless') === 'codex-headless' ? seat.wake === true : seat.wake !== false };
   }
   save() { writeJson(join(this.dir, 'seat.json'), this.info); }
+  /** An owner's setting the seat declares for its Souls home: `briefBytes` (0 = no pre-turn brief; #1226's baseline arm).
+   *  Written once the mind has made the home, and checked again on each turn and restart; nothing else in config.json moves. */
+  ownerSettings() {
+    if (this.seat.briefBytes == null) return null;
+    const f = join(this.folder, '.souls', 'config.json'), c = readJson(f, null);
+    if (!c) return null;
+    if (c.briefBytes !== this.seat.briefBytes) { const tmp = `${f}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify({ ...c, briefBytes: this.seat.briefBytes }, null, 1) + '\n', { mode: 0o600 }); renameSync(tmp, f); }
+    if (this.info.briefBytes !== this.seat.briefBytes) { this.info.briefBytes = this.seat.briefBytes; this.save(); }
+    return this.seat.briefBytes;
+  }
   /** A new start for this Soul's owner: its resident client restarts, and the next turn opens a new chat. What the last chat
    *  left unread goes with it, or a replay would stand in for memory. A seat with `home` moves into a Souls home first. */
   async restart() {
@@ -73,6 +83,7 @@ export class Seat {
       for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
       if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
       if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      this.ownerSettings();
       if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
       this.info.sessionId = null; this.save();
     } finally { if (listening) this.startListen(); }
@@ -130,6 +141,7 @@ export class Seat {
       if (this.waking && !this.stopped) this.startListen();
       return rec;
     }
+    this.ownerSettings();
     const first = !this.info.sessionId;
     if (first && this.info.adapter === 'claude-headless') { this.info.sessionId = randomUUID(); this.save(); }
     let r;
@@ -238,7 +250,7 @@ export class Seat {
     this.info.onboard = { ok: !!paired, pairedWithinSec: paired ? Math.round(pairedMs / 1000) : null, timeoutSec, onboardTurnWallMs: turn?.wallMs ?? null, attempts,
       cliFile: paired ? (existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile) : null, lastStatus: paired ? null : last };
     if (paired && paired.soul) { this.info.soulId = paired.soul.id; this.info.soulName = paired.soul.name ?? name; }
-    this.save();
+    this.save(); if (paired) this.ownerSettings();
     return { ok: !!paired, soulId: this.info.soulId, soulName: this.info.soulName, turn, status: paired ?? last };
   }
 
