@@ -76,3 +76,25 @@ test('#1367 a walk from a floor beside a flight plans as it did: the policy chan
     assert.equal(routes[1],routes[0],`from (${x}, ${z}) level ${level}`);
   }
 });
+
+for(const [name,dz] of [['on the line just up the flight',-.5]] as const)
+  test(`#1367 an idle body ${name}, in the way of the step back: the walk climbs down beside the line and completes, so does a cancel`,()=>{
+    for(const cancel of [false,true]){
+      const e=stranded(true,.3),c=e.world.entities.climber,p=[...c.pose.p];
+      e.world.entities.other=m.human('other',p[0]-.3,p[2]+dz,{level:0,y:p[1]});e.step();(e.runtime.violations as unknown[]).length=0;
+      walk(e,9,2,0);
+      let done=false,beside=0;
+      for(let i=0;i<1500&&!done;i++){
+        if(cancel&&i===5)(e as any).rt.cancel(c.human!.task!);
+        const before=[...c.pose.p];e.step();
+        const v=e.runtime.violations.filter((d:any)=>(d.subjects??[]).includes('climber')&&d.code!=='collision.human-static');(e.runtime.violations as unknown[]).length=0;
+        assert.deepEqual(v.map((d:any)=>d.code),[],`tick ${i}`);
+        assert.ok(Math.hypot(c.pose.p[0]-before[0],c.pose.p[1]-before[1],c.pose.p[2]-before[2])<=.15,`no jump at step ${i}`);
+        if(c.pose.p[1]<before[1]-1e-6&&c.pose.p[0]>9.05)beside++;
+        done=i>2&&!c.human!.task;
+      }
+      assert.ok(done,`${cancel?'the cancel':'the walk'} ended`);
+      assert.ok(beside>0,'it climbed down beside the line while the step back was blocked');
+      assert.ok(c.pose.p[1]<.01||Math.abs(c.pose.p[1]-.24)<.05,`on a floor: ${c.pose.p[1]}`);
+    }
+  });

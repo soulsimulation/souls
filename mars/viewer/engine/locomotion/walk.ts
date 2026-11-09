@@ -1727,7 +1727,7 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
   const total = geo.total;
   const onto = stepOntoFlight(rt, ex, a, geo, link, dt); if (onto) return onto;   // #1367
   ex.climbT = Math.min(total, ex.climbT + CLIMB_SPEED * dt);
-  const next = pointOnLink(geo, ex.climbT);
+  const moved = offsetOnFlight(ex, a.pose.p, pointOnLink(geo, ex.climbT), dt), next = moved.p;   // #1367: beside the line while it is taken
   // someone standing on / at the end of the stair: wait rather than pass through them
   const onStair = stairBlocker(rt, a, a.pose.p, next, ex.profile.radius), exitEnd = leg.ascending ? link.to : link.from;
   const atLanding = !onStair && rt.services.stairLandingClearanceV1 === true && ex.climbT >= total - 1e-9 ? landingBlocker(rt, a, exitEnd, ex.profile.radius) : null;
@@ -1742,6 +1742,7 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
     return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} waits on ${link.id} for ${blocker} to move`, subjects: [ex.actor, blocker, link.id] });
   }
   a.pose.p = next;
+  if (ex.flightOff) { if (moved.off) ex.flightOff = moved.off; else delete ex.flightOff; }
   a.pose.yaw = link.faceAlong ? wrapAngle(a.pose.yaw + clamp(angleDelta(a.pose.yaw, alongYaw(geo, ex.climbT, a.pose.yaw)), -ex.profile.turnRate * 2 * dt, ex.profile.turnRate * 2 * dt)) : face;
   a.human!.activity = leg.ascending ? 'climb-up' : 'climb-down';
   if (ex.climbT >= total - 1e-9) {
@@ -1837,16 +1838,34 @@ function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: n
 }
 
 /** #1367: a resumed climber left off the flight's centre line first steps back onto it, across the step it stands on (same
- *  height), at a climber's pace; it climbs only once there. Null once on the line; otherwise the tick's result. */
+ *  height), at a climber's pace; it climbs once there. Null once on the line, or while the line is taken: then it climbs beside
+ *  the line (offsetOnFlight). */
 function stepOntoFlight(rt: Runtime, ex: Exec, a: Entity, geo: LinkGeometry, link: LinkLeg['link'], dt: number): StepResult | null {
   const o = ex.flightOff; if (!o) return null;
   const c = pointOnLink(geo, ex.climbT), m = hypot(o[0], o[1]), k = Math.max(0, m - CLIMB_SPEED * dt) / Math.max(m, 1e-9);
   const next: [number, number, number] = [c[0] + o[0] * k, c[1], c[2] + o[1] * k];
-  const blocker = stairBlocker(rt, a, a.pose.p, next, ex.profile.radius);
-  if (blocker) { a.human!.activity = 'climb-wait'; return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} waits on ${link.id} for ${blocker} to move`, subjects: [ex.actor, blocker, link.id] }); }
+  // someone on the line: no waiting for them here (a release stands a body off the line because the line was taken); the climb
+  // goes on beside the line and closes the offset as it climbs (offsetOnFlight)
+  if (stairBlocker(rt, a, a.pose.p, next, ex.profile.radius)) return null;
   a.pose.p = next;
+  // and turns to face along the flight meanwhile, at its turn rate (the climb then sets the facing outright)
+  const face = link.faceAlong ? alongYaw(geo, ex.climbT, a.pose.yaw) : geo.entry === link.from ? link.heading : wrapAngle(link.heading + Math.PI);
+  a.pose.yaw = wrapAngle(a.pose.yaw + clamp(angleDelta(a.pose.yaw, face), -ex.profile.turnRate * dt, ex.profile.turnRate * dt));
   if (k > 1e-6) ex.flightOff = [o[0] * k, o[1] * k]; else delete ex.flightOff;
   return { status: 'running', phase: 'climb' };
+}
+
+/** #1367: a climber still off the line (the line was taken) climbs beside it and closes the offset as fast as a climber's pace
+ *  allows on top of the climb (the step check reads horizontal speed against CLIMB_SPEED). `at`: the pose now; `next`: the
+ *  centre-line point this tick climbs to. */
+function offsetOnFlight(ex: Exec, at: number[], next: [number, number, number], dt: number): { p: [number, number, number]; off?: Vec2 } {
+  const o = ex.flightOff; if (!o) return { p: next };
+  const cx = next[0] - (at[0] - o[0]), cz = next[2] - (at[2] - o[1]), B = CLIMB_SPEED * dt;   // the centre line's own move this tick
+  const fits = (k: number) => hypot(cx - (1 - k) * o[0], cz - (1 - k) * o[1]) <= B;
+  let k = 1;   // the share of the offset kept: the least that keeps the move within a climber's pace
+  if (fits(0)) k = 0; else if (fits(1)) { let hi = 1, lo = 0; for (let n = 0; n < 24; n++) { const mid = (lo + hi) / 2; if (fits(mid)) hi = mid; else lo = mid; } k = hi; }
+  const off: Vec2 = [o[0] * k, o[1] * k];
+  return { p: [next[0] + off[0], next[1], next[2] + off[1]], ...(hypot(off[0], off[1]) > 1e-6 ? { off } : {}) };
 }
 
 /** #1367: a route from a body on a flight: the flight from where it stands to one landing, then the route on from that landing.
@@ -1935,7 +1954,7 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   }
   const onto = stepOntoFlight(rt, ex, a, geo, leg.link, dt); if (onto) return onto;   // #1367
   const at = forward ? Math.min(geo.total, ex.climbT + CLIMB_SPEED * dt) : Math.max(0, ex.climbT - CLIMB_SPEED * dt);
-  const next = pointOnLink(geo, at);
+  const moved = offsetOnFlight(ex, a.pose.p, pointOnLink(geo, at), dt), next = moved.p;   // #1367
   const onStair = stairBlocker(rt, a, a.pose.p, next, ex.profile.radius);
   const atLanding = !onStair && rt.services.stairLandingClearanceV1 === true && (forward ? at >= geo.total - 1e-9 : at <= 1e-9) ? landingBlocker(rt, a, landing, ex.profile.radius) : null;
   const blocker = onStair ?? atLanding;
@@ -1948,6 +1967,7 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   }
   ex.climbT = at;
   a.pose.p = next;
+  if (ex.flightOff) { if (moved.off) ex.flightOff = moved.off; else delete ex.flightOff; }
   a.human!.activity = leg.ascending === forward ? 'climb-up' : 'climb-down';
   if (forward ? at < geo.total - 1e-9 : at > 1e-9) return { status: 'running', phase: 'cancel-climb' };
   const end = forward ? geo.exit : geo.entry;
