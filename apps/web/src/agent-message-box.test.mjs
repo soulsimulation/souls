@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
 const {build} = createRequire(require.resolve('vite/package.json'))('esbuild');
-const dir = await mkdtemp(join(tmpdir(), 'sim-inbox-render-'));
+const dir = await mkdtemp(join(tmpdir(), 'souls-inbox-render-'));
 Object.assign(globalThis, {location: {origin: 'http://localhost:5960', pathname: '/w/inbox/', search: '', hash: ''}, sessionStorage: {getItem: () => null}});
 const outfile = join(dir, 'render.cjs');
 await build({stdin: {contents: `export {AgentMessageBoxView, soulStartPrompt} from './AgentMessageBox.tsx';export {watchStatus} from './god-ui/god-api.ts';export {watchInbox, godState} from './god-ui/god-store.ts';export {publishSession} from './auth-session.ts';export {SoulFocus} from './SoulFocus.tsx';export {reportAgentPresence} from './agent-presence.ts';export {createElement} from 'react';export {renderToStaticMarkup} from 'react-dom/server';`, resolveDir: new URL('.', import.meta.url).pathname, loader: 'tsx'}, outfile, bundle: true, format: 'cjs', platform: 'node', jsx: 'automatic', loader: {'.css': 'empty'}, logLevel: 'silent'});
@@ -148,4 +148,29 @@ test('AWAY-UI phone: the Copy start prompt link never shrinks (card buttons carr
   assert.match(css, /\.agent-message\.agent-message-presencebutton\{[^}]*flex:00auto[^}]*white-space:nowrap/);
   assert.match(css, /\.agent-message-presence\{[^}]*flex-wrap:wrap/);
   assert.match(css, /\.agent-message-presence>span\{[^}]*min-width:0/);
+});
+test('#1313: a Soul card says Thinking… while picked up and unanswered, then the act under way with its live phase', () => {
+  const now = 1_000_000, base = {connected: true, lastSeenAt: now - 2_000, presence: 'working', queued: 1};
+  const at = (inbox, kind = 'soul') => render(h(AgentMessageBoxView, {...props, kind, now, inbox}));
+  const picked = {id: 'm', text: 'go to the cottage', state: 'delivered', sentAt: now - 5_000, deliveredAt: now - 4_000};
+  const thinking = at({...base, latest: picked, doing: {phase: 'thinking', since: now - 4_000}});
+  assert.match(thinking, /data-thinking="1"/); assert.match(thinking, />Thinking…</); assert.doesNotMatch(thinking, /Picked up|agent-message-act/);
+  assert.match(at({...base, latest: picked}), />Picked up</, 'no record of thinking (an older server, an away agent): as before');
+  assert.doesNotMatch(at({...base, latest: picked, doing: {phase: 'thinking'}}, 'god'), /Thinking/, 'the god box is unchanged');
+  const acked = {...picked, state: 'acknowledged', reply: 'On my way'};
+  assert.doesNotMatch(at({...base, latest: acked, doing: {phase: 'thinking'}}), /Thinking/, 'thinking only while delivered');
+  const running = at({...base, latest: acked, doing: {phase: 'running', text: 'walk to cottage'}});
+  assert.match(running, /data-act-phase="running"/); assert.match(running, />walk to cottage · running</);
+  assert.match(at({...base, latest: acked, doing: {phase: 'done', text: 'walk to cottage'}}), />walk to cottage · done</);
+  assert.match(at({...base, latest: acked, doing: {phase: 'failed', text: 'walk to cottage', reason: 'got stuck on the way'}}), />walk to cottage · failed: got stuck on the way</);
+  assert.match(at({...base, latest: acked, doing: {phase: 'refused', text: 'sit down', reason: 'no room there'}}), /data-act-phase="refused"[^>]*>.*sit down · refused: no room there</);
+  assert.match(at({...base, latest: acked, doing: {phase: 'cut', text: 'wave'}}), />wave · cut short</);
+  assert.match(at({...base, latest: acked, doing: {phase: 'running', text: 'rest a while', step: {n: 2, of: 3}}}), />step 2 of 3 · rest a while · running</);
+  assert.match(at({...base, latest: acked, doing: {phase: 'paused', text: 'rest', step: {n: 3, of: 3}}}), />step 3 of 3 · rest · paused</);
+  const hostile = at({...base, latest: acked, doing: {phase: 'running', text: '<img src=x onerror=alert(1)>'}});
+  assert.doesNotMatch(hostile, /<img/); assert.match(hostile, /&lt;img/);
+  for (const bad of [{phase: 'running'}, {phase: 'started', text: 'x'}, {phase: 'done', text: '  '}, 'running', 7])
+    assert.doesNotMatch(at({...base, latest: acked, doing: bad}), /agent-message-act/, `never guessed from ${JSON.stringify(bad)}`);
+  assert.doesNotMatch(at({...base, latest: acked, doing: {phase: 'running', text: 'x', step: {n: 4, of: 3}}}), /step 4/, 'a step outside its plan is dropped');
+  assert.doesNotMatch(at({...base, latest: null, doing: {phase: 'running', text: 'x'}}), /agent-message-act/, 'no message, no act line');
 });

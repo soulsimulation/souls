@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {hashOf,type Engine} from '@sim/engine-contract';
+import {hashOf,type Engine} from '@souls/engine-contract';
 import {retainedCommonsShoreFactory} from './retained-shore-engine.ts';
 import {commonsKitchenFactory} from './commons-kitchen-engine.ts';
 import {COMMONS_KITCHENS} from './commons-kitchen.ts';
@@ -34,6 +34,8 @@ test('retained kitchen/commons becomes connected shore without replacing bodies,
   const w=(e.world as NativeWorld).entities;assert.equal(w[station.pot].contents?.fraction,.5);assert.ok(w[station.pot].foodPreparation?.complete);assert.equal(w[station.beans].contents?.fraction,0);for(const other of COMMONS_KITCHENS.slice(1))assert.equal(w[other.beans].contents?.fraction,1);
   assert.equal(factory.restore(e.snapshot()).stateHash(),e.stateHash());const old=await commonsKitchenFactory();assert.equal(old.canReplayHistory?.(e.rulesVersion),false);assert.throws(()=>old.restore(e.snapshot()),/physical binding/);
   const tamper=e.snapshot() as any;tamper.cfg.walkBlockV1=false;assert.throws(()=>factory.restore(tamper),/snapshot-binding/);
+  // #1362: body-step-guard/1 is a logged runtime policy, not the physical binding: a bound snapshot with it on restores exactly and keeps it
+  {const g=factory.restore(e.snapshot());g.configureRuntimePolicy!({sleepBlockTicks:1200,bodyStepGuardV1:true} as never);const back=factory.restore(g.snapshot());assert.equal(back.stateHash(),g.stateHash());assert.notEqual(g.stateHash(),e.stateHash());}
 });
 
 test('busy programmes and occupied region identities refuse read-only without creating a new physical interpretation',()=>{

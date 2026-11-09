@@ -16,8 +16,9 @@
 // the edit changes only stops (its body stays). Held things are set down at the resident's feet, or beside its exit
 // when its feet are inside what the edit touches; the exit is never inside a footprint the edit touches. An upstairs
 // resident whose floor the edit leaves standing (only its chair moved) steps aside on that floor.
-import type { Diff, Entity, ResidentMove, WorldModel } from '@sim/world-compiler';
-import { mediumAt } from '@sim/ground';
+import type { Diff, Entity, ResidentMove, WorldModel } from '@souls/world-compiler';
+import { isFixtureDef } from '@souls/engine-mars';
+import { mediumAt } from '@souls/ground';
 import { inSite, siteLocal, siteWorld, type ClosingSite } from './builds.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -140,6 +141,9 @@ export function zonesOf(m: WorldModel, id: string, holdingOnly = false): Zone[] 
   if (holdingOnly && !floors && !isBuilding(m, e)) return [];
   if (!worldFrame && (isBuilding(m, e) || floors)) return [{ at: [wp.x, wp.z], size: [baked.box[0] * wp.s, baked.box[2] * wp.s], yaw: wp.yaw }];
   const zones: Zone[] = d.layer === 'solid' || floors ? m.footprint(e, d).map(o => ({ at: o.c, size: [o.half[0] * 2, o.half[1] * 2] as Vec2, yaw: o.yaw })) : [];
+  // #1066: the engine keeps a body out of a fixture's whole box, not just its colliders: under a table top reads clearance 0, and
+  // a body left there faults the world. Where it stands now matters only if the thing arrives or moves there, so not for `holdingOnly`.
+  if (!holdingOnly && !worldFrame && isFixtureDef(d as never) && !(d.components.carryable && !d.tags.includes('upright-carry'))) zones.push({ at: [wp.x, wp.z], size: [baked.box[0] * wp.s, baked.box[2] * wp.s], yaw: wp.yaw });
   if (worldFrame && floors) {
     // A deck, pier or bridge along a path or over an area: its outline, plus half its width.
     const pts = ((e.shape as { path?: Vec2[]; area?: Vec2[] } | undefined)?.path ?? (e.shape as { area?: Vec2[] } | undefined)?.area ?? []) as Vec2[];
@@ -277,6 +281,12 @@ export function planWalkouts(engine: WalkoutEngine, before: WorldModel, after: W
   const moved: ResidentMove[] = [], stuck: StuckResident[] = [], reserved: Vec2[] = [], budget = { routes: ROUTE_BUDGET };
   for (const m of minds) {
     const b = engine.world.entities[m.entityId], h = b?.human; if (!h) continue;
+    // #1339: a rider in a carrier in flight is in the air, not in what is built under it: it stays aboard, and the ride checks
+    // its landing again on the way down (carrier.ts landing/1). Walking it out moved it from its seat to the ground mid-air.
+    const ride = (h as { carrier?: { id?: string } }).carrier?.id;
+    // (A punt afloat is 'aloft' too, but water edits under it are the punt's bank rules' business, as before.)
+    const rc = ride ? (engine.world.entities[ride] as { carrier?: { phase?: string; bank?: unknown } } | undefined)?.carrier : undefined;
+    if (rc?.phase === 'aloft' && !rc.bank) continue;
     const p: Vec2 = [b.pose.p[0], b.pose.p[2]], level = h.level ?? 0;
     const inside = [...zoneOf].filter(([, zs]) => zs.some(z => inSite(z, p, .35))).map(([id]) => id);
     // The ground rises over the body, or drops away from under it (left standing on air), by more than a step.

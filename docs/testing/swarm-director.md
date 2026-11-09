@@ -9,13 +9,13 @@ A console (stdin, or a script in headless runs) lets you redirect seats mid-scen
 ## Run
 
 ```sh
-node tools/playtest/playtest.mjs direct <cast.json> --server-root <sim-checkout> --out <run-dir> \
+node tools/playtest/playtest.mjs direct <cast.json> --server-root <souls-checkout> --out <run-dir> \
   [--world <url>] [--headless] [--script <file>] [--only <seat,seat>] [--no-planner] [--force-machine] [--keep-world]
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `--server-root` | Sim checkout whose server runs the dev world (needs a built `apps/web/dist`) |
+| `--server-root` | Souls checkout whose server runs the dev world (needs a built `apps/web/dist`) |
 | `--world <url>` | use an existing world instead of provisioning one (same as cast `world.kind: "url"`) |
 | `--headless` | no stdin console; the cast's `console.script` plays it |
 | `--script <file>` | a console script file |
@@ -28,7 +28,11 @@ Steps: preflight, provision (or attach to `--world`), seats onboarding in parall
 wide), planner, orchestrator with the console, close, verdict, then metrics, journal and `story.html`. Reviewer and
 developer are off by default. `node tools/playtest/playtest.mjs review <run-dir>` adds them later.
 
-Outputs in the run folder: `director/directions.jsonl` (every direction and its reason), `director/verdict.json` and
+Outputs in the run folder: `director/directions.jsonl` (every direction and its reason), `director/commands.jsonl`
+(the direction journal: every console command, typed, scripted or from a Soul Run's cancel, with its source, target,
+time, outcome `applied`, `held` or `refused` with the reason, and the request ids of the cards it sent; it keeps each command's text as typed, so do not paste secrets into the
+console, and a journal write failure warns once without stopping the run),
+`director/verdict.json` and
 `director/VERDICT.md` (checks plus per-seat cost), `REPORT.md`, `story.html`, and the usual seats, evidence and shots
 folders. Re-verify a finished run with `node tools/playtest/director/swarm/verify.mjs <run-dir>`.
 
@@ -98,9 +102,9 @@ The verdict reads world truth only:
 
 ## Live runs from a chat session
 
-For directing Souls on a live world by hand, without the harness, the `sim-director` Claude Code skill makes the
+For directing Souls on a live world by hand, without the harness, the `souls-director` Claude Code skill makes the
 chat session the coordinator, with one subagent per Soul. Each subagent works in its own folder and onboards from the
-world's served `instructions.md` like any new agent. The world owner approves each Soul in their open Sim window.
+world's served `instructions.md` like any new agent. The world owner approves each Soul in their open Souls window.
 The coordinator then relays plain-language directions. A subagent runs only a few CLI calls per direction and reports
 one line back. It never starts a Soul's live mind and leaves nothing running when the scene ends. Use a dev or forked
 world to rehearse; a `--world <url>` run of `direct` onboards seats with the dev onboarding text, which does not cover

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, fullScope, HEAD_WAIT_MS, landingMode, mainCiState, maintainerApproved, next, parseChecks, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { awaitHead, blocker, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -35,17 +35,73 @@ test('summarizeChecks: latest run per name, statuses as fallback, missing counts
   assert.equal(summarizeChecks({ runs: [run(1, 'ci-ok', 'completed', 'success')], required }).state, 'pending');
   const all = summarizeChecks({ runs: [run(1, 'ci-ok', 'completed', 'success'), run(2, 'proof-ok', 'completed', 'failure'), run(3, 'proof-ok', 'completed', 'success')], statuses: [{ context: 'legacy', state: 'success' }], required });
   assert.equal(all.state, 'pass');
-  const fail = summarizeChecks({ runs: [run(1, 'ci-ok', 'completed', 'cancelled'), run(2, 'proof-ok', 'in_progress')], statuses: [{ context: 'legacy', state: 'success' }], required });
+  const fail = summarizeChecks({ runs: [run(1, 'ci-ok', 'completed', 'failure'), run(2, 'proof-ok', 'in_progress')], statuses: [{ context: 'legacy', state: 'success' }], required });
   assert.equal(fail.state, 'fail');
-  assert.deepEqual(fail.failed, ['ci-ok (cancelled)']);
+  assert.deepEqual(fail.failed, ['ci-ok (failure)']);
   assert.deepEqual(parseChecks(''), DEFAULT_CHECKS);
   assert.deepEqual(parseChecks('a, b c'), ['a', 'b', 'c']);
+});
+
+test('summarizeChecks: a cancelled or replaced workflow run leaves no failure behind (#909)', () => {
+  // #674 at cb6a3e35: two ci runs a second apart; the older was cancelled and its always-run ci-ok failed, the newer
+  // had not created ci-ok yet. The newer run decides; until it reports, ci-ok is pending.
+  const wf = (id, suite, status, conclusion, o = {}) => ({ id, workflow_id: 7, check_suite_id: suite, status, conclusion, run_attempt: 1, run_started_at: '2026-11-04T22:25:47Z', ...o });
+  const cr = (id, suite, status, conclusion, completed_at = null) => ({ id, name: 'ci-ok', status, conclusion, check_suite: { id: suite }, completed_at });
+  const required = ['ci-ok'];
+  const cancelledOld = wf(100, 10, 'completed', 'cancelled');
+  const inFlight = wf(101, 11, 'in_progress', null);
+  const staleFail = cr(1, 10, 'completed', 'failure', '2026-11-04T22:25:53Z');
+  // A1: the cancelled run's failure is ignored; nothing newer yet, so pending.
+  const a1 = summarizeChecks({ runs: [staleFail], workflowRuns: [cancelledOld], required });
+  assert.deepEqual([a1.state, a1.pending, a1.failed], ['pending', ['ci-ok'], []]);
+  // A2: a newer run of the same workflow replaces an older one even when the older was not cancelled.
+  const doneOld = wf(100, 10, 'completed', 'failure');
+  assert.equal(summarizeChecks({ runs: [staleFail], workflowRuns: [doneOld, inFlight], required }).state, 'pending');
+  assert.equal(summarizeChecks({ runs: [staleFail, cr(2, 11, 'completed', 'success')], workflowRuns: [cancelledOld, { ...inFlight, status: 'completed', conclusion: 'success' }], required }).state, 'pass');
+  // Another label's run (every job skipped, no ci-ok under that name) replaces nothing: a real result stands, either way.
+  const otherLabel = wf(102, 12, 'completed', 'skipped');
+  assert.equal(summarizeChecks({ runs: [cr(2, 11, 'completed', 'success')], workflowRuns: [{ ...inFlight, status: 'completed', conclusion: 'success' }, otherLabel], required }).state, 'pass');
+  assert.equal(summarizeChecks({ runs: [cr(2, 11, 'completed', 'failure')], workflowRuns: [{ ...inFlight, status: 'completed', conclusion: 'failure' }, otherLabel], required }).state, 'fail');
+  // ...and its own failure still fails (A5).
+  const real = summarizeChecks({ runs: [staleFail, cr(2, 11, 'completed', 'failure')], workflowRuns: [cancelledOld, { ...inFlight, status: 'completed', conclusion: 'failure' }], required });
+  assert.deepEqual([real.state, real.failed], ['fail', ['ci-ok (failure)']]);
+  // A3: a re-run in progress: the earlier attempt's result predates the attempt and waits; one from this attempt counts.
+  const rerunning = wf(100, 10, 'in_progress', null, { run_attempt: 2, run_started_at: '2026-11-04T23:00:00Z' });
+  assert.equal(summarizeChecks({ runs: [staleFail], workflowRuns: [rerunning], required }).state, 'pending');
+  assert.equal(summarizeChecks({ runs: [staleFail, cr(3, 10, 'completed', 'failure', '2026-11-04T23:05:00Z')], workflowRuns: [rerunning], required }).state, 'fail');
+  // A4: a cancelled conclusion is pending, never a failure.
+  assert.equal(summarizeChecks({ runs: [cr(4, 12, 'completed', 'cancelled')], workflowRuns: [wf(102, 12, 'completed', 'failure')], required }).state, 'pending');
+  assert.equal(summarizeChecks({ runs: [{ id: 5, name: 'ci-ok', status: 'completed', conclusion: 'cancelled' }], required }).state, 'pending');
+  // A5: a check from another app or an unknown suite is judged on its own; statuses are unchanged.
+  assert.equal(summarizeChecks({ runs: [cr(6, 99, 'completed', 'failure')], workflowRuns: [cancelledOld], required }).state, 'fail');
+  assert.equal(summarizeChecks({ runs: [], statuses: [{ context: 'ci-ok', state: 'failure' }], workflowRuns: [cancelledOld], required }).state, 'fail');
+  // Other workflows are not replaced by this one's newer run.
+  const gl = { id: 7, name: 'gitleaks', status: 'completed', conclusion: 'success', check_suite: { id: 20 } };
+  assert.equal(summarizeChecks({ runs: [gl], workflowRuns: [wf(200, 20, 'completed', 'success', { workflow_id: 8 }), inFlight], required: ['gitleaks'] }).state, 'pass');
+});
+
+test('wait: a stale failure from a cancelled run does not eject; the replacing run decides (#909)', async () => {
+  let polls = 0;
+  const api = { ghAll: path => {
+    if (path.includes('/actions/runs?head_sha=s')) return [{ workflow_runs: [
+      { id: 100, workflow_id: 7, check_suite_id: 10, status: 'completed', conclusion: 'cancelled' },
+      { id: 101, workflow_id: 7, check_suite_id: 11, status: polls < 4 ? 'in_progress' : 'completed', conclusion: polls < 4 ? null : 'success' },
+    ] }];
+    if (!path.includes('/check-runs')) return [];
+    polls++;
+    const runs = [{ id: 1, name: 'ci-ok', status: 'completed', conclusion: 'failure', check_suite: { id: 10 } }];
+    if (polls >= 4) runs.push({ id: 2, name: 'ci-ok', status: 'completed', conclusion: 'success', check_suite: { id: 11 } });
+    return [{ check_runs: runs }];
+  } };
+  const r = await wait({ repo: 'o/r', sha: 's', required: ['ci-ok'], api, sleep: async () => {}, pollSec: 0 });
+  assert.equal(r.result, 'pass');
+  assert.equal(polls, 4);
 });
 
 test('wait polls until the checks conclude, and times out', async () => {
   let calls = 0;
   const api = { ghAll: path => {
-    if (path.includes('/statuses')) return [];
+    if (!path.includes('/check-runs')) return [];
     calls++;
     return [{ check_runs: [{ id: 1, name: 'ci-ok', status: calls < 3 ? 'in_progress' : 'completed', conclusion: calls < 3 ? null : 'success' }] }];
   } };
@@ -61,10 +117,10 @@ test('wait polls until the checks conclude, and times out', async () => {
 test('wait: a failure must hold for two polls, so a re-run started by an approval is not missed', async () => {
   let calls = 0;
   const run = (id, status, conclusion) => [{ check_runs: [{ id, name: 'proof-ok', status, conclusion }] }];
-  const rerun = { ghAll: path => path.includes('/statuses') ? [] : (++calls === 1 ? run(1, 'completed', 'failure') : calls === 2 ? run(2, 'queued', null) : run(2, 'completed', 'success')) };
+  const rerun = { ghAll: path => !path.includes('/check-runs') ? [] : (++calls === 1 ? run(1, 'completed', 'failure') : calls === 2 ? run(2, 'queued', null) : run(2, 'completed', 'success')) };
   assert.equal((await wait({ repo: 'o/r', sha: 's', required: ['proof-ok'], api: rerun, sleep: async () => {}, pollSec: 0 })).result, 'pass');
   calls = 0;
-  const failing = { ghAll: path => path.includes('/statuses') ? [] : (calls++, run(1, 'completed', 'failure')) };
+  const failing = { ghAll: path => !path.includes('/check-runs') ? [] : (calls++, run(1, 'completed', 'failure')) };
   const r = await wait({ repo: 'o/r', sha: 's', required: ['proof-ok'], api: failing, sleep: async () => {}, pollSec: 0 });
   assert.equal(r.result, 'fail');
   assert.equal(calls, 2);
@@ -287,4 +343,122 @@ test('landing: pending head checks (merge:ready re-runs proof-ok) wait, not stri
   const strictAnyway = train({ files: ['docs/a.md'], pendingPolls: Infinity, mainRuns: [run(9, 'failure')], full: [] });
   assert.equal(strictAnyway.run().mode, 'strict');
   assert.equal(strictAnyway.pauses(), 0); // main red: strict regardless, no wait
+});
+
+// A queue-mode next(): `prs` maps number -> overrides; `state` maps number -> the PR's queue state.
+function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], approved = [] }) {
+  const pr = n => ({ number: n, title: 't', labels: [{ name: 'merge:ready' }], head: { ref: `agent/${n}-x`, sha: `h${n}`, repo: { full_name: 'o/r' } }, base: { ref: 'main' }, mergeable: true, mergeable_state: 'clean', ...prs[n] });
+  const reads = { pr: {}, checks: 0, comments: [] };
+  const api = {
+    gh: path => {
+      if (path === 'repos/o/r') return { default_branch: 'main' };
+      const n = Number(path.split('/').pop());
+      reads.pr[n] = (reads.pr[n] ?? 0) + 1;
+      return reads.pr[n] > 1 && prs[n].later ? { ...pr(n), ...prs[n].later } : pr(n);
+    },
+    ghAll: path => {
+      if (path.startsWith('repos/o/r/rules/branches/main')) return rules;
+      if (path.startsWith('repos/o/r/issues?')) return Object.keys(prs).map(number => ({ number: Number(number), pull_request: {} }));
+      if (path.includes('/check-runs') || path.includes('/actions/')) { reads.checks++; return []; }
+      if (path.includes('/files')) return files.map(filename => ({ filename }));
+      if (path.includes('/reviews')) return approved.includes(Number(path.split('/')[4])) ? [{ user: { login: M }, state: 'APPROVED' }] : [];
+      return [];
+    },
+    comment: (repo, n, body) => reads.comments.push({ n, body }),
+    queueState: (repo, n) => state[n] ?? {},
+    pause: () => {},
+  };
+  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', api }), reads };
+}
+
+test('queue: the rule is read from the branch rules; without it the train picks as before', () => {
+  assert.equal(queueRequired([{ type: 'pull_request' }, { type: 'merge_queue' }]), true);
+  assert.equal(queueRequired([{ type: 'pull_request' }]), false);
+  const r = train({ files: ['apps/web/src/x.ts'] }).run();
+  assert.equal(r.queue, false);
+  assert.equal(r.mode, 'nonstrict');
+});
+
+test('queue: a mergeable PR goes to the queue at once, without waiting on its checks or on main', () => {
+  const t = queueTrain({ prs: { 20: {} } });
+  const r = t.run();
+  assert.deepEqual([r.pr, r.mode, r.queue], [20, 'queue', true]);
+  assert.equal(t.reads.checks, 0);
+});
+
+test('queue: enqueueing is auto-merge at exactly the head, never a direct merge', () => {
+  const args = enqueueArgs({ repo: 'o/r', pr: 20, sha: 'h20' });
+  assert.deepEqual(args.slice(0, 3), ['pr', 'merge', '20']);
+  assert.ok(args.includes('--auto'));
+  assert.equal(args[args.indexOf('--match-head-commit') + 1], 'h20');
+  assert.ok(!args.includes('--admin'));
+});
+
+test('queue: a queued PR is skipped, so the self-dispatch ends', () => {
+  const state = { 20: { isInMergeQueue: true }, 21: { autoMergeRequest: { enabledAt: 'x' } } };
+  const r = queueTrain({ prs: { 20: {}, 21: {} }, state }).run();
+  assert.equal(r.pr, '');
+  assert.equal(r.more, false);
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'queued'], [21, 'queued']]);
+  assert.equal(queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: state[20] } }).run().pr, 21);
+});
+
+test('queue: a conflict takes the strict steps, then enqueues; unknown mergeability is asked again', () => {
+  const strict = queueTrain({ prs: { 20: { mergeable: false, mergeable_state: 'dirty' } } }).run();
+  assert.deepEqual([strict.mode, strict.queue], ['strict', true]);
+  const late = queueTrain({ prs: { 20: { mergeable: null, later: { mergeable: false, mergeable_state: 'dirty' } } } }).run();
+  assert.equal(late.mode, 'strict');
+  assert.equal(queueTrain({ prs: { 20: { mergeable: null } } }).run().mode, 'queue');
+});
+
+test('queue: an unapproved T3 is not enqueued; an approved one is', () => {
+  const files = ['packages/engine-mars/src/nav.ts'];
+  const waiting = queueTrain({ prs: { 20: {} }, files });
+  const r = waiting.run();
+  assert.equal(r.pr, '');
+  assert.deepEqual(r.skipped, [{ pr: 20, tier: 'T3', why: 'awaiting-approval' }]);
+  assert.equal(waiting.reads.comments.length, 1);
+  assert.equal(queueTrain({ prs: { 20: {} }, files, approved: [20] }).run().mode, 'queue');
+});
+
+test('queue: hold undoes what is there; a drop ejects only a PR still labelled and neither merged nor back in', () => {
+  assert.deepEqual(holdAction({ isInMergeQueue: true, autoMergeRequest: { enabledAt: 'x' } }), ['dequeuePullRequest', 'id']);
+  assert.deepEqual(holdAction({ autoMergeRequest: { enabledAt: 'x' } }), ['disablePullRequestAutoMerge', 'pullRequestId']);
+  assert.equal(holdAction({}), null);
+  assert.equal(queued({}), false);
+  const labels = { nodes: [{ name: 'merge:ready' }] };
+  assert.equal(dropped({ labels }), true);
+  assert.equal(dropped({ labels, merged: true }), false);
+  assert.equal(dropped({ labels, isInMergeQueue: true }), false);
+  assert.equal(dropped({ labels: { nodes: [] } }), false);
+});
+
+test('workflow: every required check reports on merge_group, and queue entries never share a cancelling group', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = f => readFileSync(new URL(`../workflows/${f}`, import.meta.url), 'utf8');
+  for (const f of ['ci.yml', 'security.yml', 'changelog-check.yml', 'proof-check.yml']) assert.match(read(f), /^ {2}merge_group:$/m, f);
+  const proof = read('proof-check.yml');
+  assert.match(proof, /group: proof-check-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
+  assert.match(proof, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/);
+  assert.match(proof, /if: github\.event_name == 'merge_group' \|\| github\.event\.pull_request\.draft == false/);
+});
+
+test('workflow: only a label being added starts the train or the kick; removing one does not', async () => {
+  const { readFileSync } = await import('node:fs');
+  const yml = readFileSync(new URL('../workflows/merge-train.yml', import.meta.url), 'utf8');
+  for (const label of ['merge:ready', 'approved:maintainer']) {
+    assert.match(yml, new RegExp(`github\\.event\\.action == 'labeled' && github\\.event\\.label\\.name == '${label}'`));
+  }
+});
+
+test('workflow: every gh workflow run dispatch uses github.token, not the PAT (Next PR chain)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const yml = readFileSync(new URL('../workflows/merge-train.yml', import.meta.url), 'utf8');
+  const lines = yml.split('\n');
+  const idx = lines.map((l, i) => (l.includes('gh workflow run') ? i : -1)).filter(i => i >= 0);
+  assert.ok(idx.length >= 3);
+  for (const i of idx) {
+    const near = lines.slice(Math.max(0, i - 8), i).join('\n');
+    assert.match(near, /GH_TOKEN: \$\{\{ github\.token \}\}/, `dispatch at line ${i + 1} must set GH_TOKEN to github.token`);
+  }
 });

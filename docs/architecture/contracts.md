@@ -49,7 +49,8 @@ schemas are in `packages/protocol/src`; producer-side checks are in `apps/server
 mandate steering route: an accepted rule with `text, tick, seq, via, minted`, or a rejection with a reason. A rule being
 accepted is not the same as its being carried out. `ownerSoulDashboardSchema` validates the owner dashboard's core
 fields and preserves additive ones. On edge worlds, an action's lifecycle is its receipt (accepted → started →
-completed / failed / replaced), read from `/v1/edge/receipts/:id` or the event stream.
+completed / failed / replaced), read from `/v1/edge/receipts/:id` or the event stream. An act handed to the world before its row is written answers HTTP
+202 with phase `pending` ([souls.md](souls.md#the-edge-api)); `pending` is never stored.
 
 ## Privacy
 

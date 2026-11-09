@@ -4,7 +4,7 @@
 // cancel. Plans are durable (SQLite) and replay-safe: every act a plan makes carries clientRef `pl:<plan>:<step>:<attempt>`,
 // so re-running a step after a restart returns the receipt the first try created instead of acting twice.
 import {randomBytes} from 'node:crypto';
-import {EdgeError, type EdgeReceipt, type EdgeSoul} from '../contract.ts';
+import {ActPending, EdgeError, SEAT_KEPT, type EdgeReceipt, type EdgeSoul} from '../contract.ts';
 import type {EventStreams, StreamEvent} from '../comms/stream.ts';
 import {EVENT_KINDS, kindMatches, oneLine, type Envelope} from '../events/envelope.ts';
 
@@ -98,7 +98,8 @@ export class Plans {
   constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number} = {}) {
     this.core = core; this.actor = actor; this.envelope = envelope;
     core.db.exec(`CREATE TABLE IF NOT EXISTS edge_plans_v1 (world_id TEXT NOT NULL, plan_id TEXT NOT NULL, soul_id TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (world_id, plan_id)) WITHOUT ROWID;
-      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);`);
+      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);
+      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul_at ON edge_plans_v1 (world_id, soul_id, created_at);`);
     for (const r of core.db.prepare("SELECT body FROM edge_plans_v1 WHERE world_id = ? AND state IN ('running','paused') ORDER BY created_at").all(core.worldId) as {body: string}[]) {
       const p = JSON.parse(r.body) as Plan;
       const prior = this.active.get(p.soulId);
@@ -248,6 +249,9 @@ export class Plans {
       let out: Record<string, unknown>;
       try { out = await this.actor.act(soul, input); }
       catch (e) {
+        // #1327: handed to the world, not recorded yet. Try again later with the same clientRef (not counted as a fault): it
+        // is answered pending again, with the committed receipt once it exists, or acts afresh if the hand-off was lost.
+        if (e instanceof ActPending) { s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p); return; }
         if (e instanceof EdgeError && e.status < 500 && e.status !== 429) { this.busy.delete(p.id); return this.stepFailed(p, e.code, e.message); }
         s.state.transient++; s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p);
         if (s.state.transient > TRANSIENT_MAX) { this.busy.delete(p.id); return this.stepFailed(p, 'plan.unavailable', 'The world could not take this step after repeated tries.'); }
@@ -288,7 +292,7 @@ export class Plans {
     if (!s.state.receipt) { if ((s.do === undefined && s.say === undefined || s.state.completedOnce) && s.for === undefined && !s.until) return this.stepDone(p, 'done'); return; }
     const r = this.actor.receipt(p.soulId, s.state.receipt); if (!r) return;
     const holdsOn = s.for !== undefined || !!s.until;
-    if (r.phase === 'completed') {
+    if (r.phase === 'completed' && r.code !== SEAT_KEPT) {
       s.state.completedOnce = true;
       if (!holdsOn) return this.stepDone(p, 'completed');
       // `for`: keep a posture or activity up when the body's own activity ended early (a 30-min lie in a 90-min step)
@@ -308,7 +312,7 @@ export class Plans {
       if (s.state.completedOnce) { s.state.noReissue = true; this.save(p); return; }   // the step's own act happened; a later keep-up failed
       return this.stepFailed(p, r.code ?? 'action.failed', r.reason ?? 'The act failed.');
     }
-    if (r.phase === 'replaced') {
+    if (r.phase === 'replaced' || r.code === SEAT_KEPT) {
       // The Soul's own direct act took the body: pause and say so (PATCH resume / skip / replace, or let it be).
       p.state = 'paused'; p.reason = 'interrupted: your own act replaced this step'; this.save(p);
       this.emit(p, 'plan.paused', `Plan paused at step ${p.current + 1}/${p.steps.length} (${labelOf(s)}): your own act replaced it. PATCH op resume, skip, replace or cancel.`, {status: 'paused', reason: p.reason});
