@@ -7,7 +7,7 @@ import { collectMenuRows, MENU_CLASS, setMenuSoulsSlot, type MenuRow } from './h
 // order: Worlds, Time, Search, Souls, God mode, Music, Camera mode, and sign-in or profile at the bottom. The rows click
 // the existing (hidden) controls (hud-menu.ts), as HudMore's More does.
 
-const halo = new URL('./media/starburst.png', import.meta.url).href;
+const halo = new URL('../pwa/icon-mark.png', import.meta.url).href;
 const LINES = <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 10h12M4 14h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none"/></svg>;
 
 /** The phone hamburger and its menu. `initialOpen` is for tests. */
