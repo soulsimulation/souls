@@ -4,6 +4,7 @@
 // person or agent sends: more than 30 requests a second from one god token, or 100 API requests/writes a second from one
 // address (several people behind one NAT included). Page and static-file GETs are never counted here.
 import { createHash } from 'node:crypto';
+import { classify } from '../../apps/server/src/load/classes.ts';
 
 export const LAUNCHER_FLOOD = Object.freeze({ godTokenPerS: 30, godTokenBurst: 900, ipPerS: 100, ipBurst: 2000 });
 
@@ -120,8 +121,24 @@ export function listenTimeoutMs(rest, search = '') {
  *  timeout; one still open well after that is a ghost: a client that went away without closing, a stuck relay). */
 export const LISTEN_GRACE_MS = 5000;
 
-export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l) => console.warn(`[launcher] ${l}`) } = {}) {
+/** #459: how much of the wait the world gave is kept back, so a client that waits exactly its Retry-After (timers fire a
+ *  little early, the launcher learns the wait before the client reads it) is never refused for it. */
+export const SOUL_WAIT_SLACK_MS = 250;
+
+export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l) => console.warn(`[launcher] ${l}`), learnWaits = true } = {}) {
   const buckets = new Map(), counts = new Map(), accounts = new Map(), refused = new Map(), held = new Map();
+  // #459: the waits the world has asked of single Souls (`slug|soul` -> { until, all }): until then that Soul's requests on
+  // exactly the routes the world's own admission refuses (classify(): C1 and C2 of a Soul; for a read budget its C2 only)
+  // are answered here, so a client that ignores Retry-After never again costs the world's main thread a refusal. Every
+  // other route (its event stream, operations, view status, travel, receipts, listens) goes to the world as before.
+  // Learned only from the world's own answers (x-sim-soul-wait), which the launcher strips.
+  const waits = new Map(); let sweptAt = 0;
+  const waitOf = (slug, soul, method, rest) => {
+    const k = soul ? `${slug}|${soul}` : null, w = k ? waits.get(k) : null; if (!w) return 0;
+    const left = w.until - now(); if (left <= 0) { waits.delete(k); return 0; }
+    const rc = classify(method, rest); if (!rc || rc.god || (rc.cls !== 'C1' && rc.cls !== 'C2')) return 0;
+    return w.all || rc.cls === 'C2' ? left : 0;
+  };
   const bucket = (name, perS, burst) => { const k = `${name}:${perS}:${burst}`; let b = buckets.get(k); if (!b) buckets.set(k, b = new TokenBuckets(perS, burst, now)); return b; };
   const n = (k) => counts.get(k) ?? 0;
   const add = (k, d) => { const v = n(k) + d; if (v > 0) counts.set(k, v); else counts.delete(k); };
@@ -139,6 +156,12 @@ export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l)
   const no = (slug, status, code, scope, waitMs, message) => {
     const s = Math.max(1, Math.ceil(waitMs / 1000)); note(slug, code, scope);
     return { refuse: { status, headers: { 'retry-after': String(s), 'cache-control': 'no-store' }, body: refusalBody(code, message, waitMs, scope) } };
+  };
+  /** #459: the world's own refusal (eden-edge/1: error, world block, X-Sim-Load), answered for it inside a wait it set. */
+  const soulWait = (slug, waitMs, level) => {
+    const s = Math.max(1, Math.ceil(waitMs / 1000)); note(slug, 'soul.slow-down', 'soul');
+    return { refuse: { status: 429, headers: { 'retry-after': String(s), 'cache-control': 'no-store', 'x-sim-load': level },
+      body: { contract: 'eden-edge/1', error: { code: 'soul.slow-down', message: `this Soul has asked for too much in a short time; the world asked it to wait, and answers it again in ${s} s` }, world: { load: level, retry_after_s: s }, limit: { scope: 'soul' } } } };
   };
   const soulOf = (req) => { const t = /^Bearer\s+(sim_\S+)/i.exec(req.headers.authorization ?? '')?.[1]; return t ? short(t) + short(t + '.') : null; };
   /** The first listen ceiling this listen is over: { key, status, code, scope, waitMs, message } or null. */
@@ -168,6 +191,20 @@ export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l)
     note: (slug, code, scope) => note(slug, code, scope),
     /** The world says which account a Soul token belongs to (an opaque id): its Souls share the account's ceilings. */
     learn(soul, account) { if (soul && account) { accounts.set(soul, short(String(account))); if (accounts.size > 50_000) accounts.clear(); } },
+    /** #459: the world asked this Soul to wait (its `x-sim-soul-wait: <s> <all|reads>`): its heavy requests in that scope
+     *  are answered here until then. The longer wait wins; a cool-down (`all`) is never narrowed by a later read wait. */
+    told(slug, soul, header) {
+      if (!learnWaits || !soul || typeof header !== 'string') return;
+      const m = /^(\d+(?:\.\d+)?) (all|reads)$/.exec(header.trim()); if (!m) return;
+      const s = Math.min(600, Number(m[1])); if (!(s > 0)) return;
+      const k = `${slug}|${soul}`, t = now(), until = t + s * 1000 - SOUL_WAIT_SLACK_MS, all = m[2] === 'all', w = waits.get(k);
+      if (until <= t) return;
+      if (w && w.until > t) { w.until = Math.max(w.until, until); w.all ||= all; } else waits.set(k, { until, all });
+      // past 50 k entries, the lapsed ones go, at most once a second (never a full sweep per wait)
+      if (waits.size > 50_000 && t - sweptAt >= 1000) { sweptAt = t; for (const [kk, x] of waits) if (x.until <= t) waits.delete(kk); }
+    },
+    /** #459: Souls the world has asked to wait, now (operator view). */
+    waiting: () => { let n = 0; const t = now(); for (const w of waits.values()) if (w.until > t) n++; return n; },
     /** A WebSocket from `ip` (behind the proxy): admitted, or refused; release() when it closes. */
     socket(slug, ip) {
       if (!ip) return { release() {} };
@@ -204,6 +241,9 @@ export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l)
         { const wait = bucket('ip', l.ipPer10s / 10, l.ipPer10s).take(`${slug}|${ip}`); if (wait) return no(slug, 429, 'client.rate', 'address', wait, `More than ${l.ipPer10s} requests in 10 s came from your address to this world. The world asked you to slow down for ${secs(wait)}`); }
         if (n(`c|${ip}`) >= l.ipConcurrent) return no(slug, 429, 'client.rate', 'address', 1000, `More than ${l.ipConcurrent} requests at once came from your address. The world asked you to wait 1 s`);
       }
+      // #459: a Soul inside a wait the world gave it is answered here, after its address is counted and before the account
+      // and world budgets are taken (it costs neither, and never reaches the world), in the world's own refusal shape
+      if (heavy) { const left = waitOf(slug, soul, req.method, rest); if (left > 0) return soulWait(slug, left, level); }
       if (heavy && acct) { const wait = bucket('acct', l.accountHeavyPerMin / 60, Math.max(1, Math.round(l.accountHeavyPerMin / 4))).take(acct); if (wait) return no(slug, 429, 'account.rate', 'account', wait, `This account's Souls sent more than ${l.accountHeavyPerMin} requests in a minute. The world asked you to slow down for ${secs(wait)}`); }
       const worldDeferred = heavy && toWorker && cls === 'C2';
       if (heavy && !worldDeferred) { const wait = bucket('world', l.worldBudgetRps, l.worldBudgetRps * 2).take(slug); if (wait) return no(slug, 503, 'world.busy', 'world', wait, `This world is answering as many requests as it can right now. It asked you to wait ${secs(wait)}`); }

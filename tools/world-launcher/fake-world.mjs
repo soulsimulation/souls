@@ -46,6 +46,12 @@ const server = createServer((req, res) => {
   // Stage B (lane B-port) tests. FAKE_EDGE=1: the C2 reads answer {from: 'main'} here; /busy?ms= holds the main thread
   // that long; /read-fail?m=ok|error|500|slow|relay sets how the read worker (below) answers its next requests; /read-lag?n=
   // the lagGens live.json reports.
+  // #459: FAKE_SOUL_WAIT='<s> <all|reads>': a Soul whose token has `_cool_` in it is refused soul.slow-down with that wait
+  // (the world's x-sim-soul-wait), every other Soul's Soul API request answers 200
+  if (process.env.FAKE_SOUL_WAIT && path.startsWith('/v1/edge/')) {
+    if (/_cool_/.test(req.headers.authorization ?? '')) { const s = process.env.FAKE_SOUL_WAIT.split(' ')[0]; return res.writeHead(429, { 'content-type': 'application/json', 'retry-after': s, 'x-sim-soul-wait': process.env.FAKE_SOUL_WAIT }).end(JSON.stringify({ contract: 'eden-edge/1', error: { code: 'soul.slow-down', message: 'this Soul has asked for too much in a short time' }, world: { load: 'green', retry_after_s: Number(s) } })); }
+    return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, path }));
+  }
   if (process.env.FAKE_EDGE === '1' && /^\/v1\/edge\/(here|observe|capabilities|view|around)(\?|$)/.test(path)) return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ from: 'main', path }));
   if (path.startsWith('/busy')) { const ms = Number(new URL(req.url, 'http://x').searchParams.get('ms') ?? 2000); res.end('busy'); setTimeout(() => { const end = Date.now() + ms; while (Date.now() < end) { /* the main thread is held */ } }, 20); return; }
   if (path === '/read-env') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(Object.fromEntries(['SIM_READ_WORKER', 'SIM_READ_WORKERS', 'SIM_READ_PORTS', 'SIM_READ_MODE'].map((k) => [k, process.env[k] ?? null]))));

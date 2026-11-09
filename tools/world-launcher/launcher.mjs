@@ -225,7 +225,8 @@ export async function openLauncher(cfg = {}) {
   const log = cfg.log ?? ((s) => console.log(`[launcher] ${s}`));
   const flood = process.env.SIM_FLOOD === '0' ? () => null : launcherFlood({ log, limits: cfg.floodLimits });   // P2 coarse ceiling, see flood.mjs
   // lane L1, LOAD-CONTRACT §2b: exact ceilings on the Soul API per address, Soul, account and world (registry `limits`)
-  const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log });
+  // #459: SIM_SOUL_WAITS=0 stops the launcher answering a Soul the world asked to wait (the world answers it again)
+  const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log, learnWaits: process.env.SIM_SOUL_WAITS !== '0' });
   const c3 = new MicroCache();
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
   const origin = `http://127.0.0.1:${port}`;
@@ -655,8 +656,9 @@ export async function openLauncher(cfg = {}) {
     const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: targetPort, path: path ?? req.url, method: req.method, headers: { ...hopless(req.headers), 'x-forwarded-for': xff } }, (r) => {
       // hop-by-hop headers stay on their hop: an upstream `connection: keep-alive` would turn this server's own choice
       // back on (forward() closes after its response; Node lets a user connection header override that)
-      const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, ...headers } = r.headers;
+      const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, 'x-sim-soul-wait': wait, ...headers } = r.headers;
       if (soul && account) ceilings.learn(soul, account);   // lane L1: the account a Soul token belongs to (never shown to the client)
+      if (soul && wait && slug) ceilings.told(slug, soul, wait);   // #459: the world asked this Soul to wait; answered here until then
       if (slug) sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
@@ -784,8 +786,9 @@ export async function openLauncher(cfg = {}) {
       // the worker handed it to main itself (over its intents port: not ready, lagging, a main-only read): main's work,
       // counted against the world budget after the fact (the answer is already main's)
       if (opts.worldDeferred && r.headers['x-sim-read'] !== 'worker') { ceilings.chargeWorld(slug, { force: true }); st.mainAnswered++; }
-      const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, ...headers } = r.headers;
+      const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, 'x-sim-soul-wait': wait, ...headers } = r.headers;
       if (opts.soul && account) ceilings.learn(opts.soul, account);
+      if (opts.soul && wait) ceilings.told(slug, opts.soul, wait);
       sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, robotsOf(slug, headers));
       r.pipe(res);
@@ -832,7 +835,7 @@ export async function openLauncher(cfg = {}) {
         const { 'if-none-match': _inm, ...asked } = hopless(req.headers);
         const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...asked, 'x-forwarded-for': xff } }, (u) => {
           const chunks = []; u.on('data', (c) => chunks.push(c)); u.on('error', no);
-          u.on('end', () => { sawLoad(slug, u.headers['x-sim-load']); const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers; const body = Buffer.concat(chunks); yes({ status: u.statusCode ?? 502, headers: { ...headers, 'content-length': String(body.length) }, body }); });
+          u.on('end', () => { sawLoad(slug, u.headers['x-sim-load']); const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, 'x-sim-soul-wait': _w, ...headers } = u.headers; const body = Buffer.concat(chunks); yes({ status: u.statusCode ?? 502, headers: { ...headers, 'content-length': String(body.length) }, body }); });
         });
         up.setTimeout(30_000, () => up.destroy(new Error('timeout'))); up.on('error', no); up.end();
       }));

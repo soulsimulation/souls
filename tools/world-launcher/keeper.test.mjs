@@ -24,6 +24,8 @@ function release(name, { brokenLauncher = false, brokenWorlds = false, loadMs = 
   cpSync(here, join(r, 'tools/world-launcher'), { recursive: true, filter: (f) => !f.includes('/deploy/') && !f.endsWith('.test.mjs') });
   // the launcher's upload gate for world thumbnails (#887) is the server's own moderation module
   cpSync(join(here, '../../apps/server/src/moderation'), join(r, 'apps/server/src/moderation'), { recursive: true, filter: (f) => !f.endsWith('.test.ts') });
+  // #459: the launcher's Soul ceilings share in-world admission's route classes (flood.mjs)
+  mkdirSync(join(r, 'apps/server/src/load'), { recursive: true }); cpSync(join(here, '../../apps/server/src/load/classes.ts'), join(r, 'apps/server/src/load/classes.ts'));
   // loadMs: the release's code takes that long to load (the part a pre-warmed take-over hides)
   writeFileSync(join(r, 'apps/server/src/main.ts'), brokenWorlds ? 'process.exit(5);\n' : `process.env.FAKE_LOAD_MS ??= '${loadMs}';\n` + readFileSync(join(here, 'fake-world.mjs')));
   if (brokenLauncher) writeFileSync(join(r, 'tools/world-launcher/launcher.mjs'), 'process.exit(3);\n');
