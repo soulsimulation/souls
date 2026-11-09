@@ -1,0 +1,32 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdirSync,writeFileSync} from 'node:fs';import {setImmediate} from 'node:timers/promises';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture,invite,accept,factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {guitarStrums} from '../../mars/viewer/app/engine-view/piano-score.ts';
+const out=process.env.SOUL_ACTIONS_OUT;
+test('existing stage guitar: schema, native play state and receipts, observer, interruption, snapshot and bounded here', {timeout:240000},async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});t.after(()=>{comms.close();f.host.stop();f.db.close();});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
+ const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();assert.equal(f.host.engineFault,null);await setImmediate();f.host.drainInputs();}};await tick(5);
+ const join=async(id,name)=>{await invite(f,id);const r=await accept(f.host,f.souls.create('dev:'+id,{name,description:'Solo guitar test'}));await tick(5);return {soulId:r.id,entityId:r.entity_id,name:r.name};};
+ const ana=await join('ana','Ana'),ben=await join('ben','Ben'),body=s=>f.host.engine.world.entities[s.entityId];soul=ana;
+ const here=async(s)=>{soul=s;const r=await app.request('/v1/edge/here?include=doHere');assert.equal(r.status,200);return (await r.json()).here;};
+ const act=async(s,capability,params)=>{soul=s;return (await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,...(params?{params}:{})})}))).json();};
+ const until=async(pred,n=2000)=>{for(let i=0;i<n;i++){if(pred())return;await tick();}assert.fail('condition did not complete');};
+ const absent=await here(ana);assert.equal(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/stage@1',name:`distant-stage-${i}`,p:[120+i%10*10,120+Math.floor(i/10)*7]}))}).accepted,true);await tick(45);
+ const far=await here(ana);if(out){mkdirSync(out,{recursive:true});writeFileSync(`${out}/absent.json`,JSON.stringify(absent,null,2));writeFileSync(`${out}/far.json`,JSON.stringify(far,null,2));}
+ const p=body(ana).pose.p;const setup=god.act({ops:[{op:'place',def:'core/stage@1',name:'stage',p:[p[0],p[2]+7]},{op:'define',def:{schema:'def/1',name:'guitar-proof-stair',version:1,description:'An ordinary authored stair reaching the stage deck.',tags:['stairs'],form:'point',size:{box:[1.1,.94,2.4]},make:{kind:'gen',gen:'stairs/1'},params:{rise:{type:'number',min:.3,max:12,default:.94},run:{type:'number',min:.5,max:20,default:2.4}}}},{op:'place',def:'guitar-proof-stair@1',name:'stage-stair',p:[p[0]-5.2,p[2]+7],r:-Math.PI/2}]});assert.equal(setup.accepted,true,JSON.stringify(setup));await tick(45);
+ const stage=god.model.get('stage').id,cap=edge.capabilities(ana).find(c=>c.id===`play-music:play-music.${stage}.guitar`);assert.ok(cap,'existing stage guitar offer');assert.equal(cap.params.seconds.type,'integer');assert.equal(cap.params.seconds.max,1800);
+ const near=await here(ana),position=[...body(ana).pose.p],bad=await act(ana,cap.id,{seconds:9999});assert.equal(bad.accepted,false);assert.equal(bad.code,'capability.params');await tick(5);assert.deepEqual(body(ana).pose.p,position,'invalid duration never moves the body');
+ const r=await act(ana,cap.id,{seconds:12});assert.equal(r.accepted,true,JSON.stringify(r));await until(()=>body(ana).human?.activity==='play-music');assert.equal(body(ana).human.instrument,'guitar');await tick(30);
+ const seen=(await here(ben)).near.find(n=>n.name==='Ana');assert.match(seen?.doing??'',/playing/);
+ const clone=factory.restore(f.host.engine.snapshot());assert.equal(clone.stateHash(),f.host.engine.stateHash());assert.equal(clone.world.entities[ana.entityId].human.instrument,'guitar');
+ const seconds=f.host.engine.world.tick*.05;assert.deepEqual(guitarStrums(ana.entityId,seconds,seconds+2),guitarStrums(ana.entityId,clone.world.tick*.05,clone.world.tick*.05+2));
+ const stop=await act(ana,'stand:here');assert.equal(stop.accepted,true,JSON.stringify(stop));await until(()=>body(ana).human?.activity!=='play-music',100);assert.equal(edge.receipt(ana.soulId,r.receipt.id).phase,'replaced');
+ const again=await act(ana,cap.id,{seconds:5});assert.equal(again.accepted,true,JSON.stringify(again));await until(()=>edge.receipt(ana.soulId,again.receipt.id)?.phase==='completed');assert.notEqual(body(ana).human.activity,'play-music');assert.deepEqual(f.host.engine.runtime.violations,[]);
+ const summary={status:'pass',hereBytes:{absent:JSON.stringify(absent).length,distant100:JSON.stringify(far).length,nearby:JSON.stringify(near).length},offer:{id:cap.id,params:cap.params},observer:seen?.doing,interruptedReceipt:edge.receipt(ana.soulId,r.receipt.id).phase,finishedReceipt:edge.receipt(ana.soulId,again.receipt.id).phase,violations:0};
+ if(out){mkdirSync(out,{recursive:true});writeFileSync(`${out}/summary.json`,JSON.stringify(summary,null,2));}console.log(JSON.stringify(summary));
+ assert.ok(!far.doHere?.some(c=>c.label?.includes('guitar')),'distant stages add no guitar to local doHere');
+});

@@ -1,3 +1,4 @@
+import {observedAnimationSample,type AnimationObservation} from './observed-animation.ts';
 import {wavePose,WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 import {actuatorHand,handActuatorFrame,posterLocal,strokeWork,twoHanded,HAND_REACH_SECONDS,HAND_RELEASE_SECONDS,type HandActuatorMotion} from '../../engine/social/hand-actuator.ts';
 import {insidePoint,itemPoseOf,ITEM_RECOVERY_SECONDS,type ItemPoseView} from '../../engine/items/presentation.ts';
@@ -65,7 +66,8 @@ import type { DepictionBeat } from './station-depiction.ts';
 import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLift } from './sleep.ts';
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
-import { accompanistOf } from './piano-score.ts';
+import { accompanistOf,GUITAR_FADE } from './piano-score.ts';
+import {GUITAR_OWNER_FIELDS,guitarOwnerStamp,guitarIdleUnderlay,placeGuitar,poseGuitarHand,type GuitarViewerDiagnostic} from './guitar-contact.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -76,7 +78,7 @@ import {PLAY_MOTION, playSeatAt, rideSeat} from './play-motion.ts';
 import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './bicycle.ts';
 
 type Hands = { left?: Vec3; right?: Vec3 };
-type Snap = { p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
+type Snap = { observed?: AnimationObservation; p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
 type View = {
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
@@ -162,6 +164,7 @@ type View = {
   /** Diagnostics: per arm, shoulder→grip point distance / arm length at the last frame (null = no point). */
   reachRatio: (number | null)[];
   diag?: Diag;
+  guitarDiagnostics?:GuitarViewerDiagnostic[];
   layered: boolean;
   gaze?: { prev: number; cur: number };
   /** Body activity layer (activity-poses.ts): the engine's prop, sitting on the ground, running, and the prop mesh. */
@@ -190,10 +193,15 @@ type View = {
   prevDuration?: number;
   prevInstrument?: string;
   restAge?: number;
+  /** Observed idle clock at guitar entry; absent means an already settled/unknown entry. */
+  guitarEntryRestAge?: number;
+  /** A newer native hand owner permanently ends this guitar release. */
+  guitarReleaseBlocked?: boolean;
+  guitarOwners?: Partial<Record<typeof GUITAR_OWNER_FIELDS[number],string>>;
   restFrom?: number;
   /** Idle variety weight drawn at the last render (Idle_Neutral + variant; diagnostics only). */
   variety?: number;
-  /** Entry 36: the idle-variety onset level when the body last stood idle (a singer's gesture fades out from it). */
+  /** Entry 36: the idle-variety onset level when the body last stood idle (singing gestures fade out from it). */
   singOnset?: number;
   /** Seconds since the current walk began (its weight left 0), and the rest clock then; undefined: not walking / long ago. */
   walkAge?: number;
@@ -214,6 +222,8 @@ type View = {
 };
 /** Per-frame readout of the pose layers (lab hook `bones()`, e2e). */
 export type Diag = {
+  /** Actor-local guitar adapter failures; native state and other actors continue. */
+  guitar?:GuitarViewerDiagnostic[];
   expression?: Expression;
   water?: WaterMotion;
   stairShoeCoverage?:{vertices:number;complete:boolean};
@@ -243,6 +253,8 @@ type Source = 'hands' | 'grip' | 'frame' | 'sleep' | 'expression' | 'water' | nu
  * function of take time: clip seconds = metres / clip ground speed (feet speed-matched).
  */
 export type SampledHuman = {
+  /** Canonical native timestamp of this already sampled viewer frame; not an elapsed renderer clock. */
+  animationObservation?: {tick:number;dt:number};
   /** Public recorded Soul association, never inferred from a display name/id. */
   publicSoulKey?:string;
   bodyModel?:string;
@@ -321,6 +333,10 @@ export type SampledHuman = {
   prevActivityDuration?: number;
   prevInstrument?: string;
   restAge?: number;
+  /** Observed idle clock at guitar entry; absent means an already settled/unknown entry. */
+  guitarEntryRestAge?: number;
+  /** A newer native hand owner permanently ends this guitar release. */
+  guitarReleaseBlocked?: boolean;
   /** Seconds since the current walk began (the Walk weight left 0; absent: not walking, or longer than a gesture fade). */
   walkAge?: number;
   /** The rest clock (restAge) when that walk began; absent: unknown. */
@@ -391,7 +407,7 @@ const baseOf = (act: string, base?: string) => { if (act === 'cycle') return 'si
 /** Sitting on the ground (sit-ground, or an overlay layered on it): the seat is the grass. */
 const onGround = (act: string, base?: string) => act === 'sit-ground' || (base === 'sit-ground' && OVERLAYS.has(act));
 /** Idle variety: now and then (about 6 s in every 25, per person) the Idle_Neutral clip blends in. */
-const IDLE_VARIETY_ONSET = 1.2;
+export const IDLE_VARIETY_ONSET = 1.2;
 /** An idle gesture playing when a reach or a walk starts fades out over this long (s) instead of being cut. */
 export const GESTURE_FADE = 1.4;
 /** Track names (three-sanitised bone names) of the arms and hands: shoulders to fingertips. */
@@ -589,10 +605,13 @@ export class HumanViews {
         const s: Snap = { p: [...e.pose.p], yaw: e.pose.yaw, walkW: 0, walkT: 0, idleT: (e.id.length * 0.37) % 1, sitW: base === 'sit' ? 1 : 0, warmW: act === 'warm' ? 1 : 0, expressionT: world.tick * DT, pose: NEUTRAL, hands: copyHands(e.human.hands), pr: null };
         const key=(e.human as {soul?:unknown}).soul;
         v = this.make(e.id, s, act,typeof key==='string'?key:undefined);
+        s.idleT=v.cur.idleT=(world.tick*DT+(e.id.length*.37)%1)%v.rig.idle.getClip().duration;
+        s.observed=animationObservation(v,s,'native',world.tick,DT);v.cur.observed=s.observed;
         v.base = base;
         // A live/lab view joining an already active wave has no certified onset.
         // Retain full attained weight, as replay does for a pre-window wave.
         if(act==='wave'){v.waveEvents=[{start:world.tick*DT-WAVE_BLEND_SECONDS}];v.waveSamples=[{}];v.waveClock=world.tick*DT;}
+        if(act==='play-music'&&e.human.instrument==='guitar'){v.guitarOwners={};v.guitarReleaseBlocked=false;for(const key of GUITAR_OWNER_FIELDS){const stamp=guitarOwnerStamp(e.human[key]);if(stamp){v.guitarOwners[key]=stamp;if(key!=='on')v.guitarReleaseBlocked=true;}}}
         v.grip = e.human.grip?.entity;
         v.gripSlot = e.human.grip?.slot;
         v.cur.pose = v.prev.pose = this.postureGoal(v, e, world, false);
@@ -612,11 +631,23 @@ export class HumanViews {
         const clock=world.tick*DT;
         if(v.activity==='wave'&&v.waveEvents?.length)v.waveEvents[v.waveEvents.length-1].end=clock;
         if(act==='wave'){if(!v.waveEvents?.length)v.waveRestAge=v.restAge;(v.waveEvents??=[]).push({start:clock});}
+        if(act==='play-music'&&e.human.instrument==='guitar'){
+          v.guitarEntryRestAge=v.restAge;v.guitarReleaseBlocked=false;v.guitarOwners={};
+          for(const key of GUITAR_OWNER_FIELDS){const stamp=guitarOwnerStamp(e.human[key]);if(stamp){v.guitarOwners[key]=stamp;if(key!=='on')v.guitarReleaseBlocked=true;}}
+        }
+        else if(!(act==='idle'&&v.activity==='play-music'&&v.instrument==='guitar'))v.guitarEntryRestAge=undefined;
         v.prevWaveDuration=v.activity==='wave'?v.since:undefined;
         v.prevAct = v.activity; v.prevBase = v.base; v.prevDuration=(v.age+1)*DT;v.prevInstrument=v.instrument;
       }
       v.age = act === v.activity ? v.age + 1 : 0;
       v.since = v.age * DT;
+      if(v.guitarOwners){
+        const guitar=act==='play-music'&&e.human.instrument==='guitar',release=act==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='guitar'&&v.since<GUITAR_FADE;
+        if(guitar||release)for(const key of GUITAR_OWNER_FIELDS){
+          const stamp=guitarOwnerStamp(e.human[key]);if(stamp&&stamp!==v.guitarOwners[key])v.guitarReleaseBlocked=true;
+          v.guitarOwners[key]=stamp;
+        }else v.guitarOwners=undefined;
+      }
       if(v.waveEvents){
         const human=e.human,owner=human.hands?.left||human.hands?.right||human.grip||human.handHold||human.rps||human.heldItemsV1?.left||human.heldItemsV1?.right||human.on;
         if(owner||(act!=='wave'&&act!=='idle'&&!GAIT_ACTS.has(act))){v.waveEvents=undefined;v.waveSamples=[];v.waveClock=undefined;v.waveRestAge=undefined;}
@@ -670,7 +701,8 @@ export class HumanViews {
       if (GAIT_ACTS.has(act)) { if (v.walkAge === undefined) { v.walkAge = 0; v.restAgeAtWalk = v.restAge; } else v.walkAge += DT; }
       else v.walkAge = v.restAgeAtWalk = undefined;
       const moving = GAIT_ACTS.has(act) && walkW >= WALK_FULL_LIVE;
-      v.restAge = moving || (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) ? 0 : v.restAge === undefined ? undefined : v.restAge + DT;
+      const restReset = moving || (!REST_ACTS.has(act) && !GAIT_ACTS.has(act));
+      v.restAge = restReset ? 0 : v.restAge === undefined ? undefined : v.restAge + DT;
       // on a beam: short steps — the stride at half the Walk weight is about half the clip's, so the cadence doubles
       const rate = walking ? Math.max(0.35, v.speed / v.rig.template.walkSpeed) * (act === 'beam-walk' ? BEAM_CADENCE : 1) : 1;
       const dur = v.rig.walk.getClip().duration;
@@ -680,7 +712,7 @@ export class HumanViews {
         yaw: e.pose.yaw,
         walkW,
         walkT: walkW > 0 ? (c.walkT + DT * rate) % dur : 0,
-        idleT: (c.idleT + DT) % v.rig.idle.getClip().duration,
+        idleT: (world.tick*DT+(e.id.length*.37)%1) % v.rig.idle.getClip().duration,
         sitW: clamp01(c.sitW + (sitting ? POSE_BLEND : -POSE_BLEND)),
         expressionT: world.tick * DT,
         warmW: clamp01(c.warmW + (act === 'warm' && !walking ? POSE_BLEND : -POSE_BLEND)),
@@ -689,6 +721,7 @@ export class HumanViews {
         hands: copyHands(e.human.hands),
         pr: this.proneGoal(v, e, world, c.pr, false),
       };
+      v.cur.observed=animationObservation(v,v.cur,'native',world.tick,DT,DT*rate,restReset);
     }
     for (const [id, v] of this.views)
       if (!world.entities[id]) {
@@ -888,7 +921,9 @@ export class HumanViews {
       v.running = act === 'jog' || act === 'run' || (typeof f.speed === 'number' && f.speed > RUN_SPEED);
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
       v.since = f.activityAge;
+      v.guitarEntryRestAge=f.guitarEntryRestAge;v.guitarReleaseBlocked=f.guitarReleaseBlocked??false;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
+      else if(act==='idle'&&f.prevActivity==='play-music'&&f.prevInstrument==='guitar')v.restFrom=f.activityAge===undefined?undefined:t-f.activityAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
       v.restAge = v.restFrom !== undefined && t >= v.restFrom ? t - v.restFrom : undefined;
       v.walkAge = f.walkAge;
@@ -921,6 +956,7 @@ export class HumanViews {
       };
       v.age = 0;
       snap.pr = this.proneGoal(v, e, world, null, true);
+      if(f.animationObservation)snap.observed={...animationObservation(v,snap,'sampled',f.animationObservation.tick,f.animationObservation.dt),restAge:f.restAge};
       v.prev = v.cur = snap;
     }
     for (const [id, v] of this.views)
@@ -963,6 +999,7 @@ export class HumanViews {
     // prone receiver (prone.ts): the lying / rising body may be turned about S toward the hands
     const pr = lerpProne(a.pr, b.pr, alpha);
     // library clips (clip-library.ts): what this body plays now, and what it played just before (crossfade)
+    const sample=observedAnimationSample(a.observed,b.observed,alpha,IDLE_VARIETY_ONSET);
     const tSec0 = lerp(a.expressionT, b.expressionT, alpha);
     const lib = this.libraryPlan(v, b, tSec0);
     const proneW = !lib.sleep && pr && v.dims && v.spine && v.legs.length >= 2 ? pr.w : 0;
@@ -974,13 +1011,14 @@ export class HumanViews {
     h.rotation.y = -yaw;
     const w = (a.walkW + (b.walkW - a.walkW) * alpha) * (fp?.kind === 'beam' ? BEAM_WALK_W : 1) * (lib.still ? 0 : 1);
     const { walk, idle, mixer, extra } = v.rig;
-    const wt = b.walkT >= a.walkT ? a.walkT + (b.walkT - a.walkT) * alpha : b.walkT;
+    const wt = sample.kind==='sampled'?sample.walk:b.walkT >= a.walkT ? a.walkT + (b.walkT - a.walkT) * alpha : b.walkT;
+    const idleTime=sample.kind==='sampled'?sample.idle:b.idleT;
     const opening=v.handActuator?.opening;
     const slide=v.handActuator?.slide;
     // pulling a door toward you or a drawer out, the body steps backwards
     const backwards=(opening&&opening.side*(opening.to-opening.from)<0)||(!!slide&&slide.to>slide.from);
     walk.time=backwards?(walk.getClip().duration-wt%walk.getClip().duration)%walk.getClip().duration:wt;
-    idle.time = b.idleT;
+    idle.time = idleTime;
     // Body activity layer (activity-poses.ts): free hands only (engine hand points / grips win), never on a frame or prone.
     const tSec = lerp(a.expressionT, b.expressionT, alpha);
     const engineHands = !!(b.hands.left || b.hands.right || a.hands.left || a.hands.right);
@@ -999,9 +1037,11 @@ export class HumanViews {
     // entry 36: a singer sings along with the nearest player (her head and breath follow the sung notes); just after her
     // singing ends, the singing frame eases out (the hand lets go of the mic) instead of snapping to the base posture
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
+    const guitarRelease=!v.guitarReleaseBlocked&&v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='guitar'&&v.since!==undefined&&v.since<GUITAR_FADE;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
     const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
+      : guitarRelease ? activityFrame('play-music',v.prevBase??'idle',tSec-v.since!,pairPhase,{actorId:h.name,instrument:'guitar',released:v.since,priorAge:v.prevDuration})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
@@ -1044,6 +1084,8 @@ export class HumanViews {
     // gesture fades out over GESTURE_FADE from the singing's start, at the onset level it had then (it was cut: 0.175 m
     // per 50 ms in take 3), while the arm eases onto the mic
     const singFade = v.activity === 'sing' && v.singOnset !== undefined && (v.since ?? 9) < GESTURE_FADE ? 1 - smooth((v.since ?? 9) / GESTURE_FADE) : 0;
+    // A guitar's hands likewise enter from the idle clip already playing, rather than cutting its wrist pose at onset.
+    const guitarActive=v.activity==='play-music'&&v.instrument==='guitar';
     // entry 35: a hand game holds idle gestures off, fading them out from its start and back in after it (no pop at a
     // join, a count's start or a release); rps keeps the variety layer for that fade
     const hgOff = handGameSuppress(v), gT = handGameGestureClock(v, tSec);
@@ -1053,7 +1095,7 @@ export class HumanViews {
     // Entry 7 (frisbee clear-v1): the arms lower out of the game on its own recorded clock; idle variety fades in under them
     const gameBlend = v.game?.flightPolicy === 'clear-v1' ? gameArmBlend(v.game, v.gameTick ?? 0, v.gameDt ?? .05) : 1;
     const gameShare = v.activity === 'idle' || v.game?.flightPolicy !== 'clear-v1' ? 1 : 1 - gameBlend;
-    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
+    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || guitarActive || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
     // Entry 43 (entry 41's M04 finding): a let-go before a reach fades the gesture out on its own clock; the reach after
     // it then fades none of its own (its gesture is already gone), and the act's own return of the idle (after the arm is
     // down) still applies. A reach with no let-go keeps the fade over the reach. A put of a handle-held item starts
@@ -1084,9 +1126,10 @@ export class HumanViews {
     // Idle variety (Idle_Neutral, fold arms, look around) fades in from when the body came to rest: switched on at full
     // weight it raised or crossed the arms in one frame whenever a walk ended inside a person's variety window
     // (entry 29's shared idle-onset fix, carried by entry 33: a hand-to-hair flash at each walk stop before a reach).
-    const normalRestOnset=v.restAge===undefined?1:smooth(v.restAge/IDLE_VARIETY_ONSET);
+    const normalRestOnset=sample.kind==='sampled'&&sample.restOnset!==undefined?sample.restOnset:v.restAge===undefined?1:smooth(v.restAge/IDLE_VARIETY_ONSET);
     const waveRestOnset=v.waveRestAge===undefined?1:smooth(v.waveRestAge/IDLE_VARIETY_ONSET);
-    const restOnset = waveActive ? waveRestOnset : singFade > 0 ? v.singOnset! : normalRestOnset;
+    const entryOnset=v.guitarEntryRestAge===undefined?1:smooth(v.guitarEntryRestAge/IDLE_VARIETY_ONSET);
+    const restOnset = guitarActive||guitarRelease ? guitarIdleUnderlay(v.since,entryOnset,normalRestOnset,guitarRelease?v.since:undefined,v.prevDuration) : waveActive ? waveRestOnset : singFade > 0 ? v.singOnset! : normalRestOnset;
     if (v.activity === 'idle') v.singOnset = restOnset; else if (v.activity !== 'sing') v.singOnset = undefined;
     const neutralW = extra.idleNeutral && idleFree ? (1 - w) * neutralWeight(h.name, gT) * idleHandoff * restOnset * (1 - hgOff) * idleShare * gameShare * (waveActive?1-waveBlend:1) : 0;
     const variant = idleFree ? idleVariant(h.name, gT) : null, variantA = variant ? libAction(v.rig, variant.clip) : null;
@@ -1132,7 +1175,7 @@ export class HumanViews {
     const slowed = reachFade > 0 ? heldClip(reachS, GESTURE_FADE) - reachS : 0;   // (weight 0 once the fade is over: back on the clock unseen)
     if (variantA) libAt(gestureAction(v.rig, variant!.clip), variantW, variantTime(variant!.clip, h.name, gT + slowed));
     if (neutralW > 0) libAt(gestureAction(v.rig, 'Idle_Neutral'), neutralW, gT);
-    if (neutralW + variantW > 1e-4) libAt(idleBodyAction(v.rig), neutralW + variantW, b.idleT);
+    if (neutralW + variantW > 1e-4) libAt(idleBodyAction(v.rig), neutralW + variantW, idleTime);
     if (armsN > 0) libAt(armsAction(v.rig, 'Idle_Neutral'), armsN, tSec);
     if (armsV > 0 && gv) libAt(armsAction(v.rig, gv.clip), armsV, variantTime(gv.clip, h.name, tSec + slowed));
     if (jog) { const sp = jog.getClip().name === 'Sprint_Loop' ? v.rig.template.sprintSpeed : v.rig.template.jogSpeed; libAt(jog, runW, sp ? v.dist / sp : tSec); }
@@ -1155,6 +1198,7 @@ export class HumanViews {
     if (v.layered) for (const s of v.saved) { s.o.position.copy(s.p); s.o.quaternion.copy(s.q); }
     v.layered = false;
     v.diag = undefined;
+    v.guitarDiagnostics=undefined;
     v.stairGoals=undefined;
     v.stairResiduals=undefined;
     mixer.update(0);
@@ -1174,7 +1218,7 @@ export class HumanViews {
     const waterOrigins=!lib.water&&!hasHands&&!gripping&&!v.grip&&!v.on&&!gait&&!fp&&proneW===0&&sitW===0&&warmW===0&&!posed&&v.waterTransition&&v.waterTransition.weight<1?v.waterTransition.origins:[];
     const waterFrom=waterOrigins.some(x=>x.pose!==null);
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
-    const wantProp = !hasHands && !gripping && proneW === 0 ? propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    const wantProp = !hasHands && !gripping && proneW === 0 ? propFor(guitarRelease&&act?'play-music':act || clipBody || lib.cur ? v.activity : '', v.propWanted,guitarRelease&&act?'guitar':v.instrument) : null;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && ['idle', 'walk', 'run', 'jog'].includes(v.activity);
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
@@ -1399,6 +1443,12 @@ export class HumanViews {
       if (sitW <= 0) dangle(v, pz.bend, k);
       closeHands(v, v.carryWeight === undefined ? k : k.map(x => x * v.carryWeight!));
     } else if (act?.hands) {
+      if(act.guitar&&(!v.prop||v.prop.kind!=='guitar')){
+        if(v.prop)h.remove(v.prop.obj);
+        v.prop={kind:'guitar',obj:makeProp('guitar')};h.add(v.prop.obj);
+      }
+      if(act.guitar)for(const side of [1,-1])if(!v.arms.some(arm=>arm.side===side))
+        (v.guitarDiagnostics??=[]).push({code:'guitar.pose.unsupported-rig',side:side>0?'left':'right',reason:'The guitar arm chain is not mapped on this actor.'});
       // body activity: each hand to a goal relative to its own shoulder (forward, outward, up), reach-honest IK;
       // an arm without a goal keeps the base posture (hand on thigh seated, hanging standing)
       source = 'expression';
@@ -1410,15 +1460,21 @@ export class HumanViews {
         const saved=weight<1?[arm.upper,arm.lower,arm.hand].map(o=>({o,p:o.position.clone(),q:o.quaternion.clone()})):[];
         arm.upper.getWorldPosition(_s);
         // entry 36: a goal on a fixed thing (the mic's grip) is placed from the body root at its own height above the floor
-        const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]).addScaledVector(_right, (left ? -1 : 1) * r[1]).addScaledVector(UP, r[2])
+        const gs=act.guitar?(v.rig.template.bodyScale??1):1;
+        const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]*gs).addScaledVector(_right, (left ? -1 : 1) * r[1]*gs).addScaledVector(UP, r[2]*gs)
           : V().copy(_s).addScaledVector(_fwd, q![0]).addScaledVector(_right, (left ? -1 : 1) * q![1]).addScaledVector(UP, q![2]);
         if (t.y < floor) t.y = floor;
         if (wgt <= 0) return;
         targets[i] = t;
-        if(!act.piano)armTo(arm, t, wgt, 0.98, h, V().copy(_right).multiplyScalar(left ? -0.6 : 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
+        if(act.guitar){
+          const result=poseGuitarHand(arm,h,v.rig.model,t,_fwd,_right,wgt,gs,v.prop!.obj,act.guitar);
+          targets[i]=result.target;
+          if(result.diagnostic)(v.guitarDiagnostics??=[]).push(result.diagnostic);
+        }
+        else if(!act.piano)armTo(arm, t, wgt, 0.98, h, V().copy(_right).multiplyScalar(left ? -0.6 : 0.6).addScaledVector(UP, -0.5).addScaledVector(_fwd, -0.2));
         for(const b of saved){b.o.position.lerpVectors(b.p,b.o.position,weight);b.o.quaternion.slerpQuaternions(b.q,b.o.quaternion.clone(),weight);}
       });
-      closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
+      if(!act.guitar)closeHands(v, v.arms.map((_, i) => !targets[i] ? 0 : (act.curl ? act.curl[armSide(v, i) === 'left' ? 0 : 1] : 0.6) * (act.handWeights?.[armSide(v, i) === 'left' ? 0 : 1] ?? 1)));
       if(act.piano)v.arms.forEach((arm,i)=>{if(targets[i])posePianoHand(arm,h.position,targets[i]!,_fwd,_right,h.position.y+act.piano!.height,act.piano!.lift[armSide(v,i)==='left'?0:1],act.piano!.weight,visit=>eachSkinnedWorld(v.surf.hand.get(arm.side),V(),visit));});
     } else if (runFallback && !gait && !fp && !posed && proneW===0 && sitW===0) {
       source='expression';v.arms.forEach((arm,i)=>{const f=runFallback.hands[arm.side>0?0:1];targets[i]=arm.upper.getWorldPosition(V()).addScaledVector(_fwd,f.forward).addScaledVector(_right,-arm.side*.06).addScaledVector(UP,f.up);});reachTo(v,targets,false);closeHands(v,targets.map(()=>.45));
@@ -1474,7 +1530,8 @@ export class HumanViews {
         for (const k of [0.2, 0.4, 0.6, 0.8]) { const p = clipProbe(v.rig.template, lib.cur.clip, Math.round(d * k * 10) / 10); if (p) up += p.wristL.y - p.wristR.y; }
         if (up > 0) [L, R] = [R, L];
       }
-      placeProp(v.prop.obj, wantProp, L, R, V().copy(_fwd));
+      if(wantProp==='guitar'&&act?.guitar)placeGuitar(v.prop.obj,h.position,_fwd,act.guitar,v.rig.template.bodyScale??1);
+      else placeProp(v.prop.obj, wantProp, L, R, V().copy(_fwd));
       // placeProp wrote a world matrix: express it in the holder's frame (the prop is the holder's child)
       v.prop.obj.matrix.premultiply(_inv.copy(h.matrixWorld).invert());
     }
@@ -1506,6 +1563,10 @@ export class HumanViews {
       if(lift>0){place(v.spine.head,v.spine.head.getWorldPosition(V()).addScaledVector(UP,lift));v.spine.head.updateWorldMatrix(true,true);}
     }
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
+    if(v.guitarDiagnostics){
+      v.diag.guitar=v.guitarDiagnostics;
+      for(const arm of v.diag.arms)if(v.guitarDiagnostics.some(d=>d.side===arm.side))arm.contact=0;
+    }
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
     if(hgDiag)v.diag.handGame=hgDiag;
@@ -1754,6 +1815,12 @@ function lerpHands(a: Hands, b: Hands, t: number): Hands {
   return { left: one(a.left, b.left), right: one(a.right, b.right) };
 }
 
+/** Capture clip identity and phase at the same native observation as the existing pose snapshot. */
+function animationObservation(v:View,s:Snap,source:AnimationObservation['source'],tick:number,dt:number,walkAdvance?:number,restReset?:boolean):AnimationObservation {
+  const idle=v.rig.idle.getClip(),walk=v.rig.walk.getClip();
+  return {actor:v.rig.holder.name,source,tick,dt,time:s.expressionT,idle:{identity:idle,duration:idle.duration,phase:s.idleT},
+    walk:{identity:walk,duration:walk.duration,phase:s.walkT},walkWeight:s.walkW,walkAdvance,restAge:v.restAge,restReset};
+}
 const V = () => new THREE.Vector3();
 /** Soul Actions entry 38: the poster in a Soul's hands, from the recorded hand-actuator timeline (posterLocal) and the drawn
  *  palms. Putting up: a roll held between the palms is raised to the slot, its top edge pressed to the wall, and the sheet

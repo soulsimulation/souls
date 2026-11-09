@@ -10,6 +10,11 @@ Renderers only read the world. Every pose is a deterministic function of the eng
 id (template, legs-crossed variant, which knee kneels); nothing feeds back. The Lab `probe()` hook in the `body`
 preset is a renderer-only measurement tool.
 
+Adjacent observations of the same actor, source and clips share one presentation sample for Walk, both Idle layers
+and the existing rest envelope. The sampler unwraps observed clip loops and interpolates normalized rest-reset
+endpoints; it never advances a clock beyond those observations. Missing, incompatible or non-adjacent observations
+keep the existing fallback.
+
 ## Rig and body fit
 
 Quaternius CC0 `animated-{casual,punk,woman}.glb` with Idle, Walk and Wave clips. `Foot.L/R` are children of Root
