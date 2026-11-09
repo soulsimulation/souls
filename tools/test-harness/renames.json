@@ -80,6 +80,30 @@
       "to": "\\#1316: dragging the camera out through a one-sided room wall keeps it out; Follow again brings it back inside",
       "reason": "Replaced when a drag out through a room wall became a pull out that keeps the camera outside until Follow is pressed again",
       "pr": "#1342"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "\\#1150 halted: live.json says the clock stopped; a `halted` problem and status, not wedged and not restarted, gone once a restart boots it",
+      "to": "\\#1150, \\#1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator",
+      "reason": "Intended behaviour change: a halted world now comes back once by itself (one restart per breaker window); a second halt in the window stays up for an operator",
+      "pr": "#1347"
+    },
+    {
+      "step": "V4-web",
+      "from": "desktop shows no More button (no matchMedia, a desktop matchMedia, or forced off)",
+      "to": "desktop shows neither the More button nor the hamburger (no matchMedia, a desktop matchMedia, or forced off)",
+      "reason": "Same test, extended when phone widths got the hamburger: desktop shows neither",
+      "pr": "#1433"
+    },
+    {
+      "step": "V4-web",
+      "from": "small screens show one More button, closed until tapped",
+      "to": [
+        "tablet width shows one More button, closed until tapped, and no hamburger",
+        "phone width shows the hamburger instead of More, closed until tapped"
+      ],
+      "reason": "Split when phone widths got one hamburger instead of More (#1391 part a): tablets keep More, phones get the hamburger",
+      "pr": "#1433"
     }
   ]
 }
