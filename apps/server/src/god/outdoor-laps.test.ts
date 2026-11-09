@@ -53,3 +53,15 @@ test('access loss, missing actor, changed or removed marker and invalid endings 
   assert.equal(f.god.act({ ops: [{ op: 'place', def: 'core/rug@1', name: 'mat', p: [0, 0] }] }).accepted, true);
   f.service.onReceipt({ ...ended, capability: `object:${f.god.model.get('mat')!.id}:walk-lap` }); assert.equal(f.god.model.get('mat')!.state?.lastReceipt, undefined);
 });
+
+
+test('waypoints and current dimensions follow a translated rotated and scaled course',t=>{
+ const f=setup(t),id=f.god.model.get('mat')!.id;
+ for(const scale of[2,.5]){
+  assert.equal(f.god.act({ops:[{op:'move',id,p:[7,-5],r:Math.PI/2,s:scale}]}).accepted,true);
+  const plan=f.service.plan(f.soul,id,'walk-lap');assert.ok(plan&&'steps'in plan);
+  const expected=[[7-2*scale,-5],[7-2*scale,-5+3*scale],[7+2*scale,-5+3*scale],[7+2*scale,-5-3*scale],[7-2*scale,-5-3*scale],[7-2*scale,-5]];
+  assert.deepEqual(plan.steps.slice(1,7).map(x=>[(x.params as Record<string,number>).x,(x.params as Record<string,number>).z].map(n=>Math.round(n*1e6)/1e6)),expected);
+  assert.ok(f.service.facts(id)!.practice.includes(`${6*scale} by ${4*scale} metre`));
+ }
+});

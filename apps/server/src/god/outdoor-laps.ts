@@ -24,7 +24,7 @@ export function createOutdoorLaps(h: OutdoorLapsHost) {
     const p = h.model.worldPose(e), level = h.levelAt(p.x, p.z, p.y);
     if (h.engine.clearanceAtV1 && h.engine.clearanceAtV1(p.x, p.z, level) < 0.4) return { code: 'object.state', reason: 'There is not clear ground at the centre of this lap marker.' };
     const gait = action === 'jog-lap' ? 'jog' : 'walk';
-    const waypoints = [[0,-2],[-3,-2],[-3,2],[3,2],[3,-2],[0,-2]].map(([x,z]) => ({x:p.x + x*Math.cos(p.yaw)+z*Math.sin(p.yaw),z:p.z-x*Math.sin(p.yaw)+z*Math.cos(p.yaw)}));
+    const waypoints = [[0,-2],[-3,-2],[-3,2],[3,2],[3,-2],[0,-2]].map(([x,z]) => ({x:p.x + p.s*(x*Math.cos(p.yaw)+z*Math.sin(p.yaw)),z:p.z+p.s*(-x*Math.sin(p.yaw)+z*Math.cos(p.yaw))}));
     return { summary: 'Completed an outdoor ' + gait + ' lap.', steps: [
       {verb:'stand',params:{}},
       ...waypoints.map((point,i)=>({verb:'mars:walk_to',params:{...point,level,...(i>0?{gait}:{})}})),
@@ -43,7 +43,8 @@ export function createOutdoorLaps(h: OutdoorLapsHost) {
   }
   return { plan, onReceipt, facts(id: string) {
     const e = marker(id); if (!e) return null;
-    return { practice: `Outdoor solo lap: approach the start stripe, follow four corners around the 6 by 4 metre authored rectangle, return to the stripe and stand. Choose walk-lap or jog-lap. Native navigation may detour or refuse a blocked leg; no distance/fitness claim. Only whole completed laps count. Completed laps: ${e.state?.completedLaps ?? 0}. Last gait: ${e.state?.lastGait ?? 'none'}.` + (e.state?.lastBy ? ` Most recently ${e.state.lastBy}, at tick ${e.state.lastCompletedTick}.` : '') };
+    const scale=h.model.worldPose(e).s;
+    return { practice: `Outdoor solo lap: approach the start stripe, follow four corners around the ${Number((6*scale).toFixed(3))} by ${Number((4*scale).toFixed(3))} metre authored rectangle, return to the stripe and stand. Choose walk-lap or jog-lap. Native navigation may detour or refuse a blocked leg; no distance/fitness claim. Only whole completed laps count. Completed laps: ${e.state?.completedLaps ?? 0}. Last gait: ${e.state?.lastGait ?? 'none'}.` + (e.state?.lastBy ? ` Most recently ${e.state.lastBy}, at tick ${e.state.lastCompletedTick}.` : '') };
   } };
 }
 export type OutdoorLaps = ReturnType<typeof createOutdoorLaps>;
