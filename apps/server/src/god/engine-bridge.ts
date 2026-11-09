@@ -32,6 +32,7 @@ import { doorInGap, freeDoorOpening, isDoorDef, isShut } from './doors.ts';
 import { dryingOps } from './garden.ts';
 import { fadingIds } from '../art/art.ts';
 import { createWatering, type Watering } from './watering.ts';
+import {createPottery,type Pottery} from './pottery.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
@@ -325,7 +326,7 @@ export class EngineBridge {
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
-      moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
+      moreFacts:id=>this.pottery?.facts(id)??this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
@@ -340,7 +341,9 @@ export class EngineBridge {
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.pottery=createPottery({model:this.god.model,get engine(){return o.host.engine as never;},levelAt:(x,z,y)=>this.levelAt(x,z,y),soul:id=>this.god.db.soul(id)??undefined,denied:(id,soul)=>this.layers.takeRefusal(id,soul)??this.claimRefusal(id,soul as never),commit:(ops,note,clientRef)=>this.god.act({ops,clientRef},note),log:m=>this.log(m)});
+    this.edge?.onReceipt(r=>{try{this.pottery?.onReceipt(r);}catch(error){this.log(`pottery: ${(error as Error).message}`);}});
+    this.perceive = new GodPerceive({ pottery:this.pottery, mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -470,6 +473,7 @@ export class EngineBridge {
     });
   }
   private watering?: Watering;
+  pottery?:Pottery;
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
