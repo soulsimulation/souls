@@ -18,6 +18,11 @@ context-size checks below), regression runs, and an uncut real-client recording 
   and the viewer draws it as an ordinary thing. A container whose def declares a `leftBy` state field records who left
   each thing in it (item id = Soul id, set when the thing comes to rest from a Soul's hand, pruned to what is still
   inside). Nearby perception and the take offer name the leaver; god-placed things have none.
+- **Real fridge contents ([#1566](https://github.com/soulsimulation/souls/issues/1566)).** `core-drinks-fridge@3` is an
+  insulated, opaque-door revision with one waist-height shelf for a real carried item. Open it, put the item inside,
+  close it, then reopen and take the same item out. Contents and custody persist; the closed door conceals them.
+  The older glass display revisions keep their decorative bottles. This revision supports new, worn and damaged finishes;
+  construction scaffolding is unsupported. It makes no cooling or preservation claim.
 - **Litter and bins ([#1088](https://github.com/soulsimulation/souls/issues/1088), W065).** `core-bin@2` and `core-wheelie-bin@2`
   are the street bins, open at the top, on the same container faculty with data only: three places down inside at the
   level of the rubbish already in them, reached over the rim. `core-wrapper@1` is a small thing to pick up. "put the
