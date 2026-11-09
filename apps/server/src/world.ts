@@ -1330,6 +1330,9 @@ export class WorldHost {
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
+  /** #1455 body-separation-3d/1, one logged rules event (prospective): a placement the engine writes keeps clear of every body whose
+   *  height overlaps the placed one, whatever its level id. History before the event replays as it was. Main adopts it at boot. */
+  enableSeparation3dV1(author='operator:body-separation-3d'){if((this.extra.runtimePolicy as {separation3dV1?:boolean}|undefined)?.separation3dV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,separation3dV1:true},why:'body-separation-3d/1 (#1455): a placement keeps clear of bodies whose height overlaps it, whatever their level id, and not of bodies on another storey; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
    *  everyone else go on; never a halt. A host-only key: the engine never reads it, so no snapshot binding changes. Main adopts
