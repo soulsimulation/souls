@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "#1680 adds opt-in core-camp-wash-station@1 and core-camp-mess-kit@1 using existing surface, one-hand item and native craft faculties. Old revisions are unchanged. The same bowl changes dirty/clean geometry without an entity birth. No budget hold, rendering exception or sampling change is added.",
+  "findings": []
+}

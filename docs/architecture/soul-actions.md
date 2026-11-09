@@ -715,3 +715,10 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+
+## Camp mess-kit washing
+
+`core/camp-wash-station@1` has one supplied clean-water charge and a declared wash-board surface for `core/camp-mess-kit@1`. With empty hands, use `wash-messkit`: existing ten-second native craft work depicts a brush over the horizontal board. Only natural completion cleans the same initially bound dirty bowl and consumes the water in one ordinary world batch. It rechecks identity, native support, access, water, actor and receipt order; interruption or an invalidated target changes nothing. No separate brush item is acquired, and no water plumbing or hygiene simulation is claimed.
+
+Full current capabilities and native inspection expose the requirements and dirty/clean/water/maker facts. The same empty bowl uses ordinary one-hand pickup, carry and placement, retaining its cleaning credit. This is not loaded-container transport. Active receipt bindings are ephemeral: a restart during washing conservatively leaves state unchanged; completed cleaning persists. The retained compact nearby projection omits the supported bowl; that separate control stays unqualified (related context prerequisite #1608). Use the actual full current menu and native inspection, not an assumed compact row. This entry does not repair that projection or bypass native discovery/custody.
