@@ -26,7 +26,10 @@ import { fileURLToPath } from 'node:url';
 export const TYPES = ['feature', 'fix', 'perf', 'docs', 'internal'];
 const HEADINGS = { feature: 'Features', fix: 'Fixes', perf: 'Performance', docs: 'Documentation' };
 const NOT_FRAGMENTS = new Set(['README.md', '_template.md']);
-export const HEADER = '# Changelog\n\nUser-facing changes to Souls, newest first. Each release is compiled from `changes/` fragments.\n';
+export const HEADER = '# Changelog\n\nUser-facing changes to Souls, newest first. Each release is compiled from `changes/` fragments.\n' +
+  '\nSouls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept for the first stable release. On\n' +
+  '2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is\n' +
+  '0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.\n';
 
 export function parseFragment(name, text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(text);
