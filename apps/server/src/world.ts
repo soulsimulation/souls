@@ -713,7 +713,7 @@ export class WorldHost {
             if (p.journal!(e) !== true) throw new TypeError('acceptance journal must synchronously return true');
           }, {immediate: true});
         } catch (error) { p.reject!(error); continue; }
-      } else if(arrival){this.db.db.exec('BEGIN IMMEDIATE');try{this.db.appendEvent(this.worldId,e);this.db.appendEvent(this.worldId,arrival);journalIntentArrivalV1(this,arrival);this.db.db.exec('COMMIT');}catch(error){this.db.db.exec('ROLLBACK');this.clockFailure=error;this.paused=true;this.stop();this.recordGlitch('halt',error,{rule:'durability.arrival'});for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{}throw error;}}else this.db.appendEvent(this.worldId, e);
+      } else if(arrival){this.db.db.exec('BEGIN IMMEDIATE');try{this.db.appendEvent(this.worldId,e);this.db.appendEvent(this.worldId,arrival);journalIntentArrivalV1(this,arrival);this.db.db.exec('COMMIT');}catch(error){this.db.db.exec('ROLLBACK');this.clockFailure=error;this.paused=true;this.stop();this.recordGlitch('halt',error,{rule:'durability.arrival'});for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{}this.rejectQueued(error,pending.slice(pending.indexOf(p)));throw error;}}else this.db.appendEvent(this.worldId, e);
       this.seq = arrival?.seq ?? stationEra?.seq ?? admission?.seq ?? e.seq;
       let recovered = false;
       let result: FoldResult | undefined;
@@ -803,10 +803,19 @@ export class WorldHost {
 
   /** #1327: an input whose own records (an edge act's receipt, the receipts it replaces) are written by `journal` in the
    * event's acceptance transaction: both exist or neither does. No guard beyond the journal itself; a journal that throws
-   * refuses the input and the promise rejects. Rejects, never hangs, when the clock fails before or at its drain. */
+   * refuses the input and the promise rejects. When the clock fails, before the push (assertClockReady), at its drain, or
+   * after the push and before any drain, the promise rejects with the clock's failure (rejectQueued): it never hangs. */
   enqueueJournaled(kind: EventKind, author: string, payload: unknown, journal: AcceptanceJournal): Promise<LogEvent> {
     this.assertClockReady();
     return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard: () => true, journal, resolve, reject }));
+  }
+
+  /** #1382 follow-up: the clock failed with inputs still queued (or taken for a drain that stopped). Nothing will drain them
+   *  from this head, so each that can be refused is, with the failure: its caller answers (an edge act: 503, its hand-off
+   *  forgotten) instead of waiting until a restart. Plain enqueue()s have no refusal and stay as they were. */
+  private rejectQueued(error: unknown, taken: Pending[] = []) {
+    const reason = error instanceof Error ? error : new Error('world clock unavailable', {cause: error});
+    for (const q of [...taken, ...this.queue.splice(0)]) if (q.reject) {try {q.reject(reason);} catch {/* a caller's own fault stays its own */}} else this.queue.push(q);
   }
 
   /** Atomic object/body producer: commit its side effects only after the real
@@ -1308,6 +1317,9 @@ export class WorldHost {
   /** #1332 body-step-guard/1, one logged rules event (prospective): every placement the engine writes for a body (edge relocation,
    *  recovery restore, stall release) stands it only where the static invariant passes it, at its own radius and apart from other
    *  bodies. History before the event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
+  /** #1334 hold-settle/1: rung 1 holds a refused move, fails it at its third refusal in the window, settles a body undo can't
+   *  answer, and sends only what neither answers to the repair, alone. Acts only under the repair rules. */
+  enableRefusalSettleV1(author='operator:hold-settle'){if((this.extra.runtimePolicy as {refusalSettleV1?:boolean}|undefined)?.refusalSettleV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,refusalSettleV1:true},why:'hold-settle/1 (#1334): a refused move holds its programme (the third refusal in 5 s fails it), a body the world left where it cannot stand is moved to the nearest free spot in that tick, and the repair takes only what neither answers, alone; retain historical replay before this event'});}
   enableBodyStepGuardV1(author='operator:body-step-guard'){if((this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,bodyStepGuardV1:true},why:'body-step-guard/1 (#1332): a relocation, restore or stall release stands a body only where the static-clearance invariant passes it, at its own radius and apart from other bodies; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
@@ -1900,6 +1912,7 @@ export class WorldHost {
     // as for the other clock failures: viewers are told the world is unavailable (hub: close 1013), not left asking a host
     // that refuses snapshots
     for (const listener of this.listeners) try { listener.onClockUnavailable?.(); } catch { /* the engine fault remains the cause */ }
+    this.rejectQueued(this.clockFailure);
   }
   /** #1150 rung 1: the engine already undid these moves. The log keeps each as evidence, in this tick; a replay recomputes
    *  them from state, so it reads these only to compare the count. */
@@ -2274,6 +2287,7 @@ export class WorldHost {
     this.clockFailure = error instanceof Error ? error : new Error('periodic checkpoint failed', { cause: error }); this.paused = true; this.stop();
     this.recordGlitch('halt', error, {rule});
     for (const listener of this.listeners) try { listener.onClockUnavailable?.(); } catch { /* preserve checkpoint fault */ }
+    this.rejectQueued(this.clockFailure);
   }
   /** Superseding snapshots, recovery and stop must not leave a writer scheduled
    * against an old engine or a database the owner may close next. */
@@ -2310,6 +2324,7 @@ export class WorldHost {
       this.clockFailure=error;this.paused=true;this.stop();
       this.recordGlitch('halt',error,{rule:(error as {unhashable?:boolean})?.unhashable?'engine.unhashable':'durability.clock-frontier'});
       for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{/* The durable fault remains the cause. */}
+      this.rejectQueued(this.clockFailure);
       throw error;
     }
   }
