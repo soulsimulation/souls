@@ -714,6 +714,8 @@ export class MarsEngine implements Engine {
       if (!this.ents[id]) { delete marks[id]; continue; }
       if (bad.has(id)) { try { this.holdBodyV1(id, m.pose); } catch { /* the host's sweep still finds it */ } m.last = tick; }
       else if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) delete marks[id];
+      else { const e = this.ents[id], q = e.pose?.p, lv = e.human?.level ?? 0;   // whole: the mark follows it, so a later break holds it where it last stood whole
+        if (Array.isArray(q) && q.length === 3 && q.every(Number.isFinite) && Number.isFinite(e.pose.yaw ?? 0) && Number.isFinite(lv)) m.pose = { p: [q[0], q[1], q[2]], yaw: e.pose.yaw ?? 0, level: lv }; }
     }
     if (!Object.keys(marks).length) delete this.world.standingHoldsV1;
   }
