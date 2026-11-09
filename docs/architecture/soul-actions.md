@@ -465,7 +465,8 @@ restart until someone puts it out.
 
 The kit's small glowing tip and smoke source exist only while `on`. The atmosphere draws its rising smoke; there is
 no flame or crackle. Smoke-bearing roots retain their per-entity transform instead of losing effect anchors to
-geometry instancing. Other eligible geometry keeps using instancing. This adds no authoritative tick pass;
+geometry instancing. Redraws, attachment and removal refresh smoke on the next rendered frame; unchanged frames
+check only known smoke publishers, without another scene scan. Other eligible geometry keeps using instancing. This adds no authoritative tick pass;
 100 lit censers 120 m away add zero local `here` bytes. Nearby sit/rest offers are separate activities.
 
 ## Making: paintings and chalk

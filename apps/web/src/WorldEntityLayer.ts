@@ -20,6 +20,7 @@ import { clearBuildingPrefetch, prefetchBuilding } from './gen-mesh/building.mes
 import { MaterialLib } from './gen-mesh/materials.ts';
 import { animate, glowKind, hasMotion, quantizeGlow, steadyGlowAt, syncLightGlow } from './gen-mesh/motion.ts';
 import { hasFlames } from './fx/flames.ts';
+import {watchEntitySmoke} from './atmosphere/smoke-publishers.ts';
 import {lightDiffAhead} from './light-diff-clock.ts';
 import {wateringDiffAhead} from './watering-diff-clock.ts';
 import {defLights} from './WorldNightLights.ts';
@@ -264,6 +265,7 @@ export class WorldEntityLayer {
   private readonly terrainGroup = new THREE.Group();
   private readonly waterGroup = new THREE.Group();
   private readonly thingsGroup = new THREE.Group();
+  private stopSmokePublication: () => void;
   private sectors = new Map<string, THREE.Mesh>();
   /** PERF-EVENTLOOP: every record set here is adopted (its `settled` and `thaw` writes wake it, it joins `live` for one pass) and
    *  released when replaced or deleted (out of every per-frame set; the things whose host it was look for it again). */
@@ -469,6 +471,7 @@ export class WorldEntityLayer {
     } });
     this.group.name = 'entity-world';
     this.group.add(this.terrainGroup, this.waterGroup, this.thingsGroup, this.instancer.group, this.scatterPools.group, this.motionInstancer.group, this.sites.group, this.cover.group);
+    this.stopSmokePublication = watchEntitySmoke(this.group, this.thingsGroup);
   }
 
   private signal: AbortSignal | null = null;
@@ -1430,6 +1433,7 @@ export class WorldEntityLayer {
     for (const m of this.materials.values()) m.dispose();
     this.materials.clear();
     this.waterGroup.clear(); this.terrainGroup.clear(); this.thingsGroup.clear();
+    this.stopSmokePublication();
     if (this.horizon) { this.horizon.geometry.dispose(); (this.horizon.material as THREE.Material).dispose(); this.horizon = null; }
     this.active = false; this.model = null;
   }
