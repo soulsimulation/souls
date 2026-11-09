@@ -455,6 +455,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
 | Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
 
+`core/bench@3` combines the repairable bench with existing two-hand upright carrying. Carry the damaged bench to a
+chosen campsite, fetch a hammer and repair it there, then use its native seats at that new position. Damage, repair
+receipt and placement persist. Occupied benches and full hands retain existing carry refusals; earlier revisions stay fixed.
+
 ## Making: paintings and chalk
 
 - **Painting at an easel.** `core-easel@2` is a painting workstation. The `paint:` offer at its spot takes an optional
