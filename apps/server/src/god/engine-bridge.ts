@@ -230,6 +230,8 @@ const WRITE_BACK_SLICE_MS = 8;
  *  2026). Past NAV_REWARM_BURST cold slices in a row (the static world keeps moving under the relabel, as under a flying
  *  carrier, so each build is cancelled), it slices only on poll ticks until warm. */
 const NAV_REWARM_POLL_TICKS = 10, NAV_REWARM_POLL_AT = 5, NAV_REWARM_SLICE_MS = 10, NAV_REWARM_BURST = 30;
+/** #1548: a Soul waiting this long on cold labels under a changing static world gets one whole relabel, of at most this many ms. */
+const NAV_STUCK_TICKS = 200, NAV_FORCED_MS = 250;
 /** `atomic` (PC14): the ops are one engine edit (moves and the joints they make), never applied one by one. */
 type WriteBackUnit = { key: string; ops: Op[]; body?: string; atomic?: true };
 type WriteBackBody = { pose: string; entity: Entity | undefined };
@@ -1285,18 +1287,41 @@ export class EngineBridge {
   private navRescuedAt = new Map<string, number>();
   /** #1287: Souls a rescue passed over, cut off, because a program was running: asked again once it has ended. */
   private navWaiting = new Set<string>();
+  /** #1548: since when a rescue has found the labels cold with a Soul waiting, and the navigation epoch then. */
+  private navStuckSince: { tick: number; epoch: number } | null = null;
+  private navForcedAt = -Infinity;
   private navRescueWaiting() {
     try {
-      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number };
       const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
-      if (!souls.length) return;
+      if (!souls.length) { this.navStuckSince = null; return; }
       // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them. Marked cold, not unwarmed:
       // navWarm=false would put the first-build path back on 20 ms a tick and undo the re-warm's back-off (#1499). After a
       // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
       // waiting Souls out and re-arms the re-warm.
-      if (!E.navWarmV1?.(0)) { if (this.navCold === null) { this.navWarm = false; this.navPending = true; } else this.navCold = true; return; }
+      if (!E.navWarmV1?.(0)) {
+        if (this.navCold === null) { this.navWarm = false; this.navPending = true; return; }
+        this.navCold = true;
+        if (!this.navForceRelabel(E, souls.length)) return;
+      }
+      this.navStuckSince = null;
       this.navRescueSouls(0, souls);
     } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
+  }
+  /** #1548: a relabel spread over ticks is cancelled by each static change, so while the static world keeps changing (Souls
+   *  through a busy door) a waiting Soul could stay cut off for good. Once Souls have waited NAV_STUCK_TICKS with the labels
+   *  cold and the static world has changed in that time, one relabel runs whole in this tick (nothing moves inside one call),
+   *  at most NAV_FORCED_MS, at most once per NAV_STUCK_TICKS a world, and is logged with its ms. A quiet world never takes it:
+   *  there the re-warm finishes on its own. True when the labels are warm after it. */
+  private navForceRelabel(E: { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number }, waiting: number): boolean {
+    const tick = this.engine.world.tick, epoch = E.navEpochV1?.() ?? 0;
+    if (!this.navStuckSince) { this.navStuckSince = { tick, epoch }; return false; }
+    if (tick - this.navStuckSince.tick < NAV_STUCK_TICKS || epoch === this.navStuckSince.epoch || tick - this.navForcedAt < NAV_STUCK_TICKS) return false;
+    const t0 = performance.now(), warm = !!E.navWarmV1?.(NAV_FORCED_MS), ms = Math.round(performance.now() - t0);
+    this.navForcedAt = tick; this.navStuckSince = { tick, epoch: E.navEpochV1?.() ?? epoch };
+    this.log(`nav rescue: forced relabel ${ms} ms, ${warm ? 'warm' : 'still cold'}, ${waiting} waiting`);
+    if (warm) { this.nav.forgetWarm(); this.edge?.navRelabelled(); this.navCold = false; this.navColdSlices = 0; }
+    return warm;
   }
   /** Is this body off the main walkable area where it stands now? Asked with the labels warm. */
   private navCutOff(id: string) {
