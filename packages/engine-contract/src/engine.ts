@@ -138,6 +138,8 @@ export interface Engine {
   /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
   corruptBodiesV1?(): ContainedKeyV1[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
+  /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick. */
+  markStandingV1?(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void;
   setClockV1?(tick: number): void;
   /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
   containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };

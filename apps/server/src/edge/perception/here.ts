@@ -372,7 +372,7 @@ export function hereFrame(ledger: EdgeLedger, soul: EdgeSoul,options:{doHere?:bo
     .map(x => {const base = {to: x.p.id, name: x.p.name, dir: compassPoint(compassOf(x.at[0] - P.pos![0], x.at[1] - P.pos![1])), walk: x.c.id};
       // RT: an exit the body cannot walk from here says so (no eta), instead of an eta for a walk that is refused
       const problem = ledger.routeProblem(soul, x.c.id, P.menu().plans);   // (the exit's plan from this frame's menu)
-      return problem ? {...base, reachable: false, why: problem.code} : {...base, eta: '~' + durationWord(walkSeconds(x.d * 1.25))};}) : [];
+      return problem ? {...base, reachable: false, why: problem.code, ...(problem.retry_after ? {retry_after: problem.retry_after} : {})} : {...base, eta: '~' + durationWord(walkSeconds(x.d * 1.25))};}) : [];
   // #1281: the walk that ends a `far` line, beyond what the frame's own menu reaches: a place's one offer, looked up alone (at
   // most six). Only a walk that would go: none from a room with no way out, none for where she is, none an exit already gives.
   const exitWalks = new Set(exits.map(e => e.walk)); let wayBytes = 0;

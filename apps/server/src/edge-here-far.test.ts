@@ -12,7 +12,17 @@ async function world(t: {after(f: () => void): void}, template?: URL) {
   const here = () => hereFrame(w.edge, w.soul, {doHere: true}) as any;
   const ids = (h: any) => (h.far as string[]).map(x => x.split(' · ').find(p => p.startsWith('walk:'))).filter(Boolean) as string[];
   const act = (capability: string) => accept(w.host, Promise.resolve(w.edge.act(w.soul as never, {capability} as never))) as Promise<any>;
-  return {w, put, here, ids, act};
+  // nav-warm-wait/1 (#884): acted while navigation is still cold, a walk no route reaches waits for it rather than being
+  // refused on a cold goal, and is then refused by the planner, as a failed receipt; warm, it is refused at once
+  const refusedCode = async (capability: string) => {
+    const r = await act(capability); if (!r.accepted) return r.code as string;
+    assert.equal(r.receipt.phase, 'waiting', JSON.stringify(r)); assert.match(r.receipt.reason ?? '', /Navigation is still getting ready/);
+    assert.ok((w.host.engine as unknown as {navWarmV1(ms: number): boolean}).navWarmV1(Infinity));
+    const edge = w.edge as unknown as {receipt(soul: string, id: string): {phase: string; code: string | null} | undefined};
+    for (let i = 0; i < 40 && edge.receipt(w.soul.soulId, r.receipt.id)?.phase === 'waiting'; i++) await w.settle(1);
+    const end = edge.receipt(w.soul.soulId, r.receipt.id)!; assert.equal(end.phase, 'failed', JSON.stringify(end)); return end.code;
+  };
+  return {w, put, here, ids, act, refusedCode};
 }
 
 test('#1281 H1, H3: past the reach of exits a far line still ends with its walk, and a strict client can send it', {timeout: 300000}, async t => {
@@ -25,7 +35,7 @@ test('#1281 H1, H3: past the reach of exits a far line still ends with its walk,
 });
 
 test('#1281 H3: from a room with no way out no far or flag line offers a walk that would be refused', {timeout: 300000}, async t => {
-  const {w, put, here, ids, act} = await world(t);
+  const {w, put, here, ids, refusedCode} = await world(t);
   const room = w.edge.places.byId.get('g-lab-reading-room')!, at = room.polygon.reduce((s, q) => [s[0] + q[0] / room.polygon.length, s[1] + q[1] / room.polygon.length], [0, 0]) as [number, number];
   await put(at);
   const h = here(); assert.ok(h.exits.length > 0 && h.exits.every((e: any) => e.reachable === false), JSON.stringify(h.exits));
@@ -33,20 +43,20 @@ test('#1281 H3: from a room with no way out no far or flag line offers a walk th
   // the flags are still named, without the id `act` would refuse: on a fresh world, nothing walked before
   assert.ok(h.flags.some((l: string) => l.startsWith('orchard · ')), JSON.stringify(h.flags));
   assert.ok(h.flags.every((l: string) => !l.includes('walk:')), JSON.stringify(h.flags));
-  assert.equal((await act('walk:flag-orchard')).code, 'route.unreachable', 'the id left out would have been refused');
+  assert.equal(await refusedCode('walk:flag-orchard'), 'route.unreachable', 'the id left out would have been refused');
 });
 
 const marsTwo = new URL('../../../worlds/templates/mars-two.json', import.meta.url);
 
 test('#1281 H3: a walk offered only on demand is route-checked too: none from a closed house', {timeout: 300000}, async t => {
-  const {w, put, here, ids, act} = await world(t, marsTwo);
+  const {w, put, here, ids, refusedCode} = await world(t, marsTwo);
   const {ref: _r, hash: _h, by: _b, born: _bo, ...definition} = w.god.model.resolvedDef('core/cottage@1') as any;
   const built = w.god.act({ops: [{op: 'define', def: {...definition, name: 'closed-cottage-control', state: {...definition.state, doors: {type: 'json', default: {}}}}}, {op: 'place', def: 'closed-cottage-control@1', name: 'closed-house', p: [440, 0], state: {doors: {'front-door': 'closed'}}}]} as never);
   assert.equal(built.accepted, true, JSON.stringify(built)); await w.settle(8); w.edge.map();
   const room = [...w.edge.places.byId.values()].find(p => /closed-house.*bedroom/.test(p.id))!;
   await put(room.polygon.reduce((s, q) => [s[0] + q[0] / room.polygon.length, s[1] + q[1] / room.polygon.length], [0, 0]) as [number, number]);
   const h = here(); assert.deepEqual(ids(h), [], JSON.stringify(h.far));
-  assert.equal((await act('walk:chiba')).code, 'route.unreachable', 'the walk the line left out would have been refused');
+  assert.equal(await refusedCode('walk:chiba'), 'route.unreachable', 'the walk the line left out would have been refused');
 });
 
 test('#1281 H1: a water place keeps its walk, though the walk aims at its shore', {timeout: 300000}, async t => {

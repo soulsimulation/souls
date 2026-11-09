@@ -151,3 +151,34 @@ test('#850: every route-dead code names alternatives; a blocked offer of another
   }
 });
 
+
+// #1468 (#850 follow-up): an offer that was available when the act came, whose walk the planner then refuses route-dead (a
+// stand point it finds cut off, nav still cold, the world changed since the listing), names alternatives as a blocked offer
+// does at listing time, never the refused act itself; another planner refusal names none (#850 A3)
+test('#1468: an available offer the planner refuses route-dead names alternatives; another refusal names none', {timeout: 300000}, async t => {
+  const w = await bootEden(() => {}, new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url)); t.after(w.close);
+  const caps = w.edge.capabilitiesPage(w.soul, {all: true}).capabilities as {id: string; verb: string; available: boolean}[];
+  const avail = new Set(caps.filter(c => c.available).map(c => c.id)), sits = caps.filter(c => c.available && c.verb === 'sit' && !c.id.endsWith(':here'));
+  assert.ok(sits.length >= 2, `two free seats to choose between: ${sits.map(c => c.id)}`);
+  const engine = w.host.engine as any, real = engine.canPerform.bind(engine);
+  assert.ok(engine.navWarmV1(Infinity), 'warm: a cold refused walk waits for navigation instead (#884)');
+  for (const [code, named] of [['route.unreachable', true], ['route.goal-blocked', true], ['seat.none-free', false]] as const) {
+    // the planner seam, for this act's seat only: every other check is real
+    engine.canPerform = (p: {actor: string; steps: {verb: string}[]}) => p.actor === w.soul.entityId && p.steps.some(s => /sit/.test(s.verb)) ? {code, message: `stubbed ${code}`} : real(p);
+    let r: any; try {r = await accept(w.host, w.edge.act(w.soul, {capability: sits[0]!.id}));} finally {engine.canPerform = real;}
+    assert.equal(r.accepted, false, `${code}: ${JSON.stringify(r)}`); assert.equal(r.code, code);
+    if (!named) {assert.equal(r.alternatives, undefined, `${code}: ${JSON.stringify(r.alternatives)}`); continue;}
+    assert.ok(r.alternatives?.length >= 1 && r.alternatives.length <= 3, `${code}: 1-3 alternatives ${JSON.stringify(r)}`);
+    for (const x of r.alternatives) {assert.ok(avail.has(x.id), `${code}: ${x.id} is available now`); assert.notEqual(x.id, sits[0]!.id, 'never the refused act'); assert.ok(x.why, 'each says why');}
+    t.diagnostic(`${code}: ${JSON.stringify(r.alternatives.map((x: any) => x.id))}`);
+  }
+  // a walk refused so (clip review at 05f450946: "…-roof-planter-1" named eden-house-1, "walks to 1"): an id's own words
+  // name no other place; what is offered instead is near the refused place, and only partly serves
+  const walks = caps.filter(c => c.available && c.verb === 'walk' && /\d/.test(c.id)), walk = walks[0] ?? caps.find(c => c.available && c.verb === 'walk')!;
+  engine.canPerform = (p: {actor: string; steps: {verb: string}[]}) => p.actor === w.soul.entityId && p.steps.some(s => s.verb === 'walk_to') ? {code: 'route.unreachable', message: 'stubbed'} : real(p);
+  let r: any; try {r = await accept(w.host, w.edge.act(w.soul, {capability: walk.id}));} finally {engine.canPerform = real;}
+  assert.equal(r.code, 'route.unreachable', JSON.stringify(r));
+  assert.ok(r.alternatives?.length >= 1, `${walk.id}: ${JSON.stringify(r)}`);
+  for (const x of r.alternatives) {assert.notEqual(x.id, walk.id); assert.ok(avail.has(x.id)); assert.equal(x.partial, true, `${x.id} only partly serves`); assert.doesNotMatch(x.why, /^walks to /, `no place named by the id's own words: ${x.why}`);}
+  t.diagnostic(`${walk.id}: ${JSON.stringify(r.alternatives.map((x: any) => [x.id, x.why]))}`);
+});

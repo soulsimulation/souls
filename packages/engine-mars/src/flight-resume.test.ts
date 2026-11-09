@@ -9,9 +9,11 @@ import {loadMars} from './load.ts';
 import {clearanceAt} from '../../../mars/viewer/engine/spatial/grid.ts';
 import {strandedOnFlight} from '../../../mars/viewer/engine/locomotion/walk.ts';
 import {probeBody} from './stall.ts';
+import {humanStaticClearance,humanHumanSeparation} from '../../../mars/viewer/engine/runtime/invariants.ts';
 
 const m=await loadMars();
 const commons=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true});
+const commonsRepair=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true,soulsRepairV1:true});
 
 /** The commons deck's front flight climbs from (9, -0.4) on level 0 to its landing at (9, -1.4) on level 1. The climber's walk
  *  is force-ended halfway up (as stall-guard/1 does), so it stands on the flight at neither landing's height. */
@@ -23,10 +25,11 @@ function stranded(policy:boolean,nudge=0){
   for(let i=0;i<300&&!(c.human!.activity==='climb-up'&&c.pose.p[1]>.2);i++){e.step();assert.deepEqual(e.runtime.violations,[]);}
   assert.equal(c.human!.activity,'climb-up','the climber is on the flight');
   assert.ok((e as any).rt.forceCancel(c.human!.task!,{code:'stall.released',message:'test: force-ended mid-flight'}));
-  // stood idle on this low flight, the body overlaps the deck's edge on its level-0 grid: the stranded state itself is flagged
-  // (an idle body is not exempt as a climber is); that is the state the walk must recover from, so it is cleared here
+  // stood idle on this low flight, the body overlaps the deck's edge on its level-0 grid. Without the policy that is flagged
+  // every tick; under it (#1453 review) a body on the flight's profile, all of it within the flight's width, is checked as a
+  // climber is, so the repair rules never relocate it and it waits there for its next walk
   if(nudge){c.pose.p=[c.pose.p[0]+nudge,c.pose.p[1],c.pose.p[2]];e.step();(e.runtime.violations as unknown[]).length=0;}   // a release that stands it off the centre line (the move itself is the release's, not under test)
-  e.step();assert.deepEqual([...new Set(e.runtime.violations.map((d:any)=>d.code))].filter(c=>c!=='collision.human-static'),[]);(e.runtime.violations as unknown[]).length=0;
+  e.step();assert.deepEqual([...new Set(e.runtime.violations.map((d:any)=>d.code))],policy?[]:['collision.human-static']);(e.runtime.violations as unknown[]).length=0;
   assert.equal(c.human!.level,0);assert.ok(c.pose.p[1]>.2,'left standing on the flight, above its floor');
   return e;
 }
@@ -44,10 +47,8 @@ for(const [name,x,z,level,nudge] of [['down to the lawn',9,2,0,0],['up onto the 
     const e=stranded(true,nudge),c=e.world.entities.climber;walk(e,x,z,level);
     let done=false;
     for(let i=0;i<600&&!done;i++){
-      // the tick the walk is admitted the body still stands idle where it was stranded (the flag cleared above); from the next
-      // tick it climbs and nothing is flagged
+      // nothing is flagged on any tick: standing idle on the flight (exempt under the policy), then climbing
       const before=[...c.pose.p];e.step();
-      if(i===0){assert.deepEqual(e.runtime.violations.map((d:any)=>d.code),['collision.human-static']);(e.runtime.violations as unknown[]).length=0;}
       assert.deepEqual(e.runtime.violations,[]);
       assert.ok(Math.hypot(c.pose.p[0]-before[0],c.pose.p[1]-before[1],c.pose.p[2]-before[2])<=.15,`no jump at step ${i}`);
       done=!c.human!.task;
@@ -83,7 +84,7 @@ test('#1367 a walk from a floor beside a flight plans as it did: the policy chan
 for(const [name,dz] of [['on the line just up the flight',-.5]] as const)
   test(`#1367 an idle body ${name}, in the way of the step back: the walk climbs down beside the line and completes, so does a cancel`,()=>{
     for(const cancel of [false,true]){
-      const e=stranded(true,.3),c=e.world.entities.climber,p=[...c.pose.p];
+      const e=stranded(true,.25),c=e.world.entities.climber,p=[...c.pose.p];
       e.world.entities.other=m.human('other',p[0]-.3,p[2]+dz,{level:0,y:p[1]});e.step();(e.runtime.violations as unknown[]).length=0;
       walk(e,9,2,0);
       let done=false,beside=0;
@@ -104,9 +105,9 @@ for(const [name,dz] of [['on the line just up the flight',-.5]] as const)
 
 /** A climber walking down from the deck, stopped by a stall release partway down the flight (level 1, at neither landing's
  *  height). `blockers`: bodies stood idle once it is on the flight (level, x, z, y). */
-function releasedOnFlight(policy:boolean,blockers:[number,number,number,number][]=[]){
-  const w=commons.genesis('flight-release') as any;w.entities.climber=m.human('climber',9,-2.2,{level:1,y:.24,yaw:Math.PI/2});
-  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,...(policy?{flightResumeV1:true}:{})});
+function releasedOnFlight(policy:boolean,blockers:[number,number,number,number][]=[],repair=false){
+  const f=repair?commonsRepair:commons,w=f.genesis('flight-release') as any;w.entities.climber=m.human('climber',9,-2.2,{level:1,y:.24,yaw:Math.PI/2});
+  const e=f.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,...(policy?{flightResumeV1:true}:{}),...(repair?{refusalSettleV1:true}:{})});
   const r=e.perform({actor:'climber',label:'down to the lawn',steps:[{verb:'mars:walk_to',params:{x:9,z:2,level:0}}]});assert.equal(r.ok,true,JSON.stringify(r));
   const c=e.world.entities.climber;
   for(let i=0;i<400&&!(c.human!.activity==='climb-down'&&c.pose.p[1]<.18);i++)e.step();
@@ -116,7 +117,7 @@ function releasedOnFlight(policy:boolean,blockers:[number,number,number,number][
   blockers.filter(([level,x,z])=>clearanceAt(sp.levelAt(level,[x,z]),[x,z])>.2).forEach(([level,x,z,y],i)=>{e.world.entities[`b${i}`]=m.human(`b${i}`,x,z,{level,y});});
   const before=[...c.pose.p],rel=(e as any).stallReleaseV1('climber',{code:'stall.released',message:'test: released mid-flight'});
   assert.ok(rel,'released');(e.runtime.violations as unknown[]).length=0;
-  return {e,c,before};
+  return {e,c,before,blockers:Object.keys(e.world.entities).filter(id=>/^b\d+$/.test(id))};
 }
 
 test('#1367 without flight-resume/1 a stall release on a flight keeps the flight height on a floor cell (the fault, as recorded)',()=>{
@@ -172,4 +173,73 @@ test('#1367 under flight-resume/1 a release never moves a body more than 4 m: pa
   const near=releaseAt(.5,1.05);
   assert.ok(Math.hypot(near.c.pose.p[0]-near.before[0],near.c.pose.p[2]-near.before[2])>.05,'moved to a landing within the bound');
   assert.ok(near.ends.some((p:any)=>/Moved off the flight to the landing \(\d+\.\d m\)/.test(p.message??p.reason?.message??'')),`the ended programme says so: ${JSON.stringify(near.ends).slice(0,300)}`);
+});
+
+// #1453 review (a): the 4 m bound is on the body's real one-tick move, measured from where it stands (off the centre line too),
+// and the figure the Soul is told is that move
+test('#1453 a release off the centre line reports the body\'s real move, not the way along the line',()=>{
+  const w=commons.genesis('flight-release') as any;w.entities.climber=m.human('climber',9,-2.2,{level:1,y:.24,yaw:Math.PI/2});
+  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,flightResumeV1:true});
+  assert.equal(e.perform({actor:'climber',label:'down',steps:[{verb:'mars:walk_to',params:{x:9,z:2,level:0}}]}).ok,true);
+  const c=e.world.entities.climber,rt=(e as any).rt;
+  for(let i=0;i<400&&!(c.human!.activity==='climb-down'&&c.pose.p[1]<.18);i++)e.step();
+  c.pose.p=[c.pose.p[0]+.4,c.pose.p[1],c.pose.p[2]];   // stood 0.4 m off the centre line, still on the flight's width
+  const flight=strandedOnFlight(rt,c as any);assert.ok(flight,'on the flight');
+  const before=[...c.pose.p],rel=(e as any).releaseFromFlightV1('climber',c,probeBody(rt,'climber'),flight,{code:'stall.released',message:'test'});
+  assert.ok(rel);const ends=e.step().programs.filter((p:any)=>p.kind!=='step');
+  const real=Math.hypot(c.pose.p[0]-before[0],c.pose.p[1]-before[1],c.pose.p[2]-before[2]),msg=JSON.stringify(ends);
+  const said=Number(/Moved off the flight to the landing \((\d+\.\d) m\)/.exec(msg)?.[1]);
+  assert.ok(Math.abs(said-real)<=.051,`told ${said} m, moved ${real.toFixed(3)} m: ${msg.slice(0,300)}`);
+  assert.ok(real>Math.min(flight!.t,flight!.total-flight!.t)+.05,'the real move is longer than the way along the line');
+});
+test('#1453 a landing spot more than 4 m from where the body really stands is refused, whatever the way along the line',()=>{
+  const w=commons.genesis('flight-release') as any;w.entities.climber=m.human('climber',9,-2.2,{level:1,y:.24,yaw:Math.PI/2});
+  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,flightResumeV1:true});
+  assert.equal(e.perform({actor:'climber',label:'down',steps:[{verb:'mars:walk_to',params:{x:9,z:2,level:0}}]}).ok,true);
+  const c=e.world.entities.climber,rt=(e as any).rt;
+  for(let i=0;i<400&&!(c.human!.activity==='climb-down'&&c.pose.p[1]<.18);i++)e.step();
+  const flight=strandedOnFlight(rt,c as any);assert.ok(flight&&Math.min(flight.t,flight.total-flight.t)<1,'the way along the line is under 1 m');
+  // the same flight, with the body 6.5 m to its side: every landing spot (within 2 m of a landing) is over 4 m away
+  c.pose.p=[c.pose.p[0]+6.5,c.pose.p[1],c.pose.p[2]];
+  const before=[...c.pose.p];(e as any).releaseFromFlightV1('climber',c,probeBody(rt,'climber'),flight,{code:'stall.released',message:'test'});
+  assert.deepEqual(c.pose.p,before,'not moved');
+});
+
+// #1453 review (b): the stay-on-the-flight fallback holds under the repair rules every server world runs (souls-repair/1 and
+// hold-settle/1): no relocation, no settle, no static flag; the Soul is told why it stayed, and its next walk resumes the flight
+test('#1453 under the repair rules a body left on the flight stays there, is told why, and its next walk resumes the flight',()=>{
+  const crowd:[number,number,number,number][]=[];
+  for(let x=6.5;x<=11.5;x+=.5){for(let z=-2.4;z<=2.1;z+=.5)crowd.push([0,x,z,0]);for(let z=-1.4;z>=-3.9;z-=.5)crowd.push([1,x,z,.24]);}
+  const {e,c,before,blockers}=releasedOnFlight(true,crowd,true);
+  assert.equal((e as any).cfg.soulsRepairV1,true);assert.equal((e as any).cfg.refusalSettleV1,true);
+  const ends=e.step().programs.filter((p:any)=>p.kind!=='step');
+  assert.ok(/Left standing on the flight: no clear landing within 4 m; the next walk resumes the flight from here\./.test(JSON.stringify(ends)),`told why it stayed: ${JSON.stringify(ends).slice(0,300)}`);
+  for(let i=0;i<60;i++){e.step();
+    assert.deepEqual(e.runtime.violations.filter((d:any)=>(d.subjects??[]).includes('climber')).map((d:any)=>d.code),[],`tick ${i}`);
+    assert.deepEqual(c.pose.p.map(v=>+v.toFixed(3)),before.map(v=>+v.toFixed(3)),`still where it stood at tick ${i}`);}
+  assert.equal(c.human!.level,1);
+  for(const id of blockers)delete e.world.entities[id];   // the crowd goes; the body walks on from the flight
+  walk(e,9,2,0);let done=false;
+  for(let i=0;i<600&&!done;i++){const b=[...c.pose.p];e.step();
+    assert.deepEqual(e.runtime.violations.filter((d:any)=>(d.subjects??[]).includes('climber')).map((d:any)=>d.code),[],`walk tick ${i}`);
+    assert.ok(Math.hypot(c.pose.p[0]-b[0],c.pose.p[1]-b[1],c.pose.p[2]-b[2])<=.15,`no jump at step ${i}`);done=i>0&&!c.human!.task;}
+  assert.ok(done,'the walk ended');assert.equal(c.human!.level,0);assert.ok(Math.hypot(c.pose.p[0]-9,c.pose.p[2]-2)<.3,`arrived: ${JSON.stringify(c.pose.p)}`);
+});
+
+// #1453 kernel exemption, kept tight: only on the flight's profile, all of the body within its width, and only under the policy;
+// another body is still kept apart
+test('#1453 the static check exempts only a body on the flight\'s profile and within its width, under the policy; bodies stay apart',()=>{
+  const flagged=(e:MarsEngine)=>humanStaticClearance((e as any).rt).some((d:any)=>d.subjects.includes('climber'));
+  const e=stranded(true),c=e.world.entities.climber,p=[...c.pose.p] as [number,number,number];
+  assert.equal(flagged(e),false,'on the flight: checked as a climber');
+  for(const [what,q] of [['0.1 m above the flight\'s profile',[p[0],p[1]+.1,p[2]]],['0.3 m further up the flight at the same height (off its profile)',[p[0],p[1],p[2]-.3]],['0.35 m to the side, reaching past the flight\'s edge',[p[0]+.35,p[1],p[2]]]] as const){
+    c.pose.p=[...q] as [number,number,number];
+    const g=(e as any).rt.services.spatial.levelAt(0,[q[0],q[2]]);
+    assert.ok(g&&clearanceAt(g,[q[0],q[2]])<.25,`${what}: inside geometry on its level grid`);
+    assert.equal(flagged(e),true,`${what}: still flagged`);
+  }
+  c.pose.p=[...p];
+  const off=stranded(false);assert.equal(flagged(off),true,'without the policy the stranded body is flagged, as recorded');
+  e.world.entities.other=m.human('other',p[0]+.1,p[2],{level:0,y:p[1]});
+  assert.ok(humanHumanSeparation((e as any).rt).some((d:any)=>d.subjects.includes('climber')&&d.subjects.includes('other')),'two bodies on the flight are still kept apart');
 });

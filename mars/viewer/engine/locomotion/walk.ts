@@ -1813,6 +1813,15 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
  *  stall-guard/1 does when both landings stay blocked), and how far along its ascending path. Such a body's level is a landing's,
  *  but it is not on that floor: a walk planned from the floor drops it to the floor in one tick (`motion.teleport`, refused, every
  *  walk). Null without the policy, or for a body at the height of its own level's landing (on that floor). Reads the world only. */
+/** #1453: how far a body's height may sit from its flight's profile where it stands and still be on that flight (m). */
+const FLIGHT_PROFILE_TOL = 0.05;
+/** #1453: a body strandedOnFlight finds whose whole footprint (its radius from where it stands) lies within that flight's width.
+ *  The static invariant checks it as a climber (it stands on the flight, which its level's floor grid does not describe); one
+ *  reaching past the flight's edge, towards a wall or rail beside it, is checked as any body. Null otherwise. */
+export function onFlightFootprint(rt: Runtime, a: Entity, radius: number): ReturnType<typeof strandedOnFlight> {
+  const s = strandedOnFlight(rt, a);
+  return s && hypot(s.off[0], s.off[1]) + radius <= s.link.width / 2 + 0.05 ? s : null;
+}
 export function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link']; t: number; total: number; off: Vec2 } | null {
   if (rt.services.flightResumeV1 !== true || !a.human || a.human.riding || a.human.carrier) return null;
   const lv = a.human.level, p = a.pose.p, sp = spatial(rt, a.id);
@@ -1831,6 +1840,11 @@ export function strandedOnFlight(rt: Runtime, a: Entity): { link: LinkLeg['link'
       const u = Math.abs(Q[1] - P[1]) > 1e-6 ? clamp((p[1] - P[1]) / (Q[1] - P[1]), 0, 1) : h2 > 1e-12 ? clamp(((p[0] - P[0]) * hx + (p[2] - P[2]) * hz) / h2, 0, 1) : 0;
       const x = P[0] + hx * u, z = P[2] + hz * u, d = hypot(p[0] - x, p[2] - z), at = acc + u * L;
       if (d > link.width / 2 + 0.05 || at <= 1e-6 || at >= g.total - 1e-6) continue;
+      // #1453 review: on the flight's profile, not only at a height it passes: where the body stands (its own xz projected on
+      // the segment) the flight is within FLIGHT_PROFILE_TOL of the body's height, so a body beside a stair's foot in the air
+      // or inside a riser further along is not taken for one standing on it
+      const w = h2 > 1e-12 ? ((p[0] - P[0]) * hx + (p[2] - P[2]) * hz) / h2 : 0;
+      if (w < -1e-6 || w > 1 + 1e-6 || Math.abs(P[1] + (Q[1] - P[1]) * w - p[1]) > FLIGHT_PROFILE_TOL) continue;
       if (!found || d < found.d) found = { link, t: at, total: g.total, off: [p[0] - x, p[2] - z], d };   // the nearest flight and place
     }
   }

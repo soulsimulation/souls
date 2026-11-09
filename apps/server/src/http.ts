@@ -9,6 +9,7 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, type Admission} from './load/admission.ts';
+import {slowedFromRefusals} from './load/soul-slowed.ts';
 import type {LoadMonitor} from './load/monitor.ts';
 import {clockNow, setClockSource} from './load/clock-source.ts';
 import {clockBlockOf} from './load/shared.ts';
@@ -136,6 +137,8 @@ export function buildApp(d: Deps) {
   });
   if (d.edge) { const edge = d.edge; app.use('/v1/edge/*', servingWait(() => edge.whenServing())); }
   // srv-load (LOAD-CONTRACT §2): heavy Soul/god requests queue for the admission dispatcher; edge answers carry X-Sim-Load
+  // #456: the public Soul's `slowed`, from the admission's refusals addressed to that Soul (load/soul-slowed.ts)
+  slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
     load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer

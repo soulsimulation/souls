@@ -155,6 +155,11 @@ type Prog = {
 /** #1150: an invariant that throws is a named violation, so the repair ladder sees it and the rest of the tick still runs. */
 /** #1369: every number in this value is finite (what the state hash requires). */
 const finiteDeepV1 = (v: unknown, depth = 0): boolean => typeof v === 'number' ? Number.isFinite(v) : !v || typeof v !== 'object' || depth > 8 || Object.values(v as object).every(x => finiteDeepV1(x, depth + 1));
+/** #1440: the invariants already guarded, so wrapping a list again (one appended to, or swapped back in) leaves those as they are. */
+const GUARDED_V1 = new WeakSet<object>();
+const guardInvariantOnceV1 = (inv: any) => { if (GUARDED_V1.has(inv)) return inv; const g = guardedInvariantV1(inv); GUARDED_V1.add(g); return g; };
+/** #1440: how long a body under a standing hold must stay whole before the mark ends. */
+const STANDING_HOLD_COOLDOWN_V1 = 1200;
 const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } catch (e) { return [{ code: 'engine.thrown', message: String((e as Error)?.message ?? e).slice(0, 200), subjects: [] }]; } };
 const containedKey = (v: { code: string; subjects?: string[] }) => `${v.code}|${[...(v.subjects ?? [])].sort().join()}`;
 /** #1150: how long a contained entry stays after it last fired. A rule that flickers stays contained, instead of faulting again each time it comes back. */
@@ -179,7 +184,7 @@ const bodyEntriesV1 = <T,>(entries: Map<string, T>, v: { subjects?: string[] }):
   return out;
 };
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
-export type MarsWorldConfig = { /** #1367 flight-resume/1 (runtime policy): a walk from a body standing on a flight resumes that flight (walk.ts strandedOnFlight). */ flightResumeV1?:boolean; /** #1428 stair-way/1 (runtime policy): a walk's way on a link leg is the link's exit (walk.ts pointAt). */ stairWayV1?:boolean; /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
+export type MarsWorldConfig = { /** #1367 flight-resume/1 (runtime policy): a walk from a body standing on a flight resumes that flight (walk.ts strandedOnFlight). */ flightResumeV1?:boolean; /** #1454 stand-height/1 (runtime policy): the engine stands a body it places upstairs at its floor's own height, never the height it had. */ standHeightV1?:boolean; /** #1428 stair-way/1 (runtime policy): a walk's way on a link leg is the link's exit (walk.ts pointAt). */ stairWayV1?:boolean; /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
 export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arrival:[0,18],arrivalPlace:'garden',reference:[0,16],grounds:{id:'grounds',name:'Ceramic garden'}};
 export const GREEN_FIELD_WORLD:MarsWorldConfig={scene:'greenfield',arrival:[0,0],arrivalPlace:'field',reference:[2,0],grounds:{id:'grounds',name:'Green field'}};
 export const EDEN_COMMONS_WORLD:MarsWorldConfig={scene:'eden-commons',arrival:[14,4],arrivalPlace:'commons',reference:[9,5],grounds:{id:'grounds',name:'Eden commons'}};
@@ -189,7 +194,7 @@ export const EDEN_SAFE_COMMONS_WORLD:MarsWorldConfig={...EDEN_COMMONS_WORLD,safe
  *  runtime-policy-registry.test.ts fails. */
 export const RUNTIME_POLICY_FLAGS=['walkSettleWaitV1','occupiedLinkRoutingV1','concurrentLinkEgressV1','stairLandingClearanceV1',
   'fixtureGroundGoalsV1','nativeArrivalWitnessV1','quietLandingCourtesyV1','quietStallReleaseV1','stairMakeWayV1','reflexTimeoutV1',
-  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1','refusalSettleV1','stairWayV1','flightResumeV1'] as const satisfies readonly (keyof MarsWorldConfig)[];
+  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1','refusalSettleV1','stairWayV1','standHeightV1','flightResumeV1'] as const satisfies readonly (keyof MarsWorldConfig)[];
 export type RuntimePolicyV1={sleepBlockTicks:number;quietSeatCourtesy?:boolean}&{[K in typeof RUNTIME_POLICY_FLAGS[number]]?:boolean};
 /** #1363: every `cfg` key a world may change after genesis without changing its rules version: the runtime policy, the render
  *  clock (`configureClock`) and ground-reclaim/1 (its own logged fact, `enableGroundReclaimV1`). Each still enters the state
@@ -370,12 +375,13 @@ export class MarsEngine implements Engine {
   stateHash(): string { return this.stateHashWithWorld(this.rt.stateHash()); }
   /** Reuse only the native hash captured synchronously by snapshot(); never cache a live world hash across calls. */
   private stateHashWithWorld(nativeStateHash: string): string { return hashOf(this.stateHashInputs(nativeStateHash)); }
-  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.stairWayV1===true?{stairWayPolicy:'stair-way/1'}:{}),...(this.cfg.flightResumeV1===true?{flightResumePolicy:'flight-resume/1'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
+  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.stairWayV1===true?{stairWayPolicy:'stair-way/1'}:{}),...(this.cfg.standHeightV1===true?{standHeightPolicy:'stand-height/1'}:{}),...(this.cfg.flightResumeV1===true?{flightResumePolicy:'flight-resume/1'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
   // Preserve the contract serializer's exact bytes; only the Node digest implementation changes.
   physicalHash(): string { return createHash('sha256').update(stableStringify(physicalView(this.world))).digest('hex'); }
 
   // ------------------------------------------------------------------ tick
   step() {
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();   // #1440: a body under a standing hold, broken before the step
     // Rebased physical runtimes rebuild service state; the accepted policy stays in cfg.
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
@@ -401,12 +407,15 @@ export class MarsEngine implements Engine {
     if (reuse) this.tableReusesV1++;
     const table: EntityTable = reuse ? checkedTable(cached!) : listTable(this.ents);
     this.tableCacheV1 = null;
-    if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardedInvariantV1);
+    if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardInvariantOnceV1);
     if (this.cfg.soulsRepairV1 === true) this.rt.actionThrewV1 ??= (action: string, error: unknown) => this.abandonV1(action, error);
     const refusable = this.cfg.soulsRepairV1 === true ? this.refusalCopyV1(table) : null, seen = this.rt.violations.length;
     this.m.stepCarriers(this.rt, table);   // carrier/1: rides move their seated riders first (no carriers: no effect)
     this.m.stepHandHolds(this.rt);         // entry 35: hands let go finish, a broken pair lets go (no holds: no effect)
     this.rt.step(table);
+    // #1440: a body under a standing hold, broken inside the step: held before anything reads it (the refusal pass, the take's
+    // cut, the keyframes), so no reader meets the broken pose; the trailing hold below stays for what runs after
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();
     if (refusable && this.world.containedV1) this.stillContainedV1(seen, refusable);
     if (refusable && this.rt.violations.length > seen) this.refuseV1(refusable, seen);
     const pass: EntityTable | null = (this.rt as any).passTable ?? null;
@@ -442,6 +451,7 @@ export class MarsEngine implements Engine {
       if (last && (last[1] !== now[1] || last[3] !== now[3] || last[4] !== now[4])) this.out.paths.push({ entity: id, startTick: last[0], speed: 0, waypoints: [last, now], activity: act, actionId: e.human.task ?? '' });
       this.keys.set(id, now);
     }
+    if (this.world.standingHoldsV1) this.standingHoldsStepV1();   // #1440: and broken by it, before the host reads the state
     const events = this.rt.events.slice(this.cursor) as RuntimeEvent[];
     const out = { ...this.out, events };
     this.out = { paths: [], changes: [], programs: [] };
@@ -693,6 +703,28 @@ export class MarsEngine implements Engine {
       if (!e.human || typeof e.human !== 'object' || !Array.isArray(e.pose?.p) || e.pose.p.length !== 3 || e.pose.p.some(bad) || bad(e.pose.yaw ?? 0) || bad(e.human.level ?? 0) || !finiteDeepV1(e.human)) out.push({ code: 'entity.corrupt', subjects: [e.id] });
     }
     return out.sort((a, b) => (a.subjects[0] < b.subjects[0] ? -1 : 1));
+  }
+  /** #1440 (logged in a quarantine/1 event's `standing`): a body broken again and again is held by one standing mark instead of
+   *  one logged hold a tick. While it is marked the engine holds it again, at the logged pose, whenever it is found broken (at the
+   *  start and end of each step, so the host never reads it broken); the mark ends once the body has stayed whole for a cooldown, or
+   *  is gone. World state, so a snapshot and a replay carry it. */
+  markStandingV1(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void {
+    if (!this.ents[id] || !Array.isArray(pose?.p)) return;
+    (this.world.standingHoldsV1 ??= {})[id] = { pose: { p: [...pose.p] as [number, number, number], yaw: pose.yaw, level: pose.level }, last: this.rt.tick };
+  }
+  private standingHoldsStepV1(): void {
+    const marks = this.world.standingHoldsV1 as Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; last: number }>, tick: number = this.rt.tick;
+    let bad: Set<string>;
+    try { bad = new Set(this.corruptBodiesV1().flatMap(k => k.subjects)); } catch { return; }
+    for (const id of Object.keys(marks).sort()) {
+      const m = marks[id];
+      if (!this.ents[id]) { delete marks[id]; continue; }
+      if (bad.has(id)) { try { this.holdBodyV1(id, m.pose); } catch { /* the host's sweep still finds it */ } m.last = tick; }
+      else if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) delete marks[id];
+      else { const e = this.ents[id], q = e.pose?.p, lv = e.human?.level ?? 0;   // whole: the mark follows it, so a later break holds it where it last stood whole
+        if (Array.isArray(q) && q.length === 3 && q.every(Number.isFinite) && Number.isFinite(e.pose.yaw ?? 0) && Number.isFinite(lv)) m.pose = { p: [q[0], q[1], q[2]], yaw: e.pose.yaw ?? 0, level: lv }; }
+    }
+    if (!Object.keys(marks).length) delete this.world.standingHoldsV1;
   }
   /** #1369 quarantine/1: a broken body is held where it last stood whole: its programmes stopped (by the host), a fresh human
    *  state if it lost its own, and `pose` (its last whole pose, which the host logged) if its own is no number. With no whole
@@ -1490,7 +1522,9 @@ export class MarsEngine implements Engine {
     const near=upper?null:this.freeStandingNearV1([r3(from.at[0]),r3(from.at[1])],guard?this.bodyRadiusV1(a):a.body?.radius??HUMAN_RADIUS,guard?a:undefined);
     const xz=upper?(guard?this.upperClearNearV1(a,from.at,level):from.at):near??(!guard||this.placeClearV1(a,from.at[0],from.at[1],0,this.guardBodiesV1())?from.at:null);
     const f=this.rt.world.groundV1&&!upper?(this.rt.services.spatial as Spatial).ground:undefined;
-    const y=xz&&f?standOn(f,xz[0],xz[1]):(from.y??a.pose.p[1]);
+    // #1454 stand-height/1: upstairs at that floor's own height (a carrier's exit keeps its own); off, the body's height as recorded
+    const floorY=upper&&xz&&from.y===undefined&&this.cfg.standHeightV1===true?(()=>{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(level,xz);return g&&clearanceAt(g,xz)>0?g.y:undefined;})():undefined;   // only on a cell of that floor (with the guard off, xz is where the body stood: a flight or the air)
+    const y=xz&&f?standOn(f,xz[0],xz[1]):(from.y??floorY??a.pose.p[1]);
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
     const r=releaseBody(this.rt,actor,xz?[r3(xz[0]),r3(y),r3(xz[1])]:null,reason);
     if(r&&pp&&own)this.end(pp,'failed',reason);
@@ -1499,9 +1533,11 @@ export class MarsEngine implements Engine {
   /** #1367 flight-resume/1: stallReleaseV1 for a body standing on a flight. Each landing in turn (nearer first): the nearest
    *  spot to its point on its level, rings of 0.4 m out to 2 m, where the static invariant passes the body standing and no other
    *  body (whatever its level) overlaps it, stood at that floor's own height and on that level. Neither: released where it
-   *  stands (flight-resume/1 resumes its next walk from there). A force-legal eject, bounded: the way along the flight to the
-   *  landing plus the search ring is at most FLIGHT_RELEASE_MAX_V1 (4 m); past that the body stays on the flight. Only a stall
-   *  release takes it; the move is an acknowledged relocation, and the ended programme's reason says it was moved to the landing. */
+   *  stands (flight-resume/1 resumes its next walk from there; the static check takes it as a climber, invariants.ts). A
+   *  force-legal eject, bounded: the body's real move from where it stands to the spot, and the way along the flight plus the
+   *  search ring, are each at most FLIGHT_RELEASE_MAX_V1 (4 m); past that the body stays on the flight. Only a stall release
+   *  takes it; the move is an acknowledged relocation, and the ended programme's reason gives the measured move, or says why
+   *  the body stayed. */
   private releaseFromFlightV1(actor:string,a:any,p:{holders:{id:string}[]},flight:NonNullable<ReturnType<typeof strandedOnFlight>>,reason:{code:string;message:string}){
     const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);
     const f=this.rt.world.groundV1?sp.ground?.field:undefined,me=bodyProfile(a),r=this.bodyRadiusV1(a);
@@ -1511,17 +1547,19 @@ export class MarsEngine implements Engine {
     let moved=0;
     for(const end of ends){
       const along=end===flight.link.from?flight.t:flight.total-flight.t;
-      for(let ring=0;ring<=5&&!spot&&along+ring*.4<=FLIGHT_RELEASE_MAX_V1+1e-9;ring++){moved=along+ring*.4;const n=Math.max(1,ring*8);for(let k=0;k<n;k++){
+      for(let ring=0;ring<=5&&!spot&&along+ring*.4<=FLIGHT_RELEASE_MAX_V1+1e-9;ring++){const n=Math.max(1,ring*8);for(let k=0;k<n;k++){
         const ang=(k/n)*Math.PI*2,x=r3(end.p[0]+dcos(ang)*ring*.4),z=r3(end.p[1]+dsin(ang)*ring*.4),g=sp.levelAt(end.level,[x,z]);
         if(!g||!bodyStandsClear(this.rt,a,[x,z],end.level)||(end.level===0&&f&&f.medium(x,z)>1))continue;
         const y=r3(g.level===0&&sp.ground?sp.ground.standY(x,z):g.y);if(!Number.isFinite(y))continue;
+        // #1453 review: the cap is on the body's real one-tick move, from where it stands (off the centre line too) to the spot
+        const d=Math.hypot(x-a.pose.p[0],y-a.pose.p[1],z-a.pose.p[2]);if(!(d<=FLIGHT_RELEASE_MAX_V1+1e-9))continue;
         if(others.some((o:any)=>o.pose.p[1]<y+me.height&&y<o.pose.p[1]+bodyProfile(o).height&&hypot(o.pose.p[0]-x,o.pose.p[2]-z)<r+this.bodyRadiusV1(o)))continue;
-        spot={p:[x,y,z],level:end.level};break;
+        spot={p:[x,y,z],level:end.level};moved=d;break;
       }}
       if(spot)break;
     }
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
-    const why=spot?{...reason,message:`${reason.message} Moved off the flight to the landing (${moved.toFixed(1)} m).`}:reason;
+    const why={...reason,message:spot?`${reason.message} Moved off the flight to the landing (${moved.toFixed(1)} m).`:`${reason.message} Left standing on the flight: no clear landing within ${FLIGHT_RELEASE_MAX_V1} m; the next walk resumes the flight from here.`};
     const res=releaseBody(this.rt,actor,spot?spot.p:null,why);
     if(res&&spot){a.human.level=spot.level;res.at=[a.pose.p[0],a.pose.p[1],a.pose.p[2]];}
     if(res&&pp&&own)this.end(pp,'failed',why);
@@ -1790,12 +1828,15 @@ export class MarsEngine implements Engine {
     const land = (p: [number, number, number], level: number) => ({ p, level });
     const [x0, y0, z0] = pose.p, level = Number.isInteger(pose.level) ? pose.level! : 0;
     if (level > 0) {
-      const g = spatial.levelAt(level, [x0, z0]); if (g && clearanceAt(g, [x0, z0]) >= radius && free(x0, z0, level) && this.placeClearV1(e, r3(x0), r3(z0), level, bodies)) return land([r3(x0), r3(y0), r3(z0)], level);
+      // #1454 stand-height/1: at that floor's own height (the grid's), never the height the pose had (a body on a flight or
+      // mid-climb would stand in the air beside it); off, as recorded
+      const yAt = (g: { y: number }) => this.cfg.standHeightV1 === true ? r3(g.y) : r3(y0);
+      const g = spatial.levelAt(level, [x0, z0]); if (g && clearanceAt(g, [x0, z0]) >= radius && free(x0, z0, level) && this.placeClearV1(e, r3(x0), r3(z0), level, bodies)) return land([r3(x0), yAt(g), r3(z0)], level);
       // MARSLIVED: a crowded upper floor (five Souls in a raised diner) keeps the body on its floor: the nearest free
       // spot on that level within 2 m, before the ground search below (which put it outside, under the floor)
       for (let ring = 1; ring <= 5; ring++) for (let k = 0; k < ring * 8; k++) {
         const ang = (k / (ring * 8)) * Math.PI * 2, x = r3(x0 + dcos(ang) * ring * 0.4), z = r3(z0 + dsin(ang) * ring * 0.4), gg = spatial.levelAt(level, [x, z]);
-        if (gg && clearanceAt(gg, [x, z]) >= radius && free(x, z, level) && this.placeClearV1(e, x, z, level, bodies)) return land([x, r3(y0), z], level);
+        if (gg && clearanceAt(gg, [x, z]) >= radius && free(x, z, level) && this.placeClearV1(e, x, z, level, bodies)) return land([x, yAt(gg), z], level);
       }
     }
     const grid = spatial.levelAt(0, [x0, z0]); if (!grid) return null;
@@ -2902,6 +2943,7 @@ export class MarsEngine implements Engine {
     if(policy.stairWayV1===true){this.cfg={...this.cfg,stairWayV1:true};this.rt.services.stairWayV1=true;}
     // #1367 flight-resume/1 (prospective): a walk from a body standing on a flight resumes that flight, never drops it to a floor.
     if(policy.flightResumeV1===true){this.cfg={...this.cfg,flightResumeV1:true};this.rt.services.flightResumeV1=true;}
+    if(policy.standHeightV1===true)this.cfg={...this.cfg,standHeightV1:true};   // #1454
     if(policy.reflexTimeoutV1===true)this.cfg={...this.cfg,reflexTimeoutV1:true};
     if(policy.edgeMotionV1===true)this.cfg={...this.cfg,edgeMotionV1:true};
     if(policy.spreadV2===true)this.cfg={...this.cfg,spreadV2:true};

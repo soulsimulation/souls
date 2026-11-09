@@ -63,7 +63,7 @@ export type VocabResult =
     verb?: string; places?: string[]};
 
 const STOP = new Set(['first', 'the', 'a', 'an', 'to', 'of', 'in', 'at', 'by', 'on', 'into', 'near', 'with', 'my', 'some', 'through', 'thru', 'around', 'across', 'over', 'back', 'please', 'little', 'bit', 'for', 'while', 'and', 'then', 'there']);
-const VERBS: Record<string, string> = {'stop-by': 'walk', 'stop-at': 'walk', 'drop-by': 'walk', 'swing-by': 'walk', 'pop-into': 'walk', 'pop-in-to': 'walk', 'pop-over-to': 'walk', 'go-on-to': 'walk', 'carry-on-to': 'walk', fix: 'repair', mend: 'repair', 'pump-up': 'repair', go: 'walk', goto: 'walk', 'go-to': 'walk', 'walk-to': 'walk', visit: 'walk', 'go-inside': 'walk', 'go-into': 'walk', 'go-in': 'walk', enter: 'walk', 'step-inside': 'walk', 'step-into': 'walk', 'walk-into': 'walk', 'walk-inside': 'walk', move: 'walk', head: 'walk', travel: 'walk', 'come-back': 'walk', return: 'walk', 'go-back': 'walk', 'head-back': 'walk', 'walk-back': 'walk', running: 'run', sprint: 'run', sprinting: 'run', hurry: 'run', jogging: 'jog', 'go-over': 'walk',
+const VERBS: Record<string, string> = {'stop-by': 'walk', 'stop-at': 'walk', 'drop-by': 'walk', 'drop-in': 'walk', 'drop-over': 'walk', 'drop-round': 'walk', 'drop-around': 'walk', 'drop-off-at': 'walk', 'swing-by': 'walk', 'pop-into': 'walk', 'pop-in-to': 'walk', 'pop-over-to': 'walk', 'go-on-to': 'walk', 'carry-on-to': 'walk', fix: 'repair', mend: 'repair', 'pump-up': 'repair', go: 'walk', goto: 'walk', 'go-to': 'walk', 'walk-to': 'walk', visit: 'walk', 'go-inside': 'walk', 'go-into': 'walk', 'go-in': 'walk', enter: 'walk', 'step-inside': 'walk', 'step-into': 'walk', 'walk-into': 'walk', 'walk-inside': 'walk', move: 'walk', head: 'walk', travel: 'walk', 'come-back': 'walk', return: 'walk', 'go-back': 'walk', 'head-back': 'walk', 'walk-back': 'walk', running: 'run', sprint: 'run', sprinting: 'run', hurry: 'run', jogging: 'jog', 'go-over': 'walk',
   hangout: 'hang-out', 'hang-around': 'hang-out', linger: 'hang-out', 'go-near': 'go-near', approach: 'go-near', join: 'go-near',
   'sit-on': 'sit', 'sit-at': 'sit', 'sit-down': 'sit', 'take-a-seat': 'sit', 'have-a-seat': 'sit', 'take-seat': 'sit', 'be-seated': 'sit', seat: 'sit', relax: 'rest',
   stroll: 'stroll', 'take-a-walk': 'stroll', 'take-a-stroll': 'stroll', 'go-for-a-walk': 'stroll', 'go-for-a-stroll': 'stroll', 'walk-through': 'stroll', 'stroll-through': 'stroll', wander: 'stroll', ramble: 'stroll', meander: 'stroll', explore: 'stroll',
@@ -96,6 +96,30 @@ const ACT_ALIASES: Record<string, string> = {'turn-on': 'switch-on', 'turn-off':
 /** #428: a second meaning of an everyday word, used only when its ACT_ALIASES meaning is not on offer and this one is:
  *  "cross out" a sign-up name (unsign) or a notebook line (the pinboard faculty's unpin). */
 const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unpin', 'strike-off': 'unpin'};
+/** #1229: words for a kind of writable thing (the kit's notice board, notebook stand and their synonyms), read only as the
+ *  thing a take-down names. Each maps to the word an offer of that kind goes by (books.ts: a notebook stand is also a guest
+ *  book, visitors book, logbook or journal; a pinboard or corkboard is a notice board). Loose nouns ("list", "log", "book",
+ *  "wall") are left out: "the shopping list note", "the log cabin", "the book fair" are what a note or poster is about. */
+const KIND_WORDS: Record<string, string> = {notebook: 'notebook', journal: 'notebook', logbook: 'notebook', diary: 'diary', guestbook: 'notebook', guest: 'notebook', visitors: 'notebook', visitor: 'notebook',
+  board: 'board', noticeboard: 'board', pinboard: 'board', corkboard: 'board', sheet: 'sheet'};
+const BOOK_ONLY = new Set(['guest', 'visitors', 'visitor']), TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'from', 'inside', 'off']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'page']);
+// (the def's own noun, "the notebook stand", or where it is, "the board by the door", also ends the phrase that names it)
+const PHRASE_END = new Set(['now', 'please', 'here', 'then', 'and', 'for', 'too', 'again', 'stand', 'by', 'in', 'on', 'at', 'near', 'next', 'beside', 'inside', 'outside', 'over', 'behind']);
+/** Kind words where the words put a target: the last word of a phrase led by in/from/inside/off, at most two words between
+ *  ("from the wanted board", "in the guest book", not "from the board games corner"), or right before note/line ("my
+ *  journal note"). Each run comes back with the words it is made of ("guest book": guest, book). */
+const targetKindWords = (ws: string[]): string[][] => {
+  // ("guest" and "visitor" name the guest book only with "book": "the note from the guest" names a person)
+  const out: string[][] = [], kind = (w?: string, next?: string) => !!w && Object.hasOwn(KIND_WORDS, w) && (!BOOK_ONLY.has(w) || next === 'book');
+  for (let i = 0; i < ws.length; i++) {
+    if (!kind(ws[i], ws[i + 1]) || (i > 0 && kind(ws[i - 1], ws[i]))) continue;
+    let j = i; while (j + 1 < ws.length && (kind(ws[j + 1], ws[j + 2]) || (ws[j + 1] === 'book' && ['guest', 'visitors', 'visitor'].includes(ws[j]!)))) j++;
+    const next = ws[j + 1], led = ws.slice(Math.max(0, i - 3), i).some(w => TARGET_LEAD.has(w)) && (next === undefined || PHRASE_END.has(next)), before = TARGET_NOUN.has(next ?? '');
+    if (led || before) out.push(ws.slice(i, j + 1));
+    i = j;
+  }
+  return out;
+};
 const LABEL_FILLER = new Set(['from', 'your', 'my', 'out', 'off', 'down', 'take', 'cross', 'in', 'on', 'of']), PLAIN_WORDS = new Set(['the', 'a', 'an', 'this', 'that', 'please']), SAYS_MORE = new Set(['first', 'and', 'then']), ENDS_ONLY = new Set(['and', 'then']), THING_ALIASES: Record<string, string> = {journal: 'notebook', logbook: 'notebook', noticeboard: 'board'};
 /** #428: "write in the notebook" is a notebook's line (the pinboard faculty's `pin`), only where a notebook's line is on
  *  offer (its label says so), so "write in the study" still reaches a desk beside a pinboard. */
@@ -670,6 +694,25 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     const rawWords = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     const known = crossing ? rawWords([...first, ...second].flatMap(c => [c.label, thing(c)]).join(' ')) : [], fits = (w: string) => tokenHit(w, known) || tokenHit(THING_ALIASES[w] ?? w, known), words = rawWords(rest), stray = words.find((w, i) => !(ENDS_ONLY.has(w) && words.slice(i + 1).every(x => ENDS_ONLY.has(x))) && !PLAIN_WORDS.has(w) && !LABEL_FILLER.has(w) && !(STOP.has(w) && !SAYS_MORE.has(w)) && !fits(w));
     if (crossing && first.length + second.length && stray) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to cross out or take down goes by "${stray}", so nothing was done.`, didYouMean: []};
+    // #1229: "take down" and "remove" keep their free words ("the old poster", "the board games poster", "Ben's note": a
+    // title's or note's words), so a stray word can't stop them; a word for a kind of writable thing where the words put
+    // their target ("from the notebook", "my journal note") that no offer here goes by does: nothing of hers is lost. With
+    // a board and a notebook both here, that word keeps only the one it names ("my journal note" is never the board's note)
+    const named = !crossing && TAKE_DOWN.has(verb) && first.length ? targetKindWords(rawWords(rest)) : [];
+    if (named.length) {
+      const fit = (ws: string[], c: EdgeCapability) => {const own = rawWords([c.label, thing(c)].join(' ')); return ws.some(w => tokenHit(w, own) || tokenHit((Object.hasOwn(KIND_WORDS, w) ? KIND_WORDS[w] : undefined) ?? w, own));};
+      const kept = first.filter(c => named.every(ws => fit(ws, c)));
+      if (!kept.length) {
+        const offered = first.slice(0, 5).map(c => ({id: c.id, label: c.label})), absent = named.find(ws => !first.some(c => fit(ws, c)));
+        if (absent) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to take down or remove goes by "${absent.join(' ')}", so nothing was done. What can be taken down here is listed.`, didYouMean: offered};
+        // (each word names an offer here, but different ones: "my journal note from the board")
+        const each = first.filter(c => named.some(ws => fit(ws, c))).slice(0, 5);
+        return {kind: 'unknown', code: 'capability.choose', reason: `${named.map(ws => `"${ws.join(' ')}"`).join(' and ')} name different things here, so nothing was done; choose one by its id.`, didYouMean: each.map(c => ({id: c.id, label: c.label}))};
+      }
+      // (the words name exactly one take-down, which takes no words of its own: that one, as its id would)
+      if (kept.length === 1 && !kept[0]!.params && kept.length < first.length) return {kind: 'alias', cap: kept[0]!, note: `${input} is ${kept[0]!.id} (${kept[0]!.label}).`};
+      if (kept.length < first.length) {const drop = new Set(first.filter(c => !kept.includes(c)).map(c => c.id)); ctx = {...ctx, caps: ctx.caps.filter(c => !drop.has(c.id))};}
+    }
     const altFits = !!alt && (second.length
       ? first.some(name) ? false : second.some(name) ? true : !first.length && ws.includes('name') ? false : first.some(noun) ? false : second.some(noun) ? true : !first.length
       : !verbs.has(primary) && verbs.has(alt));

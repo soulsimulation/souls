@@ -82,6 +82,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
 /** #1369: how often a world under quarantine/1 looks for a broken body that nothing has faulted on yet (one second). */
 const BROKEN_SWEEP_TICKS = 20;
 const REWIND_COOLDOWN_TICKS = 1200;
+/** #1440: holds of one body within a cooldown before quarantine-mark/1 holds it by a standing mark. */
+const MARK_AFTER = 3;
 /** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
 const glitchy = (r: EngineRefusalV1) => r.rule !== STOP_GAVE_UP.code && r.rule !== FRAME_LET_GO.code;
 /** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
@@ -1318,8 +1320,9 @@ export class WorldHost {
    *  recovery restore, stall release) stands it only where the static invariant passes it, at its own radius and apart from other
    *  bodies. History before the event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
   /** #1334 hold-settle/1: rung 1 holds a refused move, fails it at its third refusal in the window, settles a body undo can't
-   *  answer, and sends only what neither answers to the repair, alone. Acts only under the repair rules. */
-  enableRefusalSettleV1(author='operator:hold-settle'){if((this.extra.runtimePolicy as {refusalSettleV1?:boolean}|undefined)?.refusalSettleV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,refusalSettleV1:true},why:'hold-settle/1 (#1334): a refused move holds its programme (the third refusal in 5 s fails it), a body the world left where it cannot stand is moved to the nearest free spot in that tick, and the repair takes only what neither answers, alone; retain historical replay before this event'});}
+   *  answer, and sends only what neither answers to the repair, alone. Acts only under the repair rules. Refused, writing nothing,
+   *  while body-step-guard/1 is off, so every adoption event carries the guard (#1442). */
+  enableRefusalSettleV1(author='operator:hold-settle'){const rp=this.extra.runtimePolicy as {refusalSettleV1?:boolean;bodyStepGuardV1?:boolean}|undefined;if(rp?.refusalSettleV1){if(!rp.bodyStepGuardV1)console.warn('[world] hold-settle.unguarded: hold-settle/1 was adopted before body-step-guard/1 and the guard is still off, so settle places bodies without bodyStandsClear (#1442)');return Promise.resolve();}if(!(this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.reject(Error('hold-settle.guard-required: hold-settle/1 is adopted only after body-step-guard/1, so its settle stands bodies only where the guard would (#1442)'));return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,refusalSettleV1:true},why:'hold-settle/1 (#1334): a refused move holds its programme (the third refusal in 5 s fails it), a body the world left where it cannot stand is moved to the nearest free spot in that tick, and the repair takes only what neither answers, alone; retain historical replay before this event'});}
   enableBodyStepGuardV1(author='operator:body-step-guard'){if((this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,bodyStepGuardV1:true},why:'body-step-guard/1 (#1332): a relocation, restore or stall release stands a body only where the static-clearance invariant passes it, at its own radius and apart from other bodies; retain historical replay before this event'});}
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
@@ -1328,10 +1331,16 @@ export class WorldHost {
    *  by a force-ended climb) resumes the flight from where it stands, so it never drops to a floor in one tick. History before the
    *  event replays as it was. Main adopts it at boot; repeated calls are no-ops. */
   enableFlightResumeV1(author='operator:flight-resume'){if((this.extra.runtimePolicy as {flightResumeV1?:boolean}|undefined)?.flightResumeV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,flightResumeV1:true},why:'flight-resume/1 (#1367): a walk from a body standing on a flight resumes that flight from where it stands; retain historical replay before this event'});}
+  /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
+   *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
+  enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
    *  everyone else go on; never a halt. A host-only key: the engine never reads it, so no snapshot binding changes. Main adopts
    *  it at boot; repeated calls are no-ops. */
+  /** #1440 quarantine-mark/1, one logged rules event (prospective, host-only): a body broken again and again is held by one standing
+   *  mark after MARK_AFTER holds in a cooldown, not one logged hold a tick. Main adopts it at boot, after quarantine/1. */
+  enableQuarantineMarkV1(author='operator:quarantine-mark'){if((this.extra.runtimePolicy as {quarantineMarkV1?:boolean}|undefined)?.quarantineMarkV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,quarantineMarkV1:true},why:'quarantine-mark/1 (#1440): a body broken again and again is held by one standing mark after 3 holds in a cooldown, not one logged hold a tick; retain historical replay before this event'});}
   enableQuarantineV1(author='operator:quarantine'){if((this.extra.runtimePolicy as {quarantineV1?:boolean}|undefined)?.quarantineV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,quarantineV1:true},why:'quarantine/1 (#1369): a rule fault the repair ladder cannot undo stops and contains only the bodies it names, and the world runs on; a halt is left for a failed write'});}
   enableReflexTimeoutV1(){if((this.extra.runtimePolicy as {reflexTimeoutV1?:boolean}|undefined)?.reflexTimeoutV1)return Promise.resolve();return this.enqueue('rules','operator:reflex-timeout',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,reflexTimeoutV1:true},why:'every reflex the runtime reports stalled on other people for 60 s (walk, seat, stair, swim, courtesy step, yield) is natively cancelled in every state, so no single body can hold another or the world; retain historical replay before this event'});}
   /** placeRegionsV1: admit W1 places (id, label, polygon) as native destination regions in one logged prospective rules fact.
@@ -1615,6 +1624,8 @@ export class WorldHost {
   /** #1150: this world repairs instead of halting for a broken rule. */
   private get repairRules(): boolean { return this.engine.rulesVersion.includes('+souls-repair/'); }
   /** #1369: quarantine/1 is adopted (a logged runtime policy the host alone reads). */
+  /** #1440 quarantine-mark/1 (host-only, prospective): a body held again past MARK_AFTER times in a cooldown is held by one standing mark. */
+  private get quarantineMarkRule(): boolean { return this.quarantineRule && (this.extra.runtimePolicy as {quarantineMarkV1?: boolean} | undefined)?.quarantineMarkV1 === true; }
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
   /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
    *  rule names it, but it can make every step or the state hash throw). */
@@ -1786,7 +1797,11 @@ export class WorldHost {
       try { const at = this.engine.holdBodyV1!(id, pose); return at ? [{id, pose: at, ...(w ? {} : {fallback: 'arrival'})}] : []; }
       catch (failure) { console.error('[world] a broken body could not be held:', String(failure).slice(0, 200)); return []; }
     });
-    const q = {...this.engine.containV1!([...keys, ...again.map(id => ({code: '*', subjects: [id]}))]), bodies, souls, ...(held.length ? {held} : {}), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
+    // #1440 quarantine-mark/1: a broken body held again past MARK_AFTER times in a cooldown is held from here by one standing
+    // mark the engine keeps (logged here, so a replay keeps it too), not one event a tick
+    const standing = this.quarantineMarkRule && this.engine.markStandingV1 ? held.filter(h => (this.repeats.get(h.id)?.n ?? 0) >= MARK_AFTER && !(this.engine.world as {standingHoldsV1?: Record<string, unknown>}).standingHoldsV1?.[h.id]).map(h => ({id: h.id, pose: h.pose})) : [];
+    for (const m of standing) this.engine.markStandingV1!(m.id, m.pose);
+    const q = {...this.engine.containV1!([...keys, ...again.map(id => ({code: '*', subjects: [id]}))]), bodies, souls, ...(held.length ? {held} : {}), ...(standing.length ? {standing} : {}), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:quarantine', payload: {quarantineV1: q}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
@@ -2007,8 +2022,11 @@ export class WorldHost {
       intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(m.energy), doing: this.doingOfV1(m),
       ...this.publicNow(m.soulId),
       ...(this.publicBodyOf?.(m.soulId) ? {body: this.publicBodyOf(m.soulId)!} : {}),
+      ...(this.publicSlowedOf?.(m.soulId) ? {slowed: this.publicSlowedOf(m.soulId)!} : {}),
     };
   }
+  /** #456: while the world slows or refuses this Soul's own requests (load/soul-slowed.ts). Re-sent via markSoulDirty. */
+  publicSlowedOf?:(soulId:string)=>NonNullable<PublicSoul['slowed']>|null;
   /** LINK BODY: the body rule's public state for a Soul (edge worlds; the Ledger sets it). Re-sent via markSoulDirty. */
   publicBodyOf?:(soulId:string)=>NonNullable<PublicSoul['body']>|null;
   /** A human-readable name for a kernel thing id, an engine entity id or a region id. */
@@ -2170,10 +2188,29 @@ export class WorldHost {
   /** #1368, #1376: a capture the engine refused by name is recorded as a skipped snapshot (`durability.snapshot-skipped`, rung
    *  `contained`) and answers true; anything else is no refusal and answers false, for the caller to propagate. */
   private captureRefused(error: unknown, path: string): boolean {
-    const code = (error as {code?: unknown} | null)?.code;
-    if (typeof code !== 'string' || !code.startsWith('snapshot.')) return false;
-    this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: this.engine.world.tick, evidence: {code, path}});
+    const code = this.captureRefusalCode(error);
+    if (!code) return false;
+    this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: this.engine.world.tick, evidence: {code, path, ...this.nonFiniteAt(code)}});
     return true;
+  }
+  /** #1368, #1376: a named `snapshot.*` refusal; #1492: a head holding a number that is no number (NaN, Infinity) can't be
+   *  hashed, so its capture is `snapshot.non-finite`. Anything else is no refusal (null). */
+  private captureRefusalCode(error: unknown): string | null {
+    const code = (error as {code?: unknown} | null)?.code;
+    if (typeof code === 'string' && code.startsWith('snapshot.')) return code;
+    return error instanceof Error && error.message.startsWith('non-finite number') ? 'snapshot.non-finite' : null;
+  }
+  /** #1492: the first entity and field that holds a non-finite number, for the skipped snapshot's row (bounded walk). */
+  private nonFiniteAt(code: string): {entity?: string; field?: string} {
+    if (code !== 'snapshot.non-finite') return {};
+    const find = (v: unknown, path: string, depth: number): string | null => {
+      if (typeof v === 'number') return Number.isFinite(v) ? null : path;
+      if (!v || typeof v !== 'object' || depth > 6) return null;
+      for (const [k, x] of Object.entries(v)) { const hit = find(x, Array.isArray(v) ? `${path}[${k}]` : path ? `${path}.${k}` : k, depth + 1); if (hit) return hit; }
+      return null;
+    };
+    for (const [id, e] of Object.entries(this.engine.world.entities as Record<string, unknown>)) { const field = find(e, '', 0); if (field) return {entity: id, field}; }
+    return {};
   }
   /** Capture and persist the head as the snapshot and recovery baseline (the caller has checked it can snapshot). */
   private snapshotHead(sync: boolean): { tick: number; stateHash: string } {
@@ -2210,6 +2247,10 @@ export class WorldHost {
     if (this.repairRules && !this.clockAvailable) return;
     if (this.durableClockV1) this.persistClockFrontier();
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
+    // #1492: a body broken with nothing faulting is held by the once-a-second sweep; a capture before it would read the broken
+    // head. Under quarantine/1 the world looks first (only when a capture follows), so the body is held on this tick, logged as
+    // that sweep logs it, and the capture sees it whole.
+    if (this.quarantineRule) { this.sweepBrokenBodies(); if (this.repairRules && !this.clockAvailable) return; }
     this.snapshotGeneration++;
     const t0 = performance.now(), engine = this.engine;
     const capture = () => {
@@ -2231,10 +2272,10 @@ export class WorldHost {
     let parts: ReturnType<typeof capture>;
     try { parts = capture(); }
     catch (error) {
-      const code = (error as {code?: unknown} | null)?.code;
-      if (typeof code !== 'string' || !code.startsWith('snapshot.')) throw error;
+      const code = this.captureRefusalCode(error);   // #1492: a non-finite head too: never out of pumpFrame as an exception
+      if (!code) throw error;
       this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
-      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code}});
+      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code, ...this.nonFiniteAt(code)}});
       return;
     }
     const { checkpoint, legacy, fields, steps } = parts;
