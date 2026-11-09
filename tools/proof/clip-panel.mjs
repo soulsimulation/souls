@@ -125,9 +125,9 @@ export function panelHtml(shown, { side }) {
 html,body{margin:0;height:100%;background:#14161a;color:#e8e6e1;font:14px/1.35 ui-monospace,Menlo,Consolas,monospace}
 body{display:flex;flex-direction:column;box-sizing:border-box;padding:10px 12px ${side === 'right' ? 10 : 30}px;${side === 'right' ? 'border-left' : 'border-top'}:1px solid #2c3038}
 h1{font:600 13px/1.2 system-ui,sans-serif;margin:0 0 8px;color:#a9b0bb;letter-spacing:.02em}
-ul{list-style:none;margin:0;padding:0;flex:1;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
+ul{list-style:none;margin:0;padding:0;flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
 li{display:grid;grid-template-columns:auto auto 1fr;gap:6px;padding:2px 0;overflow-wrap:anywhere}
 time{color:#7d8592}b{font-weight:700}.cmd b{color:#ffc400}.reply b{color:#6fd3ff}.receipt b{color:#8be28b}.note b{color:#a9b0bb}
 .cmd span{color:#fff1c2}</style><h1>Soul ↔ world (debug)</h1><ul>${rows}</ul>
-<script>const u=document.querySelector('ul'),top=()=>u.getBoundingClientRect().top;while(u.firstChild&&u.firstChild.getBoundingClientRect().top<top()-0.5)u.firstChild.remove();</script>`;
+<script>const u=document.querySelector('ul'),h=document.querySelector('h1'),edge=()=>Math.max(u.getBoundingClientRect().top,h.getBoundingClientRect().bottom);while(u.firstChild&&u.firstChild.getBoundingClientRect().top<edge()-0.5)u.firstChild.remove();</script>`;
 }
