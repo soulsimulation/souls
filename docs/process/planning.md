@@ -39,7 +39,8 @@ coupled work; permanent agent departments and a custom orchestration service are
 contracts are durable; the agents assigned to them need not be.
 
 For Soul Actions, use the narrower [current direction](../design/soul-actions-direction.md): ordinary actions
-target 30–60 minutes including focused verification, capped at one lane × two hours in the current portfolio.
+target 30–60 minutes including focused verification; keep the portfolio average at or below two lane-hours per
+action. Assign explicit limits, with bounded few-hour budgets for genuinely complex slices.
 Require this direction in future dispatch/handoffs; preserve required checks, park concrete blockers and select
 independent breadth rather than allowing a prerequisite or optional animation polish to consume the tranche.
 

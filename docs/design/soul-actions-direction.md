@@ -48,8 +48,10 @@ and any higher applicable tier. Record dependencies and continue independent wor
 ## Budget, checklist and parking rule
 
 An ordinary action using existing capability should take **30–60 minutes including focused verification**.
-A genuinely complex action may take a few hours, but the current breadth portfolio caps a dispatched action at
-**one lane × two hours**. Scope or split a complex action before dispatch; extra time needs an explicit decision.
+A genuinely complex action may take a few hours. Keep the **portfolio average at or below two lane-hours per
+action**. Give each dispatch an explicit limit: ordinary slices normally fit within two hours; a complex slice
+gets a bounded few-hour budget at dispatch and is accounted for in the portfolio. Split oversized prerequisites;
+do not extend a task automatically.
 These are work budgets, not permission to skip required checks or call unfinished work complete.
 
 For each slice:

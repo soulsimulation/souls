@@ -14,7 +14,8 @@ are acceptable when understandable; finer animation is optional polish. Mandator
 binding; escalate any conflict to the steward rather than changing the proof policy.
 
 Budget an ordinary existing-capability action at 30–60 minutes including focused verification, with the current
-portfolio cap of one lane × two hours per action. At the cap, return reviewable work or park with a concrete reason
+portfolio average at or below two lane-hours per action. Ordinary slices normally fit within two hours; complex
+slices get an explicit few-hour budget at dispatch. At the assigned limit, return reviewable work or park with a concrete reason
 and continue an independent action. A substantial prerequisite is a separate bounded issue.
 
 ## The four shapes
@@ -129,7 +130,7 @@ Each long-tail item is filed with these fields (#903):
 
 ```markdown
 **Direction:** read docs/design/soul-actions-direction.md; new capability and applicable five outcomes
-**Time budget:** expected 30–60 minutes; one lane × two hours cap; concrete parking condition
+**Time budget:** ordinary 30–60 minutes; assigned limit; portfolio average ≤ two lane-hours/action; parking condition
 **Entry:** what a person asks for, in their words
 **Faculty:** existing or new, and which shape, (a) to (d)
 **Offer ids and schemas:** each offer, with its parameters
