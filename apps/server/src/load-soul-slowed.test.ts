@@ -37,6 +37,19 @@ test('A2/A4: a Soul refused again and again: the page\'s until never lapses whil
   for (let i = 1; i < sent.length; i++) assert.ok(sent[i] > sent[i - 1]);
 });
 
+test('A2: a 1 s wait refused every 600-900 ms never leaves the page\'s until behind', () => {
+  for (const every of [600, 700, 800, 900]) {
+    let now = 1_000_000; const s = new SoulSlowed(() => now); let sent = 0;
+    s.onChange = id => { sent = s.get(id)!.until; };
+    s.note('s_ada', 'world.busy', 1);
+    for (let k = 0; k < 6000 / every * 10; k++) {
+      const next = now + every;
+      for (; now < next; now += 50) assert.ok(sent > now, `${every} ms: the line lapsed at ${now - 1_000_000}`);
+      s.note('s_ada', 'world.busy', 1);
+    }
+  }
+});
+
 test('A4: reasons flipping on every request send no more than one event a second; a longer wait is sent at once', () => {
   let now = 1_000_000; const s = new SoulSlowed(() => now), changed: string[] = [];
   s.onChange = id => changed.push(s.get(id)!.reason);

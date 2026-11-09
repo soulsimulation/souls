@@ -2,7 +2,8 @@
 // Fed by the world's admission refusals addressed to one Soul's token (soul.slow-down, world.busy, world.crowded; never
 // soul.busy, the agent overlapping itself, nor the god's), from the HTTP middleware and the read workers' port alike.
 // A Soul not slowed has no entry and no field. The page clears its line at the `until` it was last sent, so a change
-// re-sends that Soul's card only when the page would otherwise be wrong for long: never more than once a second per Soul.
+// re-sends that Soul's card only when the page would otherwise be wrong for long: about once a second per refused Soul at most
+// (twice for 1 s waits), and never more often than the Soul's own requests.
 
 export type SlowedReason = 'soul.slow-down' | 'world.busy' | 'world.crowded';
 export type Slowed = {reason: SlowedReason; until: number};
@@ -21,7 +22,8 @@ export class SoulSlowed {
     if (!e || e.live.until <= t) { this.by.set(soulId, {live: {reason, until}, sentAt: t, sentUntil: until, sentReason: reason}); this.prune(t); this.onChange?.(soulId); return; }
     // the longer wait wins, with its reason; a shorter refusal inside a longer one changes nothing
     if (until >= e.live.until) e.live = {reason, until};
-    const grew = e.live.until >= e.sentUntil + EXTEND_MS, gap = t - e.sentAt >= MIN_GAP_MS;
+    // a short window (a 1 s wait) is renewed within half of itself, so the page's line never lapses between refusals
+    const grew = e.live.until >= e.sentUntil + EXTEND_MS, gap = t - e.sentAt >= Math.min(MIN_GAP_MS, (e.sentUntil - e.sentAt) / 2);
     const lapsing = e.sentUntil - t < LAPSE_MS && e.live.until > e.sentUntil;
     if (grew || (gap && (lapsing || e.live.reason !== e.sentReason))) { e.sentAt = t; e.sentUntil = e.live.until; e.sentReason = e.live.reason; this.onChange?.(soulId); }
   }
@@ -45,7 +47,8 @@ export function slowedFromRefusals(o: {admission?: {onRefused?: (token: string, 
   o.host.publicSlowedOf = id => slowed.get(id);
   if (o.admission) o.admission.onRefused = (token, code, after) => {
     const t = now(); let hit = cache.get(token);
-    if (!hit || t - hit.at > 60_000) { let id: string | null = null; try { id = o.soulOf(token); } catch { /* unknown */ } if (cache.size > 4096) cache.clear(); hit = {id, at: t}; cache.set(token, hit); }
+    // a miss is kept 5 s only: a Soul not yet ready to be controlled is found soon after it is
+    if (!hit || t - hit.at > (hit.id ? 60_000 : 5_000)) { let id: string | null = null; try { id = o.soulOf(token); } catch { /* unknown */ } if (cache.size > 4096) cache.clear(); hit = {id, at: t}; cache.set(token, hit); }
     if (hit.id) slowed.note(hit.id, code, after);
   };
   return slowed;
