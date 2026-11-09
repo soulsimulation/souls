@@ -1857,7 +1857,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
     if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true, receipt: this.view(old)};}
     const refuse = (code: string, reason: string, extra?: {retry_after?: number}) => {this.recordRefusal(soul.soulId, 'act', capability, code, reason); return this.withInPlaceAlternative(soul, {accepted: false as const, code, reason, capability, ...extra});};
-    if (this.host.stepFailing) return refuse(STEP_FAILING.code, STEP_FAILING.message);
+    if (this.host.stepFailingFor(soul.entityId)) return refuse(STEP_FAILING.code, STEP_FAILING.message);   // #1378: the bodies its faults named
     // #1381: the explicit stop of the act under way, with an honest answer when nothing runs (by id, or by its words while offered)
     // (a member of a running shared carry: its words keep going to the carry's safe shared stop, PC10)
     if (asked.trim() === STOP_CURRENT || (STOP_WORDS.test(asked.trim()) && this.openReceipts(soul.soulId).length && !this.together.sharedRunning(soul.soulId))) return this.stopCurrent(soul, input.params, clientRef, refuse);
@@ -2321,7 +2321,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   async performBodies(soul: EdgeSoul, capability: string, label: string, steps: Program['steps'], clientRef?: string,effects?:ConfirmedEffects,admission?:ObjectBodyAdmission): Promise<{accepted: true; receipt: EdgeReceipt} | {accepted: false; code: string; reason: string}> {
     if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true, receipt: this.view(old)};}
     const refuse = (code: string, reason: string) => {this.recordRefusal(soul.soulId, 'object', capability, code, reason); return {accepted: false as const, code, reason};};
-    if (this.host.stepFailing) return refuse(STEP_FAILING.code, STEP_FAILING.message);
+    if (this.host.stepFailingFor(soul.entityId)) return refuse(STEP_FAILING.code, STEP_FAILING.message);   // #1378: the bodies its faults named
     this.clockGate();   // #1327: before anything is written
     {const pending = this.pendingByRef(soul.soulId, clientRef); if (pending) throw pending;}
     const busy = this.sharedBusy(soul.soulId); if (busy) return {...refuse('shared.busy', busy.reason), ...this.busyExtra(busy)};

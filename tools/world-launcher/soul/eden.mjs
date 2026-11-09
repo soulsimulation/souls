@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.6";
+const VERSION = "2.24.7";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2753,6 +2753,15 @@ export function rankCapabilities(list, search) {
   }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** 2.24.7 (#1412): the places the world reads the words as (`search.places`, resolve's own reading, best first) lead, in
+ *  the world's order, then the client's own ranking without repeats. A world without `search` gets today's ranking. */
+export function searchOrder(list, search, answer) {
+  const ranked = rankCapabilities(list, search), places = Array.isArray(answer?.places) ? answer.places : [];
+  if (!places.length) return ranked;
+  const byId = new Map(list.map((c) => [c.id, c])), first = [...new Set(places)].map((id) => byId.get(id)).filter(Boolean), lead = new Set(first.map((c) => c.id));
+  return [...first, ...ranked.filter((c) => !lead.has(c.id))];
+}
+
 /** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
 const LABEL_MAX = 80;
 export function shortLabel(id, label) {
@@ -2789,18 +2798,25 @@ async function caps(...args) {
   }
   // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
   limit ??= search && !all ? 12 : 60;
-  // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
-  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
+  // The plain listing is the world's page (what is near); search and verb filters read the whole menu. 2.24.7 (#1412):
+  // a search sends its words too, and a world that reads them answers `search` with resolve's own place reading.
+  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "") + (search ? "&search=" + encodeURIComponent(search) : "")), "capabilities");
   let list = d.capabilities ?? [];
   if (!all) list = list.filter((c) => c.available);
   if (verb) list = list.filter((c) => c.verb === verb);
-  if (search) {
-    list = rankCapabilities(list, search);
-  }
+  if (search) list = searchOrder(list, search, d.search);
+  const seen = search && d.search && typeof d.search === "object" ? d.search : null;
+  // the world's own note first; with none and nothing listed, say why: the world knew the place but a filter left it out, or nothing matched
+  const filtered = verb ? `--verb ${verb}` : "available offers (--all lists the rest)";
+  const note = seen?.note ?? (seen && !list.length ? (seen.placesMatched > 0
+    ? `The world knows ${seen.placesMatched === 1 ? "a place" : `${seen.placesMatched} places`} named "${search}", but none is among ${filtered}.`
+    : `Nothing here or on the menu matches "${search}". Try other words, or resolve "walk to ${search}".`) : undefined);
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
     ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
     ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
+    ...(seen && Number.isFinite(seen.placesMatched) ? { placesMatched: seen.placesMatched } : {}),
+    ...(note ? { note } : {}),
     offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }

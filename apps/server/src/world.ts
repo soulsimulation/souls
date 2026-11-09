@@ -713,7 +713,7 @@ export class WorldHost {
             if (p.journal!(e) !== true) throw new TypeError('acceptance journal must synchronously return true');
           }, {immediate: true});
         } catch (error) { p.reject!(error); continue; }
-      } else if(arrival){this.db.db.exec('BEGIN IMMEDIATE');try{this.db.appendEvent(this.worldId,e);this.db.appendEvent(this.worldId,arrival);journalIntentArrivalV1(this,arrival);this.db.db.exec('COMMIT');}catch(error){this.db.db.exec('ROLLBACK');this.clockFailure=error;this.paused=true;this.stop();this.recordGlitch('halt',error,{rule:'durability.arrival'});for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{}throw error;}}else this.db.appendEvent(this.worldId, e);
+      } else if(arrival){this.db.db.exec('BEGIN IMMEDIATE');try{this.db.appendEvent(this.worldId,e);this.db.appendEvent(this.worldId,arrival);journalIntentArrivalV1(this,arrival);this.db.db.exec('COMMIT');}catch(error){this.db.db.exec('ROLLBACK');this.clockFailure=error;this.paused=true;this.stop();this.recordGlitch('halt',error,{rule:'durability.arrival'});for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{}this.rejectQueued(error,pending.slice(pending.indexOf(p)));throw error;}}else this.db.appendEvent(this.worldId, e);
       this.seq = arrival?.seq ?? stationEra?.seq ?? admission?.seq ?? e.seq;
       let recovered = false;
       let result: FoldResult | undefined;
@@ -803,10 +803,19 @@ export class WorldHost {
 
   /** #1327: an input whose own records (an edge act's receipt, the receipts it replaces) are written by `journal` in the
    * event's acceptance transaction: both exist or neither does. No guard beyond the journal itself; a journal that throws
-   * refuses the input and the promise rejects. Rejects, never hangs, when the clock fails before or at its drain. */
+   * refuses the input and the promise rejects. When the clock fails, before the push (assertClockReady), at its drain, or
+   * after the push and before any drain, the promise rejects with the clock's failure (rejectQueued): it never hangs. */
   enqueueJournaled(kind: EventKind, author: string, payload: unknown, journal: AcceptanceJournal): Promise<LogEvent> {
     this.assertClockReady();
     return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard: () => true, journal, resolve, reject }));
+  }
+
+  /** #1382 follow-up: the clock failed with inputs still queued (or taken for a drain that stopped). Nothing will drain them
+   *  from this head, so each that can be refused is, with the failure: its caller answers (an edge act: 503, its hand-off
+   *  forgotten) instead of waiting until a restart. Plain enqueue()s have no refusal and stay as they were. */
+  private rejectQueued(error: unknown, taken: Pending[] = []) {
+    const reason = error instanceof Error ? error : new Error('world clock unavailable', {cause: error});
+    for (const q of [...taken, ...this.queue.splice(0)]) if (q.reject) {try {q.reject(reason);} catch {/* a caller's own fault stays its own */}} else this.queue.push(q);
   }
 
   /** Atomic object/body producer: commit its side effects only after the real
@@ -1312,6 +1321,9 @@ export class WorldHost {
    *  answer, and sends only what neither answers to the repair, alone. Acts only under the repair rules. */
   enableRefusalSettleV1(author='operator:hold-settle'){if((this.extra.runtimePolicy as {refusalSettleV1?:boolean}|undefined)?.refusalSettleV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,refusalSettleV1:true},why:'hold-settle/1 (#1334): a refused move holds its programme (the third refusal in 5 s fails it), a body the world left where it cannot stand is moved to the nearest free spot in that tick, and the repair takes only what neither answers, alone; retain historical replay before this event'});}
   enableBodyStepGuardV1(author='operator:body-step-guard'){if((this.extra.runtimePolicy as {bodyStepGuardV1?:boolean}|undefined)?.bodyStepGuardV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,bodyStepGuardV1:true},why:'body-step-guard/1 (#1332): a relocation, restore or stall release stands a body only where the static-clearance invariant passes it, at its own radius and apart from other bodies; retain historical replay before this event'});}
+  /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
+   *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
+  enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
    *  everyone else go on; never a halt. A host-only key: the engine never reads it, so no snapshot binding changes. Main adopts
@@ -1624,6 +1636,8 @@ export class WorldHost {
   /** When each broken body was last held: one that breaks again within a cooldown (a bug that breaks it every tick) is not held
    *  again, and takes the in-place rung's once-per-cooldown report instead of a row a tick. */
   private heldAt = new Map<string, number>();
+  /** #1378: when each body was last quarantined, for any reason. */
+  private quarantinedAt = new Map<string, number>();
   private heldRecently(bodies: string[]) { const now = this.engine.world.tick; return bodies.length > 0 && bodies.every(id => now - (this.heldAt.get(id) ?? -Infinity) < REWIND_COOLDOWN_TICKS); }
   /** The bodies a fault names that are in the world, sorted. */
   private namedBodies(error: unknown): string[] { const ents = this.engine.world.entities as Record<string, unknown>; return [...new Set(faultKeys(error).flatMap(k => k.subjects))].filter(id => id !== '*' && ents[id]).sort(); }
@@ -1652,14 +1666,26 @@ export class WorldHost {
   /** #1150: why steps are failing, while they are. The clock runs but bodies can't get anywhere, so acts are refused and the
    *  world counts as halted for the launcher's alert. Live only: it ends when faults fall away, and a restart finds it again. */
   stepFailing: string | null = null;
-  private pruneFaultTicks() { const since = this.engine.world.tick - STEP_FAILING_WINDOW_TICKS; while (this.faultTicks.length && this.faultTicks[0] <= since) this.faultTicks.shift(); }
+  /** #1378: the bodies each faulted tick in the window named (`null`: one that named none), beside `faultTicks`. */
+  private faultBodies: (string[] | null)[] = [];
+  private pruneFaultTicks() { const since = this.engine.world.tick - STEP_FAILING_WINDOW_TICKS; while (this.faultTicks.length && this.faultTicks[0] <= since) { this.faultTicks.shift(); this.faultBodies.shift(); } }
+  /** #1378: are this body's acts refused while steps fail? Under quarantine/1 only a body a fault in the window named is, and
+   *  everyone while any fault in it named no body (#1377 attributes those); without it, everyone, as before. */
+  stepFailingFor(entityId: string): boolean {
+    if (!this.stepFailing) return false;
+    if (!this.quarantineRule) return true;
+    return this.faultBodies.some(b => b === null || b.includes(entityId));
+  }
   private noteFaultedTick(error: unknown) {
     if (!this.repairRules) return;
-    this.faultTicks.push(this.engine.world.tick); this.pruneFaultTicks();
+    let bodies: string[] | null = null;
+    if (this.quarantineRule) try { const t = this.quarantineTargets(error).bodies; bodies = t.length ? t : null; } catch { bodies = null; }
+    this.faultTicks.push(this.engine.world.tick); this.faultBodies.push(bodies); this.pruneFaultTicks();
     if (this.stepFailing || this.faultTicks.length < STEP_FAILING_FAULTS) return;
     this.stepFailing = String(error).slice(0, 800);
     console.error(`[world] ${this.faultTicks.length} of the last ${STEP_FAILING_WINDOW_TICKS} ticks faulted; acts are refused until that falls away:`, this.stepFailing);
-    this.recordGlitch('halt', error, {rule: 'engine.step-failing', tick: this.engine.world.tick, evidence: {ticks: this.faultTicks.length}});
+    const named = this.faultBodies.some(b => b === null) ? null : [...new Set(this.faultBodies.flat() as string[])].sort();
+    this.recordGlitch('halt', error, {rule: 'engine.step-failing', tick: this.engine.world.tick, evidence: {ticks: this.faultTicks.length, ...(this.quarantineRule ? {refused: named ?? 'everyone'} : {})}});
   }
   /** Booted from a marked snapshot, with no clean tick since. */
   private bootedFaulted = false;
@@ -1741,6 +1767,10 @@ export class WorldHost {
     if (restoreFailure !== undefined) this.snapshotSoon ??= 'the recovery baseline would not restore';   // a restart must not boot from it
     if (!bodies.length || this.heldRecently(corrupt)) return this.containInPlace(error, true);
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
+    // #1378: a body held again within the cooldown is held whole, every rule on it contained, so a fault that comes back under
+    // a new rule each tick is absorbed, not a step fault a tick (the key is logged in `contained`, so a replay holds it too)
+    const again = bodies.filter(id => tick - (this.quarantinedAt.get(id) ?? -Infinity) < REWIND_COOLDOWN_TICKS);
+    for (const id of bodies) this.quarantinedAt.set(id, tick);
     const {stopped, deadlines} = this.engine.stopBodiesV1!(bodies, QUARANTINED), souls = bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
     // a broken body is held where it last stood whole; the log carries that pose, so a replay holds it in the same place
     // (with no whole pose on record the engine picks a free spot by the arrival); what it did is logged, so a replay does the same
@@ -1749,7 +1779,7 @@ export class WorldHost {
       try { const at = this.engine.holdBodyV1!(id, pose); return at ? [{id, pose: at, ...(w ? {} : {fallback: 'arrival'})}] : []; }
       catch (failure) { console.error('[world] a broken body could not be held:', String(failure).slice(0, 200)); return []; }
     });
-    const q = {...this.engine.containV1!(keys), bodies, souls, ...(held.length ? {held} : {}), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
+    const q = {...this.engine.containV1!([...keys, ...again.map(id => ({code: '*', subjects: [id]}))]), bodies, souls, ...(held.length ? {held} : {}), stopped, ...(deadlines ? {deadlines} : {}), reason: String(error).slice(0, 300), ...(restoreFailure === undefined ? {} : {restore: String(restoreFailure).slice(0, 300)})};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:quarantine', payload: {quarantineV1: q}, at: Date.now()};
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
@@ -1778,7 +1808,7 @@ export class WorldHost {
    *  is off the list, so a named fault always gets here, even while steps are failing, and the list's cap per rule bounds those
    *  rows. Each stop row answers a decision that started what it stopped. A fault that only repeats is written once per cooldown. */
   private containInPlace(error: unknown, noQuarantine = false): void {
-    if (this.quarantineRule && !noQuarantine) { const t = this.quarantineTargets(error); if ((t.corrupt.length || (!this.stepFailing && t.bodies.length)) && !this.heldRecently(t.corrupt)) return this.quarantine(error); }   // #1369: only what the fault named stops
+    if (this.quarantineRule && !noQuarantine) { const t = this.quarantineTargets(error); if ((t.corrupt.length || t.bodies.length) && !this.heldRecently(t.corrupt)) return this.quarantine(error); }   // #1378: while steps fail too   // #1369: only what the fault named stops
     const tick = this.engine.world.tick, rule = faultFacts(error).rule, keys = faultKeys(error), seen = this.inPlaceAt.get(rule);
     // what ended in a step that faulted on a violation ended all the same, and a replay runs this too
     if (this.faultedPrograms) try { this.afterPrograms(this.faultedPrograms, false); } catch (failure) { console.error('[world] a finished programme failed its effects on a faulted tick:', String(failure).slice(0, 200)); }
@@ -1883,6 +1913,7 @@ export class WorldHost {
     // as for the other clock failures: viewers are told the world is unavailable (hub: close 1013), not left asking a host
     // that refuses snapshots
     for (const listener of this.listeners) try { listener.onClockUnavailable?.(); } catch { /* the engine fault remains the cause */ }
+    this.rejectQueued(this.clockFailure);
   }
   /** #1150 rung 1: the engine already undid these moves. The log keeps each as evidence, in this tick; a replay recomputes
    *  them from state, so it reads these only to compare the count. */
@@ -2257,6 +2288,7 @@ export class WorldHost {
     this.clockFailure = error instanceof Error ? error : new Error('periodic checkpoint failed', { cause: error }); this.paused = true; this.stop();
     this.recordGlitch('halt', error, {rule});
     for (const listener of this.listeners) try { listener.onClockUnavailable?.(); } catch { /* preserve checkpoint fault */ }
+    this.rejectQueued(this.clockFailure);
   }
   /** Superseding snapshots, recovery and stop must not leave a writer scheduled
    * against an old engine or a database the owner may close next. */
@@ -2293,6 +2325,7 @@ export class WorldHost {
       this.clockFailure=error;this.paused=true;this.stop();
       this.recordGlitch('halt',error,{rule:(error as {unhashable?:boolean})?.unhashable?'engine.unhashable':'durability.clock-frontier'});
       for(const listener of this.listeners)try{listener.onClockUnavailable?.();}catch{/* The durable fault remains the cause. */}
+      this.rejectQueued(this.clockFailure);
       throw error;
     }
   }

@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
@@ -246,7 +246,7 @@ one rule, so what returns past the hold writes a small row, not a whole world. A
 
 **A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get
-anywhere, so acts are refused with `world.step-failing`, nothing rewinds, the launcher alerts as for a halt, and a due
+anywhere, so acts are refused with `world.step-failing` (under quarantine/1, only those of the bodies its faults named), nothing rewinds, the launcher alerts as for a halt, and a due
 snapshot is taken at once on a faulted tick. That snapshot is marked: it serves a boot, never a rewind, and one that won't
 capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below three quarters of that, and a clean snapshot follows at once. While it lasts a faulted tick keeps the ordinary beat of batches and heartbeats. What still reaches it is a throw outside
 any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
@@ -261,8 +261,13 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   without reading an invariant. The glitch is rung `contained`, with the restore error as evidence. Everyone else goes on.
   The quarantined Soul can act again at once: it is never held or refused for the quarantine. The rule a rung 3 went back
   for stays on the head after that, and a snapshot is taken at once, so a restart never boots from the refused baseline.
-- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies.
-  A fault that names none still stops everything in place, as above.
+- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies,
+  while steps are failing too (#1378). A fault that names none still stops everything in place, as above.
+- A body quarantined again within the cooldown is held whole (#1378): the event also contains every rule on it (key
+  `{code: '*', subjects: [body]}`), so a fault that comes back under a new rule each tick is absorbed instead of faulting
+  the step. Only a violation whose every subject is held whole is covered; one that names a free body still faults.
+- While steps are failing, only a Soul whose body a fault in the window named is refused `world.step-failing`; everyone is
+  while any fault in the window named no body (#1378). The `engine.step-failing` glitch names who is refused.
 - A broken body (`entity.corrupt`: a person with no human state, or any number in its pose or human state that is no
   finite number) can make every step or the state hash throw while no rule names it. It is found when a step faults,
   when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
