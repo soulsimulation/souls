@@ -17,7 +17,7 @@ in the repository.
 
 Each stage is one systemd unit, `sim-worlds@<stage>`, running as the unprivileged `simworlds` user. The unit runs the
 keeper (`tools/world-launcher/keeper.mjs`), which holds the stage's port and runs the world launcher from the release
-the stage link `/srv/sim-worlds/<stage>` points at. The launcher runs one Sim server process per world on a private
+the stage link `/srv/sim-worlds/<stage>` points at. The launcher runs one Souls server process per world on a private
 loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand and letting idle ones sleep.
 
 | Stage | Public paths | Settings | Data |
@@ -32,6 +32,12 @@ origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
 
 Caddy terminates TLS and sends the canonical root site to production; `souls.game` redirects to `soul.game`.
+`sim.eden.art`, the former origin and still the Clerk primary origin, moves to the production host. There it
+redirects to `soul.game` with the same path and query (301 for GET and HEAD, 308 otherwise), except `/sign-in`, which
+is the launcher's own primary sign-in bridge. Its site file is
+[`deploy/caddy/sim-eden-art.caddy`](../tools/world-launcher/deploy/caddy/sim-eden-art.caddy), installed once at cutover;
+the release never writes Caddy's configuration. `node tools/world-launcher/deploy/caddy/check-sim-redirect.mjs` checks
+it from anywhere ([Clerk satellite](operations/clerk-satellite.md#simedenart-on-the-production-host)).
 The canonical worlds are `/w/eden/`, `/w/mars-college-2026/` and `/w/mars-college-2027/`.
 Keep the configured asset-serving rules and old world URL aliases intact. The Clerk primary remains on the
 eden.art instance: old identity-provider URLs are intentional, not blanket rename targets. After a host reboot,
@@ -48,6 +54,36 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   and short `hostCodes` are public; the numbers behind them are for loopback requests only.
 - `GET /__sim/health`: a health page for site owners (accounts listed in `SIM_SITE_OWNERS`) or loopback; build,
   host, every world, backups, arrivals, new client errors and alerts (`tools/world-launcher/health-dash.mjs`).
+- `GET /w/<slug>/healthz` carries `halted` and `glitches`: `{total, byRule: {rule: {rung: n}}}`, every refusal, recovery and halt
+  the world has had. It is public, so rule names and counts only. Each glitch also writes one `[world] glitch` line to
+  the world's log and one row to its store, with the bodies, the tick and the evidence: `op.mjs glitches --port <port>
+  --base / [--world <slug>]` reads those, for sleeping worlds too. The health page shows the counts. A halted world is the
+  `halted` problem code, so `hostOk` goes false and `host-health.log` gets its ALERT line; a refusal or recovery raises no alert
+  until real numbers set a rate threshold ([#1150](https://github.com/soulsimulation/souls/issues/1150)). A rewind (rung 3), or a stop on the spot that stopped something, is the
+  `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
+  count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
+  its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
+  The launcher restarts a halted world once per breaker window (30 min), since a restart boots from the log; a second halt
+  in the same window stays halted for an operator ([#1326](https://github.com/soulsimulation/souls/issues/1326)).
+- `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
+  `stalled` and, while the clock is dilated, `slowed`. A world is `stalled` when its clock owes ticks and the last one is
+  older than 2 s, or 10 of its expected tick intervals when it runs at a reduced pace; paused, halted and rate-0 worlds
+  never are. `live.json` carries the same as `tick.ageMs`, `stalled` and `slowed`, written by the watchdog thread, so a
+  stuck main thread still shows. A stalled world is the `stalled` problem code: `hostOk` goes false and `host-health.log`
+  gets its ALERT line, then RECOVERED once it ticks again. It isn't restarted for it. Edge reads say `world.stalled`
+  meanwhile and acts are refused with `503 world.stalled` (`docs/architecture/load.md` §3).
+- The repair rules are on by default ([#1323](https://github.com/soulsimulation/souls/issues/1323)): a world whose history
+  began without them adopts them at its first boot on 4.16.1 or later, logged as one `rules` event, with the line
+  `[world] adopted the repair rules at tick <n> (one way)`. **That is one way: once adopted, a world can't boot on 4.16 or
+  earlier**, so a rollback past 4.16.1 needs that world's pre-release backup. Leave `SIM_SOULS_REPAIR` unset.
+  `SIM_SOULS_REPAIR=0` stops adoption for worlds that haven't adopted, and is ignored, with a warning, for one that has.
+  `SIM_SOULS_REPAIR=1` (or `SIM_SHARED_CARRY=1`, which brings repair) bypasses adoption: an old world then refuses to boot, as
+  in 4.16, so don't set it on a server with existing worlds.
+  Before a release that changes what a first boot adopts, rehearse each world on the host:
+  `node tools/world-launcher/deploy/boot-rehearsal.mjs --db <world data>/sim.db --scratch <new empty dir outside it>
+  --from-pid <the world's process>` (or `--env-file`/`--env` with the world's settings) boots an online-backup copy with
+  this tree's code, adopts, runs `--ticks` (default 1200) and prints one JSON line: adopted or refused and why, running or
+  halted, the hashes before and after. The original is opened read-only and the copy is deleted afterwards.
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
@@ -61,7 +97,7 @@ audit log, uploaded assets, old-world fork inputs and the stage's non-secret hos
 restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`). An off-host copy to an
 S3-compatible bucket runs when `SIM_BACKUP_OFFSITE` is set. Every release also takes its own compact pre-release copy.
 Commands are in the [runbook](operations/runbook.md#backups). Local backup verification does not prove offsite
-recovery; [offsite setup #557](https://github.com/genekogan/souls/issues/557) is explicitly deferred and must be
+recovery; [offsite setup #557](https://github.com/soulsimulation/souls/issues/557) is explicitly deferred and must be
 qualified separately.
 
 ## Logs

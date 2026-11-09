@@ -23,6 +23,11 @@ pnpm build
 BRAIN_MODE=fake DEV_AUTH=1 DATA_DIR=.local/dev node --env-file=.env apps/server/src/main.ts
 ```
 
+In a cloud environment, CI runner or any other executor, use `scripts/bootstrap.sh` as the setup step in place of the
+first two commands. It installs locked dependencies and pulls media only when the lockfile, the `package.json` files or
+the media manifest changed since its last successful run, and `--no-media` skips the pull. It needs Node and pnpm
+already on the image. The Claude cloud SessionStart hook (`scripts/cloud-session-start.sh`) is a thin wrapper around it.
+
 Open <http://localhost:4500/w/toy/?dev=1>: a world is served under `WORLD_PATH` (`/w/<key>`), and the root `/` is the
 multi-world homepage, which lists only a launcher's worlds. With `DEV_AUTH=1` the page offers a dev sign-in; the name
 `admin` is an admin. `.env.example` sets `INVITE_REQUIRED=1`, so creating a Soul (**New Soul**, `POST /v1/souls`)
@@ -86,6 +91,7 @@ Read in `apps/server/src/config.ts` (and `thinking-budget.ts`, `auth.ts`). `.env
 | `NARRATOR_MODEL`, `COMPILER_MODEL`, `TALK_MODEL` | `claude-haiku-4-5-20251001` | Models per role; the latter two default to the narrator |
 | `EDGE_SKILL_FILE`, `EDGE_INSTRUCTIONS_FILE`, `EDGE_CLI_FILE`, `EDGE_CONTROLLER_CLI_FILE` | built-in | Override the Soul skill, instructions and CLI the world serves |
 | `EDGE_EYES` | unset (off) | `world` renders Soul views in a headless browser ([Souls](architecture/souls.md#eyes)) |
+| `EDGE_EYES_CHROME` | unset | An explicit Chromium executable for Eyes, instead of the release's Playwright Chromium ([Souls](architecture/souls.md#eyes)) |
 | `TAKES_PERSIST`, `ARCHIVE_TAKES` | off | Persist recorded takes; archive them to R2 (`R2_*`) |
 | `WEB_DIR`, `MARS_WEB_DIR`, `BUILD_ID` | built app dirs, `BUILD` file or `dev` | Static assets and the reported build |
 | `PRIVY_APP_ID`, `PRIVY_APP_SECRET` | none | Legacy sign-in, kept only for rollback |

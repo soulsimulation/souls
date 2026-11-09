@@ -105,7 +105,7 @@ try {
   const h0 = await step('K1 Ana here: near detail as before, plus district and far names with directions; no grove anywhere', async () => {
     const r = await ana.run('here'), h = r.data; report.sizes.hereStart = sizeOf(h);
     return { where: h?.me?.placePath, district: h?.district, far: h?.far, farMore: h?.farMore, exits: (h?.exits ?? []).map((e) => e.to), grove: JSON.stringify(h).includes('grove'), size: report.sizes.hereStart };
-  }, (r) => Array.isArray(r.far) && r.far.some((x) => /^garden · /.test(x)) && r.far.some((x) => /^orchard · /.test(x)) && !r.grove && r.far.every((x) => x.split(' · ').length === 2));
+  }, (r) => Array.isArray(r.far) && r.far.some((x) => /^garden · /.test(x)) && r.far.some((x) => /^orchard · /.test(x)) && !r.grove && r.far.every((x) => x.split(' · ').length <= 3));
   await step('K2 the grove is secret to Ana: not on her map, not walkable by id or by name', async () => {
     const m = (await ana.run('map')).data?.places ?? [], a = (await ana.run('act', 'walk:grove')).data, b = (await ana.run('act', 'walk to the grove')).data;
     // the reply may quote the Soul's own words back; nothing else in it (reason, note, did_you_mean) names the grove
@@ -125,7 +125,7 @@ try {
     const a = await ana.act('walk:garden'), b = await ana.act('walk:plaza'), h = (await ana.run('here')).data; report.sizes.hereLater = sizeOf(h);
     const bf = (await ben.run('here')).data?.far ?? [];
     return { there: a.phase, back: b.phase, far: h?.far, district: h?.district, ben: bf.find((x) => /^garden/.test(x)) };
-  }, (r) => r.there === 'completed' && r.back === 'completed' && r.far?.some((x) => /^garden · [NESW]{1,2} \d+m · been/.test(x)) && /^garden · [NESW]{1,2}$/.test(r.ben ?? ''));
+  }, (r) => r.there === 'completed' && r.back === 'completed' && r.far?.some((x) => /^garden · [NESW]{1,2} \d+m · been/.test(x)) && /^garden · [NESW]{1,2}( · walk:\S+)?$/.test(r.ben ?? ''));
   await step('K6 the god makes the grove public again: Ben sees it on his map', async () => {
     const g = await god('secret', 'grove', 'off'), bm = (await ben.run('map')).data?.places ?? [];
     return { code: g.code, benMap: bm.some((p) => p.id === 'g-grove') };

@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
 import {Hono} from 'hono';
-import {coreRef} from '@sim/world-compiler';
+import {coreRef} from '@souls/world-compiler';
 import {coreAWorld} from '../test/core-a-fixture.ts';
 import {fixture, invite, accept, factory} from '../test/native-owner-fixture.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
@@ -40,7 +40,10 @@ test('knowledge at scales: district summary, far names, memory of visits, look a
   assert.ok(Array.isArray(h1.far) && h1.far.length === 6 && h1.farMore > 0, JSON.stringify(h1.far));
   const east1 = h1.far.find((x: string) => x.startsWith('Eden east'));
   assert.equal(east1, 'Eden east · E', 'never been there: a name and a direction only');
-  assert.ok(h1.far.every((x: string) => x.split(' · ').length === 2), 'nothing visited yet');
+  // #1281: a line ends with the walk on offer; a place no walk reaches (Eden east is scenery) keeps its line without one
+  assert.ok(h1.far.every((x: string) => {const [, , go, more] = x.split(' · '); return more === undefined && (go === undefined || go.startsWith('walk:'));}), `nothing visited yet: ${JSON.stringify(h1.far)}`);
+  const go = h1.far.map((x: string) => x.split(' · ')[2]).filter(Boolean); assert.ok(go.length > 0, JSON.stringify(h1.far));
+  for (const id of go) assert.equal((await w.http(a, 'POST', '/v1/edge/resolve', {capability: id})).body.resolve.ok, true, id);
   const added = raw1.length - before.length;
   t.diagnostic(`here frame ${before.length} chars (~${Math.ceil(before.length / 4)} tokens) before, ${raw1.length} (~${Math.ceil(raw1.length / 4)} tokens) with scales: +${added} chars (~${Math.ceil(added / 4)} tokens)`);
   assert.ok(added <= 420, `scales cost ${added} chars`);

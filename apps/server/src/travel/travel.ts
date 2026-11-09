@@ -12,6 +12,10 @@ import type {WorldHost} from '../world.ts';
 
 export const TRAVEL_CONTRACT = 'travel/1';
 const LOG_KEEP = 20, ARRIVE_READY_MS = 30_000, RELAY_MS = 60_000;
+// #795: putting on a carried body is bounded so that arrival (up to ARRIVE_READY_MS) plus wearing stays well inside the
+// launcher relay's 55 s abort; a slow source never fails the trip. The pull gets at most BODY_PULL_MS of that budget.
+const WEAR_MS = 12_000, BODY_PULL_MS = 8_000;
+const SLOW = {ok: false as const, code: 'body.source-slow', reason: 'The carried body took too long to fetch here; it was not worn on arrival'};
 
 export class TravelError extends Error {
   readonly status: number; readonly code: string; readonly extra: Record<string, unknown>;
@@ -32,24 +36,43 @@ export type TravelDeps = {
   /** The launcher's site relay; null when this world runs alone (travel then refuses). */
   site: {worlds(): Promise<SiteWorld[]>; relay: Relay} | null;
   invalidateBodies?(): void;
+  /** #795: resolve a carried body reference for its owner (edge/body/routes.ts bodyRefResolvers). */
+  resolveBodyRef?(ref: string, owner: string): BodyRef;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** The carried-body pull deadline (default BODY_PULL_MS); tests shorten it. */
+  bodyPullMs?: number;
 };
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-/** A body the destination can wear: a kit look or a shipped preset. An owner's uploaded GLB lives in its home world's store. */
+type Pulled = {ok: true} | {ok: false; code: string; reason: string};
+/** A carried-body pull against a real-time deadline. A late pull may still finish and cache its verified bytes for a
+ *  later PUT {ref}; it never assigns the body, because only wear() assigns, and wear() has already moved on. */
+function pullWithin(run: () => Promise<Pulled>, ms: number): Promise<Pulled> {
+  const pulled = run().catch((e: {code?: unknown}) => ({ok: false as const, code: typeof e?.code === 'string' ? e.code : 'body.source-unavailable', reason: 'The carried body could not be fetched and admitted here'}));
+  let timer: ReturnType<typeof setTimeout> | undefined;   // kept ref'd: cleared in finally, and it must hold the loop until the race settles
+  const slow = new Promise<Pulled>(r => { timer = setTimeout(() => r(SLOW), ms); });
+  return Promise.race([pulled, slow]).finally(() => clearTimeout(timer));
+}
+/** A resolved carried reference: the body to wear and, when its bytes are elsewhere, the pull to run once ready. */
+export type BodyRef = {ok: true; body: unknown; fetch?: () => Promise<{ok: true} | {ok: false; code: string; reason: string}>} | {ok: false; code: string; reason: string};
+/** A body the destination can wear: a kit look, a shipped preset, or (#795) a reference `{ref}` to an admitted
+ *  definition (an upload, Pip, the monster, the centaur), which the destination resolves under its own policy. */
 export function portableBody(body: unknown): {body: unknown; note: string | null} {
   if (body === undefined || body === null) return {body: null, note: null};
   const model = (body as {model?: unknown}).model;
-  if (typeof model === 'string' && /^body_[a-f0-9]{64}$/.test(model)) return {body: null, note: 'an uploaded body stays in its home world; the default look is worn here'};
+  if (typeof model === 'string' && /^body_[a-f0-9]{64}$/.test(model)) return {body: {ref: model}, note: null};
   return {body: structuredClone(body), note: null};
 }
+const carriedRef = (body: unknown) => body && typeof body === 'object' && typeof (body as {ref?: unknown}).ref === 'string' ? (body as {ref: string}).ref : null;
 /** Keep the most recent entries. */
 export const appendLog = (log: LogEntry[], e: LogEntry) => [...log, e].slice(-LOG_KEEP);
 
 export class Travel {
   readonly d: TravelDeps;
   private sql: Db['db'];
+  /** Told as a Soul sets off, while its body is still here; what it returns runs once the other world has admitted it. */
+  onLeave: ((soulId: string, at: number, world: string) => (() => void) | undefined) | null = null;
   constructor(d: TravelDeps) {
     this.d = d; this.sql = d.db.db;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS travel_settings_v1 (world_id TEXT PRIMARY KEY, open INTEGER NOT NULL, changed_at INTEGER NOT NULL);
@@ -131,6 +154,7 @@ export class Travel {
     const {body, note} = portableBody(engineBody);
     const leaving: LogEntry = {at: this.now(), kind: 'travel', from: this.d.slug, fromName: this.d.name, to: dest.slug, toName: dest.name, ...(note ? {note} : {})};
     this.put(soul.id, {traveller: id.traveller, home: id.home, state: 'departing', at: dest.slug, requestId, log: id.log});
+    const left = this.onLeave?.(soul.id, leaving.at, dest.name);
     const passport: Passport = {contract: TRAVEL_CONTRACT, requestId, traveller: id.traveller, home: id.home, homeSoulId: id.traveller.slice(id.home.length + 1), name: soul.name, description: soul.description,
       owner: soul.owner, body, bodyNote: note, from: this.d.slug, fromName: this.d.name, log: appendLog(id.log, leaving)};
     let r: {status: number; data: any};
@@ -146,6 +170,7 @@ export class Travel {
       if (code === 'travel.unreachable') void this.d.site.relay(dest.slug, '/v1/site/release', {traveller: id.traveller, requestId, reason: 'origin gave up'}).catch(() => {});
       throw new TravelError(r.status >= 400 && r.status < 600 ? r.status : 502, code, message, {to: dest.slug});
     }
+    left?.();
     const log: LogEntry[] = Array.isArray(r.data.log) ? r.data.log : appendLog(id.log, leaving);
     this.setState(soul.id, 'away', dest.slug, log);
     this.d.fading.depart(soul.id, `You leave ${this.d.name} for ${dest.name}.`, {to: dest.slug});
@@ -206,8 +231,16 @@ export class Travel {
     }
     this.sql.prepare('INSERT OR REPLACE INTO travel_requests_v1 (world_id, request_id, traveller, soul_id, at) VALUES (?,?,?,?,?)').run(this.world, p.requestId, p.traveller, soulId, this.now());
     if (atHome) this.setWhere(p.traveller, this.d.slug);
-    const worn=await this.wear(soulId, p.body);
-    if(p.body&&!worn){const inc=this.inc(soulId)!,log=JSON.parse(inc.log) as LogEntry[];if(log.length)log[log.length-1].note='The destination did not admit the carried body; its existing body is retained.';this.sql.prepare('UPDATE travel_incarnations_v1 SET log=? WHERE world_id=? AND soul_id=?').run(JSON.stringify(log),this.world,soulId);}
+    // #795: a carried reference is resolved here (owner's own or published, active, admitted type); its bytes are pulled
+    // only once the arriving Soul can change bodies. A refusal keeps the default body and says why.
+    let carried=p.body,fetch:(()=>Promise<{ok:true}|{ok:false;code:string;reason:string}>)|undefined,refusal:{code:string;reason:string}|null=null;
+    const ref=carriedRef(p.body);
+    if(ref){const r=this.d.resolveBodyRef?.(ref,p.owner)??{ok:false as const,code:'body.ref-unsupported',reason:'This world cannot resolve carried body references'};if(r.ok){carried=r.body;fetch=r.fetch;}else{refusal=r;carried=null;}}
+    // A traveller in the default look (no body) arrives in the default look, also where an earlier visit left another body.
+    const resetDefault=p.body===null&&returned;
+    const worn=await this.wear(soulId, carried, fetch, f=>{refusal=f;}, resetDefault);
+    if(refusal){const inc=this.inc(soulId)!,log=JSON.parse(inc.log) as LogEntry[];if(log.length)log[log.length-1].note=`The carried body was not admitted here (${refusal.code}: ${refusal.reason}); its body here is unchanged.`;this.sql.prepare('UPDATE travel_incarnations_v1 SET log=? WHERE world_id=? AND soul_id=?').run(JSON.stringify(log),this.world,soulId);}
+    else if(carried&&!worn){const inc=this.inc(soulId)!,log=JSON.parse(inc.log) as LogEntry[];if(log.length)log[log.length-1].note='The destination did not admit the carried body; its existing body is retained.';this.sql.prepare('UPDATE travel_incarnations_v1 SET log=? WHERE world_id=? AND soul_id=?').run(JSON.stringify(log),this.world,soulId);}
     this.event(p.traveller, soulId, p.name, atHome ? 'came-home' : 'arrived', p.from, p.fromName);
     return this.admitted(p, soulId, created, returned);
   }
@@ -233,17 +266,21 @@ export class Travel {
     }
   }
   /** Put on the carried body (an ordinary body-assignment-v1 event; the engine's safe-swap check applies). */
-  private async wear(soulId: string, body: unknown) {
-    if (body === null || body === undefined) return false;
+  private async wear(soulId: string, body: unknown, fetch?: () => Promise<{ok: true} | {ok: false; code: string; reason: string}>, refused?: (r: {code: string; reason: string}) => void, defaultLook = false) {
+    if ((body === null || body === undefined) && !defaultLook) return false;
+    if (body === undefined) body = null;
     const {host} = this.d, entityId = this.d.db.soul(soulId)!.entity_id;
     const engine = host.engine as unknown as {world: {entities: Record<string, {body?: unknown}>}; bodyAssignmentProblemV1?(id: string, body: unknown): string | null};
     if (!engine.bodyAssignmentProblemV1) return false;
-    for (let i = 0; i < 100; i++) {
+    const until = this.now() + WEAR_MS;
+    for (let i = 0; i < 100 && this.now() <= until; i++) {
       const ent = engine.world.entities[entityId];
       if(engine.bodyAssignmentProblemV1!(entityId,body)==='body.world-policy')return false;
-      if (ent && JSON.stringify(ent.body) === JSON.stringify(body)) return true;
+      if (ent && JSON.stringify(ent.body ?? null) === JSON.stringify(body)) return true;
       const guard = (): true => { const e = engine.world.entities[entityId]; if (!e || host.quietBarrier || engine.bodyAssignmentProblemV1!(entityId, body)) throw new Error('travel.body-not-ready'); return true; };
-      try { guard(); await host.enqueueChecked('body-assignment-v1', 'world:body', {contract: 'body-assignment/1', worldId: this.world, soulId, entityId, body: structuredClone(body)}, guard, () => true); this.d.invalidateBodies?.(); }
+      try { guard();
+        if (fetch) { const run = fetch; fetch = undefined; const f = await pullWithin(run, Math.max(0, Math.min(this.d.bodyPullMs ?? BODY_PULL_MS, until - this.now()))); if (!f.ok) { refused?.(f); return false; } guard(); }   // bytes move only once the body can change
+        await host.enqueueChecked('body-assignment-v1', 'world:body', {contract: 'body-assignment/1', worldId: this.world, soulId, entityId, body: structuredClone(body)}, guard, () => true); this.d.invalidateBodies?.(); }
       catch { /* not standing still yet (or the birth look landed in between): try again */ }
       await (this.d.sleep ?? sleep)(100);
     }
