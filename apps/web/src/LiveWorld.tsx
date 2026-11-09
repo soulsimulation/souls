@@ -352,8 +352,17 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // for a moment. `?entityBatches=0` turns it off, `?entityCell=<m>` sets the cell size (default 48 m).
     const entityBatchQuery=new URLSearchParams(location.search),entityBatchEnabled=entityBatchQuery.get('entityBatches')!=='0',entityCell=Number(entityBatchQuery.get('entityCell'))||96;
     const entityBatches=new StaticBatchOwner(scene,{cellSize:entityCell,maxMeshes:32768,maxNodes:262144,maxRootInputs:32768,maxMergedBytes:160*1024*1024,maxWorkingBytes:320*1024*1024,maxMeshesPerBatch:1024});
+    // PERF-HEAP (#1473): batches drop their CPU geometry after upload, so a lost context's buffers cannot be re-uploaded from
+    // them. Both owners retire their batches while the context is lost (disposal on a lost context is a silent no-op; after a
+    // restore it would delete old-context objects) and prepare nothing until it is restored; then they rebuild from sources.
+    let glLost=false;
+    const retireBatches=()=>{try{staticBatches.reset();entityBatches.reset();}catch{/* mid-commit/render: never here, events run between frames */}batchGeometry=null;batchRevision=-1;entityBatchRevision=-1;};
+    const onBatchContextLost=()=>{glLost=true;retireBatches();};
+    const onBatchContextRestored=()=>{glLost=false;retireBatches();};
+    renderer.domElement.addEventListener('webglcontextlost',onBatchContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored',onBatchContextRestored);
     let entityBatchRevision=-1,entityBatchChangedAt=0,entityBatchStillAt=0,entityBatchSeenRevision=-1,entityBatchGeneration=0,entityBatchDraw=true;  // entityBatchDraw: a proof's A/B switch (window.__soulsEntity.batching)
-    const prepareEntityBatches=()=>{const revision=entityLayer.staticRevision;entityBatchRevision=revision;entityBatchSeenRevision=revision;void entityBatches.prepare(entityLayer.staticBatchRoots(32768),{sourcePolicy:'complete-roots/1',generation:++entityBatchGeneration,signal:abort.signal,budgetPolicy:'partial-cells/1',sharePlainMaterials:true,incremental:true,hideWholeRoots:true,sliceMs:24  /* PERF-LOAD: cell by cell, not one ~0.45 s task */,shaderMerge:{material:(m)=>mergedGlowMaterial(m,mergedRealismMaterial)??mergedRealismMaterial(m),attributes:(copy,mesh,toBatch,derived)=>{if(derived.userData.mergedRealism)mergedRealismAttributes(copy,mesh,toBatch,glowSourceMaterial(mesh)??mesh.material as THREE.Material);},source:glowSourceMaterial}}).catch(()=>{});};
+    const prepareEntityBatches=()=>{if(glLost)return;const revision=entityLayer.staticRevision;entityBatchRevision=revision;entityBatchSeenRevision=revision;void entityBatches.prepare(entityLayer.staticBatchRoots(32768),{sourcePolicy:'complete-roots/1',generation:++entityBatchGeneration,signal:abort.signal,budgetPolicy:'partial-cells/1',sharePlainMaterials:true,incremental:true,hideWholeRoots:true,sliceMs:24  /* PERF-LOAD: cell by cell, not one ~0.45 s task */,shaderMerge:{material:(m)=>mergedGlowMaterial(m,mergedRealismMaterial)??mergedRealismMaterial(m),attributes:(copy,mesh,toBatch,derived)=>{if(derived.userData.mergedRealism)mergedRealismAttributes(copy,mesh,toBatch,glowSourceMaterial(mesh)??mesh.material as THREE.Material);},source:glowSourceMaterial}}).catch(()=>{});};
     // Far plane covers the whole ±900 m terrain from anywhere in Eden: a nearer far plane slices the distant
     // ranges and the slice moves with the camera (ridges seemed to rise and recede). Depth precision is set by near.
     const camera = (adopted?.camera as THREE.PerspectiveCamera|undefined) ?? new THREE.PerspectiveCamera(45, 1, 0.1, 2400);
@@ -486,7 +495,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     let geometry = new WorldGeometry(null);
     // Called by the finite initial gate after required attachments and appearances.
     const prepareStaticRendering=async()=>{
-      if(!batchEnabled)return;
+      if(!batchEnabled||glLost)return;
       const revision=geometry.staticRenderRevision;
       if(batchGeometry===geometry&&batchRevision===revision)return;
       batchGeometry=geometry;batchRevision=revision;
@@ -1264,7 +1273,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       renderer.domElement.removeEventListener('pointercancel', onCancel);
       renderer.domElement.removeEventListener('click', onFlagClick);
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
-      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);renderer.domElement.removeEventListener('webglcontextlost',onBatchContextLost);renderer.domElement.removeEventListener('webglcontextrestored',onBatchContextRestored);
       navigation?.dispose();
       controls.dispose();
       controlsApi.current = null;
