@@ -178,7 +178,9 @@ const campProvisionRack: DefInput = {
   params: { timber: { type: 'color', default: '#98734c', doc: 'trestle timber colour' }, tray: { type: 'color', default: '#617453', doc: 'provision tray colour' }, rim: { type: 'color', default: '#34442e', doc: 'front rail colour' } },
   palette: { timber: '#98734c', tray: '#617453', rim: '#34442e' },
   slots: [shelf('in-1', [-0.36, 1.015, 0], 'rack'), shelf('in-2', [0, 1.015, 0], 'rack'), shelf('in-3', [0.36, 1.015, 0], 'rack')] as DefInput['slots'],
-  components: { container: { capacity: 3, inside: { lip: 1.095, face: 0.27, stand: [0, 0.87], fit: [0.3, 0.28, 0.3], word: 'rack' } } } as DefInput['components'],
+  // The physical rail ends at 1.095 m. The hand-transfer envelope adds 20 mm of clearance: a maximum-fit square
+  // parcel turns with the hand, and its rotated corner can meet the rail before its unrotated footprint would.
+  components: { container: { capacity: 3, inside: { lip: 1.115, face: 0.27, stand: [0, 0.87], fit: [0.3, 0.28, 0.3], word: 'rack' } } } as DefInput['components'],
   size: { box: [1.2, 1.195, 0.54] },
 } as DefInput;
 

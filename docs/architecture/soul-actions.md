@@ -504,6 +504,8 @@ separate shelf places stand at 1.015 m behind a low front rail; each fits a thin
 pantry's existing container faculty: discover `put-in:<rack>` while holding something, or `pick-up:<item>` to take a
 stored thing, then act with that offered id and no parameters. The recorded hand crosses the rail and releases the
 real item at its shelf place. Nearby `holds` names the contents, which persist with their item ids and slots.
+The physical rail ends at 1.095 m; the authored hand-transfer envelope is 1.115 m, leaving clearance for a maximum-size
+square parcel as it turns with the hand. This raises the transfer path, while stored items still rest on the tray floor.
 
 The rack is fixed campsite furniture. It has no carrying, packing, deployment or cooling action. A fourth item,
 an item too large for a place, and a non-owner using a private rack receive the existing storage refusals. It adds no

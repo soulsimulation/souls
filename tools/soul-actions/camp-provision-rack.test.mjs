@@ -11,6 +11,19 @@ import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
 import {WorldModel, containerInside} from '../../packages/world-compiler/src/index.ts';
 import {TakeRecorder} from '../../mars/viewer/engine/take/recorder.ts';
 
+// Measure the actual unrounded kit panels, independently of the conservative hand-transfer envelope in inside.lip.
+const rackGeometry = def => {
+ const panels = def.make.args.shapes.filter(s => ['tray', 'rim'].includes(s.tint)).map(s => {
+  assert.equal(s.kind, 'box'); assert.equal(s.round, 0);
+  assert.ok(!s.pitch && !s.roll && !s.yaw, 'the measured tray panels are axis-aligned in the def frame');
+  return {...s, min: s.at.map((v, i) => v - s.size[i] / 2), max: s.at.map((v, i) => v + s.size[i] / 2)};
+ });
+ const rail = panels.find(s => s.tint === 'rim'), floor = panels.reduce((a, b) => a.min[1] < b.min[1] ? a : b);
+ const left = panels.find(s => s.at[0] < 0), right = panels.find(s => s.at[0] > 0), back = panels.find(s => s !== floor && s.at[2] < 0);
+ assert.ok(rail && left && right && back); assert.equal(panels.length, 5);
+ return {panels, rail, floor, left, right, back};
+};
+
 // #1490: new fixed campsite geometry on the existing storage faculty. Every transfer goes through a discovered
 // strict offer, with real engine support and recorded hand motion; no product code knows the rack's name.
 test('camp provision rack: strict offers, stocked places, hand clearance, access, interruption, restore and long tail', {timeout: 600000}, async t => {
@@ -29,7 +42,7 @@ test('camp provision rack: strict offers, stocked places, hand clearance, access
  const id = name => ent(name).id, native = name => f.host.engine.world.entities[id(name)];
  const here = async () => {const r = await app.request('/v1/edge/here?include=doHere'); assert.equal(r.status, 200); return (await r.json()).here;};
  const frame = h => JSON.stringify({...h, tick: 0}), absent = await here();
- const rackDef = god.model.resolvedDef('core/camp-provision-rack@1'), inside = containerInside(rackDef);
+ const rackDef = god.model.resolvedDef('core/camp-provision-rack@1'), inside = containerInside(rackDef), geometry = rackGeometry(rackDef);
  assert.ok(inside); assert.equal(rackDef.components.carryable, undefined, 'a fixed fixture');
  const farOps = Array.from({length: 100}, (_, i) => [
   {op: 'place', def: 'core/camp-provision-rack@1', name: `distant-rack-${i}`, p: [120 + i % 10 * 2, 120 + Math.floor(i / 10) * 2]},
@@ -63,15 +76,15 @@ test('camp provision rack: strict offers, stocked places, hand clearance, access
  const done = async (name, verb, watch, who = soul) => {const previous = soul; soul = who; try {const c = await offer(name, verb); assert.equal(c.available, true, JSON.stringify(c)); const r = ok(await act(c.id)); const rc = await wait(r, watch); assert.equal(rc.phase, 'completed', JSON.stringify(rc).slice(0, 800)); return rc;} finally {soul = previous;}};
  const refused = async (name, verb, code, who = soul) => {const previous = soul; soul = who; try {const c = await offer(name, verb); const r = await act(c.id); assert.equal(r.accepted, false); assert.equal(r.code, code, JSON.stringify(r));} finally {soul = previous;}};
  const rackFrame = name => {const wp = god.model.worldPose(ent(name)), c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); return p => [(p[0] - wp.x) * c - (p[2] - wp.z) * s, p[1] - wp.y, (p[0] - wp.x) * s + (p[2] - wp.z) * c];};
- let transferSamples = 0, lipSamples = 0, minLip = Infinity;
+ let transferSamples = 0, lipSamples = 0, minLip = Infinity, minPhysicalRail = Infinity;
  const watch = (itemName, boxName) => () => {
   const transfer = body().human?.itemTransferV1; if (!transfer || transfer.reachTick === undefined) return;
   transferSamples++; const item = native(itemName), local = rackFrame(boxName), p = local(item.pose.p);
   // The held bowl's complete footprint clears the front rail, not only its centre. Its base must remain above the
   // shelf once it enters the tray; neither side nor the fixed back can be crossed below their top edge.
   if (item.support?.kind === 'in-hand') {
-   if (Math.abs(p[0]) < 0.695 && p[2] + 0.125 >= 0.24 && p[2] - 0.125 <= 0.27) {minLip = Math.min(minLip, p[1] - inside.lip); lipSamples++; assert.ok(p[1] >= inside.lip, `bowl clears rail: ${JSON.stringify(p)}`);}
-   if (p[2] - 0.125 < 0.24) {assert.ok(p[1] >= 1.015 - 0.002, 'above tray floor'); assert.ok(Math.abs(p[0]) + 0.125 <= 0.57 + 0.002, 'clear of tray sides'); assert.ok(p[2] - 0.125 >= -0.24 - 0.002, 'clear of tray back');}
+   if (p[0] + 0.125 >= geometry.rail.min[0] && p[0] - 0.125 <= geometry.rail.max[0] && p[2] + 0.125 >= geometry.rail.min[2] && p[2] - 0.125 <= geometry.rail.max[2]) {minLip = Math.min(minLip, p[1] - inside.lip); minPhysicalRail = Math.min(minPhysicalRail, p[1] - geometry.rail.max[1]); lipSamples++; assert.ok(p[1] >= inside.lip, `bowl clears transfer envelope: ${JSON.stringify(p)}`); assert.ok(p[1] >= geometry.rail.max[1], 'bowl clears physical rail');}
+   if (p[2] - 0.125 < geometry.rail.min[2]) {assert.ok(p[1] >= geometry.floor.max[1] - 0.002, 'above tray floor'); assert.ok(p[0] - 0.125 >= geometry.left.max[0] - 0.002 && p[0] + 0.125 <= geometry.right.min[0] + 0.002, 'clear of tray sides'); assert.ok(p[2] - 0.125 >= geometry.back.max[2] - 0.002, 'clear of tray back');}
    for (const other of ['bowl-one', 'bowl-two', 'bowl-three']) {if (other === itemName) continue; const o = native(other); if (o.support?.on !== id(boxName)) continue; const q = local(o.pose.p); assert.ok(Math.abs(p[0] - q[0]) >= 0.25 - 0.002 || Math.abs(p[2] - q[2]) >= 0.25 - 0.002 || p[1] >= q[1] + 0.1 - 0.002, 'clear of another stored bowl');}
   }
  };
@@ -85,7 +98,7 @@ test('camp provision rack: strict offers, stocked places, hand clearance, access
   if (i === 0) {const before = structuredClone(native(name).support), invalid = await act(put.id, []); assert.equal(invalid.accepted, false); assert.equal(invalid.code, 'capability.params'); assert.deepEqual(native(name).support, before, 'malformed params change nothing');}
   await done('camp-rack', 'put-in', watch(name, 'camp-rack'));
   assert.deepEqual(native(name).support, {kind: 'resting-on', on: id('camp-rack'), slot: `in-${i + 1}`});
-  const p = rackFrame('camp-rack')(native(name).pose.p); assert.ok(Math.abs(p[1] - 1.015) < 0.002); assert.ok(Math.abs(p[0] - inside.slots[i].p[0]) < 0.002);
+  const p = rackFrame('camp-rack')(native(name).pose.p); assert.ok(Math.abs(p[1] - geometry.floor.max[1]) < 0.002); for (let k = 0; k < 3; k++) assert.ok(Math.abs(p[k] - inside.slots[i].p[k]) < 0.002, 'stored bowl is at the physical slot endpoint');
  }
  assert.ok(transferSamples > 20 && lipSamples > 0, 'recorded transfer crosses the rail');
  const stocked = await here(), facts = stocked.objects.find(o => o.id === id('camp-rack'))?.state;
@@ -105,9 +118,26 @@ test('camp provision rack: strict offers, stocked places, hand clearance, access
  await done('bowl-one', 'pick-up', undefined, souls.Bea);
  await refused('private-rack', 'put-in', 'object.private', souls.Bea); await done('table', 'put-on', undefined, souls.Bea);
  await done('bowl-one', 'pick-up'); await done('private-rack', 'put-in'); assert.equal(ent('bowl-one').in.parent, id('private-rack'));
+
+ // The authored front approach can be legally obstructed by another fixture. A failed approach must name the
+ // existing route refusal and keep the held item, rather than reaching through the obstruction or relocating it.
+ await done('bowl-two', 'pick-up');
+ const wp = god.model.worldPose(ent('camp-rack')), [sx, sz] = inside.stand;
+ ok(god.act({ops: [
+  {op: 'define', def: {schema: 'def/1', name: 'camp-test-obstruction', version: 1, form: 'point', tags: ['wall'], description: 'A test obstruction occupying the rack approach.', make: {kind: 'gen', gen: 'kit/2', args: {shapes: [{kind: 'box', at: [0, 1, 0], size: [2.4, 2, 1], collide: true}]}}, size: {box: [2.4, 2, 1]}}},
+  {op: 'place', def: 'camp-test-obstruction@1', name: 'obstruction', p: [wp.x + sx * Math.cos(wp.yaw) + sz * Math.sin(wp.yaw), wp.z - sx * Math.sin(wp.yaw) + sz * Math.cos(wp.yaw)], r: wp.yaw},
+ ]})); await tick(40);
+ const beforeBlocked = structuredClone(native('bowl-two').support), blocked = await act((await offer('camp-rack', 'put-in')).id), failure = blocked.accepted ? await wait(blocked) : blocked;
+ assert.equal(failure.code, 'route.goal-blocked', JSON.stringify(failure).slice(0, 800));
+ if (blocked.accepted) assert.equal(failure.phase, 'failed');
+ assert.deepEqual(native('bowl-two').support, beforeBlocked, 'blocked approach keeps original hand custody');
+ assert.equal(ent('bowl-two').in.parent, soul.entityId);
+ ok(god.act({ops: [{op: 'remove', id: id('obstruction')}]})); await tick(40);
+ await done('camp-rack', 'put-in', watch('bowl-two', 'camp-rack')); assert.equal(native('bowl-two').support.on, id('camp-rack'));
+ await done('bowl-two', 'pick-up', watch('bowl-two', 'camp-rack')); await done('table', 'put-on');
  assert.deepEqual(f.host.engine.runtime.violations, []);
  assert.equal(f.host.glitches.total, 0, 'no recovered or contained engine faults');
- const report = {status: 'pass', hereBytes: {absent: frame(absent).length, distant100: frame(far).length, nearbyStocked: frame(stocked).length}, transferSamples, lipSamples, minLipMargin: minLip, limits: ['fixed fixture; no portability, packing, deployment or cooling']};
+ const report = {status: 'pass', hereBytes: {absent: frame(absent).length, distant100: frame(far).length, nearbyStocked: frame(stocked).length}, transferSamples, lipSamples, minLipMargin: minLip, minPhysicalRailMargin: minPhysicalRail, blockedApproach: failure.code, limits: ['fixed fixture; no portability, packing, deployment or cooling']};
  if (process.env.SOUL_ACTIONS_OUT) {mkdirSync(process.env.SOUL_ACTIONS_OUT, {recursive: true}); writeFileSync(`${process.env.SOUL_ACTIONS_OUT}/summary.json`, JSON.stringify(report, null, 2) + '\n');}
  t.diagnostic(JSON.stringify(report));
 });
@@ -132,6 +162,8 @@ test('camp provision rack: three maximum-fit parcels clear the tray and one anot
   ...names.map((name, i) => ({op: 'place', def: 'camp-fit-parcel@1', name, in: {parent: 'table', slot: 'top'}, p: [(i - 1) * 0.4, 0]})),
  ]})); await tick(40);
  const ent = name => [...god.model.entities.values()].find(e => e.name === name), id = name => ent(name).id, item = name => f.host.engine.world.entities[id(name)];
+ const rackDef = god.model.resolvedDef('core/camp-provision-rack@1'), geometry = rackGeometry(rackDef), inside = containerInside(rackDef);
+ assert.ok(inside.lip > geometry.rail.max[1], 'authored transfer envelope is conservative, independent of physical geometry');
  let samples = 0, railSamples = 0, minRail = Infinity, minSide = Infinity;
  const overlap = (a, aa, b, ba, ah = [0.15, 0.15], bh = [0.15, 0.15]) => {
   const axes = a => [[Math.cos(a), Math.sin(a)], [-Math.sin(a), Math.cos(a)]];
@@ -144,14 +176,11 @@ test('camp provision rack: three maximum-fit parcels clear the tray and one anot
   const local = p => [(p[0] - wp.x) * c - (p[2] - wp.z) * s, p[1] - wp.y, (p[0] - wp.x) * s + (p[2] - wp.z) * c];
   const p = local(e.pose.p), yaw = e.pose.yaw + wp.yaw, half = 0.15 * (Math.abs(Math.cos(yaw)) + Math.abs(Math.sin(yaw)));
   samples++;
-  if (overlap(p, yaw, [0, 0, 0.255], 0, [0.15, 0.15], [0.57, 0.015])) {railSamples++; minRail = Math.min(minRail, p[1] - 1.095); assert.ok(p[1] >= 1.095, `maximum parcel clears rail ${JSON.stringify({p, yaw})}`);}
+  if (overlap(p, yaw, geometry.rail.at, 0, [0.15, 0.15], [geometry.rail.size[0] / 2, geometry.rail.size[2] / 2])) {railSamples++; minRail = Math.min(minRail, p[1] - geometry.rail.max[1]); assert.ok(p[1] >= geometry.rail.max[1], `maximum parcel clears rail ${JSON.stringify({p, yaw})}`);}
   // Test actual finite panel volumes. A transfer starts at the hand beside the source table, which may be far behind
   // the rack; that is not an item inside the tray. Each panel includes its complete height and oriented footprint.
-  for (const [panel, at, size] of [
-   ['left side', [-0.585, 1.105, 0], [0.03, 0.18, 0.54]], ['right side', [0.585, 1.105, 0], [0.03, 0.18, 0.54]],
-   ['back', [0, 1.105, -0.255], [1.14, 0.18, 0.03]], ['rail', [0, 1.055, 0.255], [1.14, 0.08, 0.03]], ['floor', [0, 1, 0], [1.2, 0.03, 0.54]],
-  ]) if (p[1] < at[1] + size[1] / 2 - 0.001 && p[1] + 0.28 > at[1] - size[1] / 2 + 0.001) assert.ok(!overlap(p, yaw, at, 0, [0.15, 0.15], [size[0] / 2, size[2] / 2]), `maximum parcel clears ${panel}: ${JSON.stringify({p, yaw})}`);
-  if (Math.abs(p[2]) <= 0.05 && Math.abs(p[0]) <= 0.4 && p[1] < 1.195) minSide = Math.min(minSide, 0.57 - Math.abs(p[0]) - half);
+  for (const panel of geometry.panels) if (p[1] < panel.max[1] - 0.001 && p[1] + 0.28 > panel.min[1] + 0.001) assert.ok(!overlap(p, yaw, panel.at, 0, [0.15, 0.15], [panel.size[0] / 2, panel.size[2] / 2]), `maximum parcel clears actual panel ${JSON.stringify({panel: panel.at, p, yaw})}`);
+  if (Math.abs(p[2]) <= 0.05 && Math.abs(p[0]) <= 0.4 && p[1] < geometry.left.max[1]) minSide = Math.min(minSide, p[0] - half - geometry.left.max[0], geometry.right.min[0] - p[0] - half);
   for (const other of names) {const o = item(other); if (other === name || o.support?.on !== id('rack')) continue; const q = local(o.pose.p); assert.ok(p[1] >= q[1] + 0.28 - 0.001 || !overlap(p, yaw, q, o.pose.yaw + wp.yaw), `maximum parcels do not overlap: ${name}, ${other}`);}
  };
  const done = async (name, verb, moving) => {
@@ -161,7 +190,16 @@ test('camp provision rack: three maximum-fit parcels clear the tray and one anot
  };
  for (const turn of [0.4, 1.9]) {
   ok(god.act({ops: [{op: 'place', def: 'core/camp-provision-rack@1', name: 'rack', p: [ax + 1, az + 3], r: turn}]})); await tick(40);
-  for (const name of names) {await done(name, 'pick-up'); await done('rack', 'put-in', name); assert.equal(item(name).support.on, id('rack'));}
+  for (const [i, name] of names.entries()) {
+   await done(name, 'pick-up'); await done('rack', 'put-in', name);
+   assert.deepEqual(item(name).support, {kind: 'resting-on', on: id('rack'), slot: inside.slots[i].id});
+   const wp = god.model.worldPose(ent('rack')), p = item(name).pose.p, c = Math.cos(wp.yaw), s = Math.sin(wp.yaw), local = [(p[0] - wp.x) * c - (p[2] - wp.z) * s, p[1] - wp.y, (p[0] - wp.x) * s + (p[2] - wp.z) * c];
+   for (let k = 0; k < 3; k++) assert.ok(Math.abs(local[k] - inside.slots[i].p[k]) < 0.002, 'maximum parcel rests at its actual slot endpoint');
+   assert.ok(Math.abs(local[1] - geometry.floor.max[1]) < 0.002, 'maximum parcel rests on the physical tray floor, not at envelope height');
+   const yaw = item(name).pose.yaw + wp.yaw, half = 0.15 * (Math.abs(Math.cos(yaw)) + Math.abs(Math.sin(yaw)));
+   assert.ok(local[0] - half >= geometry.left.max[0] && local[0] + half <= geometry.right.min[0], 'stored maximum parcel clears both sides');
+   assert.ok(local[2] - half >= geometry.back.max[2] && local[2] + half <= geometry.rail.min[2], 'stored maximum parcel fits behind the physical rail');
+  }
   for (const name of [...names].reverse()) {await done(name, 'pick-up', name); await done('table', 'put-on');}
   ok(god.act({ops: [{op: 'remove', id: id('rack')}]})); await tick(20);
  }
