@@ -138,7 +138,8 @@ const FAR: [number, number] = [1e9, 1e9];
 const WITH_PARAM = {type: 'array', items: 'Soul id or name', optional: true, description: 'Invite Souls near you; each joins only if they accept (shared walk / ride).'};
 type Row = {created_at: number; receipt_id: string; soul_id: string; capability: string; phase: EdgeReceipt['phase']; accepted_tick: number; started_tick: number | null; ended_tick: number | null; code: string | null; reason: string | null; program_id: string | null; client_ref: string | null; plan?: string | null; detail?: string | null};
 const ARRIVAL_FRESH_MS = 10 * 60_000, MAX_DATE_MS = 8.64e15;
-type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string; navWarm?: true};
+/** failNext (#1468): a route-dead failure held to the next tick, so its alternatives are built then (one build a tick). */
+type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string; navWarm?: true; failNext?: {code: string; reason: string}};
 type StandReleaseV1={actor:string;owner:string;seats:{action:string;slot:string}[]};
 
 /** The body plans behind a Soul's offered capabilities, by capability id. */
@@ -883,6 +884,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if(this.motionWatch.size)this.motionTicks(tick);
     for (const [soulId, p] of this.pending) {
       if (this.host.quietBarrier) {p.deadline = Math.max(p.deadline, tick + WAIT_LIMIT_TICKS); continue;}   // the wait clock pauses during renewal
+      if (p.failNext) {this.failWait(soulId, p, tick, p.failNext.code, p.failNext.reason); continue;}
       if (tick > p.deadline) {this.pending.delete(soulId); this.update(p.receipt, p.navWarm ? {phase: 'failed', code: 'nav.warm-timeout', reason: 'Navigation was still not ready two minutes after this walk was asked; ask again.'} : {phase: 'failed', code: 'state.safe-stop-timeout', reason: 'The body could not reach a safe stop within a minute.'}); continue;}
       if (this.host.quietBarrier) continue;
       // nav-warm-wait/1 (#884): a walk refused while navigation was cold starts from goals made again once it is warm
@@ -892,7 +894,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         const steps = this.navReplan(p.soul, p.capability, p.steps);
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason;   // the wait's reason is over once it is warm
         if (said?.endsWith(NAV_WARM_REASON)) this.update(p.receipt, {reason: said.slice(0, -NAV_WARM_REASON.length).trim() || null});
-        if (steps && !Array.isArray(steps)) {this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt); this.update(p.receipt, {phase: 'failed', code: steps.code, reason: steps.reason}); continue;}
+        if (steps && !Array.isArray(steps)) {this.failWait(soulId, p, tick, steps.code, steps.reason); continue;}
         if (steps) {p.steps = steps; const l = this.launched.get(p.receipt); if (l) l.steps = steps;}
       }
       const issue = this.host.engine.canPerform({actor: p.soul.entityId, label: p.label, steps: p.steps});
@@ -903,8 +905,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
         p.navWarm = true; p.deadline = Math.max(p.deadline, tick + NAV_WARM_WAIT_TICKS); this.arm(p);
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason; this.update(p.receipt, {reason: said ? `${said} ${NAV_WARM_REASON}` : NAV_WARM_REASON}); continue;
       }
+      if (issue) {this.failWait(soulId, p, tick, issue.code, humanBlockedExplanationV1(issue.code, p.label)); continue;}
       this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt);
-      if (issue) {this.update(p.receipt, {phase: 'failed', code: issue.code, reason: humanBlockedExplanationV1(issue.code, p.label)}); continue;}
       void this.decide(p.soul, p.receipt, p.capability, p.label, p.steps).catch(() => this.update(p.receipt, {phase: 'failed', code: 'ledger.unavailable', reason: 'The world could not record this action.'}));
     }
     if (this.ambient && tick % 20 === 0) this.ambientLife(tick);
@@ -1022,6 +1024,41 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  as act binds it: the one offer, else made on demand, a far part's walk; RESOLVE2's roofReach and WALK3's main ground
    *  run only once navigation is warm). The warm offer's own refusal when it is no longer available (a roof no stair reaches);
    *  null when the offer is gone or its walks no longer line up with the plan's: the plan is then judged as it was. */
+  /** #1468: a route-dead answer at act time names 1-3 available alternatives (as a blocked offer does when listed), never
+   *  the refused act; other codes and verifier probes name none. Only the verb is its words: an id's own words name no
+   *  place ("…-roof-planter-1" would name eden-house-1). */
+  private routeDeadAlternatives(soul: EdgeSoul, capability: string, code: string, keptOnly = false): Alternative[] | 'no-menu' | undefined {
+    if (!ROUTE_DEAD.has(code) || isVerificationProbe(soul.soulId)) return undefined;
+    try {
+      const verb = capability.includes(':') ? capability.slice(0, capability.indexOf(':')) : capability;
+      // the tick path never builds a menu (a cold build is ~400 ms on Eden 2026, and it would block the clock): it reads the
+      // Soul's kept menu, stale or not (every pick is bound again below and kept only if available now), or names none
+      const w = keptOnly ? this.keptMenu(soul) : this.wordsMenu(soul);
+      if (!w) return 'no-menu';
+      // the refused offer itself, bound exactly or (an on-demand walk, as a roof planter's) resolved as navReplan does
+      const cap = this.bindOne(soul, capability)?.cap ?? this.resolveOnDemand(soul, capability, [...w.caps], new Map(w.plans)).caps.find(c => c.id === capability);
+      const alt = this.withAlternatives(soul, verb, {code, reason: ''}, w.caps, cap, keptOnly).alternatives?.filter(x => x.id !== capability);
+      return alt?.length ? alt : undefined;
+    } catch (e) {console.error('[edge] route-dead alternatives', e instanceof Error ? e.message : e); return undefined;}   // a local failure: the refusal stands without them
+  }
+  /** #1468: a walk that waited (for warm navigation or a safe stop) and then fails route-dead keeps its alternatives on the receipt.
+   *  Stored before the receipt turns failed, so the emitted failed receipt and its outcome carry them (review of 1a07cae42). */
+  /** #1468: this Soul's last menu as kept (its exact or words menu), however old; null when it has none. Never builds one. */
+  private keptMenu(soul: EdgeSoul): {caps: EdgeCapability[]; plans: Plans} | null {return this.capCache.get(soul.soulId)?.value ?? this.wordsCache.get(soul.soulId)?.value ?? null;}
+  /** #1468: a failed wait's alternatives, from the kept menu only; 'no-menu' when the Soul has none (the reason says where to look). */
+  private failedAlternatives(p: Pending, code: string): 'no-menu' | undefined {const alternatives = this.routeDeadAlternatives(p.soul, p.capability, code, true); if (alternatives === 'no-menu') return alternatives; if (alternatives) this.setDetail(p.receipt, {alternatives}); return undefined;}
+  /** #1468: the tick on which route-dead alternatives were last built. A build costs about 25 ms on Eden 2026, so at most
+   *  one is built a tick: a second failure that tick stays pending (failNext) and fails on the next, with its own. Live
+   *  edge state only; nothing reaches the engine log. */
+  private altTick = -1;
+  /** A waited act fails (route-dead with its alternatives, stored before the receipt turns failed), or is held a tick. */
+  private failWait(soulId: string, p: Pending, tick: number, code: string, reason: string) {
+    // only a build counts: a Soul with no kept menu fails at once, without alternatives and without building one
+    if (ROUTE_DEAD.has(code) && !isVerificationProbe(p.soul.soulId) && this.keptMenu(p.soul)) {if (this.altTick === tick) {p.failNext = {code, reason}; return;} this.altTick = tick;}
+    this.pending.delete(soulId); this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=NULL WHERE world_id=? AND receipt_id=?').run(this.host.worldId, p.receipt);
+    const none = this.failedAlternatives(p, code);
+    this.update(p.receipt, {phase: 'failed', code, reason: none ? `${reason.replace(/\s+$/, '')} Read your capabilities for where you can go from here.` : reason});
+  }
   private navReplan(soul: EdgeSoul, capability: string, steps: Program['steps']): Program['steps'] | {code: string; reason: string} | null {
     try {
       const one = this.bindOne(soul, capability), w = one ? null : this.wordsMenu(soul);
@@ -2330,7 +2367,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (issue?.code === 'route.unreachable' && navWasCold && steps.some(s => WALK_VERBS.has(s.verb)) && !isVerificationProbe(soul.soulId)) {
       if (this.navWarmFor(NAV_ACT_WARM_MS)) {
         const again = this.navReplan(soul, capability, steps);
-        if (again && !Array.isArray(again)) return {...refuse(again.code, again.reason), ...resolved};
+        if (again && !Array.isArray(again)) {const alternatives = this.routeDeadAlternatives(soul, capability, again.code) as Alternative[] | undefined; return {...refuse(again.code, again.reason), ...resolved, ...(alternatives ? {alternatives} : {})};}
         if (again) return this.launch(soul, capability, label, again, clientRef, resolved, refuse, commit, contentParams, chosen, true);
       } else {
       const r = this.insert(soul, capability, 'waiting', clientRef,false,{...detail,...keepsSeat()},contentParams); commit?.(r.id); remember(r.id);
@@ -2340,7 +2377,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
     }
     // The verifier probe reports the engine's own diagnostic (what blocks the seat, how much room it needs) to the builder.
-    if (issue && !WAIT_CODES.has(issue.code)) return {...refuse(issue.code, (issue.code.startsWith('carrier.') || isVerificationProbe(soul.soulId) ? issue.message : humanBlockedExplanationV1(issue.code, label) + unfinishedWay(issue)) + (steppedOut ? ` ${steppedOut}` : '')), ...resolved};
+    if (issue && !WAIT_CODES.has(issue.code)) {
+      // #1468 (#850 follow-up): an offer that was available, whose walk the planner refuses route-dead, names what this Soul
+      // can do instead, as a blocked offer does at listing time; never the refused act itself
+      const alternatives = this.routeDeadAlternatives(soul, capability, issue.code) as Alternative[] | undefined;
+      return {...refuse(issue.code, (issue.code.startsWith('carrier.') || isVerificationProbe(soul.soulId) ? issue.message : humanBlockedExplanationV1(issue.code, label) + unfinishedWay(issue)) + (steppedOut ? ` ${steppedOut}` : '')), ...resolved, ...(alternatives ? {alternatives} : {})};
+    }
     if (issue) {
       // Asleep or mid-step: stop safely first, then start (receipt `waiting`). #1327: the armed receipt starts itself once
       // the body is free; the stop is queued after it commits and bounded, so it never turns the answer into a 503.
@@ -2844,7 +2886,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  already read (one per verb). Nothing available: no field. */
   /** CTRL-3 (#1095): what serves the same intent with a different binding, at most 3, nearest first within that class: never
    *  a different verb, never a different destination, never the refused act. Information for the agent, never a default. */
-  withAlternatives<T extends {code: string; reason: string; did_you_mean?: {id: string; label: string}[]}>(soul: EdgeSoul, words: string, out: T, caps: EdgeCapability[], blocked?: EdgeCapability): T & {alternatives?: Alternative[]} {
+  /** `keptOnly` (#1468, the tick path): read only `caps`, never build this Soul's menu. */
+  withAlternatives<T extends {code: string; reason: string; did_you_mean?: {id: string; label: string}[]}>(soul: EdgeSoul, words: string, out: T, caps: EdgeCapability[], blocked?: EdgeCapability, keptOnly = false): T & {alternatives?: Alternative[]} {
     const asked = words.trim(), seen = new Set([asked, ...(out.did_you_mean ?? []).map(d => d.id)]), picks: {c: EdgeCapability; why: string; partial?: true}[] = [];
     const add = (c: EdgeCapability | undefined, why: string, partial?: boolean) => {if (c?.available && !seen.has(c.id) && picks.length < ALTERNATIVES * 2) {seen.add(c.id); picks.push({c, why, ...(partial ? {partial: true as const} : {})});}};
     const ctx = this.vocabulary(soul, caps), w = tokens(words), head = (asked.includes(':') ? asked.slice(0, asked.indexOf(':')) : w[0] ?? '').toLowerCase();
@@ -2855,7 +2898,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // words only, longest first
     let named: string[] | undefined, place: Place | undefined;
     for (let i = Math.max(1, w.length - 4); i < w.length && !named; i++) {const m = placeMatchTier(w.slice(i), ctx.places, ctx.withheld); if (m.tier >= 0 && m.tier <= 1 && m.found.length) {named = w.slice(i); place = this.places.byId.get(m.found[0]!.id);}}
-    const menu = (wanted: string) => caps.some(c => c.verb === wanted && c.id !== asked) ? caps : this.wordsMenu(soul).caps;
+    const menu = (wanted: string) => keptOnly || caps.some(c => c.verb === wanted && c.id !== asked) ? caps : this.wordsMenu(soul).caps;
     // a place no walk reaches may say itself what to do instead ("the outdoor cottage bench is another place to pause"): an
     // offer whose own title or alias its description names comes first, under whatever verb, since walking there was only the
     // way to the activity. It only partly serves, and says so (coordinator's exception to A1 on #1095)
