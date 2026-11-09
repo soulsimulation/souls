@@ -77,7 +77,7 @@ export type WorldDelta = StreamPos & {
   items?: ItemRow[]; togetherVersion?: number;
   static?: StaticLayer;            // only when the static epoch moved
   menuInputs?: string[];
-  scene?: unknown; sceneKey?: string;   // B-spatial: when `${spatial.epoch}|${entityPhysicsV1.hash}` moved: rebuild the spatial replica
+  scene?: unknown; sceneKey?: string;   // B-spatial: when `${spatial id}:${spatial.epoch}|${entityPhysicsV1.hash}` moved (#1560: a restored engine's service is a new id): rebuild the spatial replica
   pages?: unknown;                 // B-spatial: spatial.pageRectsV1() when the windows moved
   navReady?: boolean;              // B-spatial: main's connectivity ready flag when it flipped
   menu?: MenuDelta;                // B-facade: changed action rows, verdicts, menu statics

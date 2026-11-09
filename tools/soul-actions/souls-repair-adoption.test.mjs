@@ -1,7 +1,7 @@
-// #1323 (hotfix 4.16.1): the repair rules on by default. A world whose history began without them boots under its own rules,
+// #1323 (hotfix 0.120.1): the repair rules on by default. A world whose history began without them boots under its own rules,
 // adopts them in one logged fact at its head, and a later boot (clean or crash) replays that fact and reaches the same world.
 // The fault is the Eden incident's: the world sets a still body down inside a static at a fixed tick, in every runtime, as
-// the balloon's step-out did to Kino. Under 4.16 that halts, and a reboot halts again.
+// the balloon's step-out did to Kino. Under 0.120 that halts, and a reboot halts again.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
@@ -21,7 +21,7 @@ import {soulsRepairReaderV1} from '../../packages/engine-mars/src/souls-repair-r
 import {acknowledgeRelocation} from '../../mars/viewer/engine/runtime/invariants.ts';
 import {kernelHash} from '../../apps/server/src/fold.ts';
 
-// 4.16 as production runs it: no repair rules, no shared carry
+// 0.120 as production runs it: no repair rules, no shared carry
 const old = await marsFactory({...GREEN_FIELD_WORLD, soulsRepairV1: false});
 const plan = {at: -1, who: '', to: null};   // at tick `at` the world itself sets body `who` down at `to` (inside a table)
 const wrap = (e) => {
@@ -40,7 +40,7 @@ const refusals = (db) => db.db.prepare("SELECT payload FROM events WHERE author=
 const halts = (h) => Object.values(h.glitches.byRule).reduce((n, r) => n + (r.halt ?? 0), 0);
 const run = async (h, n) => { for (let i = 0; i < n && h.clockAvailable && !h.paused; i++) { h.tickOnce(); if (i % 10 === 0) await setImmediate(); if (h.clockAvailable && !h.paused) h.drainInputs(); } };
 
-/** The incident world, halted under 4.16's rules: a durable clock, two Souls, a god's table, a snapshot before the fault. */
+/** The incident world, halted under 0.120's rules: a durable clock, two Souls, a god's table, a snapshot before the fault. */
 async function haltedWorld(t, path, moving) {
   const f = fixture(path, faulted(old), {durableClockV1: true}); f.brain.quiesce();
   const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false, sharedCarry: false}), app = new Hono();
@@ -64,11 +64,11 @@ async function haltedWorld(t, path, moving) {
   host.saveSnapshot(true);
   plan.at = host.engine.world.tick + 5; plan.who = Bo.entityId; plan.to = [x + 4, z];
   await run(host, 40);
-  assert.equal(host.clockAvailable, false, '4.16 halts'); assert.deepEqual(Object.keys(host.glitches.byRule), ['collision.human-static']);
+  assert.equal(host.clockAvailable, false, '0.120 halts'); assert.deepEqual(Object.keys(host.glitches.byRule), ['collision.human-static']);
   const rules = host.engine.rulesVersion; assert.doesNotMatch(rules, REPAIR);
   comms.close(); host.stop(); f.db.close();
-  // a plain restart under 4.16's reader halts again
-  { const {db, h} = boot(path, faulted(old)); h.boot(); await run(h, 20); assert.equal(h.clockAvailable, false, 'a 4.16 restart halts again'); h.stop(); db.close(); }
+  // a plain restart under 0.120's reader halts again
+  { const {db, h} = boot(path, faulted(old)); h.boot(); await run(h, 20); assert.equal(h.clockAvailable, false, 'a 0.120 restart halts again'); h.stop(); db.close(); }
   return {Bo, rules};
 }
 
@@ -111,19 +111,19 @@ test(`R2 R3 R4 R5 R7 R8 the halted world (${moving ? 'body walking under a progr
     const {db, h} = boot(path, reader(true)); assert.equal(h.boot().from, 'snapshot'); assert.deepEqual(head(h), live);
     assert.equal(await accept(h, h.adoptSoulsRepairV1('operator:souls-repair-default')), null); assert.equal(adoptions(db).length, 1);
     assert.ok(!Object.keys(h.glitches.byRule).includes('clock-frontier.replay-differs')); h.stop(); db.close(); }
-  // R5: SIM_SOULS_REPAIR=0 is ignored for an adopted world (it boots under the rules it has), and 4.16's reader refuses it
+  // R5: SIM_SOULS_REPAIR=0 is ignored for an adopted world (it boots under the rules it has), and 0.120's reader refuses it
   { const {db, h} = boot(path, reader(false)); h.boot(); assert.deepEqual(head(h), live); await run(h, 20); assert.equal(h.clockAvailable, true); h.stop(); db.close(); }
   { const {db, h} = boot(path, faulted(old)); assert.throws(() => h.boot(), /clock-frontier\.rules-incompatible|history rules are incompatible/); db.close(); }
 });
 
-test('R5 SIM_SOULS_REPAIR=0 adopts nothing: an unadopted world boots and runs exactly as under 4.16', async (t) => {
+test('R5 SIM_SOULS_REPAIR=0 adopts nothing: an unadopted world boots and runs exactly as under 0.120', async (t) => {
   quiet(t); plan.at = -1;
   const dir = mkdtempSync(join(tmpdir(), 'repair-off-')), path = join(dir, 'world.db'); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const f = fixture(path, reader(false), {durableClockV1: true}); f.brain.quiesce();
   assert.equal(await accept(f.host, f.host.adoptSoulsRepairV1('operator:souls-repair-default')), null);
   await invite(f, 'ada'); await accept(f.host, f.souls.create('dev:ada', {name: 'Ada', description: 'Opt-out fixture'})); await run(f.host, 100);
   const live = head(f.host); assert.doesNotMatch(live.rules, REPAIR); assert.equal(adoptions(f.db).length, 0); f.host.saveSnapshot(true); f.host.stop(); f.db.close();
-  // 4.16's own reader boots it to the same world, from its snapshot and from genesis
+  // 0.120's own reader boots it to the same world, from its snapshot and from genesis
   for (const mode of ['snapshot', 'genesis']) {
     if (mode === 'genesis') { const db0 = new Db(path); db0.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(worldId); db0.close(); }
     const {db, h} = boot(path, faulted(old)); assert.equal(h.boot().from, mode); assert.deepEqual(head(h), live, mode); h.stop(); db.close();
@@ -144,7 +144,7 @@ test('R1 R4 a new world adopts at tick 0, and a history that began under the rep
       const {db, h} = boot(path, reader(true)); assert.equal(h.boot().from, mode); assert.deepEqual(head(h), live, mode);
       assert.equal(await accept(h, h.adoptSoulsRepairV1('operator:souls-repair-default')), null); assert.equal(adoptions(db).length, 1); h.stop(); db.close();
     } }
-  // a world made under the rules (SIM_SOULS_REPAIR=1 or shared building in 4.16): no adoption fact, genesis runs them
+  // a world made under the rules (SIM_SOULS_REPAIR=1 or shared building in 0.120): no adoption fact, genesis runs them
   { const path = join(dir, 'born.db'), born = faulted(await marsFactory({...GREEN_FIELD_WORLD, soulsRepairV1: true})), f = fixture(path, born, {durableClockV1: true}); f.brain.quiesce();
     await invite(f, 'ada'); await accept(f.host, f.souls.create('dev:ada', {name: 'Ada', description: 'Born under repair'})); await run(f.host, 100);
     const live = head(f.host); assert.match(live.rules, REPAIR); f.host.saveSnapshot(true); f.host.stop(); f.db.close();
