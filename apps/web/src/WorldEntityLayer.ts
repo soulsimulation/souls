@@ -51,6 +51,7 @@ import { isRideBalloonDef, rideMotionDef } from './gen-mesh/kits/ride-balloon.ts
 import { isRideCarrierDef, carrierIdOf } from './ride-carriers.ts';
 import { holdRainbow, isRainbowDef } from './atmosphere/rainbow-things.ts';
 import {WorldEntityStairs,pendingStairDiff} from './WorldEntityStairs.ts';
+import {WorldEntityIncense, type IncenseLiveSelection} from './WorldEntityIncense.ts';
 import { ScatterPools } from './ScatterPools.ts';
 import { MotionInstancer } from './MotionInstancer.ts';
 import { StreamRing, sectorsWithin, sectorDistance } from './StreamRing.ts';
@@ -239,6 +240,12 @@ export class WorldEntityLayer {
     this.sectorWork = null; this.streamStats.sectors++;
   }
   private readonly stairContacts=new WorldEntityStairs();
+  private readonly incenseContacts=new WorldEntityIncense();
+  private incenseWorld='';
+  createIncenseContactResolver(read:()=>IncenseLiveSelection|null){
+    return this.incenseContacts.resolver(read,(q,selection)=>!this.model||!this.active||this.building||this.filling||this.resyncing||
+      this.immutable||selection.world!==this.incenseWorld?null:this.incenseContacts.contact(q,selection,this.model,this.drawn,this.seq));
+  }
   clearSupplementalStairs(){this.stairContacts.clearObservation();}
   supplementalStairs(messages:readonly {kind?:string;seq?:unknown}[]=[],nativeTick:number|null=null){
     if(!this.model||this.resyncing||pendingStairDiff(this.seq,messages,m=>this.stairContacts.affectsDiff(m))){this.clearSupplementalStairs();return [];}
@@ -499,6 +506,7 @@ export class WorldEntityLayer {
   async resync() {
     if (this.immutable || this.resyncing || !this.signal) return;
     this.clearSupplementalStairs();
+    this.incenseContacts.reset();
     this.resyncing = true;
     try {
       const asked = [...this.touched], wantGround = this.groundTouched;
@@ -579,6 +587,7 @@ export class WorldEntityLayer {
    *  page's second loading phase start then). */
   async start(signal: AbortSignal, onSnapshot?: () => void, frozen?:EntitySnapshot) {
     this.clearSupplementalStairs();
+    this.incenseContacts.reset();
     this.signal = signal;
     let snap: EntitySnapshot;
     // lane L3h: the first start takes the snapshot GET index.html sent at page entry (snapshot-prefetch.ts), one request
@@ -587,6 +596,7 @@ export class WorldEntityLayer {
     try { if(frozen){this.immutable=true;snap=structuredClone(frozen);onSnapshot?.();}else{ const decoder = await this.snapshotDecoder(); const got = await loadSnapshot(this.api('/v1/world/snapshot'), signal, true, async (pieces) => { arrivalMark('snapshot-received'); const snapshot = await decoder.initial(pieces, signal); arrivalMark('snapshot-decoded'); return snapshot; }); onSnapshot?.(); if (!got || signal.aborted) return; const r = got.response; noteSnapshotVersion(r.headers.get('x-moderation-version')); snap = got.snap as unknown as EntitySnapshot;
       ageNow(snap, r); }} catch { onSnapshot?.(); return; }
     if (signal.aborted || snap.contract !== 'world/1') return;
+    this.incenseWorld=snap.worldId;
     noteUploadSizes(snap.assetBytes);   // CDN4
     // Keep the old model visible until all new records exist; aborting a sliced load cannot publish half a world.
     try { this.model = await snapshotModel({ constants: snap.constants, state: snap.state, seed: snap.seed ?? 'viewer', seq: snap.counter ?? 0, editSeq: snap.seq, defs: snap.defs, entities: snap.entities, ground: snap.ground }, signal, nextTask); } catch (error) { if (signal.aborted) return; throw error; }
@@ -726,6 +736,7 @@ export class WorldEntityLayer {
     // Edits may arrive while no native frame/people renderer is available.
     // Invalidate the observed fixture/old ancestry even for equal reinsertion.
     this.stairContacts.invalidateDiff(d);
+    this.incenseContacts.invalidate(d);
     {
       const contextChanged=!!d.ground||!!d.diff.world||d.diff.defs.length>0||d.diff.removes.some(id=>contextStamp(this.model!.entities.get(id)))||d.diff.upserts.some(e=>contextStamp(e)!==contextStamp(this.model!.entities.get(e.id)));
       let lit=!!d.ground||!!d.diff.world||d.diff.defs.length>0||!!d.defs?.length||d.diff.removes.some(id=>this.lit(id))||d.diff.upserts.some(e=>this.lit(e.id));
@@ -947,7 +958,7 @@ export class WorldEntityLayer {
       }
       d.obj.visible = shown;
       if (d.removing && t >= 1) { this.motionInstancer.untrack(d.obj); this.thingsGroup.remove(d.obj); disposeObject(d.obj); this.releaseGeometry(d.obj); this.drawn.delete(id); continue; }
-      if (t >= 1 && (!d.motion || (this.freezeSettled && d.motion.glowOnly)) && !d.removing && !ride && !inHand) d.settled = true;
+      if (t >= 1 && (!d.motion || (this.freezeSettled && d.motion.glowOnly)) && !d.removing && !ride && !inHand) {d.settled = true;this.incenseContacts.ready(id);}
       // P1: a hidden thing (a storey its building hides, or far furniture on a phone) is not animated: nobody sees it
       // P7b: things stay at their stored pose under the arrival card (the creatures' first route search was ~0.09 s of a 4x
       // phone's card); nobody sees motion before the card is gone
@@ -1418,6 +1429,7 @@ export class WorldEntityLayer {
   };
 
   dispose() {
+    this.incenseContacts.reset();this.incenseWorld='';
     this.decoderDisposed = true; this.decoder?.dispose();
     this.sites.dispose();
     for (const pool of [this.instancer, this.scatterPools, this.motionInstancer]) pool.group.removeEventListener('childadded', this.onPoolGeometryAdded);
@@ -1628,10 +1640,11 @@ export class WorldEntityLayer {
       this.live.add(e.id); this.touchDependents(e.id);
       // lane PERF-SNAPSHOT: a settled thing asked to stay where it is (a resync, a parent's children re-posed) is left
       // alone: its pose is not re-eased, so it stays settled (frozen on the phone tier) and nothing flashes
-      if (!ease && existing.settled && existing.to.p.equals(target) && existing.to.s === wp.s && existing.obj.rotation.y === wp.yaw && (!Array.isArray(e.r) || (existing.obj.rotation.x === e.r[1] && existing.obj.rotation.z === e.r[2]))) return;
+      if (!ease && existing.settled && existing.to.p.equals(target) && existing.to.s === wp.s && existing.obj.rotation.y === wp.yaw && (!Array.isArray(e.r) || (existing.obj.rotation.x === e.r[1] && existing.obj.rotation.z === e.r[2]))) {this.incenseContacts.observe(m,e,def,existing);return;}
       existing.obj.rotation.set(0, wp.yaw, 0); applyTilt(existing.obj, e);
       existing.from = refinement ? { p: target.clone(), s: wp.s * refinement.scale } : { p: ease ? existing.obj.position.clone() : target.clone(), s: ease ? existing.obj.scale.x : wp.s };
       existing.to = { p: target, s: wp.s }; existing.t0 = this.now; existing.dur = ease ? refinement?.seconds ?? EASE_IN_S : 0.001; existing.settled = false;
+      this.incenseContacts.observe(m,e,def,existing);
       return;
     }
     let built = this.build(e, def);
@@ -1679,6 +1692,7 @@ export class WorldEntityLayer {
     if (isWorld) { from.s = fresh && ease ? 1 : 1; }
     const mdef = rideMotionDef(def);  // BALLOON-BODY: a ride balloon does not hover; Core's vehicle owns its motion
     this.drawn.set(e.id, { ...(opening ? {opening} : {}), ...(instKey ? { inst: instKey, settled: false } : {}), obj: built, from, to, t0: this.now, dur: ease ? refinement?.seconds ?? EASE_IN_S : 0.001, defHash, world: isWorld, ...(hasMotion(mdef) ? { motion: { entity: e, def: mdef, yaw: wp.yaw, glowOnly: glowOnly(mdef) } } : {}) });
+    this.incenseContacts.observe(m,e,def,this.drawn.get(e.id));
     if (this.motionInstancing && !instKey && hasMotion(mdef) && !glowOnly(mdef) && !hasFlames(mdef) && !rainbow) this.motionInstancer.track(built);   // PERF-BATCH round 2
     // entry 42: a thing kept in a shut container is hidden from its first frame (a resync can draw before the next update)
     if (this.keptIn.has(e.id)) { const k = this.drawn.get(e.id)!, v = this.interiorVisible(e.id, k); if (k.inst) k.shown = v; else k.obj.visible = v; }
@@ -1691,6 +1705,7 @@ export class WorldEntityLayer {
   }
   /** What a thing's picture had around it (jets, steam, growth, where it is kept or held). */
   private forget(id: string) {
+    this.incenseContacts.remove(id);
     this.held.delete(id); this.horizonBy.delete(id);
     this.tapJets.delete(id); this.growing.delete(id); this.plantShown.delete(id); this.plantTweens.delete(id);
     { const pour = this.pours.get(id); if (pour) { pour.removeFromParent(); (pour.material as THREE.Material).dispose(); this.pours.delete(id); } }

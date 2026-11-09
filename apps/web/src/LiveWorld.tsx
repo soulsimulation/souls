@@ -617,6 +617,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // bound segments load their verified base; old unbound history uses neutral ground.
     let dayTicks: number | null = null, dayOrigin: number | null = null;
     let base: ReturnType<typeof parseSceneInfo>['scene'] = null, sceneSettled = false, people: TakePeople | WorldLightPeople | null = null;
+    let incenseSelection:{takeId:string;observedTick:number;exact:boolean}|null=null;
     let peopleKitRetryAt=0;
     let appearanceProfiles=ALL_OPTIONAL_APPEARANCE_PROFILES;
     let publication:unknown=null,restMarkers:ReturnType<OldSceneKit['createPublishedRestMarkers']>=null;
@@ -654,7 +655,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       clearSocialPaths();
       clearNewcomerMarkers();restMarkers?.dispose();restMarkers=null;publication=verifiedPublication??null;expansionSceneInfo=info;
       refreshCameraGround();
-      people?.dispose();people=null;applied=null;
+      people?.dispose();people=null;applied=null;incenseSelection=null;
       base=info.scene;nativeBoat=info.shore?.metadata.boat&&info.shore.appearance?{layout:info.shore.metadata.boat.layout,proposal:info.shore.appearance.boat}:undefined;dayTicks=info.clock?.dayTicks??null;dayOrigin=info.clock?.origin??null;broadcast.reset();followView.reset();followed=null;
       capturedPlatforms=info.platforms??null;
       geometry.dispose();geometry=new WorldGeometry(base,info.ground,info.commons,info.shore,info.assetRoot);scene.add(geometry.group);light.fit(geometry.bounds);light.setCommonsReadability(geometry.hasAuthoredCommons);dressForkLand(geometry.group);  // MARSLAND-FORK: layer 3 around the Mars fork
@@ -818,6 +819,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       // new world (WorldLightPeople until then); a failed fetch is retried every 5 s
       if(!peopleKit&&(!peopleLater||arrivalOver())&&now>=peopleKitRetryAt){peopleKitRetryAt=now+5000;void loadPeopleKit().catch(()=>{});}
       const pick = candidate && ensureScene(candidate.chunk,!!past.current,now) && (peopleKit!==null||peopleLater) ? candidate : null;
+      incenseSelection=pick&&!past.current?{takeId:pick.chunk.take.id,observedTick:recordingTick(pick.chunk,tick),exact:pick.exact}:null;
       frameGap = !!pick && !pick.exact;
       if(!pick||past.current||!pick.exact||!entityLayer.active||people instanceof WorldLightPeople){
         entityLayer.clearSupplementalStairs();
@@ -830,7 +832,10 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         try {
           if(people instanceof WorldLightPeople&&peopleKit){scene.remove(people.group);people.dispose();people=null;applied=null;}  // the renderer has loaded: the same take, drawn
           if (!people) {
-            people = peopleKit ? new peopleKit.TakePeople(take, { scene: base ?? undefined,nativeBoat,commonsContrast:geometry.hasAuthoredCommons,humanPresets:humanPresets&&geometry.hasAuthoredCommons }) : new WorldLightPeople(take);
+            people = peopleKit ? new peopleKit.TakePeople(take, { scene: base ?? undefined,nativeBoat,commonsContrast:geometry.hasAuthoredCommons,humanPresets:humanPresets&&geometry.hasAuthoredCommons,
+              incenseContact:entityLayer.createIncenseContactResolver(()=>{const s=context.current.sim,w=s.conn.welcome,at=serverNow(s),selected=incenseSelection;
+                return !past.current&&selected&&w&&w.epoch!==undefined&&at!==null?{world:w.worldId,epoch:String(w.epoch),nativeNowTick:at,live:true,exact:selected.exact,
+                  takeId:selected.takeId,observedTick:selected.observedTick,messages:s.edge??[]}:null;}) }) : new WorldLightPeople(take);
             people.setTemplates(templates);
             people.setBodyTemplates(bodyModels.templates);
             scene.add(people.group);

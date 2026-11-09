@@ -1,9 +1,7 @@
 // #1495, V12: smoldering incense on the existing hand-operated fire/contact faculty.
 import type { DefInput } from '../schemas.ts';
-import { HAND_FIRE } from './hand-fire.ts';
-
-const actions = structuredClone(HAND_FIRE.find(d => d.name === 'core-candle-stand')!.actions!);
-for (const action of actions) action.label = action.name === 'light' ? 'Light the incense' : 'Put out the incense';
+// Keep this viewer-imported definition independent of the unrelated fire vocabulary.
+const actions: NonNullable<DefInput['actions']> = [{"name":"light","label":"Light the incense","roles":"anyone","reach":"touch","params":{},"when":[{"field":"on","is":false}],"then":[{"op":"set","field":"on","value":true}]},{"name":"put-out","label":"Put out the incense","roles":"anyone","reach":"touch","params":{},"when":[{"field":"on","is":true}],"then":[{"op":"set","field":"on","value":false}]}];
 
 export const INCENSE_CENSER_DEF: DefInput = {
   schema: 'def/1', name: 'core-incense-censer', version: 1,

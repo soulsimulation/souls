@@ -463,6 +463,11 @@ context-size checks below), regression runs, and an uncut real-client recording 
 access rules apply. Interrupting the reach before contact preserves the old state. A lit censer stays lit through
 restart until someone puts it out.
 
+The current live viewer binds the authored censer geometry to the observed native action and adjusts the selected
+empty hand toward the tip, preserving the native reach and release times. Missing geometry, stale revisions,
+unsupported poses or other hand owners retain the generic animation. Historical playback has no certified static
+geometry binding for this adjustment and also retains the generic animation; no historical contact guarantee is claimed.
+
 The kit's small glowing tip and smoke source exist only while `on`. Its declared `smokeScale` parameter defaults to
 0.15 (0.1–0.3), attenuating the existing smoke plume; kits without this parameter keep their previous smoke scale.
 The atmosphere draws its rising smoke; there is no flame or crackle. Smoke-bearing roots retain their per-entity
