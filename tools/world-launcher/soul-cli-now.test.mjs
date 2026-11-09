@@ -24,7 +24,7 @@ async function mounted(t) {
       if (u.pathname === '/v1/edge/wait') return reply(200, {cursor: 'c_3', events: []});
       if (u.pathname === '/v1/edge/self/now') return reply(200, {ok: true, now: body.text === null ? null : {text: body.text, at: 7}});
       if (u.pathname === '/v1/edge/self/link') return reply(200, {soulId: 's_pip', link: {state: 'connected', reason: 'listening', since: 3}, now: {text: 'Rowing', at: 7}});
-      if (u.pathname === '/v1/agent/me') return reply(200, {soul: {id: 's_pip', name: 'Pip'}, inbox: {connected: true, queued: 0}});
+      if (u.pathname === '/v1/agent/me') return reply(200, {soul: {id: 's_pip', name: 'Pip'}, paired_as: 'the laptop', inbox: {connected: true, queued: 0}});
       reply(200, {});
     });
   });
@@ -68,5 +68,5 @@ test('now sets the line alone, --clear clears it; a too-long line refuses before
   const before = m.seen.length; const r = await m.run(['act', 'wander:here', '--now', 'y'.repeat(141)], 1);
   assert.match(r.err, /at most 140/); assert.equal(m.seen.length, before, 'no call made');
   const {d} = await m.run(['status']);
-  assert.deepEqual(d.link, {state: 'connected', reason: 'listening', since: 3}); assert.deepEqual(d.now, {text: 'Rowing', at: 7}); assert.equal(d.client, '2.14.0');
+  assert.deepEqual(d.link, {state: 'connected', reason: 'listening', since: 3}); assert.deepEqual(d.now, {text: 'Rowing', at: 7}); assert.equal(d.client, '2.24.8'); assert.equal(d.pairedAs, 'the laptop', 'who the world knows holds it');
 });

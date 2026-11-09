@@ -54,6 +54,8 @@ export type NavHost = {
   levelAt(x: number, z: number, y: number): number;
   /** Things the engine owns (bodies and what they carry). */
   engineOwned(e: Entity): boolean;
+  /** #485: whether someone else is on a named seat's slot, recorded with the menu being built. */
+  seatRead?(entity: string, slot: string, me: string): boolean;
   /** R4-INFO: the place (places.ts) a thing is, if it is one: its walk then targets that place (exits, map, `via`). */
   placeOf?(ref: string): string | undefined;
   /** G1: changes when what every thing's description reads beyond the thing and what holds it changed (terrain, defs,
@@ -869,8 +871,10 @@ export class GodNav {
     if (t.semanticPart?.seat) {
       const target=t.semanticPart.seat, sid=`sit:${t.ref}`;
       // This invokes the engine's actual slot reservation/approach; the semantic name cannot create a seat.
-      caps.push({id:sid,verb:'sit',label:`Sit at ${t.name} [${t.ref}]`,...(t.aliases?.length?{aliases:t.aliases}:{}),target:{id:target.entity,kind:'object'},available:true,params:{seconds:{type:'integer',min:1,max:600,default:600}}});
-      plans.set(sid,{label:`Sit at ${t.name}`,steps:[...stand,...down,go,{verb:'mars:sit',params:{slot:`${target.entity}#${target.slot}`}},{verb:'rest',params:{seconds:600}}],seconds:true});
+      // #485: an offer is executable when it's shown. A seat someone else holds would only fail after admission.
+      const taken=this.h.seatRead?.(target.entity,target.slot,soul.entityId)??false;
+      caps.push({id:sid,verb:'sit',label:`Sit at ${t.name} [${t.ref}]`,...(t.aliases?.length?{aliases:t.aliases}:{}),target:{id:target.entity,kind:'object'},available:!taken,...(taken?{blocked:{code:'seat.taken',reason:`Someone is sitting at ${t.name}; choose another seat, or wait until they stand up.`}}:{}),params:{seconds:{type:'integer',min:1,max:600,default:600}}});
+      if(!taken)plans.set(sid,{label:`Sit at ${t.name}`,steps:[...stand,...down,go,{verb:'mars:sit',params:{slot:`${target.entity}#${target.slot}`}},{verb:'rest',params:{seconds:600}}],seconds:true});
     }
     if (place&&!onlyWalk) this.placeCapabilities(t, place, here, d, [...stand, ...down, go], myLevel, caps, plans);
   }

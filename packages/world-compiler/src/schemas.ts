@@ -100,6 +100,10 @@ export const componentsSchema = z.object({
    *  or a one-shot each time that field changes (mode 'change'); heard within `radius` m of the thing (path/area: its outline). */
   //  W7: `variant` pins one voicing of the kind; `also` adds up to 3 more sounds to the same thing.
   sound: soundSchema.optional(),
+  /** #427: while its `open` state is true this thing shades the ground within `radius` metres (def frame, scale 1) of its centre:
+   *  a parasol. Its canopy overhangs, so this is not its size box, which stays the footprint a body stands clear of. It needs
+   *  that state and an action that sets it, or it never shades; `here` looks 15 m out (OBJECT_RADIUS), so no further than that. */
+  shade: z.object({ radius: num.positive().max(15) }).optional(),
   /** Text on a sign or board (state `text` overrides). */
   sign: z.object({ lines: z.array(z.string().max(80)).max(6).default([]) }).optional(),
   body: z.object({

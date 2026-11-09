@@ -1,6 +1,6 @@
 export type FollowPoint=readonly[number,number,number];
 export type FollowResponse={positionSeconds:number;aimSeconds:number};
-export const DEFAULT_FOLLOW_RESPONSE:Readonly<FollowResponse>=Object.freeze({positionSeconds:1.1,aimSeconds:.45});  // VF4: calmer than .7/.25
+export const DEFAULT_FOLLOW_RESPONSE:Readonly<FollowResponse>=Object.freeze({positionSeconds:1.3,aimSeconds:.55});  // VF4: calmer than .7/.25; #1316: calmer again than 1.1/.45
 const valid=(p:FollowPoint)=>p.length===3&&p.every(v=>Number.isFinite(v)&&Math.abs(v)<=1e6);
 const sub=(a:FollowPoint,b:FollowPoint):[number,number,number]=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
 /** Exact exponential response to a linearly sampled goal over this frame.

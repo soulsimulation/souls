@@ -37,12 +37,13 @@ test('F5: "sit on the presenter box" sits on the presenter timber box; other des
   }
   assert.equal(dry('sit on the teal sofa').would?.capability, 'sit:' + teal);
   const unknown = dry('sit on the auditorium sofa'); assert.equal(unknown.code, 'capability.unavailable'); assert.equal(unknown.did_you_mean.length, 0);
-  assert.equal(dry('sit on the presenter seat').code, 'capability.choose', 'a part choice stays a choice');
+  assert.equal(dry('sit on the presenter seat').would?.capability, 'sit:chiba/part-podium-desk', '#849: its own word names one seat, so resolve says which');
   assert.equal(dry('walk to the Chiba auditorium').would?.capability, 'walk:chiba');
   assert.equal(dry('sit on the chair').ok, true, 'a generic seat word keeps the nearest seat');
   assert.equal(dry('sit:presenter-timber-box').would?.capability, 'sit:' + box);
   assert.match(String(dry('sit on the navy sofa').would?.label), /^navy-sofa/, 'numbered copies keep the nearest of them');
-  assert.equal(dry('sit at the podium desk in Chiba').code, 'capability.choose', 'a part choice stays a choice');
+  assert.equal(dry('sit at the podium desk in Chiba').would?.capability, 'sit:chiba/part-podium-desk', '#849: resolve says which');
+  assert.equal(dry('sit on the seat in Chiba').code, 'capability.choose', 'a type word in a room of seats stays a choice');
   assert.equal(dry('sit on the presenter tracks').ok, false, 'a neighbour named in the label is not the seat');
   // act: the Soul walks to the box and sits on it
   const out = await accept(w.host, Promise.resolve(edge.act(soul as never, {capability: 'sit on the presenter box'}))) as any;

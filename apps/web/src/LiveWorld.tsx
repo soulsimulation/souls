@@ -55,6 +55,7 @@ import {arrivalMark,arrivalOver,whenArrivalCardGone,whenMarked} from './arrival-
 import {worldDepictionBeat,type WorldBeatSampler} from './WorldDepiction.ts';
 import {RecordedGaitContinuity} from '../../../mars/viewer/app/engine-view/recorded-gait-continuity.ts';
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { startWakeLock } from './wake-lock.ts';
 import * as THREE from 'three';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -229,6 +230,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   const [initialProgress,setInitialProgress]=useState<InitialWorldProgress>({generation:0,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
   const retryInitial=useRef<(()=>void)|null>(null);
   useEffect(()=>{onInitialProgress?.(initialProgress);},[initialProgress,onInitialProgress]);
+  useEffect(() => startWakeLock(), []);   // #1390: the screen stays awake while the world is watched
   const progressInCard=!!onInitialProgress&&initialProgress.stage!=='failed';
   const [assetProgress,setAssetProgress]=useState<AssetDownloadProgress>({loaded:0,total:0,failed:0,pending:0});
   const [placeCard,setPlaceCard]=useState<HoverTarget|null>(null);
@@ -528,6 +530,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         const c=context.current,soul=c.sim.conn.replica.souls.get(soulId),p=soul?shown.current.entities[soul.entityId]?.p:null;
         if(!soul||!p||past.current||c.loading||c.graphicsUnavailable||!shown.current.take||(initialGate&&initialGate.snapshot().stage!=='ready'))return false;
         soulFlightChip=!!opts?.chip;  // #892: a touch's follow shows the bottom chip, not the card (same flight)
+        followView.reset();followed=null;  // #1316: Follow couples the camera again, whatever the mode was
         navigation?.release();rts.release();groupSelection.clear();c.onSelect(soulId,soulFlightChip?'chip':undefined);c.setThing(null);
         const target=new THREE.Vector3(p[0],p[1]+1,p[2]);
         if(reducedMotionQuery?.matches){soulFlight=null;c.cameraMode='follow';c.follow=true;c.setCameraMode('follow');hapticTick();return true;}
@@ -868,7 +871,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           const beat=worldDepictionBeat(context.current.depictionBeatAt,s.conn.welcome?.worldId,take,depictedTick,past.current?'history':'live',pick.exact);
           if(!eyes&&!shotMode){camera.updateMatrixWorld();bodyViewer.frustum.setFromProjectionMatrix(bodyViewerM.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));bodyViewer.eye.copy(camera.position);people.setViewer(bodyViewer);entityLayer.viewer=bodyViewer;viewerLive=true;}else{people.setViewer(null);entityLayer.viewer=null;viewerLive=false;}  // PERF-EDEN: far / off-screen bodies are posed at a lower rate
           const sampled = people.show(local * take.dt, depictedTick * dt,beat,(depictedTick - take.startTick) * take.dt,!eyes&&!shotMode?rigBudget:undefined);
-          games.update(sampled.entities,depictedTick);
+          games.update(sampled.entities,depictedTick);entityLayer.setJuggled(games.juggledSets);
           bodyModels.sync(records,sampled.entities);
           const sampledFloaters=new Map(Object.entries(sampled.entities).flatMap(([id,e])=>{const body=recordedBody(records[id]?.body,e.state);if(body?.family!=='floater')return [];const url=admittedBodyUrl(body.modelUrl,apiPath('').replace(/\/$/,''));return [[id,{...body,...(url?{modelUrl:url}:{})} as NonNullable<Entity['body']>]] as [string,NonNullable<Entity['body']>][];}));
           floaters.sync(sampledFloaters);
@@ -1046,7 +1049,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(warmLayer===2){warmLayer=0;const done=()=>{programsPending=false;arrivalMark('programs-linked');};void compileInitialPrograms().then(done,done);}else if(warmLayer===1)warmLayer=2;  // compiled on the next frame, not in the update's task  // no-ops unless this is a new (entity) world
       if(!holdDraw&&shown.current.take)entityLayer.drawHandActuators(shown.current.entities,shown.current.tick,shown.current.take.dt);
       navigation?.update(step);
-      rts.update(step);
+      rts.update(step);touchFree.sync();
       hover.update(now);
       if(soulFlight){
         const flight=soulFlight,id=s.conn.replica.souls.get(flight.soulId)?.entityId,q=id?at.entities[id]?.p:null;
@@ -1173,7 +1176,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
         else speechVisibility.reset();
         emitState(viewerPresentation({room:context.current.edenExpansion?exploreRoom(camera.position.toArray(),EDEN_VIEWER_PLACES,s.conn.replica.souls,at.entities):null,assetDownloads:downloads.snapshot(),soulIds:[...groupSelection],
           drawnTick: drawnTick.current, history: !!past.current, playing: past.current?.playing ?? false,
-          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
+          cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.held,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
           loading: initialGate?.snapshot().stage!=='ready'||context.current.loading || (!at.take && renderer.domElement.dataset.sceneBinding!=='unavailable'),
           unavailableReason: context.current.graphicsUnavailable ?? sceneReason ?? (!area ? 'The world view is covered by controls or has no visible area.' : brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null),
           speechAnchors,
