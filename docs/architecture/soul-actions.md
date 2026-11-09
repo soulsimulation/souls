@@ -473,6 +473,9 @@ context-size checks below), regression runs, and an uncut real-client recording 
 `core/chalkboard@3` also offers existing two-hand upright carrying: write an attributed message, carry the same board
 with `{"to": "display spot"}`, then read, rewrite or erase it at its new position. Its text, author and placement
 persist together. Earlier chalkboard revisions remain fixed; writing still requires contact and access.
+`core/bench@3` combines the repairable bench with existing two-hand upright carrying. Carry the damaged bench to a
+chosen campsite, fetch a hammer and repair it there, then use its native seats at that new position. Damage, repair
+receipt and placement persist. Occupied benches and full hands retain existing carry refusals; earlier revisions stay fixed.
 
 ## Making: paintings and chalk
 
