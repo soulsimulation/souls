@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ship.sh's rehearse step, on the host (#1402; first run by hand for 4.16 and 4.16.1): boot a COPY of every world's database
+# ship.sh's rehearse step, on the host (#1402; first run by hand for 0.120 and 0.120.1): boot a COPY of every world's database
 # with the STAGED release tree, before anything goes live, with boot-rehearsal.mjs (#1323).
 #   bash -s -- <staged release dir> <data dir> <scratch parent> [<meminfo file, default /proc/meminfo: a test seam>] < host-rehearse.sh
 # Read-only on production: each world's sim.db is opened read-only and copied (SQLite online backup) into a new
