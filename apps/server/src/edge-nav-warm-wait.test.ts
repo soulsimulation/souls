@@ -25,6 +25,10 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   // failed wait's alternatives on the tick
   const emitted: { id: string; phase: string; alternatives?: { id: string }[] }[] = [];
   L.onReceipt((r) => emitted.push(structuredClone(r) as never));
+  let menuBuiltForFay = 0, fayIdV = '';
+  const fayId = () => fayIdV;
+  { const Lm = L as unknown as { wordsMenu(s: { soulId: string }): unknown; binds(s: { soulId: string }): unknown }, wm = Lm.wordsMenu.bind(L), bd = Lm.binds.bind(L);
+    Lm.wordsMenu = (s) => { if (s.soulId === fayId()) menuBuiltForFay++; return wm(s); }; Lm.binds = (s) => { if (s.soulId === fayId()) menuBuiltForFay++; return bd(s); }; }
   const La = L as unknown as { routeDeadAlternatives(...a: unknown[]): unknown }, altBuild = La.routeDeadAlternatives.bind(L), altMs: number[] = [];
   La.routeDeadAlternatives = (...a: unknown[]) => { const t0 = performance.now(); try { return altBuild(...a); } finally { altMs.push(performance.now() - t0); } };
   const bob = await soulOf('bob', 'Bob'), cy = await soulOf('cy', 'Cy'), di = await soulOf('di', 'Di');
@@ -48,7 +52,13 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   assert.equal(phase(bob, second.receipt!.id).phase, 'waiting');
   // #1468: two more kitchen roof walks wait beside Bob's, so three fail when navigation warms (one alternatives build a tick)
   const more = [] as { s: typeof bob; id: string }[];
+  // Eve read her capabilities while cold (a kept menu, stale once warm); Fay never did (no kept menu)
+  L.capabilitiesPage(eve as never, { all: true });
   for (const s of [eve, fay]) { const o = await L.act(s, { capability: kitchen }) as Out; assert.equal(o.receipt?.phase, 'waiting', JSON.stringify(o)); more.push({ s, id: o.receipt!.id }); }
+  // Fay's wait is taken out of the tick loop here (#900's re-plan would bind her walk, building her menu); her failure is
+  // driven below through the same failWait the tick loop calls, with no kept menu
+  const fayWait = (L as unknown as { pending: Map<string, unknown> }).pending.get(fay.soulId)!;
+  (L as unknown as { pending: Map<string, unknown> }).pending.delete(fay.soulId);
   // A3: the wait is bounded: past its deadline it fails with a named code (the deadline is moved, not waited out)
   const third = await L.act(cy, { capability: roof }) as Out; assert.equal(third.receipt?.phase, 'waiting');
   const pending = (L as unknown as { pending: Map<string, { deadline: number; navWarm?: true }> }).pending;
@@ -83,17 +93,31 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const kEv = emitted.filter((r) => r.id === second.receipt!.id && r.phase === 'failed');
   assert.equal(kEv.length, 1, `one failed event: ${JSON.stringify(kEv)}`);
   assert.deepEqual(kEv[0]!.alternatives?.map((x) => x.id), kAlt!.map((x) => x.id), 'the emitted failed receipt names the same alternatives');
-  // the three kitchen walks fail on successive ticks, at most one alternatives build a tick, each event carrying its own
+  // the kitchen walks with a kept menu (Bob's, Eve's stale one) fail on successive ticks, one alternatives build a tick,
+  // each event carrying legal alternatives; Fay, with no kept menu, fails at once, naming where to look, and no menu is built
   const all3 = [{ s: bob, id: second.receipt!.id }, ...more];
-  for (let i = 0; i < 6 && all3.some(({ s, id }) => phase(s, id).phase === 'waiting'); i++) w.host.tickOnce();
-  const three = all3.map(({ s, id }) => ({ r: phase(s, id), ev: emitted.filter((e) => e.id === id && e.phase === 'failed') }));
-  for (const { r, ev } of three) {
-    assert.equal(r.phase, 'failed', JSON.stringify(r)); assert.equal(r.code, 'route.unreachable');
-    assert.equal(ev.length, 1, `one failed event: ${JSON.stringify(ev)}`); assert.ok((ev[0]!.alternatives?.length ?? 0) >= 1, `the event names alternatives: ${JSON.stringify(ev[0])}`);
+  {
+    const Lc = L as unknown as { wordsCache: Map<string, unknown>; capCache: Map<string, unknown>; pending: Map<string, unknown>; failWait(id: string, p: unknown, tick: number, code: string, reason: string): void };
+    Lc.wordsCache.delete(fay.soulId); Lc.capCache.delete(fay.soulId); fayIdV = fay.soulId; menuBuiltForFay = 0;   // from here, a menu built for Fay counts
+    Lc.pending.set(fay.soulId, fayWait); Lc.failWait(fay.soulId, fayWait, w.host.engine.world.tick, 'route.unreachable', 'That roof is up where no stair or ramp from the ground reaches.');
+    assert.equal(phase(fay, more[1]!.id).phase, 'failed', 'with no kept menu, the failure is at once, not held');
   }
-  const ended = three.map(({ r }) => (r as { endedTick: number }).endedTick).sort((a, b) => a - b);
-  assert.equal(new Set(ended).size, 3, `one build a tick: ${ended}`); assert.ok(ended[2]! - ended[0]! <= 2, `all failed within 3 ticks: ${ended}`);
-  t.diagnostic(`three failed waits ended at ticks ${ended.join(', ')}`);
+  for (let i = 0; i < 6 && all3.some(({ s, id }) => phase(s, id).phase === 'waiting'); i++) w.host.tickOnce();
+  const ev = (id: string) => emitted.filter((e) => e.id === id && e.phase === 'failed');
+  for (const { s, id } of all3) {
+    const r = phase(s, id); assert.equal(r.phase, 'failed', JSON.stringify(r)); assert.equal(r.code, 'route.unreachable');
+    assert.equal(ev(id).length, 1, `one failed event: ${JSON.stringify(ev(id))}`);
+  }
+  for (const { s, id } of all3.slice(0, 2)) {
+    const alts = ev(id)[0]!.alternatives ?? []; assert.ok(alts.length >= 1, `the event names alternatives: ${JSON.stringify(ev(id)[0])}`);
+    for (const x of alts) assert.ok((L as any).bindOne(s, x.id)?.cap.available, `${x.id} is available now`);
+  }
+  const fayR = phase(fay, more[1]!.id) as { endedTick: number; reason?: string; alternatives?: unknown };
+  assert.equal(fayR.alternatives, undefined); assert.match(fayR.reason ?? '', /Read your capabilities for where you can go from here\./);
+  assert.equal(menuBuiltForFay, 0, 'no menu was built for Fay on the tick');
+  const ended = all3.slice(0, 2).map(({ s, id }) => (phase(s, id) as { endedTick: number }).endedTick).sort((a, b) => a - b);
+  assert.equal(new Set(ended).size, 2, `one build a tick: ${ended}`); assert.ok(ended[1]! - ended[0]! <= 2 && fayR.endedTick - ended[0]! <= 2, `all failed within 3 ticks: ${ended}, Fay ${fayR.endedTick}`);
+  t.diagnostic(`failed waits ended at ticks ${ended.join(', ')} (kept menus), Fay ${fayR.endedTick} (none)`);
   t.diagnostic(`route-dead alternatives build on the tick (Eden 2026, ms each): ${altMs.map((x) => x.toFixed(1)).join(', ')}`);
   for (const x of kAlt!) {assert.notEqual(x.id, kitchen); assert.ok((L as any).bindOne(bob, x.id)?.cap.available, `${x.id} is available now`);}
   for (let i = 0; i < 4000 && phase(w.soul, ana.receipt!.id).phase !== 'completed'; i++) { w.host.tickOnce(); if (i % 20 === 0) await w.settle(1); }
