@@ -6,8 +6,10 @@ import { tmpdir, homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
-import { combineReceipts } from './ship-receipt.mjs';
+import { CI_COVERED, ciEvidence, cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
+import { combineReceipts, publicReceipt } from './ship-receipt.mjs';
+import { receiptProblems, releaseReceiptProblems } from '../world-launcher/deploy/ship/root-release.mjs';
+import { JOBS } from '../../.github/scripts/ci-scope.mjs';
 
 // Preserve fixture artifacts under the same no-delete rule as release work.
 const retireFixture = dir => { const trash = join(homedir(), '.Trash'); mkdirSync(trash, { recursive: true }); renameSync(dir, join(trash, dir.split('/').at(-1) + '-' + Date.now())); };
@@ -407,7 +409,7 @@ function fakeModal(calls, nodeVersionFor = () => 'v22.23.0', onlys = []) {
     return { exit: 0, timedOut: false, log: join(out, 'gate-driver.log'), logSha256: '' };
   };
 }
-const gate = async (repo, args, remoteRun, lines = []) => ({ rc: await main(args, { root: repo.dir, remoteRun, log: l => lines.push(l) }), lines });
+const gate = async (repo, args, remoteRun, lines = [], extra = {}) => ({ rc: await main(args, { root: repo.dir, remoteRun, log: l => lines.push(l), repo: null, ...extra }), lines });
 const receiptOf = out => JSON.parse(readFileSync(join(out, 'receipt.json'), 'utf8'));
 
 function collisionFixture(t) {
@@ -799,6 +801,128 @@ test('cache: an entry stored under the old suite-tree definition is found when i
   const r = receiptOf(out);
   assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(calls, [c2]); assert.equal(r.baseline.source, 'cached'); assert.equal(r.baseline.legacyKey, true);
 });
+// ── CI evidence (#1463) ──
+const CI_STEPS = ['V1-types', 'V2-build-root', 'V3-client-cli', 'V3-launcher-unit', 'V4-web', 'V5-server-full'];
+const here = p => readFileSync(new URL(p, import.meta.url), 'utf8');
+function fakeGithub({ sha, runs, jobs }) {
+  const calls = [];
+  const api = path => { calls.push(path);
+    if (path.includes('/workflows/ci.yml/runs?head_sha=')) return { workflow_runs: runs };
+    const id = Number(/\/runs\/(\d+)\/jobs/.exec(path)?.[1]); return { jobs: Object.entries(jobs[id] || {}).map(([name, conclusion]) => ({ name, conclusion })) }; };
+  const files = { '.github/workflows/ci.yml': here('../../.github/workflows/ci.yml'), '.github/scripts/server-test-files.mjs': 'export const SERVER_SHARDS = 3;\n' };
+  return { api, calls, file: p => files[p] ?? null, files, sha };
+}
+const ciRun = (sha, extra = {}) => ({ id: 7, head_sha: sha, event: 'push', head_branch: 'main', status: 'completed', conclusion: 'success', path: '.github/workflows/ci.yml', html_url: 'https://github.com/o/r/actions/runs/7', ...extra });
+const allJobs = { 'types-web': 'success', 'client-cli': 'success', launcher: 'success', web: 'success', latency: 'success', 'server-0': 'success', 'server-1': 'success', 'server-2': 'success', packages: 'success', native: 'success' };
+
+test('CI evidence: the covered table is exact, and ci.yml still runs each covered command with those jobs', () => {
+  assert.deepEqual(Object.keys(CI_COVERED).sort(), [...CI_STEPS].sort());
+  const ci = here('../../.github/workflows/ci.yml'), names = new Set(JOBS.map(j => j.name));
+  for (const [step, c] of Object.entries(CI_COVERED)) {
+    assert.ok(ci.includes(c.command), `${step}: ci.yml runs ${c.command}`);
+    for (const j of c.jobs) assert.ok(j === 'server-*' ? names.has('server-0') : names.has(j), `${step}: CI job ${j}`);
+  }
+  // the gate commands CI does not run the same way (one-validation.sh) stay on Modal
+  for (const step of ['V2-build-worlds', 'V3-harness', 'V3-walk', 'V3-bundle', 'V3-packages', 'V3-mars-engine', ...REQUIRED_STEPS.filter(s => s.startsWith('V6-'))]) assert.ok(!CI_COVERED[step], step);
+});
+
+test('CI evidence: only a successful push-to-main or merge_group ci.yml run at the exact sha, and only steps whose jobs all succeeded', () => {
+  const sha = 'a'.repeat(40);
+  const full = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } });
+  const r = ciEvidence(sha, { repo: 'o/r', api: full.api, file: full.file });
+  assert.deepEqual(r.covered, CI_STEPS); assert.equal(r.run.id, 7); assert.equal(r.run.event, 'push');
+  assert.match(full.calls[1], /runs\/7\/jobs\?filter=latest/);
+  // a failed or missing server shard keeps V5 on Modal; other steps stay covered
+  const shard = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: { ...allJobs, 'server-2': 'cancelled' } } });
+  const s2 = ciEvidence(sha, { repo: 'o/r', api: shard.api, file: shard.file });
+  assert.ok(!s2.covered.includes('V5-server-full')); assert.match(s2.notCovered['V5-server-full'], /server-2=cancelled/);
+  const fewer = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); fewer.files['.github/scripts/server-test-files.mjs'] = 'export const SERVER_SHARDS = 4;\n';
+  assert.match(ciEvidence(sha, { repo: 'o/r', api: fewer.api, file: fewer.file }).notCovered['V5-server-full'], /server-3=absent/);
+  // a path-scoped merge-group run covers what it ran
+  const mg = fakeGithub({ sha, runs: [ciRun(sha, { id: 8, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 8: { 'types-web': 'success', web: 'success' } } });
+  assert.deepEqual(ciEvidence(sha, { repo: 'o/r', api: mg.api, file: mg.file }).covered, ['V1-types', 'V2-build-root', 'V4-web']);
+  // a push run is preferred over a newer merge-group run
+  const both = fakeGithub({ sha, runs: [ciRun(sha), ciRun(sha, { id: 9, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 7: allJobs, 9: {} } });
+  assert.equal(ciEvidence(sha, { repo: 'o/r', api: both.api, file: both.file }).run.id, 7);
+  // refused: failed, in progress, another sha, a pull_request run, a push to another branch, another workflow file
+  for (const bad of [{ conclusion: 'failure' }, { status: 'in_progress', conclusion: null }, { head_sha: 'b'.repeat(40) }, { event: 'pull_request' },
+    { head_branch: 'feature' }, { path: '.github/workflows/other.yml' }]) {
+    const g = fakeGithub({ sha, runs: [ciRun(sha, bad)], jobs: { 7: allJobs } });
+    const e = ciEvidence(sha, { repo: 'o/r', api: g.api, file: g.file });
+    assert.deepEqual(e.covered, [], JSON.stringify(bad)); assert.match(e.reason, /no successful push\/merge_group ci.yml run/);
+  }
+  // the commit's own ci.yml no longer running a command drops that step
+  const edited = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); edited.files['.github/workflows/ci.yml'] = edited.files['.github/workflows/ci.yml'].replace('pnpm test:client', 'pnpm test:other');
+  assert.match(ciEvidence(sha, { repo: 'o/r', api: edited.api, file: edited.file }).notCovered['V3-client-cli'], /no longer runs/);
+  assert.match(ciEvidence(sha, { repo: null, api: full.api, file: full.file }).reason, /no GitHub repository/);
+  assert.match(ciEvidence(sha, { repo: 'o/r', api: () => { throw Error('HTTP 403'); }, file: full.file }).reason, /could not read CI runs: HTTP 403/);
+});
+
+test('CI evidence gate: Modal runs only the uncovered steps against the cached full baseline; the receipt keeps its verdict and ships', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'), calls = [], onlys = [], seen = [], out = join(repo.dir, '.lane/g2');
+  const evidence = sha => { seen.push(sha); return { covered: CI_STEPS, notCovered: {}, run: { id: 7, event: 'push', headSha: sha }, jobs: {} }; };
+  const executed = REQUIRED_STEPS.filter(s => !CI_STEPS.includes(s));
+  const { rc } = await gate(repo, [c2, '--baseline', c1, '--out', out, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: evidence });
+  const r = receiptOf(out);
+  assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(seen, [c2]); assert.deepEqual(calls, [c2]); assert.deepEqual(onlys, [executed]);
+  assert.equal(r.status, 'pass'); assert.equal(r.scope.resolved, 'full'); assert.deepEqual(r.scope.steps, REQUIRED_STEPS);
+  assert.deepEqual(r.scope.executed, executed); assert.deepEqual(r.scope.ciCovered, CI_STEPS); assert.equal(r.ciEvidence.run.id, 7);
+  assert.equal(r.baseline.source, 'cached'); assert.deepEqual(Object.keys(r.runs.candidate.steps).sort(), [...executed].sort());
+  for (const k of ['blockers', 'newFailures', 'removed', 'unexpectedSkips']) assert.deepEqual(r[k], [], k);
+  // the ship receipt and ship.sh's preflight accept it unchanged; V7 stays required
+  const v7 = { schemaVersion: 1, step: 'V7', status: 'pass', dirty: false, source: c2, at: '2026-11-08T00:00:00.000Z', checks: [{ id: 'walk', ok: true }], failed: [] };
+  const combined = combineReceipts(r, v7);
+  assert.equal(combined.status, 'pass', combined.blockers.join('\n')); assert.deepEqual(combined.remainingExclusions, ['V8']);
+  assert.deepEqual(receiptProblems(r, { ...combined, gate: { sha256: 'g' } }, c2, 'g'), []);
+  assert.deepEqual(releaseReceiptProblems(publicReceipt(r, 'a'.repeat(64), v7, 'b'.repeat(64)), c2), []);
+  assert.equal(combineReceipts(r, { ...v7, status: 'fail', checks: [{ id: 'walk', ok: false }] }).status, 'blocked');
+  // the partial candidate is cached under a key naming its steps, and is the next gate's baseline for those steps
+  const partKey = cacheKey({ sourceSha: c2, suiteTree: r.harness.suiteTree, node: '22', only: executed });
+  assert.ok(existsSync(join(cache, partKey, 'CACHE.json'))); assert.ok(!existsSync(join(cache, cacheKey({ sourceSha: c2, suiteTree: r.harness.suiteTree, node: '22' }))));
+  const c3 = repo.commit('apps/web/src/c.ts', 'three\n'); calls.length = 0; onlys.length = 0;
+  const out3 = join(repo.dir, '.lane/g3');
+  const third = await gate(repo, [c3, '--baseline', c2, '--out', out3, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: evidence });
+  const r3 = receiptOf(out3);
+  assert.equal(third.rc, 0, r3.blockers.join('\n')); assert.deepEqual(calls, [c3]); assert.equal(r3.baseline.source, 'cached'); assert.deepEqual(r3.baseline.only, executed);
+  assert.equal(r3.baseline.cacheKey, partKey);
+  // a steps-only cached run never stands in for a full baseline
+  assert.match(lookupCache(cache, { sourceSha: c2, suiteTree: r.harness.suiteTree, node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir).reason, /no cached run/);
+});
+
+test('CI evidence gate: none (or --no-ci-evidence, or another Node) runs the full contract; a miss runs the baseline on the same steps', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), calls = [], onlys = [], out = join(repo.dir, '.lane/n1');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', out, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: () => ({ covered: [], reason: 'no successful push/merge_group ci.yml run' }) });
+  const r = receiptOf(out);
+  assert.deepEqual(onlys, [[], []]); assert.deepEqual(r.scope.executed, REQUIRED_STEPS); assert.match(r.ciEvidence.reason, /no successful/); assert.equal(r.status, 'pass');
+  let asked = 0; const evidence = () => { asked++; return { covered: CI_STEPS, notCovered: {}, run: { id: 1 }, jobs: {} }; };
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'); onlys.length = 0;
+  await gate(repo, [c2, '--baseline', c1, '--out', join(repo.dir, '.lane/n2'), '--no-cache', '--no-ci-evidence'], fakeModal([], undefined, onlys), [], { ciEvidence: evidence });
+  assert.equal(asked, 0); assert.deepEqual(onlys, [[], []]); assert.equal(receiptOf(join(repo.dir, '.lane/n2')).ciEvidence, undefined);
+  onlys.length = 0;
+  await gate(repo, [c2, '--baseline', c1, '--out', join(repo.dir, '.lane/n3'), '--no-cache', '--node', '26'], fakeModal([], () => 'v26.1.0', onlys), [], { ciEvidence: evidence });
+  assert.equal(asked, 0); assert.match(receiptOf(join(repo.dir, '.lane/n3')).ciEvidence.reason, /CI runs Node 22/);
+  // a baseline with no cached run of either shape runs once, on exactly the executed steps, and is cached under that key
+  const executed = REQUIRED_STEPS.filter(s => !CI_STEPS.includes(s)); onlys.length = 0; calls.length = 0;
+  const out4 = join(repo.dir, '.lane/n4');
+  const c3 = repo.commit('apps/web/src/c.ts', 'three\n');
+  const c4 = repo.commit('apps/web/src/d.ts', 'four\n');
+  const fourth = await gate(repo, [c4, '--baseline', c3, '--out', out4, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: evidence });
+  const r4 = receiptOf(out4);
+  assert.equal(fourth.rc, 0, r4.blockers.join('\n')); assert.deepEqual(calls.sort(), [c3, c4].sort()); assert.deepEqual(onlys, [executed, executed]);
+  assert.equal(r4.baseline.source, 'run'); assert.deepEqual(r4.baseline.only, executed); assert.match(r4.baseline.cacheMiss, /steps-only: no cached run/);
+  assert.deepEqual(r4.cache.stored.map(s => s.label), ['baseline', 'candidate']);
+  // the dry run says what CI covers and what Modal runs
+  const lines = [];
+  await gate(repo, [c4, '--baseline', c3, '--cache', cache, '--dry-run'], fakeModal([]), lines, { ciEvidence: evidence });
+  const plan = JSON.parse(lines[0]);
+  assert.deepEqual(plan.candidate.steps, executed); assert.deepEqual(plan.scope.ciCovered, CI_STEPS); assert.equal(plan.ciEvidence.run.id, 1);
+  assert.match(lines.at(-1), new RegExp(`executed=${executed.length} ci_covered=${CI_STEPS.length} baseline_source=cached modal_runs=1`));
+});
+
 test('against a cached baseline with other driver files, only their own removed self-tests are not lost coverage', () => {
   const harness = (names, source) => { const p = parseTap(tap(names.map(name => ({ name, source }))), 'V3-harness');
     return { errors: [], steps: { 'V3-harness': { exit: '0', tests: p.tests, executedFiles: [] } } }; };

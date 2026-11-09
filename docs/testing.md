@@ -8,7 +8,7 @@ needs.
 | Unit and typecheck | `node --test` suites per package, `tsc` per package | your machine, CI |
 | Gates | walk, bundle, conformance | your machine (focused), CI, the remote gate |
 | Browser e2e | the local smoke (`node e2e/local-smoke.mjs`) and Markdown scenarios against an isolated client fixture | your machine, CI |
-| Remote gate | the complete suite for a release head, on Modal | the release workflow |
+| Remote gate | the complete suite for a release head: CI's result at the exact commit for the steps CI runs, Modal for the rest | the release workflow |
 | Playtests | coding agents play Souls and gods in a fake-mind world, reviewed by agents | a quiet machine or a cloud session |
 
 All of them use fake minds and isolated data directories. None touches production.
@@ -154,8 +154,9 @@ its header shows the one-line invocation from a workstation. The steward sets an
 
 ## Remote gate
 
-[testing/remote-gate.md](testing/remote-gate.md): `tools/test-harness/release-gate.sh` runs the complete suite for a
-candidate and its baseline on Modal and compares them. Clean means 0 new failures, 0 blockers and 0 unexpected skips.
+[testing/remote-gate.md](testing/remote-gate.md): `tools/test-harness/release-gate.sh` qualifies the complete suite for a
+candidate: the steps CI ran identically at that commit come from CI, the rest run on Modal and are compared with the
+baseline. Clean means 0 new failures, 0 blockers and 0 unexpected skips.
 The release head always takes the full scope; candidates may use `--scope auto`. The baseline comes from a cache, and
 docs/tools-only changes are never gated ([Modal policy](process/modal-policy.md)).
 
