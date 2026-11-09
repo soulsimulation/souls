@@ -12,6 +12,14 @@ context-size checks below), regression runs, and an uncut real-client recording 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
   `upright-carry`, containers with an `inside`, the tea defs, and so on). Older revisions of a def keep their old,
   hand-free behaviour, so existing worlds do not change until a god places the new revision.
+- **Kindling preparation ([#1614](https://github.com/soulsimulation/souls/issues/1614)).** A fixed
+  `core-kindling-block@1` starts with one visible raw wood stock. Its `prepare-kindling` action walks to the authored
+  worker position and runs the existing native `craft` pose with its `tool` prop for twenty seconds. Only completed
+  work consumes the stock and creates one separate `core-kindling-bundle@1` on the real output surface; interruption
+  leaves the stock unchanged. Pick up and place that same bundle through ordinary item offers. Current inspection
+  records the preparer. Clear standing room, empty hands, access and an empty output surface are required; target,
+  stock, access and nearby body are rechecked at completion. This is a preloaded stock and generic tool routine,
+  with no axe contact, arbitrary log input, restocking or ignition claim.
 - **Storage with and without a door ([#435](https://github.com/soulsimulation/souls/issues/435)).** A container with an
   `inside` (entry 42) is open only while its door or drawer is, if its def declares an `open` state. One that declares
   none has no door: `core-swap-shelf@1` is always open, so what is on it is seen nearby and taken without an open step,
