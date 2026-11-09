@@ -761,3 +761,6 @@ the world creator can place or mark a tent with `broken: true`.
 ## Portable area irrigation (#1651)
 
 `core/garden-sprinkler@2` adds opt-in two-hand upright carry to the unchanged sprinkler. Carry it to a chosen clear place, set it down, then switch it on by hand. At that contact, the existing irrigation faculty wets the actual planters in its forward arc within reach, from its current world pose. Turn it off and move the same entity to tend another patch. Moisture and sprinkler placement/state persist; this is contact-time watering, not continuous irrigation or a new water-supply simulation. Existing @1 remains fixed. No new contact, placement, ownership or native movement path is introduced.
+### Expanded record repertoire (content)
+
+`core/record-player@2` retains the existing record-selection action and four original choices, adding two original eight-second scores: `Paper Lanterns` and `Open Window`. Select with `put-on-record` and its `record` parameter; normal hand contact starts the chosen shared-clock piece. Stop at the existing power knob. The selected title persists. The new console uses simpler geometry while retaining the original tonearm/knob locations; the first revision stays unchanged. This is new playable music content, not a new Soul action or arbitrary user-authored notation. Original seeded piano behavior is unchanged.
