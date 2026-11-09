@@ -292,6 +292,16 @@ list of slugs). Budgets: at most one new picture per 30 s per Soul and 12 per mi
 (`EDGE_EYES_SOUL_SECONDS`, `EDGE_EYES_GLOBAL_PER_MINUTE` may tighten, never relax). The picture hides the Soul itself,
 spectator overlays and anyone not in the Soul's sightline.
 
+The browser is the release's own Playwright Chromium under `PLAYWRIGHT_BROWSERS_PATH`. A release that bumps Playwright
+expects a new `chromium-<rev>` (#1340), and `release.sh`'s stage installs it ([release](../release.md)). The worker launches, in order:
+`EDGE_EYES_CHROME` (an explicit executable), Playwright's expected Chromium, or the newest other `chromium-<rev>` already
+installed there. It logs which one it chose. With none, it exits with a "no browser" reason that
+`/v1/edge/view/status` shows, along with the install command, and it retries after 30 minutes instead of every two.
+Before a release, `node tools/world-launcher/deploy/eyes-browser.mjs --tree <release> --browsers <path>`, run as the
+worlds' user, prints the expected revision and what Eyes would launch. It exits 1 when there is no browser. To install
+the expected revision, in the release as the worlds' user, run
+`PLAYWRIGHT_BROWSERS_PATH=<path> pnpm --filter mars-campus-viewer exec playwright install chromium`.
+
 ## The body without its agent
 
 The body never leaves the world. Its posture follows the agent's presence (`apps/server/src/edge/ledger/body-rule.ts`):
