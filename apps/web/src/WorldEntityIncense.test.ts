@@ -8,12 +8,13 @@ import {WorldEntityIncense,type IncenseLiveSelection} from './WorldEntityIncense
 import {WorldEntityLayer} from './WorldEntityLayer.ts';
 import {prepareIncenseContact,placeIncenseContact} from './incense-contact-context.ts';
 import type {IncenseContactRequest} from '../../../mars/viewer/app/engine-view/incense-contact-observation.ts';
+import {armUnderlay,indexTipSkin,incenseArmSkin,poseIncenseTipTouch,clearUnownedIncenseArm} from '../../../mars/viewer/app/engine-view/incense-tip-touch.ts';
 
 function fixture(parent?:THREE.Object3D,initialManualMismatch=false){
   const model=new WorldModel({constants:{ground:'land',extent:100},seed:'incense-binding'});model.library=coreLibrary();
   assert.equal(applyBatch(model,{ops:[{op:'place',def:coreRef('incense-censer',1),name:'censer',p:[1.5,3],r:.6}]},'god',1).result.accepted,true);
   const e=model.get('censer')!,def=model.resolvedDef(e.def)!,pose=model.worldPose(e),prepared=prepareIncenseContact(def,e,model.bake(def,e.params??{},e.seed??0,e.shape).box,pose.s)!;
-  const context=placeIncenseContact(prepared,e.id,pose)!;
+  const context={...placeIncenseContact(prepared,e.id,pose)!,depiction:{armUnderlay,indexTipSkin,incenseArmSkin,poseIncenseTipTouch,clearUnownedIncenseArm}};
   const build=(state=e.state??{})=>{assert.equal(def.make.kind,'gen');const obj=buildKit(def.make.kind==='gen'?def.make.args:{},{materials:new MaterialLib(),params:e.params??{},state,smokeFx:true,tint:(key,fallback)=>key?def.palette?.[key]??fallback:fallback});
     obj.position.set(pose.x,pose.y,pose.z);obj.rotation.y=pose.yaw;obj.scale.setScalar(pose.s);parent?.add(obj);
     if(initialManualMismatch){const mesh=obj.children.find(o=>(o as THREE.Mesh).isMesh)!;mesh.matrixAutoUpdate=false;mesh.matrix.makeTranslation(.125,0,0);}

@@ -12,10 +12,13 @@ export type IncenseContactRequest = {
     pose: {p: readonly number[]; yaw: number; pitch?: number; roll?: number}} | null;
   targetTracked: boolean;
 };
-export type IncenseContactResolver = (request: IncenseContactRequest) => Readonly<IncenseTipContext> | null;
+export type IncenseDepiction = Pick<typeof import('./incense-tip-touch.ts'),
+  'armUnderlay' | 'indexTipSkin' | 'incenseArmSkin' | 'poseIncenseTipTouch' | 'clearUnownedIncenseArm'>;
+export type IncenseContactResolver = (request: IncenseContactRequest) => Readonly<IncenseTipContext & {depiction: IncenseDepiction}> | null;
 export type IncenseContactObservation = {
   context: Readonly<IncenseTipContext>;
   ownership: {left: IncenseFreeArmOwnership; right: IncenseFreeArmOwnership};
+  depiction: IncenseDepiction;
 };
 const empty = (v: unknown) => v === undefined || v === null || typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0;
 const extra = ['carryContactV1', 'juggleV1', 'together'] as const;

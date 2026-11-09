@@ -555,7 +555,7 @@ export class TakePeople {
           if(ownership){
             const context=this.incenseContact({actor:id,motion,take:{id:this.take.id,startTick:this.take.startTick,endTick:this.take.startTick+this.take.ticks,dt:this.take.dt},observedTick:observed.tick,
               nativeTarget:this.take.finalState.entities[motion.target]??null,targetTracked:Object.hasOwn(this.take.tracks,motion.target)||Object.hasOwn(this.take.entities0??{},motion.target)});
-            if(context)incenseContact={context,ownership};
+            if(context)incenseContact={context,ownership,depiction:context.depiction};
           }
         }
       }

@@ -1,7 +1,7 @@
 import {observedQuaternionBlend} from './observed-quaternion.ts';
 import {observedAnimationSample,type AnimationObservation} from './observed-animation.ts';
 import type {IncenseContactObservation} from './incense-contact-observation.ts';
-import {armUnderlay,indexTipSkin,incenseArmSkin,poseIncenseTipTouch,clearUnownedIncenseArm,type ArmUnderlay,type TipSkin} from './incense-tip-touch.ts';
+import type {ArmUnderlay,TipSkin} from './incense-tip-touch.ts';
 import {wavePose,WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 import {actuatorHand,handActuatorFrame,posterLocal,strokeWork,twoHanded,HAND_REACH_SECONDS,HAND_RELEASE_SECONDS,type HandActuatorMotion} from '../../engine/social/hand-actuator.ts';
 import {insidePoint,itemPoseOf,ITEM_RECOVERY_SECONDS,type ItemPoseView} from '../../engine/items/presentation.ts';
@@ -1345,12 +1345,12 @@ export class HumanViews {
     if(water?.kind==='surface-swim')surfaceSwimBody(v,water);
     if(water?.floating)waterLegs(v,water);
     // arms
-    const incense=v.incenseContact,incenseMotion=v.handActuator;
+    const incense=v.incenseContact,incenseMotion=v.handActuator,depiction=incense?.depiction;
     const incenseStanding=pz.drop===0&&pz.rise===0&&pz.kneel===0&&Number.isFinite(pz.bend)&&pz.bend>=0&&pz.bend<=BODY_MODEL.bendMax.knees;
-    const incenseDriver=incense&&incenseMotion&&actuatorObserved&&incense.context.target===incenseMotion.target&&
+    const incenseDriver=incense&&depiction&&incenseMotion&&actuatorObserved&&incense.context.target===incenseMotion.target&&
       !v.itemPose&&!v.grip&&!v.on&&!gait&&!fp&&!water&&!waterFrom&&!lib.water&&!lib.sleep&&proneW===0&&sitW===0&&warmW===0&&incenseStanding&&
       ['idle','reach','operate'].includes(v.activity)?v.arms.find(arm=>armSide(v,v.arms.indexOf(arm))===actuatorHand(incenseMotion.opening,incenseMotion.hand)):undefined;
-    let incenseUnderlay:ArmUnderlay|undefined=incenseDriver?armUnderlay(incenseDriver):undefined;
+    let incenseUnderlay:ArmUnderlay|undefined=incenseDriver?depiction!.armUnderlay(incenseDriver):undefined;
     h.userData.wateringTilt=0;h.userData.wateringFlow=0;h.userData.wateringYaw=0;h.userData.cupPose=undefined;
     const targets: (THREE.Vector3 | null)[] = v.arms.map(() => null);
     let source: Source = null;
@@ -1427,7 +1427,7 @@ export class HumanViews {
       const armW=(i:number)=>cf&&cm?(armSide(v,i)===cm.hand?1:cm.stage==='wash'?cf.left:weight):wf?(armSide(v,i)==='left'?wf.left:1):transferOwns&&armSide(v,i)===v.transfer!.hand?tw!:actSide&&armSide(v,i)===actSide?actW!:weight;
       h.userData.wateringTilt=wf?.tilt??0;h.userData.wateringFlow=wf?.flow??0;h.userData.wateringYaw=wf?.yaw??0;
       const armBase=v.arms.some((_,i)=>armW(i)<1)?v.arms.flatMap((arm,i)=>[...(arm.shoulder?[arm.shoulder]:[]),arm.upper,arm.lower,arm.hand].map(o=>({o,w:armW(i),actuator:actuatorObserved&&!!v.handActuator&&!cf&&!wf&&!transferOwns&&(!v.itemPose||armSide(v,i)===actSide)}))).map(({o,w,actuator})=>({o,w,actuator,q:o.quaternion.clone(),p:o.position.clone()})):[];
-      if(incenseDriver)incenseUnderlay=armUnderlay(incenseDriver);
+      if(incenseDriver)incenseUnderlay=depiction!.armUnderlay(incenseDriver);
       const k = reachTo(v, targets, pz.rise > 0, BODY_MODEL.maxExtension, undefined, pa);
       v.arms.forEach((arm, i) => {
         if (!targets[i] && sitW > 0 && !seatClip) handOnThigh(v, i, sitW);
@@ -1588,23 +1588,23 @@ export class HumanViews {
       if(lift>0){place(v.spine.head,v.spine.head.getWorldPosition(V()).addScaledVector(UP,lift));v.spine.head.updateWorldMatrix(true,true);}
     }
     let incenseDiag:Diag['incense'];
-    if(incenseDriver&&incenseUnderlay&&incense&&incenseMotion){
+    if(incenseDriver&&incenseUnderlay&&incense&&incenseMotion&&depiction){
       incenseDiag={target:incense.context.target,revision:incense.context.revision};
-      const rollback=v.arms.flatMap(armUnderlay),cache=v.incenseSkin??(v.incenseSkin=new Map());
-      const skin=(arm:Arm)=>{let s=cache.get(arm);if(!s){s={tip:indexTipSkin(h,arm),arm:incenseArmSkin(h,arm),invalid:false};cache.set(arm,s);}
+      const rollback=v.arms.flatMap(depiction.armUnderlay),cache=v.incenseSkin??(v.incenseSkin=new Map());
+      const skin=(arm:Arm)=>{let s=cache.get(arm);if(!s){s={tip:depiction.indexTipSkin(h,arm),arm:depiction.incenseArmSkin(h,arm),invalid:false};cache.set(arm,s);}
         if(s.invalid)return null;
         if(!s.tip||s.tip.valid?.()===false||s.arm.valid?.()===false)s.invalid=true;return s.invalid?null:s;};
       const selected=skin(incenseDriver);
       if(!selected?.tip)incenseDiag.reason='incense.cached-rig-unsupported';
       else{
         const fail=(f:{reason:string})=>{incenseDiag!.reason=f.reason;};
-        poseIncenseTipTouch(incenseDriver,h,incense.context,incenseMotion,actuatorTime-incenseMotion.startTick*DT,incenseUnderlay,selected.tip,g=>{
+        depiction.poseIncenseTipTouch(incenseDriver,h,incense.context,incenseMotion,actuatorTime-incenseMotion.startTick*DT,incenseUnderlay,selected.tip,g=>{
           incenseDiag={...incenseDiag!,rawWrist:g.rawWrist.toArray(),requestedWrist:g.requestedWrist.toArray(),attainedWrist:g.attainedWrist.toArray(),plannedTip:g.plannedTip.toArray(),
             chainLength:g.chainLength,requestedRatio:g.requestedWrist.distanceTo(g.shoulder)/g.chainLength,attainedRatio:g.wristExtension};},fail);
         if(!incenseDiag.reason)for(const arm of v.arms){const ownership=incense.ownership[armSide(v,v.arms.indexOf(arm))];
           if(ownership.nativeTarget!==null)continue;
           const free=skin(arm);if(!free){incenseDiag.reason='incense.cached-rig-unsupported';break;}
-          clearUnownedIncenseArm(arm,h,incense.context,ownership,free.arm,fail);
+          depiction.clearUnownedIncenseArm(arm,h,incense.context,ownership,free.arm,fail);
           if(incenseDiag.reason)break;
         }
       }

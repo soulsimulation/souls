@@ -3,6 +3,9 @@ import {stableStringify, type Entity, type StoredDef, type WorldModel} from '@so
 import type {IncenseContactRequest, IncenseContactResolver} from '../../../mars/viewer/app/engine-view/incense-contact-observation.ts';
 import {prepareIncenseContact, placeIncenseContact, type PreparedIncenseContact} from './incense-contact-context.ts';
 
+import {armUnderlay,indexTipSkin,incenseArmSkin,poseIncenseTipTouch,clearUnownedIncenseArm} from '../../../mars/viewer/app/engine-view/incense-tip-touch.ts';
+const depiction=Object.freeze({armUnderlay,indexTipSkin,incenseArmSkin,poseIncenseTipTouch,clearUnownedIncenseArm});
+
 type Drawn = {obj: THREE.Object3D; settled?: boolean; removing?: boolean; inst?: string};
 export type IncenseLiveSelection = {world: string; epoch: string; nativeNowTick: number; live: boolean; exact: boolean;
   takeId: string; observedTick: number; messages: readonly {kind?: string; seq?: unknown}[]};
@@ -176,7 +179,7 @@ export class WorldEntityIncense {
       d.obj.rotation.x !== 0 || d.obj.rotation.z !== 0 || [d.obj.scale.x, d.obj.scale.y, d.obj.scale.z].some(s => s !== p.s) || !this.witness(d.obj, p)) return null;
     const context = placeIncenseContact(c.prepared, e.id, p);
     if (!context || q.motion.at.length !== 3 || q.motion.at.some((v, i) => Math.abs(v - context.tip[i]) > 1e-12)) return null;
-    return Object.freeze({...context, tip: Object.freeze([...context.tip]) as typeof context.tip,
+    return Object.freeze({...context, depiction, tip: Object.freeze([...context.tip]) as typeof context.tip,
       centre: Object.freeze([...context.centre]) as typeof context.centre});
   }
 }
