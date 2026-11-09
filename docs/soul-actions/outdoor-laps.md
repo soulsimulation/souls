@@ -1,0 +1,7 @@
+# Outdoor walking and jogging laps
+
+Place `core/outdoor-laps@1` on clear, level outdoor ground. The start stripe and four cones mark a nominal6by4metre rectangle. Normal object offers `walk-lap` and `jog-lap` approach the stripe, traverse each corner, return and stand. Existing native navigation/gait owns the whole journey; obstacles can cause a detour or a named native failure. This is not a distance, speed, stamina or fitness measurement.
+
+Current normal `inspect` supplies a `practice` fact with route instructions, completed laps, last gait and last participant. Only the completed whole-program receipt adds a durable lap. Ordinary stop or a failed leg adds nothing; consecutive real laps count separately. Empty hands and existing access/body admission apply. The marker must remain where authored during a lap; moving the course is not a supported training workflow.
+
+The implementation adds no idle/background entity scan or model work. It reuses the existing request-time custody admission scan, native program completion and local state commit; it makes no constant-time menu-planning claim. Approximate existing locomotion/turns are sufficient under the [Soul Actions direction](../design/soul-actions-direction.md).
