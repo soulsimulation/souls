@@ -1,7 +1,9 @@
 # Remote gate
 
-The release gate runs the full CPU test contract on [Modal](https://modal.com) containers, compares the candidate
-with a baseline and writes a receipt. Nothing runs locally except `git archive` and the Modal client. The gate
+The release gate qualifies the full CPU test contract for a candidate: the steps CI already ran identically on the
+exact commit come from that CI run ([CI evidence](#ci-evidence)), the rest run on [Modal](https://modal.com)
+containers and are compared with a baseline, and it writes a receipt. Nothing runs locally except `git archive`, the
+Modal client and read-only GitHub API calls. The gate
 never merges, pushes or deploys. A release attaches its receipt; see [release](../release.md).
 
 Requirements: `pip install modal && modal token new`, and a committed checkout (only committed files are shipped).
@@ -22,12 +24,66 @@ Requirements: `pip install modal && modal token new`, and a committed checkout (
 `REQUIRED_STEPS` in `tools/test-harness/release-gate.mjs` is the exact list of step ids. V7 and V8 are excluded
 from the CPU gate.
 
+## CI evidence
+
+Every PR and the merge queue run CI on the exact commits, and each push to `main` runs every `ci.yml` job. A full gate
+(#1463) takes the successful `ci.yml` run whose head is exactly the candidate (event `push` to `main`, preferred, or
+`merge_group`) as evidence for the steps CI runs with the same command, and runs only the rest on Modal. A step counts
+as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `release-gate.mjs`):
+
+- every CI job that runs it succeeded in that run, and the commit's `ci.yml` runs the step's command;
+- the CI definitions it depends on are identical at the candidate and at the baseline, the live release: `ci.yml`
+  (without comments and the `repo` and `smoke` jobs, which run no contract step), `.github/scripts/ci-scope.mjs`, and
+  per step the `typecheck` or `test:client` script in `package.json`, `tools/test-harness/web-suite.sh` and
+  `web-loader.mjs`, or `.github/scripts/server-test-files.mjs`. The gate runs from the candidate's harness, so a
+  candidate that weakens CI (`|| true`, `continue-on-error`, a test-name filter, an `echo` of the command) cannot have
+  it counted; any change to these files since the baseline runs the affected steps on Modal for that release;
+- each covered job's log has complete node test summaries, and every test it skipped or marked todo is in
+  `quarantine.json` for the step. A skip passes CI, but the gate counts it as unproved, so an unquarantined one sends
+  the step to Modal, whose comparison reports it.
+
+A run that went green on a re-run of failed jobs counts (it ran at this sha); `ciEvidence.run.attempt` records it.
+CI runs everything a covered step needs: the `launcher` job installs the gate's pinned restic for
+`backup-restic.test.mjs` (x86_64 runners; elsewhere it skips and the step goes to Modal) and the `web` job builds the
+root web app before the web tests, as V2-build-root does in the gate. A harness test fails if `ci.yml` drifts from the
+table.
+
+| Step | Source | Why |
+| --- | --- | --- |
+| V1-types | CI `types-web` | same command, `pnpm typecheck` |
+| V2-build-root | CI `types-web` | same web build |
+| V3-client-cli | CI `client-cli` | same command, `pnpm test:client` |
+| V3-launcher-unit | CI `launcher` | same command |
+| V4-web | CI `web` | same script, `web-suite.sh` |
+| V5-server-full | CI `server-0` … `server-<SERVER_SHARDS-1>` and `latency` | the same recursive server inventory, sharded |
+| V2-build-worlds | Modal | CI builds only the root base |
+| V3-harness, V3-walk | Modal | no CI job runs them |
+| V3-bundle | Modal | CI runs the budget comparison, not the bundle tests |
+| V3-packages | Modal | CI's `pnpm -r test` does not run `protocol` and `engine-native` |
+| V3-mars-engine | Modal | CI skips the full campus re-extraction |
+| V6 (every scenario) | Modal | no CI job runs the scenarios |
+| V7 | local, required | real Chrome on a GPU ([below](#v7-and-the-ship-receipt)) |
+
+The Modal steps run with `--only` and are compared assertion by assertion with the baseline: removed assertions,
+renames, new failures, skips and quarantine work as before. For the CI-covered steps a green CI means every test
+passed and the log check above found no unquarantined skip or todo. A deleted or renamed test is not visible in a
+green run; it is caught when the PR is made, by the [renames](#renames) check (#1462). Titles built at run time are
+outside that check, so on the CI-covered steps their removal is not seen at release. From the 4.16.1 gate's step timings the Modal part is about 30 minutes (the longest
+container: V3-walk 138 s, V3-mars-engine 578 s and the V6 scenarios about 840 s, plus image and install), against about
+75 to 90 minutes for the whole contract; V5 alone was 46 minutes in its longest shard.
+
+No usable evidence (no such run, not successful, another sha, a job that did not succeed, `--node 26`, a GitHub read
+that fails) runs the full contract on Modal as before, with the reason in the receipt's `ciEvidence.reason`. Per step,
+the reason a step was not covered is in `ciEvidence.notCovered`. `--no-ci-evidence` forces the full contract. Scoped
+gates (`--scope auto`) and imports take no CI evidence. Reading CI needs `gh` authenticated for the repository
+(`GH_TOKEN` in `gate.yml`).
+
 ## `release-gate.sh`
 
 ```sh
 tools/test-harness/release-gate.sh <candidate-ref> [--baseline <ref>] [--out <dir>] [--node 22|26]
     [--scope full|auto] [--cache <dir> | --no-cache] [--dry-run]
-    [--baseline-results <dir> [--candidate-results <dir>]] [--baseline-bundle-carry <cache-dir>]
+    [--baseline-results <dir> [--candidate-results <dir>]] [--baseline-bundle-carry <cache-dir>] [--no-ci-evidence]
 tools/test-harness/release-gate.sh cache-add <completed-run-dir> [--cache <dir>]
 ```
 
@@ -39,7 +95,12 @@ fixed, quarantined and new failures. It never overwrites an output directory tha
 
 - Exit 1: `blocked`.
 - Exit 0: `pass`, `quarantined` (only known, listed failures; inspect them before shipping) or `not-gated`.
-- `--dry-run` prints the plan (refs, scope, cache hit or miss, Modal runs) without contacting Modal or writing.
+- `--dry-run` prints the plan (refs, scope, the CI evidence with covered and executed steps, cache hit or miss, Modal
+  runs) without contacting Modal or writing.
+
+The receipt keeps its format and verdict. A CI-evidence gate still has `scope.resolved: full` and `scope.steps` the
+whole contract, and adds `scope.executed` (the Modal steps), `scope.ciCovered` and `ciEvidence` (run id, event, sha,
+job conclusions, covered and not-covered steps). `ship-receipt.mjs` and ship.sh's preflight read it unchanged.
 
 ### Running it from GitHub Actions
 
@@ -133,7 +194,10 @@ results are compared (`COMPARISON_ONLY`: `renames.json`). A driver or renames ch
 cached baselines; a change to anything the containers read, `quarantine.json` included, does. An entry stored under an
 earlier suite-tree definition is still found when its own harness commit recomputes to the current suite tree (the
 receipt marks it `legacyKey`). A hit requires unchanged file hashes and a complete, matching run. If the candidate
-runs a different Node or pnpm version than the cached run, the baseline is re-run. A miss runs the baseline once
+runs a different Node or pnpm version than the cached run, the baseline is re-run. A CI-evidence gate takes a cached
+full run, else a cached run of exactly its executed steps (keyed `…-node<major>-only-<hash of the steps>`), else runs
+the baseline once on those steps only; its passing candidate is cached under the steps key, never as a full run. A later gate that needs that sha as a full
+baseline (no CI evidence, `--node 26`) or with other steps runs its baseline once. A miss runs the baseline once
 beside the candidate and caches it when it validates. Every passing full gate caches its candidate, which becomes the
 next gate's baseline once it is on `main`.
 
