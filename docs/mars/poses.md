@@ -10,6 +10,11 @@ Renderers only read the world. Every pose is a deterministic function of the eng
 id (template, legs-crossed variant, which knee kneels); nothing feeds back. The Lab `probe()` hook in the `body`
 preset is a renderer-only measurement tool.
 
+Adjacent observations of the same actor, source and clips share one presentation sample for Walk, both Idle layers
+and the existing rest envelope. The sampler unwraps observed clip loops and interpolates normalized rest-reset
+endpoints; it never advances a clock beyond those observations. Missing, incompatible or non-adjacent observations
+keep the existing fallback.
+
 ## Rig and body fit
 
 Quaternius CC0 `animated-{casual,punk,woman}.glb` with Idle, Walk and Wave clips. `Foot.L/R` are children of Root
@@ -92,6 +97,11 @@ mouth landmark the palm target shifts slightly so the spoon reaches the rig's li
 `HumanViews.setFrame` (random access, posture solved without the blend) → `render` → `components.attachHeld`. Per frame:
 recorded `hands`, `baseActivity` and `on`; component phase, support and connections from the frame, not the final
 state; stairs from the base scene's usable links plus the construction contributor over the frame's components.
+
+A newly published hand actuator may supply its recorded upper-endpoint metadata and arm targets only inside the
+current adjacent observed interval. This requires the exact native episode and start, matching actor lineage, and
+clear prior task and hand ownership. The presentation context does not change recorded hands, posture inputs, native
+root or custody. Missing or mixed evidence falls back without recovering an older episode.
 
 ## Approximations
 
