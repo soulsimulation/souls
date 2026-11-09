@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
@@ -273,8 +273,9 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
   own is broken, and its last whole pose if its pose is broken. If no whole pose is on record, it goes to the nearest free
   spot by the arrival, which is loud: logged, counted and told to its Soul. The event carries the pose, so a replay holds
-  it in the same place. A body that breaks again within a cooldown is not held again: the in-place rung's once-per-cooldown
-  report takes it.
+  it in the same place. A body that breaks again within a cooldown is quarantined and held again, alone (#1377): its own
+  programmes stop and nobody else's. Its glitch row is written at most twice a cooldown; the log event, which a replay
+  needs, every time.
 
 **What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it

@@ -55,7 +55,7 @@ function setup() {
   // build, browser and manifest tools
   script(join(t, 'stubs/node'), `printf 'node\\t%s\\n' "$*" >> ${log}\nif [ -n "\${STUB_FAIL:-}" ] && [[ "$*" == *"$STUB_FAIL"* ]]; then exit 1; fi\ncase "$1" in *release-probe.mjs)\n  while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; shift; done\n  mkdir -p "$out"; touch "$out/ready"\n  for i in $(seq 1 600); do { [ -e "$out/released" ] || [ -e "$out/stop" ]; } && break; sleep 0.05; done\n  exit "\${STUB_PROBE_RC:-0}";;\nesac\nexit 0`);
   script(join(t, 'stubs/python'), `printf 'python\\t%s\\n' "$*" >> ${log}`);
-  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s noinstall=%s\\n' "$*" "$SIM_WORLDS_BASE" "\${SIM_RELEASE_NO_INSTALL:-}" >> ${log}\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
+  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s noinstall=%s\\n' "$*" "$SIM_WORLDS_BASE" "\${SIM_RELEASE_NO_INSTALL:-}" >> ${log}\n[ -z "\${STUB_EYES_WARN:-}" ] || echo "WARN edenEyes: degraded (\$STUB_EYES_WARN)"\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
   // the staged tree's boot-rehearsal.mjs: a world whose data dir has a halt-<dir> flag halts, a nofinish-<dir> one crashes
   writeFileSync(join(t, 'fake-boot-rehearsal.mjs'), `import { existsSync, readFileSync, appendFileSync } from 'node:fs'; import { basename, dirname } from 'node:path';
 const a = process.argv.slice(2), db = a[a.indexOf('--db') + 1], dir = basename(dirname(db)), envf = a.includes('--env-file') ? a[a.indexOf('--env-file') + 1] : null;
@@ -316,6 +316,16 @@ test('verdicts: receipts, a backup that dropped rows or missed a database, stale
   assert.ok(activationProblems(snapshot, 's', backup, upload, 'm', Date.now() + 2 * 3_600_000).length >= 2);
   assert.ok(activationProblems(snapshot, 'other', backup, upload, 'm').length);
   assert.ok(activationProblems(snapshot, 's', backup, { ...upload, manifestSha256: 'x' }, 'm').length);
+});
+
+test('#1340 a degraded Eden Eyes browser never stops a release: it is recorded in ship-result.json and the summary', () => {
+  let s = setup(), r = s.run(s.base, { STUB_EYES_WARN: 'installing chromium-1248 failed exit 1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const result = JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8'));
+  assert.equal(result.status, 'live'); assert.equal(result.edenEyes, 'degraded (installing chromium-1248 failed exit 1)');
+  assert.match(r.stdout, /edenEyes: degraded \(installing chromium-1248 failed exit 1\)\. The release is unaffected/);
+  s = setup(); r = s.run(s.base);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).edenEyes, 'ok');
 });
 
 test('#1402 rehearse: every world boots a copy with the staged tree before the backup; secrets never reach its env files', () => {

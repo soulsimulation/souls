@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BASE } from './base-path.ts';
-import { collectMenuRows, MENU_CLASS, type MenuRow } from './hud-menu.ts';
+import { collectMenuRows, MENU_CLASS, setMenuSoulsSlot, type MenuRow } from './hud-menu.ts';
 
 // #1391 (Gene): "On phone widths, replace the floating controls with a hamburger button and a menu": the hamburger is
 // styled like the logo (a black circle, white lines); the menu is a slightly translucent panel holding everything, in
@@ -28,15 +28,22 @@ export function HudMenu({ initialOpen = false }: { initialOpen?: boolean }) {
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
   }, [open]);
   const choose = (row: MenuRow) => { setOpen(false); row.target.click(); };
+  // part b: MySouls portals the inline Souls list here (between Search and New Soul); choosing a Soul closes the menu
+  const soulsSlot = useCallback((el: HTMLDivElement | null) => setMenuSoulsSlot(el, () => setOpen(false)), []);
+  const before = rows.filter((r) => r.section === 'time' || r.section === 'search'), after = rows.filter((r) => !before.includes(r));
+  const row = (r: MenuRow, i: number, list: MenuRow[]) => // New Soul sits under the Souls list, which draws its own rule
+     <button key={r.key} type="button" role="menuitem" className="hud-menu-row" data-menu={r.key} data-section={r.section}
+    data-section-start={(i === 0 ? !(list === after && r.section === 'souls') : list[i - 1].section !== r.section) || undefined} onClick={() => choose(r)}>
+    <span>{r.label}</span>{r.value && <span className="hud-menu-value">{r.value}</span>}
+  </button>;
   return (
     <span ref={root} className="hud-menu-wrap">
       <button ref={button} type="button" className="hud-menu" aria-label="Menu" title="Menu" aria-haspopup="menu" aria-expanded={open} aria-controls="hud-menu-panel" onClick={() => setOpen(!open)}>{LINES}</button>
       <div id="hud-menu-panel" className="hud-menu-panel" role="menu" aria-label="Menu" data-open={open} inert={!open}>
         <a role="menuitem" className="hud-menu-row hud-menu-worlds" href={BASE + '/'}><img src={halo} width="24" height="24" alt="" aria-hidden="true" /><span>Worlds</span></a>
-        {rows.map((row, i) => <button key={row.key} type="button" role="menuitem" className="hud-menu-row" data-menu={row.key} data-section={row.section}
-          data-section-start={i === 0 || rows[i - 1].section !== row.section || undefined} onClick={() => choose(row)}>
-          <span>{row.label}</span>{row.value && <span className="hud-menu-value">{row.value}</span>}
-        </button>)}
+        {before.map((r, i, list) => row(r, i, list))}
+        <div ref={soulsSlot} className="hud-menu-souls-slot" />
+        {after.map((r, i, list) => row(r, i, list))}
       </div>
     </span>
   );
