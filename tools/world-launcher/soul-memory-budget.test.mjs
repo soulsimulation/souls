@@ -53,5 +53,19 @@ test('#1527: 30 heavy days: knowledge, places and ledger stay under budget, the 
   assert.equal(m.search('o_7:').matches[0]?.file, 'log', 'the first thing made');
   const shown = m.search(`Fact ${seq}x4`);
   assert.deepEqual(shown.matches.map((x) => x.file), ['knowledge.md'], 'a fact still in the projection is found once, there');
+  const all = m.search('fact provenance authored-fiction');
+  assert.equal(all.matches.length + all.more, fed.facts, 'every fact counted once, shown or in the log');
   assert.ok(Buffer.byteLength(m.brief()) <= BRIEF_BYTES);
+});
+
+test('#1527: the Soul\'s own note on a place it left long ago is still found, as its own', (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'souls-budget-'))); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const m = openSoulMemory(dir, { world: 'eden', soul: 's_me', now: () => new Date(T0).toISOString() });
+  const visit = (place, tick) => m.sawHere({ tick, clock: '10:00', now: '· world day 1', me: { place, placePath: [`The ${place} ${words(30)}`], posture: 'standing' }, near: [] });
+  visit('place_first', 1); m.remember('place', 'place_first', 'A zebra sleeps under the bridge.');
+  for (let i = 0; i < 200; i++) visit(`place_${i}`, 10 + i);
+  assert.ok(statSync(join(dir, 'memory/places.md')).size <= PROJECTION_BUDGETS.places);
+  assert.doesNotMatch(readFileSync(join(dir, 'memory/places.md'), 'utf8'), /zebra/, 'the place left the projection');
+  const found = m.search('zebra');
+  assert.deepEqual(found.matches.map((x) => [x.file, x.untrusted, x.text]), [['log', false, 'eden:place_first — Judgment: A zebra sleeps under the bridge.']]);
 });

@@ -150,7 +150,8 @@ The log keeps everything; the projections that grow with it don't. `knowledge.md
 `ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/edge-skill/memory-folder.mjs`). Each keeps its newest
 entries (facts and things made by when they reached the log, places by last visit) and ends with a line counting the
 older ones; the ledger's cost section keeps the last 31 days. `memory` also searches the log for the learned facts, things
-made and places a projection dropped, marked `log` and untrusted. People files have their own caps (below), journal pages
+made and places a projection dropped, marked `log` and untrusted, and for the Soul's own note on a place that left
+`places.md`, marked as its own; `more` counts every match once. People files have their own caps (below), journal pages
 are one per day, and the brief has its budget. Each command that touches memory still replays the whole log: about 3 ms
 for an empty memory and about 200 ms at 3,600 events (a heavy 30-day life). A 1.9 folder's projections have no budget. A legacy folder has no memory, so a Soul run by
 the managed runtime (`tools/soul-runtime`, which runs only a legacy folder) writes none and gets no brief: it keeps its own
