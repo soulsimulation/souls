@@ -30,7 +30,7 @@ test('a new rules suffix or static hash does not stop the client (#1518 L1, L2)'
  const plain=structuredClone(connected) as any;plain.shore.rulesVersion=CHECKPOINT_RULES.replace('+eg/1','');accepts(plain);
 });
 
-test('unsupported connected captures are refused with the named reason (#1518 L1-refused)',()=>{
+test('unsupported connected captures are refused with the named reason (#1518 L4)',()=>{
  const cases:[string,any,(x:any)=>void][]=[
   ['terrain height',expanded,x=>{x.shore.terrain.heightMetres[3][20]+=.01;}],
   ['water bounds',expanded,x=>{x.shore.water.wetBoundsXZ[2]=-45;}],
