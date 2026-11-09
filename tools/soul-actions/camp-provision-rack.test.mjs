@@ -113,7 +113,16 @@ test('camp provision rack: strict offers, stocked places, hand clearance, access
  for (let i = 0; i < 20; i++) {clone.step(); f.host.engine.step(); assert.equal(clone.stateHash(), f.host.engine.stateHash());}
 
  // Cancel a take after the hand motion starts but before its custody contact.
- {const c = await offer('bowl-two', 'pick-up'), r = ok(await act(c.id)); for (let n = 0; n < 1600 && !body().human?.itemTransferV1; n++) await tick(1); assert.ok(body().human?.itemTransferV1); assert.equal(native('bowl-two').support.on, id('camp-rack')); ok(await act('stop:current')); await tick(120); assert.equal(receipt(r).phase, 'failed'); assert.equal(receipt(r).code, 'act.stopped'); assert.equal(ent('bowl-two').in.parent, id('camp-rack'));}
+ {
+  const c = await offer('bowl-two', 'pick-up'), r = ok(await act(c.id)); let transfer;
+  for (let n = 0; n < 1600; n++) {transfer = body().human?.itemTransferV1; if (transfer?.reachTick !== undefined) break; await tick(1);}
+  assert.ok(transfer?.reachTick !== undefined && transfer.reachSeconds > 0, 'the actual reach starts');
+  const cancelTick = transfer.reachTick + Math.floor(transfer.reachSeconds * 20 * 0.7);
+  while (f.host.engine.world.tick < cancelTick) await tick(1);
+  assert.equal(native('bowl-two').support.on, id('camp-rack'), 'still stored at 70% of the actual reach');
+  ok(await act('stop:current')); await tick(120);
+  assert.equal(receipt(r).phase, 'failed'); assert.equal(receipt(r).code, 'act.stopped'); assert.equal(ent('bowl-two').in.parent, id('camp-rack'));
+ }
  for (const name of ['bowl-three', 'bowl-two', 'bowl-one']) {await done(name, 'pick-up', watch(name, 'camp-rack')); await done('table', 'put-on');}
  await done('bowl-one', 'pick-up', undefined, souls.Bea);
  await refused('private-rack', 'put-in', 'object.private', souls.Bea); await done('table', 'put-on', undefined, souls.Bea);
