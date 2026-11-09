@@ -4,6 +4,7 @@ import { registerHooks } from 'node:module';
 import * as THREE from 'three';
 import { WorldModel, coreLibrary, coreRef, applyBatch, type Entity } from '@souls/world-compiler';
 import { StreamRing } from '../../StreamRing.ts';
+import { instanceable } from '../../EntityInstancer.ts';
 import { findAnchors } from '../../atmosphere/finder.ts';
 import { hasFlames, flameStats } from '../../fx/flames.ts';
 import '../kit.mesh.ts';
@@ -11,7 +12,7 @@ import '../kit.mesh.ts';
 type Drawn = { obj: THREE.Object3D; inst?: string };
 type Inner = { model: WorldModel; ring: StreamRing; now: number; drawn: Map<string, Drawn>; draw(e: Entity, ease: boolean, force?: boolean): void };
 
-test('two real incense renders retain distinct rotated smoke anchors through on/off/on instancing transitions', async t => {
+test('two real incense redraws retain distinct rotated smoke anchors through on/off/on changes', async t => {
   const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
   globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });
   // Keep the real generic builder and entity-layer draw/instancer path, without loading unrelated browser builders.
@@ -37,7 +38,12 @@ test('two real incense renders retain distinct rotated smoke anchors through on/
       return new THREE.Vector3(pose.x + 0.025 * Math.cos(pose.yaw) + 0.02 * Math.sin(pose.yaw), pose.y + 1.132, pose.z - 0.025 * Math.sin(pose.yaw) + 0.02 * Math.cos(pose.yaw));
     });
     for (const p of expected) assert.equal(sources.filter(s => s.p.distanceTo(p) < 1e-6).length, 1, 'one smoke anchor at each actual rotated tip');
-    for (const id of [east, west]) assert.equal(!!inner.drawn.get(id)!.inst, !on.includes(id), 'unlit ordinary meshes retain instancing; burning smoke roots stay individual');
+    for (const id of [east, west]) {
+      const drawn = inner.drawn.get(id)!;
+      assert.equal(instanceable(drawn.obj), !on.includes(id), 'the predicate accepts ordinary geometry and preserves burning smoke anchors');
+      // Existing look policy gives an off censer no instance key; the smoke guard keeps a lit censer individual.
+      assert.equal(drawn.inst, undefined, 'both states draw individually for their respective existing look or smoke requirement');
+    }
     assert.equal(flameStats.mounted, mountedBefore, 'no flame effect is substituted for smoke');
   };
   redraw(east, false); redraw(west, false); check([]);
