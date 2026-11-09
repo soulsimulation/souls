@@ -68,7 +68,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       <header className="lh-bar">
         <div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div>
         <div className="lh-actions">
-          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>{needsSignIn ? 'Sign in to make a world' : '+ New world'}</button>
+          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
           {session.authed ? <AccountMenu label={session.label} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
               : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
