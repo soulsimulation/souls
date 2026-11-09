@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.8";
+const VERSION = "2.24.9";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2025,6 +2025,8 @@ export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", 
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
+// How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
+const SERVE_START_MS = 60_000;
 /** Full jitter: uniform in [0, min(cap, base·2^attempt)]. */
 export const fullJitter = (attempt, rnd = Math.random) => rnd() * Math.min(RETRY.capMs, RETRY.baseMs * 2 ** attempt);
 /** A stated wait is a floor: the world counts a return before it as impolite. Up to 20 % more, so a crowd told "4 s"
@@ -3870,12 +3872,16 @@ function serveHolder() {
   if (!h?.pid || !pidAlive(h.pid) || serveIdentity(h.pid) === false) return null;
   return Date.now() - (h.beatAt ?? 0) < SERVE_STALE_MS ? h : null;
 }
-function writeServeLock(start) { writeFileSync(SERVE_LOCK + ".tmp", JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(SERVE_LOCK + ".tmp", SERVE_LOCK); }
+// Each writer has its own temporary name: two serves started together never rename each other's bytes into the lock (#1244).
+function writeServeLock(start) { const tmp = `${SERVE_LOCK}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(tmp, SERVE_LOCK); }
+/** The lock file was just created and is not yet written: another serve is a moment into taking it. */
+// A writer fills it within moments, so an empty file older than 5 s is a start that died there, and counts for nothing.
+const serveLockFresh = () => { try { const st = lstatSync(SERVE_LOCK); return st.size === 0 && Date.now() - st.mtimeMs < 5_000; } catch { return false; } };
 function takeServeLock(start) {
   try { closeSync(openSync(SERVE_LOCK, "wx", 0o600)); }
   catch (e) {
     if (e.code !== "EEXIST") throw e;
-    if (serveHolder()) return false;
+    if (serveHolder() || serveLockFresh()) return false;
     const h = readServeLock(); if (h?.pid && h.pid !== process.pid && pidAlive(h.pid) && serveIdentity(h.pid) === true) { try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ } }
   }
   writeServeLock(start);
@@ -4528,12 +4534,33 @@ async function serve(...args) {
   const env = HOME ? { ...process.env, SOULS_HOME: HOME.root, SOULS_PRINCIPAL: SEAT.id } : process.env;
   const child = spawn(process.execPath, [process.argv[1], "serve", "--foreground"], { detached: true, env, stdio: ["ignore", logFd, logFd] });
   child.unref(); closeSync(logFd);
-  for (let i = 0; i < 100; i++) {
+  // The wait follows the child, not a clock: a slow start on a loaded machine is still a start (#1244). One that exits has
+  // failed, and says so at once; one still starting at the limit is stopped, so no serve is left up that was reported down.
+  let exited = null;
+  child.once("exit", (code, signal) => { exited = { code, signal }; });
+  const up = (a) => ({ ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` });
+  const limit = Date.now() + SERVE_START_MS * TIME_SCALE;
+  let other = null, heldAt = 0;   // a serve this command didn't start, which took the folder's lock first
+  while (Date.now() < limit) {
     await sleep(50);
     const a = await askServe({ op: "status" });
-    if (a?.serving) return { ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` };
+    if (a?.serving) return other || a.pid !== child.pid ? { ...a, alreadyServing: true } : up(a);
+    if (exited && Date.now() - heldAt >= 1_000) {
+      // A child that lost the lock to a concurrent serve exits too: that one is followed until it answers, never signalled.
+      // Who holds the lock is asked about once a second (it runs ps and lsof), not at every poll.
+      heldAt = Date.now();
+      const h = serveHolder();
+      other = h && h.pid !== child.pid ? h : serveLockFresh() ? { pid: "unknown" } : null;
+      if (!other) throw new Error(`serve did not start: it exited (${exited.signal ?? `code ${exited.code}`}); see ${SERVE_LOG}`);
+    }
   }
-  throw new Error(`serve did not start; see ${SERVE_LOG}`);
+  const last = await askServe({ op: "status" });
+  if (last?.serving) return other || last.pid !== child.pid ? { ...last, alreadyServing: true } : up(last);
+  if (other) throw new Error(`serve did not start: another serve for this folder (pid ${other.pid}) took it first and is still starting; ${CLI} serve --status shows when it answers; see ${SERVE_LOG}`);
+  try { process.kill(child.pid, "SIGTERM"); } catch { /* it ended on its own */ }
+  for (let i = 0; i < 40 && !exited; i++) await sleep(50);
+  if (!exited) { try { process.kill(child.pid, "SIGKILL"); } catch { /* gone */ } }
+  throw new Error(`serve did not start within ${Math.round(SERVE_START_MS * TIME_SCALE / 1000)} s, so it was stopped and nothing is serving; see ${SERVE_LOG}`);
 }
 
 // travel, create and pair change who this folder speaks for. A serve up for the old one stops, and a new one starts for the new one.

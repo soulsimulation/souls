@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
@@ -97,11 +97,12 @@ async function world(t) {
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({ world: `http://127.0.0.1:${server.address().port}/w/test`, soul: 's', token: 'synthetic-serve-token' }), { mode: 0o600 });
-  w.cli = (...args) => new Promise((done) => {
-    const child = spawn(process.execPath, [cli, ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  w.cliEnv = (env, ...args) => new Promise((done) => {
+    const child = spawn(process.execPath, [cli, ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], ...(env ? { env: { ...process.env, ...env } } : {}) });
     let out = '', err = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { err += c; });
     child.on('exit', (code) => { let json = null; try { json = JSON.parse(out); } catch { /* text */ } done({ code, out, err, json }); });
   });
+  w.cli = (...args) => w.cliEnv(null, ...args);
   t.after(async () => { await w.cli('serve', '--stop'); await sleep(50); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
   return w;
 }
@@ -130,6 +131,50 @@ test('A1: one serve per folder: a second start finds the first, and the listen t
   assert.equal(stopped.json.stopping, true);
   assert.ok(await until(() => !existsSync(join(w.dir, '.eden-serve.sock'))), 'the socket goes with it');
   assert.equal((await w.cli('here')).json.place, 'green', 'and commands go straight to the world again');
+});
+
+// #1244: the start waits on the child, not a fixed 5 s. The issue's preload, blocking only in the serve child (its
+// `--foreground` argument), so the command's own wait is what is measured.
+const preload = (w, body) => { const f = join(w.dir, 'slow.mjs'); writeFileSync(f, `if (process.argv.includes('--foreground')) { ${body} }\n`); return { NODE_OPTIONS: `--import ${pathToFileURL(f).href}` }; };
+const SLOW = 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);';
+
+test('#1244 A1: a child that is slow but alive is waited for: serve answers serving, not "did not start"', async (t) => {
+  const w = await world(t);
+  const t0 = Date.now(), r = await w.cliEnv(preload(w, SLOW), 'serve');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json.serving, true);
+  assert.ok(Date.now() - t0 >= 5_500, 'it really was slower than the old 5 s wait');
+  assert.equal((await w.cli('serve', '--status')).json.pid, r.json.pid);
+});
+
+test('#1244 A2: a child that exits fails at once and names the log', async (t) => {
+  const w = await world(t);
+  const t0 = Date.now(), r = await w.cliEnv(preload(w, 'process.exit(3);'), 'serve');
+  assert.equal(r.code, 1);
+  assert.match(r.err, /serve did not start: it exited \(code 3\); see .*\.eden-serve\.log/);
+  assert.ok(Date.now() - t0 < 4_500, `at once, not after main's 5 s or the limit (${Date.now() - t0} ms)`);
+  assert.equal((await w.cli('serve', '--status')).json.serving, false);
+});
+
+test('#1244 A3: two serves started at once in one folder both answer the one that came up, slow to listen or not', async (t) => {
+  const w = await world(t);
+  // The child that wins the lock is slow between taking it and answering; the one that loses exits at once.
+  const env = preload(w, "const net = await import('node:net'); const l = net.Server.prototype.listen; net.Server.prototype.listen = function (...a) { setTimeout(() => l.apply(this, a), 2000); return this; };");
+  const [a, b] = await Promise.all([w.cliEnv(env, 'serve'), w.cliEnv(env, 'serve')]);
+  assert.equal(a.code, 0, a.err); assert.equal(b.code, 0, b.err);
+  assert.equal(a.json.serving && b.json.serving, true);
+  assert.equal(a.json.pid, b.json.pid, 'one serve, named by both');
+});
+
+test('#1244 A3: at the limit the child it started is stopped, and the answer says nothing is serving', async (t) => {
+  const w = await world(t);
+  const r = await w.cliEnv({ ...preload(w, SLOW), EDEN_TIME_SCALE: '0.05' }, 'serve');   // the 60 s limit becomes 3 s
+  assert.equal(r.code, 1);
+  assert.match(r.err, /serve did not start within 3 s, so it was stopped and nothing is serving; see .*\.eden-serve\.log/);
+  await sleep(4_000);   // past the 6 s the child would have needed
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.serving, false, 'no serve came up after the command said it did not start');
+  assert.equal(existsSync(join(w.dir, '.eden-serve.sock')), false);
 });
 
 test('A2: batch returns several reads in one call, each standing on its own; a write is refused', async (t) => {
