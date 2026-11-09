@@ -46,6 +46,12 @@ test('a Soul picks up the god\'s bowl, is seen holding it, and puts it down', { 
   const caps = edge.capabilities(ana);
   assert.ok(caps.some((c: any) => c.id === 'put-down:here' && c.available), caps.map((c: any) => c.id).join(' '));
 
+  // #1261 review: a visit phrase is not a put-down; riding, the put-down names the next step (the ride's leave)
+  for (const words of ['drop by the bakery', 'drop in on Bo']) { const r: any = edge.intents.dryRun(ana, { capability: words }); assert.notEqual(r.would?.capability, 'put-down:here', `${words}: ${JSON.stringify(r)}`); }
+  const aboard = (edge as any).aboard; (edge as any).aboard = () => ({ id: 'ride-sky', phase: 'parked', label: 'the balloon' });
+  try { await settle(2); const riding: any = (edge.capabilities(ana) as any[]).find((c: any) => c.id === 'put-down:here');
+    assert.equal(riding?.available, false); assert.equal(riding?.blocked?.code, 'ride.aboard'); assert.match(riding?.blocked?.reason, /disembark first \(object:ride-sky:leave/); }
+  finally { (edge as any).aboard = aboard; await settle(2); }
   // #1261: the words reach the same put-down:here as the id (they were refused hands.empty: the bowl is no ledger item)
   for (const words of ['put down the bowl', 'put it down', 'drop it']) {
     const r: any = edge.intents.dryRun(ana, { capability: words });
