@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import {marsFactory,EDEN_SAFE_COMMONS_WORLD,GREEN_FIELD_WORLD,type MarsEngine} from './engine.ts';
 import {loadMars} from './load.ts';
 import {clearanceAt} from '../../../mars/viewer/engine/spatial/grid.ts';
+import {strandedOnFlight} from '../../../mars/viewer/engine/locomotion/walk.ts';
+import {probeBody} from './stall.ts';
 
 const m=await loadMars();
 const commons=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true});
@@ -148,4 +150,26 @@ test('#1367 under flight-resume/1 a release with both landings crowded leaves th
   for(let x=6.5;x<=11.5;x+=.5){for(let z=-2.4;z<=2.1;z+=.5)crowd.push([0,x,z,0]);for(let z=-1.4;z>=-3.9;z-=.5)crowd.push([1,x,z,.24]);}
   const {c,before}=releasedOnFlight(true,crowd);
   assert.deepEqual(c.pose.p.map(v=>+v.toFixed(3)),before.map(v=>+v.toFixed(3)),'not moved');assert.equal(c.human!.level,1);
+});
+
+// #1367 sign-off bounds (maintainer, via the coordinator): the eject is a stall release's only, at most 4 m (the way along the
+// flight to the landing plus the search ring); past that the body stays on the flight. The ended programme says it was moved.
+function releaseAt(t:number,total:number){
+  const w=commons.genesis('flight-release') as any;w.entities.climber=m.human('climber',9,-2.2,{level:1,y:.24,yaw:Math.PI/2});
+  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,bodyStepGuardV1:true,flightResumeV1:true});
+  const r=e.perform({actor:'climber',label:'down to the lawn',steps:[{verb:'mars:walk_to',params:{x:9,z:2,level:0}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  const c=e.world.entities.climber,rt=(e as any).rt;
+  for(let i=0;i<400&&!(c.human!.activity==='climb-down'&&c.pose.p[1]<.18);i++)e.step();
+  const flight=strandedOnFlight(rt,c as any);assert.ok(flight,'on the flight');
+  // the same flight, as if it were longer: the body this far along it from the foot, and that far from the top
+  const before=[...c.pose.p],rel=(e as any).releaseFromFlightV1('climber',c,probeBody(rt,'climber'),{...flight,t,total},{code:'stall.released',message:'test: released mid-flight'});
+  const ends=e.step().programs.filter((p:any)=>p.kind!=='step');
+  return {c,before,rel,ends};
+}
+test('#1367 under flight-resume/1 a release never moves a body more than 4 m: past that it stays on the flight',()=>{
+  const far=releaseAt(4.5,9);
+  assert.deepEqual(far.c.pose.p.map(v=>+v.toFixed(3)),far.before.map(v=>+v.toFixed(3)),'not moved: both landings are farther than 4 m');
+  const near=releaseAt(.5,1.05);
+  assert.ok(Math.hypot(near.c.pose.p[0]-near.before[0],near.c.pose.p[2]-near.before[2])>.05,'moved to a landing within the bound');
+  assert.ok(near.ends.some((p:any)=>/Moved off the flight to the landing \(\d+\.\d m\)/.test(p.message??p.reason?.message??'')),`the ended programme says so: ${JSON.stringify(near.ends).slice(0,300)}`);
 });

@@ -88,6 +88,7 @@ import type { Spatial, StaticExportV1 } from '../../../mars/viewer/engine/spatia
 import { NavConnectivity, NAV_CONNECT_POLICY, NAV_RESCUE_MAX_POCKET, CONNECT_CLEAR, type ConnPoint, type ConnVerdict } from '../../../mars/viewer/engine/spatial/connectivity.ts';
 /** lane NAV: a body in one of these activities is anchored to furniture (seat, bed, berth): never relocated as cut off. */
 const NAV_ANCHORED=new Set<unknown>(['sit','lie','nap','sleep']);
+const FLIGHT_RELEASE_MAX_V1 = 4;   // #1367: the farthest a stall release moves a body off a flight (way along it + search ring), metres
 // L1: Object.values(entities)'s list, ~2.7x cheaper on a big world's dictionary-mode object (fresh array each call)
 import { listEntities } from '../../../mars/viewer/engine/world/entity-list.ts';
 import type {NativeBoatControlsV1} from '@souls/engine-contract';
@@ -1498,15 +1499,19 @@ export class MarsEngine implements Engine {
   /** #1367 flight-resume/1: stallReleaseV1 for a body standing on a flight. Each landing in turn (nearer first): the nearest
    *  spot to its point on its level, rings of 0.4 m out to 2 m, where the static invariant passes the body standing and no other
    *  body (whatever its level) overlaps it, stood at that floor's own height and on that level. Neither: released where it
-   *  stands (flight-resume/1 resumes its next walk from there). */
+   *  stands (flight-resume/1 resumes its next walk from there). A force-legal eject, bounded: the way along the flight to the
+   *  landing plus the search ring is at most FLIGHT_RELEASE_MAX_V1 (4 m); past that the body stays on the flight. Only a stall
+   *  release takes it; the move is an acknowledged relocation, and the ended programme's reason says it was moved to the landing. */
   private releaseFromFlightV1(actor:string,a:any,p:{holders:{id:string}[]},flight:NonNullable<ReturnType<typeof strandedOnFlight>>,reason:{code:string;message:string}){
     const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);
     const f=this.rt.world.groundV1?sp.ground?.field:undefined,me=bodyProfile(a),r=this.bodyRadiusV1(a);
     const others=listEntities(this.ents).filter((o:any)=>o.kind==='human'&&o.human&&o.id!==actor);
     const ends=flight.t<=flight.total-flight.t?[flight.link.from,flight.link.to]:[flight.link.to,flight.link.from];
     let spot:{p:[number,number,number];level:number}|null=null;
+    let moved=0;
     for(const end of ends){
-      for(let ring=0;ring<=5&&!spot;ring++){const n=Math.max(1,ring*8);for(let k=0;k<n;k++){
+      const along=end===flight.link.from?flight.t:flight.total-flight.t;
+      for(let ring=0;ring<=5&&!spot&&along+ring*.4<=FLIGHT_RELEASE_MAX_V1+1e-9;ring++){moved=along+ring*.4;const n=Math.max(1,ring*8);for(let k=0;k<n;k++){
         const ang=(k/n)*Math.PI*2,x=r3(end.p[0]+dcos(ang)*ring*.4),z=r3(end.p[1]+dsin(ang)*ring*.4),g=sp.levelAt(end.level,[x,z]);
         if(!g||!bodyStandsClear(this.rt,a,[x,z],end.level)||(end.level===0&&f&&f.medium(x,z)>1))continue;
         const y=r3(g.level===0&&sp.ground?sp.ground.standY(x,z):g.y);if(!Number.isFinite(y))continue;
@@ -1516,9 +1521,10 @@ export class MarsEngine implements Engine {
       if(spot)break;
     }
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
-    const res=releaseBody(this.rt,actor,spot?spot.p:null,reason);
+    const why=spot?{...reason,message:`${reason.message} Moved off the flight to the landing (${moved.toFixed(1)} m).`}:reason;
+    const res=releaseBody(this.rt,actor,spot?spot.p:null,why);
     if(res&&spot){a.human.level=spot.level;res.at=[a.pose.p[0],a.pose.p[1],a.pose.p[2]];}
-    if(res&&pp&&own)this.end(pp,'failed',reason);
+    if(res&&pp&&own)this.end(pp,'failed',why);
     return res;
   }
   /** #1332 body-step-guard/1: the nearest point to `at` on upper `level` where the invariant passes body `a` standing (rings of
