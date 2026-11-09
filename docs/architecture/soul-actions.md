@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Weeding a raised bed (#1635)
+
+`core/garden-planter@4` opts into one authored patch of weeds. With empty hands, `weed-bed` approaches its worker position and runs the existing garden/tool pose for ten seconds. Only the native completed receipt atomically clears the weeds, records credit in the existing read status, and creates one real `core/weed-bundle@1` on the side ledge. Pick up that bundle through normal native custody. Stopping early leaves the weeds unchanged; private access, full hands and an occupied output are refused. The same plants retain ordinary watering and daily growth. Earlier planter revisions are unchanged. This is fixed-bed authored overgrowth, with no terrain clearing, regrowth, composting or long-tool animation claim.
