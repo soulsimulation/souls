@@ -158,7 +158,9 @@ its header shows the one-line invocation from a workstation. The steward sets an
 candidate: the steps CI ran identically at that commit come from CI, the rest run on Modal and are compared with the
 baseline. Clean means 0 new failures, 0 blockers and 0 unexpected skips.
 The release head always takes the full scope; candidates may use `--scope auto`. The baseline comes from a cache, and
-docs/tools-only changes are never gated ([Modal policy](process/modal-policy.md)).
+docs/tools-only changes are never gated ([Modal policy](process/modal-policy.md)). A PR that removes or renames a test
+the gate compares adds its `tools/test-harness/renames.json` entry in the same change, and a newly skipped test its
+`quarantine.json` entry; CI's `repo` job checks both ([renames](testing/remote-gate.md#renames)).
 
 ## Capacity qualification workflow
 

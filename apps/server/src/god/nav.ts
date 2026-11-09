@@ -169,7 +169,14 @@ const article = (w: string) => (/^[aeiou]/.test(w) ? `an ${w}` : `a ${w}`);
 export class GodNav {
   private h: NavHost;
   private cache: { key: string; things: Thing[]; byRef: Map<string, Thing> } | null = null;
-  private goals = new Map<string, { tick: number; key: string; goal: { p: Vec2; level: number } | null }>();
+  private goals = new Map<string, { tick: number; key: string; warm: boolean; goal: { p: Vec2; level: number } | null }>();
+  /** #882: whether the engine's connectivity labels are ready (navWarmV1(0)), read at most once per tick: a read syncs
+   *  the paged spatial service. A goal made before they were ready skipped RESOLVE2's roofReach and WALK3's main ground. */
+  private warmSeen: { tick: number; warm: boolean } | null = null;
+  private navWarm(tick: number): boolean {
+    if (this.warmSeen?.tick !== tick) this.warmSeen = { tick, warm: !!this.E.navWarmV1?.(0) };
+    return this.warmSeen.warm;
+  }
   constructor(h: NavHost) { this.h = h; }
   /** B-facade: the world this read code reaches (split/menu-world.ts); `h.engine` may be the engine or a MenuWorld. */
   private get E(): MenuWorld { return menuWorldOf(this.h); }
@@ -354,6 +361,10 @@ export class GodNav {
   goal(t: Thing, me: Vec2, except?: string): { p: Vec2; level: number } | null {
     this.refreshServicePoints();
     const E = this.E, tick = E.world.tick;
+    // #882: the warm reads this goal's own steps made; one that found navigation cold (it can go cold within a tick, after a
+    // god edit) makes the stored entry cold whatever this tick's memo says, so it is made again once warm
+    let sawCold = false;
+    const warmNow = () => { const w = !!E.navWarmV1?.(0); if (!w) sawCold = true; return w; };
     // a Soul-dependent goal (the shore nearest me, the nearest point of a road) is never cached
     // MARSLIVED: a room's goal is refined live round whoever already stands there (roomGoal itself is cached per version)
     const mine = t.kind === 'water' || t.kind === 'room' || (t.kind === 'path' && !t.deck?.length) || (t.stands?.length ?? 0) > 1 || t.level > 0;
@@ -363,13 +374,15 @@ export class GodNav {
     // Area arrivals depend on exact current position, but movement must replace
     // the actor's entry rather than retain a new cache entry for every position.
     const positionKey = t.kind === 'area' ? `${me[0]},${me[1]}` : key;
-    const hit = this.goals.get(key); if (hit && hit.key === positionKey && tick - hit.tick < 50) return hit.goal;
+    // (#882: a goal made while navigation was still cold is made again once it is warm, not kept for the rest of its 50
+    // ticks: the roof planter walk asked just after boot was refused as cut, its cold goal never moved to the stair's side)
+    const hit = this.goals.get(key); if (hit && hit.key === positionKey && tick - hit.tick < 50 && (hit.warm || !this.navWarm(tick))) return hit.goal;
     const near = (at: Vec2, level: number, ring = 24) => { const p = E.standableNearV1!(at, level, except, 0.4, ring); return p ? { p: [r2(p[0]), r2(p[1])] as Vec2, level } : null; };
     // WALK3: a ground goal off the main walkable ground (a fenced court, a dense wood, a mountain band, a hill) moves to the
     // nearest open spot of the main ground within r of it, else of `alt`; only once the engine's labels are ready (a
     // listing never waits for them)
     const toMain = (g: { p: Vec2; level: number } | null, r: number, ...alts: Vec2[]) => {
-      if (!g || g.level || !E.navCheckV1 || !E.navNearestMainV1 || !E.navWarmV1?.(0) || E.navCheckV1([{ id: t.ref, p: g.p, level: 0 }])[0]?.ok) return g;
+      if (!g || g.level || !E.navCheckV1 || !E.navNearestMainV1 || !warmNow() || E.navCheckV1([{ id: t.ref, p: g.p, level: 0 }])[0]?.ok) return g;
       // an area's spot must stay inside it: main ground outside a walled yard is not the yard (route truth)
       const ok = (v: Vec2 | null) => (v && (!t.area || inPoly(v[0], v[1], t.area)) ? v : null);
       let q = ok(E.navNearestMainV1(g.p, except, r));
@@ -453,7 +466,24 @@ export class GodNav {
       if (!t.stands?.length) goal = toMain(goal, t.big ? 80 : 3);
       // RESOLVE2: a thing up on a roof whose own patch is cut off (eden-house-3: its planters stand on a strip a ridge
       // parts from the terrace its roof stair lands on): the nearest connected standing room on that roof within 4 m
-      if (goal && goal.level > 0 && E.navCheckV1 && E.navWarmV1?.(0) && !E.navCheckV1([{ id: t.ref, ...goal }])[0]?.ok) goal = this.roofReach(goal) ?? goal;
+      if (goal && goal.level > 0 && E.navCheckV1 && warmNow() && !E.navCheckV1([{ id: t.ref, ...goal }])[0]?.ok) goal = this.roofReach(goal) ?? goal;
+      // #875: a seat whose stand point is in a pocket furniture closes off (a dining chair pushed in between the table and
+      // the wall) while the room's main floor is beside it: another stand point of it that is connected, else the nearest
+      // connected standing spot within 2.5 m of that stand point, both in its own room; with none the goal stays, refused
+      // honestly. The floor through the wall is no way to it, and a search by distance doesn't know a wall, so a seat in no
+      // room keeps its goal: a bench in a walled yard behind a closed door reads as cut off too, and the door opens on the way.
+      // The ground floor only in practice: RESOLVE2 above has already moved an upper floor's goal, and no room limits that
+      if (goal && t.seat && E.navCheckV1 && warmNow() && !E.navCheckV1([{ id: t.ref, ...goal }])[0]?.ok) {
+        const poly = this.things().find((r) => r.kind === 'room' && r.level === t.level && r.poly && inPoly(t.at[0], t.at[1], r.poly))?.poly;
+        if (poly) {
+          const fits = (g: { p: Vec2; level: number } | null) => !!g && inPoly(g.p[0], g.p[1], poly) && !!E.navCheckV1!([{ id: t.ref, ...g }])[0]?.ok;
+          let other: { p: Vec2; level: number } | null = null;
+          for (const s of stands) { const g = near(s, t.level, 6); if (fits(g)) { other = g; break; } }
+          // roofReach knows nothing of bodies: step off anyone on its spot, as any goal does, if that stays in the room
+          const reach = other ? null : this.roofReach(goal, 2.5, poly), aside = reach ? near(reach.p, t.level, 6) : null;
+          goal = other ?? (fits(aside) ? aside : reach) ?? goal;
+        }
+      }
       // WALK3: a duck on the lake, a boat in the harbour: the shore of the water it floats on, nearest to it
       if (!goal && !t.level) for (const w of this.things()) {
         if (w.kind !== 'water' || !w.area || !inPoly(t.at[0], t.at[1], w.area)) continue;
@@ -484,14 +514,15 @@ export class GodNav {
       const room = t.kind === 'room' ? t : this.things().find(r => r.kind === 'room' && t.rooms?.includes(r.ref) && r.level === goal!.level && r.poly && inPoly(goal!.p[0], goal!.p[1], r.poly));
       if (room) goal = this.visitorGoal(room, goal, near);
     }
-    this.goals.set(key, { tick, key: positionKey, goal });
+    this.goals.set(key, { tick, key: positionKey, warm: !sawCold && this.navWarm(tick), goal });
     return goal;
   }
 
-  /** RESOLVE2: the nearest connected (walkable both ways from the main ground) standing spot on `g`'s level within 4 m. */
-  private roofReach(g: { p: Vec2; level: number }): { p: Vec2; level: number } | null {
+  /** RESOLVE2: the nearest connected (walkable both ways from the main ground) standing spot on `g`'s level within `r` m
+   *  (and inside `within`, a room's polygon, when given). */
+  private roofReach(g: { p: Vec2; level: number }, r = 4, within?: Vec2[]): { p: Vec2; level: number } | null {
     const E = this.E, pts: { id: string; p: Vec2; level: number }[] = [];
-    for (let dz = -4; dz <= 4; dz += 0.5) for (let dx = -4; dx <= 4; dx += 0.5) if (Math.hypot(dx, dz) <= 4) pts.push({ id: `${dx},${dz}`, p: [r2(g.p[0] + dx), r2(g.p[1] + dz)], level: g.level });
+    for (let dz = -r; dz <= r; dz += 0.5) for (let dx = -r; dx <= r; dx += 0.5) if (Math.hypot(dx, dz) <= r && (!within || inPoly(g.p[0] + dx, g.p[1] + dz, within))) pts.push({ id: `${dx},${dz}`, p: [r2(g.p[0] + dx), r2(g.p[1] + dz)], level: g.level });
     let best: Vec2 | null = null, bd = Infinity;
     for (const v of E.navCheckV1!(pts) as { id: string; ok: boolean }[]) {
       if (!v.ok) continue; const [dx, dz] = v.id.split(',').map(Number), d = Math.hypot(dx, dz);
