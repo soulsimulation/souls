@@ -779,3 +779,12 @@ Completion preserves the artwork identity and replaces dark crack geometry with 
 `repairedBy` stores the repair receipt provenance, not a display author name. The whole artwork loses its
 repair offer; the completed receipt reports the outcome and the brush stays in hand. This is an authored
 restoration, with no curing simulation or removable bowl. No new contact or repair mechanism is introduced.
+### Intention paper ritual (#1655)
+
+`core-intention-burner@1` combines existing native hand writing and action-specific fire contact on one fixed
+stand. A permitted Soul supplies words, reads them, then lights the paper's lower edge. Contact commits `on`
+and irreversible `spent` state with a released status; conditional kit geometry replaces the supplied paper with
+charred material. Putting out the tray removes the flame and preserves that material/status. Spent paper cannot
+be rewritten or relit. Existing sign read exposes words/status; rendered glyphs, refill, a removable output,
+progressive combustion, fire spread and mental-state effects are not claimed. Earlier words may remain in world history;
+this is not secure erasure. No contact or reader registry changes.
