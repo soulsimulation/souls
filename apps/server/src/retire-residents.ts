@@ -1,4 +1,4 @@
-// Release 3.1.1 (Gene 2026-10-17, relayed verbatim by the coordinator): "delete the ~30 pre-sign-in residents with no signed-in
+// Release 0.6.1 (Gene 2026-10-17, relayed verbatim by the coordinator): "delete the ~30 pre-sign-in residents with no signed-in
 // owner". One-shot operator maintenance with the same shape as legacy-looks.env (edge/body/migrate-looks.ts): a world run by
 // the launcher reads <DATA_DIR>/retire-residents.env (one line, RETIRE_RESIDENTS_MODE=plan|apply) at boot.
 //   plan  : lists every live Soul whose owner is not a signed-in account (acct_<uuid> from the account registry); no writes.

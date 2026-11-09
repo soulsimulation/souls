@@ -95,6 +95,11 @@ test('a walk with no observed end is unknown; its end, read later, settles it', 
 test('no shared plan on day one is unknown, not a failure of memory', () => {
   assert.equal(verdict([say('See you.', T - 5000), parted(), say('Bo!'), walk('flag-orchard')]), 'unknown');
   assert.equal(verdict([plan('flag-knoll'), parted(), say('Bo!'), walk('flag-orchard')]), 'unknown');
+  // #1606: a first day that didn't happen says so, so an arm can stop before paying for another
+  const why = (a) => question.score(ctxOf(a, good('Ada'))).uncertainty;
+  assert.match(why([say('See you.', T - 5000), parted(), say('Bo!'), walk('flag-orchard')]), /^invalid-day-1: the two Souls stated no shared plan/);
+  assert.match(why([plan(), say('Bo!'), walk('flag-orchard')]), /^invalid-day-1: a Soul never walked away/);
+  assert.doesNotMatch(why([here({ day: 1, atMs: T - 8000 }), here({ day: 2, atMs: T - 6000 }), ...good('Bo')]) ?? '', /invalid-day-1/, 'a clock fault is not a day one that didn\'t happen');
 });
 test('a plan the world repeats is not recall; the Soul\'s own memory and brief are', () => {
   const told = { verb: 'pending', args: [], atMs: T + 500, out: { events: [{ text: 'Tomorrow at walk:flag-orchard.' }] } };

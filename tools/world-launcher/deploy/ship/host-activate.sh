@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The guarded activation, run on the release host by ship.sh: bash -s -- <args> < host-activate.sh
 # Everything it needs is a positional argument. It runs under the host's environment, so it must not read a variable
-# that only the operator's machine sets (the 4.15 run stopped on exactly that).
+# that only the operator's machine sets (the 0.119 run stopped on exactly that).
 # On a failed reload or health check it rolls code back to the previous build. Data is never touched.
 # Its exit says what happened, and ship.sh reports exactly that:
 #   0   the build is active and healthy
