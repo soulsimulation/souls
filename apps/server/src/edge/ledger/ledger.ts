@@ -2228,7 +2228,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // #1468 (#850 follow-up): an offer that was available, whose walk the planner refuses route-dead, names what this Soul
       // can do instead, as a blocked offer does at listing time; never the refused act itself
       if (!ROUTE_DEAD.has(issue.code) || isVerificationProbe(soul.soulId)) return out;
-      const named = this.withAlternatives(soul, capability, out, this.wordsMenu(soul).caps, this.bindOne(soul, capability)?.cap);
+      // only the verb as its words: an id's own words are no place named ("…-roof-planter-1" would name eden-house-1)
+      const verb = capability.includes(':') ? capability.slice(0, capability.indexOf(':')) : capability;
+      const named = this.withAlternatives(soul, verb, out, this.wordsMenu(soul).caps, this.bindOne(soul, capability)?.cap);
       const alternatives = named.alternatives?.filter(x => x.id !== capability);
       return alternatives?.length ? {...out, alternatives} : out;
     }

@@ -171,4 +171,13 @@ test('#1468: an available offer the planner refuses route-dead names alternative
     for (const x of r.alternatives) {assert.ok(avail.has(x.id), `${code}: ${x.id} is available now`); assert.notEqual(x.id, sits[0]!.id, 'never the refused act'); assert.ok(x.why, 'each says why');}
     t.diagnostic(`${code}: ${JSON.stringify(r.alternatives.map((x: any) => x.id))}`);
   }
+  // a walk refused so (clip review at 05f450946: "…-roof-planter-1" named eden-house-1, "walks to 1"): an id's own words
+  // name no other place; what is offered instead is near the refused place, and only partly serves
+  const walks = caps.filter(c => c.available && c.verb === 'walk' && /\d/.test(c.id)), walk = walks[0] ?? caps.find(c => c.available && c.verb === 'walk')!;
+  engine.canPerform = (p: {actor: string; steps: {verb: string}[]}) => p.actor === w.soul.entityId && p.steps.some(s => s.verb === 'walk_to') ? {code: 'route.unreachable', message: 'stubbed'} : real(p);
+  let r: any; try {r = await accept(w.host, w.edge.act(w.soul, {capability: walk.id}));} finally {engine.canPerform = real;}
+  assert.equal(r.code, 'route.unreachable', JSON.stringify(r));
+  assert.ok(r.alternatives?.length >= 1, `${walk.id}: ${JSON.stringify(r)}`);
+  for (const x of r.alternatives) {assert.notEqual(x.id, walk.id); assert.ok(avail.has(x.id)); assert.equal(x.partial, true, `${x.id} only partly serves`); assert.doesNotMatch(x.why, /^walks to /, `no place named by the id's own words: ${x.why}`);}
+  t.diagnostic(`${walk.id}: ${JSON.stringify(r.alternatives.map((x: any) => [x.id, x.why]))}`);
 });
