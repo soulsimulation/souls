@@ -20,6 +20,7 @@ import { readOnlyObjectAdvance, refreshOnlyObjectAdvance } from '../edge/comms/o
 import type { NearFilter, Objects } from '../edge/comms/objects/framework.ts';
 import { canonicalJson, stateDigest } from '../edge/comms/objects/table.ts';
 import { actionsOf, actuatedState, keptShut, kindActions, wrapAct, type Thing } from './actuators.ts';
+import type { Meditation } from './meditation.ts';
 import { heldGodThing } from './held.ts';
 import { waterRole, wordOf } from './water.ts';
 import { economyOn } from './layers.ts';
@@ -125,6 +126,8 @@ export type PerceiveHost = {
 export const GOD_PLACES = process.env.GOD_PLACES !== '0';
 
 export class GodPerceive {
+  private meditation?: Meditation;
+  bindMeditation(service: Meditation) { this.meditation = service; }
   private h: PerceiveHost;
   private sigs = new Map<string, string>();
   /** What each `built` object's state should be now (its kind's advance reads this). */
@@ -185,6 +188,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      meditation: (soul: EdgeSoul, id: string, action: string) => this.meditation?.plan(soul, id, action) ?? null,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),

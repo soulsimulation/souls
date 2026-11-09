@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1594: core-meditation-mat@1 adds a fixed thirty-second quiet seated practice with completed-receipt persistence. Scoped EF4 k=2 placed, baked and rendered all five samples with zero findings or qualification gaps. The local-fixture tag marks mats as local props rather than distant landmarks; no prior supplement or budget changes.",
+  "defs": [
+    {
+      "def": "core-meditation-mat@1",
+      "hash": "44c57267f28721edf6f59a6e27014876e0a715fbb31e9c9cd2e56267ea4b5b12"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}

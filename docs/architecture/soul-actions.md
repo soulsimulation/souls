@@ -709,3 +709,9 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Timed quiet practice
+
+`core/meditation-mat@1` offers `object:<entity-id>:meditate` with no parameters: walk normally to the mat, use the existing `sit-ground` posture for 30 seconds, and stand. This is a quiet seated practice, without a physiology, breathing animation or mental-state claim. Finish current hand work first. Existing access, support and native admission rules apply.
+
+Only a completed receipt saves the latest participant name, native completion tick and receipt id in the mat entity state. `inspect <entity-id>` exposes that bounded record. Stop with `stand:here`; interrupted or failed practices leave the previous completion unchanged. Removed or changed mats and access lost before completion receive no record. Repeated or older completion notifications cannot overwrite a newer result. The action remains available for another practice. No timer or idle scan is added.
