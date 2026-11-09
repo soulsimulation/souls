@@ -39,3 +39,9 @@ for(const policy of [false,true])
     const p=e.world.entities.body.pose.p,moved=Math.hypot(p[0]-at[0],p[2]-at[2]);
     if(policy)assert.ok(moved<1e-3,`not moved: ${moved}`);else assert.ok(moved>.3,`moved: ${moved}`);
   });
+
+test('#1455 under body-separation-3d/1 a body on the same floor at the spot is still kept clear of (review)',()=>{
+  const e=world(true,{other:[1,9,-2.6,DECK]},[1,8,-2.6,DECK]);
+  assert.equal(e.restoreHumanPoseV1('body',{p:[9,DECK,-2.6],level:1}),true);
+  assert.ok(apart(e,'body','other')>=.5,`apart: ${apart(e,'body','other')}`);
+});
