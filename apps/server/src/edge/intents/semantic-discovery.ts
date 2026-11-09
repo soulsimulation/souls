@@ -122,7 +122,7 @@ export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:Ed
 // nothing. Not when the seat words name no seat ("sit with Zed on the bench": the ground is never offered for a named seat)
 // or the "with" words name a place or part ("with a view"): those keep the refusal.
 const WITH=/^(.+?)\s+(?:together\s+with|along\s+with|with)\s+(?!me\b)(.+?)[\s.!?]*$/i;
-const COMPANION_TAIL=/\s+(?:now|here|right\s+now|for\s+(?:a\s+(?:while|bit|minute|moment)|some\s+time)|so(?:\s+that)?\s+.*|to\s+.*|in\s+order\s+to\s+.*)$/i;
+const COMPANION_TAIL=/\s+(?:now|here|right\s+now|(?:next\s+to|near|by|beside|under|outside|inside|on|at|in)\s+.*|for\s+(?:a\s+(?:while|bit|minute|moment)|some\s+time)|so(?:\s+that)?\s+.*|to\s+.*|in\s+order\s+to\s+.*)$/i;
 function unresolvedCompanion(L:EdgeLedger,soul:EdgeSoul,text:string,caps:EdgeCapability[],plans:Parameters<EdgeLedger['resolveOnDemand']>[3],known:Place[]):VocabResult|null{
  const m=WITH.exec(text.trim());if(!m)return null;
  const head=m[1]!.trim(),who=m[2]!.replace(COMPANION_TAIL,'').trim();if(!who)return null;

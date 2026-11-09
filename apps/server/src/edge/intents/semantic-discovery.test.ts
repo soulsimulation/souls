@@ -113,7 +113,7 @@ test('#1242: "sit outside with <someone unknown>" lists the outdoor seat, choose
  L.resolveOnDemand=(_:unknown,text:string,caps:any[],plans:any)=>{const c=caps.find(x=>x.id===text);if(c||text.includes(':'))return {v:{kind:'exact',cap:c??{id:text,verb:'sit',available:true}}};
   return {v:semanticDiscovery(L,soul,text,caps,plans)??(/\bbench\b/.test(text)&&caps[0]?{kind:'alias',cap:caps[0],note:''}:{kind:'unknown',reason:'none',didYouMean:[]})};};
  L.host={minds:new Map()};const run=(s:string,caps:any[]=[])=>semanticDiscovery(L,soul,s,caps,new Map()) as any;
- for(const [text,who] of [['sit outside with Bo','Bo'],['sit outside with Zed.','Zed'],['sit outside with a friend','a friend'],['take a seat outside along with Bo and Zed','Bo, Zed'],['sit outside with Bo now','Bo'],['sit outside with Bo for a minute','Bo']]){
+ for(const [text,who] of [['sit outside with Bo','Bo'],['sit outside with Zed.','Zed'],['sit outside with a friend','a friend'],['take a seat outside along with Bo and Zed','Bo, Zed'],['sit outside with Bo now','Bo'],['sit outside with Bo for a minute','Bo'],['sit outside with Bo next to the fire','Bo']]){
   const r=run(text);assert.equal(r.kind,'unknown',text);assert.equal(r.code,'capability.choose',text);
   assert.deepEqual(r.didYouMean.map((x:any)=>x.id),['sit:cottage/part-outdoor-bench'],text);
   assert.deepEqual(r.discovery.unresolved,{with:who},text);assert.ok(r.reason.includes(`"${who}" is not read: no Soul you can invite from here is called that`),text);assert.match(r.reason,/No seat has been selected/,text);
