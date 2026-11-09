@@ -185,6 +185,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      correspondenceHeld:(id:string)=>this.h.engine.world.entities[id]?.support?.kind==='in-hand',
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
