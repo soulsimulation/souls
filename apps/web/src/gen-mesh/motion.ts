@@ -625,13 +625,18 @@ export function syncLightGlow(obj: THREE.Object3D, e: Entity, def: StoredDef, mo
   const reduced=!!reducedLightMotion?.matches;
   const patterned=lights.some(l=>l.pattern&&l.pattern!=='steady'),flame=!patterned&&flickers(e.def); // W2: a flame's own glow flickers with its pool
   const pattern=flame?lightPatternLevel('flicker',t,lightPhase(e.id,0,1,'flicker'),reduced):patterned?lights.reduce((v,l,i)=>v+(l.on===false?0:lightPatternLevel(l.pattern,t,lightPhase(e.id,i,lights.length,l.pattern),reduced)),0)/lights.length:1;
-  const night = nightOf(model), level = (0.25 + 1.4 * night + (patterned||flame?0:0.03 * Math.sin(t * 3)))*pattern;
+  const night = nightOf(model), level = (0.25 + 1.4 * night + (patterned||flame?0:steadyWobble(t)))*pattern;
   // K1 / XP1: retain v2's per-shape glow level through the day/night and pattern multiplier.
   for (const p of ud.glow) { steadyPart(p, !patterned && !flame && !p.flame); const v = level * p.gain; setGlow(p, p.flame ? Math.max(FLAME_GLOW_MIN, Math.min(v, FLAME_GLOW_CAP)) : v); }
 }
 /** PERF-EVENTLOOP: the glow level every steady lamp shares at page time `tIn` (syncLightGlow's `level` for an unpatterned lamp,
  *  before each part's gain): the layer re-syncs its steady lamps only when the quantized value (quantizeGlow) steps. */
-export function steadyGlowAt(tIn: number, model: WorldModel | null = boundModel): number { const t = worldSeconds(tIn); return 0.25 + 1.4 * nightOf(model) + 0.03 * Math.sin(t * 3); }
+export function steadyGlowAt(tIn: number, model: WorldModel | null = boundModel): number { const t = worldSeconds(tIn); return 0.25 + 1.4 * nightOf(model) + steadyWobble(t); }
+/** P2 phones: a steady lamp's slow 3% breathing, read at STEADY_WOBBLE_HZ. Read continuously, its quantized level stepped ~22
+ *  times a second by day (dim lamps: each 1% step is a small absolute change), and every step re-synced every visible
+ *  steady lamp (~790 on Eden 2026). At 4 Hz it steps under 4 times a second by day and night alike; the 2 s breath remains. */
+export const STEADY_WOBBLE_HZ = 4;
+function steadyWobble(t: number): number { return 0.03 * Math.sin(Math.floor(t * STEADY_WOBBLE_HZ) / STEADY_WOBBLE_HZ * 3); }
 /** PERF-EVENTLOOP: how a drawn lamp's glow moves: not at all (switched off), with the shared steady level (every part's level is
  *  steadyGlowAt × its gain), or by its own pattern (a blink, a twinkle, a flame's flicker). */
 export function glowKind(obj: THREE.Object3D, e: Entity, def: StoredDef): 'off' | 'steady' | 'patterned' {

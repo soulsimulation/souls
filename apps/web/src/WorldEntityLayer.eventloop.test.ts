@@ -190,3 +190,15 @@ test('steady lamps sync only when the shared glow level steps, and only those se
   assert.equal(ticks.get('steady2'), 1 + stepped, 'synced for the stale glow (and once more if the level stepped this frame)'); assert.equal(steady2.d().glowStale, false);
   void off;
 });
+
+test('P2: the shared steady glow level steps at most a few times a second, by day and by night', async () => {
+  const { quantizeGlow, steadyGlowAt, STEADY_WOBBLE_HZ, setClockNight } = await import('./gen-mesh/motion.ts');
+  for (const night of [0, 0.5, 1]) {
+    setClockNight(night);
+    let last = NaN, steps = 0;
+    for (let f = 0; f < 60 * 60; f++) { const q = quantizeGlow(steadyGlowAt(1e9 + f / 60, null)); if (q !== last) { last = q; steps++; } }
+    assert.ok(steps / 60 <= STEADY_WOBBLE_HZ + 0.5, `night ${night}: ${(steps / 60).toFixed(1)} steps a second`);
+    assert.ok(steps / 60 >= 1, 'the lamps still breathe');
+  }
+  setClockNight(null);
+});
