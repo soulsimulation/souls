@@ -16,6 +16,9 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const w = await bootEden();
   t.after(() => w.close());
   const E = w.host.engine as unknown as NavV1, L = w.edge;
+  // #1502: this test is about #900's and #1468's outcomes, not the re-plan budget (edge-nav-replan-budget.test.ts): every
+  // re-plan fits in a tick here, whatever the runner's speed
+  (L as unknown as { replanBudgetMs: number }).replanBudgetMs = Infinity;
   const soulOf = async (owner: string, name: string) => {
     await invite(w as never, owner);
     const row = await accept(w.host, w.souls.create(`dev:${owner}`, { name, description: 'curious' })) as { id: string; entity_id: string; name: string; owner: string };
@@ -80,7 +83,8 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   assert.equal(phase(w.soul, ana.receipt!.id).phase, 'waiting');
   // the tick loop warms navigation in slices; here all at once
   assert.ok(E.navWarmV1(Infinity));
-  for (let i = 0; i < 40 && phase(w.soul, ana.receipt!.id).phase === 'waiting'; i++) await w.settle(1);
+  // (every waiting walk settles first: Ana's start and Bob's kitchen failure; #1504 review)
+  for (let i = 0; i < 40 && [phase(w.soul, ana.receipt!.id), phase(bob, second.receipt!.id)].some((r) => r.phase === 'waiting'); i++) await w.settle(1);
   // A1: planned again from the warm goal, it starts; A2: the kitchen roof is refused by the planner, as any walk
   assert.notEqual(phase(w.soul, ana.receipt!.id).phase, 'waiting'); assert.notEqual(phase(w.soul, ana.receipt!.id).phase, 'failed', JSON.stringify(phase(w.soul, ana.receipt!.id)));
   assert.notEqual(phase(di, fourth.receipt!.id).phase, 'failed', JSON.stringify(phase(di, fourth.receipt!.id)));
@@ -97,8 +101,9 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   // each event carrying legal alternatives; Fay, with no kept menu, fails at once, naming where to look, and no menu is built
   const all3 = [{ s: bob, id: second.receipt!.id }, ...more];
   {
-    const Lc = L as unknown as { wordsCache: Map<string, unknown>; capCache: Map<string, unknown>; pending: Map<string, unknown>; failWait(id: string, p: unknown, tick: number, code: string, reason: string): void };
-    Lc.wordsCache.delete(fay.soulId); Lc.capCache.delete(fay.soulId); fayIdV = fay.soulId; menuBuiltForFay = 0;   // from here, a menu built for Fay counts
+    const Lc = L as unknown as { wordsCache: Map<string, unknown>; capCache: Map<string, unknown>; lastMenu: Map<string, unknown>; pending: Map<string, unknown>; failWait(id: string, p: unknown, tick: number, code: string, reason: string): void };
+    Lc.wordsCache.delete(fay.soulId); Lc.capCache.delete(fay.soulId); Lc.lastMenu.delete(fay.soulId);   // (#1502: and the copy kept when her act dropped it)
+    fayIdV = fay.soulId; menuBuiltForFay = 0;   // from here, a menu built for Fay counts
     Lc.pending.set(fay.soulId, fayWait); Lc.failWait(fay.soulId, fayWait, w.host.engine.world.tick, 'route.unreachable', 'That roof is up where no stair or ramp from the ground reaches.');
     assert.equal(phase(fay, more[1]!.id).phase, 'failed', 'with no kept menu, the failure is at once, not held');
   }

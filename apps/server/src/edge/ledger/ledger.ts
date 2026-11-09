@@ -91,6 +91,10 @@ const NAV_WARM_WAIT_TICKS = 20 * 120;
 /** nav-warm-wait/1: labels a moving ride invalidated relabel in ~70-150 ms on Eden (the first build takes 8-15 s): an act
  *  refused while cold warms them for at most this long in the request; a waiting walk, this long per tick */
 const NAV_ACT_WARM_MS = 150, NAV_TICK_WARM_MS = 10;
+/** #1502: a re-plan (with its route check) starts only while this tick has spent under this long on re-plans, so a tick's
+ *  re-plan work is at most this plus one re-plan (soft, about 2x under load); one always runs. The rest wait for a later
+ *  tick. While walks are held so, the tick's relabel slice is this long too (else NAV_TICK_WARM_MS), and counts. */
+const NAV_REPLAN_TICK_MS = 40;
 const NAV_WARM_REASON = 'Navigation is still getting ready after the world started: this walk is planned again and starts once it is ready.';
 const WALK_VERBS = new Set(['walk_to', 'mars:walk_to']);
 const MOTION_M = 0.05;   // #790: a root displacement (m, ground plane) larger than this is first motion
@@ -139,7 +143,7 @@ const WITH_PARAM = {type: 'array', items: 'Soul id or name', optional: true, des
 type Row = {created_at: number; receipt_id: string; soul_id: string; capability: string; phase: EdgeReceipt['phase']; accepted_tick: number; started_tick: number | null; ended_tick: number | null; code: string | null; reason: string | null; program_id: string | null; client_ref: string | null; plan?: string | null; detail?: string | null};
 const ARRIVAL_FRESH_MS = 10 * 60_000, MAX_DATE_MS = 8.64e15;
 /** failNext (#1468): a route-dead failure held to the next tick, so its alternatives are built then (one build a tick). */
-type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string; navWarm?: true; failNext?: {code: string; reason: string}};
+type Pending = {receipt: string; soul: EdgeSoul; steps: Program['steps']; label: string; deadline: number; capability: string; navWarm?: true; failNext?: {code: string; reason: string}; held?: number};
 type StandReleaseV1={actor:string;owner:string;seats:{action:string;slot:string}[]};
 
 /** The body plans behind a Soul's offered capabilities, by capability id. */
@@ -882,22 +886,30 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private afterTick(tick: number) {
     if(this.contactPending.size)this.contactTicks(tick);
     if(this.motionWatch.size)this.motionTicks(tick);
+    // #1502: a re-plan's cost (with its route check, ~10-15 ms each on Eden 2026) counts against this tick's budget
+    let replanFrom: number | undefined;
+    const spent = () => {if (replanFrom === undefined) return; const ms = performance.now() - replanFrom, was = this.replanSpent?.tick === tick ? this.replanSpent : {tick, ms: 0, n: 0}; replanFrom = undefined; this.replanSpent = {tick, ms: was.ms + ms, n: was.n + 1};};
     for (const [soulId, p] of this.pending) {
+      replanFrom = undefined;
       if (this.host.quietBarrier) {p.deadline = Math.max(p.deadline, tick + WAIT_LIMIT_TICKS); continue;}   // the wait clock pauses during renewal
       if (p.failNext) {this.failWait(soulId, p, tick, p.failNext.code, p.failNext.reason); continue;}
       if (tick > p.deadline) {this.pending.delete(soulId); this.update(p.receipt, p.navWarm ? {phase: 'failed', code: 'nav.warm-timeout', reason: 'Navigation was still not ready two minutes after this walk was asked; ask again.'} : {phase: 'failed', code: 'state.safe-stop-timeout', reason: 'The body could not reach a safe stop within a minute.'}); continue;}
       if (this.host.quietBarrier) continue;
       // nav-warm-wait/1 (#884): a walk refused while navigation was cold starts from goals made again once it is warm
       if (p.navWarm) {
-        if (!this.navWarmTick(tick)) continue;
-        p.navWarm = undefined;
+        // #1502: a walk the budget held never spends its deadline on that: while held (over budget, or since then behind a
+        // relabel) its deadline moves a tick a tick, for at most NAV_WARM_WAIT_TICKS more (bounded: original + time held)
+        if (!this.navWarmTick(tick)) {if (p.held !== undefined) this.holdTick(p); continue;}
+        if (this.replanSpent?.tick === tick && this.replanSpent.n > 0 && this.replanSpent.ms >= this.replanBudgetMs) {this.holdTick(p); continue;}   // (a tick's first re-plan always runs)
+        p.navWarm = undefined; p.held = undefined; replanFrom = performance.now();
         const steps = this.navReplan(p.soul, p.capability, p.steps);
         const said = this.rows('receipt_id=?', p.receipt)[0]?.reason;   // the wait's reason is over once it is warm
         if (said?.endsWith(NAV_WARM_REASON)) this.update(p.receipt, {reason: said.slice(0, -NAV_WARM_REASON.length).trim() || null});
-        if (steps && !Array.isArray(steps)) {this.failWait(soulId, p, tick, steps.code, steps.reason); continue;}
+        if (steps && !Array.isArray(steps)) {spent(); this.failWait(soulId, p, tick, steps.code, steps.reason); continue;}
         if (steps) {p.steps = steps; const l = this.launched.get(p.receipt); if (l) l.steps = steps;}
       }
       const issue = this.host.engine.canPerform({actor: p.soul.entityId, label: p.label, steps: p.steps});
+      spent();
       if (issue && WAIT_CODES.has(issue.code)) continue;
       // nav-warm-wait/1: a walk that waited for a safe stop (or a quiet renewal) and is then refused while navigation is
       // still cold waits on for it too (a sleeping Soul's first walk after a restart lands at boot)
@@ -911,7 +923,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     if (this.ambient && tick % 20 === 0) this.ambientLife(tick);
     if (this.bodyRule && tick % 20 === 0) {if (!this.bodyMigrated && this.bodyPlacesReady()) {this.bodyMigrated = true; this.migrateGone();} this.bodyRule.sweep();}
-    if (tick % 100 === 0) this.unstick(tick);
+    if (tick % 100 === 0) {this.unstick(tick); this.pruneLastMenus();}
     if (tick % 20 === 0) try {this.together.sweep();} catch (e) {console.error('[edge] together sweep', e instanceof Error ? e.message : e);}
     try {this.together.sharedWatch();} catch (e) {console.error('[edge] shared watch', e instanceof Error ? e.message : e);}
     if (this.projects && tick % 10 === 0) try {this.projects.sweep();} catch (e) {console.error('[edge] projects sweep', e instanceof Error ? e.message : e);}
@@ -1018,7 +1030,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** nav-warm-wait/1: while walks wait for navigation, one slice of labelling per tick (after the first build the engine-bridge
    *  stops warming, and a moving ride invalidates the labels until some read relabels them). */
-  private navWarmTick(tick: number): boolean {if (this.navWarmSeen?.tick !== tick) this.navWarmSeen = {tick, warm: this.navWarmFor(NAV_TICK_WARM_MS)}; return this.navWarmSeen.warm;}
+  private navWarmTick(tick: number): boolean {
+    if (this.navWarmSeen?.tick === tick) return this.navWarmSeen.warm;
+    // #1502: while walks are held by the re-plan budget, relabel in budget-sized slices (a relabel after a ride moved is
+    // ~70-150 ms on Eden: 2-4 ticks, not 7-15), and count the slice against this tick's budget
+    const held = [...this.pending.values()].some(q => q.held !== undefined), t0 = performance.now();
+    this.navWarmSeen = {tick, warm: this.navWarmFor(held ? NAV_REPLAN_TICK_MS : NAV_TICK_WARM_MS)};
+    if (held) this.replanSpent = {tick, ms: (this.replanSpent?.tick === tick ? this.replanSpent.ms : 0) + performance.now() - t0, n: this.replanSpent?.tick === tick ? this.replanSpent.n : 0};
+    return this.navWarmSeen.warm;
+  }
+  /** #1502: one tick held by the re-plan budget: the deadline moves with it, at most NAV_WARM_WAIT_TICKS in all. */
+  private holdTick(p: Pending) {const n = p.held ?? 0; if (n < NAV_WARM_WAIT_TICKS) {p.held = n + 1; p.deadline++;} else p.held = n;}
   private navWarmSeen: {tick: number; warm: boolean} | null = null;
   /** nav-warm-wait/1: a cold-refused walk's steps with each walk goal made again from the warm state (the offer bound anew,
    *  as act binds it: the one offer, else made on demand, a far part's walk; RESOLVE2's roofReach and WALK3's main ground
@@ -1044,7 +1066,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #1468: a walk that waited (for warm navigation or a safe stop) and then fails route-dead keeps its alternatives on the receipt.
    *  Stored before the receipt turns failed, so the emitted failed receipt and its outcome carry them (review of 1a07cae42). */
   /** #1468: this Soul's last menu as kept (its exact or words menu), however old; null when it has none. Never builds one. */
-  private keptMenu(soul: EdgeSoul): {caps: EdgeCapability[]; plans: Plans} | null {return this.capCache.get(soul.soulId)?.value ?? this.wordsCache.get(soul.soulId)?.value ?? null;}
+  private keptMenu(soul: EdgeSoul): {caps: EdgeCapability[]; plans: Plans} | null {return this.capCache.get(soul.soulId)?.value ?? this.wordsCache.get(soul.soulId)?.value ?? (this.host.minds.has(soul.soulId) ? this.lastMenu.get(soul.soulId) : undefined) ?? null;}
   /** #1468: a failed wait's alternatives, from the kept menu only; 'no-menu' when the Soul has none (the reason says where to look). */
   private failedAlternatives(p: Pending, code: string): 'no-menu' | undefined {const alternatives = this.routeDeadAlternatives(p.soul, p.capability, code, true); if (alternatives === 'no-menu') return alternatives; if (alternatives) this.setDetail(p.receipt, {alternatives}); return undefined;}
   /** #1468: the tick on which route-dead alternatives were last built. A build costs about 25 ms on Eden 2026, so at most
@@ -1059,10 +1081,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const none = this.failedAlternatives(p, code);
     this.update(p.receipt, {phase: 'failed', code, reason: none ? `${reason.replace(/\s+$/, '')} Read your capabilities for where you can go from here.` : reason});
   }
+  /** #1502: re-plan work spent on waiting walks in one tick (live edge state; nothing reaches the engine log). */
+  private replanSpent: {tick: number; ms: number; n: number} | null = null;
+  /** #1502: the per-tick re-plan budget (tests set it, so a test fixes how many re-plans fit in a tick, not the runner). */
+  replanBudgetMs = NAV_REPLAN_TICK_MS;
   private navReplan(soul: EdgeSoul, capability: string, steps: Program['steps']): Program['steps'] | {code: string; reason: string} | null {
     try {
-      const one = this.bindOne(soul, capability), w = one ? null : this.wordsMenu(soul);
-      const od = one ? null : this.resolveOnDemand(soul, capability, [...w!.caps], new Map(w!.plans));
+      // #1502: never a whole menu (a cold build is 100-500 ms on Eden 2026, and on the tick it stops the clock): the one
+      // offer, else that capability resolved on demand over the Soul's kept menu with the offer itself taken out (it may be
+      // bound as it was while cold; the rest gives the words their verbs: `read:<place>` is made only from them)
+      const one = this.bindOne(soul, capability), kept = one ? null : this.keptMenu(soul);
+      const od = one ? null : this.resolveOnDemand(soul, capability, (kept?.caps ?? []).filter(c => c.id !== capability), new Map([...(kept?.plans ?? [])].filter(([id]) => id !== capability)) as Plans);
       const cap = one ? one.cap : od!.caps.find(c => c.id === capability), plan = one ? one.plan : od!.plans.get(capability);
       if (cap && !cap.available && cap.blocked && !WAIT_CODES.has(cap.blocked.code)) return cap.blocked;
       const fresh = plan?.steps.filter(s => WALK_VERBS.has(s.verb));
@@ -1430,7 +1459,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** L3: an act or a receipt changed what Souls near it can do (a seat taken, an invitation, a bicycle out): the menus
    *  of the actor and of every Soul within reach of the actor or the act's target rebuild; Souls farther off keep theirs. */
   private menusChangedBy(site: string, soulId: string, capability?: string) {
-    countClear(site, true); this.capCache.delete(soulId); this.menuEpoch++;
+    countClear(site, true); this.keepLast(soulId); this.capCache.delete(soulId); this.menuEpoch++;
     const m = this.host.minds.get(soulId), b = m ? this.body(m.entityId) : undefined;
     this.bumpCellsAt([b ? [b.pose.p[0], b.pose.p[2]] : null, capability ? this.capabilityPoint(capability) : null]);
   }
@@ -1654,9 +1683,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   invalidateBodies(){this.dropMenus('invalidateBodies');}
   /** Every Soul's menu rebuilds on its next read (`site` names the cause, for menu-stats). */
-  private dropMenus(site: string) {countClear(site); this.menuGen++; this.capCache.clear(); this.focusCache.clear(); this.wordsCache.clear();}
+  private dropMenus(site: string) {countClear(site); this.menuGen++; for (const id of this.capCache.keys()) this.keepLast(id); this.capCache.clear(); this.focusCache.clear(); this.wordsCache.clear();}
   /** One Soul's menu rebuilds on its next read. */
-  private dropMenu(site: string, soulId: string) {countClear(site, true); this.capCache.delete(soulId); this.focusCache.delete(soulId);}
+  private dropMenu(site: string, soulId: string) {countClear(site, true); this.keepLast(soulId); this.capCache.delete(soulId); this.focusCache.delete(soulId);}
+  /** #1502: each Soul's last menu, kept when its cache entry is dropped (an act drops the actor's own), for keptMenu only:
+   *  the tick builds no menu, and a waited walk's alternatives are read from this one (every pick bound again, kept only if
+   *  available now). One entry a Soul in the world: a Soul retired or removed (gone from host.minds) is never kept, and its
+   *  entry goes at the next sweep (pruneLastMenus, every 100 ticks). */
+  private lastMenu = new Map<string, {caps: EdgeCapability[]; plans: Plans}>();
+  private keepLast(soulId: string) {const v = this.capCache.get(soulId)?.value; if (v && this.host.minds.has(soulId)) this.lastMenu.set(soulId, v);}
+  private pruneLastMenus() {for (const id of this.lastMenu.keys()) if (!this.host.minds.has(id)) this.lastMenu.delete(id);}
   /** Before HTTP opens, and again once boot-time world changes (punt installs) have landed: list live Souls' capabilities
    *  (the first with a body, then more in creation order while within `budgetMs`), so the derived caches a rich `here`
    *  otherwise builds lazily (room reaches, fine nav tiles, spatial and place indexes, activity spots) are ready instead
