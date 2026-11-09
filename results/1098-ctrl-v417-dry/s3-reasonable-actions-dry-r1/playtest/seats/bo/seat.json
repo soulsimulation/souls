@@ -1,0 +1,25 @@
+{
+ "id": "bo",
+ "kind": "soul",
+ "adapter": "scripted-owner",
+ "model": "haiku",
+ "effort": "low",
+ "soulName": "Bo",
+ "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+ "folder": "<home>/souls-playtest/results/1098-ctrl-v417-dry/s3-reasonable-actions-dry-r1/playtest/seats/bo/folder",
+ "createdAt": "2026-11-09T05:13:11.815Z",
+ "sessionId": null,
+ "soulId": "s_db725a2b64",
+ "ownerIdentity": "agent-885fb1f6e5b9ca62f4d9976e",
+ "assisted": false,
+ "wake": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 3,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 779,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

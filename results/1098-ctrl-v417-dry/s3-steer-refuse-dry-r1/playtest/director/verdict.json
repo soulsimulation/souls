@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T05:12:49.888Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T05:12:51.889Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 111,
+   "firstAt": "2026-11-09T05:12:52.207Z",
+   "text": "Hello everyone, I am Ada. I came the long way, past the village green, and the apple trees there are in flower.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T05:12:55.888Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 110,
+   "firstAt": "2026-11-09T05:12:56.149Z",
+   "text": "Hello, I am Bo. I tried to fly here, but there is nothing to fly in, so I walked, and the pond was very still.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T05:12:49.888Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 0,
+    "cachedTokens": 0,
+    "cacheCreationTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "turns": 4,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 0,
+    "cachedTokens": 0,
+    "cacheCreationTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 0,
+   "cachedTokens": 0,
+   "cacheCreationTokens": 0,
+   "outputTokens": 0,
+   "costUsd": 0,
+   "turns": 9,
+   "unknownTurns": 0
+  }
+ }
+}

@@ -1,0 +1,25 @@
+{
+ "id": "ada",
+ "kind": "soul",
+ "adapter": "scripted-owner",
+ "model": "haiku",
+ "effort": "low",
+ "soulName": "Ada",
+ "worldBase": "http://world.invalid/w/s3-sustained-intent",
+ "folder": "<home>/souls-playtest/results/1098-ctrl-v417-dry/s3-sustained-intent-dry-r1/playtest/seats/ada/folder",
+ "createdAt": "2026-11-09T05:17:08.133Z",
+ "sessionId": null,
+ "soulId": "s_69d9b0331c",
+ "ownerIdentity": "agent-c5958c034c896340794f106c",
+ "assisted": false,
+ "wake": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 3,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 758,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

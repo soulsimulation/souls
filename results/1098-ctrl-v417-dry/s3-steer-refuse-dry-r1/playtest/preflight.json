@@ -1,0 +1,48 @@
+{
+ "ok": true,
+ "allow": {
+  "allowed": true,
+  "note": "Claude unused; Codex limit errors stop the seat"
+ },
+ "checks": {
+  "quota": {
+   "skipped": "no Claude roles"
+  },
+  "serverRoot": true,
+  "webDist": true,
+  "controllerCli": true,
+  "playwright": "server root mars/viewer",
+  "claude": null,
+  "codex": null,
+  "providersOk": true,
+  "live": {
+   "eden-2026": {
+    "ok": true,
+    "build": "we-168ba5df9d15",
+    "tickMs": {
+     "avg": 6.9,
+     "max": 49.7,
+     "n": 273
+    },
+    "clients": 1
+   },
+   "godmode-lab": {
+    "ok": true,
+    "build": "we-168ba5df9d15",
+    "tickMs": {
+     "avg": 0.8,
+     "max": 26.6,
+     "n": 222
+    },
+    "clients": 0
+   }
+  },
+  "laptopLoad": [
+   0.2,
+   0.1,
+   0.1
+  ],
+  "freeGb": 119,
+  "machineOk": true
+ }
+}

@@ -1,0 +1,27 @@
+{
+ "fixture": null,
+ "base": "http://world.invalid/w/s3-sustained-intent",
+ "pid": 1349197,
+ "build": "dev",
+ "bootMs": 2539,
+ "dataDir": "<home>/souls-playtest/results/1098-ctrl-v417-dry/s3-sustained-intent-dry-r1/playtest/server/data",
+ "marsWebDir": "<home>/souls-playtest/mars-web",
+ "kind": "dev",
+ "slug": "s3-sustained-intent",
+ "port": 4558,
+ "skill": {
+  "version": "2.10.2",
+  "sha256": "cf1b44b659b9701cc03689c420a4c2edcddaffb8c87f913cce2223b60f3980af"
+ },
+ "cli": {
+  "eden.mjs": "ed954bd297ab1e474187f1deb486ecfbf8adb525fd94a5062a3cf990003e8997",
+  "eden.mjs.version": "2.24.8",
+  "eden-agent.mjs": "7f8d5c6072d63469cab0bf12fd85be2a56e2f232d558314b09dd34f4032bdf82",
+  "eden-god.mjs": "93a7f23edba06d287c1c4bad5fb0064486e8877b4496c56896de633c815ead9e"
+ },
+ "instructions": {
+  "sha256": "717b538352b35176a55354874f4517383f934e044f0269685e880dd6f6289c30",
+  "mentionsEdenMjs": true
+ },
+ "startedAt": "2026-11-09T05:17:07.960Z"
+}

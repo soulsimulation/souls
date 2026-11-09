@@ -1,0 +1,23 @@
+{
+ "run": "s3-reasonable-actions-dry-r1",
+ "status": "completed",
+ "arm": "b75469499cf2",
+ "evaluation": "<home>/souls-playtest/results/1098-ctrl-v417-dry/s3-reasonable-actions-dry-r1/evaluations/001-v4",
+ "measured": 19,
+ "unavailable": [
+  "ackSec",
+  "seatResultSec",
+  "unacked",
+  "walkMps",
+  "tickRate",
+  "coLocationRatio",
+  "M7-intent-retention",
+  "G3-tick-rate"
+ ],
+ "questions": [
+  "reasonable-carried-out:predeclared:pass",
+  "refusal-helps:predeclared:unknown"
+ ],
+ "conflicts": 0,
+ "sourcesUnchanged": true
+}

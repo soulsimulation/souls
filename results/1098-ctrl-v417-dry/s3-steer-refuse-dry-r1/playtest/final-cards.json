@@ -1,0 +1,107 @@
+{
+ "schema": "soul-run-final-cards/1",
+ "source": "world api at run end",
+ "readAt": "2026-11-09T05:13:05.930Z",
+ "summary": {
+  "delivered": 7,
+  "read": 7,
+  "unread": 0,
+  "closed": 7,
+  "open": 0,
+  "closedBy": {
+   "agent": 6,
+   "server": 1
+  },
+  "outcome": {
+   "done": 6,
+   "failed": 1,
+   "other": 0
+  }
+ },
+ "cards": [
+  {
+   "seat": "ada",
+   "requestId": "ada-001",
+   "messageId": "msg_60e81d34-d31f-4f55-bb38-597578fd0768",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "failed",
+   "closedBy": "server",
+   "resultAt": 1794201068799,
+   "acknowledgedAt": 1794201060030
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-001",
+   "messageId": "msg_a172082d-dd46-46e2-8657-4f4d1818fe95",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794201093248,
+   "acknowledgedAt": 1794201060027
+  },
+  {
+   "seat": "ada",
+   "requestId": "ada-002",
+   "messageId": "msg_c0e9d163-82bb-47d5-ac50-a65ddfa230a9",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794201171264,
+   "acknowledgedAt": 1794201066220
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-002",
+   "messageId": "msg_768eed75-78d5-4e9e-94f5-3365e648a1a8",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794201093888,
+   "acknowledgedAt": 1794201093493
+  },
+  {
+   "seat": "ada",
+   "requestId": "ada-003",
+   "messageId": "msg_3322bb54-0758-4e07-8255-3c64d9c3c4c0",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794201172314,
+   "acknowledgedAt": 1794201172096
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-003",
+   "messageId": "msg_30ccae40-214b-434f-aa1b-fe9d0eb09ae0",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794201172149,
+   "acknowledgedAt": 1794201172040
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-004",
+   "messageId": "msg_a5bc4332-2e03-4beb-8660-a6613444c173",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794201176256,
+   "acknowledgedAt": 1794201176041
+  }
+ ]
+}

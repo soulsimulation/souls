@@ -1,0 +1,11 @@
+{
+ "step": "preflight",
+ "t": "2026-11-09T05:17:05.067Z",
+ "mono": 1,
+ "ok": true,
+ "allow": {
+  "allowed": true,
+  "note": "Claude unused; Codex limit errors stop the seat"
+ },
+ "machineOk": true
+}

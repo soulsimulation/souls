@@ -1,0 +1,22 @@
+{
+ "run": "s3-sustained-intent-dry-r1",
+ "status": "completed",
+ "arm": "af7fc55c86ff",
+ "evaluation": "<home>/souls-playtest/results/1098-ctrl-v417-dry/s3-sustained-intent-dry-r1/evaluations/001-v4",
+ "measured": 20,
+ "unavailable": [
+  "ackSec",
+  "seatResultSec",
+  "unacked",
+  "walkMps",
+  "tickRate",
+  "coLocationRatio",
+  "G3-tick-rate"
+ ],
+ "questions": [
+  "errand-kept-through-burst:predeclared:unknown",
+  "cancel-not-resumed:predeclared:pass"
+ ],
+ "conflicts": 0,
+ "sourcesUnchanged": true
+}

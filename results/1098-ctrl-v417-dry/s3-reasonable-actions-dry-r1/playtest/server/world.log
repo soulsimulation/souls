@@ -1,0 +1,23 @@
+[db] applied migrations 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+[boot] restore 7 ms from genesis tick 0 (snapshot read+decode 0 ms, 0 minds)
+[boot] replay 0 ms 0 ticks 0 events to tick 0 (0 ms/tick; recovery baseline 3 ms)
+[world] adopted the repair rules at tick 0 (one way): rules sim-mars/1+mars-engine/1+mars-assembly/3+activities/31+bodies/1+souls-repair/1
+[world] s3-reasonable-actions-1 booted from genesis, tick 0, replayed 0 events, 0 souls, rules sim-mars/1+mars-engine/1+mars-assembly/3+activities/31+bodies/1+souls-repair/1
+[auth] Privy not configured; logins disabled
+[god] entity world ready: 13 entities, 10 own defs + library core@5dd8abc8e5ee68eb (884), owner (unclaimed)
+(node:1346308) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[bridge] boot: world-edit seq 0, 9 entities, 9.6 ms
+[boot] projection 385 ms initial physics coherent at tick 1
+[boot] prepare 0 ms serving caches at tick 1
+[http] listening on http://world.invalid (public http://world.invalid), build dev, brain fake, budget $0.5/day, invites open
+[boot] listening 2.24 s after start: code 1.33, engine 0.02, the rest 0.79
+[boot] edge capability caches warm after listen: 0 ms: 0 slices (longest 0 ms) and the listing 0 ms, over 4 ms for 0 Souls from tick 1
+[bridge] activity spots: 1 spots, 0 shelves in 3 ms
+[portrait] render failed s_8f10fb7ad3 ENOENT: no such file or directory, open '<home>/souls-playtest/server/mars/viewer/public/modular/humanoid/rig-fem.glb'
+[portrait] render failed s_db725a2b64 ENOENT: no such file or directory, open '<home>/souls-playtest/server/mars/viewer/public/modular/humanoid/rig-masc.glb'
+[activities] rowing punt installed: punt-e_27520a11-593c9c
+[activities] edge capability caches warm after listen: 10 ms: 2 slices (longest 1 ms) and the listing 8 ms, over 10 ms for 1 Souls from tick 243
+[snapshot] SIGTERM: before draining: tick 4622 in 6 ms
+[world] SIGTERM: saving snapshot at tick 4622
+[world] SIGTERM: snapshot saved in 3 ms (capture 3, write 0)

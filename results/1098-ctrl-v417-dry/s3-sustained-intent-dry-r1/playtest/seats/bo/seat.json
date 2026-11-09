@@ -1,0 +1,25 @@
+{
+ "id": "bo",
+ "kind": "soul",
+ "adapter": "scripted-owner",
+ "model": "haiku",
+ "effort": "low",
+ "soulName": "Bo",
+ "worldBase": "http://world.invalid/w/s3-sustained-intent",
+ "folder": "<home>/souls-playtest/results/1098-ctrl-v417-dry/s3-sustained-intent-dry-r1/playtest/seats/bo/folder",
+ "createdAt": "2026-11-09T05:17:08.134Z",
+ "sessionId": null,
+ "soulId": "s_d068a334c9",
+ "ownerIdentity": "agent-06c3d4d34330928dae2ecded",
+ "assisted": false,
+ "wake": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 3,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 800,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

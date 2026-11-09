@@ -1,0 +1,2 @@
+{"t":"2026-11-09T05:11:05.885Z","mono":13304,"elapsedSec":10,"phase":"gather","source":"script","line":"ada: change of plan: instead, stop by the orchard first, then go on to the pond hall.","cmd":"say","target":"ada","outcome":"applied","requestIds":["ada-002"]}
+{"t":"2026-11-09T05:11:07.870Z","mono":15289,"elapsedSec":12,"phase":"gather","source":"script","line":"bo: fly up to the pond hall","cmd":"say","target":"bo","outcome":"applied","requestIds":["bo-002"]}

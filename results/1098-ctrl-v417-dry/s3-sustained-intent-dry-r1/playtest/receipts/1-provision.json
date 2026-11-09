@@ -1,0 +1,9 @@
+{
+ "step": "provision",
+ "t": "2026-11-09T05:17:08.126Z",
+ "mono": 3060,
+ "ok": true,
+ "base": "http://world.invalid/w/s3-sustained-intent",
+ "build": "dev",
+ "kind": "dev"
+}
