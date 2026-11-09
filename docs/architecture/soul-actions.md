@@ -709,3 +709,9 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Camp fish cooking
+
+`core/camp-grill@1` has one charcoal charge and a declared `food` surface. Put a `core/camp-fish@1` portion on it, light the coals through the existing hand contact, then use `cook-fish` with empty hands. The existing ten-second cook animation depicts its default spoon; it does not acquire a separate owned tool. Only its natural completion may brown the same supported fish, make it edible, consume the charge and put the coals out. It rechecks the original fish identity, current support, raw state, heat, fuel, access and nearby actor; interruption or an invalidated target leaves food and fuel unchanged. This is a finite cooking operation, not a thermal simulation: heat is checked at admission/start and completion.
+
+Ordinary nearby descriptions and inspect offers expose the requirements, raw/cooked state, remaining food, maker and cold or spent fuel. Raw food has no edible portion. The cooked fish then uses normal pickup, two native bites and putdown, retaining its identity and maker provenance. New definitions are opt-in; old food, lighting and cooking remain unchanged.

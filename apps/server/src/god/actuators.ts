@@ -1,3 +1,4 @@
+import type { CampFish } from './camp-fish.ts';
 // VOCAB-MECH: def actuators as Soul actions. A def's declarative `actions` (vocab ACTUATORS: switch-on/off, open/close,
 // lock/unlock, fill/empty, light/put-out, play/stop — or any def/1 action with `when` and `then` on its own state) become
 // actions of the god thing's `built` object (perceive.ts), so a Soul near a lamp is offered
@@ -78,6 +79,7 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  campFish?: CampFish['plan'];
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   deferContacts?: boolean;
@@ -350,6 +352,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
+      const camp = s.key ? host.campFish?.(ctx.soul, s.key, a.name) : null; if (camp) return 'code' in camp ? camp : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
@@ -370,6 +373,8 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
+        const camp = s.key ? host.campFish?.(ctx.soul, s.key, a.name) : null;
+        if (camp && !('code' in camp)) return { state: s, result: { action: a.name, summary: camp.summary }, bodies: [{ label: a.label, steps: camp.steps }] };
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
