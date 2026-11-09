@@ -772,3 +772,10 @@ the world creator can place or mark a tent with `broken: true`.
 These actions use empty parameters and existing access, state and interruption rules. An approach interrupted before contact leaves raw material.
 The preserved state survives reopening and persistence. This is a compact art-making interaction, with no
 botanical drying-time simulation or removable output item.
+A fixed **gold-seam restoration stand** (`core-gold-seam-station@1`) holds one supplied cracked ceramic
+bowl. Its existing `repair` offer fetches a real `core-lacquer-brush@1`, then native tool repair performs six
+short dabs. The artwork stays cracked until the receipt completes; interruption leaves it unrepaired.
+Completion preserves the artwork identity and replaces dark crack geometry with golden seams. Existing
+`repairedBy` stores the repair receipt provenance, not a display author name. The whole artwork loses its
+repair offer; the completed receipt reports the outcome and the brush stays in hand. This is an authored
+restoration, with no curing simulation or removable bowl. No new contact or repair mechanism is introduced.
