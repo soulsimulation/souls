@@ -2114,7 +2114,11 @@ export class Together {
     }
     if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
       // #1261: a world may offer its own put-down for what is in the hand (a god-built thing: god/held.ts), as for give
-      if (!held) {const own = caps.find(c => c.id === 'put-down:here'); if (own) return {capability: own.id, note: `${raw} is put-down:here (${own.label})`}; return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};}
+      if (!held) {
+        const own = caps.find(c => c.id === 'put-down:here'), id = own?.target?.id;
+        if (own) return {capability: own.id, note: `${raw} is put-down:here (${id ? this.thingName?.(id) ?? id : own.label})`};
+        return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+      }
       return {capability: 'put-down:here', note: `${raw} is put-down:here (${held.name})`};
     }
     if (held && ((held.kind === 'food' && /^(?:eat|have|finish)\b/.test(t) && (/\b(?:it|this|that|food|snack|bread|apple|cake)\b/.test(t) || t === 'eat')) || (held.kind === 'cup' && /^(?:drink|sip|have|finish)\b/.test(t) && (/\b(?:it|this|that|tea|coffee|cup|drink)\b/.test(t) || t === 'drink'))))
