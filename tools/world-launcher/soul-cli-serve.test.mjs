@@ -152,8 +152,18 @@ test('#1244 A2: a child that exits fails at once and names the log', async (t) =
   const t0 = Date.now(), r = await w.cliEnv(preload(w, 'process.exit(3);'), 'serve');
   assert.equal(r.code, 1);
   assert.match(r.err, /serve did not start: it exited \(code 3\); see .*\.eden-serve\.log/);
-  assert.ok(Date.now() - t0 < 3_000, `at once, not at the limit (${Date.now() - t0} ms)`);
+  assert.ok(Date.now() - t0 < 4_500, `at once, not after main's 5 s or the limit (${Date.now() - t0} ms)`);
   assert.equal((await w.cli('serve', '--status')).json.serving, false);
+});
+
+test('#1244 A3: two serves started at once in one folder both answer the one that came up, slow to listen or not', async (t) => {
+  const w = await world(t);
+  // The child that wins the lock is slow between taking it and answering; the one that loses exits at once.
+  const env = preload(w, "const net = await import('node:net'); const l = net.Server.prototype.listen; net.Server.prototype.listen = function (...a) { setTimeout(() => l.apply(this, a), 2000); return this; };");
+  const [a, b] = await Promise.all([w.cliEnv(env, 'serve'), w.cliEnv(env, 'serve')]);
+  assert.equal(a.code, 0, a.err); assert.equal(b.code, 0, b.err);
+  assert.equal(a.json.serving && b.json.serving, true);
+  assert.equal(a.json.pid, b.json.pid, 'one serve, named by both');
 });
 
 test('#1244 A3: at the limit the child it started is stopped, and the answer says nothing is serving', async (t) => {

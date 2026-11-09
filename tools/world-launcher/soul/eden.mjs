@@ -3872,12 +3872,15 @@ function serveHolder() {
   if (!h?.pid || !pidAlive(h.pid) || serveIdentity(h.pid) === false) return null;
   return Date.now() - (h.beatAt ?? 0) < SERVE_STALE_MS ? h : null;
 }
-function writeServeLock(start) { writeFileSync(SERVE_LOCK + ".tmp", JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(SERVE_LOCK + ".tmp", SERVE_LOCK); }
+// Each writer has its own temporary name: two serves started together never rename each other's bytes into the lock (#1244).
+function writeServeLock(start) { const tmp = `${SERVE_LOCK}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(tmp, SERVE_LOCK); }
+/** The lock file was just created and is not yet written: another serve is a moment into taking it. */
+const serveLockFresh = () => { try { const st = lstatSync(SERVE_LOCK); return st.size === 0 && Date.now() - st.mtimeMs < SERVE_STALE_MS; } catch { return false; } };
 function takeServeLock(start) {
   try { closeSync(openSync(SERVE_LOCK, "wx", 0o600)); }
   catch (e) {
     if (e.code !== "EEXIST") throw e;
-    if (serveHolder()) return false;
+    if (serveHolder() || serveLockFresh()) return false;
     const h = readServeLock(); if (h?.pid && h.pid !== process.pid && pidAlive(h.pid) && serveIdentity(h.pid) === true) { try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ } }
   }
   writeServeLock(start);
@@ -4536,19 +4539,21 @@ async function serve(...args) {
   child.once("exit", (code, signal) => { exited = { code, signal }; });
   const up = (a) => ({ ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` });
   const limit = Date.now() + SERVE_START_MS * TIME_SCALE;
+  let other = null;   // a serve this command didn't start, which took the folder's lock first
   while (Date.now() < limit) {
     await sleep(50);
     const a = await askServe({ op: "status" });
-    if (a?.serving) return up(a);
+    if (a?.serving) return other || a.pid !== child.pid ? { ...a, alreadyServing: true } : up(a);
     if (exited) {
-      // It exits 0 when another serve for this folder took the lock first: that one answers.
-      const other = await askServe({ op: "status" });
-      if (other?.serving) return { ...other, alreadyServing: true };
-      throw new Error(`serve did not start: it exited (${exited.signal ?? `code ${exited.code}`}); see ${SERVE_LOG}`);
+      // A child that lost the lock to a concurrent serve exits too: that one is followed until it answers, never signalled.
+      const h = serveHolder();
+      other = h && h.pid !== child.pid ? h : serveLockFresh() ? { pid: "unknown" } : null;
+      if (!other) throw new Error(`serve did not start: it exited (${exited.signal ?? `code ${exited.code}`}); see ${SERVE_LOG}`);
     }
   }
   const last = await askServe({ op: "status" });
-  if (last?.serving) return up(last);
+  if (last?.serving) return other || last.pid !== child.pid ? { ...last, alreadyServing: true } : up(last);
+  if (other) throw new Error(`serve did not start: another serve for this folder (pid ${other.pid}) took it first and is still starting; ${CLI} serve --status shows when it answers; see ${SERVE_LOG}`);
   try { process.kill(child.pid, "SIGTERM"); } catch { /* it ended on its own */ }
   for (let i = 0; i < 40 && !exited; i++) await sleep(50);
   if (!exited) { try { process.kill(child.pid, "SIGKILL"); } catch { /* gone */ } }
