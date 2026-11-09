@@ -19,7 +19,8 @@
 //          chapter time in the sidecar. Without --steps the page is loaded and watched for --settle-seconds.
 // --max-seconds: hard cap on the clip. Default: the first `max_seconds:` in docs/process/PROOF-POLICY.yml, else 60.
 //          If the journey runs past it the clip is cut at the cap and the script exits 3: shorten the journey.
-// Writes <out> (mp4, or .webm when ffmpeg is missing) and <out>.json (url, viewport, duration, marks, console errors,
+// With ffmpeg, a thin progress line along the bottom edge and a small timecode chip (drawn by Chromium) at the bottom
+// left are burned in. Writes <out> (mp4, or .webm when ffmpeg is missing) and <out>.json (url, viewport, duration, marks, console errors,
 // commit). Browsers: PLAYWRIGHT_BROWSERS_PATH when set, else /opt/pw-browsers when present.
 // Privacy (#1238): through the take the page's text is polled for its own host and the Reconnect box's wording. A hit
 //          goes in the sidecar's `privacy` by kind and second, the take fails (exit 4) and upload.mjs refuses the clip.
@@ -89,16 +90,66 @@ async function loadChromium() {
   throw Error('Playwright not found: run `pnpm install --frozen-lockfile` (mars/viewer depends on @playwright/test) or install playwright globally');
 }
 
-function burnIn(src, dst, { width, height, durationSec }) {
-  const D = Math.max(durationSec, 0.1).toFixed(2);
-  const bar = `[0:v]drawbox=x=0:y=ih-30:w=iw:h=30:color=black@0.55:t=fill[bg];` +
-    `color=c=0xffc400:s=${width}x6:r=25[bar];[bg][bar]overlay=x='-w+W*t/${D}':y=H-6:shortest=1`;
-  const text = `,drawtext=text='%{pts\\:hms} / ${D}s':x=8:y=h-26:fontsize=16:fontcolor=white`;
+// The timecode is drawn by Chromium, not ffmpeg's drawtext (#1645): an ffmpeg built without fonts has no drawtext and
+// used to leave an empty dark band across the bottom with no timecode in it. One screenshot holds every label in a
+// grid (a sprite); ffmpeg's crop picks the cell for each frame's time. The overlay is a small chip at the bottom left
+// and a thin progress line along the bottom edge, never a full-width band.
+export const TIMECODE = { step: 0.1, cols: 10, maxRows: 400, bandRows: 25, cell: { width: 132, height: 24 }, line: 4, margin: 8 };
+const mmss = (sec, tenths) => { const t = Math.max(0, sec), m = Math.floor(t / 60), s = t - m * 60; return `${m}:${(tenths ? s.toFixed(1) : String(Math.floor(s))).padStart(tenths ? 4 : 2, '0')}`; };
+/** timecodeLabel(at, total) → "0:07.3 / 0:21" (the clip's time and its whole length). */
+export function timecodeLabel(at, total) { return `${mmss(at, true)} / ${mmss(Math.ceil(total), false)}`; }
+/** The sprite's layout: one cell per `step` seconds from 0 to the clip's end, in rows of `cols`. A long clip gets a
+ *  coarser step so the sprite stays under Chromium's screenshot size. */
+export function timecodeSprite(durationSec, o = TIMECODE) {
+  let step = o.step; while (Math.ceil(durationSec / step) + 2 > o.cols * o.maxRows) step *= 10;
+  const cells = Math.ceil(durationSec / step) + 2, rows = Math.ceil(cells / o.cols);
+  return { step, cells, cols: o.cols, rows, width: o.cols * o.cell.width, height: rows * o.cell.height, cell: o.cell, labels: Array.from({ length: cells }, (_, i) => timecodeLabel(i * step, durationSec)) };
+}
+/** The ffmpeg filter graph: [0:v] the take, [1:v] the looped sprite; out is the take with the chip and the line. */
+export function overlayGraph({ width, durationSec, sprite }, o = TIMECODE) {
+  const D = Math.max(durationSec, 0.1).toFixed(2), line = `color=c=0xffc400:s=${width}x${o.line}:r=25[bar]`;
+  const progress = `[bar]overlay=x='-w+W*t/${D}':y=H-${o.line}:shortest=1`;
+  if (!sprite) return `${line};[0:v]${progress}`;
+  const { cell, cols, step } = sprite, n = `floor(t/${step}+0.0001)`;
+  const chip = `[1:v]crop=w=${cell.width}:h=${cell.height}:x='mod(${n},${cols})*${cell.width}':y='floor(${n}/${cols})*${cell.height}'[tc]`;
+  return `${chip};[0:v][tc]overlay=x=${o.margin}:y=H-h-${o.line + o.margin}:shortest=1[v];${line};[v]${progress}`;
+}
+
+/** Render the timecode sprite with a fresh Chromium (a screenshot from the take's browser fails after a long take), in bands of `bandRows` rows (one tall screenshot fails
+ *  in headless Chromium), stacked into one PNG by ffmpeg; null when that fails (the clip keeps the line). */
+async function renderTimecodeSprite(launch, dir, durationSec, o = TIMECODE) {
+  const sprite = timecodeSprite(durationSec, o), { cell, cols } = sprite, per = cols * o.bandRows, bands = [];
+  let browser = null;
+  try {
+    browser = await launch();
+    const page = await browser.newPage({ viewport: { width: sprite.width, height: o.bandRows * cell.height }, deviceScaleFactor: 1 });
+    const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+    for (let i = 0; i < sprite.cells; i += per) {
+      const labels = sprite.labels.slice(i, i + per), rows = Math.ceil(labels.length / cols), file = join(dir, `timecode-${bands.length}.png`);
+      await page.setContent(`<style>html,body{margin:0;background:transparent}body{display:grid;grid-template-columns:repeat(${cols},${cell.width}px);grid-auto-rows:${cell.height}px}
+        i{font:600 13px/1 ui-monospace,Menlo,Consolas,monospace;font-style:normal;color:#fff;display:flex;align-items:center;justify-content:center;margin:2px;border-radius:5px;background:rgba(0,0,0,.55)}</style>` +
+        labels.map((l) => `<i>${esc(l)}</i>`).join(''));
+      await page.screenshot({ path: file, omitBackground: true, clip: { x: 0, y: 0, width: sprite.width, height: rows * cell.height } });
+      bands.push(file);
+    }
+    await browser.close(); browser = null;
+    const file = join(dir, 'timecode.png');
+    if (bands.length === 1) copyFileSync(bands[0], file);
+    else {
+      const r = run('ffmpeg', ['-y', '-loglevel', 'error', ...bands.flatMap((f) => ['-i', f]), '-filter_complex', `vstack=inputs=${bands.length}`, '-pix_fmt', 'rgba', file]);
+      if (r.status !== 0) throw Error(`stacking the timecode bands failed: ${r.stderr.slice(0, 200)}`);
+    }
+    return { ...sprite, file };
+  } catch (e) { await browser?.close().catch(() => {}); console.error(`warn: timecode not rendered (${String(e?.message ?? e).slice(0, 200)}); the clip keeps its progress line`); return null; }
+}
+
+function burnIn(src, dst, { width, height, durationSec, sprite }) {
   const enc = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-crf', '23', '-movflags', '+faststart', '-an'];
-  for (const graph of [bar + text, bar]) {           // drawtext needs a font; retry without it
+  for (const s of sprite ? [sprite, null] : [null]) {  // the line alone when the chip cannot be drawn
+    const inputs = ['-i', src, ...(s ? ['-loop', '1', '-framerate', '25', '-i', s.file] : [])];
     for (const codec of [enc, ['-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an']]) {
-      const r = run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-filter_complex', graph, ...codec, dst]);
-      if (r.status === 0) return { ok: true, timecode: graph !== bar };
+      const r = run('ffmpeg', ['-y', '-loglevel', 'error', ...inputs, '-filter_complex', overlayGraph({ width, height, durationSec, sprite: s }), ...codec, dst]);
+      if (r.status === 0) return { ok: true, timecode: !!s };
     }
   }
   return { ok: false };
@@ -193,11 +244,12 @@ async function main() {
   const videoSec = (Date.now() - t0) / 1000;           // the recording runs from its start (arrival or page creation) to close
   const raw = screencast ?? await video.path();
   await browser.close();
+  const ffmpeg = has('ffmpeg'), sprite = ffmpeg ? await renderTimecodeSprite(() => chromium.launch({ headless: true, args }), work, videoSec) : null;
 
   let file = out, burned = null;
-  if (has('ffmpeg')) {
+  if (ffmpeg) {
     if (extname(out) !== '.mp4') file = out.replace(/\.[^./]*$/, '') + '.mp4';
-    burned = burnIn(raw, file, { width, height, durationSec: videoSec });
+    burned = burnIn(raw, file, { width, height, durationSec: videoSec, sprite });
     if (!burned.ok) { file = file.replace(/\.mp4$/, '.webm'); copyFileSync(raw, file); }
   } else {
     file = out.replace(/\.[^./]*$/, '') + '.webm';
