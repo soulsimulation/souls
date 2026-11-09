@@ -4208,7 +4208,7 @@ function missingAbout(m, { kind, limit = 30 } = {}) {
 }
 
 // lib/version.mjs
-var SKILL_VERSION = "1.8";
+var SKILL_VERSION = "1.9";
 
 // lib/upload.mjs
 import { existsSync as existsSync9, readFileSync as readFileSync11 } from "node:fs";
