@@ -1324,6 +1324,9 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1455 body-separation-3d/1, one logged rules event (prospective): a placement the engine writes keeps clear of every body whose
+   *  height overlaps the placed one, whatever its level id. History before the event replays as it was. Main adopts it at boot. */
+  enableSeparation3dV1(author='operator:body-separation-3d'){if((this.extra.runtimePolicy as {separation3dV1?:boolean}|undefined)?.separation3dV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,separation3dV1:true},why:'body-separation-3d/1 (#1455): a placement keeps clear of bodies whose height overlaps it, whatever their level id, and not of bodies on another storey; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
    *  everyone else go on; never a halt. A host-only key: the engine never reads it, so no snapshot binding changes. Main adopts
