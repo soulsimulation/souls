@@ -74,7 +74,10 @@ done_step() { [ "$DRY" = 1 ] || { say "   $CUR done in $(( $(date +%s) - T0 )) s
 x() { say "   + $(quote "$@")"; [ "$DRY" = 1 ] || "$@"; }
 x_in() { local f="$1"; shift; if [ "$1" = x_to ]; then shift; local o="$1"; shift; say "   + $(quote "$@") < $(basename "$f") > $o"; [ "$DRY" = 1 ] || "$@" < "$f" > "$o"; else say "   + $(quote "$@") < $(basename "$f")"; [ "$DRY" = 1 ] || "$@" < "$f"; fi; }
 x_to() { local f="$1"; shift; say "   + $(quote "$@") > $f"; [ "$DRY" = 1 ] || "$@" > "$f"; }
-result() { [ "$DRY" = 1 ] || printf '{"at":"%s","label":"%s","sha":"%s","build":"%s","status":"%s","detail":"%s"}\n' "$(date -u +%FT%TZ)" "$LABEL" "$SHA" "$BUILD" "$1" "$2" > "$OUT/ship-result.json"; }
+# #1340: the stage's Eden Eyes browser step never stops a release; its `WARN edenEyes: degraded (...)` is carried into the
+# result as edenEyes (not to be confused with release/eyes, the release's browser checks, #1438)
+eden_eyes_state() { local w; w="$(grep -ao 'WARN edenEyes: degraded ([^)]*)' "$OUT/ship.log" 2>/dev/null | tail -1 | sed 's/^WARN edenEyes: //; s/["\\]//g')"; printf '%s' "${w:-ok}"; }
+result() { [ "$DRY" = 1 ] || printf '{"at":"%s","label":"%s","sha":"%s","build":"%s","status":"%s","detail":"%s","edenEyes":"%s"}\n' "$(date -u +%FT%TZ)" "$LABEL" "$SHA" "$BUILD" "$1" "$2" "$(eden_eyes_state)" > "$OUT/ship-result.json"; }
 # the probe learns the release is done (or, with --no-eyes, the workstation does, through SHIP_RELEASED_CMD)
 released() {
   [ "$NOEYES" = 1 ] || x touch "$PDIR/released"
@@ -316,6 +319,7 @@ if step cdn-walk "every manifest asset from the CDN, desktop and phone"; then
 fi
 
 say ""
+[ "$DRY" = 1 ] || [ "$(eden_eyes_state)" = ok ] || say "   edenEyes: $(eden_eyes_state). The release is unaffected; the Eden Eyes worker retries every 30 min (docs/release.md, Eyes' browser)"
 if [ "$DRY" = 1 ]; then
   say "DRY RUN complete: $NSTEPS steps printed, nothing ran.$([ "$PROBLEMS" = 0 ] || echo " PREFLIGHT: $PROBLEMS problem(s) above would stop a real run.")"
   [ "$PROBLEMS" = 0 ] || exit 1
