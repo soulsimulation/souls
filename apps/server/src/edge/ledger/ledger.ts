@@ -2226,12 +2226,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // logged edge-relocate, at most once a minute each), then starts. A destination no walk reaches still refuses.
     let steppedOut: string | undefined;
     if (issue?.code === 'route.unreachable' && (this.navRescuedAt.get(soul.soulId) ?? -1e9) <= this.host.engine.world.tick - NAV_STEP_OUT_TICKS) {
-      // (#1501 review) never past a door she may not open: the way stays shut, and the refusal names the door
-      const door = this.stepOutDoor(soul, steps, label);
-      if (door) return {...refuse('route.unreachable', door.reason), ...resolved};
       const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => {to: [number, number]; code: string; level: number; seated?: true} | null};
       const r = engine.navRescueV1 ? engine.navRescueV1(soul.entityId, 100) : null;
       if (r) {
+        // (#1501 review) cut off, but never stepped past a door she may not open: the way stays shut, the refusal names it
+        // (asked only once she is cut off, as admission asks: a Soul on open ground goes on to the checks below)
+        const door = this.stepOutDoor(soul, steps, label);
+        if (door) return {...refuse('route.unreachable', door.reason), ...resolved};
         this.navRescuedAt.set(soul.soulId, this.host.engine.world.tick);
         // A seated Soul rises first (a god walk-out: a plain relocate refuses a body its seat holds).
         await this.host.enqueue('edge-relocate', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, to: r.to, why: `nav-connect/1: ${r.seated ? 'sat' : 'stood'} cut off (${r.code}${r.level ? `, floor ${r.level}` : ''}), no walk out: ${r.seated ? 'stood up and ' : ''}stepped to the nearest open ground`, policy: 'nav-connect/1', ...(r.seated ? {godWalkout: true, released: [], level: 0} : {})});

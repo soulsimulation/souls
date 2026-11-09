@@ -95,3 +95,29 @@ test('#1287 (#1501 review): shut in behind a locked door she may not open, no wa
   assert.equal(byId.accepted, false, JSON.stringify(byId)); assert.match(byId.reason, /lock-door/, byId.reason);
   assert.equal(steps().length, 0, 'never stepped out past the door');
 });
+
+test('#1287 (#1501 re-review): from open ground, a sit in a locked yard (more than walk steps) is refused as before, never by the step-out\'s door gate', {timeout: 300000}, async t => {
+  const {w, put, act, steps} = await world(t);
+  // the locked yard's front (key side) faces out: from outside, not Zed's, door passage refuses
+  const [x, z] = [30, 30];
+  const built = w.god.act({ops: [
+    {op: 'place', def: 'core/garden-wall@1', name: 'lock-yard', shape: {path: [[x - 0.6, z], [x - 4, z], [x - 4, z + 6], [x + 4, z + 6], [x + 4, z], [x + 0.6, z]]}},
+    {op: 'place', def: 'core/door@3', name: 'lock-door', p: [x, z], r: Math.PI, owner: 'soul:Zed', state: {locked: true}},
+    {op: 'place', def: 'core/bench@1', name: 'lock-bench', p: [x + 1.5, z + 4]}]} as never) as any;
+  assert.equal(built.accepted, true, JSON.stringify(built.failures)); await w.settle(8); w.edge.map();
+  assert.equal((w.host.engine as any).navWarmV1(Infinity), true); await w.settle(2);
+  const benchId = w.god.model.get('lock-bench')!.id;
+  // a sit there: walk, then sit (not a plain walk, so door passage never planned it)
+  await put([x + 3, z - 6]);
+  const cap = (w.edge as any).capabilities(w.soul).find((c: any) => c.verb === 'sit' && (c.target?.id === benchId || c.object === benchId || String(c.id).includes('lock-bench')));
+  assert.ok(cap, 'a sit on the bench is offered: ' + JSON.stringify((w.edge as any).capabilities(w.soul).filter((c: any) => /sit/.test(c.verb)).map((c: any) => c.id).slice(0, 20)));
+  const id = cap.id, plan = (w.edge as any).bindOne(w.soul, id)?.plan;
+  assert.equal(w.edge.stepOutWait(w.soul as never), null, 'on open ground: not cut off');
+  assert.ok(plan && plan.steps.some((s: any) => s.verb !== 'walk_to' && s.verb !== 'stand'), `more than walk steps: ${JSON.stringify(plan?.steps)}`);
+  const r = await act({capability: id});
+  t.diagnostic(`outcome: ${JSON.stringify({accepted: r.accepted, code: r.code, reason: r.reason})}`);
+  // the outcome before #1501's door gate (c5e7a4c1e): refused route.unreachable in the planner's own words, no door refusal
+  assert.equal(r.accepted, false, JSON.stringify(r)); assert.equal(r.code, 'route.unreachable');
+  assert.doesNotMatch(r.reason, /locked|It was not opened/, r.reason); assert.match(r.reason, /no walkable route reaches it/);
+  assert.equal(steps().length, 0);
+});
