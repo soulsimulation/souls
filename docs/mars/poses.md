@@ -98,11 +98,6 @@ mouth landmark the palm target shifts slightly so the spoon reaches the rig's li
 recorded `hands`, `baseActivity` and `on`; component phase, support and connections from the frame, not the final
 state; stairs from the base scene's usable links plus the construction contributor over the frame's components.
 
-A newly published hand actuator may supply its recorded upper-endpoint metadata and arm targets only inside the
-current adjacent observed interval. This requires the exact native episode and start, matching actor lineage, and
-clear prior task and hand ownership. The presentation context does not change recorded hands, posture inputs, native
-root or custody. Missing or mixed evidence falls back without recovering an older episode.
-
 ## Approximations
 
 - Wrists keep the clip rotation (except a flat prone hand); one closed-hand curl for every grip.
