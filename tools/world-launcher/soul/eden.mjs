@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.8";
+const VERSION = "2.24.9";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2025,6 +2025,8 @@ export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", 
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
+// How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
+const SERVE_START_MS = 60_000;
 /** Full jitter: uniform in [0, min(cap, base·2^attempt)]. */
 export const fullJitter = (attempt, rnd = Math.random) => rnd() * Math.min(RETRY.capMs, RETRY.baseMs * 2 ** attempt);
 /** A stated wait is a floor: the world counts a return before it as impolite. Up to 20 % more, so a crowd told "4 s"
@@ -4528,12 +4530,29 @@ async function serve(...args) {
   const env = HOME ? { ...process.env, SOULS_HOME: HOME.root, SOULS_PRINCIPAL: SEAT.id } : process.env;
   const child = spawn(process.execPath, [process.argv[1], "serve", "--foreground"], { detached: true, env, stdio: ["ignore", logFd, logFd] });
   child.unref(); closeSync(logFd);
-  for (let i = 0; i < 100; i++) {
+  // The wait follows the child, not a clock: a slow start on a loaded machine is still a start (#1244). One that exits has
+  // failed, and says so at once; one still starting at the limit is stopped, so no serve is left up that was reported down.
+  let exited = null;
+  child.once("exit", (code, signal) => { exited = { code, signal }; });
+  const up = (a) => ({ ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` });
+  const limit = Date.now() + SERVE_START_MS * TIME_SCALE;
+  while (Date.now() < limit) {
     await sleep(50);
     const a = await askServe({ op: "status" });
-    if (a?.serving) return { ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` };
+    if (a?.serving) return up(a);
+    if (exited) {
+      // It exits 0 when another serve for this folder took the lock first: that one answers.
+      const other = await askServe({ op: "status" });
+      if (other?.serving) return { ...other, alreadyServing: true };
+      throw new Error(`serve did not start: it exited (${exited.signal ?? `code ${exited.code}`}); see ${SERVE_LOG}`);
+    }
   }
-  throw new Error(`serve did not start; see ${SERVE_LOG}`);
+  const last = await askServe({ op: "status" });
+  if (last?.serving) return up(last);
+  try { process.kill(child.pid, "SIGTERM"); } catch { /* it ended on its own */ }
+  for (let i = 0; i < 40 && !exited; i++) await sleep(50);
+  if (!exited) { try { process.kill(child.pid, "SIGKILL"); } catch { /* gone */ } }
+  throw new Error(`serve did not start within ${Math.round(SERVE_START_MS * TIME_SCALE / 1000)} s, so it was stopped and nothing is serving; see ${SERVE_LOG}`);
 }
 
 // travel, create and pair change who this folder speaks for. A serve up for the old one stops, and a new one starts for the new one.
