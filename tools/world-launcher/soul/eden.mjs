@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.10";
+const VERSION = "2.24.11";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2943,12 +2943,12 @@ async function act(...argv) {
     // id has no target (`pray`) reads as an id with no colon: when it is exactly a candidate's id, it is an id.
     if (!r.freeTextAct && !r.candidates?.some((c) => c.id === parsed.capability.trim())) {
       process.exitCode = 2;
-      return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}) };
+      return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}), ...(json ? {} : seeHelp("act.not-an-id")) };
     }
   }
   // #1337 (P9): a ride steer the world would refuse is answered here, in the world's words, and never sent
   const early = await steerPreflight(parsed);
-  if (early) return early;
+  if (early) return json ? early : { ...early, ...seeHelp(early.code) };
   const body = { ...parsed, strict: true };
   // D3: the owner message this act serves; the world writes its result line when the act ends, unless you write one first.
   // D3b (cloud fix-r3 trio tam-003: a later walk closed "walk with Mira" as Done): by default only the first act the world
@@ -2969,7 +2969,7 @@ async function act(...argv) {
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
-    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}), ...seeHelp(d.code) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -3175,7 +3175,7 @@ async function resolve(...args) {
   const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
   if (r.ok !== false || words.length !== args.length) return r;
   const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
-  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r), ...seeHelp(r.code) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
@@ -4658,6 +4658,12 @@ ${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client r
 // help <topic>: one section of the world's reference (/schema.md), so the skill's core can stay short (#1471). A topic names a
 // section by a word of its heading ("rides" is "## Rides"); the reference is the folder's world's own, read when asked.
 export const HELP_TOPICS = ["refusals", "rides", "plans", "messages", "listening", "talking", "memory"];
+// #1475 rework (arm B, #1098: one help call in 12 seat-runs): a refusal whose code the reference documents ends with
+// `see: "help <topic>"`, so the rule is named where the agent already looks. Other codes add nothing; --json is the world's.
+export const SEE_TOPIC = { "act.not-an-id": "refusals", "capability.unknown": "refusals", "capability.params": "refusals", "ride.unavailable": "refusals",
+  "route.unreachable": "refusals", "ride.no-landing-spot": "rides", "ride.out-of-bounds": "rides", "steer.unknown-place": "rides",
+  "ride.steered": "rides", "ride.on-ground": "rides", "ride.not-aboard": "rides" };
+export const seeHelp = (code) => (Object.hasOwn(SEE_TOPIC, code ?? "") ? { see: `help ${SEE_TOPIC[code]}` } : {});
 const stem = (w) => w.toLowerCase().replace(/[^a-z-]/g, "");   // the whole word: "messages" is not "message"
 /** Pure: the section of a markdown reference whose `## ` heading has the topic as a word, through the line before the next heading. */
 export function referenceSection(text, topic) {
