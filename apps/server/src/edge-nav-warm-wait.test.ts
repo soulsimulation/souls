@@ -16,6 +16,9 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const w = await bootEden();
   t.after(() => w.close());
   const E = w.host.engine as unknown as NavV1, L = w.edge;
+  // #1502: this test is about #900's and #1468's outcomes, not the re-plan budget (edge-nav-replan-budget.test.ts): every
+  // re-plan fits in a tick here, whatever the runner's speed
+  (L as unknown as { replanBudgetMs: number }).replanBudgetMs = Infinity;
   const soulOf = async (owner: string, name: string) => {
     await invite(w as never, owner);
     const row = await accept(w.host, w.souls.create(`dev:${owner}`, { name, description: 'curious' })) as { id: string; entity_id: string; name: string; owner: string };
@@ -80,7 +83,8 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   assert.equal(phase(w.soul, ana.receipt!.id).phase, 'waiting');
   // the tick loop warms navigation in slices; here all at once
   assert.ok(E.navWarmV1(Infinity));
-  for (let i = 0; i < 40 && phase(w.soul, ana.receipt!.id).phase === 'waiting'; i++) await w.settle(1);
+  // (every waiting walk settles first: Ana's start and Bob's kitchen failure; #1504 review)
+  for (let i = 0; i < 40 && [phase(w.soul, ana.receipt!.id), phase(bob, second.receipt!.id)].some((r) => r.phase === 'waiting'); i++) await w.settle(1);
   // A1: planned again from the warm goal, it starts; A2: the kitchen roof is refused by the planner, as any walk
   assert.notEqual(phase(w.soul, ana.receipt!.id).phase, 'waiting'); assert.notEqual(phase(w.soul, ana.receipt!.id).phase, 'failed', JSON.stringify(phase(w.soul, ana.receipt!.id)));
   assert.notEqual(phase(di, fourth.receipt!.id).phase, 'failed', JSON.stringify(phase(di, fourth.receipt!.id)));
@@ -103,9 +107,7 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
     Lc.pending.set(fay.soulId, fayWait); Lc.failWait(fay.soulId, fayWait, w.host.engine.world.tick, 'route.unreachable', 'That roof is up where no stair or ramp from the ground reaches.');
     assert.equal(phase(fay, more[1]!.id).phase, 'failed', 'with no kept menu, the failure is at once, not held');
   }
-  // (#1502: re-plans are spread over ticks by their 40 ms budget, and a ride moving between them makes the labels relabel
-  // in slices first, so the last of these may come some ticks later; each still fails within its two-minute deadline)
-  for (let i = 0; i < 120 && all3.some(({ s, id }) => phase(s, id).phase === 'waiting'); i++) w.host.tickOnce();
+  for (let i = 0; i < 6 && all3.some(({ s, id }) => phase(s, id).phase === 'waiting'); i++) w.host.tickOnce();
   const ev = (id: string) => emitted.filter((e) => e.id === id && e.phase === 'failed');
   for (const { s, id } of all3) {
     const r = phase(s, id); assert.equal(r.phase, 'failed', JSON.stringify(r)); assert.equal(r.code, 'route.unreachable');
@@ -119,9 +121,7 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   assert.equal(fayR.alternatives, undefined); assert.match(fayR.reason ?? '', /Read your capabilities for where you can go from here\./);
   assert.equal(menuBuiltForFay, 0, 'no menu was built for Fay on the tick');
   const ended = all3.slice(0, 2).map(({ s, id }) => (phase(s, id) as { endedTick: number }).endedTick).sort((a, b) => a - b);
-  assert.equal(new Set(ended).size, 2, `one build a tick: ${ended}`); assert.ok(fayR.endedTick - ended[0]! <= 2, `Fay failed with the first: ${ended}, Fay ${fayR.endedTick}`);
-  // (#1502: was "all within 3 ticks"; the second's re-plan may wait out the budget and a relabel, within the deadline)
-  assert.ok(ended[1]! - ended[0]! <= 20 * 120, `the second within the two-minute wait: ${ended}`);
+  assert.equal(new Set(ended).size, 2, `one build a tick: ${ended}`); assert.ok(ended[1]! - ended[0]! <= 2 && fayR.endedTick - ended[0]! <= 2, `all failed within 3 ticks: ${ended}, Fay ${fayR.endedTick}`);
   t.diagnostic(`failed waits ended at ticks ${ended.join(', ')} (kept menus), Fay ${fayR.endedTick} (none)`);
   t.diagnostic(`route-dead alternatives build on the tick (Eden 2026, ms each): ${altMs.map((x) => x.toFixed(1)).join(', ')}`);
   for (const x of kAlt!) {assert.notEqual(x.id, kitchen); assert.ok((L as any).bindOne(bob, x.id)?.cap.available, `${x.id} is available now`);}

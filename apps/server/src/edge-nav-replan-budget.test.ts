@@ -26,7 +26,7 @@ test('#1502 R1-R3: five walks waiting at the warm moment on Eden: no whole menu 
   // instruments: whole-menu builds, each re-plan's ms and tick, and the whole-menu path's answer for the same re-plan
   let builds = 0, counting = true;
   for (const name of ['wordsMenu', 'binds']) { const f = L[name].bind(L); L[name] = (...a: any[]) => { if (counting) builds++; return f(...a); }; }
-  const replans: { tick: number; ms: number; same: boolean }[] = [], replan = L.navReplan.bind(L);
+  const replans: { tick: number; ms: number; same: boolean; spentBefore: number }[] = [], replan = L.navReplan.bind(L);
   const wholeMenu = (soul: any, capability: string, steps: any[]) => {   // #900's path, as it was: the whole words menu
     const walkVerbs = new Set(['walk_to', 'mars:walk_to']);
     const one = L.bindOne(soul, capability), m = one ? null : L.wordsMenu(soul), od = one ? null : L.resolveOnDemand(soul, capability, [...m.caps], new Map(m.plans));
@@ -39,8 +39,9 @@ test('#1502 R1-R3: five walks waiting at the warm moment on Eden: no whole menu 
   // (the whole-menu answer is worked out after the tick, outside its budget, before anything moves)
   let unchecked: { soul: any; capability: string; steps: any[]; out: any; i: number }[] = [];
   L.navReplan = (soul: any, capability: string, steps: any[]) => {
+    const tick = w.host.engine.world.tick, spentBefore = L.replanSpent?.tick === tick ? L.replanSpent.ms : 0;   // the ledger's own count: re-plans with their route checks
     const input = structuredClone(steps), t0 = performance.now(), out = replan(soul, capability, steps), ms = performance.now() - t0;
-    replans.push({ tick: w.host.engine.world.tick, ms, same: false }); unchecked.push({ soul, capability, steps: input, out: structuredClone(out), i: replans.length - 1 });
+    replans.push({ tick, ms, same: false, spentBefore }); unchecked.push({ soul, capability, steps: input, out: structuredClone(out), i: replans.length - 1 });
     return out;
   };
   const tickMs: number[] = [];
@@ -57,11 +58,11 @@ test('#1502 R1-R3: five walks waiting at the warm moment on Eden: no whole menu 
   assert.equal(builds, 0, 'no whole menu built on the tick');
   // R1 (coordinator): each re-plan is exactly what the whole-menu path gives
   assert.ok(replans.every((r) => r.same), JSON.stringify(replans));
-  // R2: the budget: a re-plan starts only while the tick has spent under 40 ms on re-plans, and none is itself over it
-  for (const [tick, ms] of byTick) {
-    assert.ok(ms.slice(0, -1).reduce((a, b) => a + b, 0) < BUDGET_MS, `tick ${tick}: a re-plan started past the budget: ${ms}`);
-    assert.ok(ms.every((x) => x < BUDGET_MS), `tick ${tick}: one re-plan over ${BUDGET_MS} ms: ${ms}`);
-  }
+  // R2: the budget, as the ledger counts it (re-plans with their route checks, and a relabel slice while walks are held):
+  // a re-plan starts only while that is under 40 ms this tick (a tick's first always runs). Wall clock: the ms themselves are
+  // diagnostics, the rule is what is asserted
+  assert.equal(L.replanBudgetMs, BUDGET_MS);
+  for (const r of replans.filter((x, i) => replans.findIndex((y) => y.tick === x.tick) !== i)) assert.ok(r.spentBefore < BUDGET_MS, `tick ${r.tick}: a re-plan started with ${r.spentBefore.toFixed(1)} ms already spent`);
   assert.ok(L.lastMenu.size <= souls.length, 'one kept copy a Soul at most');
   // R3: each walk ends as it did: the roof walks start, the kitchen roof walk fails route.unreachable
   for (let i = 0; i < 40 && asks.some((_, k) => L.receipt(asks[k].s.soulId, ids[k]).phase === 'waiting'); i++) await w.settle(1);
@@ -72,7 +73,7 @@ test('#1502 R1-R3: five walks waiting at the warm moment on Eden: no whole menu 
   }
 });
 
-test('#1502 R2: a wait the budget holds back keeps its navigation flag and deadline, and is planned on a later tick', { timeout: 900_000, skip: NO_EDEN }, async (t) => {
+test('#1502 R2: a wait the budget holds back keeps its navigation flag, its deadline moves with the hold, and it is planned on a later tick', { timeout: 900_000, skip: NO_EDEN }, async (t) => {
   const w = await bootEden(); t.after(() => w.close());
   const L: any = w.edge, E: any = w.host.engine;
   await invite(w as never, 'bo'); const row: any = await accept(w.host, w.souls.create('dev:bo', { name: 'Bo', description: 'curious' }));
@@ -89,10 +90,58 @@ test('#1502 R2: a wait the budget holds back keeps its navigation flag and deadl
   w.host.tickOnce();
   assert.equal(seen.length, 1, 'one re-plan this tick');
   const held = L.pending.get(bo.soulId);
-  assert.ok(held, 'still pending'); assert.equal(held.navWarm, true, 'still waiting for navigation'); assert.equal(held.deadline, deadline, 'deadline unchanged');
+  assert.ok(held, 'still pending'); assert.equal(held.navWarm, true, 'still waiting for navigation'); assert.equal(held.deadline, deadline + held.held, 'the deadline moved by the ticks held, no more'); assert.equal(held.held, 1);
   assert.equal(L.receipt(bo.soulId, b.receipt.id).phase, 'waiting', 'not failed early');
   w.host.tickOnce();
   assert.equal(seen.length, 2); assert.equal(seen[1]!.soul, bo.soulId); assert.equal(seen[1]!.tick, seen[0]!.tick + 1, 'planned on the next tick');
   for (let i = 0; i < 20 && L.receipt(bo.soulId, b.receipt.id).phase === 'waiting'; i++) await w.settle(1);
   assert.ok(['started', 'completed'].includes(L.receipt(bo.soulId, b.receipt.id).phase), JSON.stringify(L.receipt(bo.soulId, b.receipt.id)));
+});
+
+test('#1502 R1: read offers made from words (the campus residences and a room) re-plan as the whole-menu path gives', { timeout: 900_000, skip: NO_EDEN }, async (t) => {
+  const w = await bootEden(); t.after(() => w.close());
+  const L: any = w.edge, E: any = w.host.engine;
+  assert.ok(E.navWarmV1(Infinity)); await w.settle(2);
+  L.capabilitiesPage(w.soul, { all: true });   // a kept menu, as an agent's read leaves it
+  const walkVerbs = new Set(['walk_to', 'mars:walk_to']);
+  const viaWhole = (id: string) => { const m = L.wordsMenu(w.soul), od = L.resolveOnDemand(w.soul, id, [...m.caps], new Map(m.plans)); return { cap: od.caps.find((c: any) => c.id === id), plan: od.plans.get(id) }; };
+  let checked = 0;
+  for (const id of ['read:g-campus-residence-1', 'read:g-campus-residence-1.living', 'read:g-campus-residence-2', 'read:g-campus-residence-2.living']) {
+    const whole = viaWhole(id);
+    if (!whole.plan) { t.diagnostic(`${id}: not offered from the whole menu here`); continue; }
+    assert.ok(whole.plan.steps.some((x: any) => walkVerbs.has(x.verb)), `${id} walks`);
+    // the plan as it was bound (its own steps), planned again: the act-time path (launch) calls this same navReplan
+    const again = L.navReplan(w.soul, id, structuredClone(whole.plan.steps));
+    assert.ok(Array.isArray(again), `${id}: re-planned, not ${JSON.stringify(again)}`);
+    assert.deepEqual(again, whole.plan.steps.map((x: any) => x), `${id}: as the whole-menu path`);
+    checked++;
+  }
+  assert.ok(checked >= 2, `read cases checked: ${checked}`);
+});
+
+test('#1502 R2: a 20-walk backlog at the warm moment under a tiny budget: none times out on the budget; each starts or fails with its own code', { timeout: 900_000, skip: NO_EDEN }, async (t) => {
+  const w = await bootEden(); t.after(() => w.close());
+  const L: any = w.edge, E: any = w.host.engine;
+  L.replanBudgetMs = 0;   // one re-plan a tick, however fast the runner
+  const souls: any[] = [w.soul];
+  for (let i = 0; i < 19; i++) { const n = `b${i}`; await invite(w as never, n); const row: any = await accept(w.host, w.souls.create(`dev:${n}`, { name: n, description: 'curious' })); souls.push({ soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner }); }
+  await w.settle(2);
+  assert.equal(E.navWarmV1(0), false, 'cold');
+  const roof = 'walk:eden-house-3/eden-house-3-roof-planter-1', kitchen = 'walk:eden-house-3-kitchen/eden-house-3-kitchen-roof-planter-1';
+  const asks: { s: any; id: string }[] = [];
+  for (const [i, s] of souls.entries()) { const o = await L.act(s, { capability: i % 4 === 3 ? kitchen : roof }); assert.equal(o.receipt?.phase, 'waiting', JSON.stringify(o)); asks.push({ s, id: o.receipt.id }); }
+  // every deadline a few ticks off: only the hold keeps a walk the budget holds from timing out
+  const start = w.host.engine.world.tick; for (const { s } of asks) L.pending.get(s.soulId).deadline = start + 5;
+  assert.ok(E.navWarmV1(Infinity));
+  let maxHeld = 0, ticks = 0;
+  for (; ticks < 3000 && asks.some(({ s, id }) => L.receipt(s.soulId, id).phase === 'waiting'); ticks++) { w.host.tickOnce(); for (const p of L.pending.values()) maxHeld = Math.max(maxHeld, p.held ?? 0); if (ticks % 20 === 0) await w.settle(1); }
+  const out = asks.map(({ s, id }) => L.receipt(s.soulId, id));
+  t.diagnostic(`backlog settled in ${ticks} ticks; longest hold ${maxHeld} ticks; ${JSON.stringify(Object.entries(out.reduce((a: any, r: any) => (a[`${r.phase}:${r.code ?? ''}`] = (a[`${r.phase}:${r.code ?? ''}`] ?? 0) + 1, a), {})))}`);
+  for (const r of out) {
+    assert.notEqual(r.phase, 'waiting', JSON.stringify(r));
+    assert.notEqual(r.code, 'nav.warm-timeout', `timed out on the budget: ${JSON.stringify(r)}`);
+    if (r.phase === 'failed') assert.ok(r.code && r.code !== 'nav.warm-timeout', JSON.stringify(r));
+  }
+  assert.ok(maxHeld > 0, 'the budget held some walks');
+  assert.ok(maxHeld <= 20 * 120, 'a hold is bounded');
 });
