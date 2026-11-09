@@ -139,3 +139,7 @@ export function voiceAt(who: Accompanist | null, t: number): { open: number; bre
   const release = Math.max(0, 1 - after / 0.12);
   return { open: n.breath ? release : 1, breath: n.breath ? Math.sin(Math.PI * Math.min(1, Math.max(0, (after - 0.02) / (rest - 0.04)))) : 0 };
 }
+
+/** Solo flute uses only the existing melody line; piano/record scores remain unchanged. */
+export const FLUTE_FADE=.8;
+export function fluteNotes(seed:string,a:number,b:number):PianoNote[]{return pianoNotes(seed,a,b).filter(n=>n.hand===1).map(n=>({...n,midi:Math.max(60,Math.min(90,n.midi))}));}
