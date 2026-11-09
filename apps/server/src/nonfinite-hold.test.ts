@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
-import { marsFactory, MEAL_WORLD } from '@souls/engine-mars';
+import { marsFactory, MEAL_WORLD, connectedCommonsBoatFactory } from '@souls/engine-mars';
+import { connectedCommonsBoatFixture } from '../../../packages/engine-mars/src/connected-boat.ts';
 import { WorldHost } from './world.ts';
 import { fixture, invite, accept, seed, worldId } from '../test/native-owner-fixture.ts';
 import { rowsOf } from '../test/glitch-rows.ts';
@@ -207,17 +208,24 @@ test('#1496 a carrier (a real balloon) whose pose breaks is never moved from her
   void was;
 });
 
-test('#1496 a parked carrier with nobody aboard and a good pose in the baseline gets that whole pose back', async (t) => {
-  const { f, h, ents, ada, boot } = await world(t);
+test('#1496 a parked carrier, even with nobody aboard and a good pose in the baseline, is never moved from here: it halts', async (t) => {
+  const { f, h, ents, ada } = await world(t);
   const [x, , z] = ents()[ada].pose.p;
   await accept<unknown>(f.host, f.host.installCarrierV1({ id: 'test-balloon', def: 'hot-air-balloon', label: 'Balloon', at: [x + 16, z], yaw: Math.PI, route: 'commons-hop', waitSeconds: 600 } as any));
   f.host.requestSnapshot('test'); f.host.tickOnce(); f.host.drainInputs();
   for (let i = 0; i < 200 && h.periodicSnapshot; i++) await setImmediate();
-  const was = structuredClone(ents()['test-balloon'].pose);
-  assert.doesNotThrow(() => tickBroken(f, () => { ents()['test-balloon'].pose.p[0] = NaN; }));
-  assert.deepEqual(ents()['test-balloon'].pose, was);
-  assert.equal(events(f)[0].payload.nonFiniteHoldV1.patches[0].from, 'baseline');
-  for (let i = 0; i < 3; i++) { f.host.tickOnce(); f.host.drainInputs(); }
-  assert.ok(!Object.keys(f.host.glitches.byRule).some(r => r.startsWith('motion.')), 'no teleport: ' + JSON.stringify(f.host.glitches.byRule));
-  assert.equal(boot().engine.stateHash(), f.host.engine.stateHash(), 'a boot from the log agrees');
+  assert.throws(() => tickBroken(f, () => { ents()['test-balloon'].pose.p[0] = NaN; }), /non-finite number/);
+  assert.equal(events(f).length, 0, 'only a free component is ever put back');
+});
+
+test('#1496 a boat with a seated passenger, its pose broken, plans nothing (the boat fixture): it halts rather than move a Soul', async () => {
+  const native = await connectedCommonsBoatFixture(), bf = await connectedCommonsBoatFactory(), e = bf.create(bf.genesis('nonfinite-boat'));
+  e.spawnHuman({ id: 'h', label: 'Hypothetical native fixture', soul: 'fixture' });
+  const run = (id: string) => { for (let i = 0; i < 3500 && e.programOf('h'); i++) e.step(); void id; };
+  const walk = e.perform({ actor: 'h', label: 'approach bank', steps: [{ verb: 'walk_to', params: { to: [native.layout.bank[0], native.layout.bank[2]] } }] }); assert.ok(walk.ok); run(walk.id);
+  const board = e.perform({ actor: 'h', label: 'board', steps: [{ verb: 'mars:boat_board', params: { slot: 'seat0' } }] }); assert.ok(board.ok); run(board.id);
+  assert.equal((e.world.entities.h as any).human.boatPassenger?.phase, 'seated');
+  const base = bf.restore(e.snapshot()), boat = e.world.entities[native.policy.boatId] as any;
+  boat.pose.p[0] = NaN;
+  assert.deepEqual(e.planNonFiniteV1!(base), [], 'nothing: a boat is not a free component, though the baseline has its whole pose');
 });

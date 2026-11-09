@@ -285,14 +285,15 @@ for example an object's pose, a field of the world such as the weather, or a pro
   programmes, all or nothing:
   - A body's pose and human state are never patched here; that is quarantine/1's, and a body quarantine/1 leaves broken
     (a pitch, for example) halts as below. A body's other fields are patched like any other number.
-  - An entity's pose is one unit. When any number in it is no number, the whole pose comes back from the last good
-    snapshot (the recovery baseline) (`from: 'baseline'`). This happens only if the entity's support is the same as it
-    was then, nothing rides it or rests on it, and no body stands within its radius.
-  - Otherwise, a free item can be ejected (`from: 'arrival'`). A free item is a component on the ground, on a surface or
-    in a hand, joined to nothing and carrying nothing. It is set down at a free spot near the arrival, found by the same
-    search a held body uses, and its holder lets go.
-  - Anything else with a broken pose (a carrier, a ride, a frame part, or anything carrying a body) is not moved: it
-    halts.
+  - An entity's pose is one unit, and only a free component's pose is ever put back. A free component is on the
+    ground, on a surface or in a hand. It is joined to nothing, nothing rests on it, and no body names it in its state:
+    a seat, a berth or a link. Its kind can never carry, seat, berth or hold a body. The whole pose comes back from
+    the last good snapshot (the recovery baseline) (`from: 'baseline'`), but only if the component's support is the
+    same as it was then and no body stands within its radius.
+  - Otherwise the component is set down at a free spot near the arrival (`from: 'arrival'`, the eject), found by the
+    same search a held body uses, and its holder lets go.
+  - Any other kind with a broken pose is not moved: it halts. That includes a carrier, a boat, a bed, a ride and a
+    frame part.
   - Any other number goes back to its value at the same path in the baseline (`from: 'baseline'`), else 0
     (`from: 'zero'`).
   - More than 64 numbers, or a pose nothing legal can put back, plans nothing at all, so no patch is ever partial.
@@ -308,7 +309,7 @@ for example an object's pose, a field of the world such as the weather, or a pro
 - A periodic capture skipped as `snapshot.non-finite` puts its numbers back the same way, so the next capture isn't
   skipped for them again.
 - What it can't put back is still `engine.unhashable` or `durability.clock-frontier`, as below: a number in the Soul
-  kernel, a body pose quarantine/1 left broken, a carrier or ride with a broken pose, or more than 64 numbers. The tick
+  kernel, a body pose quarantine/1 left broken, any entity but a free component with a broken pose, or more than 64 numbers. The tick
   throws and the process exits, and the supervisor restarts it from the log. A world never runs on with its clock
   stopped. If a deterministic rule produces that number, the restart meets it again and loops; that is a known limit.
 

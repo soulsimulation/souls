@@ -231,7 +231,7 @@ export class WorldHost {
   private bootV1(): { from: 'genesis' | 'snapshot'; replayed: number } {
     this.bootSkippedV1 = null;
     const tBoot = performance.now(); bootPhase('boot:restore');
-    this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null;
+    this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null;
     let w = this.db.world(this.worldId);
     if (!w) {
       this.db.createWorld({ id: this.worldId, schema: 'pending', rules_version: this.factory.rulesVersion, dt: 1 / 20, seed: this.seed });
@@ -1570,7 +1570,7 @@ export class WorldHost {
     try { baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; }
     catch (failure) {
       // #1369: a baseline that won't materialize is no failed write: nothing to go back to, so the head stays
-      if (this.quarantineRule) { this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; return this.quarantine(error, failure); }
+      if (this.quarantineRule) { this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null; return this.quarantine(error, failure); }
       this.failCheckpoint(failure); return;
     }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
@@ -1760,7 +1760,7 @@ export class WorldHost {
     }
     // #1369: the baseline won't restore. That is no failed write (#1368 was a wait the reader rejected), so under quarantine/1 the
     // world goes on from the head it had, with what the fault named stopped and contained, and never goes back to that baseline
-    if (this.quarantineRule) { head(); this.recoveryBaseline = null; return this.quarantine(error, failed); }
+    if (this.quarantineRule) { head(); this.recoveryBaseline = null; this.nonFiniteBase = null; return this.quarantine(error, failed); }
     this.failCheckpoint(new Error(`recovery.baseline-unusable: ${String(error).slice(0, 300)}`));
   }
   /** #1369 quarantine/1, the ladder's end: the bodies the fault names stop where they stand (their programmes alone), the fault's
@@ -2300,7 +2300,7 @@ export class WorldHost {
       if (!result.done) { later(finish); return; }
       const body: SnapshotBody = { runtime: result.value.snapshot, ...fields };
       const meta = { ...frontier, stateHash: result.value.snapshot.stateHash, physicalHash: result.value.physicalHash };
-      if (this.recoveryCapture === materialize) { this.recoveryBaseline = body; this.recoveryCapture = null; }
+      if (this.recoveryCapture === materialize) { this.recoveryBaseline = body; this.recoveryCapture = null; this.nonFiniteBase = null; }
       // JSON and SQLite each take tens of milliseconds on a large world. Give
       // queued HTTP/ticks a turn between them without changing stored bytes.
       later(() => {
@@ -2359,6 +2359,7 @@ export class WorldHost {
   private holdNonFinite(error: unknown): boolean {
     const engine = this.engine; if (!engine.planNonFiniteV1 || !engine.applyNonFiniteV1) return false;
     let base: Engine | null = null;   // only read, so one restore serves every hold until the baseline changes
+    if (this.nonFiniteBase && this.nonFiniteBase.body !== this.recoveryBaseline) this.nonFiniteBase = null;
     if (this.recoveryBaseline && this.nonFiniteBase?.body === this.recoveryBaseline) base = this.nonFiniteBase.engine;
     else if (this.recoveryBaseline) {
       try { base = this.factory.restore(structuredClone(this.recoveryBaseline.runtime)); }

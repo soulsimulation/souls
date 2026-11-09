@@ -715,10 +715,10 @@ export class MarsEngine implements Engine {
   }
   /** #1496 nonfinite-hold/1 (see the contract): a pure read of this head and `baseline`, all or nothing.
    *  - A body's pose and human state are quarantine/1's and never patched here; its other fields are, as below.
-   *  - An entity's pose is one unit: when any number in it is no number, the whole baseline pose comes back, and only if its
-   *    support is the same as then, nothing rides it and it stands clear of every body. Else a free item (a component on the
-   *    ground, a surface or in a hand, joined to nothing, carrying nothing) is set down at a free spot by the arrival
-   *    (`arrival`, the eject; its holder lets go). Anything else (a carrier, a ride, a frame part) is not patched: it halts.
+   *  - An entity's pose is one unit, and only a free component's is put back (on the ground, a surface or in a hand, joined to
+   *    nothing, with nothing on it: a kind that can never carry, seat, berth or hold a body). The whole baseline pose comes
+   *    back if its support is the same as then and it stands clear of every body; else it is set down at a free spot by the
+   *    arrival (`arrival`, the eject; its holder lets go). Any other kind with a broken pose is not patched: it halts.
    *  - Any other number goes back to the baseline's number at that path, else `zero`.
    *  More than CAP numbers, or a pose that can't be put back, plans nothing for the rest to halt on by name. */
   planNonFiniteV1(baseline?: MarsEngine | null): NonFinitePatchV1[] {
@@ -754,14 +754,16 @@ export class MarsEngine implements Engine {
   /** #1496: what puts back an entity whose pose is no number, or null when nothing legal can (it then halts by name). */
   private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
     const e = this.ents[id], was = baseline?.ents[id], ents = Object.values(this.ents) as any[];
-    const rides = ents.some(o => o.kind === 'human' && [o.human?.carrier?.id, o.human?.riding, o.human?.on].includes(id)) || ents.some(o => o.id !== id && o.support?.on === id);
-    if (rides) return null;
+    // only a free component: a kind that can never carry, seat, berth or hold anyone (a boat, a bed, a rack, a ride, a frame
+    // part are not), with nothing resting on it. Anything else halts by name rather than move what may hold a body.
+    const free = e.kind === 'component' && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
+    // and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`, a grip is released below)
+    const names = (v: unknown, depth = 0): boolean => typeof v === 'string' ? v === id || v.startsWith(`${id}#`) || v.endsWith(`:${id}`) : !!v && typeof v === 'object' && depth < 5 && Object.entries(v).some(([k, x]) => k !== 'grip' && names(x, depth + 1));
+    if (!free || ents.some(o => o.kind === 'human' && names(o.human))) return null;
     const radius = typeof e.body?.radius === 'number' && Number.isFinite(e.body.radius) ? e.body.radius : 0.3;
     const clear = (p: number[]) => !ents.some(o => o.kind === 'human' && Array.isArray(o.pose?.p) && o.pose.p.every(Number.isFinite) && hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < radius + HUMAN_RADIUS && Math.abs(o.pose.p[1] - p[1]) < 1.5);
     if (was?.pose && finiteDeepV1(was.pose) && Array.isArray(was.pose.p) && was.pose.p.length === 3 && stableStringify(was.support ?? null) === stableStringify(e.support ?? null) && clear(was.pose.p))
       return { root: 'world', path: ['entities', id, 'pose'], from: 'baseline', pose: structuredClone(was.pose) };
-    const free = e.kind === 'component' && !e.connections?.length && !e.carrier && !e.vehicle && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind);
-    if (!free) return null;
     const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0];
     const spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius); } catch { return null; } finally { this.ents[id] = e; this.tableCacheV1 = null; } })();   // the search reads everything but this
     if (!spot) return null;
