@@ -463,9 +463,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
 access rules apply. Interrupting the reach before contact preserves the old state. A lit censer stays lit through
 restart until someone puts it out.
 
-The kit's small glowing tip and smoke source exist only while `on`. The atmosphere draws its rising smoke; there is
-no flame or crackle. Smoke-bearing roots retain their per-entity transform instead of losing effect anchors to
-geometry instancing. Redraws, attachment and removal refresh smoke on the next rendered frame; unchanged frames
+The kit's small glowing tip and smoke source exist only while `on`. Its declared `smokeScale` parameter defaults to
+0.15 (0.1–0.3), attenuating the existing smoke plume; kits without this parameter keep their previous smoke scale.
+The atmosphere draws its rising smoke; there is no flame or crackle. Smoke-bearing roots retain their per-entity
+transform instead of losing effect anchors to geometry instancing. Redraws, attachment and removal refresh smoke on the next rendered frame; unchanged frames
 check only known smoke publishers, without another scene scan. Other eligible geometry keeps using instancing. This adds no authoritative tick pass;
 100 lit censers 120 m away add zero local `here` bytes. Nearby sit/rest offers are separate activities.
 

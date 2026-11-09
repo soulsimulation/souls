@@ -20,7 +20,7 @@ export const INCENSE_CENSER_DEF: DefInput = {
     { kind: 'sphere', at: [0.025, 1.094, 0.02], r: 0.005, segments: 6, tint: 'tip', glow: 0.75, when: '@on' },
     // A smoke source, not a flame stand-in. The existing atmosphere animates it while on.
     { kind: 'sphere', at: [0.025, 1.15, 0.02], r: 0.018, segments: 5, tint: 'smoke', when: '@on' }] } },
-  params: { ceramic: { type: 'color', default: '#6e8b85', doc: 'ceramic bowl colour' }, stand: { type: 'color', default: '#4a4038', doc: 'stand colour' } },
+  params: { smokeScale: { type: 'number', default: 0.15, min: 0.1, max: 0.3, doc: 'smoke plume attenuation' }, ceramic: { type: 'color', default: '#6e8b85', doc: 'ceramic bowl colour' }, stand: { type: 'color', default: '#4a4038', doc: 'stand colour' } },
   palette: { ceramic: '#6e8b85', stand: '#4a4038', ash: '#aaa399', stick: '#92714b', valve: '#39312c', tip: '#df8f45', smoke: '#aeb2b5' },
   state: { on: { type: 'bool', default: false } },
   components: {}, size: { box: [0.26, 1.18, 0.26] }, actions,

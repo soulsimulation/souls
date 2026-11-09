@@ -29,6 +29,24 @@ async function runtime() {
   return { WorldEntityLayer, createWorldAtmosphere };
 }
 
+test('the real entity registry resolves declared smokeScale defaults and keeps numeric overrides in distinct kit prototypes', async t => {
+  const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
+  globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });
+  const { WorldEntityLayer } = await runtime();
+  const layer = new WorldEntityLayer(p => p), inner = layer as unknown as Inner; t.after(() => layer.dispose());
+  const model = inner.model = new WorldModel({ constants: { ground: 'land', extent: 1000 }, seed: 'incense-scale' }); model.library = coreLibrary();
+  const placed = applyBatch(model, { ops: [{ op: 'place', def: coreRef('incense-censer', 1), name: 'default', p: [0, 0], state: { on: true } },
+    { op: 'place', def: coreRef('incense-censer', 1), name: 'override', p: [3, 0], state: { on: true }, params: { smokeScale: .3 } }] }, 'god', 1);
+  assert.equal(placed.result.accepted, true, JSON.stringify(placed.result));
+  inner.ring = new StreamRing({ inner: 100, outer: 150 }); inner.ring.update(0, 0); inner.now = 1000; layer.active = true; layer.motionInstancing = false;
+  const ordinary = model.get('default')!, changed = model.get('override')!;
+  assert.equal(ordinary.params?.smokeScale, .15, 'admission resolves the declared default without a placement override');
+  const read = (entity: Entity) => { inner.draw(entity, false, true); return inner.drawn.get(entity.id)!.obj.userData.edenSmokeSources as number[][]; };
+  assert.deepEqual(read({ ...ordinary, params: {} }), [[.025, 1.132, .02, .6 * .15]], 'WorldEntityLayer also supplies def defaults when the entity has no stored override');
+  assert.deepEqual(read(changed), [[.025, 1.132, .02, .6 * .3]], 'the existing numeric cache key separates the override');
+  assert.deepEqual(read(ordinary), [[.025, 1.132, .02, .6 * .15]], 'overridden prototype does not contaminate the default');
+});
+
 test('actual atmosphere refreshes rotated incense smoke on redraw, removal and attachment between mature scans', async t => {
   const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
   globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });

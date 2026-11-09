@@ -14,6 +14,7 @@ test('incense uses the existing contact fire actions and persistent on state wit
   const def = model.defineDef(INCENSE_CENSER_DEF, 'core', 0);
   assert.equal(applyBatch(model, { ops: [{ op: 'place', def: coreRef('incense-censer', 1), name: 'censer', p: [0, 0] }] }, 'god', 1).result.accepted, true);
   assert.deepEqual(model.get('censer')!.state, { on: false });
+  assert.deepEqual(def.params.smokeScale, { type: 'number', default: 0.15, min: 0.1, max: 0.3, doc: 'smoke plume attenuation' });
   const shapes = (def.make.kind === 'gen' ? def.make.args!.shapes : []) as { tint: string; when?: string; at: number[]; role?: string }[];
   const tip = shapes.find(s => s.tint === 'tip')!, contact = shapes.find(s => s.tint === 'valve')!, smoke = shapes.find(s => s.tint === 'smoke')!;
   assert.equal(tip.when, '@on'); assert.equal(smoke.when, '@on');

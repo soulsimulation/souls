@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { buildKit } from '../gen-mesh/kit.mesh.ts';
 import { MaterialLib } from '../gen-mesh/materials.ts';
-import { flameHint, hasFlames, isFlameShape, mountFlames, flameStats } from './flames.ts';
+import { flameHint, hasFlames, isFlameShape, mountFlames, flameStats, smokeSources } from './flames.ts';
 import type { StoredDef } from '@souls/world-compiler';
 
 const draw = (shapes: unknown[], flameHint = false) => buildKit({ v: 2, shapes } as never, { materials: new MaterialLib(), tint: (key, fallback) => key === 'flame' ? '#ff9a2a' : fallback, params: {}, state: {}, flameHint });
@@ -60,6 +60,14 @@ test('a chimney stack\'s grey puffs become one moving-smoke source, never a fire
   const moving = kit(false);
   assert.ok(moving.getObjectByName('role:flame'), 'drawn puffs travel with the train');
   assert.equal(moving.userData.edenSmokeSources, undefined);
+});
+
+test('smoke attenuation preserves legacy tuples, clusters and source order and can only reduce scale', () => {
+  const shapes = [{ kind: 'sphere', at: [0, 1, 0], r: .018 }, { kind: 'sphere', at: [3, 2, 0], r: .3 }, { kind: 'sphere', at: [10, 4, 0], r: 1.2 }];
+  const legacy = [[0, 1 - .018, 0, .6], [3, 2 - .3, 0, 1], [10, 4 - 1.2, 0, 3]];
+  for (const factor of [undefined, 1, 2, Infinity, -Infinity, NaN, 0, -.1]) assert.deepEqual(smokeSources(shapes, factor), legacy, `legacy clamp preserved for ${factor}`);
+  for (const [factor, bounded] of [[.15, .15], [.001, .05], [.05, .05], [.3, .3]])
+    assert.deepEqual(smokeSources(shapes, factor), legacy.map(([x, y, z, scale]) => [x, y, z, scale * bounded]), 'only scale changes, after legacy clustering/clamping');
 });
 
 test('fountain water ripples, stacked basins overflow, and spray shapes fall', async () => {

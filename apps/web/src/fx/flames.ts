@@ -31,8 +31,10 @@ export function isFlameShape(sh: ShapeLike, hint: boolean, color?: string): bool
 /** W2: a grey puff drawn as a shape (tint smoke/steam, no glow): the atmosphere's moving smoke replaces it. */
 export function isSmokeShape(sh: ShapeLike): boolean { return !(sh.glow && sh.glow > 0) && /smoke|steam/.test(sh.tint ?? ''); }
 /** Smoke sources [x, y, z, scale] (kit frame) for the shapes that draw smoke: one per puff column, at its base. */
-export function smokeSources(shapes: readonly ShapeLike[]): [number, number, number, number][] {
-  return flameClusters(shapes, new THREE.Vector3()).map((c) => [c.p[0], c.p[1], c.p[2], Math.max(0.6, Math.min(3, c.r / 0.3))]);
+export function smokeSources(shapes: readonly ShapeLike[], factor = 1): [number, number, number, number][] {
+  // Opt-in attenuation follows the legacy clamp; default/invalid input preserves every existing source tuple.
+  const attenuation = Number.isFinite(factor) && factor > 0 ? Math.max(0.05, Math.min(1, factor)) : 1;
+  return flameClusters(shapes, new THREE.Vector3()).map((c) => [c.p[0], c.p[1], c.p[2], Math.max(0.6, Math.min(3, c.r / 0.3)) * attenuation]);
 }
 
 export type FlameCluster = { p: [number, number, number]; r: number; h: number };
