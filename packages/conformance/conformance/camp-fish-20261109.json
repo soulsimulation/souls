@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "#1670 adds opt-in core-camp-grill@1 and core-camp-fish@1. Existing revisions retain their bytes. The grill uses existing hand lighting and a declared food surface; fish uses existing food and item faculties, changing raw/cooked/bite geometry on the same entity. No budget hold, sampling change or rendering exception is added.",
+  "findings": []
+}
