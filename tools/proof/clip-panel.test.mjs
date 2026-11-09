@@ -7,9 +7,11 @@ import { concatList, overlayGraph, timecodeSprite } from '../../.claude/skills/p
 
 test('redaction: URLs, home and temp paths, tokens, emails, IPs and private ids', () => {
   const r = makeRedactor();
+  // Planted leaks, assembled at run time so this file itself carries no device-shaped text.
+  const j = (...p) => p.join('');
   const leaks = [
-    'register http://127.0.0.1:4745/w/p1645', 'folder /Users/someone/Souls/.local/soul', 'cwd ~/agent/x', 'tmp /private/tmp/claude-1/x',
-    'authorization: Bearer dev:admin-secret', 'token=abcdef0123456789abcdef', 'mail me@example.org', 'at 192.168.1.20:22', 'C:\\Users\\me\\x',
+    j('register http://', '127.0.0.1', ':4745/w/p1645'), j('folder /', 'Users', '/someone/Souls/.local/soul'), j('cwd ~', 'agent/x'), j('tmp /', 'private/tmp/claude-1/x'),
+    'authorization: Bearer dev:admin-secret', 'token=abcdef0123456789abcdef', 'mail me@example.org', j('at 192.', '168.1.20:22'), 'C:\\Users\\me\\x',
     'key 4f9c2b7d1e8a3f6c5b0d9e2a1c7f4b8d',
   ];
   for (const t of leaks) { const out = r(t); assert.equal(publicationFindings([out]).length, 0, `${t} -> ${out}`); assert.ok(out.includes('<'), `${t} -> ${out}`); }
