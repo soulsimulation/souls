@@ -29,6 +29,7 @@ test('#1229: take down and remove on real board, notebook and poster wall offers
   const boardOnly = only(board), nbOnly = only(notebook), wallOnly = only(wall);
   refused('remove my journal note', boardOnly, 'journal'); refused('take down my note in the notebook', boardOnly, 'notebook');
   refused('take down my note from the guest book', boardOnly, 'guest book'); refused('remove my note from the guestbook', boardOnly, 'guestbook');
+  refused('take down my note from the notebook stand', boardOnly, 'notebook'); refused('take down my note in the notebook by the door', boardOnly, 'notebook');
   refused('take down the poster from the notice board', wallOnly, 'board'); refused('take down my line off the pinboard', nbOnly, 'pinboard');
   refused('take down my line from the board', nbOnly, 'board'); refused('take down my line in the diary', nbOnly, 'diary');
   refused('take down my note from the notice board', wallOnly, 'board'); refused('take down my note from the guest book', wallOnly, 'guest book');

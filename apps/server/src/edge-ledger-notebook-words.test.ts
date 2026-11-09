@@ -122,9 +122,9 @@ test('notebook words resolve only where a notebook is offered', () => {
 test('#1229: take down and remove refuse a thing that is not offered, and keep topic and adjective words', () => {
   const poster = mk('e_iiii0009', 'unpin', 'Take down a poster from the poster wall (poster-wall)', ''), wanted = mk('e_jjjj0010', 'unpin', 'Take down your note from the wanted/offered board (wanted-board)', '');
   // A1: the words name something else, in any spelling the kit's synonyms use
-  for (const w of ['remove my journal note', 'take down my note in the notebook', 'take down my note from the guest book', 'remove my note from the visitors book', "take down my note in the visitors' book", 'remove my note from the guestbook', 'take down my diary note', 'take down my note from the notebook now'])
+  for (const w of ['remove my journal note', 'take down my note in the notebook', 'take down my note from the guest book', 'remove my note from the visitors book', "take down my note in the visitors' book", 'remove my note from the guestbook', 'take down my diary note', 'take down my note from the notebook now', 'take down my note from the notebook stand', 'take down my note in the notebook by the door', 'take down my note from the notebook in the hall'])
     assert.equal(resolve(w, [pin, unpin]), 'capability.unknown', w);
-  for (const w of ['take down my line from the board', 'remove my line from the noticeboard', 'take down my line in the sheet', 'remove my board note', 'take down my line off the pinboard'])
+  for (const w of ['take down my line from the board', 'remove my line from the noticeboard', 'take down my line in the sheet', 'remove my board note', 'take down my line off the pinboard', 'take down my line from the board by the door'])
     assert.equal(resolve(w, [nbPin, nbUnpin]), 'capability.unknown', w);
   // review: the notebook stand is also the kit's guest book, visitors book, logbook and journal; a pinboard or corkboard is a notice board
   for (const w of ['take down my line in the guest book', 'take down my line in the visitors book', 'remove my line from the logbook']) assert.equal(resolve(w, [nbPin, nbUnpin]), nbUnpin.id, w);

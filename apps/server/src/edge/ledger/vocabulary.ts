@@ -103,7 +103,8 @@ const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unp
 const KIND_WORDS: Record<string, string> = {notebook: 'notebook', journal: 'notebook', logbook: 'notebook', diary: 'diary', guestbook: 'notebook', guest: 'notebook', visitors: 'notebook', visitor: 'notebook',
   board: 'board', noticeboard: 'board', pinboard: 'board', corkboard: 'board', sheet: 'sheet'};
 const TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'from', 'inside', 'off']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'page']);
-const PHRASE_END = new Set(['now', 'please', 'here', 'then', 'and', 'for', 'too', 'again']);
+// (the def's own noun, "the notebook stand", or where it is, "the board by the door", also ends the phrase that names it)
+const PHRASE_END = new Set(['now', 'please', 'here', 'then', 'and', 'for', 'too', 'again', 'stand', 'by', 'in', 'on', 'at', 'near', 'next', 'beside', 'inside', 'outside', 'over', 'behind']);
 /** Kind words where the words put a target: the last word of a phrase led by in/from/inside/off, at most two words between
  *  ("from the wanted board", "in the guest book", not "from the board games corner"), or right before note/line ("my
  *  journal note"). Each run comes back with the words it is made of ("guest book": guest, book). */
