@@ -90,7 +90,14 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   const ride = ['resort-carousel', 'resort-ferris-wheel', 'eden-balloon'].map((id) => ents[id]).find(Boolean);
   assert.ok(ride, 'Eden runs a ride'); if (E.navWarmV1(0)) ride.pose.p[0] += 0.01;
   assert.equal(E.navWarmV1(0), false, 'a moving ride invalidated the labels');
-  const pr = L.act(cy, { capability: roof }) as Promise<Out>; await w.settle(2); const again = await pr;
+  // the in-request relabel's wall-clock budget (NAV_ACT_WARM_MS, 150 ms) is injected as unbounded here, so the fast path is
+  // proven without depending on the runner's speed (a slow CI runner could not finish in 150 ms and waited instead); a zero
+  // budget (the cold read) is kept as it is
+  const Lw = L as unknown as { navWarmFor(ms: number): boolean }, budget = Lw.navWarmFor.bind(L);
+  Lw.navWarmFor = (ms: number) => budget(ms > 0 ? Infinity : 0);
+  let again: Out;
+  try { const pr = L.act(cy, { capability: roof }) as Promise<Out>; await w.settle(2); again = await pr; } finally { Lw.navWarmFor = budget; }
+  t.diagnostic(`ride-invalidated roof walk: ${again.accepted ? phase(cy, again.receipt!.id).phase : `refused ${again.code}`}`);
   assert.equal(again.accepted, true, JSON.stringify(again)); assert.notEqual(phase(cy, again.receipt!.id).phase, 'failed');
   assert.doesNotMatch(phase(cy, again.receipt!.id).reason ?? '', /Navigation is still getting ready/, 'relabelled in the request, not waited');
 });
