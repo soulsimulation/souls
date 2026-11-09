@@ -453,9 +453,9 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Play and social | Frisbee with clear lanes and three-person triangles; noughts and crosses and checkers with honest turns; rock-paper-scissors and holding hands, both by consent; pick up a set of three juggling balls and juggle them, with the set back in hand when they stop | "mark the centre", "wipe the game board for a new game", "move c3 to d4", "jump d4 to f6", "play rock-paper-scissors with Bea" then "accept", "juggle" |
 | Food | Make tea or coffee: fill the kettle at the sink, switch it on, wait for the boil and pour; carry a mug, offer it to someone, drink it in sips, and rinse the mug | "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea", "make a cup of coffee", "offer Ben the tea", "offer Ben the coffee", "drink the coffee", "rinse the mug", "wash up" |
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
-| Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
+| Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away; paint a lasting mural on a permitted wall panel | "paint at the easel", "draw in chalk" |
 
-## Making: paintings and chalk
+## Making: paintings, chalk and murals
 
 - **Painting at an easel.** `core-easel@2` is a painting workstation. The `paint:` offer at its spot takes an optional
   drawing (`painting`: a title, a background and at most 64 rectangles, ellipses and lines in 0..1 coordinates). When
@@ -470,7 +470,16 @@ context-size checks below), regression runs, and an uncut real-client recording 
   clock set back included) the bridge re-derives only the perceived lines of drawings still fading, and the viewer
   redraws things tagged `fades` (a fading def carries that tag). `core-chalk-square@1` is the first such def: a 1 m
   paving square that fades over 4 world days.
-- **Only drawn by hand.** The public hang route refuses an image on a fading canvas (`art.drawn-only`); the world's
+- **Murals ([#1489](https://github.com/soulsimulation/souls/issues/1489)).** `core-mural-panel@1` is a low plaster wall
+  explicitly set aside for painting. Its `paint:paint.<entity>` offer says "Paint a mural" and uses the same bounded
+  recipe, brush pose, server-rendered picture, title, credit and replacement history as the easel. Its media face's
+  `paintLabel` and `paintNoun` supply the surface words; `ownerBound: true` makes an unowned panel public and an owned
+  panel paintable only by its Soul owner. Permission is checked before admission and again at publication; ownership,
+  pose or canvas changes during the activity preserve the earlier picture. Another owner's panel refuses with
+  `art.not-yours`; ordinary walls have no painting offer. Nearby perception names the maker and mural title, never the
+  recipe. A mural stays through restart and does not fade. No new tick pass runs, and 100 panels 120 m away add zero
+  bytes to the local `here` frame.
+- **Only drawn by hand.** The public hang route refuses an image on a fading or owner-bound canvas (`art.drawn-only`); the world's
   creator may still clear one. A washed-away drawing stays in the square's state until it is drawn over, so the art
   listing (`GET /v1/art`) still names it.
 

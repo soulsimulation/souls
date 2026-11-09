@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Op, WorldModel } from '@souls/world-compiler';
-import { canvasFace, flatCanvas, paintingEasel, planFinishedPainting, type ArtFailure } from './art.ts';
+import { canvasFace, flatCanvas, paintingEasel, paintingPermission, planFinishedPainting, type ArtFailure } from './art.ts';
 import { worldDay } from '../god/poster-boards.ts';
 import { PAINTING_RENDERER, PaintingRejected, rasterizePainting, validatePainting, type Painting } from './painting.ts';
 import { ACT_REACH } from '../god/actuators.ts';
@@ -35,6 +35,7 @@ export function createPaintingService(d: PaintingDeps) {
     prepare(soul: Soul, target: string, raw: unknown, planned?: {face: unknown; stand: unknown; level: number}): PaintingIntent | ArtFailure {
       let recipe: Painting; try { recipe = validatePainting(raw); } catch (e) { if (e instanceof PaintingRejected) return fail(e.code, e.message); throw e; }
       const model=d.model(),b = binding(model, target); if (!b) return fail('painting.no-easel', 'This offer has no single-canvas painting easel.');
+      const denied = paintingPermission(model, target, { kind: 'soul', id: soul.soulId, name: soul.name }); if (denied) return denied;
       if (planned) {
         const p=model.worldPose(model.entities.get(target)!),face=planned.face;
         // Derived faces round to centimetres. The native painter's station
@@ -67,6 +68,7 @@ export function createPaintingService(d: PaintingDeps) {
       if (intent.renderer !== PAINTING_RENDERER) return fail('painting.renderer', 'This painting uses an unsupported renderer version.');
       const model = d.model();
       if (!intent.binding || binding(model, intent.target) !== intent.binding) return fail('painting.target-changed', 'The easel or its canvas changed while you painted; the current picture has been preserved.');
+      const denied = paintingPermission(model, intent.target, { kind: 'soul', id: soul.soulId, name: soul.name }); if (denied) return denied;
       let recipe: Painting; try { recipe = validatePainting(intent.recipe); } catch (e) { if (e instanceof PaintingRejected) return fail(e.code, e.message); throw e; }
       const publication = {worldId:d.worldId,receiptId:receipt};
       const png = rasterizePainting(recipe, publication), sha = digest(png), path = join(d.dir, `${sha}.png`), media = `${base}/art/${sha}.png`;
