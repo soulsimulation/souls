@@ -285,7 +285,10 @@ as `engine.unhashable`. Without `souls-repair/1`, `haltOnFault` is unchanged.
 A snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt. On the
 periodic path (#1368), the manual `saveSnapshot` and the repair snapshot (#1376), it is skipped and counted at rung
 `contained` as `durability.snapshot-skipped`, and the clock runs on. A manual save answers `pending: true` and logs an
-`unsnappable-head` checkpoint. Other capture faults propagate as before.
+`unsnappable-head` checkpoint. A head holding a number that is no number (a body's NaN pose) is skipped the same way, as
+`snapshot.non-finite`, its row naming the first entity and field (#1492); and under `quarantine/1` the world sweeps for broken
+bodies on any tick a snapshot comes due, as well as once a second, so the body is held before the capture reads it. Other
+capture faults propagate as before.
 
 ## Conformance
 
