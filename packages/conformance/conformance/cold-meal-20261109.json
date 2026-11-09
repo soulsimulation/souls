@@ -1,0 +1,18 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1684,
+  "reason": "Finite chosen cold ingredients become the same portable edible food via completed native craft and normal atomic God edits; existing native food bites consume it. Two new defs, productionK2 ten placed/baked/rendered samples zero findings/gaps, actual registered builder and raw400tri gate pass. No older pins/budgets/baselines change.",
+  "definitions": [
+    {
+      "ref": "core-cold-meal-bench@1",
+      "hash": "9080d7a9768ec10c0cca9ef11976ccdc225b2e77f6373ba5c14e5eee231e6b7c"
+    },
+    {
+      "ref": "core-cold-wrap@1",
+      "hash": "0af0d7fb9acc58b14618dfd904c584dda9df031af730df3205c5ac7be06ac86a"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}

@@ -715,3 +715,6 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Chosen cold meals (#1684)
+`core-cold-meal-bench@1` supplies finite greens, tomato and beans. Existing native ten-second craft completion atomically transfers a chosen portion into the real `core-cold-wrap@1` resting on its output surface. The same small portable food uses existing native pickup/bite/eat and `left`/`bites`; no fresh output is created. Partial meals cannot be refilled; an empty remainder can be returned and prepared again with a new chosen recipe. Current inspection reports actual stock, recipe/preparer and remaining food. Access/surface/stock/body/completion checks preserve material on interruption/refusal. Cosmetic spoon only, no heating/nutrition or precise-contact claim. Separately named additive God hooks/current-facts facet require steward serial integration with other action PRs.
