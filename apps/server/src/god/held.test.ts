@@ -46,10 +46,21 @@ test('a Soul picks up the god\'s bowl, is seen holding it, and puts it down', { 
   const caps = edge.capabilities(ana);
   assert.ok(caps.some((c: any) => c.id === 'put-down:here' && c.available), caps.map((c: any) => c.id).join(' '));
 
-  // indoors among the furniture: put-down:here turns to the clearest ground first
-  const pd: any = await act('put-down:here');
+  // #1261: the words reach the same put-down:here as the id (they were refused hands.empty: the bowl is no ledger item)
+  for (const words of ['put down the bowl', 'put it down', 'drop it']) {
+    const r: any = edge.intents.dryRun(ana, { capability: words });
+    assert.equal(r.ok, true, `${words}: ${JSON.stringify(r)}`); assert.equal(r.would.capability, 'put-down:here', words);
+  }
+  // indoors among the furniture: put-down:here turns to the clearest ground first (#1261: asked in words)
+  const pd: any = await act('put down the bowl');
   assert.equal(pd.phase, 'completed', JSON.stringify(pd));
   assert.deepEqual(pd.outcome.changed.map((c: any) => [c.id, c.kind]), [[bowl.id, 'item-placed']], JSON.stringify(pd.outcome));
   assert.equal((edge.observe(ana, new Set()) as any).self.holding, null);
   assert.equal((f.host.engine as any).world.entities[bowl.id].support?.kind, 'ground');
+  // #1261 A2: with nothing in the hand the same words are still refused hands.empty
+  await settle(30);
+  for (const words of ['put down the bowl', 'put it down', 'drop it']) {
+    const r: any = edge.intents.dryRun(ana, { capability: words });
+    assert.equal(r.ok, false, `${words}: ${JSON.stringify(r)}`); assert.equal(r.code, 'hands.empty', words);
+  }
 });
