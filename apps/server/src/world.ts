@@ -620,8 +620,7 @@ export class WorldHost {
     this.observeIntentActions();
     this.afterPrograms(out.programs, false);
     if (out.refusals) this.noteRefusals(out.refusals);
-    // #1492: also on a tick a snapshot comes due, so a body broken with nothing faulting is held before the capture reads it
-    if (this.quarantineRule) { this.noteWholePoses(); if (this.engine.world.tick % BROKEN_SWEEP_TICKS === 0 || this.snapshotDue()) this.sweepBrokenBodies(); }
+    if (this.quarantineRule) { this.noteWholePoses(); if (this.engine.world.tick % BROKEN_SWEEP_TICKS === 0) this.sweepBrokenBodies(); }
     if (this.repairRules && !this.clockAvailable) return;
     this.replayDebtMs += performance.now() - tStep;
     if(this.durableClockV1){
@@ -2226,6 +2225,10 @@ export class WorldHost {
     if (this.repairRules && !this.clockAvailable) return;
     if (this.durableClockV1) this.persistClockFrontier();
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
+    // #1492: a body broken with nothing faulting is held by the once-a-second sweep; a capture before it would read the broken
+    // head. Under quarantine/1 the world looks first (only when a capture follows), so the body is held on this tick, logged as
+    // that sweep logs it, and the capture sees it whole.
+    if (this.quarantineRule) { this.sweepBrokenBodies(); if (this.repairRules && !this.clockAvailable) return; }
     this.snapshotGeneration++;
     const t0 = performance.now(), engine = this.engine;
     const capture = () => {

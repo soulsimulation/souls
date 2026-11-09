@@ -45,3 +45,14 @@ test('#1492 a capture that meets a non-finite number is skipped by name, never t
   for (let i = 0; i < 5; i++) assert.doesNotThrow(() => { f.host.tickOnce(); f.host.drainInputs(); });
   assert.equal(f.host.clockAvailable, true);
 });
+
+test('#1492 under quarantine/1 a snapshot the replay debt brings due (as production sets SNAPSHOT_DEBT_MS) holds the body first and is taken', async (t) => {
+  const { f, h, ada, breakAda } = await world(t, true, false);
+  h.snapshotDebtMs = 1e-6; h.snapshotMinGapMs = 0; h.lastSnapshotCostMs = 0;   // any step cost makes it due, after this tick's step
+  breakAda(); h.replayDebtMs = 0; h.snapshotSoon = null; const before = h.lastSnapshotTick;
+  assert.equal(h.snapshotDue(), false, 'not due before the step: only the step cost brings it due');
+  assert.doesNotThrow(() => f.host.tickOnce(), 'the tick never throws');
+  assert.ok(ada().pose.p.every(Number.isFinite), 'held whole on that tick');
+  assert.ok(h.lastSnapshotTick > before || h.periodicSnapshot, 'the snapshot was taken, not skipped');
+  assert.equal(rowsOf(f.db).filter((r: any) => r.rule === 'durability.snapshot-skipped').length, 0, 'no durability cycle lost');
+});
