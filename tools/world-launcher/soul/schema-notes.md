@@ -58,6 +58,9 @@ differs, else report the `reason`.
 - `ride.unavailable` → its `alternatives`; a `partial` one (a walk, not the ride) is not what was asked: say so.
   Landing and steering: `help rides`.
 - `route.unreachable` (the room is closed) → go where it names, and say it isn't the room.
+- `capability.unknown`: no offer here has that id. Never build an id from words (`fly:hall`, `sit:cottage/bench`):
+  `resolve "<the words>"` and send one of its `candidates` or `alternatives` ids. A ride or seat asked in words is
+  resolved first.
 - `capability.params`: resend with the params as `params` says.
 - Exit 75: busy, or `unconfirmed`: the same command once. `slowed`: tell your person that sentence.
 
