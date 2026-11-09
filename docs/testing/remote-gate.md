@@ -30,7 +30,10 @@ Every PR and the merge queue run CI on the exact commits, and each push to `main
 (#1463) takes the successful `ci.yml` run whose head is exactly the candidate (event `push` to `main`, preferred, or
 `merge_group`) as evidence for the steps CI runs with the same command, and runs only the rest on Modal. A step counts
 as covered only when every CI job that runs it succeeded in that run and the candidate's own `ci.yml` still runs the
-command (`CI_COVERED` in `release-gate.mjs`; a harness test fails if `ci.yml` drifts from the table).
+command on a line that is not a comment (`CI_COVERED` in `release-gate.mjs`; a harness test fails if `ci.yml` drifts
+from the table). What CI runs through the candidate's own files is pinned too: the `typecheck` and `test:client`
+scripts in `package.json` must be the gate's commands, and `tools/test-harness/web-suite.sh` and
+`.github/scripts/server-test-files.mjs` must equal the gate's harness commit, or the step stays on Modal.
 
 | Step | Source | Why |
 | --- | --- | --- |
@@ -50,8 +53,10 @@ command (`CI_COVERED` in `release-gate.mjs`; a harness test fails if `ci.yml` dr
 
 The Modal steps run with `--only` and are compared assertion by assertion with the baseline: removed assertions,
 renames, new failures, skips and quarantine work as before. For the CI-covered steps a green CI means every test
-passed; removed or renamed tests there are caught when the PR is made (the [renames](#renames) check), and newly
-skipped ones by the same check. From the 4.16.1 gate's step timings the Modal part is about 30 minutes (the longest
+passed, but a green run does not show a deleted or newly skipped test. Those are caught when the PR is made: the
+PR-time [renames](#renames) check (#1462) requires a `renames.json` entry for a removed or renamed test title and a
+`quarantine.json` entry for a newly unconditional skip or todo. Runtime `t.skip()` calls and titles built at run time
+are outside that check, so on the CI-covered steps they are not seen at release. From the 4.16.1 gate's step timings the Modal part is about 30 minutes (the longest
 container: V3-walk 138 s, V3-mars-engine 578 s and the V6 scenarios about 840 s, plus image and install), against about
 75 to 90 minutes for the whole contract; V5 alone was 46 minutes in its longest shard.
 
@@ -166,7 +171,8 @@ earlier suite-tree definition is still found when its own harness commit recompu
 receipt marks it `legacyKey`). A hit requires unchanged file hashes and a complete, matching run. If the candidate
 runs a different Node or pnpm version than the cached run, the baseline is re-run. A CI-evidence gate takes a cached
 full run, else a cached run of exactly its executed steps (keyed `…-node<major>-only-<hash of the steps>`), else runs
-the baseline once on those steps only; its passing candidate is cached under the steps key, never as a full run. A miss runs the baseline once
+the baseline once on those steps only; its passing candidate is cached under the steps key, never as a full run. A later gate that needs that sha as a full
+baseline (no CI evidence, `--node 26`) or with other steps runs its baseline once. A miss runs the baseline once
 beside the candidate and caches it when it validates. Every passing full gate caches its candidate, which becomes the
 next gate's baseline once it is on `main`.
 
