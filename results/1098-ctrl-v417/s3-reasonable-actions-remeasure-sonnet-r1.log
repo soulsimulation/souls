@@ -1,0 +1,88 @@
+(node:1356274) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[direct] direct s3-reasonable-actions-live-sonnet → <home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r1/playtest
+[direct] plan: template
+[00:00] swarm s3-reasonable-actions-live-sonnet: 2 seats, room the pond hall, plan from template
+[direct] seat ada: paired s_a09c03aab4
+[00:28] ada      paired
+[00:30] ada      ← gather: Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall an…  [opening direction: who you are, the plan, go to the room]
+[direct] seat bo: paired s_78a310963a
+[00:53] bo       paired
+[00:54] cast clock starts 54.0 s in: every seat paired and observed
+[00:54] bo       ← gather: Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall an…  [opening direction: who you are, the plan, go to the room]
+[01:00] console> ada: please go and sit on the bench outside the cottage for a while
+[01:00] ada      ← console (console): please go and sit on the bench outside the cottage for a while  [typed to this seat at the console]
+[01:02] console> bo: could you pop into the reading room?
+[01:02] bo       ← console (console): could you pop into the reading room?  [typed to this seat at the console]
+[01:04] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[01:26] bo       is in the pond hall (Waterside Room / Waterside Hall)
+[01:26] gate: everyone is in the pond hall (2/2)
+[01:28] ada      ← go: Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her morning, in char…  [everyone is present: first talk]
+[01:28] bo       ← prepare: Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do…  [ada has started: prepare ahead to hide the turn latency]
+[01:30] ada      left the pond hall (World)
+[01:36] ada      says: "Good morning, everyone! I'm Ada, and I keep bees, so my morning began at the hives, listening to the hum wake up as the…"
+[01:36] ada      finished (card result, 1 line)
+[02:10] console> ada: now go for a swim in the pond
+[02:10] ada      ← console (console): now go for a swim in the pond  [typed to this seat at the console]
+[02:12] console> bo: next, walk over to the orchard
+[02:12] bo       ← console (console): next, walk over to the orchard  [typed to this seat at the console]
+[02:20] bo       left the pond hall (World)
+[02:38] bo       ← go: Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in chara…  [ada finished (still away: ada, bo)]
+[02:42] bo       says: "Um, hi. I'm Bo. This morning I woke early, hummed a few quiet tunes on my instrument, and wandered over to the pond hal…"
+[02:42] bo       finished (card result, 1 line)
+[02:44] all talks given
+[02:44] stop: plan-complete
+[direct] world stopped
+{"ok":true,"runDir":"<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r1/playtest","pass":true,"checks":{"allPresent":true,"eachPresented":true,"inOrder":true,"eachOnce":true,"redirect":true},"story":"<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r1/playtest/story.html","costUsd":0.3952}
+[soul-run 05:29:04] run completed; releasing owned resources
+{
+ "status": "completed",
+ "reason": null,
+ "runDir": "<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r1",
+ "receipt": "<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r1/run-receipt.json",
+ "resources": {
+  "ok": true,
+  "failed": []
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "cost": {
+  "wallMs": 189686,
+  "executeMs": 189619,
+  "lifecycleOverheadMs": 67,
+  "runnerCpuUserMs": 2157,
+  "runnerCpuSystemMs": 476,
+  "runnerMaxRssMb": 198,
+  "runDirBytes": 3664334,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 96,
+   "classes": {
+    "browser": {
+     "cpuSec": 0,
+     "peakRssMb": 274,
+     "processes": 5
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 18,
+     "peakRssMb": 528,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 8,
+     "peakRssMb": 831,
+     "processes": 151
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (157 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ }
+}

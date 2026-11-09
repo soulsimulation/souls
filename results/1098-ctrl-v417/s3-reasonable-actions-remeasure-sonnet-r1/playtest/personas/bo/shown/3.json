@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 88,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T05:27:25.624Z",
+  "mono": 91192,
+  "elapsedSec": 88,
+  "n": 6,
+  "seat": "bo",
+  "kind": "prepare",
+  "by": "director",
+  "channel": "card",
+  "text": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "ada has started: prepare ahead to hide the turn latency",
+  "phase": "turns",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_cfbc1c17-aa30-41ae-a6b3-e51a6b4a2e6d",
+  "requestId": "bo-003"
+ }
+}

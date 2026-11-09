@@ -1,0 +1,7 @@
+{"t":"2026-11-09T05:30:24.162Z","mono":75308,"requestId":"ada-001","cutoffReason":"next-direction","openSec":44.006}
+{"t":"2026-11-09T05:30:30.163Z","mono":81309,"requestId":"ada-002","cutoffReason":"next-direction","openSec":6}
+{"t":"2026-11-09T05:30:32.159Z","mono":83305,"requestId":"ada-003","cutoffReason":"next-direction","openSec":1.996}
+{"t":"2026-11-09T05:30:32.162Z","mono":83308,"requestId":"ada-004","cutoffReason":"next-direction","openSec":0.003}
+{"t":"2026-11-09T05:32:16.187Z","mono":187333,"requestId":"ada-005","cutoffReason":"next-direction","openSec":104.025}
+{"t":"2026-11-09T05:33:02.184Z","mono":233330,"requestId":"ada-006","cutoffReason":"result","openSec":45.995}
+{"t":"2026-11-09T05:33:42.169Z","mono":273315,"requestId":"ada-007","cutoffReason":"result","openSec":9.967}

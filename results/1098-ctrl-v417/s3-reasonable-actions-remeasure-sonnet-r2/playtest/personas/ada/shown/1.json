@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 30,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T05:38:27.849Z",
+  "mono": 33228,
+  "elapsedSec": 30,
+  "n": 1,
+  "seat": "ada",
+  "kind": "gather",
+  "by": "director",
+  "channel": "card",
+  "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "opening direction: who you are, the plan, go to the room",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_003f7f72-758f-4bc4-90bf-863f1ba1bbfb",
+  "requestId": "ada-001"
+ }
+}

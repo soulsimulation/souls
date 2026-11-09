@@ -1,0 +1,94 @@
+(node:1367427) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[direct] direct s3-reasonable-actions-live-sonnet → <home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r2/playtest
+[direct] plan: template
+[00:00] swarm s3-reasonable-actions-live-sonnet: 2 seats, room the pond hall, plan from template
+[direct] seat ada: paired s_b78b9b65c5
+[00:28] ada      paired
+[00:30] ada      ← gather: Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall an…  [opening direction: who you are, the plan, go to the room]
+[direct] seat bo: paired s_ca64294f85
+[00:54] bo       paired
+[00:56] cast clock starts 56.0 s in: every seat paired and observed
+[00:56] bo       ← gather: Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall an…  [opening direction: who you are, the plan, go to the room]
+[01:02] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[01:04] console> ada: please go and sit on the bench outside the cottage for a while
+[01:04] ada      ← console (console): please go and sit on the bench outside the cottage for a while  [typed to this seat at the console]
+[01:06] console> bo: could you pop into the reading room?
+[01:06] bo       ← console (console): could you pop into the reading room?  [typed to this seat at the console]
+[01:18] ada      left the pond hall (World)
+[01:28] bo       is in the pond hall (Waterside Room / Waterside Hall)
+[02:12] console> ada: now go for a swim in the pond
+[02:12] ada      ← console (console): now go for a swim in the pond  [typed to this seat at the console]
+[02:14] console> bo: next, walk over to the orchard
+[02:14] bo       ← console (console): next, walk over to the orchard  [typed to this seat at the console]
+[02:24] bo       left the pond hall (World)
+[03:26] console> ada: that's all, now walk to the pond hall and wait for the others
+[03:26] ada      ← console (console): that's all, now walk to the pond hall and wait for the others  [typed to this seat at the console]
+[03:28] console> bo: that's all, now walk to the pond hall and wait for the others
+[03:28] bo       ← console (console): that's all, now walk to the pond hall and wait for the others  [typed to this seat at the console]
+[03:44] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[04:56] bo       is in the pond hall (Waterside Room / Waterside Hall)
+[04:56] gate: everyone is in the pond hall (2/2)
+[04:58] ada      ← go: Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her morning, in char…  [everyone is present: first talk]
+[04:58] bo       ← prepare: Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about his morning, in character) but do…  [ada has started: prepare ahead to hide the turn latency]
+[05:14] ada      says: "Good morning, everyone! I started the day sitting on the cottage bench, listening to my bees hum in the early light. Th…"
+[05:14] ada      finished (card result, 1 line)
+[05:16] bo       ← go: Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about his morning, in chara…  [ada finished]
+[05:22] bo       says: "I woke up early and took my little instrument out to the green, playing softly so I wouldn't bother anyone. Then I wand…"
+[05:22] bo       finished (card result, 1 line)
+[05:24] all talks given
+[05:24] stop: plan-complete
+[direct] world stopped
+{"ok":true,"runDir":"<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r2/playtest","pass":true,"checks":{"allPresent":true,"eachPresented":true,"inOrder":true,"eachOnce":true,"redirect":true},"story":"<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r2/playtest/story.html","costUsd":0.4598}
+[soul-run 05:43:28] run completed; releasing owned resources
+{
+ "status": "completed",
+ "reason": null,
+ "runDir": "<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r2",
+ "receipt": "<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r2/run-receipt.json",
+ "resources": {
+  "ok": true,
+  "failed": []
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "cost": {
+  "wallMs": 333655,
+  "executeMs": 333586,
+  "lifecycleOverheadMs": 69,
+  "runnerCpuUserMs": 3017,
+  "runnerCpuSystemMs": 717,
+  "runnerMaxRssMb": 197,
+  "runDirBytes": 4027803,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 168,
+   "classes": {
+    "browser": {
+     "cpuSec": 0,
+     "peakRssMb": 273,
+     "processes": 5
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 23,
+     "peakRssMb": 496,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 13,
+     "peakRssMb": 860,
+     "processes": 247
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (253 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ }
+}

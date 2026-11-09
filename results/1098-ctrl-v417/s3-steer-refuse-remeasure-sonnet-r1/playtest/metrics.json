@@ -1,0 +1,184 @@
+{
+ "version": 2,
+ "scenario": "s3-steer-refuse-live-sonnet",
+ "requests": 8,
+ "basics": {
+  "requests": 8,
+  "walkRequests": 4,
+  "walksArrived": 1,
+  "walksArrivalKnown": 3,
+  "walkArrivalRate": 0.3333333333333333,
+  "bodyMovedInBudget": 3,
+  "bodyMovedRate": 0.375,
+  "ackMedianSec": 2.9,
+  "firstBodyChangeMedianSec": 20,
+  "stuck": 0,
+  "insideSolid": 0,
+  "oscillations": 1,
+  "wrong": 0,
+  "hits": 0,
+  "basis": "walk requests by verb in the owner text; arrival from the arrival oracle (unknown excluded); body moved = first visible body change inside the request budget"
+ },
+ "speed": {
+  "ackSec": {
+   "n": 8,
+   "median": 2.9,
+   "p90": 8,
+   "max": 8,
+   "mean": 3.94
+  },
+  "firstBodyChangeSec": {
+   "n": 3,
+   "median": 20,
+   "p90": 20,
+   "max": 20,
+   "mean": 18
+  },
+  "resultSec": {
+   "n": 4,
+   "median": 7.3,
+   "p90": 25.7,
+   "max": 25.7,
+   "mean": 11.05
+  },
+  "chatQueuedSec": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "mean": null
+  },
+  "walkMps": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "mean": null
+  },
+  "wallVsBudget": {
+   "n": 8,
+   "median": 0.04666666666666666,
+   "p90": 0.4066666666666667,
+   "max": 0.4066666666666667,
+   "mean": 0.1
+  },
+  "basis": "seconds from the owner message (sentAt); ack = card ack only; resultSec = latest observed card result, including server progress, not overall journey completion (use journey physicalCompleteAt/completionClaimAt); chatQueuedSec = sentAt to the start of the seat turn that carried a chat message (Claude Code queues typed messages behind a running turn); walk m/s = sampled displacement during walk receipts"
+ },
+ "uptime": {
+  "listenOpenFraction": null,
+  "unackedAtCutoff": 0,
+  "serverErrors": 0,
+  "seatCrashes": 0,
+  "seatTimeouts": 0,
+  "healthzBefore": true,
+  "healthzAfter": true,
+  "tickRate": 20,
+  "basis": "presence from the rendered card; crashes = seat turns with non-zero exit"
+ },
+ "cost": {
+  "tokensTotal": {
+   "input": 70,
+   "cached": 865762,
+   "output": 5748
+  },
+  "tokensPerHour": {
+   "input": 840,
+   "output": 68976
+  },
+  "tokensPerRequest": {
+   "input": 4.5,
+   "output": 435.5,
+   "cached": 67538
+  },
+  "outputTokensPerRequest": {
+   "n": 8,
+   "median": 435.5,
+   "p90": 540,
+   "max": 540,
+   "mean": 396.75
+  },
+  "turnsPerRequest": {
+   "n": 8,
+   "median": 1,
+   "p90": 2,
+   "max": 2,
+   "mean": 1.13
+  },
+  "cardTurnsPerRequest": {
+   "n": 8,
+   "median": 1,
+   "p90": 2,
+   "max": 2,
+   "mean": 1.13
+  },
+  "cliCallsPerRequest": {
+   "n": 8,
+   "median": 4.5,
+   "p90": 6.2,
+   "max": 6.2,
+   "mean": 4.01
+  },
+  "ackChars": {
+   "n": 8,
+   "median": 63.5,
+   "p90": 97,
+   "max": 97,
+   "mean": 59.75
+  },
+  "resultChars": {
+   "n": 4,
+   "median": 112,
+   "p90": 138,
+   "max": 138,
+   "mean": 109
+  },
+  "acksOverBound": 0,
+  "ackBoundChars": 140,
+  "chatReplyChars": {
+   "n": 0,
+   "median": null,
+   "p90": null,
+   "max": null,
+   "mean": null
+  },
+  "basis": "cost.jsonl per seat turn; a turn serves the requests whose window (sentAt..cutoffAt) it overlaps or that it carried (chatTurns); its tokens and CLI calls are split evenly over them; requests served by no turn count 0 turns and no tokens"
+ },
+ "journeys": {
+  "rows": [],
+  "basis": "ordered frozen geometry/posture predicates and exact receipt target IDs; unknown is never a pass",
+  "setup": [],
+  "infrastructureInvalid": []
+ },
+ "fidelity": {
+  "counts": {
+   "H": 0,
+   "P": 0,
+   "M": 0,
+   "W": 0,
+   "unresolved": 0
+  },
+  "wrong": 0,
+  "classes": {},
+  "hitRate": null,
+  "truthfulnessPassRate": 1,
+  "vocabularyMisses": 0,
+  "vetoed": 0,
+  "basis": "ledger.tsv (Reviewer, oracle-vetoed); P never counts as H"
+ },
+ "physical": {
+  "insideSolid": 0,
+  "noProgress": 0,
+  "stuckReceipts": 0,
+  "oscillations": 1,
+  "basis": "oracle fails per request"
+ },
+ "emergence": null,
+ "harness": {
+  "shotsTaken": 0,
+  "shotsPlanned": 30,
+  "lateSamples": 0,
+  "packsWithUnknowns": 8,
+  "reviewerCoordinatorDisagreements": null,
+  "reviewerLeaks": 0
+ }
+}

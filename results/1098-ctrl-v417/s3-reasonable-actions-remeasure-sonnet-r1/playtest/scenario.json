@@ -1,0 +1,83 @@
+{
+ "name": "s3-reasonable-actions-live-sonnet",
+ "version": 1,
+ "seed": 6233,
+ "kind": "direct",
+ "world": {
+  "kind": "dev",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "slug": "s3-reasonable-actions",
+  "port": 4456,
+  "natives": false
+ },
+ "durationSec": 300,
+ "seats": [
+  {
+   "id": "ada",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Ada",
+   "persona": null,
+   "economy": "lean",
+   "startOffsetSec": 0
+  },
+  {
+   "id": "bo",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Bo",
+   "persona": null,
+   "economy": "lean",
+   "startOffsetSec": 0
+  }
+ ],
+ "god": null,
+ "director": {
+  "mode": "swarm",
+  "brief": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning.",
+  "order": [
+   "ada",
+   "bo"
+  ],
+  "room": {
+   "label": "the pond hall",
+   "match": [
+    "waterside",
+    "pond-hall",
+    "pond hall"
+   ]
+  }
+ },
+ "observer": {
+  "sampleSec": 10,
+  "cameras": [],
+  "viewport": [
+   1024,
+   640
+  ],
+  "dpr": 1
+ },
+ "review": {
+  "reviewer": false,
+  "developer": false,
+  "reviewerModel": "opus",
+  "developerModel": "opus",
+  "rubric": "accept3"
+ },
+ "rails": {
+  "onboardWallSec": 120,
+  "onboardTimeoutSec": 90,
+  "onboardConcurrency": 2,
+  "quotaStopPct": 90,
+  "maxTurnsPerRequest": 4,
+  "maxTurnWallSec": 120,
+  "worldBudgetUsd": 0.75
+ },
+ "serverRoot": "<home>/souls-playtest/server",
+ "castPath": "<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r1/cast.effective.json",
+ "castSha256": "ec1d73b3b5c54def142b56ea0b505bf73dc3f09384e6f20da0de1ac1c2218786",
+ "headless": true,
+ "worldUrl": null
+}

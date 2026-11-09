@@ -1,0 +1,4 @@
+{"t":"2026-11-09T05:26:57.627Z","mono":63195,"requestId":"ada-001","cutoffReason":"next-direction","openSec":30.008}
+{"t":"2026-11-09T05:27:25.623Z","mono":91191,"requestId":"ada-002","cutoffReason":"next-direction","openSec":27.995}
+{"t":"2026-11-09T05:27:37.621Z","mono":103189,"requestId":"ada-003","cutoffReason":"result","openSec":11.998}
+{"t":"2026-11-09T05:28:47.637Z","mono":173205,"requestId":"ada-004","cutoffReason":"run-end","openSec":39.999}

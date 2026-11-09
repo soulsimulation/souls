@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T05:33:30.197Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T05:33:32.196Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 256,
+   "firstAt": "2026-11-09T05:33:40.517Z",
+   "text": "Good morning, everyone! I'm Ada, and I keep bees. This morning I ran my errand around the hamlet, past the green and the orchard, where the blossoms were already humming. I was glad of the early light, and I think my bees were too. Thank you for listening.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T05:33:44.200Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 238,
+   "firstAt": "2026-11-09T05:33:59.627Z",
+   "text": "Um... hi. This morning I meant to go to the orchard, but my plans kept changing. First the pond hall, then the orchard, then I was told to stop. I think I like it here, though. Sometimes a change of plan is how you end up somewhere quiet.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 1
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T05:33:30.197Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 52,
+    "cachedTokens": 704048,
+    "cacheCreationTokens": 28050,
+    "outputTokens": 5221,
+    "costUsd": 0.2349,
+    "turns": 4,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 52,
+    "cachedTokens": 685423,
+    "cacheCreationTokens": 26090,
+    "outputTokens": 4356,
+    "costUsd": 0.2166,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 104,
+   "cachedTokens": 1389471,
+   "cacheCreationTokens": 54140,
+   "outputTokens": 9577,
+   "costUsd": 0.4515,
+   "turns": 9,
+   "unknownTurns": 0
+  }
+ }
+}

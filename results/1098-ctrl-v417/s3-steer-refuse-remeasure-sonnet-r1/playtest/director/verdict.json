@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T05:25:19.048Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T05:25:21.051Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 333,
+   "firstAt": "2026-11-09T05:25:30.632Z",
+   "text": "Good morning, neighbours! I keep bees, so I know my apple trees well: every spring the blossoms hum with my little workers, and the fruit comes in sweeter for it. A tree that is visited by bees gives bigger, crisper apples, and the honey tastes faintly of orchard blossom. Plant a few apple trees and you will be rewarded twice over.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T05:25:33.055Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 213,
+   "firstAt": "2026-11-09T05:25:36.983Z",
+   "text": "Um... hi. I like the pond best when it's quiet, and the water just holds still. Sometimes I sit by the shore and hum a little tune, and the ripples seem to answer. I think it's the kind of place that listens back.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T05:25:19.048Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 30,
+    "cachedTokens": 370131,
+    "cacheCreationTokens": 19211,
+    "outputTokens": 2395,
+    "costUsd": 0.1937,
+    "turns": 3,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 40,
+    "cachedTokens": 495631,
+    "cacheCreationTokens": 22719,
+    "outputTokens": 3353,
+    "costUsd": 0.174,
+    "turns": 4,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 70,
+   "cachedTokens": 865762,
+   "cacheCreationTokens": 41930,
+   "outputTokens": 5748,
+   "costUsd": 0.3677,
+   "turns": 7,
+   "unknownTurns": 0
+  }
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 260.1,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T05:33:32.196Z",
+  "mono": 263342,
+  "elapsedSec": 260.1,
+  "n": 12,
+  "seat": "ada",
+  "kind": "go",
+  "by": "director",
+  "channel": "card",
+  "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "everyone is present: first talk",
+  "phase": "turns",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_d369775e-aa8d-49cd-b2bd-0f283425cabb",
+  "requestId": "ada-007"
+ }
+}

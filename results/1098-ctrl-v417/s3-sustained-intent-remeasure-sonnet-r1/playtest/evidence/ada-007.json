@@ -1,0 +1,501 @@
+{
+ "requestId": "ada-007",
+ "seat": "ada",
+ "soulId": "s_f1824d651a",
+ "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+ "channel": "card",
+ "sentAt": "2026-11-09T05:33:32.196Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T05:33:38.439Z",
+ "ackText": "Got it: giving my talk now.",
+ "resultAt": "2026-11-09T05:33:40.527Z",
+ "resultText": "Said: Good morning, everyone! I'm Ada, and I keep bees. This morning I ran my errand around the hamlet, past the green and the orchard…",
+ "resultState": "done",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T05:33:40.527Z",
+ "firstResultText": "Said: Good morning, everyone! I'm Ada, and I keep bees. This morning I ran my errand around the hamlet, past the green and the orchard…",
+ "cardResults": [
+  {
+   "text": "Said: Good morning, everyone! I'm Ada, and I keep bees. This morning I ran my errand around the hamlet, past the green and the orchard…",
+   "at": "2026-11-09T05:33:40.527Z",
+   "state": "done",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T05:33:42.169Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T05:33:42.169Z",
+   "mono": 273315,
+   "soulId": "s_f1824d651a",
+   "name": "Ada",
+   "tick": 5421,
+   "place": "g-lab-pond-hall.hall",
+   "placePath": [
+    "Waterside Room",
+    "Waterside Hall",
+    "World"
+   ],
+   "pos": {
+    "x": 2,
+    "z": 40,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 73.67854166666274,
+    "hunger": 24.97097222222981,
+    "company": 40.32604166666182,
+    "restlessness": 13.315069444445673
+   },
+   "near": [
+    {
+     "id": "e_c86274de",
+     "who": "Waterside Hall",
+     "distance": "here",
+     "doing": null
+    },
+    {
+     "id": "h_461107c4f4",
+     "who": "Bo",
+     "distance": "close",
+     "doing": "idle"
+    },
+    {
+     "id": "punt-e_59f304a4-e4305c",
+     "who": "e_59f304a4 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_f855ddcf",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8eebe336",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_3a3ef290",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d3703cc4",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_cd7f4aa6",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794202340040,
+   "lastReceipt": {
+    "id": "r_5afa5353-7280-445e-bdfc-cc3f0ae84817",
+    "soulId": "s_f1824d651a",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "completed",
+    "acceptedTick": 3779,
+    "startedTick": 3779,
+    "endedTick": 4444,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "endedAt": {
+     "place": "g-lab-pond-hall.hall",
+     "placePath": [
+      "Waterside Room",
+      "Waterside Hall",
+      "World"
+     ],
+     "pos": [
+      2,
+      40
+     ],
+     "heading": 181,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_5afa5353-7280-445e-bdfc-cc3f0ae84817",
+     "soulId": "s_f1824d651a",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "completed",
+     "acceptedTick": 3779,
+     "startedTick": 3779,
+     "endedTick": 4444,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       40
+      ],
+      "heading": 181,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_2c6dc188-9720-4d65-a49d-47b20846dc25",
+     "soulId": "s_f1824d651a",
+     "capability": "sit:cottage/part-outdoor-bench",
+     "phase": "replaced",
+     "acceptedTick": 2569,
+     "startedTick": 2569,
+     "endedTick": 3779,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "sit:cottage/part-outdoor-bench",
+      "target": "e_f855ddcf",
+      "kind": "object",
+      "seat": "e_f855ddcf",
+      "slot": "e_f855ddcf#seat-1"
+     },
+     "endedAt": {
+      "place": "field",
+      "placePath": [
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       29.5,
+       7.5
+      ],
+      "heading": 120,
+      "posture": "walking"
+     }
+    },
+    {
+     "id": "r_42e74a91-3b9d-45ea-bd29-4b5d27c6a648",
+     "soulId": "s_f1824d651a",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 1668,
+     "startedTick": 1668,
+     "endedTick": 2569,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_8c00dd64",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.5,
+       -29.4
+      ],
+      "heading": 324,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_a6010a32-e4fb-444a-a379-2afb2ffe12de",
+     "soulId": "s_f1824d651a",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "replaced",
+     "acceptedTick": 1407,
+     "startedTick": 1407,
+     "endedTick": 1668,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "endedAt": {
+      "place": "field",
+      "placePath": [
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0.7,
+       14
+      ],
+      "heading": 177,
+      "posture": "walking"
+     }
+    },
+    {
+     "id": "r_ce9115d9-bfe0-4534-bccf-4a3540bf009b",
+     "soulId": "s_f1824d651a",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 385,
+     "startedTick": 385,
+     "endedTick": 446,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.8",
+    "lastUsed": 1794202409577
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d369775e-aa8d-49cd-b2bd-0f283425cabb",
+     "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "acknowledged",
+     "sentAt": 1794202412198,
+     "deliveredAt": 1794202412199,
+     "acknowledgedAt": 1794202418439,
+     "reply": "Got it: giving my talk now.",
+     "outcome": "done",
+     "result": "Said: Good morning, everyone! I'm Ada, and I keep bees. This morning I ran my errand around the hamlet, past the green and the orchard…",
+     "resultAt": 1794202420527
+    }
+   },
+   "world": {
+    "tick": 5422,
+    "souls": [
+     {
+      "id": "h_f1824d651a",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_461107c4f4",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 10
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_5afa5353-7280-445e-bdfc-cc3f0ae84817",
+   "soulId": "s_f1824d651a",
+   "capability": "walk:lab-pond-hall/hall",
+   "phase": "completed",
+   "acceptedTick": 3779,
+   "startedTick": 3779,
+   "endedTick": 4444,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall/hall",
+    "target": "g-lab-pond-hall.hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall.hall"
+   },
+   "endedAt": {
+    "place": "g-lab-pond-hall.hall",
+    "placePath": [
+     "Waterside Room",
+     "Waterside Hall",
+     "World"
+    ],
+    "pos": [
+     2,
+     40
+    ],
+    "heading": 181,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_2c6dc188-9720-4d65-a49d-47b20846dc25",
+   "soulId": "s_f1824d651a",
+   "capability": "sit:cottage/part-outdoor-bench",
+   "phase": "replaced",
+   "acceptedTick": 2569,
+   "startedTick": 2569,
+   "endedTick": 3779,
+   "code": null,
+   "reason": "A newer action from this Soul replaced it.",
+   "chosen": {
+    "capability": "sit:cottage/part-outdoor-bench",
+    "target": "e_f855ddcf",
+    "kind": "object",
+    "seat": "e_f855ddcf",
+    "slot": "e_f855ddcf#seat-1"
+   },
+   "endedAt": {
+    "place": "field",
+    "placePath": [
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     29.5,
+     7.5
+    ],
+    "heading": 120,
+    "posture": "walking"
+   }
+  },
+  {
+   "id": "r_42e74a91-3b9d-45ea-bd29-4b5d27c6a648",
+   "soulId": "s_f1824d651a",
+   "capability": "walk:flag-orchard",
+   "phase": "completed",
+   "acceptedTick": 1668,
+   "startedTick": 1668,
+   "endedTick": 2569,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:flag-orchard",
+    "target": "e_8c00dd64",
+    "kind": "object"
+   },
+   "endedAt": {
+    "place": "world",
+    "placePath": [
+     "World"
+    ],
+    "pos": [
+     -39.5,
+     -29.4
+    ],
+    "heading": 324,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_a6010a32-e4fb-444a-a379-2afb2ffe12de",
+   "soulId": "s_f1824d651a",
+   "capability": "walk:lab-pond-hall/hall",
+   "phase": "replaced",
+   "acceptedTick": 1407,
+   "startedTick": 1407,
+   "endedTick": 1668,
+   "code": null,
+   "reason": "A newer action from this Soul replaced it.",
+   "chosen": {
+    "capability": "walk:lab-pond-hall/hall",
+    "target": "g-lab-pond-hall.hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall.hall"
+   },
+   "endedAt": {
+    "place": "field",
+    "placePath": [
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0.7,
+     14
+    ],
+    "heading": 177,
+    "posture": "walking"
+   }
+  },
+  {
+   "id": "r_ce9115d9-bfe0-4534-bccf-4a3540bf009b",
+   "soulId": "s_f1824d651a",
+   "capability": "wave:here",
+   "phase": "completed",
+   "acceptedTick": 385,
+   "startedTick": 385,
+   "endedTick": 446,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "g-lab-start",
+    "placePath": [
+     "Village Green",
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0,
+     0
+    ],
+    "heading": 90,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

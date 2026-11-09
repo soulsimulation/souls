@@ -1,0 +1,4 @@
+{"t":"2026-11-09T05:26:57.629Z","mono":63197,"elapsedSec":60,"phase":"gather","source":"script","line":"ada: please go and sit on the bench outside the cottage for a while","cmd":"say","target":"ada","outcome":"applied","requestIds":["ada-002"]}
+{"t":"2026-11-09T05:26:59.616Z","mono":65184,"elapsedSec":62,"phase":"gather","source":"script","line":"bo: could you pop into the reading room?","cmd":"say","target":"bo","outcome":"applied","requestIds":["bo-002"]}
+{"t":"2026-11-09T05:28:07.638Z","mono":133206,"elapsedSec":130.1,"phase":"turns","source":"script","line":"ada: now go for a swim in the pond","cmd":"say","target":"ada","outcome":"applied","requestIds":["ada-004"]}
+{"t":"2026-11-09T05:28:09.630Z","mono":135198,"elapsedSec":132,"phase":"turns","source":"script","line":"bo: next, walk over to the orchard","cmd":"say","target":"bo","outcome":"applied","requestIds":["bo-004"]}

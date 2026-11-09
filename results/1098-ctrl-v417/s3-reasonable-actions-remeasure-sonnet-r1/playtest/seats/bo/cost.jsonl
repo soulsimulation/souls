@@ -1,0 +1,3 @@
+{"t":"2026-11-09T05:26:51.440Z","mono":57008,"turn":1,"inputTokens":20,"cachedTokens":196629,"cacheCreationTokens":14379,"outputTokens":1412,"costUsd":0.09133889999999999,"sessionCostUsd":0.09133889999999999,"reservedUsd":0.48096}
+{"t":"2026-11-09T05:27:35.484Z","mono":101052,"turn":2,"inputTokens":14,"cachedTokens":207105,"cacheCreationTokens":7449,"outputTokens":1609,"costUsd":0.06662449999999999,"sessionCostUsd":0.15796339999999998,"reservedUsd":0.177384}
+{"t":"2026-11-09T05:28:50.196Z","mono":175764,"turn":3,"inputTokens":8,"cachedTokens":141782,"cacheCreationTokens":5428,"outputTokens":1469,"costUsd":0.05059620000000001,"sessionCostUsd":0.20855959999999998,"reservedUsd":0.206388}

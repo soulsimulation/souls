@@ -1,0 +1,30 @@
+{
+ "id": "ada",
+ "kind": "soul",
+ "adapter": "claude-headless",
+ "model": "sonnet",
+ "effort": "low",
+ "soulName": "Ada",
+ "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+ "folder": "<home>/souls-playtest/results/1098-ctrl-v417/s3-reasonable-actions-remeasure-sonnet-r2/playtest/seats/ada/folder",
+ "createdAt": "2026-11-09T05:37:57.675Z",
+ "sessionId": "1955220f-866d-4569-8bb0-290907f81909",
+ "soulId": "s_b78b9b65c5",
+ "ownerIdentity": "agent-706016849a1f2646ba46d848",
+ "assisted": false,
+ "wake": true,
+ "sessionCostUsd": {
+  "1955220f-866d-4569-8bb0-290907f81909": 0.21874639999999998
+ },
+ "sessionContextTokens": 40299,
+ "effortApplied": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 12,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 27958,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

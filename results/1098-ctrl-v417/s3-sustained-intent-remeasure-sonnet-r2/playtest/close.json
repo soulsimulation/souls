@@ -1,0 +1,66 @@
+{
+ "t": "2026-11-09T05:48:16.354Z",
+ "mono": 283360,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-sustained-intent",
+   "folder": "<home>/souls-playtest/results/1098-ctrl-v417/s3-sustained-intent-remeasure-sonnet-r2/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T05:43:36.079Z",
+   "sessionId": "d209a526-7c65-4a6f-a9b6-5e6468a72edb",
+   "soulId": "s_a7a26e0cc1",
+   "ownerIdentity": "agent-a72987fa76a6d15ad9bec41d",
+   "assisted": false,
+   "wake": true,
+   "sessionCostUsd": {
+    "d209a526-7c65-4a6f-a9b6-5e6468a72edb": 0.253187
+   },
+   "sessionContextTokens": 42431,
+   "effortApplied": true,
+   "onboard": {
+    "ok": true,
+    "pairedWithinSec": 16,
+    "timeoutSec": 90,
+    "onboardTurnWallMs": 25887,
+    "attempts": 1,
+    "cliFile": "eden.mjs",
+    "lastStatus": null
+   }
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-sustained-intent",
+   "folder": "<home>/souls-playtest/results/1098-ctrl-v417/s3-sustained-intent-remeasure-sonnet-r2/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T05:43:36.080Z",
+   "sessionId": "b5cf323c-fc00-4abc-a06e-91b878a2ede1",
+   "soulId": "s_52ecb0acc6",
+   "ownerIdentity": "agent-76baab5426e653cca120915d",
+   "assisted": false,
+   "wake": true,
+   "sessionCostUsd": {
+    "b5cf323c-fc00-4abc-a06e-91b878a2ede1": 0.21356919999999996
+   },
+   "sessionContextTokens": 38532,
+   "effortApplied": true,
+   "onboard": {
+    "ok": true,
+    "pairedWithinSec": 39,
+    "timeoutSec": 90,
+    "onboardTurnWallMs": 25920,
+    "attempts": 1,
+    "cliFile": "eden.mjs",
+    "lastStatus": null
+   }
+  }
+ ]
+}

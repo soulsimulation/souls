@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 192,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T05:25:21.051Z",
+  "mono": 195265,
+  "elapsedSec": 192,
+  "n": 6,
+  "seat": "ada",
+  "kind": "go",
+  "by": "director",
+  "channel": "card",
+  "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about the apple trees, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "everyone is present: first talk",
+  "phase": "turns",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_595dbc78-ac2e-4af1-bf19-8ef28959e999",
+  "requestId": "ada-004"
+ }
+}
