@@ -35,7 +35,7 @@ function faulted(base, control) {
   };
   return {...base, create: (w) => wrap(base.create(w)), restore: (s) => { if (control.restoreFails && !(control.restoreOk > 0 && control.restoreOk--)) throw new Error(REFUSED); return wrap(base.restore(s)); }};
 }
-async function world(t, {quarantine = true, path = ':memory:'} = {}) {
+async function world(t, {quarantine = true, mark = false, path = ':memory:'} = {}) {
   const control = {at: -1, fault() {}}, factory = faulted(repair, control), f = fixture(path, factory, {durableClockV1: true}); f.brain.quiesce();
   const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false, sharedCarry: true}), app = new Hono();
   const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: edge, soul: () => null});
@@ -45,6 +45,7 @@ async function world(t, {quarantine = true, path = ':memory:'} = {}) {
   const tick = async (n = 5) => { for (let i = 0; i < n && !f.host.paused; i++) { f.host.tickOnce(); await setImmediate(); if (!f.host.paused) f.host.drainInputs(); } };
   await tick();
   if (quarantine) await accept(f.host, f.host.enableQuarantineV1('test'));
+  if (mark) await accept(f.host, f.host.enableQuarantineMarkV1('test'));
   const souls = {};
   for (const name of ['Ada', 'Bo', 'Cy']) {
     await invite(f, name.toLowerCase());
@@ -153,6 +154,34 @@ test('#1377 B1-B4 a body broken every tick is held again each time, alone: bysta
   assert.equal(w.f.db.events(worldId, 0).filter((e) => e.payload?.lastRungInPlace).length, 0, 'no stop-all event');
   assert.ok(rowsOf(w).filter((r) => r.evidence?.quarantine).length <= 2, `glitch rows bounded: ${report()}`);
   assert.ok(h.engine.world.entities[Ada.entityId].pose.p.every(Number.isFinite), 'held whole again');
+  await w.tick(400);
+  assert.equal(read(w, Bo, early).phase, 'completed', report()); assert.equal(read(w, Cy, mid).phase, 'completed', report());
+  const again = ok(await act(w, Ada, {capability: 'walk:yard'})); await w.tick(500); assert.equal(read(w, Ada, again).phase, 'completed', 'Ada acts again once the bug stops');
+  h.drainInputs(); h.saveSnapshot(true); bootsAgree(w, path);
+});
+
+test('#1440 under quarantine-mark/1 a body broken every tick writes a bounded number of events: a standing mark holds it, bystanders complete, boots agree', {timeout: 300000}, async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, {path, mark: true}), h = w.f.host, {Ada, Bo, Cy} = w.souls;
+  const early = ok(await act(w, Bo, {capability: 'walk:yard'})); ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
+  w.control.restoreFails = true;
+  // in the engine's own step, for a fixed stretch of ticks: real in every replay too
+  let broken = 0; const from = h.engine.world.tick + 1, to = from + 400;
+  w.control.breakEvery = (e) => { const tk = e.world.tick; if (tk < from || tk >= to) return; const b = e.world.entities[Ada.entityId]; if (b?.pose) { b.pose.p = [NaN, b.pose.p[1], b.pose.p[2]]; broken++; forgetMotion(e.rt); } };
+  await w.tick(30);
+  const mid = ok(await act(w, Cy, {capability: 'walk:shed'}));
+  for (let i = 0; i < 370; i++) { h.tickOnce(); if (i % 10 === 0) { await setImmediate(); h.drainInputs(); } }
+  const report = () => JSON.stringify({clock: h.clockAvailable, paused: h.paused, fault: String(h.engineFault ?? "").slice(0, 200), glitches: h.glitches.byRule, stepFailing: h.stepFailing?.slice(0, 100)}).slice(0, 700);
+  assert.ok(broken >= 390, 'broken every tick: ' + broken);
+  // every tick faults by construction, so steps are failing: that names Ada alone (#1378), and nothing else halts
+  assert.ok(running(h), report()); assert.equal((byRung(h).halt ?? 0) - (h.glitches.byRule['engine.step-failing']?.halt ?? 0), 0, report());
+  if (h.stepFailing) { assert.equal(h.stepFailingFor(Cy.entityId), false); assert.equal(h.stepFailingFor(Ada.entityId), true); }
+  assert.equal(rowsOf(w).filter((r) => r.evidence?.inPlace).length, 0, `no stop-all: ${report()}`);
+  assert.equal(w.f.db.events(worldId, 0).filter((e) => e.payload?.lastRungInPlace).length, 0, 'no stop-all event');
+  assert.ok(rowsOf(w).filter((r) => r.evidence?.quarantine).length <= 2, `glitch rows bounded: ${report()}`);
+  assert.ok(h.engine.world.entities[Ada.entityId].pose.p.every(Number.isFinite), 'held whole again');
+  const events = w.f.db.events(worldId, 0).filter((e) => e.payload?.quarantineV1);
+  assert.ok(events.length <= 3 + 2, `bounded: ${events.length} quarantine events for ${broken} broken ticks`);
+  assert.equal(events.filter((e) => e.payload.quarantineV1.standing?.length).length, 1, 'one standing mark');
   await w.tick(400);
   assert.equal(read(w, Bo, early).phase, 'completed', report()); assert.equal(read(w, Cy, mid).phase, 'completed', report());
   const again = ok(await act(w, Ada, {capability: 'walk:yard'})); await w.tick(500); assert.equal(read(w, Ada, again).phase, 'completed', 'Ada acts again once the bug stops');

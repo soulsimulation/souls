@@ -209,6 +209,8 @@ named, and the row or recipe carries those keys, so a replay applies them and no
 a read there would move the step check's memory where a replay's doesn't, and the boot would differ. A rule the step check
 can only see across ticks, like `motion.teleport`, is contained the same way.
 
+**`standingHoldsV1`** (#1440, `quarantine-mark/1`, a host-only logged runtime policy adopted at boot last) is part of world state, absent when empty. Once a broken body has been held 3 times in a cooldown, the quarantine event carries `standing: [{id, pose}]`, and from then the engine itself holds that body again at the logged pose whenever it finds it broken, at the start and end of each step, so the host never reads it broken and logs no more holds. A mark ends when the body has stayed whole for 1200 ticks, or is gone. A replay folds the same event and keeps the same marks; without the policy, every hold is logged as before. The engine guards each runtime invariant once: a list appended to or swapped back in keeps its existing guards.
+
 An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
 once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
 of it, never further in: a move that takes a body nearer the solid thing, inside its own width, or nearer the other body or
