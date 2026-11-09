@@ -29,6 +29,10 @@ context-size checks below), regression runs, and an uncut real-client recording 
   close it, then reopen and take the same item out. Contents and custody persist; the closed door conceals them.
   The older glass display revisions keep their decorative bottles. This revision supports new, worn and damaged finishes;
   construction scaffolding is unsupported. It makes no cooling or preservation claim.
+- **Actual bookcase stock ([#1578](https://github.com/soulsimulation/souls/issues/1578)).** `core-bookcase@2` removes the
+  decorative books and provides three places on its waist-height shelf for real books or small items. Souls shelve and
+  retrieve each entity by hand; nearby context names the actual contents. Item identity, appearance and existing metadata
+  persist. This adds no authored-passage reading contract. Other shelves remain empty; the old decorative revision is unchanged.
 - **Litter and bins ([#1088](https://github.com/soulsimulation/souls/issues/1088), W065).** `core-bin@2` and `core-wheelie-bin@2`
   are the street bins, open at the top, on the same container faculty with data only: three places down inside at the
   level of the rubbish already in them, reached over the rim. `core-wrapper@1` is a small thing to pick up. "put the
