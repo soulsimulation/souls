@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Db } from '../db.ts';
 import { GodMode } from './god.ts';
+import { MEDITATION_MAT } from '../../../../packages/world-compiler/src/core-kit/meditation-mat.ts';
 import { createMeditation } from './meditation.ts';
 import type { EdgeReceipt, EdgeSoul } from '../edge/contract.ts';
 
 function setup(t: { after(fn: () => void): void }) {
   const db = new Db(':memory:'); t.after(() => db.close());
   const god = new GodMode(db, { worldId: 'quiet-practice-test', ownerId: 'dev:owner', tick: () => 0, emit() {} });
+  assert.equal(god.act({ ops: [{ op: 'define', def: MEDITATION_MAT }] }).accepted, true);
   assert.equal(god.act({ ops: [{ op: 'place', def: 'core/meditation-mat@1', name: 'mat', p: [0, 0] }] }).accepted, true);
   const soul: EdgeSoul = { soulId: 's_ana', entityId: 'ana', name: 'Ana', owner: 'dev:ana' };
   const body = { human: {} as { holding?: string }, pose: { p: [0, 0, 2] } };

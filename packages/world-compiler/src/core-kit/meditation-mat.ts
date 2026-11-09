@@ -10,7 +10,7 @@ export const MEDITATION_MAT: DefInput = {
     { kind: 'box', at: [0, 0.015, -0.7], size: [1.4, 0.003, 0.05], tint: 'trim', collide: false },
     { kind: 'box', at: [0, 0.015, 0.7], size: [1.4, 0.003, 0.05], tint: 'trim', collide: false }
   ] } } as DefInput['make'],
-  palette: { cloth: '#537c78', trim: '#d4c79b' }, params: {}, components: {}, size: { box: [1.6, 0.018, 1.6] },
+  palette: { cloth: '#537c78', trim: '#d4c79b' }, params: {}, components: {}, size: { box: [1.6, 0.05, 1.6] },
   state: { practiceSeconds: { type: 'number', min: 30, max: 30, default: 30 }, lastBy: { type: 'string', max: 100, default: '' }, lastReceipt: { type: 'string', max: 100, default: '' }, lastCompletedTick: { type: 'number', min: -1, max: 1e12, default: -1 } } as DefInput['state'],
   actions: [{ name: 'meditate', label: 'Meditate quietly for 30 seconds on the mat', params: {}, then: [{ op: 'set', field: 'practiceSeconds', value: 30 }] }]
 };

@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1594: retain the first draft supplement. Raise only the declared vertical bounding box from0.018m to the existing public authoring minimum0.05m, so an identical authored mat can be defined through ordinary God admission. Actual noncolliding kit shapes are byte-identical; no body pose, action, refusal, budget or previous supplement changes. Scoped EF4 k=2 has five samples and zero findings/gaps.",
+  "defs": [
+    {
+      "def": "core-meditation-mat@1",
+      "hash": "a2b792eae0655e9619b789b789bc73491d8030c3bae19a67a9ac251197637509"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}
