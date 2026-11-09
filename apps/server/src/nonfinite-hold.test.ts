@@ -161,6 +161,12 @@ test('#1496 something carrying a body, or with something resting on it, is never
   assert.ok(f.host.glitches.byRule['engine.unhashable']?.halt, JSON.stringify(f.host.glitches.byRule));
 });
 
+test('#1496 a component whose def has slots (a seat a god library could place as a component) is never moved here: it halts', async (t) => {
+  const { f, ents } = await world(t, { baseline: false });
+  assert.throws(() => tickBroken(f, () => { ents().bowl1.def = 'camp-chair'; ents().bowl1.pose.p[0] = NaN; }), /non-finite number/);
+  assert.equal(events(f).length, 0);
+});
+
 test('#1496 more numbers than the cap are not patched in part: it halts by name', async (t) => {
   const { f } = await world(t);
   const w = f.host.engine.world as any; for (let i = 0; i < 65; i++) w.env.weather[`x${i}`] = NaN;

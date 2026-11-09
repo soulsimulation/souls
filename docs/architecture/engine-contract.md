@@ -286,7 +286,7 @@ for example an object's pose, a field of the world such as the weather, or a pro
   - A body's pose and human state are never patched here; that is quarantine/1's, and a body quarantine/1 leaves broken
     (a pitch, for example) halts as below. A body's other fields are patched like any other number.
   - An entity's pose is one unit, and only a free component's pose is ever put back. A free component is on the
-    ground, on a surface or in a hand. It is joined to nothing, nothing rests on it, and no body names it in its state:
+    ground, on a surface or in a hand. Its def has no slots, it is joined to nothing, nothing rests on it, and no body names it in its state:
     a seat, a berth or a link. Its kind can never carry, seat, berth or hold a body. The whole pose comes back from
     the last good snapshot (the recovery baseline) (`from: 'baseline'`), but only if the component's support is the
     same as it was then and no body stands within its radius.

@@ -754,9 +754,10 @@ export class MarsEngine implements Engine {
   /** #1496: what puts back an entity whose pose is no number, or null when nothing legal can (it then halts by name). */
   private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
     const e = this.ents[id], was = baseline?.ents[id], ents = Object.values(this.ents) as any[];
-    // only a free component: a kind that can never carry, seat, berth or hold anyone (a boat, a bed, a rack, a ride, a frame
+    // only a free component: a kind that can never carry, seat, berth or hold anyone (a def with slots can: a seat holds its
+    // body only through the live action, which no scan of the body sees) (a boat, a bed, a rack, a ride, a frame
     // part are not), with nothing resting on it. Anything else halts by name rather than move what may hold a body.
-    const free = e.kind === 'component' && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
+    const free = e.kind === 'component' && !(CATALOG as any)[e.def]?.slots?.length && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
     // and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`, a grip is released below)
     const names = (v: unknown, depth = 0): boolean => typeof v === 'string' ? v === id || v.startsWith(`${id}#`) || v.endsWith(`:${id}`) : !!v && typeof v === 'object' && depth < 5 && Object.entries(v).some(([k, x]) => k !== 'grip' && names(x, depth + 1));
     if (!free || ents.some(o => o.kind === 'human' && names(o.human))) return null;
