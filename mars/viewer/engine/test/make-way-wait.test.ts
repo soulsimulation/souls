@@ -27,3 +27,31 @@ test('a real conflict (another directed action on the body) still fails at once'
   const second=rt.submit('walk_to',{actor:'b',x:-6,z:-1},{preempt:false});
   assert.notEqual(second.status,'requested');
 });
+// #1368: a world captured while an action waits out a make-way nudge must restore. The wait's hold is a live nudge that is
+// not cancelling (it runs out by itself), which restore used to reject as `snapshot.waiting-invalid`, so neither rung 3's
+// rewind nor a boot from that snapshot could bring the world back.
+test('#1368 a make-way wait survives capture and restore, and the restored world steps on identically',()=>{
+  const {world,rt}=fixture();
+  rt.submit('walk_to',{actor:'b',x:-4,z:-4.4},{id:'b:make-way:7'});
+  const walk=rt.submit('walk_to',{actor:'b',x:-1,z:-6});assert.equal(walk.phase,'make-way');
+  rt.step();assert.equal(rt.records.get(walk.id)!.status,'requested','still waiting when captured');
+  const snap=JSON.parse(JSON.stringify(rt.snapshot()));
+  const registry=new Map<string,ActionDef>([[walkTo.verb,walkTo]]);
+  const restored=Runtime.restore(snap,registry,{spatial:new Spatial(provingGround())},DEFAULT_INVARIANTS);
+  assert.equal(restored.stateHash(),rt.stateHash(),'the same state');
+  for(let i=0;i<400;i++){rt.step();restored.step();assert.equal(restored.stateHash(),rt.stateHash(),`tick ${rt.tick}`);}
+  assert.equal(restored.records.get(walk.id)!.status,'completed','the waiting walk ran after the nudge, in the copy too');
+  const p=world.entities.b.pose.p;assert.ok(Math.hypot(p[0]+1,p[2]+6)<0.4,'arrived');
+});
+test('#1368 restore still refuses a forged make-way wait whose hold is not a nudge',()=>{
+  const {rt}=fixture();
+  rt.submit('walk_to',{actor:'b',x:-4,z:-4.4},{id:'b:make-way:7'});
+  const walk=rt.submit('walk_to',{actor:'b',x:-1,z:-6});assert.equal(walk.phase,'make-way');
+  const other=rt.submit('walk_to',{actor:'a',x:-6,z:-1});assert.equal(other.status,'executing');
+  const snap=JSON.parse(JSON.stringify(rt.snapshot()));
+  // the wait now claims to be held by a plain walk on another body: a live hold that is neither a nudge nor stopping
+  const find=(o:any):any=>{if(!o||typeof o!=='object')return null;if(Array.isArray(o.waiting)&&o.waiting.length)return o;for(const k of Object.keys(o)){const r=find(o[k]);if(r)return r;}return null;};
+  const graph=find(snap);assert.ok(graph,'the snapshot carries the wait');graph.waiting[0].holds=[other.id];
+  const registry=new Map<string,ActionDef>([[walkTo.verb,walkTo]]);
+  assert.throws(()=>Runtime.restore(snap,registry,{spatial:new Spatial(provingGround())},DEFAULT_INVARIANTS),/waiting directive .* has invalid graph provenance/);
+});

@@ -15,3 +15,5 @@ const WHY:Readonly<Record<string,string>>={
 };
 export const refusableRule=(code:string)=>Object.hasOwn(WHY,code);
 export const refusalDiag=(rule:string)=>({code:`world.refused:${rule}`,message:`Your action stopped: ${WHY[rule]}. Nothing else changed.`});
+/** #1334 hold-settle/1: the rider or body the world put where it can't stand, moved to the nearest free spot in that tick. */
+export const settleDiag=(rule:string)=>({code:`world.settled:${rule}`,message:'The world left you somewhere you could not stand, so you were moved to the nearest free spot and what you were doing stopped. Nothing else changed.'});

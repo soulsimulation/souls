@@ -53,7 +53,8 @@ completed / failed / replaced), read from `/v1/edge/receipts/:id` or the event s
 the body program began executing, not that the body visibly moved: a walk from idle can read `started` for about ten
 ticks before the first step. `firstMotionTick` is the first tick at or after it at which the body's engine activity changed
 or its root moved more than 5 cm; it is absent until then, on receipts with no body program, and on a receipt still running across a server
-restart that had not moved before it (#790, D021).
+restart that had not moved before it (#790, D021). An act handed to the world before its row is written answers HTTP
+202 with phase `pending` ([souls.md](souls.md#the-edge-api)); `pending` is never stored.
 
 ## Privacy
 

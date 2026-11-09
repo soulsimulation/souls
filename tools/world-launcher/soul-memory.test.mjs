@@ -20,7 +20,8 @@ const receipt = (id, over = {}) => ({ id, capability: 'read:bench', phase: 'comp
 const open = (dir, over = {}) => openSoulMemory(dir, { world: 'eden', url: 'https://x.test/w/eden', soul: 's_me', ...over });
 
 function lived(t) {
-  const dir = tmp(t), m = open(dir);
+  // the clock is the fixture's day: journal pages are per real day, so a real clock splits them after 2026-11-07 UTC
+  const dir = tmp(t), m = open(dir, { now: () => new Date(T0 + 3000).toISOString() });
   m.sawHere(frame());
   m.sawEvents([{ id: 'c_1', kind: 'receipt', tick: 120, at: T0, clock: '09:20', receipt: receipt('r_1') }]);
   m.sawEvents([{ id: 'c_2', kind: 'approach', tick: 130, at: T0 + 1000, clock: '09:21', from: { soulId: 's_ana', name: 'Ana' }, text: 'Ana is close by.', untrusted: true }]);
@@ -208,7 +209,7 @@ test('A2: every projection regenerates, and speech and reports keep their label'
   for (const f of ['self.md', 'goals.md', 'schedule.md', 'places.md', 'knowledge.md', 'lessons.md', 'ledger.md']) assert.ok(existsSync(join(memory, f)), f);
   assert.equal(people.length, 1); assert.equal(readdirSync(join(memory, 'journal')).length, 1);
   const person = readFileSync(join(memory, 'people', people[0]), 'utf8');
-  assert.match(person, /UNTRUSTED/); assert.match(person, /Meet me at the mill tomorrow/); assert.match(person, /at the pier in eden, day 3/);
+  assert.match(person, /UNTRUSTED/); assert.match(person, /Meet me at the mill tomorrow/); assert.match(person, /eden, day 3, 09:21, [^ ]+ at the pier/);
   assert.match(readFileSync(join(memory, 'knowledge.md'), 'utf8'), /The mill floods\..*UNTRUSTED/);
   assert.match(readdirSync(join(memory, 'journal')).map((f) => readFileSync(join(memory, 'journal', f), 'utf8')).join(''), /Ana said the mill floods.*untrusted content/);
   rmSync(join(memory, 'places.md')); rmSync(join(memory, 'people', people[0]));
@@ -227,7 +228,7 @@ test('A4: remember goes through the validators; memory finds it with its provena
   assert.throws(() => m.remember('place', 'moon', 'x'), /no record of being at/);
   assert.throws(() => m.remember('goal', 'g', 'x', { horizon: 'someday' }), /goal horizon/);
   const own = m.search('keeps her word').matches[0];
-  assert.match(own.provenance, /Judgments/); assert.equal(own.untrusted, false); assert.match(own.provenance, /Ana/);
+  assert.match(own.provenance, /What I believe/); assert.equal(own.untrusted, false); assert.match(own.file, /^people\//);
   const said = m.search('mill tomorrow').matches[0];
   assert.equal(said.untrusted, true); assert.match(said.provenance, /UNTRUSTED/);
   assert.match(m.search('ferry dawn').matches[0].file, /knowledge\.md/);
@@ -246,7 +247,7 @@ test('A5: a place renamed by a god reads by the name as seen and when; a gone id
   assert.match(journal, /Arrived at the pier/); assert.match(journal, /Arrived at the old dock/);
   assert.match(readFileSync(join(memory, 'places.md'), 'utf8'), /the old dock.*formerly the pier until day 12/);
   const person = readdirSync(join(memory, 'people')).map((f) => readFileSync(join(memory, 'people', f), 'utf8')).join('');
-  assert.match(person, /at the pier in eden, day 3/, 'the meeting keeps the name it happened under');
+  assert.match(person, /at the pier/, 'the meeting keeps the name it happened under');
   assert.equal(m.remember('place', 'the pier', 'Still smells of tar.').id, 'eden:pier', 'the old name still finds it');
   m.sawReceipt(receipt('r_gone', { endedAt: { place: 'demolished-hut' } }));
   assert.equal(events(dir).at(-1).placeId, 'eden:demolished-hut');

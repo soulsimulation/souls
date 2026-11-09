@@ -44,23 +44,35 @@ function setup() {
   writeFileSync(join(data, 'worlds.json'), JSON.stringify({ worlds: [{ slug: 'eden' }, { slug: 'mars' }] }));
   writeFileSync(join(data, 'keeper.json'), JSON.stringify({ keeper: { pid: 4242, sha: sha256(keeperSource) }, active: { build: PREV } }));
   writeFileSync(conf, 'PORT=1\n');
-  script(join(fakebin, 'systemctl'), 'echo 4242');
-  script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nprintf '{"ok":true,"hostOk":true,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$(basename "$(readlink ${root}/production)")"`);
+  // systemctl start is the health timer's oneshot (#1356): it rewrites host health, which clears a stale code unless still-halted
+  script(join(fakebin, 'systemctl'), `case "$1" in start) printf 'systemctl\\t%s\\n' "$*" >> ${log}; [ ! -e ${t}/fail-refresh ] || exit 1; [ -e ${t}/still-halted ] || rm -f ${t}/host-codes;; *) echo 4242;; esac`);
+  // host-codes (a JSON array) makes public healthz report hostOk false with those codes
+  script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nif [ -e ${t}/host-codes ]; then hc="\\"hostOk\\":false,\\"hostCodes\\":$(cat ${t}/host-codes)"; else hc='"hostOk":true'; fi\nprintf '{"ok":true,%s,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$hc" "$(basename "$(readlink ${root}/production)")"`);
   if (spawnSync('sh', ['-c', 'command -v sha256sum']).status !== 0) script(join(fakebin, 'sha256sum'), 'exec shasum -a 256 "$@"');
   // ssh and scp: an empty environment on the far side, proving the remote block needs nothing from the operator
-  script(join(t, 'stubs/ssh'), `printf 'ssh\\t%s\\n' "$*" >> ${log}\nwhile [ "\${1:-}" = -o ]; do shift 2; done; shift\ncase "$*" in true) exit 0;; *" verify "*) cat > /dev/null; echo ok; exit 0;; "bash -s --"*) [ ! -e ${t}/ssh-drop ] || { cat > /dev/null; exit 255; }; [ ! -e ${t}/tamper-manifest ] || echo tampered >> ${root}/releases/${build}/RELEASE-MANIFEST.json; [ ! -e ${t}/tamper-keeper ] || echo '{"keeper":{"pid":1}}' > ${data}/keeper.json;; esac\nexec env -i PATH="${fakebin}:$PATH" HOME=/nonexistent bash -c "$*"`);
+  script(join(t, 'stubs/ssh'), `printf 'ssh\\t%s\\n' "$*" >> ${log}\nwhile [ "\${1:-}" = -o ]; do shift 2; done; shift\ncase "$*" in true) exit 0;; *" verify "*) cat > /dev/null; echo ok; exit 0;; *host/meminfo*) ;; "bash -s --"*) [ ! -e ${t}/ssh-drop ] || { cat > /dev/null; exit 255; }; [ ! -e ${t}/tamper-manifest ] || echo tampered >> ${root}/releases/${build}/RELEASE-MANIFEST.json; [ ! -e ${t}/tamper-keeper ] || echo '{"keeper":{"pid":1}}' > ${data}/keeper.json;; esac\nexec env -i PATH="${fakebin}:$PATH" HOME=/nonexistent bash -c "$*"`);
   script(join(t, 'stubs/scp'), `printf 'scp\\t%s\\n' "$*" >> ${log}\ndest="\${@: -1}"; dest="\${dest#*:}"\ncase "$dest" in\n*compact-backup.sh) cat > "$dest" <<'BK'\n#!/usr/bin/env bash\nB=$(mktemp -d ${t}/host/$1-$2-XXXXXX)\nfor f in worlds/eden/sim.db worlds/mars/sim.db accounts.sqlite body-collections.sqlite; do mkdir -p "$(dirname "$B/$f")"; : > "$B/$f"; echo '{"dropped":{}}'; done\necho "$B"\nBK\n;;\n*sim-quick-check.mjs) echo 'for (const f of process.argv.slice(2)) console.log("ok " + f);' > "$dest";;\n*) : > "$dest";;\nesac`);
   // build, browser and manifest tools
   script(join(t, 'stubs/node'), `printf 'node\\t%s\\n' "$*" >> ${log}\nif [ -n "\${STUB_FAIL:-}" ] && [[ "$*" == *"$STUB_FAIL"* ]]; then exit 1; fi\ncase "$1" in *release-probe.mjs)\n  while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; shift; done\n  mkdir -p "$out"; touch "$out/ready"\n  for i in $(seq 1 600); do { [ -e "$out/released" ] || [ -e "$out/stop" ]; } && break; sleep 0.05; done\n  exit "\${STUB_PROBE_RC:-0}";;\nesac\nexit 0`);
   script(join(t, 'stubs/python'), `printf 'python\\t%s\\n' "$*" >> ${log}`);
-  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s\\n' "$*" "$SIM_WORLDS_BASE" >> ${log}\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh`);
+  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s noinstall=%s\\n' "$*" "$SIM_WORLDS_BASE" "\${SIM_RELEASE_NO_INSTALL:-}" >> ${log}\n[ -z "\${STUB_EYES_WARN:-}" ] || echo "WARN edenEyes: degraded (\$STUB_EYES_WARN)"\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
+  // the staged tree's boot-rehearsal.mjs: a world whose data dir has a halt-<dir> flag halts, a nofinish-<dir> one crashes
+  writeFileSync(join(t, 'fake-boot-rehearsal.mjs'), `import { existsSync, readFileSync, appendFileSync } from 'node:fs'; import { basename, dirname } from 'node:path';
+const a = process.argv.slice(2), db = a[a.indexOf('--db') + 1], dir = basename(dirname(db)), envf = a.includes('--env-file') ? a[a.indexOf('--env-file') + 1] : null;
+appendFileSync(${JSON.stringify(log)}, 'rehearse\\t' + dir + '\\t' + (envf ? readFileSync(envf, 'utf8').replace(/\\n/g, ' ') : '') + '\\n');
+if (existsSync(${JSON.stringify(t)} + '/nofinish-' + dir)) process.exit(1);
+const halted = existsSync(${JSON.stringify(t)} + '/halt-' + dir);
+console.log(JSON.stringify({ ok: !halted, world: { id: dir + '-1', key: dir }, boot: { from: 'snapshot', ms: 5, head: { tick: 1 } }, adoption: { result: 'adopted', head: { engine: 'a' } }, run: { ticks: 1200, state: halted ? 'halted' : 'running', halt: halted ? 'x' : null, head: { engine: 'b' } } }));
+process.exit(halted ? 2 : 0);`);
+  writeFileSync(join(t, 'host/meminfo'), 'MemAvailable:   16777216 kB\n');
+  script(join(fakebin, 'systemd-run'), 'while [ "$1" != -- ]; do shift; done; shift; exec "$@"');
   // browsers: a folder that holds Chromium
   script(join(t, 'browsers/chromium-1/chrome-linux/chrome'), '');
   script(join(t, 'no-chromium/firefox-1/firefox/firefox'), '');
   mkdirSync(join(t, 'god'));
   const env = { PATH: process.env.PATH, HOME: process.env.HOME, SIM_DEPLOY_ENV: '/nonexistent', SIM_DEPLOY_HOST: HOST, SIM_DEPLOY_USER: 'root', SHIP_ROOT: repo, SHIP_RECEIPTS: receipts,
     SHIP_PROBE_CLI: join(t, 'god'), PLAYWRIGHT_BROWSERS_PATH: join(t, 'browsers'), SHIP_ORIGIN: 'https://soul.test', SHIP_OUT_ROOT: join(t, 'out'), SHIP_RELEASE_DIR: join(t, 'lane'),
-    SHIP_HOST_ROOT: root, SHIP_HOST_DATA: data, SHIP_HOST_CONF: conf, SHIP_HOST_TMP: join(t, 'host'), SHIP_SSH: join(t, 'stubs/ssh'), SHIP_SCP: join(t, 'stubs/scp'), SHIP_NODE: join(t, 'stubs/node'),
+    SHIP_HOST_ROOT: root, SHIP_HOST_DATA: data, SHIP_HOST_CONF: conf, SHIP_HOST_TMP: join(t, 'host'), SHIP_HOST_MEMINFO: join(t, 'host/meminfo'), SHIP_SSH: join(t, 'stubs/ssh'), SHIP_SCP: join(t, 'stubs/scp'), SHIP_NODE: join(t, 'stubs/node'),
     SHIP_PYTHON: join(t, 'stubs/python'), SHIP_RELEASE_SH: join(t, 'stubs/release'), SHIP_CURL: join(fakebin, 'curl'), SHIP_WALK_SLUGS: 'eden mars' };
   const run = (args, more = {}) => spawnSync('bash', [SHIP, ...args], { env: { ...env, ...more }, encoding: 'utf8', timeout: 60_000 });
   return { t, repo, sha, build, env, run, writeReceipts, root, out: join(t, 'out/4.16'), calls: () => readFileSync(log, 'utf8'), base: ['--label', '4.16', '--sha', sha] };
@@ -69,8 +81,8 @@ function setup() {
 test('--dry-run prints every step, touches nothing remote, writes nothing and never prints the host', () => {
   const s = setup(), r = s.run([...s.base, '--dry-run']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const names = [...r.stdout.matchAll(/^== \[(\d+)\/12\] ([a-z-]+):/gm)].map(m => m[2]);
-  assert.deepEqual(names, ['preflight', 'snapshot', 'stage', 'backup', 'probe-start', 'activate', 'probe-check', 'healthz', 'walks', 'poster', 'stall', 'cdn-walk']);
+  const names = [...r.stdout.matchAll(/^== \[(\d+)\/13\] ([a-z-]+):/gm)].map(m => m[2]);
+  assert.deepEqual(names, ['preflight', 'snapshot', 'stage', 'rehearse', 'backup', 'probe-start', 'activate', 'probe-check', 'healthz', 'walks', 'poster', 'stall', 'cdn-walk']);
   assert.equal(s.calls(), '');
   assert.ok(!existsSync(s.out));
   assert.ok(!r.stdout.includes(HOST));
@@ -128,7 +140,7 @@ test('a full run on the fake host: every step in order, the host block under an 
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', s.build));
   const steps = readFileSync(join(s.out, 'STEPS.txt'), 'utf8').split('\n').slice(1).filter(Boolean).map(l => l.split(' ')[0]);
-  assert.deepEqual(steps, ['snapshot', 'stage', 'backup', 'probe-start', 'activate', 'probe-check', 'healthz', 'walks', 'poster', 'stall', 'cdn-walk']);
+  assert.deepEqual(steps, ['snapshot', 'stage', 'rehearse', 'backup', 'probe-start', 'activate', 'probe-check', 'healthz', 'walks', 'poster', 'stall', 'cdn-walk']);
   const calls = s.calls();
   assert.match(calls, /release\tproduction --no-activate base=\//);
   assert.equal(calls.match(/^activate\t/gm).length, 1);
@@ -144,7 +156,7 @@ test('a full run on the fake host: every step in order, the host block under an 
 });
 
 test('the host scripts read no operator variable', () => {
-  for (const f of ['host-activate.sh', 'host-snapshot.py']) assert.doesNotMatch(readFileSync(join(HERE, 'deploy/ship', f), 'utf8'), /SIM_DEPLOY|SHIP_|PLAYWRIGHT|\$\{?HOST\b/, f);
+  for (const f of ['host-activate.sh', 'host-snapshot.py', 'host-rehearse.sh']) assert.doesNotMatch(readFileSync(join(HERE, 'deploy/ship', f), 'utf8'), /SIM_DEPLOY|SHIP_|PLAYWRIGHT|\$\{?HOST\b/, f);
 });
 
 test('a failed activation rolls code back on the host, stops the run and the probe, and starts no walk', () => {
@@ -242,6 +254,47 @@ test('--from: activation can only follow a fresh probe; resuming at the walks st
   assert.match(s.calls().slice(before), /walk\.mjs/);
 });
 
+test('#1356: a halted host refuses the snapshot unless --accept-host-codes names every code, and the activation refreshes host health', () => {
+  const halted = s => writeFileSync(join(s.t, 'host-codes'), '["halted"]');
+  // without the flag: refused at the snapshot, nothing staged
+  let s = setup(); halted(s);
+  let r = s.run(s.base);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /STOPPED at step snapshot/);
+  assert.match(r.stdout, /public healthz is not ok/);
+  assert.doesNotMatch(s.calls(), /^release\t|^activate\t/m);
+  // a code outside the accepted list still refuses
+  s = setup(); writeFileSync(join(s.t, 'host-codes'), '["halted","disk"]');
+  r = s.run([...s.base, '--accept-host-codes', 'halted']);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /host codes halted,disk, accepted only halted/);
+  assert.doesNotMatch(s.calls(), /^release\t|^activate\t/m);
+  // with the flag: recorded, and the halt the timer recorded before the activation is refreshed away before the healthz check
+  s = setup(); halted(s);
+  r = s.run([...s.base, '--accept-host-codes', 'halted']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /accepting host codes at the snapshot: halted/);
+  const snapshot = JSON.parse(readFileSync(join(s.out, 'snapshot.json'), 'utf8'));
+  assert.deepEqual(snapshot.acceptedHostCodes, ['halted']);
+  assert.deepEqual(snapshot.publicHealth.hostCodes, ['halted']);
+  assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', s.build));
+  const calls = s.calls();
+  assert.ok(calls.indexOf('activate\t') < calls.indexOf('systemctl\tstart sim-worlds-health@production.service'));
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live');
+  // the flag's format is checked
+  assert.equal(s.run([...s.base, '--accept-host-codes', 'Halted;x']).status, 2);
+});
+
+test('#1356: a failed host health refresh, or a halt the refresh still reports, rolls the activation back', () => {
+  for (const flag of ['fail-refresh', 'still-halted']) {
+    const s = setup(); writeFileSync(join(s.t, 'host-codes'), '["halted"]'); writeFileSync(join(s.t, flag), '');
+    const r = s.run([...s.base, '--accept-host-codes', 'halted']);
+    assert.equal(r.status, 1, flag);
+    assert.match(r.stdout, /failed \(exit 81\); the host rolled code back/, flag);
+    assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV), flag);
+  }
+});
+
 test('a second run into the same output folder is refused', () => {
   const s = setup(); assert.equal(s.run(s.base).status, 0);
   const r = s.run(s.base);
@@ -263,4 +316,190 @@ test('verdicts: receipts, a backup that dropped rows or missed a database, stale
   assert.ok(activationProblems(snapshot, 's', backup, upload, 'm', Date.now() + 2 * 3_600_000).length >= 2);
   assert.ok(activationProblems(snapshot, 'other', backup, upload, 'm').length);
   assert.ok(activationProblems(snapshot, 's', backup, { ...upload, manifestSha256: 'x' }, 'm').length);
+});
+
+test('#1340 a degraded Eden Eyes browser never stops a release: it is recorded in ship-result.json and the summary', () => {
+  let s = setup(), r = s.run(s.base, { STUB_EYES_WARN: 'installing chromium-1248 failed exit 1' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const result = JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8'));
+  assert.equal(result.status, 'live'); assert.equal(result.edenEyes, 'degraded (installing chromium-1248 failed exit 1)');
+  assert.match(r.stdout, /edenEyes: degraded \(installing chromium-1248 failed exit 1\)\. The release is unaffected/);
+  s = setup(); r = s.run(s.base);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).edenEyes, 'ok');
+});
+
+test('#1402 rehearse: every world boots a copy with the staged tree before the backup; secrets never reach its env files', () => {
+  const s = setup(), r = s.run(s.base);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const calls = s.calls(), rehearsed = [...calls.matchAll(/^rehearse\t([^\t]+)\t(.*)$/gm)];
+  assert.deepEqual(rehearsed.map(m => m[1]), ['eden', 'mars']);
+  for (const m of rehearsed) assert.doesNotMatch(m[2], /API_KEY|never-written/);
+  assert.ok(calls.indexOf('rehearse\t') > calls.indexOf('release\t') && calls.indexOf('rehearse\t') < calls.indexOf('compact-backup.sh'));
+  const receipt = JSON.parse(readFileSync(join(s.out, 'rehearse.json'), 'utf8'));
+  assert.equal(receipt.status, 'pass'); assert.equal(receipt.worlds, 2); assert.equal(receipt.build, s.build);
+  assert.match(r.stdout, /2 of 2 worlds boot and run/);
+  assert.deepEqual(readdirSync(join(s.t, 'host')).filter(f => f.startsWith('sim-rehearse-')), [], 'the run removes its own scratch dir, copies and env files with it');
+});
+
+test('#1402 rehearse: a world that halts, or a rehearsal that dies, stops the run before the backup and the activation', () => {
+  for (const flag of ['halt-mars', 'nofinish-eden']) {
+    const s = setup(); writeFileSync(join(s.t, flag), '');
+    const r = s.run(s.base);
+    assert.equal(r.status, 1, flag);
+    assert.match(r.stdout, /STOPPED at step rehearse: the boot rehearsal did not pass/, flag);
+    assert.match(r.stdout, flag === 'halt-mars' ? /mars: refused or halted/ : /eden: the rehearsal tool failed/, flag);
+    assert.doesNotMatch(s.calls(), /compact-backup|^activate\t/m, flag);
+    assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV), flag);
+    assert.equal(JSON.parse(readFileSync(join(s.out, 'rehearse.json'), 'utf8')).status, 'stop', flag);
+  }
+});
+
+test('#1402 --no-switch: every step but the activation, the probe and healthz expect the live build, receipts not required', () => {
+  const s = setup(); writeFileSync(join(s.t, 'host/sim-rehearse-keepme'), 'not ours');
+  const r = s.run([...s.base, '--no-switch'], { SHIP_RECEIPTS: '' });
+  assert.equal(readFileSync(join(s.t, 'host/sim-rehearse-keepme'), 'utf8'), 'not ours', 'a file the run did not create is never removed');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /receipts \(not required with --no-switch\): SHIP_RECEIPTS is not set/);
+  const calls = s.calls();
+  assert.doesNotMatch(calls, /^activate\t|host-activate|systemctl\tstart/m);
+  assert.match(calls, /release\tproduction --no-activate base=\/ noinstall=1/, 'no install.sh: unit files and timers stay as they are');
+  assert.doesNotMatch(calls, /compact-backup|quick-check/, 'no backup: nothing goes live');
+  assert.ok(!existsSync(join(s.out, 'backup-receipt.json')));
+  assert.match(calls, new RegExp(`release-probe\\.mjs .*--expect-build ${PREV}`));
+  for (const tool of ['walk.mjs', 'poster.mjs', 'stall.mjs', 'cdn-walk.mjs']) assert.match(calls, new RegExp(tool.replace('.', '\\.')), tool);
+  assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV));
+  const steps = readFileSync(join(s.out, 'STEPS.txt'), 'utf8').split('\n').slice(1).filter(Boolean).map(l => l.split(' ')[0]);
+  assert.deepEqual(steps, ['snapshot', 'stage', 'rehearse', 'backup', 'probe-start', 'activate', 'probe-check', 'healthz', 'walks', 'poster', 'stall', 'cdn-walk']);
+  assert.match(r.stdout, /activate: NOT RUN \(--no-switch\)/);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'rehearsed');
+  assert.match(r.stdout, /NO SWITCH complete/);
+  assert.ok(!r.stdout.includes(HOST));
+});
+
+test('#1402 --no-switch: a probe that sees another build is recorded, not called a rollback; a failed check fails the run', () => {
+  let s = setup(), r = s.run([...s.base, '--no-switch'], { STUB_PROBE_RC: '3' });
+  assert.equal(r.status, 1);
+  assert.doesNotMatch(r.stdout, /the release rolled back/);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'rehearsed-with-failures');
+  assert.match(s.calls(), /cdn-walk\.mjs/);
+  assert.equal(s.run([...s.base, '--no-switch', '--dry-run']).status, 2);
+  // a no-switch run's outputs never feed a real activation, nor the reverse
+  r = s.run([...s.base, '--from', 'probe-start']);
+  assert.equal(r.status, 1); assert.match(r.stdout, /holds a run in another mode/);
+  assert.doesNotMatch(s.calls(), /^activate\t/m);
+  s = setup(); assert.equal(s.run(s.base).status, 0);
+  assert.match(s.calls(), /noinstall=0/);
+  r = s.run([...s.base, '--no-switch', '--from', 'walks']);
+  assert.equal(r.status, 1); assert.match(r.stdout, /holds a run in another mode/);
+});
+
+test('#1402 the publishable release receipt: ship.sh accepts a clean one for this commit and refuses any other', async () => {
+  const { publicReceipt } = await import('../test-harness/ship-receipt.mjs');
+  const s = setup(), dir = join(s.t, 'public'); mkdirSync(dir);
+  const gate = { schemaVersion: 1, status: 'pass', blockers: [], exclusions: ['V7'], scope: { resolved: 'full' }, refs: { candidate: { sha: s.sha }, baseline: { sha: 'b'.repeat(40) } }, newFailures: [], unexpectedSkips: [], removed: [], quarantined: [], startedAt: '2026-11-08T10:00:00.000Z', harness: { dir: '/Users/someone/gate' } };
+  const v7 = { schemaVersion: 1, step: 'V7', source: s.sha, dirty: false, status: 'pass', checks: [{ id: 'x', ok: true }], failed: [], at: '2026-11-08T10:30:00.000Z', ports: '5870-5879' };
+  const write = (g, v) => writeFileSync(join(dir, 'release-receipt.json'), JSON.stringify(publicReceipt(g, 'a'.repeat(64), v, 'c'.repeat(64))));
+  write(gate, v7);
+  assert.doesNotMatch(readFileSync(join(dir, 'release-receipt.json'), 'utf8'), /Users|someone|5870/, 'no path, name or port travels');
+  let r = s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir });
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /the release receipt is clean for this commit/);
+  for (const [g, v] of [[{ ...gate, newFailures: [{}] }, v7], [{ ...gate, scope: { resolved: 'auto' } }, v7], [gate, { ...v7, dirty: true }], [gate, { ...v7, source: 'f'.repeat(40) }]]) {
+    write(g, v); r = s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir });
+    assert.equal(r.status, 1); assert.match(r.stdout, /release receipt is not clean/);
+  }
+});
+
+test('#1402 rehearse: a world slug that is not a plain slug is a stop, and nothing is written for it', () => {
+  const s = setup(), data = join(s.t, 'host/data');
+  writeFileSync(join(data, 'worlds.json'), JSON.stringify({ worlds: [{ slug: 'eden' }, { slug: '../escape' }] }));
+  const r = s.run(s.base);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /STOPPED at step rehearse/);
+  assert.match(r.stdout, /a world slug that is not/);
+  assert.ok(!existsSync(join(s.t, 'host/escape.env')) && !existsSync(join(s.t, 'escape.env')));
+  assert.doesNotMatch(s.calls(), /compact-backup|^activate\t/m);
+});
+
+test('#1438 --no-eyes: the browser steps are skipped and recorded, SHIP_RELEASED_CMD runs right after the activation, the rest is unchanged', () => {
+  const s = setup(), marker = join(s.t, 'released-at');
+  const r = s.run([...s.base, '--no-eyes'], { SHIP_PROBE_CLI: '', SHIP_RELEASED_CMD: `test -L ${s.root}/production && basename "$(readlink ${s.root}/production)" > ${marker}` });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(marker, 'utf8').trim(), s.build, 'the hook ran after the stage link moved');
+  const calls = s.calls();
+  for (const tool of ['release-probe.mjs', 'ship/walk.mjs', 'poster.mjs', 'stall.mjs']) assert.doesNotMatch(calls, new RegExp(tool.replace('.', '\\.')), tool);
+  assert.match(calls, /cdn-walk\.mjs/);
+  assert.equal(calls.match(/^activate\t/gm).length, 1);
+  assert.ok(calls.indexOf('compact-backup.sh pre-r416 production') < calls.indexOf('activate\t'));
+  const lines = readFileSync(join(s.out, 'STEPS.txt'), 'utf8').split('\n').filter(Boolean);
+  assert.match(lines[0], / mode ship-no-eyes /);
+  assert.deepEqual(lines.slice(1).map(l => l.split(' ').slice(0, 2).join(' ')), ['snapshot ok', 'stage ok', 'rehearse ok', 'backup ok', 'probe-start skipped-no-eyes', 'activate ok',
+    'probe-check skipped-no-eyes', 'healthz ok', 'walks skipped-no-eyes', 'poster skipped-no-eyes', 'stall skipped-no-eyes', 'cdn-walk ok']);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live');
+  assert.ok(!r.stdout.includes(HOST));
+});
+
+test('#1438 --no-eyes --no-switch: the hook runs at the skipped activation; a failing hook stops the run; without --no-eyes the probe is still required', () => {
+  let s = setup(), marker = join(s.t, 'hook');
+  let r = s.run([...s.base, '--no-switch', '--no-eyes'], { SHIP_RECEIPTS: '', SHIP_PROBE_CLI: '', SHIP_RELEASED_CMD: `touch ${marker}` });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(marker)); assert.doesNotMatch(s.calls(), /^activate\t/m);
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'rehearsed');
+  // after a real activation a failed hook is recorded, never a stop: the build is live and the evidence still runs
+  s = setup(); r = s.run([...s.base, '--no-eyes'], { SHIP_RELEASED_CMD: 'exit 7' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /FAILED SHIP_RELEASED_CMD/);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^released-hook 1$/m); assert.match(s.calls(), /cdn-walk\.mjs/);
+  assert.deepEqual(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live-with-failures');
+  // before it: a refusing pre-activation check stops the run and nothing goes live, in both modes
+  s = setup(); r = s.run([...s.base, '--no-eyes'], { SHIP_PREACTIVATE_CMD: 'exit 1' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /STOPPED at step activate: SHIP_PREACTIVATE_CMD refused the activation/);
+  assert.doesNotMatch(s.calls(), /^activate\t/m); assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', PREV));
+  s = setup(); r = s.run([...s.base, '--no-switch', '--no-eyes'], { SHIP_RECEIPTS: '', SHIP_PREACTIVATE_CMD: 'exit 1', SHIP_RELEASED_CMD: `touch ${marker}.2` });
+  assert.equal(r.status, 1); assert.ok(!existsSync(`${marker}.2`), 'no release is announced after a refusal');
+  s = setup(); r = s.run(s.base, { SHIP_PROBE_CLI: '' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /REFUSED: SHIP_PROBE_CLI is not the release-probe god folder/);
+  s = setup(); r = s.run([...s.base, '--dry-run', '--no-eyes']);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /walks: skipped \(--no-eyes/); assert.doesNotMatch(r.stdout, /release-probe\.mjs/);
+});
+
+test('#1438 rollback.sh: back to the previous build through its own activate.sh, healthz on it; any other state refuses and changes nothing', () => {
+  const s = setup(); assert.equal(s.run(s.base).status, 0);
+  const RB = join(HERE, 'deploy/rollback.sh'), rb = (args) => spawnSync('bash', [RB, ...args], { env: s.env, encoding: 'utf8', timeout: 30_000 });
+  symlinkSync(join(s.root, 'releases', PREV), join(s.root, 'production.previous'));
+  writeFileSync(join(s.root, 'releases', PREV, 'BUILD'), `${PREV}\n`);
+  const live = () => readlinkSync(join(s.root, 'production'));
+  let r = rb(['--build', 'we-111111111111', '--from', s.build]);
+  assert.equal(r.status, 80, r.stdout); assert.match(r.stdout, /previous build is we-000000000000, not we-111111111111/); assert.equal(live(), join(s.root, 'releases', s.build));
+  r = rb(['--build', PREV, '--from', 'we-222222222222']);
+  assert.equal(r.status, 80, r.stdout); assert.match(r.stdout, /live build is .*, not we-222222222222/);
+  r = rb(['--build', PREV, '--from', s.build, '--dry-run']);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /DRY RUN/); assert.equal(live(), join(s.root, 'releases', s.build));
+  const before = s.calls().match(/^activate\t/gm).length;
+  r = rb(['--build', PREV, '--from', s.build]);
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /ROLLED BACK/);
+  assert.equal(live(), join(s.root, 'releases', PREV));
+  assert.equal(s.calls().match(/^activate\t/gm).length, before + 1);
+  assert.match(s.calls(), new RegExp(`activate\\tproduction ${s.root}/releases/${PREV} --reload`));
+  assert.equal(s.calls().match(/compact-backup\.sh pre-r/g).length, 1, 'no backup: only the ship took one');
+  r = rb(['--build', PREV, '--from', s.build]);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /already on we-000000000000: verifying only/);
+  assert.ok(!r.stdout.includes(HOST));
+  assert.equal(rb(['--build', PREV, '--from', PREV]).status, 2);
+});
+
+test('#1438 B1: the real pre-activation check refuses a stale ready and a failed eyes, and passes a fresh one', () => {
+  const HANDOVER = join(HERE, 'deploy/ship/handover.mjs');
+  const check = (statuses) => {
+    const s = setup(), bin = join(s.t, 'ghbin'); writeFileSync(join(s.t, 'statuses.json'), JSON.stringify(statuses));
+    script(join(bin, 'gh'), `cat ${join(s.t, 'statuses.json')}`);
+    const r = s.run([...s.base, '--no-eyes'], { PATH: `${bin}:${process.env.PATH}`, SHIP_PREACTIVATE_CMD: `node ${HANDOVER} wait ${'a'.repeat(40)} release/eyes --run 5.1 --want ready --max-age-s 180 --timeout-min 0 --repo o/r` });
+    return { s, r, live: readlinkSync(join(s.root, 'production')) };
+  };
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  let c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(10 * 60_000) }]);
+  assert.equal(c.r.status, 1); assert.match(c.r.stdout, /SHIP_PREACTIVATE_CMD refused the activation/); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
+  assert.ok(existsSync(join(c.s.out, 'snapshot.json')) && !existsSync(join(c.s.out, 'ACTIVATING')), 'refused before the activation marker');
+  c = check([{ context: 'release/eyes', state: 'failure', description: 'run=5.1 fail: the probe exited before the release', updated_at: ago(1000) }, { context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(30_000) }]);
+  assert.equal(c.r.status, 1); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
+  c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(20_000) }]);
+  assert.equal(c.r.status, 0, c.r.stdout); assert.equal(c.live, join(c.s.root, 'releases', c.s.build)); assert.ok(existsSync(join(c.s.out, 'ACTIVATING')));
 });

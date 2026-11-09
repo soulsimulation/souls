@@ -18,3 +18,13 @@
 .agent-message-answer>span[aria-hidden]{flex:0 0 auto;white-space:pre}
 .agent-message .agent-message-error{margin:5px 0 0;font-size:11.5px;line-height:1.4}
 .agent-message .agent-message-prompt{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid currentColor}
+/* #1313: the act under way for the newest message, and its phase; a dot that breathes while it runs or the agent thinks */
+.agent-message .agent-message-act{display:flex;align-items:center;gap:6px;max-width:100%;margin:3px 0 0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11.5px;line-height:1.5;opacity:.8}
+.agent-message-act>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.agent-message-act>i{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5}
+.agent-message-act[data-act-phase=running]>i{animation:agent-message-pulse 1.4s ease-in-out infinite}
+.agent-message-act[data-act-phase=done]>i{background:#3c9a5f;opacity:1}
+.agent-message-act:is([data-act-phase=failed],[data-act-phase=refused])>i{background:#c0563f;opacity:1}
+.agent-message-receipt[data-thinking] .agent-message-state{animation:agent-message-pulse 1.4s ease-in-out infinite}
+@keyframes agent-message-pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.agent-message-act>i,.agent-message-receipt[data-thinking] .agent-message-state{animation:none}}

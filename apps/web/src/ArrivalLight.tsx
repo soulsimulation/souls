@@ -1,19 +1,21 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { DISC_RADIUS, DISSOLVE_MS, FILL_MS, FRAME_MS, TEXT_MARGIN, easeFraction, lightRadius, lightScale, startLight, type Light } from './arrival-light.ts';
 
-/** #1166: black, with the world's name and a bar on a white light that grows with the download until the screen is
- *  white, then dissolves into the world. The last of the light is a compositor transition on the disc, started the moment
- *  the bar is full: the world's preparation can hold the main thread for seconds then, and frames would stop with it.
- *  `done` means the world is drawn; the dissolve needs that and full white. `instant` (a ?shot page) never dissolves, so a
+/** #1166: black, with the world's name and a bar on a white light that grows with the download, then dissolves into the
+ *  world. The last of the light is a compositor transition on the disc, started the moment the bar is full: the world's
+ *  preparation can hold the main thread for seconds then, and frames would stop with it. #1318: it ends at its largest
+ *  radius with the corners light grey, never a white screen. `done` means the world is drawn; the dissolve needs that and
+ *  the light at its largest. `instant` (a ?shot page) never dissolves, so a
  *  picture is never taken through it. */
 export function ArrivalLight({ title, progress, done, card, instant, onGone }: { title: string; progress: number | null; done: boolean; card: boolean; instant: boolean; onGone: () => void }) {
-  const root = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null), disc = useRef<HTMLDivElement>(null), text = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null), disc = useRef<HTMLDivElement>(null), text = useRef<HTMLDivElement>(null), bar = useRef<HTMLProgressElement>(null);
   const live = useRef({ progress, done, onGone }); live.current = { progress, done, onGone };
   const run = useRef<{ fill(): void; settle(): void } | null>(null);
   useEffect(() => {
     const frame = root.current, picture = canvas.current, plain = disc.current, words = text.current;
     if (!frame || !picture || !plain || !words || instant) return;
-    let light: Light | null = null, raf = 0, fillTimer = 0, goneTimer = 0, fraction = 0, last = 0, drawn = false, filling = false, white = false, dissolving = false;
+    // #1266: from where the progress already is (the first paint's boot light showed it), so the light never shrinks back
+    let light: Light | null = null, raf = 0, fillTimer = 0, goneTimer = 0, fraction = Math.min(1, Math.max(live.current.progress ?? 0, (document.querySelector<HTMLProgressElement>('#boot-arrival progress')?.value ?? 0) / 1000)), last = 0, drawn = false, filling = false, lit = false, dissolving = false;
     light = startLight(picture, () => { light = null; picture.hidden = true; plain.hidden = false; });
     if (!light) picture.hidden = true;
     const still = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
@@ -21,17 +23,18 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
     const size = () => { const box = words.getBoundingClientRect(); return { w: frame.clientWidth, h: frame.clientHeight, half: Math.hypot(box.width, box.height) / 2 + TEXT_MARGIN }; };
     const stopLight = () => { cancelAnimationFrame(raf); raf = 0; light?.stop(); light = null; };
     const settle = () => {
-      if (!white || dissolving || !live.current.done) return;
+      if (!lit || dissolving || !live.current.done) return;
       dissolving = true; frame.dataset.dissolving = 'true';
       goneTimer = window.setTimeout(() => live.current.onGone(), DISSOLVE_MS);
     };
     const fill = () => {
       if (filling) return; filling = true;
       const { w, h, half } = size();
-      // from where the light is now, on the compositor: nothing after this needs the main thread to reach white
+      // from where the light is now, on the compositor: nothing after this needs the main thread to reach its largest
       plain.hidden = false; plain.style.setProperty('--s', String(lightRadius(fraction, w, h, half) / DISC_RADIUS)); void plain.offsetWidth;
+      if (bar.current) bar.current.value = 1000;   // the world is drawn: the whole of it
       frame.dataset.fill = 'true'; plain.style.setProperty('--s', String(lightRadius(1, w, h, half) / DISC_RADIUS));
-      fillTimer = window.setTimeout(() => { stopLight(); white = true; frame.dataset.white = 'true'; settle(); }, FILL_MS);
+      fillTimer = window.setTimeout(() => { stopLight(); lit = true; settle(); }, FILL_MS);
     };
     run.current = { fill, settle };
     const step = (now: number) => {
@@ -39,6 +42,8 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
       if (now - last < FRAME_MS) return;
       const seconds = last ? (now - last) / 1000 : 0; last = now;
       fraction = easeFraction(fraction, live.current.progress ?? 0, seconds);
+      // #1266: the bar shows the same eased fraction as the light, so both move gradually together, never ahead of the work
+      if (bar.current && !filling) bar.current.value = Math.round(fraction * 1000);
       const { w, h, half } = size(), radius = lightRadius(fraction, w, h, half);
       if (light) { light.draw(lightScale(radius, w, h), still ? 0 : (now - first) / 1000); if (!drawn) { drawn = true; if (!filling) plain.hidden = true; } }
       else plain.style.setProperty('--s', String(radius / DISC_RADIUS));
@@ -55,7 +60,7 @@ export function ArrivalLight({ title, progress, done, card, instant, onGone }: {
     <div ref={disc} className="arrival-disc" aria-hidden="true" />
     <div ref={text} className="arrival-text">
       <p className="viewer-arrival-title">{title}</p>
-      <div className="viewer-arrival-progress"><progress aria-label="World loading progress" max={1000} value={Math.round((progress ?? 0) * 1000)} /><span>{progress === null ? '' : `${Math.round(progress * 100)}%`}</span></div>
+      <div className="viewer-arrival-progress"><progress ref={bar} aria-label="World loading progress" max={1000} defaultValue={Math.round(Math.min(1, progress ?? 0) * 1000)} /></div>
     </div>
   </div>;
 }

@@ -13,6 +13,7 @@
 //              Its geometry stays public (the renderer draws the world); only its name and listings are withheld.
 //
 // Read-mostly and deterministic for a given world state; writes are small upserts on place change or discovery.
+import {secretMatcher, type Secrets} from './public-scrub.ts';
 import type {Place} from '../ledger/places.ts';
 import {centroid, happenings, inPoly} from '../ledger/places.ts';
 import type {EdgeLedger} from '../ledger/ledger.ts';
@@ -38,6 +39,7 @@ export class PlaceKnowledge {
       how TEXT NOT NULL, visits INTEGER NOT NULL, first_tick INTEGER NOT NULL, last_tick INTEGER NOT NULL, PRIMARY KEY (world_id, soul_id, place_id)) WITHOUT ROWID;
       CREATE TABLE IF NOT EXISTS edge_place_secrets_v1 (world_id TEXT NOT NULL, place_id TEXT NOT NULL, secret INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (world_id, place_id)) WITHOUT ROWID;`);
   }
+  private matcher: {version: number; places: number; re: Secrets | null} | null = null;
   private get w() {return this.L.host.worldId;}
 
   // ------------------------------------------------------------ secrets
@@ -67,6 +69,13 @@ export class PlaceKnowledge {
     const root = this.secretRoot(placeId); if (root === null) return true; if (!soulId) return false;
     return this.memory(soulId).has(root);
   }
+  /** #1281: does a point stand in a place this Soul doesn't know, on any floor? A flag gives no level, so a secret room upstairs
+   *  hides what stands under it too: better a flag unnamed than a secret one named. Free where nothing is secret. */
+  hidesPoint(soulId: string, at: V2): boolean {
+    if (!this.marked().size) return false;
+    for (const p of this.L.places.byId.values()) if (p.polygon.length && !this.knows(soulId, p.id) && inPoly(at[0], at[1], p.polygon)) return true;
+    return false;
+  }
   /** Mark (or unmark) a place secret. Returns false for an unknown place. */
   setSecret(placeId: string, secret: boolean): boolean {
     if (!this.L.places.byId.has(placeId)) return false;
@@ -75,9 +84,17 @@ export class PlaceKnowledge {
     this.changed(); return true;
   }
   /** Places change (a god edit re-derives them): drop caches. */
-  changed() {this.secretsCache = null; this.version++; this.L.invalidateBodies();}
+  changed() {this.secretsCache = null; this.matcher = null; this.version++; this.L.invalidateBodies();}
   /** Read worker: main writes visits and secrets; forget what was read so the next read sees the database (WAL). */
-  reload() {this.memo.clear(); this.secretsCache = null;}
+  reload() {this.memo.clear(); this.secretsCache = null; this.matcher = null;}
+  /** Everything a secret place, or anything inside one, goes by, for answers anyone can read. */
+  publicMatcher(): Secrets | null {
+    if (this.matcher?.version === this.version && this.matcher.places === this.L.places.version) return this.matcher.re;
+    const hidden = [...this.L.places.byId.values()].filter((p) => this.isSecret(p.id));
+    // a seat or a rider's slot has its own id and goes by its place's name
+    const occupiers = [...this.L.places.occupierOf.values()].filter((o) => this.isSecret(o.place.id)).map((o) => o.occ.id);
+    const re = secretMatcher([...hidden.flatMap((p) => [p.id, (p as Place & {ref?: unknown}).ref]), ...occupiers], hidden.map((p) => p.name)); this.matcher = {version: this.version, places: this.L.places.version, re}; return re;
+  }
   secrets(): {id: string; name: string}[] {return [...this.marked()].sort().map(id => ({id, name: this.L.places.byId.get(id)?.name ?? id}));}
 
   // ------------------------------------------------------------ memory of visits
@@ -157,7 +174,8 @@ export class PlaceKnowledge {
     return out;
   }
   /** The district summary and the far-away names, for `here`. Short: a few dozen tokens. */
-  scales(soulId: string, placePath: readonly string[], pos: V2 | null, minuteOfDay: number | null) {
+  /** `walkOf`: the walk on offer to a place, which ends its `far` line (#1281): a Soul that reads only `here` can name it and go. */
+  scales(soulId: string, placePath: readonly string[], pos: V2 | null, minuteOfDay: number | null, walkOf: (placeId: string) => string | undefined = () => undefined) {
     this.touch(soulId, placePath, this.L.mw.world.tick);
     const district = this.districtOf(placePath[0] ?? null), mem = this.memory(soulId);
     let summary: {name: string; people: number; busy?: string[]; on?: string[]} | undefined;
@@ -180,10 +198,11 @@ export class PlaceKnowledge {
       const dir = pos ? compassPoint(compassOf(at[0] - pos[0], at[1] - pos[1])) : '?';
       const districtName = d.semanticRole === 'landmark' ? this.districtOf(d.id)?.name : undefined;
       const name = districtName && districtName !== d.name ? `${d.name} (${districtName})` : d.name;
-      if (!mem.has(d.id)) return `${name} · ${dir}`;
+      const walk = walkOf(d.id), go = walk ? ` · ${walk}` : '';
+      if (!mem.has(d.id)) return `${name} · ${dir}${go}`;
       const been = [...mem].filter(([id, k]) => id !== d.id && k.how === 'visited' && this.L.places.byId.get(id) && this.within(this.L.places.byId.get(id)!, d.id))
         .sort((a, b) => b[1].lastTick - a[1].lastTick || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, 2).map(([id]) => this.L.places.byId.get(id)!.name);   // ties (a room and its house, one tick) in id order, not memory order
-      return `${name} · ${dir} ${Math.round(m / 10) * 10}m${been.length ? ` · been: ${been.join(', ')}` : ' · been'}`;
+      return `${name} · ${dir} ${Math.round(m / 10) * 10}m${been.length ? ` · been: ${been.join(', ')}` : ' · been'}${go}`;
     });
     return {...(summary ? {district: summary} : {}), far, ...(others.length > FAR_LISTED ? {farMore: others.length - FAR_LISTED} : {})};
   }
