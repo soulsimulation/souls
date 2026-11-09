@@ -37,6 +37,8 @@ export const unfinishedWay = (issue: {code: string; message?: string}): string =
 const APPROACH_CODES = new Set(['route.unreachable', 'route.goal-blocked']);
 /** nav-connect/1: a Soul is stepped out to open ground at most once in this many ticks (a minute). */
 const NAV_STEP_OUT_TICKS = 1200;
+/** #1287: the refusal for a Soul cut off again inside that bound (a walk then goes, stepping out first). */
+const stepOutWaitReason = (s: number) => `You stand cut off, with no walk out from here. You were moved to open ground less than a minute ago, and the next move out can be made in ${s} s: ask for the walk again then.`;
 const STUCK_RADIUS = 0.34;
 /** D2: a seat this close (m) with no enclosure boundary between is "here" for sit:here: a few steps (a fire-circle log, the
  *  bench by the fountain), never the 30 m walk to a chair in another house. 3 m failed the party and activities gates. */
@@ -975,15 +977,22 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     // #1287: no route because the Soul stands cut off, and the act would step it out (launch's nav-connect/1): every walk
     // form goes, as an offered id already did, rather than the listing and the intent saying no way leads out
-    return out?.code === 'route.unreachable' && this.stepOutReady(soul) ? null : out;
+    if (out?.code !== 'route.unreachable') return out;
+    const wait = this.stepOutWait(soul);
+    return wait === 0 ? null : wait ? {code: out.code, reason: stepOutWaitReason(wait)} : out;
+  }
+  /** #1287: for a Soul launch's step-out would move but for its once-a-minute bound, the seconds until it may (≥ 1);
+   *  0 when it would step out now; null when it would not (not cut off, labels cold, a replica, no open ground found). */
+  stepOutWait(soul: EdgeSoul): number | null {
+    if (this.readOnly) return null;
+    const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => unknown};
+    if (!engine.navRescueV1?.(soul.entityId, 0)) return null;
+    const left = (this.navRescuedAt.get(soul.soulId) ?? -1e9) + NAV_STEP_OUT_TICKS - this.host.engine.world.tick;
+    return left <= 0 ? 0 : Math.max(1, Math.ceil(left * 60 / NAV_STEP_OUT_TICKS));
   }
   /** #1287: launch's nav-connect/1 step-out would move this Soul now: outside its once-a-minute bound, and the engine's pure
    *  rescue read (0 ms: never builds the labels; cold labels answer no) finds it cut off with open ground to step to. Main only. */
-  stepOutReady(soul: EdgeSoul): boolean {
-    if (this.readOnly || (this.navRescuedAt.get(soul.soulId) ?? -1e9) > this.host.engine.world.tick - NAV_STEP_OUT_TICKS) return false;
-    const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => unknown};
-    return !!engine.navRescueV1?.(soul.entityId, 0);
-  }
+  stepOutReady(soul: EdgeSoul): boolean {return this.stepOutWait(soul) === 0;}
   private routeMemo = new Map<string, {code: string; reason: string} | null>();
   private arm(p: Pending) {
     this.pending.set(p.soul.soulId, p);
@@ -2210,6 +2219,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
         if (now && Math.hypot(now.pose.p[0] - r.to[0], now.pose.p[2] - r.to[1]) < 0.5) steppedOut = 'Moved to open ground first: no walk led out from where you stood.';
         issue = this.host.engine.canPerform({actor: soul.entityId, label, steps});
       }
+    } else if (issue?.code === 'route.unreachable') {
+      // #1287: cut off again inside the once-a-minute bound: a clear refusal naming when the step out can be taken
+      const wait = this.stepOutWait(soul);
+      if (wait) return {...refuse(issue.code, stepOutWaitReason(wait)), retry_after: wait, ...resolved};
     }
     // GEST-LIVE: the nearest source of an item that no walk reaches (a postbox behind a fence) gives way to the next one a walk does
     const kind = /^pick-up:([a-z]+)$/.exec(capability)?.[1];

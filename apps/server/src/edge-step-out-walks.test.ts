@@ -47,16 +47,24 @@ test('#1287 P3: a Soul on the main area asking for the sealed room is refused as
   assert.equal(steps().length, 0);
 });
 
-test('#1287 P3: put back inside within the minute, every walk form is refused as before, and nothing moves her', {timeout: 300000}, async t => {
+test('#1287 P3: put back inside within the minute, every walk form is refused naming when it can go, nothing moves her, and after the minute it goes', {timeout: 300000}, async t => {
   const {w, mid, put, here, act, steps, inRoom} = await world(t);
   await put(mid); assert.equal((await act({capability: 'walk:field'})).accepted, true); assert.equal(steps().length, 1);
   await w.settle(3); await act({capability: 'stop'}); await w.settle(3);
   await put(mid); assert.equal(inRoom(), true);
   assert.ok(here().exits.every((e: any) => e.reachable === false && e.why === 'route.unreachable'), JSON.stringify(here().exits));
+  const wait = w.edge.stepOutWait(w.soul as never); assert.ok(wait !== null && wait >= 1 && wait <= 60, String(wait));
   for (const input of [{verb: 'walk', target: 'field'}, {capability: 'walk:field'}, {capability: 'walk:flag-orchard'}]) {
+    // coordinator's check: never a silent no-op; the refusal says she is cut off and when the step out can be taken
     const r = await act(input); assert.equal(r.code, 'route.unreachable', `${JSON.stringify(input)}: ${JSON.stringify(r)}`);
+    assert.match(r.reason, /^You stand cut off, with no walk out from here\. .* the next move out can be made in \d+ s: ask for the walk again then\.$/, r.reason);
+    if (input.capability) assert.ok(r.retry_after >= 1 && r.retry_after <= 60, JSON.stringify(r));
   }
   assert.equal(steps().length, 1, 'no second step out'); assert.equal(inRoom(), true);
+  // once the minute is up the same ask steps her out again
+  await w.settle(Math.ceil((wait! + 1) * 20)); assert.equal(w.edge.stepOutWait(w.soul as never), 0);
+  const again = await act({verb: 'walk', target: 'field'}); assert.equal(again.accepted, true, JSON.stringify(again));
+  assert.equal(steps().length, 2); assert.equal(again.receipt.reason, MOVED);
 });
 
 test('#1287 P3: with navigation cold the intent is refused as the flag walk is', {timeout: 300000}, async t => {
