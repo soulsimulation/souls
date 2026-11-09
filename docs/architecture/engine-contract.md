@@ -246,7 +246,7 @@ one rule, so what returns past the hold writes a small row, not a whole world. A
 
 **A step that throws still moves the clock,** live and in a replay, so no cooldown or replay waits on a tick that isn't
 coming. Half the ticks of ten seconds of world time faulted is `engine.step-failing`: the clock runs, bodies can't get
-anywhere, so acts are refused with `world.step-failing`, nothing rewinds, the launcher alerts as for a halt, and a due
+anywhere, so acts are refused with `world.step-failing` (under quarantine/1, only those of the bodies its faults named), nothing rewinds, the launcher alerts as for a halt, and a due
 snapshot is taken at once on a faulted tick. That snapshot is marked: it serves a boot, never a rewind, and one that won't
 capture waits until the next is due. A snapshot from a clean tick in the stretch stays unmarked and can be a baseline. It ends when faults fall below three quarters of that, and a clean snapshot follows at once. While it lasts a faulted tick keeps the ordinary beat of batches and heartbeats. What still reaches it is a throw outside
 any action, in the world's own step. A stop in place can't answer that. If a god's edit caused it, a god removing what they
@@ -261,8 +261,13 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   without reading an invariant. The glitch is rung `contained`, with the restore error as evidence. Everyone else goes on.
   The quarantined Soul can act again at once: it is never held or refused for the quarantine. The rule a rung 3 went back
   for stays on the head after that, and a snapshot is taken at once, so a restart never boots from the refused baseline.
-- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies.
-  A fault that names none still stops everything in place, as above.
+- The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies,
+  while steps are failing too (#1378). A fault that names none still stops everything in place, as above.
+- A body quarantined again within the cooldown is held whole (#1378): the event also contains every rule on it (key
+  `{code: '*', subjects: [body]}`), so a fault that comes back under a new rule each tick is absorbed instead of faulting
+  the step. Only a violation whose every subject is held whole is covered; one that names a free body still faults.
+- While steps are failing, only a Soul whose body a fault in the window named is refused `world.step-failing`; everyone is
+  while any fault in the window named no body (#1378). The `engine.step-failing` glitch names who is refused.
 - A broken body (`entity.corrupt`: a person with no human state, or any number in its pose or human state that is no
   finite number) can make every step or the state hash throw while no rule names it. It is found when a step faults,
   when the hash fails, or by a once-a-second sweep. It is then held: its programmes stopped, a fresh human state if its
