@@ -8,7 +8,7 @@ import {loadMars} from './load.ts';
 
 const m=await loadMars();
 const commons=await marsFactory({...EDEN_SAFE_COMMONS_WORLD,walkBlockV1:true});
-const DECK=.24;   // the commons deck (level 1) floor height
+const DECK=.24,OFF=[9,-6];   // the commons deck (level 1) floor height; a point on level 1 that is no deck cell
 
 function deck(policy:boolean){
   const w=commons.genesis('stand-height') as any;w.entities.body=m.human('body',9,-2.6,{level:1,y:DECK});
@@ -43,3 +43,13 @@ for(const policy of [false,true])
     if(policy)assert.ok(Math.abs(b.pose.p[1]-DECK)<1e-9,`on the deck floor: ${b.pose.p[1]}`);
     else assert.equal(b.pose.p[1],.12);
   });
+
+test('#1454 under stand-height/1 with the guard off, a stall release at a point off the floor keeps the recorded height (review)',()=>{
+  const w=commons.genesis('stand-height') as any;w.entities.body=m.human('body',9,-2.6,{level:1,y:DECK});
+  const e=commons.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,standHeightV1:true});
+  const b=e.world.entities.body;
+  const r=e.perform({actor:'body',label:'walk',steps:[{verb:'mars:walk_to',params:{x:8.6,z:-1.6,level:1}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  e.step();b.pose.p=[OFF[0],.12,OFF[1]];   // held on its level, but at a point that is no cell of the deck floor
+  const rel=(e as any).stallReleaseV1('body',{code:'stall.released',message:'test'});assert.ok(rel,'released');
+  assert.equal(b.pose.p[1],.12,'not put at the deck height off the deck');
+});

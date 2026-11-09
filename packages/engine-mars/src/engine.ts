@@ -1483,7 +1483,7 @@ export class MarsEngine implements Engine {
     const xz=upper?(guard?this.upperClearNearV1(a,from.at,level):from.at):near??(!guard||this.placeClearV1(a,from.at[0],from.at[1],0,this.guardBodiesV1())?from.at:null);
     const f=this.rt.world.groundV1&&!upper?(this.rt.services.spatial as Spatial).ground:undefined;
     // #1454 stand-height/1: upstairs at that floor's own height (a carrier's exit keeps its own); off, the body's height as recorded
-    const floorY=upper&&xz&&from.y===undefined&&this.cfg.standHeightV1===true?(()=>{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);return sp.levelAt(level,xz)?.y;})():undefined;
+    const floorY=upper&&xz&&from.y===undefined&&this.cfg.standHeightV1===true?(()=>{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(level,xz);return g&&clearanceAt(g,xz)>0?g.y:undefined;})():undefined;   // only on a cell of that floor (with the guard off, xz is where the body stood: a flight or the air)
     const y=xz&&f?standOn(f,xz[0],xz[1]):(from.y??floorY??a.pose.p[1]);
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
     const r=releaseBody(this.rt,actor,xz?[r3(xz[0]),r3(y),r3(xz[1])]:null,reason);
