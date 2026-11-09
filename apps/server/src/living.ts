@@ -1,6 +1,7 @@
 // The clock announces moments and holds finished bodies for durability. It chooses no activities.
 import { clockAt, DAY_TICKS } from '@souls/brain';
 import type { WorldHost } from './world.ts';
+import { realClockConfig } from './god/real-clock.ts';
 
 export class LivingWorld {
   private queued = false;
@@ -15,7 +16,10 @@ export class LivingWorld {
       if (e.payload?.compact) this.capture = true;
     }, afterTick: tick => this.afterTick(tick) });
   }
-  install(customs: string[]) {
+  /** `zone` (#1649, real time on): the day clock reads the local time there (god/real-clock.ts); main.ts's real-time
+   *  keeper then keeps it on the wall. Without it, the accelerated day this class always had. */
+  install(customs: string[], zone?: string) {
+    if (!this.host.living && zone) { const c = realClockConfig(this.host.engine.world.tick, Date.now(), zone); return this.host.enqueue('rules', 'world', { ...c, dayConfig: { ...c.dayConfig, customs }, why: `${c.why}; customs inform choices` }); }
     if (!this.host.living) return this.host.enqueue('rules', 'world', { dayConfig: { origin: this.host.engine.world.tick, dayTicks: DAY_TICKS, customs }, why: 'one world day per real hour; customs inform choices' });
     return Promise.resolve();
   }

@@ -4,13 +4,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
-import { clockAt } from '@souls/brain';
+import { advanceNeeds, clockAt, newLife } from '@souls/brain';
 import { fixture, factory } from '../../test/native-owner-fixture.ts';
 import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { installWorldClock, syncWorldClock, worldTimeZone } from './world-clock.ts';
-import { CLOCK_BASE_MS, REAL_DAY_TICKS, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
+import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 test('world time is the local wall time of a UTC instant in the world zone', () => {
@@ -99,8 +99,49 @@ test('a god world on real time: migrated once, reads the wall, re-aligns after d
   assert.equal(bad.accepted, false);
   assert.match(JSON.stringify(bad.failures), /time\.zone-invalid/);
 
+  assert.equal((god.model.state.time as any).clock, 'real', 'the migration put the world on the real clock');
+
+  // a dev world's god chooses the accelerated clock (the dev-only option), then real time again
+  assert.equal((god.act({ ops: [{ op: 'world', state: { time: { clock: 'accelerated', dayTicks: 72000 } } }] }, 'fast days') as any).accepted, true);
+  await synced(3);
+  assert.equal(f.host.living?.dayTicks, 72000, 'accelerated: one world day per real hour');
+  assert.equal(env().slice(11, 16), '17:41', 'the time of day carries over');
+  assert.equal((god.act({ ops: [{ op: 'world', state: { time: { clock: 'real' } } }] }, 'real time') as any).accepted, true);
+  await synced(3);
+  assert.equal(f.host.living?.dayTicks, REAL_DAY_TICKS);
+  assert.equal(env().slice(0, 16), '2026-11-09T17:41', 'back on the wall in Lisbon');
+
   // a second boot over the same database writes no second migration
   const god2 = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {} });
   assert.equal((god2.model.state.time as any).timeZone, 'Europe/Lisbon');
   assert.equal(migrations().n, 1, 'idempotent');
+});
+
+test('an authored world (no god) keeps real time through the same keeper; customs carry over; slowed worlds wait', async () => {
+  let wall = Date.UTC(2026, 10, 9, 23, 0), tick = 5000;
+  const events: any[] = [];
+  const host: any = { engine: { world: { get tick() { return tick; } } }, living: { origin: 0, dayTicks: 72000, customs: ['supper at the long table'] }, pace: 1, paused: false, running: true,
+    enqueue(_k: string, _a: string, p: any) { events.push(p); host.living = { ...p.dayConfig }; return Promise.resolve(); } };
+  const keeper = installRealClock(host, { zone: () => 'America/New_York', now: () => wall, checkMs: 3_600_000 });
+  await keeper.sync();
+  assert.equal(hasRealClock(host), true);
+  assert.equal(events.length, 1);
+  assert.deepEqual(host.living.customs, ['supper at the long table'], 'customs carry over');
+  assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(0, 16), '2026-11-09T18:00', '18:00 in New York');
+  tick += 20 * 30; wall += 30_000; await keeper.sync();
+  assert.equal(events.length, 1, 'in step: nothing logged');
+  wall += 3_600_000; host.pace = 0.25;   // nobody watching; the periodic check skips a slowed world (sync on demand still works)
+  await keeper.sync();
+  assert.equal(events.length, 2, 'an explicit sync re-aligns');
+  assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(11, 16), '19:00');
+  keeper.stop();
+});
+
+test('needs move over the clock day: a real day is 24 times slower than the accelerated one', () => {
+  const a = newLife(0), b = newLife(0);
+  advanceNeeds(a, 72000, 'idle', false);                       // one accelerated day
+  advanceNeeds(b, 72000, 'idle', false, false, false, REAL_DAY_TICKS); // one real hour
+  assert.ok(a.needs.hunger > b.needs.hunger + 50, `accelerated ${a.needs.hunger} vs real ${b.needs.hunger}`);
+  const c = newLife(0); advanceNeeds(c, REAL_DAY_TICKS, 'idle', false, false, false, REAL_DAY_TICKS);
+  assert.equal(c.needs.hunger, a.needs.hunger, 'one real day of a real clock = one accelerated day of the old one');
 });

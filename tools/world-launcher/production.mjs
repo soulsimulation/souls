@@ -99,6 +99,8 @@ export function productionSettings(cfg, origin) {
   return {
     base, devAuth, publicOrigin, authEnvFile: cfg.authEnvFile ?? null, maxWorlds, maxRunning,
     minFreeMb: cfg.minFreeMb ?? 0, worldHeapMb: cfg.worldHeapMb ?? 0,
+    // #1649: the deploy stage (sim-worlds@<stage>.service sets SIM_STAGE=%i); `production` refuses dev-only world options
+    stage: cfg.stage ?? (/^[a-z][a-z0-9-]{0,31}$/.test(process.env.SIM_STAGE ?? '') ? process.env.SIM_STAGE : null),
   };
 }
 
@@ -122,6 +124,7 @@ export function decorateCommand({ cmd, args, env }, s) {
   Object.assign(out, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake', ANTHROPIC_API_KEY: '', TYPESAFE_API_KEY: '', OPENAI_API_KEY: '' });
   if (s.devAuth) out.DEV_AUTH = '1'; else out.DEV_AUTH = '0';
   out.PUBLIC_URL = s.publicOrigin;
+  if (s.stage) out.SIM_STAGE = s.stage; else delete out.SIM_STAGE;
   if (out.WORLD_KEY) out.WORLD_PATH = `${s.base ?? ''}/w/${out.WORLD_SLUG ?? out.WORLD_KEY}`;
   // this release's identity, not a BUILD_ID that a shared settings file may carry for another release
   if (s.build && s.build !== 'dev') out.BUILD_ID = s.build;

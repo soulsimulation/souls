@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { Hono } from 'hono';
+import { worldStateSchema } from '@souls/world-compiler';
 import { fixture, invite, accept, factory } from '../../test/native-owner-fixture.ts';
 import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { hereFrame } from '../edge/perception/here.ts';
@@ -124,4 +125,22 @@ test('a god sets dusk, a storm and slow time; the clock and a Soul\'s `here` fol
   god.undo(); await settle(3);
   assert.equal((god.model.state.weather as any).kind, 'auto');
   assert.notEqual(hereFrame(edge, ana).weather?.sky, 'thunderstorm');
+});
+
+test('#1649 envPatch on a real-time world: production previews the hour and refuses the accelerated clock; dev worlds may use it', () => {
+  const base = { ...(worldStateSchema.parse({}) as any), time: { ...(worldStateSchema.parse({}) as any).time, clock: 'real', timeZone: 'Europe/Lisbon' } };
+  const dev = { realTime: true, production: false }, prod = { realTime: true, production: true };
+  assert.throws(() => patchForSeq(base, { timeOfDay: '19:00' }, 1, prod), (e: any) => e.code === 'time.real-clock' && /Europe\/Lisbon/.test(e.message) && /preview/.test(e.message));
+  assert.throws(() => patchForSeq(base, { timeOfDay: 12, timeScale: 0 }, 1, prod), (e: any) => e.code === 'time.real-clock');
+  assert.throws(() => patchForSeq(base, { timeScale: 24 }, 1, prod), (e: any) => e.code === 'time.accelerated-production');
+  assert.deepEqual(patchForSeq(base, { timeScale: 0 }, 1, prod).time, { paused: true }, 'pausing stays allowed');
+  assert.deepEqual(patchForSeq(base, { realTime: true }, 1, prod).time, { clock: 'real', paused: false }, 'resume on real time');
+  assert.deepEqual(patchForSeq(base, { timeScale: 24 }, 1, dev).time, { clock: 'accelerated', paused: false, dayTicks: 72000 }, 'a dev world may speed up');
+  // a playtest's default (#888): midday, paused, on a dev world: the accelerated clock at 12:00
+  assert.deepEqual(patchForSeq(base, { timeOfDay: 12, timeScale: 0 }, 5, dev).time, { clock: 'accelerated', set: { hour: 12, n: 5 }, paused: true });
+  const fast = { ...base, time: { ...base.time, clock: 'accelerated' } };
+  assert.deepEqual(patchForSeq(fast, { timeOfDay: '19:00' }, 7, dev).time, { set: { hour: 19, n: 7 } }, 'already accelerated: just the hour');
+  assert.throws(() => patchForSeq(base, { realTime: true, timeScale: 24 }, 1, dev), (e: any) => e.code === 'invalid');
+  // flag off: as before, no clock field and no refusal
+  assert.deepEqual(patchForSeq(base, { timeScale: 24 }, 1, { realTime: false, production: true }).time, { paused: false, dayTicks: 72000 });
 });

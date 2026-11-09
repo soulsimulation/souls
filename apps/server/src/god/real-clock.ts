@@ -76,3 +76,65 @@ export const MIGRATION_ZONES: Readonly<Record<string, string>> = Object.freeze({
 });
 export const DEFAULT_TIME_ZONE = 'America/New_York';
 export function defaultTimeZone(slug: string | undefined): string { return (slug && MIGRATION_ZONES[slug]) || DEFAULT_TIME_ZONE; }
+
+/** #1649: the deploy's explicit production marker. The production unit sets SIM_STAGE=production (sim-worlds@.service:
+ *  the instance name), the launcher passes it to every world; anything else (staging, local, tests) is a dev world. */
+export function productionWorld(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_STAGE === 'production'; }
+
+/** A world clock's mode: real time, or the dev-only accelerated clock (`time.clock: 'accelerated'`). With the flag off
+ *  every world keeps the accelerated clock it always had. */
+export function clockMode(time: { clock?: string | null } | undefined, env: Record<string, string | undefined> = process.env): 'real' | 'accelerated' {
+  return realTimeEnabled(env) && time?.clock !== 'accelerated' ? 'real' : 'accelerated';
+}
+
+/** A paused clock: a day this long never visibly moves (2^40 ticks ≈ 1,700 years at 20/s). Same value as world-clock's. */
+const PAUSED_TICKS = 2 ** 40;
+
+type ClockHost = {
+  engine: { world: { tick: number } };
+  living?: { origin: number; dayTicks: number; customs?: string[] } | undefined;
+  enqueue(kind: 'rules', author: string, payload: unknown): Promise<unknown>;
+  pace?: number; paused?: boolean; running?: boolean;
+};
+export type RealClockOptions = {
+  /** The world's zone now. */ zone: () => string;
+  /** The god paused time (the clock stands still). */ paused?: () => boolean;
+  /** Whether this keeper owns the clock now (false: another mode, e.g. the dev-only accelerated clock). */ active?: () => boolean;
+  now?: () => number; checkMs?: number; log?: (m: string) => void;
+};
+const kept = new WeakSet<object>();
+/** Whether a real-time keeper already runs this host's clock. */
+export function hasRealClock(host: object): boolean { return kept.has(host); }
+
+/** The one real-time clock keeper (god worlds through world-clock.ts, authored worlds through main.ts): logs the
+ *  day clock that reads the local time, at once, on demand (`sync`) and whenever a watched, running world has drifted
+ *  REALIGN_MS from the wall (checked every `checkMs`, default 15 s). A world nobody watches (pace < 1) or an
+ *  admin-paused one is left alone until it runs at full pace again. Customs carry over. */
+export function installRealClock(host: ClockHost, o: RealClockOptions) {
+  kept.add(host);
+  const now = o.now ?? Date.now, active = o.active ?? (() => true);
+  let pending: Promise<void> | undefined;
+  const sync = (): Promise<void> => {
+    if (!active()) return Promise.resolve();
+    if (pending) return pending.then(sync);
+    const l = host.living as (ClockHost['living'] & { zone?: string }) | undefined, tick = host.engine.world.tick, zone = o.zone();
+    let payload: { dayConfig: Record<string, unknown>; why: string };
+    if (o.paused?.()) {
+      if (l && l.dayTicks === PAUSED_TICKS) return Promise.resolve();
+      // the time of day stands where it is (the phase of the running day), on a day too long to move
+      const days = l ? Math.max(0, tick - l.origin) / l.dayTicks : 0;
+      payload = { dayConfig: { origin: Math.round(tick - days * PAUSED_TICKS), dayTicks: PAUSED_TICKS, customs: l?.customs ?? [], zone }, why: 'world clock: paused by the god' };
+    } else {
+      if (l && l.zone === zone && Math.abs(realClockDriftMs(l, tick, now(), zone)) < REALIGN_MS) return Promise.resolve();
+      const c = realClockConfig(tick, now(), zone);
+      payload = { ...c, dayConfig: { ...c.dayConfig, customs: l?.customs ?? [] } };
+    }
+    pending = host.enqueue('rules', 'world', payload).then(() => {}).finally(() => { pending = undefined; });
+    return pending.then(sync);
+  };
+  const schedule = () => { void sync().catch((e: Error) => o.log?.(`world clock: ${e.message}`)); };
+  schedule();
+  const timer = setInterval(() => { if ((host.pace ?? 1) >= 1 && !host.paused && host.running !== false) schedule(); }, o.checkMs ?? 15_000);
+  timer.unref?.();
+  return { sync, schedule, stop: () => clearInterval(timer) };
+}

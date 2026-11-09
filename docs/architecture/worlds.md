@@ -99,7 +99,18 @@ switch independent. A previously saved master mute migrates to both switches off
   whose origin makes the engine read local time (`apps/server/src/god/real-clock.ts`), and logs a new one only at boot,
   on a zone change, or when a watched world has drifted a minute from the wall. A world without a zone is given one at
   its first real-time boot, recorded as one engine edit: `mars-college-2026` and `mars-college-2027` America/Los_Angeles,
-  `rna-studio` Europe/Lisbon, every other world America/New_York.
+  `rna-studio` Europe/Lisbon, every other world America/New_York. The same edit sets `time.clock: 'real'`.
+  Everything that reads the world day follows the one clock: the engine's `env.datetime` (perception, light labels,
+  schedules and the calendar, mandates, the ledger's clock), needs (a real day long), weather durations (real minutes)
+  and the viewer's sun, which on real time is an equator sun on the local clock (daylight about 06:00 to 18:00, all
+  year; `apps/web/src/sun-site.ts`). Authored worlds without a god (eden, mars, littlemartians run by `main.ts`) keep
+  the local time of their migration zone through the same keeper. Old-world forks served by `tools/core` are out of scope.
+- **Time setter on real time.** `POST /v1/god/env` on a production world (the deploy's marker `SIM_STAGE=production`,
+  set by `sim-worlds@.service` as the instance name and passed to every world by the launcher) refuses `timeOfDay`
+  (`time.real-clock`: preview another hour in the viewer or with `look --hour`) and a speed (`timeScale` > 0,
+  `time.accelerated-production`); pausing (`timeScale: 0`) and resuming (`realTime: true`) stay allowed. On a dev world
+  a set hour or speed puts the world on the dev-only accelerated clock (`time.clock: 'accelerated'`, as playtests need);
+  `realTime: true` puts it back.
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,
