@@ -963,7 +963,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
    * something passing: asleep, mid-step, a crowd). Cached per navigation epoch, 0.5 m position bucket and capability,
    * so `here` exits and `go` can ask on every frame.
    */
-  routeProblem(soul: EdgeSoul, capId: string, plans?: Plans): {code: string; reason: string} | null {
+  routeProblem(soul: EdgeSoul, capId: string, plans?: Plans): {code: string; reason: string; retry_after?: number} | null {
     const b = this.body(soul.entityId), engine = this.mw as unknown as {navEpochV1?(): number};
     const plan = b ? (plans ? plans.get(capId) : this.bindOne(soul, capId)?.plan) : undefined;   // L3 item 4: one offer, not the menu
     if (!b || !plan?.steps.some(s => s.verb === 'walk_to') || !engine.navEpochV1) return null;
@@ -979,20 +979,37 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // form goes, as an offered id already did, rather than the listing and the intent saying no way leads out
     if (out?.code !== 'route.unreachable') return out;
     const wait = this.stepOutWait(soul);
-    return wait === 0 ? null : wait ? {code: out.code, reason: stepOutWaitReason(wait)} : out;
+    if (wait === null) return out;
+    // ... but never past a locked door or an access refusal: when door passage refuses the walk out (as launch does before
+    // any step-out), the way stays shut, and the reason names the door
+    const door = this.stepOutDoor(soul, plan.steps, plan.label);
+    if (door) return {code: out.code, reason: door.reason};
+    return wait === 0 ? null : {code: out.code, reason: stepOutWaitReason(wait), retry_after: wait};
   }
   /** #1287: for a Soul launch's step-out would move but for its once-a-minute bound, the seconds until it may (≥ 1);
    *  0 when it would step out now; null when it would not (not cut off, labels cold, a replica, no open ground found). */
   stepOutWait(soul: EdgeSoul): number | null {
     if (this.readOnly) return null;
-    const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => unknown};
-    if (!engine.navRescueV1?.(soul.entityId, 0)) return null;
+    const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => unknown}, tick = this.host.engine.world.tick;
+    // (memoised per Soul a tick: a `here` frame asks for every exit; the body and the labels do not change within the tick)
+    let cut = this.stepOutSeen.get(soul.soulId);
+    if (cut?.tick !== tick) {cut = {tick, cut: !!engine.navRescueV1?.(soul.entityId, 0)}; this.stepOutSeen.set(soul.soulId, cut);}
+    if (!cut.cut) return null;
     const left = (this.navRescuedAt.get(soul.soulId) ?? -1e9) + NAV_STEP_OUT_TICKS - this.host.engine.world.tick;
     return left <= 0 ? 0 : Math.max(1, Math.ceil(left * 60 / NAV_STEP_OUT_TICKS));
   }
   /** #1287: launch's nav-connect/1 step-out would move this Soul now: outside its once-a-minute bound, and the engine's pure
    *  rescue read (0 ms: never builds the labels; cold labels answer no) finds it cut off with open ground to step to. Main only. */
   stepOutReady(soul: EdgeSoul): boolean {return this.stepOutWait(soul) === 0;}
+  /** #1287 (#1501 review): access is never bypassed: the door refusal (a locked door not hers to open, an access denial) on
+   *  the walk part of a plan, which door passage gives for the way out. A step-out never skips it. */
+  private stepOutDoor(soul: EdgeSoul, steps: Program['steps'], label: string): {code: string; reason: string} | null {
+    const walk = steps.filter(s => s.verb === 'walk_to' || s.verb === 'stand');
+    if (!this.doorPassage || !walk.some(s => s.verb === 'walk_to') || isVerificationProbe(soul.soulId)) return null;
+    const p = this.doorPassage(soul, walk, label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there');
+    return p && 'refuse' in p ? {code: p.code, reason: p.reason} : null;
+  }
+  private stepOutSeen = new Map<string, {tick: number; cut: boolean}>();
   private routeMemo = new Map<string, {code: string; reason: string} | null>();
   private arm(p: Pending) {
     this.pending.set(p.soul.soulId, p);
@@ -2209,6 +2226,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // logged edge-relocate, at most once a minute each), then starts. A destination no walk reaches still refuses.
     let steppedOut: string | undefined;
     if (issue?.code === 'route.unreachable' && (this.navRescuedAt.get(soul.soulId) ?? -1e9) <= this.host.engine.world.tick - NAV_STEP_OUT_TICKS) {
+      // (#1501 review) never past a door she may not open: the way stays shut, and the refusal names the door
+      const door = this.stepOutDoor(soul, steps, label);
+      if (door) return {...refuse('route.unreachable', door.reason), ...resolved};
       const engine = this.host.engine as unknown as {navRescueV1?: (id: string, budgetMs?: number) => {to: [number, number]; code: string; level: number; seated?: true} | null};
       const r = engine.navRescueV1 ? engine.navRescueV1(soul.entityId, 100) : null;
       if (r) {
@@ -2221,7 +2241,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
     } else if (issue?.code === 'route.unreachable') {
       // #1287: cut off again inside the once-a-minute bound: a clear refusal naming when the step out can be taken
-      const wait = this.stepOutWait(soul);
+      const wait = this.stepOutWait(soul), door = wait ? this.stepOutDoor(soul, steps, label) : null;
+      if (door) return {...refuse(issue.code, door.reason), ...resolved};
       if (wait) return {...refuse(issue.code, stepOutWaitReason(wait)), retry_after: wait, ...resolved};
     }
     // GEST-LIVE: the nearest source of an item that no walk reaches (a postbox behind a fence) gives way to the next one a walk does

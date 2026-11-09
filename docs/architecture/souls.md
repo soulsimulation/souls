@@ -382,5 +382,7 @@ refused when it asks for a walk out. The act first steps it to the nearest open 
 `nav-connect/1`, then walks, and the receipt reason says "Moved to open ground first". Every walk form does this: an
 offered id, words, or `{verb, target}`. `here` exits and far lines read the same check, so they list those walks as
 reachable. The step-out happens at most once a minute for each Soul. A Soul cut off again within that minute is refused
-`route.unreachable`, with a reason that gives the seconds until it can step out again (and `retry_after` on an act). A
-Soul that isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
+`route.unreachable`, with a reason that gives the seconds until it can step out again, and `retry_after` on the act,
+the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
+not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
+isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
