@@ -96,17 +96,23 @@ const ACT_ALIASES: Record<string, string> = {'turn-on': 'switch-on', 'turn-off':
 /** #428: a second meaning of an everyday word, used only when its ACT_ALIASES meaning is not on offer and this one is:
  *  "cross out" a sign-up name (unsign) or a notebook line (the pinboard faculty's unpin). */
 const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unpin', 'strike-off': 'unpin'};
-/** #1229: words for a kind of writable thing (the kit's notice boards, notebooks, guestbooks, sheets, walls and their synonyms) */
-const KIND_WORDS = new Set(['notebook', 'journal', 'logbook', 'log', 'diary', 'guestbook', 'guest', 'visitors', 'visitor', 'book', 'board', 'noticeboard', 'pinboard', 'whiteboard', 'corkboard', 'sheet', 'list', 'wall', 'ledger']);
-const TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'on', 'from', 'off', 'at', 'inside', 'of']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'name', 'page']);
-/** Runs of kind words where the words put a target: after in/on/from/off/at (two words between at most: "from the wanted
- *  board") or right before note/line ("my journal note"). "the board games poster" names a poster, so none. */
+/** #1229: words for a kind of writable thing (the kit's notice board, notebook stand and their synonyms), read only as the
+ *  thing a take-down names. Each maps to the word an offer of that kind goes by (books.ts: a notebook stand is also a guest
+ *  book, visitors book, logbook or journal; a pinboard or corkboard is a notice board). Loose nouns ("list", "log", "book",
+ *  "wall") are left out: "the shopping list note", "the log cabin", "the book fair" are what a note or poster is about. */
+const KIND_WORDS: Record<string, string> = {notebook: 'notebook', journal: 'notebook', logbook: 'notebook', diary: 'diary', guestbook: 'notebook', guest: 'notebook', visitors: 'notebook', visitor: 'notebook',
+  board: 'board', noticeboard: 'board', pinboard: 'board', corkboard: 'board', sheet: 'sheet'};
+const TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'from', 'inside', 'off']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'page']);
+const PHRASE_END = new Set(['now', 'please', 'here', 'then', 'and', 'for', 'too', 'again']);
+/** Kind words where the words put a target: the last word of a phrase led by in/from/inside/off, at most two words between
+ *  ("from the wanted board", "in the guest book", not "from the board games corner"), or right before note/line ("my
+ *  journal note"). Each run comes back with the words it is made of ("guest book": guest, book). */
 const targetKindWords = (ws: string[]): string[][] => {
-  const out: string[][] = [];
+  const out: string[][] = [], kind = (w?: string) => !!w && Object.hasOwn(KIND_WORDS, w);
   for (let i = 0; i < ws.length; i++) {
-    if (!KIND_WORDS.has(ws[i]!) || (i > 0 && KIND_WORDS.has(ws[i - 1]!))) continue;
-    let j = i; while (j + 1 < ws.length && KIND_WORDS.has(ws[j + 1]!)) j++;
-    const led = ws.slice(Math.max(0, i - 3), i).some(w => TARGET_LEAD.has(w)), before = TARGET_NOUN.has(ws[j + 1] ?? '');
+    if (!kind(ws[i]) || (i > 0 && kind(ws[i - 1]))) continue;
+    let j = i; while (j + 1 < ws.length && (kind(ws[j + 1]) || (ws[j + 1] === 'book' && ['guest', 'visitors', 'visitor'].includes(ws[j]!)))) j++;
+    const next = ws[j + 1], led = ws.slice(Math.max(0, i - 3), i).some(w => TARGET_LEAD.has(w)) && (next === undefined || PHRASE_END.has(next)), before = TARGET_NOUN.has(next ?? '');
     if (led || before) out.push(ws.slice(i, j + 1));
     i = j;
   }
@@ -688,15 +694,16 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     if (crossing && first.length + second.length && stray) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to cross out or take down goes by "${stray}", so nothing was done.`, didYouMean: []};
     // #1229: "take down" and "remove" keep their free words ("the old poster", "the board games poster", "Ben's note": a
     // title's or note's words), so a stray word can't stop them; a word for a kind of writable thing where the words put
-    // their target ("from the notebook", "my journal note") that no offer here goes by does: nothing of hers is lost
     // their target ("from the notebook", "my journal note") that no offer here goes by does: nothing of hers is lost. With
     // a board and a notebook both here, that word keeps only the one it names ("my journal note" is never the board's note)
     const named = !crossing && TAKE_DOWN.has(verb) && first.length ? targetKindWords(rawWords(rest)) : [];
     if (named.length) {
-      const fitsCap = (c: EdgeCapability) => {const own = rawWords([c.label, thing(c)].join(' ')); return named.every(ws => ws.some(w => tokenHit(w, own) || tokenHit(THING_ALIASES[w] ?? w, own)));};
-      const kept = first.filter(fitsCap);
-      if (!kept.length) {const absent = named.find(ws => !first.some(c => {const own = rawWords([c.label, thing(c)].join(' ')); return ws.some(w => tokenHit(w, own) || tokenHit(THING_ALIASES[w] ?? w, own));})) ?? named[0]!;
+      const fit = (ws: string[], c: EdgeCapability) => {const own = rawWords([c.label, thing(c)].join(' ')); return ws.some(w => tokenHit(w, own) || tokenHit((Object.hasOwn(KIND_WORDS, w) ? KIND_WORDS[w] : undefined) ?? w, own));};
+      const kept = first.filter(c => named.every(ws => fit(ws, c)));
+      if (!kept.length) {const absent = named.find(ws => !first.some(c => fit(ws, c))) ?? named[0]!;
         return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to take down or remove goes by "${absent.join(' ')}", so nothing was done.`, didYouMean: []};}
+      // (the words name exactly one take-down, which takes no words of its own: that one, as its id would)
+      if (kept.length === 1 && !kept[0]!.params && kept.length < first.length) return {kind: 'alias', cap: kept[0]!, note: `${input} is ${kept[0]!.id} (${kept[0]!.label}).`};
       if (kept.length < first.length) {const drop = new Set(first.filter(c => !kept.includes(c)).map(c => c.id)); ctx = {...ctx, caps: ctx.caps.filter(c => !drop.has(c.id))};}
     }
     const altFits = !!alt && (second.length
