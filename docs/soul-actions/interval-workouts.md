@@ -1,0 +1,7 @@
+# Configured interval workouts
+
+Place `core/interval-trainer@1` with clear ground in front. Normal inspection lists27 generated configurations: choose an ordered pair from stretch, jumping-jacks and dance, repeated1–3rounds. IDs encode the actual choices, such as `run-stretch-jacks-2`; these are one configurable workout capability, not27new movements/actions.
+
+Native approach owns movement. Each selected movement runs6native seconds, then3native seconds of quiet listen/rest, in order for every round. Empty hands and existing permission/clearance are required. Ordinary stop/failure preserves the previous completed record. Only whole completion updates sessions, total rounds, exact last configuration, participant and the panel indicators. Current normal inspection exposes these facts; they persist through restart.
+
+This reuses existing body poses and native timing, with no physiology simulation, new locomotion or timer. Approximate/stiff existing movement is acceptable under [Soul Actions direction](https://github.com/soulsimulation/souls/blob/647d04a5ce5621717c2fad78c153d082e3dffcb2/docs/design/soul-actions-direction.md). Nearby27offers have bounded nonzero context cost; absent/distant zero-context claims apply only to the declared fixture. No new idle/background scan/model work; existing request-time custody admission scan is explicit. General undo/redelivery and simultaneous multi-Soul training are not claimed.
