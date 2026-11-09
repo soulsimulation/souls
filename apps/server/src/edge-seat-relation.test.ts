@@ -2,7 +2,7 @@
 // inside the presentation hall") is found like "by"/"in" phrasings; `outside` stays a constraint (read as `outdoor`).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {accept} from '../test/native-owner-fixture.ts';
+import {accept, invite} from '../test/native-owner-fixture.ts';
 import {bootEden} from '../test/eden-capabilities-timing.ts';
 
 test('#848: "outside"/"inside" name the right seat on hello-hamlet, and "outside" is still a constraint', {timeout: 300000}, async t => {
@@ -35,7 +35,26 @@ test('#848: "outside" that names no seat (bare, trailing, "with Bo", "now") answ
   const outdoors = await accept(hamlet.host, hamlet.edge.act(hamlet.soul, {capability: 'sit outdoors'})) as any;
   assert.equal(outdoors.accepted, true, JSON.stringify(outdoors)); assert.equal(outdoors.receipt?.capability ?? outdoors.resolved, 'sit:cottage/part-outdoor-bench');
   const answers = async (w: typeof hamlet, table: [string, string][]) => { for (const [words, code] of table) { const r = await accept(w.host, w.edge.act(w.soul, {capability: words})) as any; assert.equal(r.code, code, `${words}: ${JSON.stringify(r).slice(0, 300)}`); } };
-  await answers(hamlet, [['sit outside', 'capability.choose'], ['sit outside with Bo', 'capability.unavailable'], ['sit outside now', 'capability.unavailable'], ['sit down outside for a minute', 'capability.unavailable'], ['sit outside here', 'capability.unavailable']]);
+  await answers(hamlet, [['sit outside', 'capability.choose'], ['sit outside with Bo', 'capability.choose'], ['sit outside now', 'capability.unavailable'], ['sit down outside for a minute', 'capability.unavailable'], ['sit outside here', 'capability.unavailable']]);
   const eden = await bootEden(); t.after(eden.close);
   await answers(eden, [['sit outside', 'capability.unavailable'], ['sit outdoors', 'capability.unknown'], ['sit outside with Bo', 'capability.unavailable'], ['sit outside now', 'capability.unavailable'], ['sit down outside for a minute', 'capability.unavailable']]);
+});
+
+// #1242: "sit outside with Bo" with nobody called Bo to invite names the outdoor bench, chooses nothing and says who was not
+// found; with Bo in the world the same words invite Bo, as before (together/1)
+test('#1242: a missing companion leaves the seat words a choice and is named; a present one is invited as before', {timeout: 300000}, async t => {
+  const w = await bootEden(() => {}, new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url)); t.after(w.close);
+  const dry = (words: string) => w.edge.intents.dryRun(w.soul, {capability: words}) as any;
+  for (const [words, who] of [['sit outside with Bo', 'Bo'], ['sit outside with a friend', 'a friend']]) {
+    const r = dry(words); assert.equal(r.ok, false, JSON.stringify(r)); assert.equal(r.code, 'capability.choose', JSON.stringify(r));
+    assert.deepEqual(r.did_you_mean.map((d: any) => d.id), ['sit:cottage/part-outdoor-bench'], words);
+    assert.deepEqual(r.discovery.unresolved, {with: who}); assert.ok(r.reason.includes(`"${who}" names no Soul you can invite from here`), r.reason);
+  }
+  const act = await accept(w.host, w.edge.act(w.soul, {capability: 'sit outside with Bo'})) as any;
+  assert.equal(act.accepted, false, 'an act on the words takes no seat'); assert.equal(act.code, 'capability.choose');
+  // A3: a place word that names no outdoor seat is still refused, nothing substituted
+  for (const words of ['sit outside near the orchard', 'sit on the bench outside the presentation hall with Bo']) {const r = dry(words); assert.equal(r.ok, false, words); assert.deepEqual((r.did_you_mean ?? []).map((d: any) => d.id).filter((id: string) => id.startsWith('sit:')), [], `${words}: ${JSON.stringify(r)}`);}
+  await invite(w, 'bo'); await accept(w.host, w.souls.create('dev:bo', {name: 'Bo', description: 'a friend'})); await w.settle(3);
+  const known = dry('sit outside with Bo'); assert.equal(known.discovery?.unresolved, undefined, JSON.stringify(known));
+  assert.ok(!JSON.stringify(known).includes('names no Soul'), 'a Soul who can be invited is not reported missing');
 });

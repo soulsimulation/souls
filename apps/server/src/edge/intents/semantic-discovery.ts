@@ -112,7 +112,21 @@ export function semanticDiscovery(L:EdgeLedger,soul:EdgeSoul,text:string,caps:Ed
   if(byBase.size===1)return null;
   if(byBase.size>1){const kept=[...byBase.values()].slice(0,8),named=kept.map(c=>({capability:c.id,name:seatNames(c)[0]!,place:c.target!.id,available:c.available,...(c.blocked?{reason:c.blocked.reason}:{})}));return choice('interaction','sit',named,`Several seats are named that way (${named.map(c=>c.name).join(', ')}); choose one by its exact sit capability ID. No seat has been selected.`);}
  }
+ if(!candidates.length){const c=unresolvedCompanion(L,soul,text,caps,plans);if(c)return c;}
  return choice('interaction','sit',candidates,candidates.length?'Choose a bound seat by its exact sit capability ID. No seat has been selected.':'No bound sit action matches that named target; no nearby seat or walk was substituted.');
+}
+
+// #1242: "sit outside with Bo" when the words after "with" name no Soul the asker can invite (together/1 reads a Soul it can
+// invite before this, and takes the words then): the seat words alone are read, their seats are listed, never taken, and the
+// answer says who was not found (`unresolved.with`), so the agent can tell its owner that part instead of reporting nothing
+const WITH=/^(.+?)\s+(?:together\s+with|along\s+with|with)\s+(?!me\b)(.+?)[\s.!?]*$/i;
+function unresolvedCompanion(L:EdgeLedger,soul:EdgeSoul,text:string,caps:EdgeCapability[],plans:Parameters<EdgeLedger['resolveOnDemand']>[3]):VocabResult|null{
+ const m=WITH.exec(text.trim());if(!m)return null;
+ const head=m[1]!.trim(),who=m[2]!.trim(),missing=`"${who}" names no Soul you can invite from here, so nobody was invited.`;
+ const v=L.resolveOnDemand(soul,head,[...caps],new Map(plans)).v;
+ const candidates:Candidate[]=v.kind!=='unknown'?(v.cap.verb==='sit'?[{capability:v.cap.id,name:v.cap.label,place:v.cap.target?.id??'',available:v.cap.available,...(v.cap.blocked?{reason:v.cap.blocked.reason,code:v.cap.blocked.code}:{})}]:[])
+  :((v.discovery?.candidates as Candidate[]|undefined)??[]);
+ return choice('interaction','sit',candidates,candidates.length?`${missing} The seat words alone ("${head}") name ${candidates.map(c=>`${c.name} (${c.capability})`).join(', ')}: choose one by its exact sit capability ID. No seat has been selected.`:`${missing} No bound sit action matches the rest either; no nearby seat or walk was substituted.`,{unresolved:{with:who}});
 }
 
 /** Explore accepts bare purpose words as well as sentences. Bare words must all be
