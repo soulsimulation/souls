@@ -132,6 +132,20 @@
       "to": "\\#1318: it runs from 33% of just covering the text to 60% of the way to the corners, on any aspect ratio",
       "reason": "Same test; the light now starts at 60% of its old size, as Gene asked (#1631)",
       "pr": "#1632"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "routes the coarse search already finds are byte-identical to 3.59.4 (paged ground)",
+      "to": "routes the coarse search already finds are byte-identical to 0.64.4 (paged ground)",
+      "reason": "Release renumbered to 0.x (#1500): 3.59.4 is now 0.64.4; same test, same golden hashes",
+      "pr": "#1500"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "routes the coarse search already finds are byte-identical to 3.59.4 (unpaged ground)",
+      "to": "routes the coarse search already finds are byte-identical to 0.64.4 (unpaged ground)",
+      "reason": "Release renumbered to 0.x (#1500): 3.59.4 is now 0.64.4; same test, same golden hashes",
+      "pr": "#1500"
     }
   ]
 }

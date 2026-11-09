@@ -11,7 +11,7 @@ import type {DistanceDetailOptions} from './quality-tier.ts';
  * Like WorldShadowDetail it is render-time only: `apply` runs just before renderer.render and `restore` right after,
  * so scene state, picking, tests and the static batches' change checks never see a hidden mesh. Lines, points, sprites
  * and anything with frustum culling turned off (sky, horizon, overlays) are never touched. Skinned bodies (Souls, kin)
- * are never hidden; beyond `standInDistance` metres they stop casting shadows (release 3.1: a resident 100 m away is a
+ * are never hidden; beyond `standInDistance` metres they stop casting shadows (release 0.6: a resident 100 m away is a
  * few pixels tall on a phone, yet each of its body parts cost a skinned draw in the shadow pass). The candidate list is rescanned every `rescanFrames` frames. */
 /** PERF-PASSES: a mesh inside a frozen thing (WorldEntityLayer.freeze:
  *  `userData.frozenDrawn` on the thing, with its `frozen` list replaced at every freeze) keeps its world-space centre and
