@@ -455,6 +455,11 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
 | Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
 
+`core/arranging-vase@1` holds up to three real `core/cut-flower@1` stems in distinct native slots. Pick a chosen stem,
+put it in the vase, or retrieve that particular stem; nearby contents name the actual items. Individual identities,
+petal colors and placement persist. The stationary vase has an open mouth on a pedestal; heads remain above its rim.
+This is separate from the existing harvested preset bunch and adds no growth or wilting.
+
 ## Making: paintings and chalk
 
 - **Painting at an easel.** `core-easel@2` is a painting workstation. The `paint:` offer at its spot takes an optional
