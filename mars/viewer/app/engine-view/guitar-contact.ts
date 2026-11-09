@@ -30,3 +30,10 @@ export function guitarIdleUnderlay(age:number|undefined,entry:number,normal:numb
   const r=smooth(released/GUITAR_FADE),d=smooth((duration??GUITAR_FADE)/GUITAR_FADE);
   return (1-r)*(1-d)*entry+r*normal;
 }
+
+/** Native owners observed by the guitar release adapter; these remain authoritative. */
+export const GUITAR_OWNER_FIELDS=['hands','grip','handHold','rps','heldItemsV1','on'] as const;
+export function guitarOwnerStamp(value:unknown):string|undefined{
+  if(!value)return undefined;
+  const stamp=JSON.stringify(value);return stamp==='{}'||stamp==='[]'?undefined:stamp;
+}

@@ -67,7 +67,7 @@ import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLi
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf,GUITAR_FADE } from './piano-score.ts';
-import {guitarIdleUnderlay,placeGuitar} from './guitar-contact.ts';
+import {GUITAR_OWNER_FIELDS,guitarOwnerStamp,guitarIdleUnderlay,placeGuitar} from './guitar-contact.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -194,6 +194,9 @@ type View = {
   restAge?: number;
   /** Observed idle clock at guitar entry; absent means an already settled/unknown entry. */
   guitarEntryRestAge?: number;
+  /** A newer native hand owner permanently ends this guitar release. */
+  guitarReleaseBlocked?: boolean;
+  guitarOwners?: Partial<Record<typeof GUITAR_OWNER_FIELDS[number],string>>;
   restFrom?: number;
   /** Idle variety weight drawn at the last render (Idle_Neutral + variant; diagnostics only). */
   variety?: number;
@@ -329,6 +332,8 @@ export type SampledHuman = {
   restAge?: number;
   /** Observed idle clock at guitar entry; absent means an already settled/unknown entry. */
   guitarEntryRestAge?: number;
+  /** A newer native hand owner permanently ends this guitar release. */
+  guitarReleaseBlocked?: boolean;
   /** Seconds since the current walk began (the Walk weight left 0; absent: not walking, or longer than a gesture fade). */
   walkAge?: number;
   /** The rest clock (restAge) when that walk began; absent: unknown. */
@@ -603,6 +608,7 @@ export class HumanViews {
         // A live/lab view joining an already active wave has no certified onset.
         // Retain full attained weight, as replay does for a pre-window wave.
         if(act==='wave'){v.waveEvents=[{start:world.tick*DT-WAVE_BLEND_SECONDS}];v.waveSamples=[{}];v.waveClock=world.tick*DT;}
+        if(act==='play-music'&&e.human.instrument==='guitar'){v.guitarOwners={};v.guitarReleaseBlocked=false;for(const key of GUITAR_OWNER_FIELDS){const stamp=guitarOwnerStamp(e.human[key]);if(stamp){v.guitarOwners[key]=stamp;if(key!=='on')v.guitarReleaseBlocked=true;}}}
         v.grip = e.human.grip?.entity;
         v.gripSlot = e.human.grip?.slot;
         v.cur.pose = v.prev.pose = this.postureGoal(v, e, world, false);
@@ -622,13 +628,23 @@ export class HumanViews {
         const clock=world.tick*DT;
         if(v.activity==='wave'&&v.waveEvents?.length)v.waveEvents[v.waveEvents.length-1].end=clock;
         if(act==='wave'){if(!v.waveEvents?.length)v.waveRestAge=v.restAge;(v.waveEvents??=[]).push({start:clock});}
-        if(act==='play-music'&&e.human.instrument==='guitar')v.guitarEntryRestAge=v.restAge;
+        if(act==='play-music'&&e.human.instrument==='guitar'){
+          v.guitarEntryRestAge=v.restAge;v.guitarReleaseBlocked=false;v.guitarOwners={};
+          for(const key of GUITAR_OWNER_FIELDS){const stamp=guitarOwnerStamp(e.human[key]);if(stamp){v.guitarOwners[key]=stamp;if(key!=='on')v.guitarReleaseBlocked=true;}}
+        }
         else if(!(act==='idle'&&v.activity==='play-music'&&v.instrument==='guitar'))v.guitarEntryRestAge=undefined;
         v.prevWaveDuration=v.activity==='wave'?v.since:undefined;
         v.prevAct = v.activity; v.prevBase = v.base; v.prevDuration=(v.age+1)*DT;v.prevInstrument=v.instrument;
       }
       v.age = act === v.activity ? v.age + 1 : 0;
       v.since = v.age * DT;
+      if(v.guitarOwners){
+        const guitar=act==='play-music'&&e.human.instrument==='guitar',release=act==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='guitar'&&v.since<GUITAR_FADE;
+        if(guitar||release)for(const key of GUITAR_OWNER_FIELDS){
+          const stamp=guitarOwnerStamp(e.human[key]);if(stamp&&stamp!==v.guitarOwners[key])v.guitarReleaseBlocked=true;
+          v.guitarOwners[key]=stamp;
+        }else v.guitarOwners=undefined;
+      }
       if(v.waveEvents){
         const human=e.human,owner=human.hands?.left||human.hands?.right||human.grip||human.handHold||human.rps||human.heldItemsV1?.left||human.heldItemsV1?.right||human.on;
         if(owner||(act!=='wave'&&act!=='idle'&&!GAIT_ACTS.has(act))){v.waveEvents=undefined;v.waveSamples=[];v.waveClock=undefined;v.waveRestAge=undefined;}
@@ -902,7 +918,7 @@ export class HumanViews {
       v.running = act === 'jog' || act === 'run' || (typeof f.speed === 'number' && f.speed > RUN_SPEED);
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
       v.since = f.activityAge;
-      v.guitarEntryRestAge=f.guitarEntryRestAge;
+      v.guitarEntryRestAge=f.guitarEntryRestAge;v.guitarReleaseBlocked=f.guitarReleaseBlocked??false;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
       else if(act==='idle'&&f.prevActivity==='play-music'&&f.prevInstrument==='guitar')v.restFrom=f.activityAge===undefined?undefined:t-f.activityAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
@@ -1018,7 +1034,7 @@ export class HumanViews {
     // entry 36: a singer sings along with the nearest player (her head and breath follow the sung notes); just after her
     // singing ends, the singing frame eases out (the hand lets go of the mic) instead of snapping to the base posture
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
-    const guitarRelease=v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='guitar'&&v.since!==undefined&&v.since<GUITAR_FADE;
+    const guitarRelease=!v.guitarReleaseBlocked&&v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='guitar'&&v.since!==undefined&&v.since<GUITAR_FADE;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
     const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })

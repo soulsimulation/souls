@@ -6,6 +6,7 @@ import {WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 // given t (spec §18: the take plays identically with any camera).
 import {PIANO_FADE} from './activity-poses.ts';
 import {GUITAR_FADE} from './piano-score.ts';
+import {GUITAR_OWNER_FIELDS,guitarOwnerStamp} from './guitar-contact.ts';
 import {recordedBody,admittedBodyUrl} from './recorded-body.ts';
 import {recordedGame} from './recorded-games.ts';
 import {projectPlatformFrame} from './recorded-platforms.ts';
@@ -181,7 +182,7 @@ export class TakePeople {
   /** Per person: the ticks at which `activity` / `baseActivity` changed in this take, and the values (library clip
    *  crossfades and one-shots need how long the current activity has run and what came before). */
   /** Bounded guitar observations; independent of generic activity and singer/wave indexes. */
-  private guitarActs=new Map<string,{t:number[];v:string[];instrument:(string|null)[];cacheKey:string}>();
+  private guitarActs=new Map<string,{t:number[];v:string[];instrument:(string|null)[];cacheKey:string;owners:{start:number;end?:number;field:string}[]}>();
   private guitarTakes=new WeakMap<Take,boolean>();
   private waveOwners = new Map<string,number[]>();
   private waveActs = new Map<string,{t:number[];v:string[]}>();
@@ -301,7 +302,7 @@ export class TakePeople {
   }
 
   /** How long `id`'s current activity has run at `tick` and what it did before (absent when it began before the take). */
-  private activityHistory(id: string, tick: number, act: string, walk: number): Pick<SampledHuman, 'activityAge' | 'prevActivity' | 'prevBaseActivity' | 'prevActivityDuration' | 'prevInstrument' | 'guitarEntryRestAge' | 'restAge' | 'walkAge' | 'restAgeAtWalk' | 'prevWaveDuration' | 'waveRestAge' | 'waveSamples' | 'waveClock'> {
+  private activityHistory(id: string, tick: number, act: string, walk: number): Pick<SampledHuman, 'activityAge' | 'prevActivity' | 'prevBaseActivity' | 'prevActivityDuration' | 'prevInstrument' | 'guitarEntryRestAge' | 'guitarReleaseBlocked' | 'restAge' | 'walkAge' | 'restAgeAtWalk' | 'prevWaveDuration' | 'waveRestAge' | 'waveSamples' | 'waveClock'> {
     const a = this.acts.get(id);
     const k = this.runAt(a, tick);
     const rest = { ...this.restAge(id, a, k, tick, act), ...(walk > 0.02 ? this.walkStart(id, tick) : {}) };
@@ -327,7 +328,7 @@ export class TakePeople {
     if(!a||k<1)return {...rest,...wave,...guitar};
     let b:string|null=null;for(let i=a.bt.length-1;i>=0;i--)if(a.bt[i]<a.t[k]){b=a.bv[i];break;}
     const age=(tick-a.t[k])*this.take.dt;
-    const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'guitarEntryRestAge'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'>={ ...wave, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
+    const history:Pick<SampledHuman,'activityAge'|'prevActivity'|'prevBaseActivity'|'prevActivityDuration'|'prevInstrument'|'guitarEntryRestAge'|'guitarReleaseBlocked'|'restAge'|'walkAge'|'restAgeAtWalk'|'prevWaveDuration'|'waveRestAge'|'waveSamples'|'waveClock'>={ ...wave, activityAge: age, prevActivity: a.v[k - 1], ...(b ? { prevBaseActivity: b } : {}), ...rest };
     if(age<PIANO_FADE&&(history.prevActivity==='play-piano'||history.prevActivity==='play-music'&&a.it)){
       let instrument:string|null=null;for(let i=(a.it?.length??0)-1;i>=0;i--)if(a.it![i]<a.t[k]){instrument=a.iv![i];break;}
       if(history.prevActivity==='play-piano'||instrument==='piano'||instrument==='keyboard'){
@@ -418,15 +419,24 @@ export class TakePeople {
     const hasGuitar=(take:Take)=>{let found=this.guitarTakes.get(take);if(found===undefined){found=take.changes.some(([, ,f,v])=>f==='instrument'&&v==='guitar');this.guitarTakes.set(take,found);}return found;};
     const ids=new Set<string>();for(const take of chain)if(hasGuitar(take))for(const [,id,f,v]of take.changes)if(f==='instrument'&&v==='guitar')ids.add(id);
     if(!ids.size)return;
-    const cutoff=-limit/this.take.dt;
+    const cutoff=-limit/this.take.dt,ownerFields=new Set<string>(GUITAR_OWNER_FIELDS);
     for(const id of ids){
       const a={t:[] as number[],v:[] as string[],instrument:[] as (string|null)[]};
       let activity='idle',instrument:string|null=null;
+      const owners:{start:number;end?:number;field:string}[]=[],held=new Map<string,{stamp:string;span:typeof owners[number]}>();
       for(const take of chain){
-        const changes=take.changes.filter(c=>c[1]===id&&(c[2]==='activity'||c[2]==='instrument'));
+        const changes=take.changes.filter(c=>c[1]===id&&(c[2]==='activity'||c[2]==='instrument'||ownerFields.has(c[2])));
         for(let i=0;i<changes.length;){
           const at=changes[i][0];let j=i;
-          while(j<changes.length&&changes[j][0]===at){const [, ,field,value]=changes[j++];if(field==='activity'&&typeof value==='string')activity=value;else if(field==='instrument')instrument=typeof value==='string'?value:null;}
+          while(j<changes.length&&changes[j][0]===at){
+            const [, ,field,value]=changes[j++];
+            if(field==='activity'&&typeof value==='string')activity=value;
+            else if(field==='instrument')instrument=typeof value==='string'?value:null;
+            else if(ownerFields.has(field)){
+              const stamp=guitarOwnerStamp(value),prior=held.get(field),tick=Math.max(cutoff,at+take.startTick-this.take.startTick);
+              if(stamp!==prior?.stamp){if(prior){prior.span.end=tick;held.delete(field);}if(stamp){const span={start:tick,field};owners.push(span);held.set(field,{stamp,span});}}
+            }
+          }
           const tick=Math.max(cutoff,at+take.startTick-this.take.startTick),last=a.t.length-1;
           if(last>=0&&a.t[last]===tick){a.v[last]=activity;a.instrument[last]=instrument;}
           else if(a.v[last]!==activity||a.instrument[last]!==instrument){a.t.push(tick);a.v.push(activity);a.instrument.push(instrument);}
@@ -434,7 +444,7 @@ export class TakePeople {
         }
       }
       // Projected run numbers differ from the generic index; never share its stride cache keys.
-      this.guitarActs.set(id,{...a,cacheKey:id+'#guitar#'+this.take.id+'#'+a.t.join(',')});
+      this.guitarActs.set(id,{...a,owners,cacheKey:id+'#guitar#'+this.take.id+'#'+a.t.join(',')});
     }
   }
   private guitarHistory(id:string,tick:number,act:string):Partial<SampledHuman>{
@@ -448,6 +458,7 @@ export class TakePeople {
     return {
       ...(active?{activityAge:observed?age:undefined,prevActivity:observed?a.v[k-1]:undefined}:{}),
       guitarEntryRestAge:entryRest,
+      guitarReleaseBlocked:a.owners.some(o=>o.start<=tick&&(o.start>a.t[entry]||(o.field!=='on'&&(o.end===undefined||o.end>a.t[entry])))),
       ...(released?{restAge:age,activityAge:age,prevActivity:'play-music',prevInstrument:'guitar',...(observed?{prevActivityDuration:(a.t[k]-a.t[k-1])*this.take.dt}:{})}:{}),
     };
   }

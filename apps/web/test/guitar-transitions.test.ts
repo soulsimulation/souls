@@ -111,3 +111,44 @@ test('native recorded hand points take ownership during guitar idle recovery',as
  const holder=(p as unknown as {humans:{views:Map<string,{rig:{holder:THREE.Object3D}}>}}).humans.views.get(ID)!.rig.holder;
  assert.equal(holder.getObjectByName('activity prop: guitar')?.visible??false,false,'native hand ownership hides guitar');
 });
+
+const guitarVisible=(v:HumanViews)=>((v as unknown as {views:Map<string,{rig:{holder:THREE.Object3D}}>}).views.get(ID)?.rig.holder.getObjectByName('activity prop: guitar')?.visible??false);
+async function ownerRecording(owner:boolean,seat:'none'|'existing'|'new'='none'){
+ const scene=openGround(),world=emptyWorld('guitar-owner-return',scene),e=human(ID,0,0);world.entities[ID]=e;if(seat==='existing')e.human!.on='supporting-seat';
+ const rt=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),all=new TakeRecorder(rt,{rulesVersion:'guitar-owner-return'});let rec=new TakeRecorder(rt,{rulesVersion:'guitar-owner-return'});const chunks:ReturnType<TakeRecorder['finish']>[]=[],live=await views(),joined=await views(),liveStates=new Map<number,boolean>(),joinedStates=new Map<number,boolean>();live.onTick(world);live.render(1);
+ for(let k=0;k<50;k++){
+  if(k===10||k===24){e.human!.activity='play-music';e.human!.instrument='guitar';}
+  if(k===14||k===28){e.human!.activity='idle';delete e.human!.instrument;}
+  if(owner&&k===16)e.human!.hands={left:[.2,1.2,-.25],right:[.2,1.2,.25]};
+  if(seat==='new'&&k===16)e.human!.on='new-seat';
+  if(k===18){delete e.human!.hands;delete e.human!.on;}
+  rt.step();live.onTick(world);live.render(1);liveStates.set(world.tick,guitarVisible(live));
+  if(world.tick>=12){joined.onTick(world);joined.render(1);joinedStates.set(world.tick,guitarVisible(joined));}
+  if((k+1)%2===0){chunks.push(rec.finish());if(k<49)rec=new TakeRecorder(rt,{rulesVersion:'guitar-owner-return'});}
+ }
+ return {take:all.finish(),chunks,liveStates,joinedStates};
+}
+for(const owner of [false,true])test(`new native hand owner stays cleared after release, next guitar resets: owner=${owner}`,async()=>{
+ const {take,chunks,liveStates,joinedStates}=await ownerRecording(owner),tpl=await template('woman',1.75),whole=new TakePeople(take),part=new TakePeople(chunks[0]);whole.setTemplates([tpl]);part.setTemplates([tpl]);
+ for(const tick of [16,17,18,19,20,21,22,26,30,35]){
+  const expected=!owner||tick<17||tick>=25;
+  assert.equal(liveStates.get(tick),expected,`native live tick${tick}`);assert.equal(joinedStates.get(tick),expected,`joined active live tick${tick}`);
+ }
+ for(const tick of [14,16,17,18,19,20,21,17,20,20,26,30,20,30,35]){
+  const c=chunks.find(c=>tick>=c.startTick&&tick<c.startTick+c.ticks)!,expected=!owner||tick<17||tick>=25;
+  whole.show(tick*DT);part.setTake(c);part.setWaterHistory(chunks);part.show((tick-c.startTick)*DT,tick*DT);
+  const fresh=new TakePeople(c);fresh.setTemplates([tpl]);fresh.setWaterHistory(chunks);fresh.show((tick-c.startTick)*DT,tick*DT);
+  for(const [label,p]of [['whole',whole],['chunk',part],['fresh',fresh]] as const)assert.equal(guitarVisible((p as unknown as {humans:HumanViews}).humans),expected,`${label} tick${tick}`);
+ }
+});
+for(const boundary of ['missing','foreign','ambiguous'] as const)test(`owner-active recording baseline cannot restore guitar across ${boundary} history`,async()=>{
+ const {chunks}=await ownerRecording(true),tpl=await template('woman',1.75),c=chunks[10],cut=chunks[8];
+ const history=chunks.filter(t=>t!==cut);if(boundary==='foreign')history.push({...cut,rulesVersion:'foreign'});if(boundary==='ambiguous')history.push(cut,{...cut,id:cut.id+'-ambiguous'});
+ const p=new TakePeople(c);p.setTemplates([tpl]);p.setWaterHistory(history);
+ for(const tick of [20,21,20,20]){p.show((tick-c.startTick)*DT,tick*DT);assert.equal(guitarVisible((p as unknown as {humans:HumanViews}).humans),false,'uncertified release hidden after owner baseline/clear');}
+});
+for(const seat of ['existing','new'] as const)test(`${seat} seat ownership: only a newer owner invalidates guitar release`,async()=>{
+ const {take,chunks,liveStates}=await ownerRecording(false,seat),tpl=await template('woman',1.75),expected=seat==='existing';
+ assert.equal(liveStates.get(20),expected,'live seat clear preserves only uninterrupted release');
+ for(const tick of [20,21,20]){const c=chunks.find(c=>tick>=c.startTick&&tick<c.startTick+c.ticks)!;for(const t of [take,c]){const p=new TakePeople(t);p.setTemplates([tpl]);p.setWaterHistory(chunks);p.show((tick-t.startTick)*DT,tick*DT);assert.equal(guitarVisible((p as unknown as {humans:HumanViews}).humans),expected,'recorded seat baseline and later clear');}}
+});
