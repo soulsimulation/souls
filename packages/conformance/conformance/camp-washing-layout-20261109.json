@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "#1680's pre-merge authored-layout correction raises the complete wash bench and declared bowl support to 1 m and places its worker stand at 0.8 m, aligning with the unchanged native craft/brush presentation. Earlier source and footage stay retained. The scoped K=2 conformance run and existing raw authored-shape gate find no new issue; no hold, tolerance or rendering exception changes.",
+  "findings": []
+}
