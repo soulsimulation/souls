@@ -22,11 +22,11 @@ export type Resolution =
   | {ok: true; kind: 'plan'; capability: string; label: string; steps: Steps; chosen: Chosen}
   | {ok: true; kind: 'attention'; capability: string; gaze: Gaze; yaw?: number; chosen: Chosen}
   | {ok: true; kind: 'setting'; capability: string; apply: () => void; chosen: Chosen}
-  | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
+  | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[];retry_after?:number};
 import {classWords} from './class-words.ts';
 import {signWords} from '../ledger/vocabulary.ts';
 export type IntentInput = {verb?: unknown; target?: unknown; params?: unknown; clientRef?: unknown; [k: string]: unknown};
-type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
+type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[];retry_after?:number};
 
 /** Intent verbs this module resolves (anything else is passed on as `<verb>:<target>` to ordinary capabilities). */
 export const INTENT_VERBS = ['sit', 'go', 'walk', 'swim', 'approach', 'follow', 'walk-with', 'turn', 'face', 'look', 'auto-face'];
@@ -187,7 +187,7 @@ export class Intents {
     // Preserve exact non-place destinations such as a carrier boarding object.
     const exact = caps.find(c => c.verb==='walk'&&(c.id===asked||c.id === `walk:${asked}`));
     // RT: a walk the body cannot make from here is refused with the engine's route code, not resolved and then refused at act
-    const dead = (c: EdgeCapability, p?: typeof plans) => {const d = this.L.routeProblem(P.soul, c.id, p); return d ? no(d.code, d.reason) : null;};
+    const dead = (c: EdgeCapability, p?: typeof plans) => {const d = this.L.routeProblem(P.soul, c.id, p); return d ? {...no(d.code, d.reason), ...(d.retry_after ? {retry_after: d.retry_after} : {})} : null;};   // #1287: a step-out's wait carries its seconds
     if (exact?.target?.kind === 'object') {if (!exact.available && exact.blocked) return no(exact.blocked.code, exact.blocked.reason);return dead(exact) ?? walkTo(exact);}
     const object=offeredWalkObject(this.L,P.soul,asked);if(object){if(!object.ok)return object;const d=dead(object.cap);if(d)return d;const out=walkTo(object.cap);return {...out,chosen:{...out.chosen,matchedBy:object.matchedBy}};}
     const r=resolvePlaceForVerb(this.L,P.soul,exact?.target?.kind==='place'?exact.target.id:asked);
