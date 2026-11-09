@@ -2223,7 +2223,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
     }
     // The verifier probe reports the engine's own diagnostic (what blocks the seat, how much room it needs) to the builder.
-    if (issue && !WAIT_CODES.has(issue.code)) return {...refuse(issue.code, (issue.code.startsWith('carrier.') || isVerificationProbe(soul.soulId) ? issue.message : humanBlockedExplanationV1(issue.code, label) + unfinishedWay(issue)) + (steppedOut ? ` ${steppedOut}` : '')), ...resolved};
+    if (issue && !WAIT_CODES.has(issue.code)) {
+      const out = {...refuse(issue.code, (issue.code.startsWith('carrier.') || isVerificationProbe(soul.soulId) ? issue.message : humanBlockedExplanationV1(issue.code, label) + unfinishedWay(issue)) + (steppedOut ? ` ${steppedOut}` : '')), ...resolved};
+      // #1468 (#850 follow-up): an offer that was available, whose walk the planner refuses route-dead, names what this Soul
+      // can do instead, as a blocked offer does at listing time; never the refused act itself
+      if (!ROUTE_DEAD.has(issue.code) || isVerificationProbe(soul.soulId)) return out;
+      const named = this.withAlternatives(soul, capability, out, this.wordsMenu(soul).caps, this.bindOne(soul, capability)?.cap);
+      const alternatives = named.alternatives?.filter(x => x.id !== capability);
+      return alternatives?.length ? {...out, alternatives} : out;
+    }
     if (steppedOut) note = note ? `${steppedOut} ${note}` : steppedOut;
     const remember = (id: string) => {
       if (note) this.update(id, {reason: note});
