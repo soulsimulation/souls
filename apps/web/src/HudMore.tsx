@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { requestFeedback } from './feedback-request.ts';
+import { HudMenu } from './HudMenu.tsx';
+import { PHONE_WIDTH } from './hud-menu.ts';
 
 // Lane P6 (2026-10-19, Gene): "a light pass to cut button clutter on small screens. Hide secondary controls behind one
 // menu and keep watch mode clean. Don't redesign." On small screens only, the world page's secondary controls (Sign in,
@@ -55,24 +57,28 @@ export type MoreEvent = 'toggle' | 'close';
 /** Open/close: the button toggles; Escape, a tap outside and choosing an item close. */
 export const moreMenu = (open: boolean, e: MoreEvent) => (e === 'toggle' ? !open : false);
 
-function querySmall() { try { return typeof matchMedia === 'function' && matchMedia(SMALL_SCREEN).matches; } catch { return false; } }
+function queryMedia(query: string) { try { return typeof matchMedia === 'function' && matchMedia(query).matches; } catch { return false; } }
 
-export function useSmallScreen() {
-  const [small, setSmall] = useState(querySmall);
+function useMedia(query: string) {
+  const [match, setMatch] = useState(() => queryMedia(query));
   useEffect(() => {
     if (typeof matchMedia !== 'function') return;
-    const m = matchMedia(SMALL_SCREEN), f = () => setSmall(m.matches);
+    const m = matchMedia(query), f = () => setMatch(m.matches);
     f(); m.addEventListener?.('change', f);
     return () => m.removeEventListener?.('change', f);
-  }, []);
-  return small;
+  }, [query]);
+  return match;
 }
+
+export function useSmallScreen() { return useMedia(SMALL_SCREEN); }
 
 const DOTS = <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4.5" cy="10" r="1.6" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="currentColor"/><circle cx="15.5" cy="10" r="1.6" fill="currentColor"/></svg>;
 
 /** The HUD's "More" button and menu; renders nothing on desktop. `small`/`initialOpen` are for tests. */
-export function HudMore({ small: forced, initialOpen = false }: { small?: boolean; initialOpen?: boolean }) {
+export function HudMore({ small: forced, phone: forcedPhone, initialOpen = false }: { small?: boolean; phone?: boolean; initialOpen?: boolean }) {
   const detected = useSmallScreen(), small = forced ?? detected;
+  // #1391: at phone widths the hamburger menu (HudMenu) holds every control; wider touch screens keep this More menu
+  const phoneWidth = useMedia(PHONE_WIDTH), phone = (forcedPhone ?? phoneWidth) && small;
   const [open, send] = useReducer(moreMenu, initialOpen);
   const [items, setItems] = useState<MoreItem[]>([]);
   const root = useRef<HTMLSpanElement>(null);
@@ -90,6 +96,7 @@ export function HudMore({ small: forced, initialOpen = false }: { small?: boolea
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
   }, [open]);
   if (!small) return null;
+  if (phone) return <HudMenu />;
   return (
     <span ref={root} className="hud-more-wrap">
       <button type="button" className="hud-camera hud-more" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={open} onClick={() => send('toggle')}>{DOTS}</button>

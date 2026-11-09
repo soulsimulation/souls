@@ -122,6 +122,8 @@ Maintain one authority for poses, reciprocal connections and support. Scene pare
 is supported by two uprights. Rendering and persistent entity adapters observe the same state; avoid overlaying
 a duplicate static campus mesh on dynamic materials. Project progress cannot independently declare completion.
 
+The first of these is built: `rack-bay@1`, `rack-bay-build@1` and persistent projects ([soul actions](../architecture/soul-actions.md)).
+
 Floors and stairs become navigable at actual installation and lose that affordance on safe removal. Temporary
 bracing/held support counts only while present; protect occupants during disassembly. Reverse dependencies recover
 the same instances where reversible. Cutting declares outputs/offcuts; consumed fasteners/finishes have explicit
@@ -242,6 +244,13 @@ The owner must remain able to send a revision during shared execution. Prompt in
 model response, physical cleanup and resource release are distinct. Keep compatible speech/observation available;
 report the actual resource preventing another action. After release/reconnect, reconcile each owner's latest
 intention without resuming cancelled work. Persistent assembly progress never implies indefinite crew authority.
+
+An agent discovers and joins a shared operation through the same strict offers as any other action. `act` takes
+offered ids only ([CTRL-1, #1093](https://github.com/soulsimulation/souls/issues/1093)); `resolve "<words>"` returns
+candidate ids and never acts. `inspect <id>` ([#1094](https://github.com/soulsimulation/souls/issues/1094)) is the discovery
+path for an operation: its template, revision, load, destination, roles with holders and readiness, phase, and this
+Soul's own offers with their parameter schemas. No session, role or next step has to be read from prose, and a Soul Run
+cast sends offered ids too.
 
 Roles must match a body's declared physical capabilities. The [custom body design](custom-bodies.md) extends
 this to non-humanoids: a rigid body can participate through a validated adaptation, not an assumed humanoid grip.

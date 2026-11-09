@@ -11,7 +11,7 @@ import { walkTo } from '../../../mars/viewer/engine/locomotion/walk.ts';
 import { CATALOG } from '../../../mars/viewer/engine/world/catalog.ts';
 import type { ActionRecord } from '../../../mars/viewer/engine/actions/types.ts';
 import { raiseHold, looseFramesHeld } from './raise-hold.ts';
-import { beamBays, connectBeamV1, frameStability, framesStand, worldPoint } from './beam-connect.ts';
+import { beamBays, connectBeamV1, frameStability, framesStand, settleFrames, worldPoint } from './beam-connect.ts';
 
 // the library's loose 12 ft upright and 9 ft beam with PC12's connectors (core-kit/authoring/work.mjs), as test defs
 const IN = 0.0254, L = 3.6576, T = 0.0762, W = 1.2192, COL = 3 * IN, BL = 2.7432, BH = 0.1016;
@@ -174,6 +174,19 @@ test('a saved world resumes in every phase, to the same state as one never saved
     for (const rt of [a.rt, b]) { rt.cancel(a.ra.id); rt.cancel(a.rb.id); for (let i = 0; i < 30; i++) rt.step(); }
     assert.equal(b.stateHash(), a.rt.stateHash(), `${phase}: same after the stops`);
   }
+});
+
+test('#1250: an edit stands down exactly what the invariant would find, and nothing else', () => {
+  const { rt } = raised(1), w = rt.world;
+  seat(rt, 'beam1', 'l', 0.76);
+  assert.deepEqual(settleFrames(rt), [], 'nothing to do');
+  const A = w.entities.A!; A.phase = 'installed'; A.support = { kind: 'connected', to: ['beam1'] };
+  for (const c of ['a1', 'a2']) w.entities[c]!.human!.grip = undefined;
+  const was = structuredClone(w.entities.beam1!.support);
+  assert.deepEqual(settleFrames(rt), ['A']); assert.deepEqual(A.support, { kind: 'ground' }); assert.equal(A.phase, 'installed', 'still built in');
+  assert.deepEqual(w.entities.beam1!.support, was, 'the beam is left as it was'); assert.deepEqual(framesStand(rt), [], 'and nothing is left to find');
+  w.entities.beam1!.connections = w.entities.beam1!.connections!.slice(0, 1);
+  assert.deepEqual(settleFrames(rt), ['beam1']); assert.deepEqual(framesStand(rt), []);
 });
 
 test('the invariant notices a beam seated at one end, and a joined frame let go before it stands', () => {

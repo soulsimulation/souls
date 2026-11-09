@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import type { MeshCtx } from './registry.ts';
 import { DRAWER_TRAVEL } from '@souls/world-compiler';
+import { foldCanopy } from '../opening-motion.ts';
 import { variantOf } from './material-variants.ts';
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -102,6 +103,10 @@ function stateRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
     // Soul Actions entry 23: curtains draw back to their outer ends (pleats bunch), a roller blind rolls up to its top
     if ((role === 'curtain-l' || role === 'curtain-r') && s.open !== undefined) o.scale.x = s.open === true ? 0.22 : 1;
     if (role === 'blind' && s.open !== undefined) o.scale.y = s.open === true ? 0.08 : 1;
+    // #427: an Open / Closed sign's board turns when it changes
+    if (role === 'flip' && s.open !== undefined) o.rotation.y = s.open === true ? Math.PI : 0;
+    // #427: a parasol's canopy spreads from along its pole
+    if (role === 'canopy' && s.open !== undefined) foldCanopy(o, s.open === true ? 1 : 0);
     // Soul Actions entry 24: a drawer slides straight out of the front; its closed place is kept for the hand's timeline
     if (role === 'drawer' && s.open !== undefined) { o.userData.restZ = o.position.z; if (s.open === true) o.position.z += DRAWER_TRAVEL; }
     // Soul Actions entry 32: a lock's bolt thrown across into the keeper, the thumb-turn turned across; the key only in the hand
