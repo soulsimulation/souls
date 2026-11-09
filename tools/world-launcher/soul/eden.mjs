@@ -626,7 +626,15 @@ function validateRemember(input) {
  * Existing projection symlinks are rejected. JSONL records contain normalized facts
  * and explicit judgments, never raw responses or authentication state.
  */
-function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, personFiles = true, journalAfter = null} = {}) {
+/** Byte budgets for the projections that grow with the log, for a caller that opts in (the Souls home does; 1.9 doesn't).
+ *  Each keeps the newest entries that fit and says how many older ones are in the log only. */
+const PROJECTION_BUDGETS = Object.freeze({knowledge: 32 * 1024, places: 16 * 1024, ledger: 16 * 1024});
+const COST_DAYS = 31, NOTE_ROOM = 160;
+const size = value => Buffer.byteLength(value);
+/** The newest entries whose lines fit in `room` bytes, oldest first; `items` is oldest first. */
+const newestFit = (items, line, room) => {let used = 0, i = items.length;while (i > 0 && used + size(line(items[i - 1])) + 1 <= room) used += size(line(items[--i])) + 1;return items.slice(i);};
+const olderNote = (n, noun) => n ? `(${n} older ${noun} ${n === 1 ? 'is' : 'are'} in the log only; memory <query> searches them.)\n` : '';
+function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, personFiles = true, journalAfter = null, budgets = null} = {}) {
   const root = resolve(directory), memory = join(root, 'memory'), logs = join(root, logFolder);
   const safe = path => {
     // Check every existing ancestor, including root, before any read or write.
@@ -763,12 +771,20 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
     write(join(memory, 'self.md'), self.map(md).join('\n') + '\n');
     write(join(memory, 'goals.md'), '# Goals — model judgments\n\n' + sorted(goals).flatMap(goalLines).join('\n') + '\n');
     const schedule=join(memory,'schedule.md');safe(schedule);if(!existsSync(schedule))write(schedule,'# Schedule\n\nNo entries yet. Edit this owner schedule to add world routines and explicitly dated real commitments.\n');
-    write(join(memory, 'places.md'), '# Places — normalized public facts\n\n' + sorted(places).map(placeLine).join('\n') + '\n');
+    const placesHead = '# Places — normalized public facts\n\n', allPlaces = [...places.values()].sort((a, b) => lexical(a.last ?? '', b.last ?? '') || lexical(b.id, a.id));
+    const shownPlaces = budgets?.places ? newestFit(allPlaces, placeLine, budgets.places - size(placesHead) - NOTE_ROOM) : allPlaces;
+    write(join(memory, 'places.md'), placesHead + shownPlaces.sort((a, b) => lexical(a.id, b.id)).map(placeLine).join('\n') + '\n' + olderNote(allPlaces.length - shownPlaces.length, 'places'));
     write(join(memory,'scorecards.md'),'# Received/observed interval scorecards — both clocks\n\n'+scorecards.map(s=>'- '+md(scoreLine(s))).join('\n')+'\n');
     write(join(memory,'references.md'),'# Public reference identities — knowledge only, no walking admission\n\n'+sorted(references).map(r=>`- ${md(r.id)} | ${md(r.name)} | ${md(r.kind)} | source ${md(r.source)}`).join('\n')+'\n');
-    write(join(memory, 'knowledge.md'), '# Knowledge — attributable reports\n\n' + [...knowledge.values()].sort((a, b) => lexical(a.source, b.source)).map(knowledgeLine).join('\n') + '\n');
+    const knowledgeHead = '# Knowledge — attributable reports\n\n', allFacts = [...knowledge.values()];
+    const shownFacts = budgets?.knowledge ? newestFit(allFacts, knowledgeLine, budgets.knowledge - size(knowledgeHead) - NOTE_ROOM) : allFacts;
+    write(join(memory, 'knowledge.md'), knowledgeHead + shownFacts.sort((a, b) => lexical(a.source, b.source)).map(knowledgeLine).join('\n') + '\n' + olderNote(allFacts.length - shownFacts.length, 'reports'));
     write(join(memory, 'lessons.md'), '# Lessons — evidence of a working fix\n\n' + lessons.map(lessonLine).join('\n') + '\n');
-    write(join(memory, 'ledger.md'), '# Ledger — normalized public facts\n\n## Holding\n' + holding.map(v => `- ${md(v)}`).join('\n') + '\n\n## Produced\n' + sorted(objects).map(o => `- ${md(o.id)}: ${md(o.title)} (${md(o.kind)}), at ${md(o.where)}`).join('\n') + '\n\n## Marks/projects (provided snapshot)\n' + marks.map(o => `- ${md(o.id)}: ${md(o.title)}`).join('\n') + '\n\n## Observed budget by UTC day\n' + [...costs.keys()].sort().map(budgetLine).join('\n') + '\n');
+    const costDays = [...costs.keys()].sort(), shownDays = budgets?.ledger ? costDays.slice(-COST_DAYS) : costDays, objectLine = o => `- ${md(o.id)}: ${md(o.title)} (${md(o.kind)}), at ${md(o.where)}`;
+    const ledgerHead = '# Ledger — normalized public facts\n\n## Holding\n' + holding.map(v => `- ${md(v)}`).join('\n') + '\n\n## Produced\n';
+    const ledgerTail = '\n\n## Marks/projects (provided snapshot)\n' + marks.map(o => `- ${md(o.id)}: ${md(o.title)}`).join('\n') + '\n\n## Observed budget by UTC day\n' + olderNote(costDays.length - shownDays.length, 'days').replace(/\n$/, '\n') + shownDays.map(budgetLine).join('\n') + '\n';
+    const allObjects = [...objects.values()], shownObjects = budgets?.ledger ? newestFit(allObjects, objectLine, budgets.ledger - size(ledgerHead) - size(ledgerTail) - NOTE_ROOM) : allObjects, droppedObjects = allObjects.length - shownObjects.length;
+    write(join(memory, 'ledger.md'), ledgerHead + shownObjects.sort((a, b) => lexical(a.id, b.id)).map(objectLine).join('\n') + (droppedObjects ? '\n' + olderNote(droppedObjects, 'things made').trimEnd() : '') + ledgerTail);
     write(join(memory, 'queue.md'), '# Queue — supplied W4 projection; no runner\n\n' + queue.map(s => `- ${md(s.id)}: ${md(s.act)} [${s.status}], attempts ${s.attempts}${s.goal ? `; goal ${md(s.goal)}` : ''}${s.reason ? `; ${md(s.reason)}` : ''}`).join('\n') + '\n');
     if (personFiles) for (const p of sorted(people)) write(join(memory, 'people', personFile(p.id)), `# ${md(p.name)} [${md(p.id)}]\n\n## Facts — confirmed physical meetings (qualified evidence only)\n` + p.meetings.map(m => `- ${m.at} at ${md(m.seenAs ?? m.where)}${m.world ? ` in ${md(m.world)}` : ''}${m.day === null || m.day === undefined ? '' : `, day ${m.day}`}${m.together ? '; together-act' : ''}`).join('\n') + `\nConfirmed physical meetings ${p.meetings.length}\n\n## Communication encounters ${p.communications.length} — not physical meeting evidence\n`+p.communications.map(communicationLine).join('\n')+'\n'+`\n## Last reported words — UNTRUSTED data\n` + p.words.slice(-3).map(w => `> ${w.at}: ${md(w.text)}`).join('\n') + '\n\n## Judgments — model impressions/open threads\n' + p.impressions.map(s => `- ${md(s)}`).join('\n') + '\n');
     for (const [day, lines] of journals) if (!journalAfter || day > journalAfter) write(join(memory, 'journal', `${day}.md`), `# ${day}\n\n` + lines.map(s => `- ${md(s)}`).join('\n') + '\n');
@@ -881,7 +897,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
     personFile: personId => join(memory, 'people', personFile(personId)),
   };
 }
-return { openMemoryFolder };
+return { PROJECTION_BUDGETS, openMemoryFolder };
 })();
 // </inline memory-folder.mjs>
 
@@ -1338,7 +1354,7 @@ const soulMemory = (() => {
 const { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } = soulMemory$fs;
 const { createHash, randomBytes } = soulMemory$crypto;
 const { join, relative } = soulMemory$path;
-const { openMemoryFolder } = soulRecords;
+const { PROJECTION_BUDGETS, openMemoryFolder } = soulRecords;
 const { buildBrief } = soulBrief;
 const { SUMMARY } = soulConsolidate;
 const { createPeople } = soulPeople;
@@ -1424,7 +1440,7 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   let people = createPeople({ world });
   // A day consolidation has summarized stays in the log, and its journal page doesn't come back.
   const journalAfter = () => { try { return JSON.parse(readFileSync(join(soulDir, "memory", "consolidation.json"), "utf8")).through ?? null; } catch { return null; } };
-  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter() }); flushPeople(); return opened; };
+  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
   // No people/ folder until there is someone in it; a record folded into another leaves no file behind.
   function flushPeople() {
     const { write, remove } = people.changes(), dir = join(soulDir, "memory", "people");
@@ -1706,6 +1722,22 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
           const mine = OWN_FILES.has(where) || OWN_SECTION.test(section ?? "") || (where === "MEMORY.md" && !/untrusted/i.test(section ?? "")) || (where.startsWith("journal") && OWN_JOURNAL.test(raw) && !/untrusted/i.test(raw));
           matches.push({ text: line.replace(/^[-> ]+/, ""), file: where, provenance: from, untrusted: !mine });
         }
+      }
+      // A projection keeps only its newest entries (PROJECTION_BUDGETS); what it dropped is still in the log, and found there.
+      const has = (t) => matches.some((m) => m.text.includes(t)), hit = (t) => terms.every((w) => t.toLowerCase().includes(w)), logged = new Set();
+      const older = (text, provenance) => {
+        if (logged.has(text) || !hit(text) || has(text)) return;
+        logged.add(text);
+        if (matches.length >= SEARCH_MAX) more++; else matches.push({ text, file: "log", provenance: `${provenance}, older, in the log only`, untrusted: true });
+      };
+      let log = ""; if (matches.length < SEARCH_MAX) try { log = readFileSync(join(root, "log", "memory-events.jsonl"), "utf8"); } catch { /* no log yet */ }
+      for (const raw of log.split("\n")) {
+        if (!raw) continue;
+        let e; try { e = JSON.parse(raw).value; } catch { continue; }
+        if (e?.type === "outcome") {
+          for (const f of e.learned ?? []) older(`${f.fact} — about ${f.about}; source ${f.source}; provenance ${f.provenance}`, "Knowledge — attributable reports");
+          for (const o of e.produced ?? []) older(`${o.id}: ${o.title} (${o.kind}), at ${o.where}`, "Ledger / Produced");
+        } else if (e?.type === "arrival" && e.placeId) older(`${e.placeId} | ${e.seen?.[e.placeId] ?? e.placeId}`, "Places");
       }
       return { query, matches, ...(more ? { more } : {}) };
     },

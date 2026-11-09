@@ -9,7 +9,7 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join, relative } from "node:path";
-import { openMemoryFolder } from "../../edge-skill/memory-folder.mjs";
+import { PROJECTION_BUDGETS, openMemoryFolder } from "../../edge-skill/memory-folder.mjs";
 import { buildBrief } from "./brief.mjs";
 import { SUMMARY } from "./consolidate.mjs";
 import { createPeople } from "./people.mjs";
@@ -87,7 +87,7 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
   let people = createPeople({ world });
   // A day consolidation has summarized stays in the log, and its journal page doesn't come back.
   const journalAfter = () => { try { return JSON.parse(readFileSync(join(soulDir, "memory", "consolidation.json"), "utf8")).through ?? null; } catch { return null; } };
-  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter() }); flushPeople(); return opened; };
+  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
   // No people/ folder until there is someone in it; a record folded into another leaves no file behind.
   function flushPeople() {
     const { write, remove } = people.changes(), dir = join(soulDir, "memory", "people");
@@ -369,6 +369,22 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
           const mine = OWN_FILES.has(where) || OWN_SECTION.test(section ?? "") || (where === "MEMORY.md" && !/untrusted/i.test(section ?? "")) || (where.startsWith("journal") && OWN_JOURNAL.test(raw) && !/untrusted/i.test(raw));
           matches.push({ text: line.replace(/^[-> ]+/, ""), file: where, provenance: from, untrusted: !mine });
         }
+      }
+      // A projection keeps only its newest entries (PROJECTION_BUDGETS); what it dropped is still in the log, and found there.
+      const has = (t) => matches.some((m) => m.text.includes(t)), hit = (t) => terms.every((w) => t.toLowerCase().includes(w)), logged = new Set();
+      const older = (text, provenance) => {
+        if (logged.has(text) || !hit(text) || has(text)) return;
+        logged.add(text);
+        if (matches.length >= SEARCH_MAX) more++; else matches.push({ text, file: "log", provenance: `${provenance}, older, in the log only`, untrusted: true });
+      };
+      let log = ""; if (matches.length < SEARCH_MAX) try { log = readFileSync(join(root, "log", "memory-events.jsonl"), "utf8"); } catch { /* no log yet */ }
+      for (const raw of log.split("\n")) {
+        if (!raw) continue;
+        let e; try { e = JSON.parse(raw).value; } catch { continue; }
+        if (e?.type === "outcome") {
+          for (const f of e.learned ?? []) older(`${f.fact} — about ${f.about}; source ${f.source}; provenance ${f.provenance}`, "Knowledge — attributable reports");
+          for (const o of e.produced ?? []) older(`${o.id}: ${o.title} (${o.kind}), at ${o.where}`, "Ledger / Produced");
+        } else if (e?.type === "arrival" && e.placeId) older(`${e.placeId} | ${e.seen?.[e.placeId] ?? e.placeId}`, "Places");
       }
       return { query, matches, ...(more ? { more } : {}) };
     },
