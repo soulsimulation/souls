@@ -84,6 +84,19 @@ TODO, or already ran in the baseline, the id stays under `removed` with `rename.
 naming it, and the gate still blocks. Several old ids may name the same new replacement (tests merged into one). Anything unlisted blocks as before. The receipt lists
 `renamed` and records `renamesSha256` beside `quarantineSha256`.
 
+**Declared in the PR (#1462).** CI's `repo` job runs `.github/scripts/gate-renames.mjs` on every pull request and merge
+group. It reads the literal titles of `test()`, `it()`, `describe()`, `suite()` and `t.test()` in each changed test file
+the gate runs (the step follows `one-validation.sh`), at the merge base and at the head. A title that is gone from its
+step fails the check until `renames.json` at the head has an entry for that step whose `from` ends with it (a
+V3-packages `from` starts with its package). A suite title that is gone needs entries for the tests under it. A test
+that newly gets an unconditional `skip` or `todo` fails until `quarantine.json` lists it. Titles built at run time are
+listed as unchecked; when a step's changed files build titles at run time at the head (a table loop that replaced
+literal tests), the literal titles gone from the base are listed as unchecked too, since they may still run under the
+same name. Replacement titles that no changed file declares are noted. Known limits: a test moved from one `describe`
+to another keeps its last segment, so the check passes it and the gate reports the changed id at release; a regex
+literal containing a quote or backtick can mislead the reader for that file. To check a branch locally:
+`node .github/scripts/gate-renames.mjs --base origin/main`. The gate's own comparison stays the backstop.
+
 Add an entry in the PR that renames or replaces the test, or when a gate reports the removal, citing the PR that made
 it. An entry whose `from` still runs has no effect, and because a replacement must be absent from the baseline, an old
 entry cannot later excuse deleting a test that happens to reuse its `from` name. `renames.json` executes nowhere: only
