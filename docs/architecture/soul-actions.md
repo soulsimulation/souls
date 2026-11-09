@@ -18,6 +18,12 @@ context-size checks below), regression runs, and an uncut real-client recording 
   `put-down:here`; pick it up again to rearrange it. The ground placement is in front of the body and may turn toward clear ground,
   rather than setting an arbitrary coordinate. Each entity keeps its actual saved position. There is no preset
   composition, stacking rule, special land-art action or new placement authority.
+- **Campsite table setup ([#1605](https://github.com/soulsimulation/souls/issues/1605)).** `core-table@2` is a solo,
+  two-hand carry revision of the fixed table. Carry it empty to a named clear place, then use the existing `put-on`
+  and `pick-up` offers to stage and retrieve real bowls, lanterns and other fitting items on its relocated surface.
+  Native support and persistent parent/slot placement follow the same table identity. Unload before moving it again:
+  the native fixture mover refuses a loaded table (`move_fixture.contents`). It does not fold, and the fixed `@1`
+  table and the heavier crew work table are unchanged.
 - **Storage with and without a door ([#435](https://github.com/soulsimulation/souls/issues/435)).** A container with an
   `inside` (entry 42) is open only while its door or drawer is, if its def declares an `open` state. One that declares
   none has no door: `core-swap-shelf@1` is always open, so what is on it is seen nearby and taken without an open step,
