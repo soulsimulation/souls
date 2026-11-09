@@ -121,3 +121,21 @@ test('/3 gate-cycle yield: make-way counts only when its native walk runs; with 
  e.m={...e.m,makeWay:real};assert.deepEqual(e.runtime.violations,[]);
  // (a real step aside with room is the pinned four-swims set in apps/server/src/edge-ledger-swim.test.ts)
 });
+for(const after of [0,2,40])test(`/3: a free swim past the cap is never cut off (cap reached ${after} steps into the walk)`,()=>{
+ const e=setup(),p=e.perform({actor:'h_actor',label:'clear way past the cap',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);
+ for(let i=0;i<after;i++)e.step();const prog=(e as any).programs.get(p.id);prog.waterWait={step:prog.index<0?0:prog.index,since:e.world.tick-3600,attempts:1};
+ const rt=(e as any).rt,cancels:string[]=[],cancel=rt.cancel.bind(rt);rt.cancel=(id:string,why:any)=>{cancels.push(why?.code);return cancel(id,why);};
+ const initial=[...e.world.entities.h_actor.pose.p];assert.equal(finish(e,p.id).kind,'completed');assert.ok(!cancels.includes('shore.wait-capped'),JSON.stringify(cancels));
+ assert.ok(Math.hypot(e.world.entities.h_actor.pose.p[0]-initial[0],e.world.entities.h_actor.pose.p[2]-initial[2])>=4,'it actually swam its lap');
+});
+test('/3: a walk held past the cap with no body named is still stopped, and says it was held',()=>{
+ const e=setup(),stationary=structuredClone(e.world.entities.h_actor.human),p=e.perform({actor:'h_actor',label:'held, nobody named',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);
+ e.step();e.step();const eng=e as any,prog=eng.programs.get(p.id);assert.ok(prog?.action);lateHuman(e,'h_crossing',stationary);
+ // nothing names a body: no published people wait, no human subjects anywhere in the record tree
+ eng.sharedWaterBlockingAction=()=>undefined;eng.sharedWaterSubjectsV3=()=>[];
+ prog.waterWait={step:prog.index,since:e.world.tick-3600,attempts:1};
+ const rt=eng.rt,cancels:string[]=[],cancel=rt.cancel.bind(rt);rt.cancel=(id:string,why:any)=>{cancels.push(why?.code);return cancel(id,why);};
+ const start=e.world.tick;let terminal:any;for(let i=0;i<400&&!terminal;i++){const r=e.step();terminal=r.programs.find(x=>x.id===p.id&&x.kind!=='step');assert.deepEqual(e.runtime.violations,[]);}
+ assert.ok(cancels.includes('shore.wait-capped'),JSON.stringify(cancels));assert.equal(terminal?.kind,'failed',JSON.stringify(terminal));assert.equal(terminal.code,'shore.occupied-route');
+ assert.match(terminal.message,/is held on the way into the water; waited the 180 s limit/);assert.ok(e.world.tick-start<=400);
+});

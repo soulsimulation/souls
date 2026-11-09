@@ -136,7 +136,7 @@ type Prog = {
   blockedSince?: number;
   quietHeldSince?: number;
   spreadWaits?: number;
-  waterWait?: {step: number; since: number; attempts: number; note?: string; capped?: true};
+  waterWait?: {step: number; since: number; attempts: number; note?: string; capped?: true; headway?: {x: number; z: number; tick: number}};
   walkStopping?: Diag;
   waterStopRetry?: Diag;
   walkResume?: true;
@@ -1105,9 +1105,11 @@ export class MarsEngine implements Engine {
    * It also keeps the 180 s cap exact for a walk resubmitted just before it (`shore.wait-capped`). */
   private sharedWaterCycleYieldV3(p:Prog,rec:ActionRecord):boolean{
     const step=p.steps[p.index];if(step?.params?.spreadWaitPolicy!==SHARED_WATER_WAIT_POLICY_V3||!this.sharedWaterStep(step)||!this.rt.isActive(rec.id))return false;
-    // The hard cap holds for a walk resubmitted just before it, too: once past the cap, a walk that is not moving stops
-    // whatever holds it, and the step fails shore.occupied-route naming the body it waited for (when one is named).
-    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&(this.ents[p.actor]?.human?.speed??0)<0.02){
+    // The hard cap holds for a walk resubmitted just before it, too: past the cap, a walk that is really held stops and
+    // the step fails shore.occupied-route naming the body it waited for (when one is named). Held means its record tree
+    // is blocked, it names a people wait or body obstruction, or it made under 0.5 m of headway over the last 2 s. A swim
+    // that is moving freely is never cut off (a single tick's speed reads 0 on a start, a turn or an arrival).
+    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&this.sharedWaterHeldV3(p,rec)){
       const blocker=this.sharedWaterBlockingAction(p,rec)?.subjects?.find(id=>id!==p.actor&&!!this.ents[id]?.human)??this.sharedWaterSubjectsV3(rec).find(id=>id!==p.actor&&!!this.ents[id]?.human);
       const water:Diag={code:'shore.occupied-route',message:blocker?`${p.actor} must wait for ${blocker}`:`${p.actor} is held on the way into the water`,subjects:[p.actor,...(blocker?[blocker]:[])]};
       p.waterWait.capped=true;this.rt.cancel(rec.id,{code:'shore.wait-capped',message:'the shore wait reached its 180 s cap',subjects:water.subjects});p.walkStopping=water;p.waterStopRetry=water;return true;}
@@ -1118,6 +1120,15 @@ export class MarsEngine implements Engine {
     this.rt.cancel(rec.id,why);
     p.walkStopping=why;p.waterStopRetry={code:'shore.occupied-route',message:`${p.actor} must wait for ${others[0]}`,subjects:[p.actor,...others],details:{cycleYield:true}};
     return true;
+  }
+  /** Past the cap only: is this /3 walk held? Headway is sampled every 2 s from the first over-cap tick (state in waterWait). */
+  private sharedWaterHeldV3(p:Prog,rec:ActionRecord):boolean{
+    if(this.sharedWaterTreeV3(rec).some(r=>r.status==='blocked')||this.sharedWaterBlockingAction(p,rec))return true;
+    const w=p.waterWait!,at=this.pos(p.actor),tick=this.rt.tick;if(!at)return false;
+    if(!w.headway){w.headway={x:at[0],z:at[1],tick};return false;}
+    if(tick-w.headway.tick<2*TPS)return false;
+    if(Math.hypot(at[0]-w.headway.x,at[1]-w.headway.z)<0.5)return true;
+    w.headway={x:at[0],z:at[1],tick};return false;
   }
   /** A /3 swim's live record and its active descendants (connected children carry the native waits). */
   private sharedWaterTreeV3(rec:ActionRecord):ActionRecord[]{
