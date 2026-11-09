@@ -732,7 +732,7 @@ export class MarsEngine implements Engine {
     const fin = (n: unknown) => typeof n === 'number' && Number.isFinite(n), whole = Array.isArray(e.pose?.p) && e.pose.p.length === 3 && e.pose.p.every(fin) && fin(e.pose.yaw ?? 0);
     let to = pose;
     if (!whole && !to) {
-      const radius = e.body?.radius ?? HUMAN_RADIUS, [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0], spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius) ?? [ax, az]; } catch { return [ax, az] as [number, number]; } finally { this.ents[id] = e; this.tableCacheV1 = null; } })();   // the search reads every other body, not this one
+      const radius = e.body?.radius ?? HUMAN_RADIUS, [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0], spot = (() => { try { return this.freeStandingNearV1([ax, az], radius, undefined, { skip: id }) ?? [ax, az]; } catch { return [ax, az] as [number, number]; } })();   // the search reads every other body, not this one: skipped by id, never taken out of the table (#1523: that reorders the live table, and its replay never searches)
       const spatial = this.rt.services.spatial as Spatial, y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, spot[0], spot[1])) : 0;
       to = { p: [spot[0], y, spot[1]], yaw: 0, level: 0 };
     }
@@ -1906,11 +1906,13 @@ export class MarsEngine implements Engine {
   }
   /** birth-near/1: the nearest ground point (rings of 0.25 m out to 12 m) with a clear standing disc, nobody within
    * 0.8 m and no deep water. Walkability from there is proved by the caller's own physical walk, never assumed. */
-  private freeStandingNearV1(at: [number, number], radius: number, who?: any): [number, number] | null {
+  /** `opts` (#1521): `skip` a body's own place without taking it out of the table (a plan must not reorder it), and keep clear of
+   *  `also`, spots already promised in the same plan. Without them, as before. */
+  private freeStandingNearV1(at: [number, number], radius: number, who?: any, opts?: { skip?: string; also?: [number, number][] }): [number, number] | null {
     if (!Array.isArray(at) || at.length !== 2 || !at.every(Number.isFinite)) return null;
     const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
     const f = this.rt.world.groundV1 ? spatial.ground?.field : undefined;
-    const people = Object.values(this.ents).filter((e: any) => e.kind === 'human' && (e.human?.level ?? 0) === 0).map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]), bodies = who ? this.guardBodiesV1() : [];
+    const people = [...Object.values(this.ents).filter((e: any) => e.kind === 'human' && (e.human?.level ?? 0) === 0 && e.id !== opts?.skip).map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]), ...(opts?.also ?? [])], bodies = who ? this.guardBodiesV1() : [];
     for (let ring = 0; ring <= 48; ring++) { const n = Math.max(1, ring * 8); for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2, x = r3(at[0] + dcos(ang) * ring * 0.25), z = r3(at[1] + dsin(ang) * ring * 0.25);
       const grid = spatial.levelAt(0, [x, z]);
