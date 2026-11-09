@@ -1,7 +1,7 @@
 // release-probe.mjs against a loopback origin, in real Chrome (#1414). Not in CI's tools/world-launcher/*.test.mjs glob:
 // it needs Google Chrome (the probe launches channel 'chrome'). Run: node --test tools/world-launcher/deploy/release-probe.test.mjs
 // The origin answers 503 for /w/eden/ until it is "up", then a page whose world socket welcome names a build: the state
-// a release that fixes a halted world starts from (the 4.16.1 ship). RELEASE_PROBE=<file> runs another copy of the probe.
+// a release that fixes a halted world starts from (the 0.120.1 ship). RELEASE_PROBE=<file> runs another copy of the probe.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';

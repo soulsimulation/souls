@@ -17,7 +17,7 @@ Required outcomes are the coordination lifecycle, authentic construction recover
 six activity families below, and the interactive materials/accessories those examples require. Prefer adapting
 preserved native machinery over reconstructing it from generic pickup actions.
 
-The November 1 research used release 4.09 (`5eebdc33`). Planning intake checked main `ecb63f57` and release 4.12
+The November 1 research used release 0.113 (`5eebdc33`). Planning intake checked main `ecb63f57` and release 0.116
 (`fa695018`). Twelve relevant source files were byte-identical to the research baseline, including the carry
 bridge, together ledger, catalogue adapter, camp construction/disassembly, runtime snapshot, sequence schema,
 campus generators, native catalogue, Lab registry and authored rack definitions. This is scoped source evidence,

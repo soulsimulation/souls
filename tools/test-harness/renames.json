@@ -111,6 +111,20 @@
       "to": "renames: the committed list validates, and is left out of the suite cache key, unlike quarantine.json (\\#1461)",
       "reason": "Same test, inverted on purpose: renames.json now stays out of the suite-tree fingerprint (#1461)",
       "pr": "#1464"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "routes the coarse search already finds are byte-identical to 3.59.4 (paged ground)",
+      "to": "routes the coarse search already finds are byte-identical to 0.64.4 (paged ground)",
+      "reason": "Release renumbered to 0.x (#1500): 3.59.4 is now 0.64.4; same test, same golden hashes",
+      "pr": "#1500"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "routes the coarse search already finds are byte-identical to 3.59.4 (unpaged ground)",
+      "to": "routes the coarse search already finds are byte-identical to 0.64.4 (unpaged ground)",
+      "reason": "Release renumbered to 0.x (#1500): 3.59.4 is now 0.64.4; same test, same golden hashes",
+      "pr": "#1500"
     }
   ]
 }
