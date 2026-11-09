@@ -129,10 +129,11 @@ export class DeltaTap {
   }
   /** engine static epoch | ledger static version: the static layer depends on nothing else. Costs two spatial syncs
    *  (~0.5 ms each on Eden 2026 outside the engine's own pass), so the tick reads it only when staticCheapKey moved. */
-  epochNow(): string {return `${this.spatialId()}:${this.engine().staticEpochV1?.() ?? 0}|${this.L.staticVersion()}`;}
+  epochNow(): string {return `${this.engine().staticEpochV1?.() ?? 0}|${this.L.staticVersion()}`;}
   /** #1560: a process-unique number for the spatial service in use. A restored engine (WorldHost.restoreBody: a decision
    *  rollback, a recovery rewind, a held head) brings a new service that counts its epochs from the snapshot's, so the
-   *  same epoch can name a different static world: every key the replica rebuilds on includes this. */
+   *  same epoch can name a different static world: the scene key the replica rebuilds its spatial service on includes this.
+   *  (The static layer needs no such part: a swapped engine restarts the tap, and every re-init sends the layer whole.) */
   private spatialId(): number {const sp = this.spatial(); if (!sp) return 0; let id = SPATIALS.get(sp) ?? 0; if (!id) SPATIALS.set(sp, id = ++spatialsN); return id;}
   /** B-spatial seam: the spatial service and the engine's connectivity, read without a sync (the step left them current) */
   private spatial() {return (this.engine() as unknown as {rt?: {services?: {spatial?: {epoch?: number; pageRectsV1?(): unknown}}}}).rt?.services?.spatial;}

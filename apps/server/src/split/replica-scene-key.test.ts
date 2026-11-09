@@ -48,4 +48,7 @@ test('#1560: a rollback then another static change at the same epoch sends a new
   assert.equal(blocked(replica, -15), true, 'the replica reads solid B');
   assert.equal(blocked(replica, -15), blocked(eng(), -15), 'as main reads it');
   assert.notEqual(RW.R.sceneKey, keyA, 'a new scene key at the same epoch');
+  // the static layer (the named solids, places and spots the read code lists) is resent too: its key names the service
+  const solids = () => ((RW.R.static as {solids?: {id: string}[]} | null)?.solids ?? []).map(x => x.id);
+  assert.deepEqual(solids(), ['nav-solid:solid-b'], 'the replica\'s static layer lists solid B, not solid A');
 });
