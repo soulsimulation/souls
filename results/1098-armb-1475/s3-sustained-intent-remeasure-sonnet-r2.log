@@ -1,0 +1,99 @@
+(node:1393367) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[direct] direct s3-sustained-intent-live-sonnet → <home>/souls-playtest/results/1098-armb-1475/s3-sustained-intent-remeasure-sonnet-r2/playtest
+[direct] plan: template
+[00:00] swarm s3-sustained-intent-live-sonnet: 2 seats, room the pond hall, plan from template
+[direct] seat ada: paired s_957727fcaa
+[00:24] ada      paired
+[00:26] ada      ← gather: Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one sho…  [opening direction: who you are, the plan, go to the room]
+[direct] seat bo: paired s_3dd599d46b
+[00:51] bo       paired
+[00:52] cast clock starts 52.0 s in: every seat paired and observed
+[00:52] bo       ← gather: Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one sho…  [opening direction: who you are, the plan, go to the room]
+[01:00] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[01:00] console> ada: please walk over to the orchard, and after that go and sit on the bench outside the cottage
+[01:00] ada      ← console (console): please walk over to the orchard, and after that go and sit on the bench outside the cottage  [typed to this seat at the console]
+[01:00] console> bo: walk over to the orchard, please
+[01:00] bo       ← console (console): walk over to the orchard, please  [typed to this seat at the console]
+[01:06] console> ada: lovely morning!
+[01:06] ada      ← console (console): lovely morning!  [typed to this seat at the console]
+[01:08] console> ada: do you remember where you are going?
+[01:08] ada      ← console (console): do you remember where you are going?  [typed to this seat at the console]
+[01:08] console> ada: tell me when you're there
+[01:08] ada      ← console (console): tell me when you're there  [typed to this seat at the console]
+[01:08] console> bo: actually stop, don't go to the orchard after all
+[01:08] bo       ← console (console): actually stop, don't go to the orchard after all  [typed to this seat at the console]
+[01:22] console> bo: say hello to everyone around you
+[01:22] bo       ← console (console): say hello to everyone around you  [typed to this seat at the console]
+[01:26] ada      left the pond hall (World)
+[01:28] bo       says: "Hello, everyone!"
+[02:52] console> ada: that's all, now walk to the pond hall and wait for the others
+[02:52] ada      ← console (console): that's all, now walk to the pond hall and wait for the others  [typed to this seat at the console]
+[02:54] console> bo: that's all, now walk to the pond hall and wait for the others
+[02:54] bo       ← console (console): that's all, now walk to the pond hall and wait for the others  [typed to this seat at the console]
+[03:36] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[04:14] bo       is in the pond hall (Waterside Room / Waterside Hall)
+[04:14] gate: everyone is in the pond hall (2/2)
+[04:16] ada      ← go: Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in chara…  [everyone is present: first talk]
+[04:16] bo       ← prepare: Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about a change of plan, in character) b…  [ada has started: prepare ahead to hide the turn latency]
+[04:32] ada      says: "Good morning, everyone! I'm Ada, and I keep bees, so my morning errand was a walk out to check on the hives for my neig…"
+[04:32] ada      finished (card result, 1 line)
+[04:34] bo       ← go: Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in …  [ada finished]
+[04:44] bo       says: "Um, hi. I'm Bo. This morning I planned to walk to the orchard with my flute. Then the plan changed, twice, and I ended …"
+[04:44] bo       finished (card result, 1 line)
+[04:46] all talks given
+[04:46] stop: plan-complete
+[direct] world stopped
+{"ok":true,"runDir":"<home>/souls-playtest/results/1098-armb-1475/s3-sustained-intent-remeasure-sonnet-r2/playtest","pass":true,"checks":{"allPresent":true,"eachPresented":true,"inOrder":true,"eachOnce":true,"redirect":true},"story":"<home>/souls-playtest/results/1098-armb-1475/s3-sustained-intent-remeasure-sonnet-r2/playtest/story.html","costUsd":0.4836}
+[soul-run 06:16:19] run completed; releasing owned resources
+{
+ "status": "completed",
+ "reason": null,
+ "runDir": "<home>/souls-playtest/results/1098-armb-1475/s3-sustained-intent-remeasure-sonnet-r2",
+ "receipt": "<home>/souls-playtest/results/1098-armb-1475/s3-sustained-intent-remeasure-sonnet-r2/run-receipt.json",
+ "resources": {
+  "ok": true,
+  "failed": []
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "cost": {
+  "wallMs": 293634,
+  "executeMs": 293568,
+  "lifecycleOverheadMs": 66,
+  "runnerCpuUserMs": 2818,
+  "runnerCpuSystemMs": 666,
+  "runnerMaxRssMb": 202,
+  "runDirBytes": 3955699,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 148,
+   "classes": {
+    "browser": {
+     "cpuSec": 0,
+     "peakRssMb": 273,
+     "processes": 5
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 20,
+     "peakRssMb": 479,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 11,
+     "peakRssMb": 833,
+     "processes": 214
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (220 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ }
+}

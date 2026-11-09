@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 68,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T06:12:37.392Z",
+  "mono": 71223,
+  "elapsedSec": 68,
+  "n": 7,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "tell me when you're there",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_d6998356-75c6-427d-a852-dc7958ea427f",
+  "requestId": "ada-005"
+ }
+}

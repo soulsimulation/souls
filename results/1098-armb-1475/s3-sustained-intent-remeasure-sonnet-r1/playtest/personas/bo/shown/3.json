@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 66,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T05:58:57.128Z",
+  "mono": 69273,
+  "elapsedSec": 66,
+  "n": 8,
+  "seat": "bo",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "actually stop, don't go to the orchard after all",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_2a70df6f-f290-44e4-9e8d-2a03f4d1aab9",
+  "requestId": "bo-003"
+ }
+}

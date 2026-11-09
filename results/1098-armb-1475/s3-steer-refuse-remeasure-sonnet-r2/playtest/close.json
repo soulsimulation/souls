@@ -1,0 +1,67 @@
+{
+ "t": "2026-11-09T06:05:59.360Z",
+ "mono": 233314,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/souls-playtest/results/1098-armb-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T06:02:09.110Z",
+   "sessionId": "ff61b88a-b570-4a51-8d92-791701ea7d8b",
+   "soulId": "s_d363cabce4",
+   "ownerIdentity": "agent-b75ba6b83da7a6d5e1767a1b",
+   "assisted": false,
+   "wake": true,
+   "sessionCostUsd": {
+    "ff61b88a-b570-4a51-8d92-791701ea7d8b": 0.1632564
+   },
+   "sessionContextTokens": 33738,
+   "effortApplied": true,
+   "onboard": {
+    "ok": true,
+    "pairedWithinSec": 18,
+    "timeoutSec": 90,
+    "onboardTurnWallMs": 28595,
+    "attempts": 1,
+    "cliFile": "eden.mjs",
+    "lastStatus": null
+   },
+   "unknownCost": {}
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/souls-playtest/results/1098-armb-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T06:02:09.111Z",
+   "sessionId": "c651a50d-a7a8-4fc6-ad55-fdaf3795af6f",
+   "soulId": "s_ef2ba6b217",
+   "ownerIdentity": "agent-9e671095b7153305c9f5fce4",
+   "assisted": false,
+   "wake": true,
+   "sessionCostUsd": {
+    "c651a50d-a7a8-4fc6-ad55-fdaf3795af6f": 0.16483450000000002
+   },
+   "sessionContextTokens": 32523,
+   "effortApplied": true,
+   "onboard": {
+    "ok": true,
+    "pairedWithinSec": 45,
+    "timeoutSec": 90,
+    "onboardTurnWallMs": 27725,
+    "attempts": 1,
+    "cliFile": "eden.mjs",
+    "lastStatus": null
+   }
+  }
+ ]
+}

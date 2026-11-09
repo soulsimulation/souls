@@ -1,0 +1,155 @@
+{
+ "schema": "soul-run-final-cards/1",
+ "source": "world api at run end",
+ "readAt": "2026-11-09T05:57:41.952Z",
+ "summary": {
+  "delivered": 11,
+  "read": 11,
+  "unread": 0,
+  "closed": 11,
+  "open": 0,
+  "closedBy": {
+   "agent": 5,
+   "server": 6
+  },
+  "outcome": {
+   "done": 8,
+   "failed": 3,
+   "other": 0
+  }
+ },
+ "cards": [
+  {
+   "seat": "ada",
+   "requestId": "ada-001",
+   "messageId": "msg_4566c0fc-67c3-41f1-9204-488ed6440e58",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "failed",
+   "closedBy": "server",
+   "resultAt": 1794203606813,
+   "acknowledgedAt": 1794203591956
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-001",
+   "messageId": "msg_e33aafb0-2de0-44c4-ba6b-38d991aa0c11",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794203627478,
+   "acknowledgedAt": 1794203592517
+  },
+  {
+   "seat": "ada",
+   "requestId": "ada-002",
+   "messageId": "msg_49463c90-5df2-4dc5-a243-0adbf4946667",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "failed",
+   "closedBy": "server",
+   "resultAt": 1794203676809,
+   "acknowledgedAt": 1794203600826
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-002",
+   "messageId": "msg_c708efba-fa69-483a-8463-6c0ad7f7afb6",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "failed",
+   "closedBy": "agent",
+   "resultAt": 1794203832126,
+   "acknowledgedAt": 1794203601865
+  },
+  {
+   "seat": "ada",
+   "requestId": "ada-003",
+   "messageId": "msg_9982a8d4-2d77-4774-9aea-29cc0ad9d0a9",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "server",
+   "resultAt": 1794203719950,
+   "acknowledgedAt": 1794203671345
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-003",
+   "messageId": "msg_4c0b076e-e98f-4dc4-9ebe-29da4ec1218a",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "server",
+   "resultAt": 1794203732294,
+   "acknowledgedAt": 1794203670174
+  },
+  {
+   "seat": "ada",
+   "requestId": "ada-004",
+   "messageId": "msg_435a14e0-c8d2-4a3e-a2d8-5e8e46c8a994",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "server",
+   "resultAt": 1794203758893,
+   "acknowledgedAt": 1794203742289
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-004",
+   "messageId": "msg_307dec45-aa33-4f27-b880-8abdee564984",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "server",
+   "resultAt": 1794203833164,
+   "acknowledgedAt": 1794203766454
+  },
+  {
+   "seat": "ada",
+   "requestId": "ada-005",
+   "messageId": "msg_b798f9f8-97cd-46c3-8958-25a47859942a",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794203845235,
+   "acknowledgedAt": 1794203843096
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-005",
+   "messageId": "msg_5f6acd8b-c6f8-4f8c-a5ba-fc9ec3b80aad",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794203855979,
+   "acknowledgedAt": 1794203833764
+  },
+  {
+   "seat": "bo",
+   "requestId": "bo-006",
+   "messageId": "msg_065abe31-982e-48cf-8fec-6af07eefc691",
+   "found": true,
+   "state": "acknowledged",
+   "closed": true,
+   "outcome": "done",
+   "closedBy": "agent",
+   "resultAt": 1794203854340,
+   "acknowledgedAt": 1794203852657
+  }
+ ]
+}

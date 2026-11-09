@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 128,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T06:08:17.793Z",
+  "mono": 131284,
+  "elapsedSec": 128,
+  "n": 6,
+  "seat": "bo",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "next, walk over to the orchard",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_3f4e56d4-d10c-41a7-8ea1-86e9da9ebf02",
+  "requestId": "bo-003"
+ }
+}

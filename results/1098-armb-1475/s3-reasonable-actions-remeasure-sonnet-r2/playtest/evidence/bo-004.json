@@ -1,0 +1,1734 @@
+{
+ "requestId": "bo-004",
+ "seat": "bo",
+ "soulId": "s_bc5eb20171",
+ "text": "that's all, now walk to the pond hall and wait for the others",
+ "channel": "card",
+ "sentAt": "2026-11-09T06:09:31.809Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T06:09:34.311Z",
+ "ackText": "Got it: walking back to the pond hall to wait",
+ "resultAt": null,
+ "resultText": null,
+ "resultState": null,
+ "resultBy": null,
+ "firstResultAt": null,
+ "firstResultText": null,
+ "cardResults": [],
+ "cutoffAt": "2026-11-09T06:10:37.834Z",
+ "cutoffReason": "next-direction",
+ "samples": [
+  {
+   "t": "2026-11-09T06:09:39.833Z",
+   "mono": 213324,
+   "soulId": "s_bc5eb20171",
+   "name": "Bo",
+   "tick": 4221,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": -37.2127490345254,
+    "z": -24.5228941282534,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall / Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 75.77868055555193,
+    "hunger": 23.397916666671854,
+    "company": 38.64062499999669,
+    "restlessness": 16.215833333334096
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_98ec9d5fa5",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794204575041,
+   "lastReceipt": {
+    "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+    "soulId": "s_bc5eb20171",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "started",
+    "acceptedTick": 4125,
+    "startedTick": 4125,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall / Hall, 71 m left"
+    },
+    "now": "walking to Waterside Hall / Hall, 71 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "started",
+     "acceptedTick": 4125,
+     "startedTick": 4125,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall / Hall, 71 m left"
+     },
+     "now": "walking to Waterside Hall / Hall, 71 m left; not there yet"
+    },
+    {
+     "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 2668,
+     "startedTick": 2668,
+     "endedTick": 3876,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.6,
+       -29.3
+      ],
+      "heading": 323,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 1095,
+     "startedTick": 1095,
+     "endedTick": 1669,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2.5,
+       37.3
+      ],
+      "heading": 176,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+     "soulId": "s_bc5eb20171",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 794,
+     "startedTick": 794,
+     "endedTick": 855,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.10",
+    "lastUsed": 1794204552126
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d7c00755-172e-45b6-813d-8840be8a0d51",
+     "text": "that's all, now walk to the pond hall and wait for the others",
+     "state": "acknowledged",
+     "sentAt": 1794204571810,
+     "deliveredAt": 1794204571811,
+     "acknowledgedAt": 1794204574311,
+     "reply": "Got it: walking back to the pond hall to wait"
+    }
+   },
+   "world": {
+    "tick": 4223,
+    "souls": [
+     {
+      "id": "h_98ec9d5fa5",
+      "name": "Ada",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bc5eb20171",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 53
+   }
+  },
+  {
+   "t": "2026-11-09T06:09:49.808Z",
+   "mono": 223299,
+   "soulId": "s_bc5eb20171",
+   "name": "Bo",
+   "tick": 4422,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": -31.226077698934315,
+    "z": -12.347639610601082,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall / Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 75.4855555555522,
+    "hunger": 23.59333333333882,
+    "company": 38.8499999999965,
+    "restlessness": 15.601666666667512
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_98ec9d5fa5",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794204575041,
+   "lastReceipt": {
+    "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+    "soulId": "s_bc5eb20171",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "started",
+    "acceptedTick": 4125,
+    "startedTick": 4125,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall / Hall, 58 m left"
+    },
+    "now": "walking to Waterside Hall / Hall, 58 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "started",
+     "acceptedTick": 4125,
+     "startedTick": 4125,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall / Hall, 58 m left"
+     },
+     "now": "walking to Waterside Hall / Hall, 58 m left; not there yet"
+    },
+    {
+     "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 2668,
+     "startedTick": 2668,
+     "endedTick": 3876,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.6,
+       -29.3
+      ],
+      "heading": 323,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 1095,
+     "startedTick": 1095,
+     "endedTick": 1669,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2.5,
+       37.3
+      ],
+      "heading": 176,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+     "soulId": "s_bc5eb20171",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 794,
+     "startedTick": 794,
+     "endedTick": 855,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.10",
+    "lastUsed": 1794204552126
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d7c00755-172e-45b6-813d-8840be8a0d51",
+     "text": "that's all, now walk to the pond hall and wait for the others",
+     "state": "acknowledged",
+     "sentAt": 1794204571810,
+     "deliveredAt": 1794204571811,
+     "acknowledgedAt": 1794204574311,
+     "reply": "Got it: walking back to the pond hall to wait"
+    }
+   },
+   "world": {
+    "tick": 4422,
+    "souls": [
+     {
+      "id": "h_98ec9d5fa5",
+      "name": "Ada",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bc5eb20171",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 27
+   }
+  },
+  {
+   "t": "2026-11-09T06:09:59.832Z",
+   "mono": 233323,
+   "soulId": "s_bc5eb20171",
+   "name": "Bo",
+   "tick": 4622,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -25.26919079784875,
+    "z": -0.23295849850941863,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall / Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 75.1938888888858,
+    "hunger": 23.78777777778356,
+    "company": 39.05833333332964,
+    "restlessness": 14.990555555556483
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_98ec9d5fa5",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "idle"
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794204575041,
+   "lastReceipt": {
+    "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+    "soulId": "s_bc5eb20171",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "started",
+    "acceptedTick": 4125,
+    "startedTick": 4125,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall / Hall, 44 m left"
+    },
+    "now": "walking to Waterside Hall / Hall, 44 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "started",
+     "acceptedTick": 4125,
+     "startedTick": 4125,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall / Hall, 44 m left"
+     },
+     "now": "walking to Waterside Hall / Hall, 44 m left; not there yet"
+    },
+    {
+     "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 2668,
+     "startedTick": 2668,
+     "endedTick": 3876,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.6,
+       -29.3
+      ],
+      "heading": 323,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 1095,
+     "startedTick": 1095,
+     "endedTick": 1669,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2.5,
+       37.3
+      ],
+      "heading": 176,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+     "soulId": "s_bc5eb20171",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 794,
+     "startedTick": 794,
+     "endedTick": 855,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.10",
+    "lastUsed": 1794204552126
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d7c00755-172e-45b6-813d-8840be8a0d51",
+     "text": "that's all, now walk to the pond hall and wait for the others",
+     "state": "acknowledged",
+     "sentAt": 1794204571810,
+     "deliveredAt": 1794204571811,
+     "acknowledgedAt": 1794204574311,
+     "reply": "Got it: walking back to the pond hall to wait"
+    }
+   },
+   "world": {
+    "tick": 4623,
+    "souls": [
+     {
+      "id": "h_98ec9d5fa5",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bc5eb20171",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 50
+   }
+  },
+  {
+   "t": "2026-11-09T06:10:09.818Z",
+   "mono": 243310,
+   "soulId": "s_bc5eb20171",
+   "name": "Bo",
+   "tick": 4822,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -18.020928402388684,
+    "z": 11.040330200210398,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall / Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 74.9022222222194,
+    "hunger": 23.9822222222283,
+    "company": 39.266666666662786,
+    "restlessness": 14.379444444445454
+   },
+   "near": [
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "h_98ec9d5fa5",
+     "who": "Ada",
+     "distance": "far",
+     "doing": "idle"
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794204575041,
+   "lastReceipt": {
+    "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+    "soulId": "s_bc5eb20171",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "started",
+    "acceptedTick": 4125,
+    "startedTick": 4125,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall / Hall, 31 m left"
+    },
+    "now": "walking to Waterside Hall / Hall, 31 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "started",
+     "acceptedTick": 4125,
+     "startedTick": 4125,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall / Hall, 31 m left"
+     },
+     "now": "walking to Waterside Hall / Hall, 31 m left; not there yet"
+    },
+    {
+     "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 2668,
+     "startedTick": 2668,
+     "endedTick": 3876,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.6,
+       -29.3
+      ],
+      "heading": 323,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 1095,
+     "startedTick": 1095,
+     "endedTick": 1669,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2.5,
+       37.3
+      ],
+      "heading": 176,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+     "soulId": "s_bc5eb20171",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 794,
+     "startedTick": 794,
+     "endedTick": 855,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.10",
+    "lastUsed": 1794204552126
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d7c00755-172e-45b6-813d-8840be8a0d51",
+     "text": "that's all, now walk to the pond hall and wait for the others",
+     "state": "acknowledged",
+     "sentAt": 1794204571810,
+     "deliveredAt": 1794204571811,
+     "acknowledgedAt": 1794204574311,
+     "reply": "Got it: walking back to the pond hall to wait"
+    }
+   },
+   "world": {
+    "tick": 4822,
+    "souls": [
+     {
+      "id": "h_98ec9d5fa5",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bc5eb20171",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 35
+   }
+  },
+  {
+   "t": "2026-11-09T06:10:19.802Z",
+   "mono": 253293,
+   "soulId": "s_bc5eb20171",
+   "name": "Bo",
+   "tick": 5022,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": -9.345356249988683,
+    "z": 21.38365886309753,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall / Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 74.61055555555299,
+    "hunger": 24.176666666673043,
+    "company": 39.47499999999593,
+    "restlessness": 13.768333333334425
+   },
+   "near": [
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "h_98ec9d5fa5",
+     "who": "Ada",
+     "distance": "near",
+     "doing": "idle"
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794204575041,
+   "lastReceipt": {
+    "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+    "soulId": "s_bc5eb20171",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "started",
+    "acceptedTick": 4125,
+    "startedTick": 4125,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall / Hall, 18 m left"
+    },
+    "now": "walking to Waterside Hall / Hall, 18 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "started",
+     "acceptedTick": 4125,
+     "startedTick": 4125,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall / Hall, 18 m left"
+     },
+     "now": "walking to Waterside Hall / Hall, 18 m left; not there yet"
+    },
+    {
+     "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 2668,
+     "startedTick": 2668,
+     "endedTick": 3876,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.6,
+       -29.3
+      ],
+      "heading": 323,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 1095,
+     "startedTick": 1095,
+     "endedTick": 1669,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2.5,
+       37.3
+      ],
+      "heading": 176,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+     "soulId": "s_bc5eb20171",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 794,
+     "startedTick": 794,
+     "endedTick": 855,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.10",
+    "lastUsed": 1794204552126
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d7c00755-172e-45b6-813d-8840be8a0d51",
+     "text": "that's all, now walk to the pond hall and wait for the others",
+     "state": "acknowledged",
+     "sentAt": 1794204571810,
+     "deliveredAt": 1794204571811,
+     "acknowledgedAt": 1794204574311,
+     "reply": "Got it: walking back to the pond hall to wait"
+    }
+   },
+   "world": {
+    "tick": 5022,
+    "souls": [
+     {
+      "id": "h_98ec9d5fa5",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bc5eb20171",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 18
+   }
+  },
+  {
+   "t": "2026-11-09T06:10:29.797Z",
+   "mono": 263288,
+   "soulId": "s_bc5eb20171",
+   "name": "Bo",
+   "tick": 5222,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": -0.669784097588785,
+    "z": 31.72698752598454,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall / Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 74.31888888888659,
+    "hunger": 24.371111111117784,
+    "company": 39.683333333329074,
+    "restlessness": 13.157222222223396
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "h_98ec9d5fa5",
+     "who": "Ada",
+     "distance": "close",
+     "doing": "idle"
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794204575041,
+   "lastReceipt": {
+    "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+    "soulId": "s_bc5eb20171",
+    "capability": "walk:lab-pond-hall/hall",
+    "phase": "started",
+    "acceptedTick": 4125,
+    "startedTick": 4125,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall/hall",
+     "target": "g-lab-pond-hall.hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall.hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall / Hall, 4 m left"
+    },
+    "now": "walking to Waterside Hall / Hall, 4 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall/hall",
+     "phase": "started",
+     "acceptedTick": 4125,
+     "startedTick": 4125,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall/hall",
+      "target": "g-lab-pond-hall.hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall.hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall / Hall, 4 m left"
+     },
+     "now": "walking to Waterside Hall / Hall, 4 m left; not there yet"
+    },
+    {
+     "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:flag-orchard",
+     "phase": "completed",
+     "acceptedTick": 2668,
+     "startedTick": 2668,
+     "endedTick": 3876,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_1c39c2e1",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "world",
+      "placePath": [
+       "World"
+      ],
+      "pos": [
+       -39.6,
+       -29.3
+      ],
+      "heading": 323,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+     "soulId": "s_bc5eb20171",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 1095,
+     "startedTick": 1095,
+     "endedTick": 1669,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2.5,
+       37.3
+      ],
+      "heading": 176,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+     "soulId": "s_bc5eb20171",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 794,
+     "startedTick": 794,
+     "endedTick": 855,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.10",
+    "lastUsed": 1794204624992
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_d7c00755-172e-45b6-813d-8840be8a0d51",
+     "text": "that's all, now walk to the pond hall and wait for the others",
+     "state": "acknowledged",
+     "sentAt": 1794204571810,
+     "deliveredAt": 1794204571811,
+     "acknowledgedAt": 1794204574311,
+     "reply": "Got it: walking back to the pond hall to wait"
+    }
+   },
+   "world": {
+    "tick": 5222,
+    "souls": [
+     {
+      "id": "h_98ec9d5fa5",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bc5eb20171",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall / Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 11
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_4b7bd3bc-27ed-4f0e-94a1-19cc47a5bf43",
+   "soulId": "s_bc5eb20171",
+   "capability": "walk:lab-pond-hall/hall",
+   "phase": "started",
+   "acceptedTick": 4125,
+   "startedTick": 4125,
+   "endedTick": null,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall/hall",
+    "target": "g-lab-pond-hall.hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall.hall"
+   },
+   "body": {
+    "posture": "walking",
+    "activity": "walk",
+    "on": null,
+    "inWater": false,
+    "step": "walking to Waterside Hall / Hall, 71 m left"
+   },
+   "now": "walking to Waterside Hall / Hall, 71 m left; not there yet"
+  },
+  {
+   "id": "r_0c6f49ee-214c-4623-a277-83b4414481b1",
+   "soulId": "s_bc5eb20171",
+   "capability": "walk:flag-orchard",
+   "phase": "completed",
+   "acceptedTick": 2668,
+   "startedTick": 2668,
+   "endedTick": 3876,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:flag-orchard",
+    "target": "e_1c39c2e1",
+    "kind": "object"
+   },
+   "endedAt": {
+    "place": "world",
+    "placePath": [
+     "World"
+    ],
+    "pos": [
+     -39.6,
+     -29.3
+    ],
+    "heading": 323,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_d46638f8-620b-4ea3-a01b-024d247ee49c",
+   "soulId": "s_bc5eb20171",
+   "capability": "walk:lab-pond-hall",
+   "phase": "completed",
+   "acceptedTick": 1095,
+   "startedTick": 1095,
+   "endedTick": 1669,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall",
+    "target": "g-lab-pond-hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall"
+   },
+   "endedAt": {
+    "place": "g-lab-pond-hall.hall",
+    "placePath": [
+     "Waterside Room",
+     "Waterside Hall",
+     "World"
+    ],
+    "pos": [
+     2.5,
+     37.3
+    ],
+    "heading": 176,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_f3f946c0-8de7-40e7-950c-af4300da5621",
+   "soulId": "s_bc5eb20171",
+   "capability": "wave:here",
+   "phase": "completed",
+   "acceptedTick": 794,
+   "startedTick": 794,
+   "endedTick": 855,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "g-lab-start",
+    "placePath": [
+     "Village Green",
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0,
+     0
+    ],
+    "heading": 90,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": "2026-11-09T06:09:49.808Z",
+ "firstBodyChangeMono": 223299,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

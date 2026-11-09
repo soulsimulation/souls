@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-09T05:57:09.925Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-09T05:57:11.924Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 291,
+   "firstAt": "2026-11-09T05:57:25.222Z",
+   "text": "Good morning, everyone! I started my day tending to my bees, who were buzzing happily in the dawn light. Then I rested on the cottage bench, took a refreshing swim in the pond, and walked here with honey-sweet thoughts. It has been a lovely, quiet morning, and I'm glad to share it with you.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-09T05:57:27.929Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 238,
+   "firstAt": "2026-11-09T05:57:34.321Z",
+   "text": "Um... it was a quiet morning. I started on the green, then walked down to the orchard and back. I hummed a little as I went, because music helps when I'm nervous. The pond hall feels calmer, so I think I'll play something here after this.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-09T05:57:09.925Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 38,
+    "cachedTokens": 499964,
+    "cacheCreationTokens": 23172,
+    "outputTokens": 3445,
+    "costUsd": 0.224,
+    "turns": 4,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 50,
+    "cachedTokens": 715060,
+    "cacheCreationTokens": 31076,
+    "outputTokens": 5530,
+    "costUsd": 0.2512,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 88,
+   "cachedTokens": 1215024,
+   "cacheCreationTokens": 54248,
+   "outputTokens": 8975,
+   "costUsd": 0.4752,
+   "turns": 9,
+   "unknownTurns": 0
+  }
+ }
+}

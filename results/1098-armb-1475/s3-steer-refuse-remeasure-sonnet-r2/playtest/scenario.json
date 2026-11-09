@@ -1,0 +1,83 @@
+{
+ "name": "s3-steer-refuse-live-sonnet",
+ "version": 1,
+ "seed": 6231,
+ "kind": "direct",
+ "world": {
+  "kind": "dev",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "slug": "s3-steer-refuse",
+  "port": 4452,
+  "natives": false
+ },
+ "durationSec": 300,
+ "seats": [
+  {
+   "id": "ada",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Ada",
+   "persona": null,
+   "economy": "lean",
+   "startOffsetSec": 0
+  },
+  {
+   "id": "bo",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Bo",
+   "persona": null,
+   "economy": "lean",
+   "startOffsetSec": 0
+  }
+ ],
+ "god": null,
+ "director": {
+  "mode": "swarm",
+  "brief": "Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route and Bo's owner asks for something the world cannot do; Bo recovers with what the refusal names instead.",
+  "order": [
+   "ada",
+   "bo"
+  ],
+  "room": {
+   "label": "the pond hall",
+   "match": [
+    "waterside",
+    "pond-hall",
+    "pond hall"
+   ]
+  }
+ },
+ "observer": {
+  "sampleSec": 10,
+  "cameras": [],
+  "viewport": [
+   1024,
+   640
+  ],
+  "dpr": 1
+ },
+ "review": {
+  "reviewer": false,
+  "developer": false,
+  "reviewerModel": "opus",
+  "developerModel": "opus",
+  "rubric": "accept3"
+ },
+ "rails": {
+  "onboardWallSec": 120,
+  "onboardTimeoutSec": 90,
+  "onboardConcurrency": 2,
+  "quotaStopPct": 90,
+  "maxTurnsPerRequest": 4,
+  "maxTurnWallSec": 120,
+  "worldBudgetUsd": 0.75
+ },
+ "serverRoot": "<home>/souls-playtest/server",
+ "castPath": "<home>/souls-playtest/results/1098-armb-1475/s3-steer-refuse-remeasure-sonnet-r2/cast.effective.json",
+ "castSha256": "2de41e9b1c7dd9531b9cbd474a2377dac187db21bbe940bd52283ab345869a41",
+ "headless": true,
+ "worldUrl": null
+}

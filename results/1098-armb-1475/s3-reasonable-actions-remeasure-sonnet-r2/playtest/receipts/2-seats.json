@@ -1,0 +1,41 @@
+{
+ "step": "seats",
+ "t": "2026-11-09T06:06:09.606Z",
+ "mono": 3098,
+ "ok": true,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+   "folder": "<home>/souls-playtest/results/1098-armb-1475/s3-reasonable-actions-remeasure-sonnet-r2/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T06:06:09.605Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-aa1ee6f96cd2dbaa13f5506b",
+   "assisted": false,
+   "wake": true
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+   "folder": "<home>/souls-playtest/results/1098-armb-1475/s3-reasonable-actions-remeasure-sonnet-r2/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T06:06:09.606Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-dcbe2016ae755040cd6ff1a1",
+   "assisted": false,
+   "wake": true
+  }
+ ],
+ "onboarding": "parallel, during play"
+}

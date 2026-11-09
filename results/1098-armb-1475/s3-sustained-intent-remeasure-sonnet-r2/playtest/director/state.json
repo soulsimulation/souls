@@ -1,0 +1,48 @@
+{
+ "phase": "done",
+ "speakerIdx": 2,
+ "paused": false,
+ "stopped": "plan-complete",
+ "gateOpenedAt": "2026-11-09T06:15:43.425Z",
+ "gateReason": "all-present",
+ "directions": 14,
+ "redirects": [],
+ "startedAt": "2026-11-09T06:11:29.354Z",
+ "endedAt": "2026-11-09T06:16:19.396Z",
+ "elapsedSec": 290,
+ "scriptLeft": 0,
+ "seats": {
+  "ada": {
+   "pairing": "paired",
+   "present": true,
+   "everPresent": true,
+   "done": "presented",
+   "economy": "lean",
+   "nudges": {
+    "gather": 0,
+    "left": 0,
+    "speak": 0,
+    "onboard": 0
+   },
+   "speeches": 1,
+   "directions": 7,
+   "override": null
+  },
+  "bo": {
+   "pairing": "paired",
+   "present": true,
+   "everPresent": true,
+   "done": "presented",
+   "economy": "lean",
+   "nudges": {
+    "gather": 0,
+    "left": 0,
+    "speak": 0,
+    "onboard": 0
+   },
+   "speeches": 2,
+   "directions": 7,
+   "override": null
+  }
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 176,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-09T05:51:38.099Z",
+  "mono": 179290,
+  "elapsedSec": 176,
+  "n": 5,
+  "seat": "ada",
+  "kind": "nudge",
+  "by": "director",
+  "channel": "card",
+  "text": "Ada should be in the pond hall by now and the others are waiting. Walk there now, please. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "straggler: not in the pond hall 120 s after the last direction (nudge 1/2)",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_7dc96079-8b86-408e-969a-fc702bbbedea",
+  "requestId": "ada-003"
+ }
+}

@@ -1,0 +1,27 @@
+{
+ "fixture": null,
+ "base": "http://world.invalid/w/s3-reasonable-actions",
+ "pid": 1379515,
+ "build": "dev",
+ "bootMs": 2631,
+ "dataDir": "<home>/souls-playtest/results/1098-armb-1475/s3-reasonable-actions-remeasure-sonnet-r1/playtest/server/data",
+ "marsWebDir": "<home>/souls-playtest/mars-web",
+ "kind": "dev",
+ "slug": "s3-reasonable-actions",
+ "port": 4456,
+ "skill": {
+  "version": "2.11.0",
+  "sha256": "e62e98d212c5bfade3f7a936050fad930d99382463c9bc37d1306b8bc362bb78"
+ },
+ "cli": {
+  "eden.mjs": "a296767957c7cbdda5defbdad432ffa6e7d688cb08d7c6ced67e244690c9d264",
+  "eden.mjs.version": "2.24.10",
+  "eden-agent.mjs": "7f8d5c6072d63469cab0bf12fd85be2a56e2f232d558314b09dd34f4032bdf82",
+  "eden-god.mjs": "93a7f23edba06d287c1c4bad5fb0064486e8877b4496c56896de633c815ead9e"
+ },
+ "instructions": {
+  "sha256": "1ac2dcbba16f9b9af531a284301e6627cc8f2f8f53bca7803bea6e739f97b0ce",
+  "mentionsEdenMjs": true
+ },
+ "startedAt": "2026-11-09T05:52:21.626Z"
+}

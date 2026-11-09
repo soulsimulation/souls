@@ -1,0 +1,73 @@
+{
+ "soulRun": 1,
+ "kind": "cast",
+ "name": "s3-sustained-intent-remeasure-sonnet",
+ "cast": {
+  "path": "<home>/souls-playtest/playtest/tools/playtest/runs/specs/1098/s3-sustained-intent-candidate-sonnet.cast.json",
+  "sha256": "f2de1845b58dc18a48815e5377b292bb09869f62460da1e77efa7171b90b93d3",
+  "name": "s3-sustained-intent-live-sonnet",
+  "seats": 2,
+  "consoleScript": 9
+ },
+ "world": {
+  "port": 4458,
+  "slug": "s3-sustained-intent",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "snapshot": null,
+  "source": {
+   "kind": "genesis",
+   "path": "worlds/templates/hello-hamlet.json",
+   "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+  }
+ },
+ "setup": null,
+ "durationSec": 300,
+ "observer": {
+  "check": false,
+  "required": false,
+  "cameras": null,
+  "timeoutMs": 60000,
+  "mode": "cameras",
+  "record": null,
+  "recordSize": "compact",
+  "recordStart": "arrival",
+  "freeComposition": null
+ },
+ "limits": {
+  "maxWallSec": 1300,
+  "maxControllers": 2,
+  "cleanupWaitMs": 15000
+ },
+ "controllers": {
+  "allowLiveModels": true
+ },
+ "retention": {
+  "worldData": "keep",
+  "controllerState": "keep"
+ },
+ "evaluation": {
+  "questions": [
+   {
+    "id": "errand-kept-through-burst",
+    "path": "<home>/souls-playtest/playtest/tools/playtest/runs/questions/errand-kept-through-burst.mjs",
+    "sha256": "24f0279d7ca3850b34a0e8eb5d18c40243ef99d06c201d538418843581d9520a"
+   },
+   {
+    "id": "cancel-not-resumed",
+    "path": "<home>/souls-playtest/playtest/tools/playtest/runs/questions/cancel-not-resumed.mjs",
+    "sha256": "1f7df3c4aafafcf4fd0e7050e3844c4b248fb7ce573ec199c515da9ccad05603"
+   },
+   {
+    "id": "reasonable-carried-out-v3",
+    "path": "<home>/souls-playtest/playtest/tools/playtest/runs/questions/reasonable-carried-out-v3.mjs",
+    "sha256": "a530132a4a6cd451653bdd62a2f59bc1d631da4912b468907a034534780fa848"
+   }
+  ]
+ },
+ "scorer": {
+  "id": "controllability",
+  "version": "5",
+  "path": "tools/playtest/runs/controllability.mjs",
+  "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+ }
+}

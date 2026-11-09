@@ -1,0 +1,6 @@
+{"t":"2026-11-09T06:07:03.779Z","mono":57270,"seat":"ada","present":true,"placePath":["Waterside Room","Waterside Hall","World"],"posture":"walking","pos":[0,0]}
+{"t":"2026-11-09T06:07:15.779Z","mono":69271,"seat":"ada","present":false,"placePath":["World"],"posture":"walking","pos":[2,40]}
+{"t":"2026-11-09T06:07:31.786Z","mono":85277,"seat":"bo","present":true,"placePath":["Waterside Room","Waterside Hall","World"],"posture":"walking","pos":[0,0]}
+{"t":"2026-11-09T06:08:25.794Z","mono":139285,"seat":"bo","present":false,"placePath":["World"],"posture":"walking","pos":[2.5,37.3]}
+{"t":"2026-11-09T06:09:49.807Z","mono":223298,"seat":"ada","present":true,"placePath":["Waterside Room","Waterside Hall","World"],"posture":"walking","pos":[-11.5,38.5]}
+{"t":"2026-11-09T06:10:35.822Z","mono":269313,"seat":"bo","present":true,"placePath":["Waterside Room","Waterside Hall","World"],"posture":"walking","pos":[-39.6,-29.3]}
