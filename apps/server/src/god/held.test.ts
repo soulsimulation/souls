@@ -6,6 +6,7 @@ import { setImmediate } from 'node:timers/promises';
 import { coreRef } from '@souls/world-compiler';
 import { fixture, invite, accept, factory } from '../../test/native-owner-fixture.ts';
 import { EdgeLedger } from '../edge/ledger/ledger.ts';
+import { rideDownReason } from '../edge/ledger/together.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { runQuery } from './query.ts';
@@ -46,10 +47,35 @@ test('a Soul picks up the god\'s bowl, is seen holding it, and puts it down', { 
   const caps = edge.capabilities(ana);
   assert.ok(caps.some((c: any) => c.id === 'put-down:here' && c.available), caps.map((c: any) => c.id).join(' '));
 
-  // indoors among the furniture: put-down:here turns to the clearest ground first
-  const pd: any = await act('put-down:here');
+  // #1261 review: a visit phrase is not a put-down; riding, the put-down names the next step (the ride's leave)
+  for (const words of ['drop by the bakery', 'drop in on Bo']) { const r: any = edge.intents.dryRun(ana, { capability: words }); assert.notEqual(r.would?.capability, 'put-down:here', `${words}: ${JSON.stringify(r)}`); }
+  const aboard = (edge as any).aboard; (edge as any).aboard = () => ({ id: 'eden-balloon', slot: 'a', riderPhase: 'seated', phase: 'parked', label: 'the balloon' });   // the carrier's engine id, as aboard() gives it
+  try { await settle(2); const riding: any = (edge.capabilities(ana) as any[]).find((c: any) => c.id === 'put-down:here');
+    assert.equal(riding?.available, false); assert.equal(riding?.blocked?.code, 'ride.aboard'); assert.match(riding?.blocked?.reason, /disembark first/); assert.doesNotMatch(riding?.blocked?.reason, /object:eden-balloon:leave/, 'never an id built from the carrier'); }
+  finally { (edge as any).aboard = aboard; await settle(2); }
+  // #1261: the words reach the same put-down:here as the id (they were refused hands.empty: the bowl is no ledger item)
+  for (const words of ['put down the bowl', 'put it down', 'drop it']) {
+    const r: any = edge.intents.dryRun(ana, { capability: words });
+    assert.equal(r.ok, true, `${words}: ${JSON.stringify(r)}`); assert.equal(r.would.capability, 'put-down:here', words);
+  }
+  // indoors among the furniture: put-down:here turns to the clearest ground first (#1261: asked in words)
+  const pd: any = await act('put down the bowl');
   assert.equal(pd.phase, 'completed', JSON.stringify(pd));
   assert.deepEqual(pd.outcome.changed.map((c: any) => [c.id, c.kind]), [[bowl.id, 'item-placed']], JSON.stringify(pd.outcome));
   assert.equal((edge.observe(ana, new Set()) as any).self.holding, null);
   assert.equal((f.host.engine as any).world.entities[bowl.id].support?.kind, 'ground');
+  // #1261 A2: with nothing in the hand the same words are still refused hands.empty
+  await settle(30);
+  for (const words of ['put down the bowl', 'put it down', 'drop it']) {
+    const r: any = edge.intents.dryRun(ana, { capability: words });
+    assert.equal(r.ok, false, `${words}: ${JSON.stringify(r)}`); assert.equal(r.code, 'hands.empty', words);
+  }
+});
+
+// steward review of #1261: the reason names the leave the menu offers (the ride object's id), never one built from the carrier
+test('#1261: a put-down while riding names the offered leave', () => {
+  const caps = [{ id: 'object:ride-eden-balloon:join', available: false }, { id: 'object:ride-eden-balloon:leave', available: true }];
+  assert.match(rideDownReason('parked', caps), /disembark first \(object:ride-eden-balloon:leave while it is on the ground\), then put it down/);
+  assert.equal(rideDownReason('parked', []), 'Not while riding: disembark first, then put it down.');
+  assert.match(rideDownReason('aloft', caps), /lands by itself/);
 });
