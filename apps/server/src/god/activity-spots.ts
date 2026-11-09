@@ -264,7 +264,10 @@ export class GodActivitySpots {
       if ((++slice & 127) === 0) yield;
       const k = t.c.workstation?.kind;
       // #430: a painting canvas lying flat on the ground is drawn in chalk, stooping over it (the same paint offer and recipe)
-      if (k === 'painting' || is(t, 'easel')) standSpot(t, 'paint', paintingEasel(t.def) ? { paintingTarget: t.id, ...(flatCanvas(canvasFace(t.def)) ? { ...CHALK_SPOT, ...(canvasFace(t.def)!.fadeDays ? { fadeDays: canvasFace(t.def)!.fadeDays } : {}) } : {}) } : {});
+      if (k === 'painting' || is(t, 'easel')) {
+        const face = canvasFace(t.def), title = typeof face?.paintLabel === 'string' ? face.paintLabel.trim().slice(0, 80) : '';
+        standSpot(t, 'paint', paintingEasel(t.def) ? { paintingTarget: t.id, ...(title ? { title } : {}), ...(flatCanvas(face) ? { ...CHALK_SPOT, ...(face!.fadeDays ? { fadeDays: face!.fadeDays } : {}) } : {}) } : {});
+      }
       else if (k === 'cooking' || is(t, 'stove', 'hearth')) standSpot(t, 'cook');
       else if (is(t, 'arcade-cabinet', 'pool-table', 'dartboard', 'foosball')) standSpot(t, 'play-game', {}, t.slots.find(s => s.kind === 'stand')?.id);
       // a workbench (old Eden's barn and workshop): make something by hand

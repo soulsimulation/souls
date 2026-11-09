@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 making family (#1489, W055): core-mural-panel@1 (ff07975e49c9b165046f5e3744523a9d907e1a54d7f40b4fd1838af5338bd18b) is a new immutable painting-workstation def. A reachable 1.2 m square media face supplies mural wording and owner-bound permission; unowned panels are public. The 1.46 m wall remains local rather than becoming a distant landmark. The kit has 68 construction triangles. A narrow production K=2 run (conformance.mjs --k 2 --filter core-mural-panel) baked, placed and rendered all 5 samples with 0 findings and 0 qualification gaps, so this supplement pins no finding. Existing easel and chalk revisions retain their bytes. No budget, sample or gap check was relaxed.",
+  "findings": []
+}

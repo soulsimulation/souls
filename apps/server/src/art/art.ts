@@ -47,6 +47,7 @@ export function planHang(model: WorldModel, caller: Caller, req: HangRequest): A
 export function planFinishedPainting(model: WorldModel, caller: Extract<Caller, { kind: 'soul' }>, req: HangRequest): ArtPlan | ArtFailure {
   const e = model.entities.get(req.frame);
   if (!e || !paintingEasel(model.resolvedDef(e.def))) return fail(409, 'painting.target-changed', 'The original painting easel is no longer available.');
+  const denied = paintingPermission(model, e.id, caller); if (denied) return denied;
   if (!req.media || !/^\/(?!\/)(?:[^\s?#]*\/)?art\/[0-9a-f]{64}\.png$/.test(req.media)) return fail(400, 'painting.media', 'A completed painting must use its server-rendered PNG.');
   return hang(model, caller, { ...req, slot: 0 }, true);
 }
@@ -58,10 +59,18 @@ export function paintingEasel(def: StoredDef | undefined): boolean {
 }
 
 /** A painting workstation's canvas: its media face for slot 0 (def data, make.args.faces). */
-export type CanvasFace = { at?: number[]; w?: number; h?: number; pitch?: number; media?: boolean; slot?: number; fadeDays?: number };
+export type CanvasFace = { at?: number[]; w?: number; h?: number; pitch?: number; media?: boolean; slot?: number; fadeDays?: number;
+  /** Optional surface words and permission. Existing easels/chalk retain their shared painting rules. */
+  paintLabel?: string; paintNoun?: string; ownerBound?: boolean };
 export function canvasFace(def: StoredDef | undefined): CanvasFace | null {
   const faces = def?.make.kind === 'gen' && Array.isArray(def.make.args?.faces) ? def.make.args.faces as CanvasFace[] : [];
   return faces.find(f => f && f.media && (f.slot ?? 0) === 0) ?? null;
+}
+/** An explicitly owner-bound painting surface is public only while unowned. */
+export function paintingPermission(model: WorldModel, target: string, caller: Extract<Caller, { kind: 'soul' }>): ArtFailure | null {
+  const e = model.entities.get(target);
+  if (!e || canvasFace(model.resolvedDef(e.def))?.ownerBound !== true || !e.owner || ownsIt(e, caller)) return null;
+  return fail(403, 'art.not-yours', `${e.name ?? e.id} is an owned painting surface; only its Soul owner may paint it.`);
 }
 /** #430: a canvas lying flat, facing up (pitch -90°), is on the ground: drawn in chalk, stooping. */
 export const flatCanvas = (face: CanvasFace | null | undefined) => !!face && typeof face.pitch === 'number' && Math.abs(face.pitch + Math.PI / 2) < 0.05;
@@ -94,6 +103,7 @@ export function paintingLine(e: Entity, def: StoredDef | undefined, today = 0): 
   const oneLine = (v: unknown, max: number) => clean(String(v ?? '').replace(/[\u0085\u2028\u2029]/g, ' '), max);
   const maker = oneLine(parts.slice(2).join(':'), 32) || 'a Soul', title = oneLine(e.state.title, 50) || 'Untitled';
   const wear = age === null || age < 1 ? '' : age >= face!.fadeDays! - 1 ? ', nearly washed away' : ', fading';
+  if (typeof face?.paintNoun === 'string' && face.paintNoun.trim()) return `${maker}’s ${clean(face.paintNoun, 24)} “${title}”${wear}`;
   return flatCanvas(face) ? `${maker}’s chalk drawing “${title}” on the pavement${wear}` : `an easel with ${maker}’s painting “${title}”${wear}`;
 }
 
@@ -106,8 +116,9 @@ function hang(model: WorldModel, caller: Caller, req: HangRequest, painting: boo
   const slot = req.slot ?? 0;
   if (!Number.isInteger(slot) || slot < 0 || slot >= disp.slots) return fail(400, 'art.slot', `slot must be 0..${disp.slots - 1}`);
   const clear = req.media === null || req.media === '' || req.media === undefined;
+  if (caller.kind === 'soul') { const denied = paintingPermission(model, e.id, caller); if (denied) return denied; }
   // #430: a fading canvas (chalk) holds only what was drawn on it; hanging an image there is refused (clearing is not)
-  if (!clear && !painting && typeof canvasFace(def)?.fadeDays === 'number') return fail(409, 'art.drawn-only', `${req.frame} takes only drawings made on it by hand; draw on it instead`);
+  if (!clear && !painting && (typeof canvasFace(def)?.fadeDays === 'number' || canvasFace(def)?.ownerBound === true)) return fail(409, 'art.drawn-only', `${req.frame} takes only drawings made on it by hand; draw on it instead`);
   if (!clear && !mediaKind(req.media!)) return fail(400, 'art.media', 'media must be an https URL or a same-site path (images, or .mp4/.webm/.mov/.m4v video), at most 480 characters, no spaces');
   const st = e.state ?? {}, media = lines(st.media, disp.slots), title = lines(st.title, disp.slots), maker = lines(st.maker, disp.slots);
   if (caller.kind === 'soul' && !painting && !ownsIt(e, caller)) {
