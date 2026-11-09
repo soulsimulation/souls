@@ -130,3 +130,19 @@ test('distance detail: an instanced pool is judged where its instances are now, 
   mesh.boundingSphere.center.set(0,2,0);
   detail.apply(root,camera,800);assert.equal(mesh.visible,true,'carried here since the scan');detail.restore();
 });
+
+test('P2 churn: render-time lists are reused across frames, every change is undone and no mesh is held after restore', () => {
+  const s=scene(),detail=new WorldDistanceDetail(PHONE_DETAIL);s.body.castShadow=true;
+  const thing=new THREE.Group();s.root.add(thing);thing.add(s.bench);thing.userData.frozenDrawn={frozen:[]};s.root.updateMatrixWorld(true);
+  const lists=detail as unknown as {hidden:unknown[];noShadow:unknown[]};
+  for(let frame=0;frame<5;frame++){
+    detail.apply(s.root,s.camera,844);
+    assert.deepEqual([s.far.visible,s.bench.castShadow,s.body.castShadow],[false,false,false],'frame '+frame);
+    assert.deepEqual([detail.stats.culled,detail.stats.shadowSkipped,detail.stats.bodyShadowsSkipped],[1,1,1]);
+    detail.restore();
+    assert.deepEqual([s.far.visible,s.bench.castShadow,s.body.castShadow],[true,true,true],'restored '+frame);
+    assert.ok([...lists.hidden,...lists.noShadow].every(m=>m===null),'no mesh retained after restore');
+  }
+  const hiddenStore=lists.hidden;detail.apply(s.root,s.camera,844);assert.equal(lists.hidden,hiddenStore,'the same array, not a regrown one');
+  detail.dispose();assert.equal(s.far.visible,true);assert.equal(lists.hidden.length,0);
+});
