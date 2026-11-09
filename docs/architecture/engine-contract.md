@@ -159,7 +159,8 @@ is ignored for a world that has adopted. A factory that already has the rules (`
   compare the count, and a difference is reported, not fatal.
 
 **Hold or settle** (`hold-settle/1`, #1334). This is a logged runtime policy (cfg `refusalSettleV1`), and every world
-adopts it at boot after `body-step-guard/1`. It acts only under the repair rules. A history from before its event
+adopts it at boot after `body-step-guard/1`. Its adoption is refused, writing nothing, while the guard is off
+(`hold-settle.guard-required`, #1442), so settle never places a body without `bodyStandsClear`. It acts only under the repair rules. A history from before its event
 replays as it was recorded. Under it, rung 1 answers each violation on its own:
 
 - **Hold.** The moves are undone as above, and the refusal row is written, but the programme is not stopped. The third

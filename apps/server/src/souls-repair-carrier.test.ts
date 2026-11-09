@@ -25,7 +25,7 @@ async function world(t:any,repair:boolean,settle=false){
   t.after(()=>{f.host.stop();f.db.close();});
   const host=f.host;
   if(repair){const fact=await accept(host,host.adoptSoulsRepairV1('test'));assert.ok(fact,'adopted');assert.match(host.engine.rulesVersion,/\+souls-repair\/1/);}
-  if(settle)await accept<unknown>(host,host.enableRefusalSettleV1('test'));   // #1334 hold-settle/1, as boot adopts it
+  if(settle){await accept<unknown>(host,host.enableBodyStepGuardV1('test'));await accept<unknown>(host,host.enableRefusalSettleV1('test'));}   // #1334 hold-settle/1 after the guard, as boot adopts it (#1442)
   const edge=new EdgeLedger(host,f.db,undefined,{ambient:false,sharedCarry:false}),app=new Hono();
   const comms=mountEdgeRoutes(app,{host,db:f.db,souls:f.souls,ledger:edge,soul:()=>null as any});t.after(()=>comms.close());
   const god=new GodMode(f.db,{worldId:host.worldId,ownerId:'dev:admin',tick:()=>host.engine.world.tick,emit(){}});
