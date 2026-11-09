@@ -124,6 +124,9 @@ after the cutoff are diagnostic only.
 ```
 
 - `world.kind` must be `dev`. Every seat needs an `id`, an `adapter`, a `soulName` and (for Claude) a `model`.
+- A seat may set `briefBytes` (a whole number, `0` for none): the harness writes it into the seat's Souls home
+  `config.json` once the mind has made the home, and again before each turn and restart, so an arm can run without the
+  pre-turn brief. Reunion's baseline arm (`reunion-baseline.json`) uses `0`; `seat.json` records it.
 - `director.mode` is `persona` (every seat needs a persona) or `scripted`, with
   `script: [{ "seat", "atSec", "channel": "chat"|"card", "text", "budgetSec", "expect"? }]`. A seat's scripted
   requests must not overlap their budgets.
