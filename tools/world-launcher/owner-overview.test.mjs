@@ -20,7 +20,7 @@ test('projection separates observation, checkpoint, merge, release and live qual
   const p = { number: 600, title: 'Change', url: 'https://github.com/soulsimulation/souls/pull/600', state: 'MERGED', mergedAt: at, headRefName: 'agent/556-perf', headRefOid: 'b'.repeat(40), closingIssuesReferences: [{ number: 556 }] };
   let s = projectRecords({ issues: [issue()], pulls: [p], observedAt: at });
   assert.equal(s.items[0].lifecycle, 'source issue only'); assert.equal(s.items[0].relatedLifecycle, 'merged'); assert.equal(s.items[0].group, 'Now'); assert.equal(s.items[0].sha, p.headRefOid);
-  const release = { name: '4.14', html_url: 'https://github.com/soulsimulation/souls/releases/tag/4.14', published_at: at, body: 'Included #600' };
+  const release = { name: '0.118', html_url: 'https://github.com/soulsimulation/souls/releases/tag/v0.118', published_at: at, body: 'Included #600' };
   s = projectRecords({ issues: [issue()], pulls: [p], releases: [release], observedAt: at });
   assert.equal(s.items[0].lifecycle, 'source issue only'); assert.equal(s.items[0].relatedLifecycle, 'released'); assert.equal(s.items[0].group, 'Now');
   const open = { ...p, number: 601, mergedAt: null, state: 'OPEN' };
