@@ -277,6 +277,27 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   programmes stop and nobody else's. Its glitch row is written at most twice a cooldown; the log event, which a replay
   needs, every time.
 
+**Any other number that is no number: nonfinite-hold/1 (#1496).** A logged, host-only runtime policy
+(`runtimePolicy.nonFiniteHoldV1`, adopted at boot after stair-way/1, effective only with quarantine/1). The durable clock
+hashes the head every tick. When that hash still fails on a non-finite number after quarantine/1 has held any broken body,
+for example an object's pose, a field of the world such as the weather, or a programme's own state:
+- The engine lists every such number in the world (every entity, every kind) and in the programmes (`planNonFiniteV1`).
+  Each is put back to its value at the same path in the last good snapshot (the recovery baseline): `from: 'baseline'`.
+  When that snapshot has no finite value there, a fallback is named. An object's pose sets the object down on the
+  ground at the arrival (`from: 'arrival'`, the eject, listed in the row). A body's pose is never moved this way; that
+  is quarantine/1's. Any other number becomes 0 (`from: 'zero'`).
+- What the patches touched stops (`state.non-finite`): a programme whose own state was patched, the programmes of a body
+  that was patched, and the holder of an object that was set down. Each of those Souls is told, and its open acts end.
+- One `nonFiniteHoldV1` rules event (author `world:nonfinite-hold`) carries the exact patches. A replay writes the same
+  ones through the same engine method (`applyNonFiniteV1`) and reads nothing. The glitch row (rung `contained`, rule
+  `state.non-finite`) names each field and where its value came from. The hash is then taken again, and the frontier is
+  written through the event, so no frontier is ever hashed over a non-finite head.
+- A periodic capture skipped as `snapshot.non-finite` puts its numbers back the same way, so the next capture isn't
+  skipped for them again.
+- A non-finite number it can't put back is still `engine.unhashable` or `durability.clock-frontier`, as below: one in the
+  Soul kernel, or one left after the patch. The tick throws and the process exits, and the supervisor restarts it from
+  the log. A world never runs on with its clock stopped.
+
 **What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it
 still halts as before (`recovery.baseline-unusable`). A state that still won't hash after its broken bodies are held halts
