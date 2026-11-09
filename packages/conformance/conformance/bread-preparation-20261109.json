@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "#1623: new core-bread-board@1 uses finite authored stock and one existing native output surface. K=2 places, bakes and renders all five samples with zero findings and zero qualification gaps. No holds or budget changes. Existing bun and other revisions remain unchanged.",
+  "findings": [],
+  "defs": [
+    {
+      "def": "core-bread-board@1",
+      "hash": "331e55d966888dfb55564dced3ab23549db1ced3258b48a08662ee65b45865b4"
+    }
+  ],
+  "samples": 5,
+  "qualificationGaps": []
+}
