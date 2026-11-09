@@ -1,4 +1,4 @@
-import {QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
+import {STOOD_ON_FLOOR,QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
@@ -738,6 +738,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (e.kind === 'rules' && fact?.lastRungInPlace && !fact.lastRungInPlace.stopped) return this.onRelocated(fact.lastRungInPlace.relocated ?? []);   // nothing ended, so there is nothing to tell
     if (e.kind === 'rules' && (fact?.recovery?.lastRung || fact?.lastRungInPlace)) return this.onRewound((fact.recovery?.lastRung ?? fact.lastRungInPlace)!.relocated ?? []);
     if (e.kind === 'rules' && fact?.refusal?.relocated) return this.onRelocated(fact.refusal.bodies);
+    // #1521 stand-height/2's one-time repair: each Soul stood on its floor is told, and an open act it had ends
+    const stood = (e.payload as {standHeightRepairV2?: {bodies?: {soul?: string}[]}} | null)?.standHeightRepairV2;
+    if (e.kind === 'rules' && stood) for (const soulId of (stood.bodies ?? []).flatMap(b => b.soul ? [b.soul] : [])) {
+      this.pending.delete(soulId);
+      for (const r of this.openReceipts(soulId)) this.update(r.id, {phase: 'failed', code: STOOD_ON_FLOOR.code, reason: STOOD_ON_FLOOR.message});
+      this.comms?.streams.deliver?.(soulId, STOOD_ON_FLOOR.code, this.host.engine.world.tick, {text: STOOD_ON_FLOOR.message});
+    }
     const q = (e.payload as {quarantineV1?: {souls?: string[]; relocated?: string[]}} | null)?.quarantineV1;
     if (e.kind === 'rules' && q) return this.onQuarantined(q.souls ?? [], q.relocated ?? []);
     const edge = fact?.recovery?.edge; if (e.kind !== 'rules' || !edge) return;

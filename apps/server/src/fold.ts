@@ -290,6 +290,9 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
       if (rules?.runtimePolicy) {
         if (!engine.configureRuntimePolicy) throw Error('runtime-policy.unsupported');
         engine.configureRuntimePolicy(rules.runtimePolicy);
+        // #1521 stand-height/2's one-time repair, logged with its adoption: the same bodies to the same places, nothing read again
+        const stood = (e.payload as {standHeightRepairV2?: {bodies?: {id: string; p: [number, number, number]}[]}} | null)?.standHeightRepairV2;
+        if (stood) { if (!engine.standOnFloorV2) throw Error('stand-height.reader-required'); engine.standOnFloorV2(stood.bodies ?? []); }
       }
       if (rules?.dayConfig) engine.configureClock?.(rules.dayConfig);
       if (rules?.quiet) engine.beginQuiet?.();
