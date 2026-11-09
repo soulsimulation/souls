@@ -117,3 +117,41 @@ test('notebook words resolve only where a notebook is offered', () => {
   for (const w of ['cross out my note on the lost-and-found', 'cross out my note on the lost and found']) assert.equal(resolve(w, [found]), found.id, w);
   assert.equal(resolve('cross out my line in the first-aid-log', [aid]), aid.id);
 });
+
+// #1229: "take down" and "remove" act on nothing when the words name a writable thing that isn't offered, and keep their free words
+test('#1229: take down and remove refuse a thing that is not offered, and keep topic and adjective words', () => {
+  const poster = mk('e_iiii0009', 'unpin', 'Take down a poster from the poster wall (poster-wall)', ''), wanted = mk('e_jjjj0010', 'unpin', 'Take down your note from the wanted/offered board (wanted-board)', '');
+  // A1: the words name something else, in any spelling the kit's synonyms use
+  for (const w of ['remove my journal note', 'take down my note in the notebook', 'take down my note from the guest book', 'remove my note from the visitors book', "take down my note in the visitors' book", 'remove my note from the guestbook', 'take down my diary note', 'take down my note from the notebook now', 'take down my note from the notebook stand', 'take down my note in the notebook by the door', 'take down my note from the notebook in the hall'])
+    assert.equal(resolve(w, [pin, unpin]), 'capability.unknown', w);
+  for (const w of ['take down my line from the board', 'remove my line from the noticeboard', 'take down my line in the sheet', 'remove my board note', 'take down my line off the pinboard', 'take down my line from the board by the door'])
+    assert.equal(resolve(w, [nbPin, nbUnpin]), 'capability.unknown', w);
+  // review: the notebook stand is also the kit's guest book, visitors book, logbook and journal; a pinboard or corkboard is a notice board
+  for (const w of ['take down my line in the guest book', 'take down my line in the visitors book', 'remove my line from the logbook']) assert.equal(resolve(w, [nbPin, nbUnpin]), nbUnpin.id, w);
+  for (const w of ['remove my note from the pinboard', 'remove my note from the corkboard']) assert.equal(resolve(w, [pin, unpin]), unpin.id, w);
+  const said = (input: string, caps: any[]) => (resolveCapability(input, { caps, target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any).reason;
+  assert.match(said('take down my note from the guest book', [pin, unpin]), /take down or remove goes by "guest book", so nothing was done/);
+  // a board and a notebook both here: the word names one, and the other's note or line is never taken
+  assert.equal(resolve('take down my line in the notebook', [pin, unpin, nbPin, nbUnpin]), nbUnpin.id);
+  assert.notEqual(resolve('remove my journal note', [pin, unpin, nbPin, nbUnpin]), unpin.id, 'the board note stays');
+  assert.equal(resolve('take down my note from the notice board', [pin, unpin, nbPin, nbUnpin]), unpin.id);
+  // steward: a guest or visitor is a person unless "book" follows; two words that name two different offers are a choice
+  for (const w of ['remove the note from the guest', 'take down my line from the visitor']) assert.notEqual(resolve(w, [nbPin, nbUnpin]), 'capability.unknown', w);
+  const both2 = (input: string) => resolveCapability(input, { caps: [pin, unpin, nbPin, nbUnpin], target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any;
+  const two = both2('take down my journal note from the board'); assert.equal(two.code, 'capability.choose'); assert.deepEqual(two.didYouMean.map((d: any) => d.id).sort(), [nbUnpin.id, unpin.id].sort()); assert.match(two.reason, /"journal" and "board" name different things here/);
+  const none = resolveCapability('take down my note from the guest book', { caps: [pin, unpin], target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any;
+  assert.deepEqual(none.didYouMean.map((d: any) => d.id), [unpin.id], 'the refusal lists what can be taken down');
+  // A2: as on main
+  assert.equal(resolve('take down my note', [pin, unpin]), unpin.id);
+  assert.equal(resolve('take down my note from the wanted board now', [pin, unpin]), unpin.id);
+  assert.equal(resolve('take down my note from the wanted board now', [wanted]), wanted.id);
+  assert.equal(resolve('remove my note from the noticeboard', [pin, unpin]), unpin.id, 'a synonym of what is offered');
+  assert.equal(resolve('take down my line in the journal', [nbPin, nbUnpin]), nbUnpin.id);
+  for (const w of ['take down the old poster', 'take down the board games poster', "remove Ben's poster"]) assert.equal(resolve(w, [poster]), poster.id, w);
+  assert.equal(resolve("remove Ben's note", [pin, unpin]), unpin.id);
+  // review: what a poster or note is about, where it was, or a loose noun, is never the thing named (each as on main)
+  for (const w of ['take down the poster of the book fair', 'take down the poster of the board games night', 'take down my poster on the book club', 'take down my poster at the board games corner', 'take down the poster from the board games corner'])
+    assert.equal(resolve(w, [poster]), poster.id, w);
+  for (const w of ['remove my note on the lost diary', 'take down my note from the log cabin', 'remove the shopping list note', 'take down my reading list note', 'remove my book note', 'take down my note on the wall', 'remove my note about the constructor'])
+    assert.equal(resolve(w, [pin, unpin]), unpin.id, w);
+});

@@ -127,6 +127,13 @@ const SHARED_RAISE_REFUSED = new Set(['raise.arc-blocked', 'raise.station-blocke
 /** PC14 (#693): what the native beam plan refuses before anyone is asked (not bodies: someone busy waits for the commit). */
 const SHARED_BEAM_REFUSED = new Set(['beam.misaligned', 'beam.seat-taken', 'beam.no-seat', 'beam.not-staged', 'beam.not-beam', 'beam.not-upright', 'beam.upright-not-standing', 'beam.upright-unsupported', 'beam.station-unreachable', 'reach.too-high', 'lift.path-blocked']);
 const SHARED_ROUTE_REFUSED = new Set(['carry.no-route', 'carry.clearance', 'carry.target-blocked', 'carry.pickup-blocked']);
+/** #1261 review: what a put-down while riding says, naming the next step: the ride's own leave as the menu offers it
+ *  (its object id, not the carrier's engine id), as rideStandRefusal names it; aloft, the ride lands by itself first. */
+export const rideDownReason = (phase: string, caps: readonly {id: string; available: boolean}[]): string => {
+  if (phase === 'aloft') return 'Not while riding: it lands by itself and you step out then; put it down after that.';
+  const leave = caps.find(c => /^object:[^:]+:leave$/.test(c.id) && c.available);
+  return `Not while riding: disembark first${leave ? ` (${leave.id} while it is on the ground)` : ''}, then put it down.`;
+};
 /** PC07 (#686): a native hold-up shorter than this is part of ordinary motion; one that lasts this long is reported as
  *  `lasting` (the crew still holds the load: nobody lets go on a timeout, PC02 §3). Ticks at 20 Hz. */
 const SHARED_BLOCK_TICKS = 10, SHARED_LASTING_TICKS = 600;
@@ -501,7 +508,7 @@ export class Together {
     }
     // items: what is in my hand, or what I can pick up
     if (held) {
-      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: 'Not while riding.'}} : {})},
+      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: rideDownReason(aloft.phase, [])}} : {})},
         {label: `Put down ${held.name}`, steps: [pose('put-down', 1.5, {prop: held.kind, release: true})], together: {kind: 'item', op: 'put-down', item: held.id}});
       if (held.kind === 'food' || held.kind === 'cup') {
         const verb = held.kind === 'food' ? 'eat' : 'drink';
@@ -2112,8 +2119,13 @@ export class Together {
       const c = capFor('give', o); if (!c) return tooFar('give', o);
       return {capability: c.id, note: `${raw} is ${c.id}${held ? ` (${held.name})` : ''}`};
     }
-    if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
-      if (!held) return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+    if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?!\s+(?:by|in|over|round|around)\b|\s+off\s+at\b)(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
+      // #1261: a world may offer its own put-down for what is in the hand (a god-built thing: god/held.ts), as for give
+      if (!held) {
+        const own = caps.find(c => c.id === 'put-down:here'), id = own?.target?.id;
+        if (own) return {capability: own.id, note: `${raw} is put-down:here (${id ? this.thingName?.(id) ?? id : own.label})`};
+        return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+      }
       return {capability: 'put-down:here', note: `${raw} is put-down:here (${held.name})`};
     }
     if (held && ((held.kind === 'food' && /^(?:eat|have|finish)\b/.test(t) && (/\b(?:it|this|that|food|snack|bread|apple|cake)\b/.test(t) || t === 'eat')) || (held.kind === 'cup' && /^(?:drink|sip|have|finish)\b/.test(t) && (/\b(?:it|this|that|tea|coffee|cup|drink)\b/.test(t) || t === 'drink'))))

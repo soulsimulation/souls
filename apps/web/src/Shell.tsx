@@ -1,7 +1,7 @@
 import {AudioMenu} from './AudioMenu.tsx';
 import { HudMore } from './HudMore.tsx';
 import {explorePresence} from './explore-data.ts';
-import {bodiesFromEvents} from './soul-state.ts';
+import {bodiesFromEvents,readSlowed} from './soul-state.ts';
 import {exploreAvailable} from './explore-control.ts';
 import {arrivalOver} from './arrival-marks.ts';
 import {MySouls,useMySouls} from './MySouls.tsx';
@@ -231,7 +231,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
       </header>
       {!advanced&&!panelOpen&&(()=>{
         const following=chip&&selected===chip&&(viewerState?.cameraMode==='follow'||viewerState?.flyingTo===chip)?r.souls.get(chip):undefined;
-        if(following)return <SoulChip kind="follow" name={following.name} status={doingText(following.doing,(r.entities[following.entityId] as {activity?:string}|undefined)?.activity,following.id)} note={chipNote?.text} openCard={()=>{chipRef.current=null;setChip(null);revealPanel();}}/>;
+        if(following)return <SoulChip kind="follow" name={following.name} status={doingText(following.doing,(r.entities[following.entityId] as {activity?:string}|undefined)?.activity,following.id)} note={chipNote?.text} slowed={readSlowed(following.slowed)} openCard={()=>{chipRef.current=null;setChip(null);revealPanel();}}/>;
         const showing=coarse&&viewerState?.cameraMode==='broadcast'&&viewerState.shownTick!=null&&viewerState.broadcastSoulId?r.souls.get(viewerState.broadcastSoulId):undefined;
         return showing?<SoulChip kind="broadcast" name={showing.name} follow={()=>{viewerHandle?.flyToSoul?.(showing.id,{chip:true});}}/>:null;
       })()}

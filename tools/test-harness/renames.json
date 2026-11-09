@@ -104,6 +104,13 @@
       ],
       "reason": "Split when phone widths got one hamburger instead of More (#1391 part a): tablets keep More, phones get the hamburger",
       "pr": "#1433"
+    },
+    {
+      "step": "V3-harness",
+      "from": "renames: the committed list validates, and stays in the suite cache key like quarantine.json",
+      "to": "renames: the committed list validates, and is left out of the suite cache key, unlike quarantine.json (\\#1461)",
+      "reason": "Same test, inverted on purpose: renames.json now stays out of the suite-tree fingerprint (#1461)",
+      "pr": "#1464"
     }
   ]
 }
