@@ -162,3 +162,15 @@ test('a switched-off record player is silent, whatever record is set (#1051)', (
   assert.equal(condition(spec.when, { on: false, record: 'Low Tide' }), false, 'off: no emitter sounds and no note is scheduled (playJukeboxes reads this gate first)');
   assert.equal(condition(spec.when, { on: true, record: 'Low Tide' }), true);
 });
+
+test('P2: a def\'s sound specs are made once per def object and never changed by the scan', () => {
+  const fountain = { name: 'core-fountain', form: 'point', tags: ['fountain'], size: { box: [2, 2, 2] }, components: { sound: { kind: 'water', radius: 14, volume: 0.5 } } };
+  const own = specsOf(fountain as never), implied = impliedSpecs(fountain as never);
+  assert.equal(specsOf(fountain as never), own, 'the same list for the same def');assert.equal(impliedSpecs(fountain as never), implied);
+  assert.ok(Object.isFrozen(own) && Object.isFrozen(own[0]));
+  const model = fakeModel([['f', 'fo', [0, 0]], ['g', 'fo', [9, 9]]], { fo: fountain });
+  const a = emittersOf(model as never), b = emittersOf(model as never);
+  assert.deepEqual(b, a, 'the same emitters on every scan');
+  assert.equal(a.find((e) => e.id === 'f#0')!.spec.variant, 0, 'the fountain is re-voiced');assert.equal(own[0].variant, undefined, 'without touching the cached spec');
+  assert.notEqual(specsOf({ ...fountain } as never), own, 'another def object computes its own');
+});

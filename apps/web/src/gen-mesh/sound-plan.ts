@@ -74,7 +74,17 @@ export function distanceTo(e: Pick<Emitter, 'pts' | 'area'>, x: number, y: numbe
 export const falloff = (d: number, radius: number, volume: number) => (d >= radius ? 0 : volume * (1 - d / radius) ** 2);
 
 /** A def's sound specs: `components.sound` and its `also` list (at most 4 in all). Unknown kinds are dropped. */
-export function specsOf(def: Pick<StoredDef, 'components'> | undefined): SoundSpec[] {
+/** P2 phones: a def's specs are a pure function of the def object, and the sound scan reads every entity's every 2 s; stored
+ *  defs are never edited in place, so each def's lists are made once (frozen: callers copy before changing one). A merged def
+ *  (one that extends another) is a fresh object per resolve, so it simply misses and is computed as before. */
+const OWN_SPECS = new WeakMap<object, readonly SoundSpec[]>(), IMPLIED_SPECS = new WeakMap<object, readonly SoundSpec[]>();
+const frozenList = (list: SoundSpec[]): readonly SoundSpec[] => Object.freeze(list.map((s) => Object.freeze(s)));
+export function specsOf(def: Pick<StoredDef, 'components'> | undefined): readonly SoundSpec[] {
+  if (!def) return [];
+  let hit = OWN_SPECS.get(def); if (!hit) { hit = frozenList(specsOfUncached(def)); OWN_SPECS.set(def, hit); }
+  return hit;
+}
+function specsOfUncached(def: Pick<StoredDef, 'components'> | undefined): SoundSpec[] {
   const raw = (def?.components as { sound?: unknown } | undefined)?.sound;
   const list = Array.isArray(raw) ? raw.slice(0, 4) : raw ? [raw, ...(Array.isArray((raw as { also?: unknown }).also) ? ((raw as { also: unknown[] }).also).slice(0, 3) : [])] : [];
   const out: SoundSpec[] = [];
@@ -94,8 +104,12 @@ export const CLUSTERED = new Set<SoundKind>(['leaves', 'bees']);
 const CLUSTER = 24;
 /** Sounds a def implies from its name and tags when it carries none of its own (or extra sounds for one that does).
  *  Kept to what a thing honestly sounds like on its own: no phantom people or machines working. */
-export function impliedSpecs(def: DefLike | undefined): SoundSpec[] {
+export function impliedSpecs(def: DefLike | undefined): readonly SoundSpec[] {
   if (!def) return [];
+  let hit = IMPLIED_SPECS.get(def); if (!hit) { hit = frozenList(impliedSpecsUncached(def)); IMPLIED_SPECS.set(def, hit); }
+  return hit;
+}
+function impliedSpecsUncached(def: DefLike): SoundSpec[] {
   const tags = new Set(def.tags ?? []), name = String(def.name ?? '').replace(/^core[-/]/, '').replace(/@\d+$/, '');
   const has = (...t: string[]) => t.some((x) => tags.has(x));
   const own = specsOf(def), kinds = new Set(own.map((s) => s.kind)), out: SoundSpec[] = [];
@@ -123,10 +137,11 @@ export function impliedSpecs(def: DefLike | undefined): SoundSpec[] {
 export function emittersOf(model: WorldModel): Emitter[] {
   const out: Emitter[] = [], clusters = new Map<string, Emitter>();
   for (const e of model.entities.values()) {
-    const def = model.resolvedDef(e.def), own = specsOf(def), implied = impliedSpecs(def as DefLike | undefined);
+    const def = model.resolvedDef(e.def), implied = impliedSpecs(def as DefLike | undefined);
+    let own = specsOf(def);
     if (!def || (!own.length && !implied.length)) continue;
     // a fountain's own water is the splashing voicing (its drip and pigeons come as extra sounds)
-    if (own[0] && own[0].variant === undefined && ((def as DefLike).tags ?? []).includes('fountain')) own[0] = { ...own[0], variant: 0 };
+    if (own[0] && own[0].variant === undefined && ((def as DefLike).tags ?? []).includes('fountain')) own = [{ ...own[0], variant: 0 }, ...own.slice(1)];
     const specs = own.length ? [...own, ...implied].slice(0, 4) : implied.filter((s) => !CLUSTERED.has(s.kind));
     if (!own.length) for (const spec of implied) {
       if (!CLUSTERED.has(spec.kind)) continue;
