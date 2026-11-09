@@ -1,0 +1,14 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1675,
+  "reason": "Four independently chosen sand furrows and smoothing use existing native paint/brush completion and normal atomic God edits. One new definition, five production K=2 samples with zero findings/gaps. Real registered builder covers both axes and smoothing; existing raw library gate passes. No older pins, budgets or baselines change.",
+  "definitions": [
+    {
+      "ref": "core-sand-garden@1",
+      "hash": "411dc5632d624e5025b886b9ada48a8c482f4790835797ea41d41998f9bbbb5f"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}

@@ -709,3 +709,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+## Quiet sand garden (#1675)
+
+`core/sand-garden@1` exposes two brush directions per cell (`bl`, `br`, `fl`, `fr`, relative to the bed/worker side), plus whole-bed `smooth`. Ten seconds of native paint/brush work must complete before the corresponding sand ridges and readable pattern change. Other cells persist independently; identical-direction work and smoothing an already-flat bed are refused. Read for actual current cells/worker, including after restart; generic cached immediate inspect labels remain a separate known limitation. No meditation state, separable material, borrowed-tool custody or new native contact is claimed. Three separately named optional God hooks commit a normal atomic edit after target/stage/access/proximity rechecks; no idle service scan.
