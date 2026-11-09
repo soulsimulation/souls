@@ -122,7 +122,13 @@ const SHARED_WATER_WAIT_POLICY = 'shared-water-wait/1';
  * body, the one with the larger entity id steps aside (native make-way) so the other can go first. /1 programmes
  * in old snapshots keep the plain wait, so recorded histories replay unchanged. */
 const SHARED_WATER_WAIT_POLICY_V2 = 'shared-water-wait/2';
-const SHARED_WATER_WAIT_POLICIES = new Set([SHARED_WATER_WAIT_POLICY, SHARED_WATER_WAIT_POLICY_V2]);
+/** shared-water-wait/3 (prospective, #1291): /2 plus a wait budget that counts only time behind a parked body. Every
+ * commons swim enters through the one dry shore gate, so a swimmer behind a queue at the gate cannot pick another way
+ * in; while the body it waits for is itself an active native mover (moving or queued), the 60-attempt budget restarts.
+ * Hard cap: 180 s from the step's first wait, whatever the blocker does. /1 and /2 programmes keep their exact path. */
+const SHARED_WATER_WAIT_POLICY_V3 = 'shared-water-wait/3';
+const SHARED_WATER_WAIT_CAP_V3 = 180 * TPS;
+const SHARED_WATER_WAIT_POLICIES = new Set([SHARED_WATER_WAIT_POLICY, SHARED_WATER_WAIT_POLICY_V2, SHARED_WATER_WAIT_POLICY_V3]);
 type Op = { verb: string; params: Record<string, unknown>; settle: 'done' | 'held'; soft?: boolean; raw?: boolean } | { wait: number };
 type Prog = {
   id: string; actor: string; label: string; steps: Program['steps'];
@@ -130,7 +136,7 @@ type Prog = {
   blockedSince?: number;
   quietHeldSince?: number;
   spreadWaits?: number;
-  waterWait?: {step: number; since: number; attempts: number};
+  waterWait?: {step: number; since: number; attempts: number; note?: string};
   walkStopping?: Diag;
   waterStopRetry?: Diag;
   walkResume?: true;
@@ -863,6 +869,7 @@ export class MarsEngine implements Engine {
           // runtime does not report as deadlock.*, e.g. four Souls each yielding at a deck's single-file step) steps
           // back after 10 s plus a per-actor stagger, waits 1-3 s and re-tries the same step (at most 6 times), so
           // one walker goes first and the rest follow instead of all freezing for ever.
+          if(this.sharedWaterCycleYieldV3(p,rec))return;
           if (this.cfg.edgeMotionV1 === true) {
             const held = this.trafficHeld(p.actor);
             if (held) {
@@ -1074,9 +1081,42 @@ export class MarsEngine implements Engine {
   private retrySharedWaterV1(p:Prog,d:Diag):boolean{
     if(!this.sharedWaterStep(p.steps[p.index])||!this.waterBodyObstruction(d,p.actor))return false;
     const tick=this.rt.tick,wait=p.waterWait?.step===p.index?p.waterWait:{step:p.index,since:tick,attempts:0};
-    p.waterWait=wait;if(++wait.attempts>60)return false;
-    const yielded=p.steps[p.index]?.params?.spreadWaitPolicy===SHARED_WATER_WAIT_POLICY_V2&&this.sharedWaterYieldV2(p,d);
+    p.waterWait=wait;const policy=p.steps[p.index]?.params?.spreadWaitPolicy;
+    if(policy===SHARED_WATER_WAIT_POLICY_V3){if(tick-wait.since>=SHARED_WATER_WAIT_CAP_V3)return false;if(this.sharedWaterQueuedV3(p.actor,d))wait.attempts=0;}
+    if(++wait.attempts>60)return false;
+    const yielded=policy===SHARED_WATER_WAIT_POLICY_V3&&d.details?.cycleYield===true?this.sharedWaterMakeWayV3(p,d):(policy===SHARED_WATER_WAIT_POLICY_V2||policy===SHARED_WATER_WAIT_POLICY_V3)&&this.sharedWaterYieldV2(p,d);
     p.index--;p.ops=[{wait:yielded?3*TPS:TPS}];return true;
+  }
+  /** shared-water-wait/3: the named blocker is not parked. It has an active native movement record of its own (moving,
+   * or blocked in a queue), so waiting behind it is progress rather than a wall. Reads native records only. */
+  private sharedWaterQueuedV3(actor:string,d:Diag):boolean{
+    const others=new Set((d.subjects??[]).filter(id=>id!==actor&&!!this.ents[id]?.human));if(!others.size)return false;
+    for(const rec of this.rt.records.values() as Iterable<any>)if(others.has(rec.params?.actor)&&(rec.verb==='commons_shore_travel'||rec.verb==='shore_travel'||rec.verb==='walk_to')&&this.rt.isActive(rec.id))return true;
+    return false;
+  }
+  /** shared-water-wait/3 gate-cycle yield (#1291): two swimmers whose walks to the one dry shore gate wait on each other
+   * (the runtime's deadlock.cycle, published after DEADLOCK_TICKS) would each stay held until the minute-long walk
+   * timeout, twice over. As soon as the cycle is published, the larger entity id among its humans (the /2 rule) stops
+   * its walk with the named cancel `shore.cycle-yield`, then steps aside by native make-way and retries the same step.
+   * The programme continues; the others go on through the gate. Only /3 shared-water steps; plain walks are untouched. */
+  private sharedWaterCycleYieldV3(p:Prog,rec:ActionRecord):boolean{
+    const step=p.steps[p.index];if(step?.params?.spreadWaitPolicy!==SHARED_WATER_WAIT_POLICY_V3||!this.sharedWaterStep(step)||!this.rt.isActive(rec.id))return false;
+    let cycle:Diag|undefined=rec.diagnostic?.code==='deadlock.cycle'?rec.diagnostic:undefined;
+    const owned=new Set([rec.id]);for(let depth=0;depth<4&&!cycle;depth++){let added=false;for(const child of this.rt.records.values())if(child.parent&&owned.has(child.parent)&&!owned.has(child.id)&&this.rt.isActive(child.id)){owned.add(child.id);added=true;if(child.diagnostic?.code==='deadlock.cycle'){cycle=child.diagnostic;break;}}if(!added)break;}
+    if(!cycle)return false;
+    const others=(cycle.subjects??[]).filter(id=>id!==p.actor&&!!this.ents[id]?.human).sort();if(!others.length||others.some(id=>id>p.actor))return false;
+    const why={code:'shore.cycle-yield',message:`making way for ${others.join(', ')} at the shore gate; ${p.actor} tries again in a few seconds`,subjects:[p.actor,...others]};
+    this.rt.cancel(rec.id,why);
+    p.walkStopping=why;p.waterStopRetry={code:'shore.occupied-route',message:`${p.actor} must wait for ${others[0]}`,subjects:[p.actor,...others],details:{cycleYield:true}};
+    return true;
+  }
+  /** The step aside of a gate-cycle yield, once the walk has stopped. When make-way finds no free spot nearby, the
+   * swimmer keeps the plain /3 wait (1 s retries, bounded by the cap) and its wait records `shore.cycle-yield-no-room`. */
+  private sharedWaterMakeWayV3(p:Prog,d:Diag):boolean{
+    const other=d.subjects?.find(id=>id!==p.actor&&!!this.ents[id]?.human),at=other?this.pos(other):undefined;
+    if(at){this.m.makeWay(this.rt,p.actor,at);if(this.rt.records.has(`${p.actor}:make-way:${this.rt.tick}`))return true;}
+    if(p.waterWait)p.waterWait.note='shore.cycle-yield-no-room';
+    return false;
   }
   /** shared-water-wait/2: two swimmers standing in each other's shore route (each programme waiting on the other)
    * would both wait a minute and fail together. The larger entity id steps aside with a native courtesy walk. */
@@ -1332,7 +1372,7 @@ export class MarsEngine implements Engine {
   canPerform(program: Program): Diag | null {
     if(this.steerOnlyV1(program))return this.plan('carrier_steer',{...program.steps[0].params,actor:program.actor});
     for(const step of program.steps)if(step.verb==='mars:carrier_ride'){const issue=this.puntBoardingIssue(String(step.params.carrier??''));if(issue)return issue;}
-    for(const step of program.steps)if(step.params?.spreadWaitPolicy!==undefined&&!this.sharedWaterStep(step))return {code:'action.invalid-spread-wait-policy',message:'Only shared-water-wait/1 or /2 on a pond/1 or pond-lap/1 walk is supported.'};
+    for(const step of program.steps)if(step.params?.spreadWaitPolicy!==undefined&&!this.sharedWaterStep(step))return {code:'action.invalid-spread-wait-policy',message:'Only shared-water-wait/1, /2 or /3 on a pond/1 or pond-lap/1 walk is supported.'};
     const bodyIssue=this.bodyProgramProblemV1(program); if(bodyIssue)return bodyIssue;
     for(const step of program.steps)if(step.verb==='walk_to'){const issue=this.gaitIssue(program.actor,step.params);if(issue)return issue;}
     if(program.steps[0]?.verb==='control_classroom_v1'){const p=program.steps[0].params;if(program.steps.length!==1||!['cancel','advance'].includes(String(p.kind))||typeof p.session!=='string'||!this.ownedClassroomControlRosterV1(program.actor,p.session))return {code:'classroom.owned-host-control-required',message:'Only the active classroom host can apply this control.'};return this.plan('classroom_control',{session:p.session,intent:{kind:p.kind}});}

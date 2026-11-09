@@ -62,3 +62,25 @@ test('explicit unknown policy refuses and a finite waiting snapshot resumes exac
 test('accepted soft water action blocked by late bodies exhausts as failure rather than skipped arrival',()=>{
  const e=setup(),stationary=structuredClone(e.world.entities.h_actor.human),p=e.perform({actor:'h_actor',label:'late body after actual native submission',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:policy}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);e.step();e.step();assert.ok((e.snapshot() as any).programs.find((x:any)=>x.id===p.id)?.action,'native action has actually been submitted');lateHuman(e,'h_crossing',stationary);const initial=[...e.world.entities.h_actor.pose.p],start=e.world.tick,terminal=finish(e,p.id);assert.equal(terminal.kind,'failed');assert.equal(terminal.code,'shore.occupied-route');assert.ok(e.world.tick-start<=2600,'native hold plus actual renewals remain bounded');assert.ok(Math.hypot(e.world.entities.h_actor.pose.p[0]-initial[0],e.world.entities.h_actor.pose.p[2]-initial[2])<.25,'native approach stops before the .8m ring of .28m capsules');assert.equal(e.world.entities.h_actor.human!.activity,'tread');
 });
+
+// #1291 shared-water-wait/3: a parked-only wait budget with a 180 s hard cap, and a gate-cycle yield for swim steps only.
+const V3='shared-water-wait/3';
+test('/3: behind parked bodies the wait stays bounded at about a minute, as /1',()=>{
+ const e=setup(),initial=[...e.world.entities.h_actor.pose.p],p=e.perform({actor:'h_actor',label:'parked crowd under /3',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}}]});assert.ok(p.ok);lateHuman(e);
+ const begin=e.world.tick,terminal=finish(e,p.id);assert.equal(terminal.kind,'failed');assert.equal(terminal.code,'shore.occupied-route');assert.match(terminal.message??'',/must wait for h_crossing/);
+ assert.ok(e.world.tick-begin<=1201,String(e.world.tick-begin));assert.ok(Math.hypot(e.world.entities.h_actor.pose.p[0]-initial[0],e.world.entities.h_actor.pose.p[2]-initial[2])<.25);
+});
+test('/3: behind bodies that stay active movers the wait still ends at the 180 s hard cap, without moving through them',()=>{
+ const e=setup(),initial=[...e.world.entities.h_actor.pose.p],p=e.perform({actor:'h_actor',label:'queued crowd under /3',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}}]});assert.ok(p.ok);lateHuman(e);
+ // The water fixture cannot hold eight native movers queued for minutes, so only the liveness read is held true:
+ // every blocker counts as an active mover, the budget never runs out, and only the hard cap ends the wait.
+ (e as any).sharedWaterQueuedV3=()=>true;
+ const begin=e.world.tick,terminal=finish(e,p.id);assert.equal(terminal.kind,'failed');assert.equal(terminal.code,'shore.occupied-route');
+ const waited=e.world.tick-begin;assert.ok(waited>1201&&waited<=3600+40,String(waited));
+ assert.ok(Math.hypot(e.world.entities.h_actor.pose.p[0]-initial[0],e.world.entities.h_actor.pose.p[2]-initial[2])<.25,'never through the crowd');assert.deepEqual(e.runtime.violations,[]);
+});
+test('/3: a snapshot taken mid-wait restores and steps state-hash identical',()=>{
+ const e=setup(false),p=e.perform({actor:'h_actor',label:'/3 snapshot',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);lateHuman(e);for(let i=0;i<45;i++)e.step();
+ const snap=e.snapshot(),copy=factory.restore(snap);assert.equal(copy.stateHash(),e.stateHash());leave(e);leave(copy);let terminal=false;
+ for(let i=0;i<1500&&!terminal;i++){const a=e.step(),b=copy.step();assert.equal(copy.stateHash(),e.stateHash());assert.deepEqual(b.programs,a.programs);terminal=a.programs.some(x=>x.id===p.id&&x.kind==='completed');}assert.ok(terminal);
+});
