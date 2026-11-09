@@ -10,11 +10,11 @@ export const MENU_CLASS = 'phone-menu';
 export type MenuSection = 'time' | 'search' | 'souls' | 'god' | 'music' | 'camera' | 'extra' | 'account';
 
 /** The rows after Worlds, in the issue's order. `value` reads the control's current state for the row's second line. */
-export const MENU_TARGETS: readonly { key: string; section: MenuSection; selector: string; label?: string; value?: (root: MenuRoot) => string; fallback?: () => void }[] = [
+export const MENU_TARGETS: readonly { key: string; section: MenuSection; selector: string; label?: string; value?: (root: MenuRoot) => string; fallback?: () => void; unless?: string }[] = [
   { key: 'time', section: 'time', selector: '.hud-status .world-time-button', label: 'Time', value: (root) => text(root, '.hud-status [data-viewer-status]') },
   { key: 'search', section: 'search', selector: '.hud-explore-group .explore-open:not(.god-open)', label: 'Search' },
-  { key: 'souls', section: 'souls', selector: '.hud-explore-group .my-souls > button, .hud-explore-group .souls-menu .navbar-menu-trigger' },
-  { key: 'new-soul', section: 'souls', selector: '.hud-explore-group .bring-agent-open', label: 'New Soul' },
+  // the Souls list (part b) carries its own New Soul; this row stands in when you have no Souls yet
+  { key: 'new-soul', section: 'souls', selector: '.hud-explore-group .bring-agent-open', label: 'New Soul', unless: '.hud-menu-souls' },
   { key: 'god', section: 'god', selector: '[data-god-open]', label: 'God mode' },
   { key: 'claim', section: 'god', selector: '[data-god-panel-toggle]' },
   { key: 'music', section: 'music', selector: '.hud-left .navbar-audio .navbar-menu-trigger', label: 'Music' },
@@ -40,6 +40,7 @@ function text(root: MenuRoot, selector: string): string {
 export function collectMenuRows(root: MenuRoot): MenuRow[] {
   const rows: MenuRow[] = [];
   for (const t of MENU_TARGETS) {
+    if (t.unless && root.querySelectorAll(t.unless).length) continue;
     const found = Array.from(root.querySelectorAll(t.selector));
     found.forEach((target, i) => {
       if (target.hidden) return;
@@ -52,3 +53,24 @@ export function collectMenuRows(root: MenuRoot): MenuRow[] {
   }
   return rows;
 }
+
+/** Show up to this many of your Souls in the menu before "Show more" (#1391 part b). */
+export const MENU_SOULS_SHOWN = 5;
+
+/** The visible slice of `ids`: the first MENU_SOULS_SHOWN unless expanded, and how many are hidden. */
+export function menuSoulsShown<T>(all: readonly T[], expanded: boolean): { shown: readonly T[]; hidden: number } {
+  const shown = expanded ? all : all.slice(0, MENU_SOULS_SHOWN);
+  return { shown, hidden: all.length - shown.length };
+}
+
+// #1391 part b: the open menu offers a slot for the Souls list. MySouls (mounted, hidden, in the top bar) portals its
+// inline list into it, so the list is the same component with the same data and click behaviour as the top bar's.
+type SoulsSlot = { el: HTMLElement | null; close: () => void };
+let soulsSlot: SoulsSlot = { el: null, close: () => {} };
+const slotListeners = new Set<() => void>();
+export function setMenuSoulsSlot(el: HTMLElement | null, close: () => void) {
+  if (soulsSlot.el === el) return;
+  soulsSlot = { el, close }; for (const f of slotListeners) f();
+}
+export const menuSoulsSlot = (): SoulsSlot => soulsSlot;
+export function subscribeMenuSoulsSlot(f: () => void) { slotListeners.add(f); return () => { slotListeners.delete(f); }; }
