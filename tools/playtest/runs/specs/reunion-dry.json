@@ -1,0 +1,144 @@
+{
+ "soulRun": 1,
+ "name": "reunion-dry",
+ "scenario": "../../scenarios/reunion/reunion.json",
+ "cast": {
+  "seats": [
+   {
+    "id": "ada",
+    "adapter": "scripted-owner",
+    "soulName": "Ada",
+    "wake": true,
+    "home": true,
+    "script": {
+     "rules": [
+      {
+       "match": "Tomorrow at walk",
+       "ack": "Meeting Bo",
+       "do": [
+        [
+         "say",
+         "Hello Bo, nice to meet you."
+        ],
+        [
+         "say",
+         "Tomorrow at walk:knoll"
+        ]
+       ],
+       "result": "Agreed with Bo: the knoll tomorrow"
+      },
+      {
+       "match": "For the evening",
+       "ack": "Off for the evening",
+       "do": [
+        [
+         "act",
+         "walk:lab-pond-hall",
+         "--wait",
+         "170"
+        ]
+       ],
+       "result": "There for the evening"
+      },
+      {
+       "match": "new day",
+       "ack": "Good morning",
+       "do": [
+        [
+         "act",
+         "walk:knoll",
+         "--wait",
+         "280"
+        ],
+        [
+         "say",
+         "Good morning, Bo!"
+        ]
+       ],
+       "result": "At the knoll, greeted Bo"
+      }
+     ]
+    }
+   },
+   {
+    "id": "bo",
+    "adapter": "scripted-owner",
+    "soulName": "Bo",
+    "wake": true,
+    "home": true,
+    "script": {
+     "rules": [
+      {
+       "match": "Tomorrow at walk",
+       "ack": "Meeting Ada",
+       "do": [
+        [
+         "say",
+         "Hello Ada, nice to meet you."
+        ],
+        [
+         "say",
+         "Tomorrow at walk:knoll"
+        ]
+       ],
+       "result": "Agreed with Ada: the knoll tomorrow"
+      },
+      {
+       "match": "For the evening",
+       "ack": "Off for the evening",
+       "do": [
+        [
+         "act",
+         "walk:cottage",
+         "--wait",
+         "170"
+        ]
+       ],
+       "result": "There for the evening"
+      },
+      {
+       "match": "new day",
+       "ack": "Good morning",
+       "do": [
+        [
+         "act",
+         "walk:knoll",
+         "--wait",
+         "280"
+        ],
+        [
+         "say",
+         "Good morning, Ada!"
+        ]
+       ],
+       "result": "At the knoll, greeted Ada"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "world": {
+  "port": 4351
+ },
+ "observer": {
+  "check": true,
+  "required": false,
+  "mode": "passive",
+  "timeoutMs": 60000
+ },
+ "limits": {
+  "maxWallSec": 1500,
+  "maxControllers": 2,
+  "cleanupWaitMs": 15000
+ },
+ "retention": {
+  "worldData": "keep",
+  "controllerState": "keep"
+ },
+ "evaluation": {
+  "questions": [
+   "../questions/reunion-recall.mjs"
+  ]
+ }
+}
