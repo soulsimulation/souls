@@ -134,6 +134,8 @@ export type PublicSoul = {
    *  idle reflex runs; zombie = disconnected, shuffling; asleep = disconnected, still. `doing` is the posture word (null when
    *  directed); `since` (ms) when the state began. Edge worlds only. */
   body?: {state: 'awake' | 'idle' | 'zombie' | 'asleep'; doing: 'standing' | 'sitting' | 'dozing' | 'drifting' | 'floating' | null; since: number};
+  /** #456: present only while the world slows or refuses this Soul's own requests: the refusal's code and when (ms) it ends. */
+  slowed?: {reason: 'soul.slow-down' | 'world.busy' | 'world.crowded'; until: number};
 };
 export type BrainCall = {
   id: number; tick: number; at: number; tier: 'mid' | 'translate' | 'director' | 'narrator' | 'shot' | 'compile' | 'talk' | 'attune' | 'reflection';

@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
+import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
 export type RouteClass = {cls: Cls; id: string; god: boolean; deadlineMs: number};
@@ -267,7 +268,10 @@ export const accountTag = (owner: string) => createHash('sha256').update('sim-ac
 /** `account(token)` → the token's account (Soul owner) for `x-sim-account`, which the launcher's per-account ceilings read
  *  and strip (LOAD-CONTRACT §2b). Cached per token for a minute (a token lookup reads the database). */
 export function admissionMiddleware(adm: Admission, level: () => Level, bearer: (c: Context) => string | undefined, account?: (token: string) => string | undefined,
-  crowded?: (token: string) => {position: number; eta_s: number} | null): MiddlewareHandler {
+  crowded?: (token: string) => {position: number; eta_s: number} | null,
+  /** #456: a refusal addressed to this Soul token (never the god's), for the public Soul's `slowed`. */
+  refused?: (token: string, code: SlowedReason, retryAfterS: number) => void): MiddlewareHandler {
+  const told = (token: string, code: string, retryAfterS: number) => { if (code !== 'soul.busy') try { refused?.(token, code as SlowedReason, retryAfterS); } catch { /* the answer goes out regardless */ } };
   const tags = new Map<string, {tag: string | null; at: number}>();
   const tagOf = (token: string) => {
     const now = Date.now(), hit = tags.get(token);
@@ -293,7 +297,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
-    if (line) { stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
+    if (line) { told(token, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
       return c.json({contract: 'eden-edge/1', error: {code: 'world.crowded', message: crowdedNote(line), position: line.position, eta_s: line.eta_s}, world: worldBlock(lv, Math.max(1, Math.min(line.eta_s, 60)))}, 503); }
     // the body is NOT pre-read here: god/ingestion.ts and edge/body/routes.ts measure/stream the raw body with their own
     // reader, and a stream Hono has already consumed is locked (R2 integration: every POST /v1/god/* answered 500). Body
@@ -301,7 +305,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     // the client went away = its socket closed (not `incoming.destroyed`: a fully read request body is destroyed too)
     const env = c.env as {incoming?: {socket?: {destroyed?: boolean}}} | undefined, hint = Number(c.req.header('x-sim-timeout-ms'));
     const t = adm.request({key: r.god ? 'god' : 'soul:' + token, god: r.god, route: r, hintMs: Number.isFinite(hint) ? hint : undefined, closed: () => env?.incoming ? env.incoming.socket?.destroyed === true : c.req.raw.signal?.aborted === true});
-    const refuse = (x: Refusal) => { c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
+    const refuse = (x: Refusal) => { if (!r.god) told(token, x.code, x.retryAfterS); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
       return c.json({contract: 'eden-edge/1', error: {code: x.code, message: x.message}, world: worldBlock(lv, x.retryAfterS)}, x.status); };
     if ('refusal' in t) return refuse(t.refusal);
     const v = await t.turn;
