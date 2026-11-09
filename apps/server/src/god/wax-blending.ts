@@ -66,6 +66,10 @@ export function createWaxBlending(h:WaxBlendingHost){
   const done=h.commit(ops,`${r.soulId} worked modelling wax`,`wax-blending:${r.id}`);
   if(!done.accepted)h.log('wax-blending: world refused consume/create; materials and output remain unchanged');
  }
- return{plan,onReceipt};
+ function facts(id:string){
+  const e=block(id);if(!e)return null;
+  return{waxMixture:`${colors.map(c=>`${count(e.state,c)} ${c}`).join(', ')}; ${Number(e.state?.units??0)} portions; color ${waxColor(Object.fromEntries(colors.map(c=>[c,count(e.state,c)])))}.`,waxStock:colors.map(c=>`${Number(e.state?.[c+'Stock']??0)} ${c}`).join(', '),waxLastWork:String(e.state?.text??''),waxWorker:String(e.state?.lastBy||'none')};
+ }
+ return{plan,onReceipt,facts};
 }
 export type WaxBlending=ReturnType<typeof createWaxBlending>;
