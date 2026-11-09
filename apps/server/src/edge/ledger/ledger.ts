@@ -1,4 +1,4 @@
-import {STOOD_ON_FLOOR,QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
+import {NONFINITE_HELD,STOOD_ON_FLOOR,QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
@@ -732,6 +732,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     this.onRelocated(relocated);
   }
+  /** #1496 nonfinite-hold/1: a number near these Souls was put back and their programmes stopped. Their open acts end here and
+   *  each is told; nobody else. */
+  private onNonFiniteHeld(souls: string[]) {
+    for (const soulId of souls) {
+      this.pending.delete(soulId);
+      for (const r of this.openReceipts(soulId)) this.update(r.id, {phase: 'failed', code: NONFINITE_HELD.code, reason: NONFINITE_HELD.message});
+      this.comms?.streams.deliver?.(soulId, NONFINITE_HELD.code, this.host.engine.world.tick, {text: NONFINITE_HELD.message});
+    }
+  }
   /** Hotfix: a recovered engine fault ends the open receipts of the Souls whose programmes were set aside. */
   private onRecovery(e: {kind: string; payload: unknown}) {
     const fact = e.payload as {recovery?: {edge?: {souls: string[]}; lastRung?: {relocated?: string[]}}; lastRungInPlace?: {relocated?: string[]; stopped?: number}; refusal?: {relocated?: true; bodies: string[]}} | null;
@@ -747,6 +756,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     const q = (e.payload as {quarantineV1?: {souls?: string[]; relocated?: string[]}} | null)?.quarantineV1;
     if (e.kind === 'rules' && q) return this.onQuarantined(q.souls ?? [], q.relocated ?? []);
+    const nf = (e.payload as {nonFiniteHoldV1?: {souls?: string[]}} | null)?.nonFiniteHoldV1;
+    if (e.kind === 'rules' && nf) return this.onNonFiniteHeld(nf.souls ?? []);
     const edge = fact?.recovery?.edge; if (e.kind !== 'rules' || !edge) return;
     for (const soulId of edge.souls) {
       this.pending.delete(soulId);

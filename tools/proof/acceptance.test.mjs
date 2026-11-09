@@ -314,7 +314,7 @@ test('proofHostProblem: a repository\'s earlier name counts as it, and only that
   for (const path of ['genekogan/souls/releases/download/proofs/pr-1.desktop.mp4', 'genekogan/souls/releases/download/proofs-1101/pr-1101.proof.json', 'soulsimulation/souls/releases/download/proofs-7/x.mp4'])
     assert.equal(proofHostProblem(gh(path), opts), null, path);
   for (const path of ['genekogan/other/releases/download/proofs/x.mp4', 'evil/souls/releases/download/proofs/x.mp4', 'genekogan/souls2/releases/download/proofs/x.mp4',
-    'xgenekogan/souls/releases/download/proofs/x.mp4', 'genekogan/souls/releases/download/v4.15/x.mp4', 'genekogan/souls/releases/download/proofs/../v1/x.mp4'])
+    'xgenekogan/souls/releases/download/proofs/x.mp4', 'genekogan/souls/releases/download/v0.119/x.mp4', 'genekogan/souls/releases/download/proofs/../v1/x.mp4'])
     assert.match(String(proofHostProblem(gh(path), opts)), /proofs release \(soulsimulation\/souls\)/, path);
   assert.match(String(proofHostProblem(gh('genekogan/souls/releases/download/proofs/x.mp4'), { repo: 'o/r', cdn: null })), /proofs release \(o\/r\)/, 'another repository gains nothing');
   assert.deepEqual(allowedProofLinks([gh('genekogan/souls/releases/download/proofs/x.mp4')], opts), { ok: [gh('genekogan/souls/releases/download/proofs/x.mp4')], ignored: [] });
@@ -340,7 +340,7 @@ test('proofHostProblem: this repository\'s proofs releases, GitHub attachments a
   no(VIDEO.replace('https:', 'http:'), /not https/);
   // other repositories and other release tags
   no('https://github.com/evil/r/releases/download/proofs-7/x.mp4', /proofs release \(o\/r\)/);
-  no('https://github.com/o/r/releases/download/v4.14/x.mp4', /proofs release/);
+  no('https://github.com/o/r/releases/download/v0.118/x.mp4', /proofs release/);
   no('https://github.com/o/r/releases/download/proofs-x/x.mp4', /proofs release/);
   no('https://github.com/o/r/releases/download/proofs-7/../v1/x.mp4', /proofs release/);
   no('https://github.com/o/r/blob/main/x.mp4', /proofs release/);

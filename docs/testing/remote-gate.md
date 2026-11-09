@@ -68,7 +68,7 @@ The Modal steps run with `--only` and are compared assertion by assertion with t
 renames, new failures, skips and quarantine work as before. For the CI-covered steps a green CI means every test
 passed and the log check above found no unquarantined skip or todo. A deleted or renamed test is not visible in a
 green run; it is caught when the PR is made, by the [renames](#renames) check (#1462). Titles built at run time are
-outside that check, so on the CI-covered steps their removal is not seen at release. From the 4.16.1 gate's step timings the Modal part is about 30 minutes (the longest
+outside that check, so on the CI-covered steps their removal is not seen at release. From the 0.120.1 gate's step timings the Modal part is about 30 minutes (the longest
 container: V3-walk 138 s, V3-mars-engine 578 s and the V6 scenarios about 840 s, plus image and install), against about
 75 to 90 minutes for the whole contract; V5 alone was 46 minutes in its longest shard.
 

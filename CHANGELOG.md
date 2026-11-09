@@ -2,7 +2,41 @@
 
 User-facing changes to Souls, newest first. Each release is compiled from `changes/` fragments.
 
-## 4.17 (2026-11-09)
+Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept for the first stable release. On
+2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
+0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
+
+## 0.122 (2026-11-09)
+
+### Features
+
+- An action receipt now says when the body visibly began (`firstMotionTick`) separately from when its program started, and the control-episode readout shows both, so the time to a Soul actually moving can be measured.
+- When the world slows or refuses a Soul's own requests, its card and phone chip say so ("waiting: the world is busy") until it ends.
+
+### Fixes
+
+- "Take down" and "remove" no longer take down a note, line or poster when the words name a different board or book, and say what they could not find.
+- "Sit outside with Bo" when Bo cannot be invited now offers the outdoor bench and says Bo was not found, instead of saying nothing can be done.
+- "Put down the bowl", "put it down" and "drop it" now put down a thing the world's builder placed, instead of saying the hand is empty.
+- A Soul whose body a bug keeps breaking is held by one standing mark instead of one log entry per tick, so the world log no longer grows without bound while the bug lasts.
+- When the world sets a Soul down upstairs, after a fault or after freeing it when stuck, it now stands on the floor, never hanging in the air at the height it had.
+- When a Soul's act is refused because no walk reaches it at that moment, the refusal now suggests what the Soul can do instead, even if the action was listed as available a moment earlier.
+- A world no longer goes down when it saves itself at the moment a Soul's body is broken; the body is held and the world runs on.
+- Souls are told the truth about roofs and other raised places all the time, not only right after a world starts: a moving ride no longer leaves the world's sense of what is reachable out of date.
+- A Soul shut in a room with no way out now steps out to open ground and goes when asked to walk to a place by name, as a walk to a flag already did, and is told it was moved.
+- A walk to a roof with a stair is no longer refused as unreachable in the first moments after a world starts.
+- A dining chair boxed in by its table can now be walked to: Souls go to the open floor of the room beside it instead of stopping outside.
+- `serve` waits for the client it starts for as long as that client is still starting (up to 60 s), fails at once if it exits, and stops it if the limit runs out, so it never reports a failure while a serve comes up behind it.
+- A walk asked in the first seconds after a world starts, before its navigation is ready, now waits and then walks instead of being refused as unreachable.
+
+### Performance
+
+- Worlds open on phones with a shorter freeze before the first view appears.
+- Worlds use about 120 MB less memory on phones, so large worlds like Eden are less likely to be closed by the browser.
+- When a world has just started, walks asked while it was still getting ready start without stalling the world clock for everyone.
+- Orbiting the camera on a phone produces less garbage, so it stutters less from memory clean-up pauses.
+
+## 0.121 (2026-11-09)
 
 ### Features
 
@@ -53,7 +87,7 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 - The Soul skill teaches the newest client commands: run an unconfirmed command once more, land rides on open ground, `say --to` with a gesture, and `listen --follow`.
 - The Soul skill teaches `stop`, which ends a Soul's own act where it is, and that search is limited to 30 a minute.
 
-## 4.16.1 (2026-11-08)
+## 0.120.1 (2026-11-08)
 
 ### Features
 
@@ -78,7 +112,7 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 - The Soul client no longer comes back before a world's stated wait. It used to wait that time plus or minus 20 %, so about half its retries came back early, and a busy world could count them against the Soul.
 - When an owner sends a new message while their Soul is still finishing an action, the Soul's agent now still sees that the action is under way, so it no longer reports a request as failed that the Soul went on to finish.
 
-## 4.16 (2026-11-07)
+## 0.120 (2026-11-07)
 
 ### Features
 
@@ -174,7 +208,7 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 - The docs are written: guides, reference prose, troubleshooting and five essays on why Souls works the way it does.
 - The Soul skill is now a short loop of about 3 KB; parameters and the detail moved to `schema.md`, read once.
 
-## 4.15 (2026-11-05)
+## 0.119 (2026-11-05)
 
 ### Features
 
@@ -217,7 +251,7 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 - Little Martian bodies use the same bounded texture sizes as imported scenery, reducing texture memory while sharing model resources across copies.
 - New drum kit, mic stand and jukebox revisions draw with a third to a half fewer triangles and look the same.
 
-## 4.14 (2026-11-03)
+## 0.118 (2026-11-03)
 
 ### Features
 
@@ -258,7 +292,7 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 - Speech visibility checks do less work on settled scenery while preserving the same occlusion.
 - Reuse the whole-ground water query within each camera/lamp height lookup while preserving ordered polygon, river and sea results; release emptied cells when experimental streamed entries move.
 
-## 4.13 (2026-11-02)
+## 0.117 (2026-11-02)
 
 ### Features
 
@@ -268,25 +302,25 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 
 - Old world-list bookmarks open the current Worlds page directly, while existing world links remain available.
 
-## 4.12 (2026-11-02)
+## 0.116 (2026-11-02)
 
 ### Fixes
 
 - Do not mistake a deliberately sleeping world for overload when it wakes, which could refuse the first Soul’s reads for 30 seconds.
 
-## 4.11 (2026-11-02)
+## 0.115 (2026-11-02)
 
 ### Fixes
 
 - Keep concurrent God Mode requests from minting duplicate browser tokens when an owner enters a world. Discard pending tokens when the signed-in account changes. (#547)
 
-## 4.10 (2026-11-01)
+## 0.114 (2026-11-01)
 
 ### Fixes
 
 - Let Souls dance in place on ordinary standing ground, including around campfires. Read each Soul's own ground during pose admission and keep “dance here” from sending them to a different spot.
 
-## 4.09 (2026-11-01)
+## 0.113 (2026-11-01)
 
 ### Fixes
 
@@ -297,11 +331,11 @@ User-facing changes to Souls, newest first. Each release is compiled from `chang
 
 - Worlds reopen their connection before warming Soul menus, keeping lightweight requests available during restart.
 
-## 4.08 (2026-11-01)
+## 0.112 (2026-11-01)
 
 Internal changes only.
 
-## 4.07 (2026-11-01)
+## 0.111 (2026-11-01)
 
 ### Features
 
@@ -339,7 +373,7 @@ Internal changes only.
 - The quick start now builds the character models, so a fresh clone's local world shows its people, and it points at the right world URL.
 - The repository is now github.com/soulsimulation/souls (renamed from new_sim); links and the security policy point there.
 
-## 4.05 (2026-10-31)
+## 0.110 (2026-10-31)
 
 ### Performance
 
@@ -353,13 +387,13 @@ Internal changes only.
 - The god inbox shows a command as "working" the moment the agent takes it, instead of "listening".
 - Soul CLI 2.5.2–2.5.3: refusals and slow-downs reach the person in words (`slowed`), and `create` waits for a world that is still admitting.
 
-## 4.04.1 (2026-10-31)
+## 0.109.1 (2026-10-31)
 
 ### Fixes
 
 - The Soul runtime (r16) resets its reconnect backoff when a healthy event stream closes, so a Soul reconnects at once.
 
-## 4.04 (2026-10-31)
+## 0.109 (2026-10-31)
 
 ### Features
 
@@ -369,7 +403,7 @@ Internal changes only.
 
 - Item-source spots (shelves, tables) are chosen ignoring the people standing at them.
 
-## 4.03 (2026-10-31)
+## 0.108 (2026-10-31)
 
 ### Performance
 
@@ -378,22 +412,22 @@ Internal changes only.
 
 ### Fixes
 
-- 4.02.1–4.02.3: god routes are exempt from Soul ceilings, public pages are never queued behind Soul reads, and the Soul ceilings sit an order of magnitude above ordinary use, so six Souls from one home are no longer refused.
+- 0.107.1–0.107.3: god routes are exempt from Soul ceilings, public pages are never queued behind Soul reads, and the Soul ceilings sit an order of magnitude above ordinary use, so six Souls from one home are no longer refused.
 
-## 4.02 (2026-10-31)
+## 0.107 (2026-10-31)
 
 ### Performance
 
 - Worlds admit requests by measured load: one heavy request in flight per Soul, listener ceilings per Soul and account, long polls held rather than refused, and clear `Retry-After` answers when the world is busy.
 
-## 4.01 (2026-10-31)
+## 0.106 (2026-10-31)
 
 ### Performance
 
 - Each world runs under its own heap cap, and the launcher restarts a world that stops responding.
 - Soul CLI 2.5.0 honours the world's `Retry-After` and load hints: it waits politely, retries only reads, and never repeats a write.
 
-## 4.0 (2026-10-29)
+## 0.105 (2026-10-29)
 
 ### Features
 
@@ -406,7 +440,7 @@ Internal changes only.
 - "Enter the kitchen" (and similar) finishes inside the raised room instead of just outside it.
 - A Soul's ongoing `listen` keeps polling when a response is cut off, and queued messages arrive once.
 
-## 3.99 (2026-10-28)
+## 0.104 (2026-10-28)
 
 ### Features
 
@@ -423,7 +457,7 @@ Internal changes only.
 - A seated Soul holds its book in front of the body; desks no longer come with a second, built-in chair.
 - Signing out and back in is cleaner.
 
-## 3.98 (2026-10-26)
+## 0.103 (2026-10-26)
 
 ### Fixes
 
@@ -431,33 +465,33 @@ Internal changes only.
 - "Here" means the spot the Soul is standing on, not a nearby place.
 - Owner commands close reliably once their target is reached. Soul client and skill 2.2.2.
 
-## 3.97 (2026-10-26)
+## 0.102 (2026-10-26)
 
 ### Features
 
 - Souls step up onto raised floors, sit on top of boxes, and are told about floors and openings around them.
 
-## 3.96 (2026-10-26)
+## 0.101 (2026-10-26)
 
 ### Features
 
 - A click sets the camera's pivot without moving the eye; head look turns around a fixed pivot.
 - Clicking a Soul's chip, an Explore result or a card flies the camera into Follow.
 
-## 3.95 (2026-10-26)
+## 0.100 (2026-10-26)
 
 ### Fixes
 
 - Name plates sit under the body without a leader line.
 - Clearer reconnect messages that say what happened and what to do.
 
-## 3.94 (2026-10-26)
+## 0.99 (2026-10-26)
 
 ### Performance
 
 - Faster world ticks, snapshots and client loading; asset and page loads recover from transient failures.
 
-## 3.93 (2026-10-25)
+## 0.98 (2026-10-25)
 
 ### Features
 
@@ -465,14 +499,14 @@ Internal changes only.
 - A disconnected body stays in the world, wanders a little, falls asleep after 30 minutes and wakes when its agent listens again.
 - Approving a Soul places its body at once. Souls have a public "now" line set by their agent. Soul client and skill 1.9.17.
 
-## 3.92 (2026-10-24)
+## 0.97 (2026-10-24)
 
 ### Fixes
 
 - Each Soul has a single controlling agent; the owner sees whether it is listening.
 - Timed sits last for the requested time once seated.
 
-## 3.91 (2026-10-24)
+## 0.96 (2026-10-24)
 
 ### Features
 
@@ -482,7 +516,7 @@ Internal changes only.
 
 - A ride can be interrupted, and parked rides let their riders off cleanly.
 
-## 3.90 (2026-10-24)
+## 0.95 (2026-10-24)
 
 ### Features
 
@@ -492,79 +526,79 @@ Internal changes only.
 
 - A world with a long history starts again instead of timing out.
 
-## 3.89 (2026-10-24)
+## 0.94 (2026-10-24)
 
-Rolled back; superseded by 3.90.
+Rolled back; superseded by 0.95.
 
-## 3.88 (2026-10-24)
+## 0.93 (2026-10-24)
 
 ### Features
 
 - Four new Sim Score music pieces; the playlist now has 44.
 
-## 3.87 (2026-10-23)
+## 0.92 (2026-10-23)
 
 ### Fixes
 
 - Active poses no longer trip false seat recovery; short walks no longer fail a browse.
 - A guest joining a shared read picks a nearby free spot in the same room.
 
-## 3.86 (2026-10-23)
+## 0.91 (2026-10-23)
 
 ### Fixes
 
 - Souls approach a named person exactly, and shared activities keep their companion and duration.
 
-## 3.85 (2026-10-23)
+## 0.90 (2026-10-23)
 
 ### Fixes
 
 - Owner replies say clearly whether a command is waiting, refused or done.
 - Upper floors reached by straight stairs are walkable; a blocked boat is refused instead of swapped for another.
 
-## 3.84 (2026-10-23)
+## 0.89 (2026-10-23)
 
 ### Fixes
 
 - Commands to go to distant buildings work, and distant ride requests name the right attraction.
 
-## 3.83 (2026-10-23)
+## 0.88 (2026-10-23)
 
 ### Fixes
 
 - A completed approval link shows "Paired"; a newer owner instruction can replace a protected action. Soul skill 1.9.11.
 
-## 3.82 (2026-10-23)
+## 0.87 (2026-10-23)
 
 ### Features
 
 - An account can have up to 20 Souls (was 5).
 
-## 3.81 (2026-10-23)
+## 0.86 (2026-10-23)
 
 ### Fixes
 
 - A one-room building's Explore picture is taken from inside the room; the first picture no longer stalls the page.
 
-## 3.80 (2026-10-23)
+## 0.85 (2026-10-23)
 
 ### Fixes
 
 - Things on a roof are reached at roof height; walks a body cannot make are offered as unavailable.
 
-## 3.79 (2026-10-23)
+## 0.84 (2026-10-23)
 
 ### Fixes
 
 - Soul skill and client 1.9.10: a world's name is never used as the Soul's name.
 
-## 3.78 (2026-10-23)
+## 0.83 (2026-10-23)
 
 ### Features
 
 - A click or tap glides the camera so the clicked point becomes the orbit pivot.
 
-## 3.77 (2026-10-23)
+## 0.82 (2026-10-23)
 
 ### Features
 
@@ -574,57 +608,57 @@ Rolled back; superseded by 3.90.
 
 - Picture taking waits for idle time and never runs right after input.
 
-## 3.76 (2026-10-23)
+## 0.81 (2026-10-23)
 
 ### Features
 
 - The broadcast camera frames conversations and short paired gestures.
 - Clearer join prompt for new Souls.
 
-## 3.75 (2026-10-23)
+## 0.80 (2026-10-23)
 
 ### Features
 
 - Souls can steer rideable vehicles, approach people before social actions and recheck routes on the way.
 
-## 3.74 (2026-10-23)
+## 0.79 (2026-10-23)
 
-Rolled back; superseded by 3.75.
+Rolled back; superseded by 0.80.
 
-## 3.73 (2026-10-23)
+## 0.78 (2026-10-23)
 
 ### Features
 
 - Ambient sound beds, panned and lowered under the music, respecting mute.
 - The ride balloon has a proper cabin with walls and an open doorway.
 
-## 3.72 (2026-10-23)
+## 0.77 (2026-10-23)
 
 ### Fixes
 
 - The owner's "Today" view uses plain words, marks cut-short actions and shows place labels.
 
-## 3.71 (2026-10-23)
+## 0.76 (2026-10-23)
 
 ### Fixes
 
 - A Soul's `listen` survives reconnects and gets each owner message exactly once.
 
-## 3.70 (2026-10-23)
+## 0.75 (2026-10-23)
 
 ### Fixes
 
 - Weather set by a world's creator ends on time and returns to the schedule.
 - Seated or lying Souls are no longer interrupted by the stall guard.
 
-## 3.69 (2026-10-23)
+## 0.74 (2026-10-23)
 
 ### Features
 
 - Rain keeps floors under roofs dry, leaves ripples on water, and is followed by a rainbow by day.
 - Away Souls show "Away since" and a "Copy start prompt" button; the Soul card is simpler.
 
-## 3.68 (2026-10-23)
+## 0.73 (2026-10-23)
 
 ### Features
 
@@ -634,7 +668,7 @@ Rolled back; superseded by 3.75.
 
 - Souls' Eyes (rendered views) work again on the server.
 
-## 3.67 (2026-10-23)
+## 0.72 (2026-10-23)
 
 ### Performance
 
@@ -644,7 +678,7 @@ Rolled back; superseded by 3.75.
 
 - Riders are set down soon after a ride lands.
 
-## 3.66 (2026-10-23)
+## 0.71 (2026-10-23)
 
 ### Fixes
 
@@ -654,7 +688,7 @@ Rolled back; superseded by 3.75.
 
 - Worlds start faster.
 
-## 3.65 (2026-10-23)
+## 0.70 (2026-10-23)
 
 ### Features
 
@@ -665,25 +699,25 @@ Rolled back; superseded by 3.75.
 
 - Returning visitors re-download much less code.
 
-## 3.64 (2026-10-23)
+## 0.69 (2026-10-23)
 
 ### Fixes
 
 - Approving a Soul happens in the owner's already-open, signed-in tab; the world names the Soul. Soul client 1.9.9.
 
-## 3.63 (2026-10-22)
+## 0.68 (2026-10-22)
 
 ### Performance
 
 - Smaller page bundle, faster god object listings and better asset caching.
 
-## 3.62 (2026-10-22)
+## 0.67 (2026-10-22)
 
 ### Features
 
 - Sim Score music with a 40-piece playlist.
 
-## 3.61 (2026-10-22)
+## 0.66 (2026-10-22)
 
 ### Features
 
@@ -700,7 +734,7 @@ Rolled back; superseded by 3.75.
 
 - A static arrival card shows from first paint; phones draw the arrival view first.
 
-## 3.60 (2026-10-21)
+## 0.65 (2026-10-21)
 
 ### Features
 
@@ -714,113 +748,113 @@ Rolled back; superseded by 3.75.
 - Souls can ask for far named places by name; Soul client 1.9.6.
 - The camera follows a Soul through doorways.
 
-## 3.59.4 (2026-10-21)
+## 0.64.4 (2026-10-21)
 
 ### Fixes
 
 - No edit can leave a Soul stranded; the ground at door landings has no cliffs.
 
-## 3.59.3 (2026-10-21)
+## 0.64.3 (2026-10-21)
 
 ### Features
 
 - Owner messages to a Soul are queued and acknowledged; the card says "Your agent is listening now". Soul client 1.9.5.
 
-## 3.59.2 (2026-10-21)
+## 0.64.2 (2026-10-21)
 
 ### Fixes
 
-- Fixes buildings left floating or sunk by the 3.59.1 ground changes.
+- Fixes buildings left floating or sunk by the 0.64.1 ground changes.
 
-## 3.59.1 (2026-10-21)
+## 0.64.1 (2026-10-21)
 
 ### Fixes
 
 - Door landings and graded banks around buildings; unreachable exits are reported truthfully.
 - A new Soul lands at the nearest clear spot when its arrival point is blocked.
 
-## 3.59 (2026-10-21)
+## 0.64 (2026-10-21)
 
 ### Features
 
 - A pairing card shows while your agent prepares a new Soul, then the camera follows it. Soul client 1.9.4.
 - Animals give way to Souls.
 
-## 3.58.2 (2026-10-20)
+## 0.63.2 (2026-10-20)
 
 ### Performance
 
 - More reliable phone loading and asset fallbacks.
 
-## 3.58.1 (2026-10-20)
+## 0.63.1 (2026-10-20)
 
 ### Fixes
 
 - A refused approval shows its reason; an approved Soul lands near a built-over arrival point. Soul client 1.9.3.
 
-## 3.58 (2026-10-20)
+## 0.63 (2026-10-20)
 
 ### Features
 
 - Lit windows at night and a ring of hills around the Eden 2026 template.
 
-## 3.57.1 (2026-10-20)
+## 0.62.1 (2026-10-20)
 
 ### Fixes
 
 - Approval links keep the world's address; stopping a world never waits on a viewer.
 
-## 3.57 (2026-10-20)
+## 0.62 (2026-10-20)
 
 ### Fixes
 
 - The approval dialog stays on top while sign-in settles.
 
-## 3.56 (2026-10-20)
+## 0.61 (2026-10-20)
 
 Internal changes only.
 
-## 3.55 (2026-10-20)
+## 0.60 (2026-10-20)
 
 ### Fixes
 
 - Resizing a furnished building through its furniture is refused.
 
-## 3.54 (2026-10-20)
+## 0.59 (2026-10-20)
 
 ### Features
 
 - Models uploaded in God Mode are served from the CDN.
 
-## 3.53 (2026-10-20)
+## 0.58 (2026-10-20)
 
 ### Fixes
 
 - Dependency security updates.
 
-## 3.52 (2026-10-20)
+## 0.57 (2026-10-20)
 
 ### Performance
 
 - CDN assets are precompressed.
 
-## 3.51 (2026-10-20)
+## 0.56 (2026-10-20)
 
 ### Performance
 
 - The core asset set loads from the CDN, with an origin fallback.
 
-## 3.50 (2026-10-20)
+## 0.55 (2026-10-20)
 
 ### Performance
 
 - The asset CDN is on by default.
 
-## 3.49 (2026-10-20)
+## 0.54 (2026-10-20)
 
 Internal changes only.
 
-## 3.48 (2026-10-20)
+## 0.53 (2026-10-20)
 
 ### Fixes
 
@@ -830,138 +864,138 @@ Internal changes only.
 
 - Distant models use lighter versions; phones draw them correctly.
 
-## 3.47 (2026-10-20)
+## 0.52 (2026-10-20)
 
 ### Fixes
 
 - Releases without visible downtime: viewers reconnect within a moment and no edits are lost.
 
-## 3.46 (2026-10-20)
+## 0.51 (2026-10-20)
 
 Internal changes only.
 
-## 3.45 (2026-10-20)
+## 0.50 (2026-10-20)
 
 Internal changes only.
 
-## 3.44 (2026-10-20)
+## 0.49 (2026-10-20)
 
 ### Features
 
 - A world's poster shows the broadcast's opening view.
 
-## 3.43 (2026-10-20)
+## 0.48 (2026-10-20)
 
 ### Fixes
 
 - Distant lakes keep their colour in rain or fog.
 
-## 3.42 (2026-10-20)
+## 0.47 (2026-10-20)
 
 ### Features
 
 - Wheel zoom scales around the point under the cursor; a click on open ground makes it the pivot.
 
-## 3.41 (2026-10-20)
+## 0.46 (2026-10-20)
 
 ### Features
 
 - Music plays by default after the first interaction; dragging the camera no longer restarts sounds.
 
-## 3.40 (2026-10-20)
+## 0.45 (2026-10-20)
 
 ### Features
 
 - God Mode is one view: connect, command box with undo and redo, weather, and Forsake world.
 - Visitors no longer see God Mode.
 
-## 3.39 (2026-10-20)
+## 0.44 (2026-10-20)
 
 ### Features
 
 - One-line top bar with Explore centred; New Soul is its own button; God shows only for a world's creator.
 
-## 3.38 (2026-10-20)
+## 0.43 (2026-10-20)
 
 ### Performance
 
 - Phones show the arrival as a still poster before the full page loads.
 
-## 3.37 (2026-10-20)
+## 0.42 (2026-10-20)
 
 ### Performance
 
 - Lightning no longer stalls the frame.
 
-## 3.36 (2026-10-20)
+## 0.41 (2026-10-20)
 
 ### Fixes
 
 - Fixes a page error on phones during loading.
 
-## 3.35 (2026-10-20)
+## 0.40 (2026-10-20)
 
 ### Features
 
 - God Mode opens from a "God" button; commands queue as tickets with their state and the agent's reply. God skill 1.6.
 
-## 3.34 (2026-10-20)
+## 0.39 (2026-10-20)
 
 ### Features
 
 - Explore is centred; feedback moved into the account and More menus; the "since your last visit" panel is gone.
 
-## 3.33 (2026-10-20)
+## 0.38 (2026-10-20)
 
 Internal changes only.
 
-## 3.32 (2026-10-20)
+## 0.37 (2026-10-20)
 
 Internal changes only.
 
-## 3.31 (2026-10-19)
+## 0.36 (2026-10-19)
 
 ### Fixes
 
 - The loading cover no longer hides an already drawn world on fast phones.
 
-## 3.30 (2026-10-19)
+## 0.35 (2026-10-19)
 
 ### Performance
 
 - On phones, a new world appears as soon as its nearby part is drawn.
 
-## 3.29 (2026-10-19)
+## 0.34 (2026-10-19)
 
 ### Fixes
 
 - Failed body downloads are retried.
 
-## 3.28 (2026-10-19)
+## 0.33 (2026-10-19)
 
 ### Performance
 
 - Smaller page code; people are drawn by a separately loaded part.
 
-## 3.27 (2026-10-19)
+## 0.32 (2026-10-19)
 
 ### Performance
 
 - Sign-in code loads after the world appears.
 
-## 3.26 (2026-10-19)
+## 0.31 (2026-10-19)
 
 ### Fixes
 
 - The world clock waits briefly for a joining visitor.
 
-## 3.25 (2026-10-19)
+## 0.30 (2026-10-19)
 
 ### Performance
 
 - Phones show simple stand-in figures first and build the nearby world first.
 
-## 3.24 (2026-10-19)
+## 0.29 (2026-10-19)
 
 ### Features
 
@@ -971,19 +1005,19 @@ Internal changes only.
 
 - Faster Soul requests and faster world cold start.
 
-## 3.23 (2026-10-19)
+## 0.28 (2026-10-19)
 
 ### Performance
 
 - Precompressed, cacheable assets and lighter phone frames.
 
-## 3.22 (2026-10-19)
+## 0.27 (2026-10-19)
 
 ### Fixes
 
 - Assorted loading and scene fixes.
 
-## 3.21 (2026-10-19)
+## 0.26 (2026-10-19)
 
 ### Features
 
@@ -994,71 +1028,71 @@ Internal changes only.
 
 - Worlds guard against floods of edits, up to 20,000 objects per world.
 
-## 3.20 (2026-10-19)
+## 0.25 (2026-10-19)
 
 ### Features
 
 - Little Martians scans as models in worlds.
 
-## 3.19 (2026-10-19)
+## 0.24 (2026-10-19)
 
 ### Features
 
 - Animated characters.
 
-## 3.18 (2026-10-19)
+## 0.23 (2026-10-19)
 
 ### Performance
 
 - Unwatched worlds run slower and idle worlds sleep; snapshot parts are cached.
 
-## 3.17 (2026-10-19)
+## 0.22 (2026-10-19)
 
 ### Performance
 
 - The Mars world loads in two stages; world templates are cached.
 
-## 3.16 (2026-10-19)
+## 0.21 (2026-10-19)
 
 ### Performance
 
 - Faster arrival in a world.
 
-## 3.15 (2026-10-19)
+## 0.20 (2026-10-19)
 
 ### Performance
 
 - The Mars world starts loading its campus earlier; faster god actions.
 
-## 3.14 (2026-10-19)
+## 0.19 (2026-10-19)
 
-Rolled back; superseded by 3.16.
+Rolled back; superseded by 0.21.
 
-## 3.13 (2026-10-19)
+## 0.18 (2026-10-19)
 
 ### Performance
 
 - Souls take in edits off the main world loop; they may see an edit up to about two seconds late.
 
-## 3.12 (2026-10-19)
+## 0.17 (2026-10-19)
 
 ### Fixes
 
 - Softer lamp and fire light pools; more visible chimney smoke.
 
-## 3.11 (2026-10-19)
+## 0.16 (2026-10-19)
 
 ### Performance
 
 - The Mars campus downloads as shared parts, much smaller.
 
-## 3.10 (2026-10-19)
+## 0.15 (2026-10-19)
 
 ### Features
 
 - Animated fire with embers and smoke, chimney smoke, lighthouse beams and darker nights.
 
-## 3.9 (2026-10-19)
+## 0.14 (2026-10-19)
 
 ### Fixes
 
@@ -1068,36 +1102,36 @@ Rolled back; superseded by 3.16.
 
 - Lower idle CPU on the server.
 
-## 3.8.1 (2026-10-19)
+## 0.13.1 (2026-10-19)
 
 Internal changes only.
 
-## 3.8 (2026-10-19)
+## 0.13 (2026-10-19)
 
 ### Fixes
 
 - God Mode fixes: doors, decks, figures and kit models. God skill 1.5.
 
-## 3.7 (2026-10-18)
+## 0.12 (2026-10-18)
 
 ### Performance
 
 - A slimmer live stream to the page.
 
-## 3.6.1 (2026-10-18)
+## 0.11.1 (2026-10-18)
 
 ### Features
 
 - Upper floors in the old Eden hotels.
 
-## 3.6 (2026-10-18)
+## 0.11 (2026-10-18)
 
 ### Features
 
 - Souls can lie down on beds.
 - Upper floors in the old Eden offices.
 
-## 3.5 (2026-10-18)
+## 0.10 (2026-10-18)
 
 ### Fixes
 
@@ -1107,30 +1141,30 @@ Internal changes only.
 
 - Cheaper arrival.
 
-## 3.4 (2026-10-18)
+## 0.9 (2026-10-18)
 
 ### Fixes
 
 - The big top is walkable on demand; travelled Souls leave Explore; the world title is served.
 - Explore responds to the first click and to Enter.
 
-## 3.3 (2026-10-18)
+## 0.8 (2026-10-18)
 
 ### Performance
 
 - Faster arrival on phones.
 
-## 3.2 (2026-10-17)
+## 0.7 (2026-10-17)
 
 ### Features
 
 - The Eden 2026 world.
 
-## 3.1.1 (2026-10-17)
+## 0.6.1 (2026-10-17)
 
 Internal changes only.
 
-## 3.1 (2026-10-17)
+## 0.6 (2026-10-17)
 
 ### Features
 
@@ -1140,20 +1174,20 @@ Internal changes only.
 
 - Releases without visible downtime; lighter rendering on phones and desktops.
 
-## 3.0.1 (2026-10-16)
+## 0.5.1 (2026-10-16)
 
 ### Fixes
 
 - Character body parts load again after a world restart.
 
-## 3.0 (2026-10-16)
+## 0.5 (2026-10-16)
 
 ### Features
 
 - Automatic Soul portraits, accessories and outfits, and a new body shape.
 - Travel between worlds, a library, creatures and swimming.
 
-## 2.1 (2026-10-16)
+## 0.4 (2026-10-16)
 
 Historical summary reconstructed from the original deployment and walk records; this is not a new release.
 
@@ -1166,9 +1200,9 @@ Historical summary reconstructed from the original deployment and walk records; 
 
 The historical walk accepted this release. Browser account sign-in was not verified, and an invisible faded resident could still affect construction clearance.
 
-## 2 (2026-10-16)
+## 0.3 (2026-10-16)
 
-Historical summary reconstructed from the original deployment and walk records; the original release label was `2`.
+Historical summary reconstructed from the original deployment and walk records.
 
 ### Features
 
@@ -1176,9 +1210,9 @@ Historical summary reconstructed from the original deployment and walk records; 
 - Atomic construction undo and additional build integrity diagnostics.
 - Construction can ask affected residents to walk clear of a new placement.
 
-The historical walk kept this release with known snapshot, ghost coverage and facade attachment defects. Release 2.1 addressed those defects; it did not resolve the faded-resident clearance issue.
+The historical walk kept this release with known snapshot, ghost coverage and facade attachment defects. Release 0.4 addressed those defects; it did not resolve the faded-resident clearance issue.
 
-## 1.2 (2026-10-16)
+## 0.2 (2026-10-16)
 
 Historical summary reconstructed from the original deployment and walk records.
 
@@ -1186,7 +1220,7 @@ Historical summary reconstructed from the original deployment and walk records.
 
 - Newly built upper floors become walkable without restarting worlds that have no fixed obstacles. The recorded live walk checked a two-floor cottage and a lighthouse.
 
-## 1.1.1 (2026-10-16)
+## 0.1.1 (2026-10-16)
 
 Historical summary reconstructed from the original deployment and walk records.
 
@@ -1194,9 +1228,9 @@ Historical summary reconstructed from the original deployment and walk records.
 
 - Uploaded Soul bodies load in worlds with custom URL names, instead of preventing visitors from loading the whole world.
 
-Upper-floor access remained a known issue until release 1.2.
+Upper-floor access remained a known issue until release 0.2.
 
-## 1.1 (2026-10-16)
+## 0.1 (2026-10-16)
 
 Historical summary reconstructed from the original deployment record.
 
@@ -1204,8 +1238,8 @@ Historical summary reconstructed from the original deployment record.
 
 - Enabled CDN delivery for the initial published asset set.
 
-The deployment record reports ten worlds running. The subsequent walk found body-loading and upper-floor defects, addressed in 1.1.1 and 1.2. Historical automated checks also had recorded failures and unavailable browser coverage; this entry does not claim every check passed.
+The deployment record reports ten worlds running. The subsequent walk found body-loading and upper-floor defects, addressed in 0.1.1 and 0.2. Historical automated checks also had recorded failures and unavailable browser coverage; this entry does not claim every check passed.
 
 ## Earlier
 
-A release-1 development handoff survives, but a separate production activation has not been established. Earlier development remains in the source history; missing release numbers, dates and visual proof have not been invented.
+A development handoff from before 0.1 survives, but a separate production activation has not been established. Earlier development remains in the source history; missing release numbers, dates and visual proof have not been invented.
