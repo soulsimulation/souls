@@ -129,5 +129,5 @@ ul{list-style:none;margin:0;padding:0;flex:1;min-height:0;display:flex;flex-dire
 li{display:grid;grid-template-columns:auto auto 1fr;gap:6px;padding:2px 0;overflow-wrap:anywhere}
 time{color:#7d8592}b{font-weight:700}.cmd b{color:#ffc400}.reply b{color:#6fd3ff}.receipt b{color:#8be28b}.note b{color:#a9b0bb}
 .cmd span{color:#fff1c2}</style><h1>Soul ↔ world (debug)</h1><ul>${rows}</ul>
-<script>const u=document.querySelector('ul'),h=document.querySelector('h1'),edge=()=>Math.max(u.getBoundingClientRect().top,h.getBoundingClientRect().bottom);while(u.firstChild&&u.firstChild.getBoundingClientRect().top<edge()-0.5)u.firstChild.remove();</script>`;
+<script>{const u=document.querySelector('ul'),h=document.querySelector('h1'),edge=()=>Math.max(u.getBoundingClientRect().top,h.getBoundingClientRect().bottom);while(u.firstChild&&u.firstChild.getBoundingClientRect().top<edge()-0.5)u.firstChild.remove();}</script>`;
 }

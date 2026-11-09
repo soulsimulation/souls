@@ -69,3 +69,7 @@ test('speech ids and other short-prefixed ids become ordinals; plain words with 
   assert.equal(summarizeReply('{"said":{"id":"sp_1","channel":{"kind":"earshot"},"heardBy":["a","b"]}}'), 'said (earshot, heard by 2)');
   assert.equal(summarizeReply('{"capability":"carry:e_1","phase":"completed","endedAt":{"placePath":["Main Hall","World"]}}'), 'carry:e_1 completed at Main Hall');
 });
+
+test('the trim script is block-scoped: the recorder reuses one page, and a second top-level const would not run', () => {
+  assert.match(panelHtml([], { side: 'bottom' }), /<script>\{const u=.*\}<\/script>/s);
+});
