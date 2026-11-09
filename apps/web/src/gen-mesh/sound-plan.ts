@@ -184,7 +184,9 @@ export function exposureAt(x: number, z: number, ground: number, typicalGround: 
   return Math.max(0, Math.min(1, 0.55 * high + 0.45 * open * (0.4 + 0.6 * high) + 0.25 * open));
 }
 function placeOf(model: WorldModel, e: Entity, def: StoredDef): Pick<Emitter, 'pts' | 'area'> {
-  const g = (x: number, z: number) => { try { return model.terrain.sample(x, z); } catch { return 0; } };
+  // PERF-ARRIVAL: peek is sample's bit-identical height without baking the tile (Terrain.peek, #1481): these points lie all
+  // over the world, and baking a tile for each was the longest task of a 4x phone's arrival.
+  const g = (x: number, z: number) => { try { return model.terrain.peek(x, z); } catch { return 0; } };
   if (def.form !== 'point' && e.in.parent === 'world' && e.shape) {
     const raw = 'path' in e.shape ? e.shape.path : e.shape.area;
     const step = Math.max(1, Math.floor(raw.length / 64));
