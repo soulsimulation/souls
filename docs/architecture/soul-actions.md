@@ -715,3 +715,14 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+
+### Mending camping canvas
+
+`core/tent@3` adds a torn-canvas repair to the existing hand-operated tent; older revisions stay unchanged.
+A nearby Soul sees the damage and `object:<tent>:repair` offer. With a `core/sewing-awl@1` nearby, the existing
+repair faculty fetches the tool and works at the tear; only successful completion mends the canvas and records
+who repaired it. Interruption leaves it torn and the awl stays in hand. The awl can be put down and carried again.
+The original flap actions and mat declaration remain. The interior mat is not currently an admitted adult berth,
+so this addition does not enable sleeping inside tents. There is no automatic wear or cloth/weather simulation;
+the world creator can place or mark a tent with `broken: true`.
