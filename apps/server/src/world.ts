@@ -2166,10 +2166,29 @@ export class WorldHost {
   /** #1368, #1376: a capture the engine refused by name is recorded as a skipped snapshot (`durability.snapshot-skipped`, rung
    *  `contained`) and answers true; anything else is no refusal and answers false, for the caller to propagate. */
   private captureRefused(error: unknown, path: string): boolean {
-    const code = (error as {code?: unknown} | null)?.code;
-    if (typeof code !== 'string' || !code.startsWith('snapshot.')) return false;
-    this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: this.engine.world.tick, evidence: {code, path}});
+    const code = this.captureRefusalCode(error);
+    if (!code) return false;
+    this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: this.engine.world.tick, evidence: {code, path, ...this.nonFiniteAt(code)}});
     return true;
+  }
+  /** #1368, #1376: a named `snapshot.*` refusal; #1492: a head holding a number that is no number (NaN, Infinity) can't be
+   *  hashed, so its capture is `snapshot.non-finite`. Anything else is no refusal (null). */
+  private captureRefusalCode(error: unknown): string | null {
+    const code = (error as {code?: unknown} | null)?.code;
+    if (typeof code === 'string' && code.startsWith('snapshot.')) return code;
+    return error instanceof Error && error.message.startsWith('non-finite number') ? 'snapshot.non-finite' : null;
+  }
+  /** #1492: the first entity and field that holds a non-finite number, for the skipped snapshot's row (bounded walk). */
+  private nonFiniteAt(code: string): {entity?: string; field?: string} {
+    if (code !== 'snapshot.non-finite') return {};
+    const find = (v: unknown, path: string, depth: number): string | null => {
+      if (typeof v === 'number') return Number.isFinite(v) ? null : path;
+      if (!v || typeof v !== 'object' || depth > 6) return null;
+      for (const [k, x] of Object.entries(v)) { const hit = find(x, Array.isArray(v) ? `${path}[${k}]` : path ? `${path}.${k}` : k, depth + 1); if (hit) return hit; }
+      return null;
+    };
+    for (const [id, e] of Object.entries(this.engine.world.entities as Record<string, unknown>)) { const field = find(e, '', 0); if (field) return {entity: id, field}; }
+    return {};
   }
   /** Capture and persist the head as the snapshot and recovery baseline (the caller has checked it can snapshot). */
   private snapshotHead(sync: boolean): { tick: number; stateHash: string } {
@@ -2206,6 +2225,10 @@ export class WorldHost {
     if (this.repairRules && !this.clockAvailable) return;
     if (this.durableClockV1) this.persistClockFrontier();
     if (this.engine.canSnapshot && !this.engine.canSnapshot()) return;
+    // #1492: a body broken with nothing faulting is held by the once-a-second sweep; a capture before it would read the broken
+    // head. Under quarantine/1 the world looks first (only when a capture follows), so the body is held on this tick, logged as
+    // that sweep logs it, and the capture sees it whole.
+    if (this.quarantineRule) { this.sweepBrokenBodies(); if (this.repairRules && !this.clockAvailable) return; }
     this.snapshotGeneration++;
     const t0 = performance.now(), engine = this.engine;
     const capture = () => {
@@ -2227,10 +2250,10 @@ export class WorldHost {
     let parts: ReturnType<typeof capture>;
     try { parts = capture(); }
     catch (error) {
-      const code = (error as {code?: unknown} | null)?.code;
-      if (typeof code !== 'string' || !code.startsWith('snapshot.')) throw error;
+      const code = this.captureRefusalCode(error);   // #1492: a non-finite head too: never out of pumpFrame as an exception
+      if (!code) throw error;
       this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
-      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code}});
+      this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code, ...this.nonFiniteAt(code)}});
       return;
     }
     const { checkpoint, legacy, fields, steps } = parts;
