@@ -3,7 +3,7 @@ import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
 import {authoredBoundariesDeclarationV1Schema,type AuthoredBoundariesDeclarationV1} from '@souls/engine-contract';
-import {ACTION_THREW,FRAME_LET_GO,QUARANTINED,REWOUND,STOP_GAVE_UP,type EngineRefusalV1} from '@souls/engine-contract';
+import {ACTION_THREW,FRAME_LET_GO,NONFINITE_HELD,QUARANTINED,REWOUND,STOP_GAVE_UP,type EngineRefusalV1,type NonFinitePatchV1} from '@souls/engine-contract';
 import {edenLectureV1} from '@souls/engine-mars';
 import {renderPlatformRowsV1Schema,type RenderPlatformV1} from '@souls/engine-contract';
 import {officeStairGuardsDeclarationV1Schema,type OfficeStairGuardsDeclarationV1} from '@souls/engine-contract';
@@ -83,6 +83,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
 const BROKEN_SWEEP_TICKS = 20;
 const REWIND_COOLDOWN_TICKS = 1200;
 /** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
+/** #1496: the hash's own fault for a number that is no number. */
+const nonFiniteError = (error: unknown) => error instanceof Error && /non-finite number/.test(error.message);
 const glitchy = (r: EngineRefusalV1) => r.rule !== STOP_GAVE_UP.code && r.rule !== FRAME_LET_GO.code;
 /** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
 const STEP_FAILING_WINDOW_TICKS = 200, STEP_FAILING_FAULTS = 100;
@@ -984,6 +986,7 @@ export class WorldHost {
     const tick = e.tick;
     if(e.kind==='rules'&&e.payload?.lastRungInPlace)for(const m of this.minds.values())m.pending=null;
     if(e.kind==='rules'&&e.payload?.quarantineV1)for(const id of e.payload.quarantineV1.bodies??[]){const m=this.mindByEntity.get(id);if(m)m.pending=null;}
+    if(e.kind==='rules'&&e.payload?.nonFiniteHoldV1)for(const id of e.payload.nonFiniteHoldV1.bodies??[]){const m=this.mindByEntity.get(id);if(m)m.pending=null;}
     if(e.kind==='rules'&&e.payload?.reflection?.episodeMemory){
       const p=e.payload,record=p.reflection.episodeMemory,m=this.minds.get(p.soulId);
       if(!this.extra.intentEpisodeMemoryV1||!m||record.contract!=='private-purpose-episodes/1'||record.proseKind!=='interpretation'||!Number.isSafeInteger(record.throughSeq)||record.throughSeq<0||record.throughSeq>=e.seq||Object.keys(record).sort().join(',')!=='contract,episodes,proseKind,throughSeq'||JSON.stringify(record.episodes)!==JSON.stringify(episodesFromHistoryV1(this.intentHistoryOf(p.soulId),m.owner,record.throughSeq)))throw Error('purpose-episodes.invalid-source');
@@ -1324,6 +1327,8 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1496 nonfinite-hold/1 (prospective, needs quarantine/1): a non-finite number the frontier hash meets that quarantine/1 doesn't hold is put back to its last good value by a logged event, never a halt. */
+  enableNonFiniteHoldV1(author='operator:nonfinite-hold'){if((this.extra.runtimePolicy as {nonFiniteHoldV1?:boolean}|undefined)?.nonFiniteHoldV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteHoldV1:true},why:'nonfinite-hold/1 (#1496): a number in the hashed head that is no number is put back to its value in the last good snapshot by a logged patch, and what it touched stops; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
    *  everyone else go on; never a halt. A host-only key: the engine never reads it, so no snapshot binding changes. Main adopts
@@ -1612,6 +1617,8 @@ export class WorldHost {
   private get repairRules(): boolean { return this.engine.rulesVersion.includes('+souls-repair/'); }
   /** #1369: quarantine/1 is adopted (a logged runtime policy the host alone reads). */
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
+  /** #1496: nonfinite-hold/1 is adopted, on top of quarantine/1. */
+  private get nonFiniteHoldRule(): boolean { return this.quarantineRule && (this.extra.runtimePolicy as {nonFiniteHoldV1?: boolean} | undefined)?.nonFiniteHoldV1 === true; }
   /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
    *  rule names it, but it can make every step or the state hash throw). */
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
@@ -2254,6 +2261,8 @@ export class WorldHost {
       if (!code) throw error;
       this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
       this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code, ...this.nonFiniteAt(code)}});
+      // #1496: under nonfinite-hold/1 what the capture met is put back now, so the next capture is not skipped for it again
+      if (code === 'snapshot.non-finite' && this.nonFiniteHoldRule && this.holdNonFinite(error)) this.snapshotSoon ??= 'a non-finite number was put back';
       return;
     }
     const { checkpoint, legacy, fields, steps } = parts;
@@ -2328,15 +2337,40 @@ export class WorldHost {
     this.replayDebtMs += job.previousDebt.ms; this.lastSnapshotWall = job.previousDebt.wall; this.snapshotSoon ??= job.previousDebt.soon;
   }
   /** #1369: a state that won't hash because a body in it is broken (a pose that is no number) is no failed write. Under
-   *  quarantine/1 that body is held where it last stood whole and the hash is taken again; anything else fails as before. */
+   *  quarantine/1 that body is held where it last stood whole and the hash is taken again. #1496: under nonfinite-hold/1 any
+   *  other non-finite number is then put back (`holdNonFinite`) and the hash taken again; anything else fails as before. */
   private hashOrQuarantine():string{
-    try{return this.engine.stateHash();}
-    catch(error){
-      if(!this.quarantineRule||!this.quarantineTargets(error).corrupt.length)throw error;
+    let error:unknown;
+    try{return this.engine.stateHash();}catch(failure){error=failure;}
+    if(this.quarantineRule&&this.quarantineTargets(error).corrupt.length){
       this.quarantine(error,undefined,false);
-      try{return this.engine.stateHash();}
-      catch(again){throw Object.assign(new Error(`engine.unhashable: ${String(again).slice(0,300)}`,{cause:again}),{unhashable:true});}   // named for what it is: no write failed
-    }
+      try{return this.engine.stateHash();}catch(again){error=again;}
+    }else if(!this.nonFiniteHoldRule)throw error;
+    if(this.nonFiniteHoldRule&&nonFiniteError(error)&&this.holdNonFinite(error)){try{return this.engine.stateHash();}catch(again){error=again;}}
+    throw Object.assign(new Error(`engine.unhashable: ${String(error).slice(0,300)}`,{cause:error}),{unhashable:true});   // named for what it is: no write failed
+  }
+  /** #1496 nonfinite-hold/1: every non-finite number the engine can put right goes back to its value in the last good snapshot
+   *  (the recovery baseline; with none there, the named fallback), and what it touched stops. One logged event carries the
+   *  exact patches, so a replay writes the same ones and reads nothing. False when there was nothing to patch or the write failed. */
+  private holdNonFinite(error: unknown): boolean {
+    const engine = this.engine; if (!engine.planNonFiniteV1 || !engine.applyNonFiniteV1) return false;
+    let base: Engine | null = null;
+    try { if (this.recoveryBaseline) base = this.factory.restore(structuredClone(this.recoveryBaseline.runtime)); }
+    catch (failure) { console.error('[world] the last good snapshot would not restore for a non-finite hold:', String(failure).slice(0, 200)); }
+    let patches: NonFinitePatchV1[];
+    try { patches = engine.planNonFiniteV1(base); } catch (failure) { console.error('[world] could not look for non-finite numbers:', String(failure).slice(0, 200)); return false; }
+    if (!patches.length) return false;
+    const tick = engine.world.tick, done = engine.applyNonFiniteV1(patches, NONFINITE_HELD);
+    const souls = done.bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
+    const q = {patches, bodies: done.bodies, souls, programmes: done.programmes, stopped: done.stopped, ...(done.deadlines ? {deadlines: done.deadlines} : {}), reason: String(error).slice(0, 300)};
+    const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:nonfinite-hold', payload: {nonFiniteHoldV1: q}, at: Date.now()};
+    if (!this.writeRepair(e)) return false;
+    this.seq = e.seq; this.acc.log.push(e);
+    const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
+    this.recordGlitch('contained', error, {rule: NONFINITE_HELD.code, tick, bodies: done.bodies, evidence: {seq: e.seq, fields, stopped: done.stopped, programmes: done.programmes, ...(patches.some(p => p.from === 'arrival') ? {arrival: patches.filter(p => p.from === 'arrival').map(p => p.path[1])} : {})}});
+    for (const id of done.bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
+    for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a non-finite hold:', String(failure).slice(0, 200)); }
+    return true;
   }
   private persistClockFrontier():void {
     try{

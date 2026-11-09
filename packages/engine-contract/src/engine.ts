@@ -100,10 +100,17 @@ export const STOP_GAVE_UP = { code: 'world.stop-gave-up', message: 'What you ask
 export const FRAME_LET_GO = { code: 'world.frame-let-go', message: 'A crew on the same frame let go, so nobody can finish it with you now: your hands were freed, and the part stands where it is. You can act again.' };
 /** #1369 quarantine/1: the ladder could not go back, so this body alone was stopped (and set down clear if it was inside something or broken), and the world went on. */
 export const QUARANTINED = { code: 'world.quarantined', message: 'Something about you broke a rule the world could not undo, so it stopped what you were doing; if you were inside something, or your body had broken, it set you down clear. Everyone else carried on. You can act again.' };
+/** #1496 nonfinite-hold/1: a number in the world went bad (NaN, Infinity) and was put back; what it touched was stopped. */
+export const NONFINITE_HELD = { code: 'state.non-finite', message: 'A number in the world near you broke, so the world put it back to its last good value and stopped what you were doing with it. Everyone else carried on. You can act again.' };
 export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again once your hands are free.' };
 
 /** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
 export type ContainedKeyV1 = { code: string; subjects: string[] };
+/** #1496 nonfinite-hold/1: one number put right, as logged. `path` runs from its root (`world`: the engine's world, every
+ *  entity included; `programme`: a programme by id, then its fields). `from`: where the value came from, the last good
+ *  snapshot (`baseline`) or the named fallback (`zero`; `arrival`: an object set down on the ground at the world's arrival,
+ *  `place` carrying its pose, the eject when no good value exists). */
+export type NonFinitePatchV1 = { root: 'world' | 'programme'; path: string[]; from: 'baseline' | 'zero' | 'arrival'; value?: number; place?: { p: [number, number, number]; yaw: number } };
 
 export interface Engine {
   readonly rulesVersion: string;
@@ -138,6 +145,13 @@ export interface Engine {
   /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
   corruptBodiesV1?(): ContainedKeyV1[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
+  /** #1496 nonfinite-hold/1: every non-finite number in the world and the programmes, and what each is put back to: its value in
+   *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A
+   *  number it can't put right (a body's pose, which quarantine/1 holds) is left out. */
+  planNonFiniteV1?(baseline?: Engine | null): NonFinitePatchV1[];
+  /** #1496: writes those patches (as logged; a replay passes the same ones back and reads nothing) and stops, with `why`, the
+   *  programmes they touched: a programme whose own state was patched, and those of a body patched or holding a set-down object. */
+  applyNonFiniteV1?(patches: NonFinitePatchV1[], why: { code: string; message: string }): { stopped: number; deadlines: number; bodies: string[]; programmes: string[] };
   setClockV1?(tick: number): void;
   /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
   containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };

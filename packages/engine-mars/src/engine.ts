@@ -2,7 +2,7 @@ import {LIE_CLEARANCE} from '../../../mars/viewer/engine/social/pose.ts';
 import {regionArrivalMask} from './region-arrival.ts';
 import { createHash } from 'node:crypto';
 import { capturePhysicalHashInput, capturedPhysicalHashSteps, physicalHashNeedsLegacyCapture } from './checkpoint-hash.ts';
-import { ACTION_THREW, FRAME_LET_GO, STOP_GAVE_UP, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1 } from '@souls/engine-contract';
+import { ACTION_THREW, FRAME_LET_GO, STOP_GAVE_UP, RELOCATED as relocationDiag, stableStringify, type ContainedKeyV1, type EngineRefusalV1, type NonFinitePatchV1 } from '@souls/engine-contract';
 import {bodyProfile} from '../../../mars/viewer/engine/bodies/navigation.ts';
 import {immutableAuthoredBoundaryFact} from '../../../mars/viewer/engine/spatial/edits.ts';
 import {keepStaticGridsForBoot,withStaticGridReadCache,type BootGridStore} from '../../../mars/viewer/engine/spatial/grid.ts';
@@ -712,6 +712,65 @@ export class MarsEngine implements Engine {
     try { if (!this.standsClearV1(id)) this.tryRelocateV1(id); } catch { /* it stands where it was held */ }
     rememberPosesAfterRestore(this.rt);
     return { p: [e.pose.p[0], e.pose.p[1], e.pose.p[2]], yaw: e.pose.yaw ?? 0, level: e.human.level ?? 0 };
+  }
+  /** #1496 nonfinite-hold/1 (see the contract): a pure read of this head and `baseline`. A number at a path is put back to the
+   *  baseline's finite number there; an object whose pose has none is set down at the arrival (the eject, named `arrival`); a
+   *  body's pose, yaw or level is quarantine/1's and is left out; anything else with none is `zero`. Walks are capped. */
+  planNonFiniteV1(baseline?: MarsEngine | null): NonFinitePatchV1[] {
+    const out: NonFinitePatchV1[] = [], placed = new Set<string>(), CAP = 64, DEPTH = 12;
+    const roots = (e: MarsEngine | null | undefined) => e ? { world: e.rt.world as unknown, programme: Object.fromEntries(e.programs) as unknown } : undefined;
+    const head = roots(this)!, base = roots(baseline);
+    const at = (root: unknown, path: string[]) => { let v: any = root; for (const k of path) { if (!v || typeof v !== 'object') return undefined; v = v[k]; } return v; };
+    const visit = (root: 'world' | 'programme', v: unknown, path: string[]) => {
+      if (out.length >= CAP) return;
+      if (typeof v === 'number') {
+        if (Number.isFinite(v)) return;
+        const was = base ? at(base[root], path) : undefined;
+        if (typeof was === 'number' && Number.isFinite(was)) { out.push({ root, path, from: 'baseline', value: was }); return; }
+        const id = root === 'world' && path[0] === 'entities' ? path[1] : undefined, e = id ? this.ents[id] : undefined;
+        if (e && path[2] === 'pose') {
+          if (e.kind === 'human') return;   // quarantine/1 holds a body; never a forced move from here
+          if (placed.has(id!)) return; placed.add(id!);
+          const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0], spatial = this.rt.services.spatial as Spatial;
+          const y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, ax, az)) : 0;
+          out.push({ root, path: ['entities', id!], from: 'arrival', place: { p: [ax, y, az], yaw: 0 } }); return;
+        }
+        if (e?.kind === 'human' && path[2] === 'human' && path[3] === 'level') return;
+        out.push({ root, path, from: 'zero', value: 0 }); return;
+      }
+      if (!v || typeof v !== 'object' || path.length > DEPTH) return;
+      for (const k of Object.keys(v).sort()) visit(root, (v as any)[k], [...path, k]);
+    };
+    visit('world', head.world, []); visit('programme', head.programme, []);
+    return out;
+  }
+  /** #1496 nonfinite-hold/1: writes the logged patches and stops what they touched. Never throws: a patch whose place is gone
+   *  costs only itself, live and in a replay alike. */
+  applyNonFiniteV1(patches: NonFinitePatchV1[], why: { code: string; message: string }): { stopped: number; deadlines: number; bodies: string[]; programmes: string[] } {
+    const bodies = new Set<string>(), progs = new Set<string>(), moved = new Set<string>();
+    for (const q of patches) {
+      try {
+        if (q.root === 'programme') { progs.add(q.path[0]); const actor = this.programs.get(q.path[0])?.actor; if (actor) bodies.add(actor); }   // its Soul is told
+        const id = q.root === 'world' && q.path[0] === 'entities' ? q.path[1] : undefined, e = id ? this.ents[id] : undefined;
+        if (id && e?.kind === 'human') bodies.add(id);
+        if (q.place) {
+          if (!e) continue;
+          if (['held', 'in-hand'].includes(e.support?.kind)) for (const by of [e.support.by].flat()) if (typeof by === 'string') bodies.add(by);
+          placeOnGround(e, [...q.place.p], q.place.yaw); moved.add(id!); continue;
+        }
+        let v: any = q.root === 'world' ? this.rt.world : this.programs.get(q.path[0]);
+        const rest = q.root === 'world' ? q.path : q.path.slice(1);
+        for (const k of rest.slice(0, -1)) { if (!v || typeof v !== 'object') { v = undefined; break; } v = v[k]; }
+        if (!v || typeof v !== 'object' || typeof q.value !== 'number') continue;
+        v[rest[rest.length - 1]] = q.value;
+        if (id && q.path[2] === 'pose') moved.add(id);
+      } catch (failure) { console.error('[engine] a non-finite patch could not be applied:', String(failure).slice(0, 200)); }
+    }
+    for (const id of [...moved].sort()) try { acknowledgeRelocation(this.rt, id); } catch { /* the patch stands */ }
+    this.tableCacheV1 = null;
+    const {stopped, deadlines} = (bodies.size || progs.size) ? this.stopWhereV1(p => bodies.has(p.actor) || progs.has(p.id), why, this.rt.tick) : {stopped: 0, deadlines: 0};
+    rememberPosesAfterRestore(this.rt);
+    return { stopped, deadlines, bodies: [...bodies].sort(), programmes: [...progs].sort() };
   }
   private stopWhereV1(which: (p: Prog) => boolean, why: { code: string; message: string }, from: number): { stopped: number; deadlines: number } {
     let stopped = 0, deadlines = 0;   // what this call changed, so a host knows if a replay has to make the same stops. A deadline ends nothing yet.

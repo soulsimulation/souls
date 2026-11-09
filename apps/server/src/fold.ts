@@ -5,7 +5,7 @@ import {authoredBoundariesDeclarationV1Schema} from '@souls/engine-contract';
 //   the log alone, and the ENGINE (depiction: bodies, motion), which replays the
 //   programs that decisions started. Models never appear here.
 // Used identically by the live loop, the restart fast-forward and replay tests.
-import { QUARANTINED, REWOUND, type Engine } from '@souls/engine-contract';
+import { NONFINITE_HELD, QUARANTINED, REWOUND, type Engine } from '@souls/engine-contract';
 import {
   applyAll, bind, changesOf, emptyKernel, kernelHash, seedVocabulary, sweep, whyNot, BASE_MANNERS,
   type Change, type KState, type Thing,
@@ -207,6 +207,7 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
     case 'rules': {
       if(e.payload?.lastRungInPlace){engine.stopAllV1?.(REWOUND);engine.containV1?.(e.payload.lastRungInPlace.contained??[]);return {};}
       if(e.payload?.quarantineV1){const q=e.payload.quarantineV1;if(!engine.stopBodiesV1||!engine.containV1)throw Error('quarantine.reader-required');engine.stopBodiesV1(q.bodies??[],QUARANTINED);for(const h of q.held??[]){if(!engine.holdBodyV1)throw Error('quarantine.reader-required');try{engine.holdBodyV1(h.id,h.pose);}catch{/* as live: a hold that fails costs only itself */}}engine.containV1(q.contained??[]);return {};}   // #1369
+      if(e.payload?.nonFiniteHoldV1){if(!engine.applyNonFiniteV1)throw Error('nonfinite-hold.reader-required');engine.applyNonFiniteV1(e.payload.nonFiniteHoldV1.patches??[],NONFINITE_HELD);return {};}   // #1496: the logged patches, as live wrote them; nothing is read again
       if(e.payload?.soulsRepairAdoptV1){if(Object.keys(e.payload).length!==1||!engine.adoptSoulsRepairV1)throw Error('souls-repair-adoption.reader-required');engine.adoptSoulsRepairV1(e.payload.soulsRepairAdoptV1);}   // #1323
       if(e.payload?.nativeSleepSnapshotPolicy){if(Object.keys(e.payload).length!==1||!engine.adoptNativeSleepSnapshotV1)throw Error('sleep-snapshot.reader-required');engine.adoptNativeSleepSnapshotV1(e.payload.nativeSleepSnapshotPolicy);}
       if(e.payload?.commonsNewcomerResources){if(Object.keys(e.payload).length!==1||!engine.adoptCommonsNewcomerResourcesV1)throw Error('newcomer-resources.reader-required');engine.adoptCommonsNewcomerResourcesV1(e.payload.commonsNewcomerResources);
