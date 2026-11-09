@@ -757,7 +757,8 @@ export class MarsEngine implements Engine {
     // only a free component: a kind that can never carry, seat, berth or hold anyone (a def with slots can: a seat holds its
     // body only through the live action, which no scan of the body sees) (a boat, a bed, a rack, a ride, a frame
     // part are not), with nothing resting on it. Anything else halts by name rather than move what may hold a body.
-    const free = e.kind === 'component' && !(CATALOG as any)[e.def]?.slots?.length && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
+    const def = (this.rt.world as any).entityPhysicsV1?.assets?.[e.def] ?? (CATALOG as any)[e.def];   // the world's library first, as registered for seat placement; an unknown def is not free
+    const free = e.kind === 'component' && !!def && !def.slots?.length && !def.seats?.length && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
     // and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`, a grip is released below)
     const names = (v: unknown, depth = 0): boolean => typeof v === 'string' ? v === id || v.startsWith(`${id}#`) || v.endsWith(`:${id}`) : !!v && typeof v === 'object' && depth < 5 && Object.entries(v).some(([k, x]) => k !== 'grip' && names(x, depth + 1));
     if (!free || ents.some(o => o.kind === 'human' && names(o.human))) return null;

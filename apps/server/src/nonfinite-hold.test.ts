@@ -167,6 +167,23 @@ test('#1496 a component whose def has slots (a seat a god library could place as
   assert.equal(events(f).length, 0);
 });
 
+test('#1496 a component whose world-library def has seat slots, or whose def is unknown, is never moved here: it halts', async (t) => {
+  for (const def of ['library/stool@2', 'no-such-def']) {
+    const { f, ents } = await world(t, { baseline: false });
+    const w = f.host.engine.world as any;
+    assert.throws(() => tickBroken(f, () => {
+      if (def.startsWith('library/')) w.entityPhysicsV1 = { ...(w.entityPhysicsV1 ?? {}), assets: { ...(w.entityPhysicsV1?.assets ?? {}), [def]: { id: def, slots: [{ id: 's0', kind: 'seat', local: [0, 0], yaw: 0 }] } } };   // as a god library item registers it
+      ents().bowl1.def = def; ents().bowl1.pose.p[0] = NaN;
+    }), /non-finite number/, def);
+    assert.equal(events(f).length, 0, def);
+  }
+  // the control: the same library entry with no slots is a free component, so the seat slots are what refuse the first
+  const { f, ents } = await world(t, { baseline: false });
+  const w = f.host.engine.world as any, def = 'library/crate@1';
+  assert.doesNotThrow(() => tickBroken(f, () => { w.entityPhysicsV1 = { ...(w.entityPhysicsV1 ?? {}), assets: { ...(w.entityPhysicsV1?.assets ?? {}), [def]: { id: def, slots: [] } } }; ents().bowl1.def = def; ents().bowl1.pose.p[0] = NaN; }));
+  assert.equal(events(f)[0]?.payload.nonFiniteHoldV1.patches[0].from, 'arrival');
+});
+
 test('#1496 more numbers than the cap are not patched in part: it halts by name', async (t) => {
   const { f } = await world(t);
   const w = f.host.engine.world as any; for (let i = 0; i < 65; i++) w.env.weather[`x${i}`] = NaN;
