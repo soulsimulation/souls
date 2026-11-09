@@ -119,7 +119,9 @@ test('actual atmosphere refreshes rotated incense smoke on redraw, removal and a
   layer.dispose(); check([]);
 });
 
-test('a new hidden cottage censer redrawn on a periodic scan publishes immediately when uncovered', async t => {
+for (const newHidden of [true, false]) test(newHidden
+  ? 'a new hidden cottage censer redrawn on a periodic scan publishes immediately when uncovered'
+  : 'a known cottage censer hidden without redraw across a periodic scan publishes immediately when uncovered', async t => {
   const globals = globalThis as unknown as { location?: URL }, previousLocation = globals.location;
   globals.location = new URL('https://example.invalid/w/fixture'); t.after(() => { globals.location = previousLocation; });
   const { WorldEntityLayer, createWorldAtmosphere } = await runtime();
@@ -138,17 +140,25 @@ test('a new hidden cottage censer redrawn on a periodic scan publishes immediate
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#bbddff'); scene.add(layer.group);
   const atmosphere = createWorldAtmosphere(scene), camera = new THREE.PerspectiveCamera(); t.after(() => atmosphere.dispose());
   const frame = (seconds: number) => atmosphere.update({ seconds, dt: .01, clock: '2026-11-09T12:00:00', daylight: 1, camera, eden: true, profile: 'world', reducedMotion: false });
+  if (!newHidden) act([{ op: 'set', id: censer, state: { on: true } }]);
   inner.draw(home, false, true); inner.draw(model.entities.get(censer)!, false, true);
   const interior = inner.drawn.get(home.id)!.obj.userData.interior as { floorOf: Record<string, number> };
   assert.equal(interior.floorOf['floor-1'], 1, 'real cottage builder provides the occupied upper storey');
   const visibility = () => { inner.hostPass(); inner.refreshVisibility(censer, inner.drawn.get(censer)!, inner.now); };
+  layer.interiorFrom = null; visibility();
+  assert.equal(inner.drawn.get(censer)!.obj.visible, true, 'the initial cottage censer is visible');
+  for (const seconds of [0, 1.5, 5, 12, 25, 45]) frame(seconds);
+  assert.equal(atmosphere.inspect().smokeSources, newHidden ? 1 : 2, 'startup scan sees the chimney plus an initially lit censer');
   layer.interiorFrom = new THREE.Vector3(100, 0, 0); visibility();
   assert.equal(inner.drawn.get(censer)!.obj.visible, false, 'supported far-interior policy hides the censer');
-  for (const seconds of [0, 1.5, 5, 12, 25, 45]) frame(seconds);
-  assert.equal(atmosphere.inspect().smokeSources, 1, 'only the real cottage chimney is burning');
-  act([{ op: 'set', id: censer, state: { on: true } }]);
-  inner.draw(model.entities.get(censer)!, false, true); visibility();
-  assert.equal(inner.drawn.get(censer)!.obj.visible, false, 'new lit redraw remains hidden');
+  if (newHidden) {
+    act([{ op: 'set', id: censer, state: { on: true } }]);
+    inner.draw(model.entities.get(censer)!, false, true); visibility();
+    assert.equal(inner.drawn.get(censer)!.obj.visible, false, 'new lit redraw remains hidden');
+  } else {
+    // No additions or redraws occur after scan45: the cache must retain this known hidden publisher itself.
+    frame(45.1); assert.equal(atmosphere.inspect().smokeSources, 1, 'hiding the known source leaves only the chimney');
+  }
   const scans = atmosphere.inspect().scans;
   frame(75); assert.equal(atmosphere.inspect().scans, scans + 1);
   assert.equal(atmosphere.inspect().smokeSources, 1, 'periodic scan must not show the hidden new censer');
