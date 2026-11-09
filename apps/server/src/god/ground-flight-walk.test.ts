@@ -86,13 +86,13 @@ for (const paged of [true, false]) {
 }
 
 // Routes the coarse ground search already finds are planned exactly as before the detour: these hashes are the routes'
-// bytes on 3.59.4 (37a5017b4, no detour), on the open lawn, round the terrace's foot, along its top and 80-150 m away
+// bytes on 0.64.4 (37a5017b4, no detour), on the open lawn, round the terrace's foot, along its top and 80-150 m away
 // (paged: chunked with `rest`), with the flight in place. The detour runs only when the coarse search finds no way.
 const SAME: [Vec2, Vec2][] = [[[25, 10], [40, 10]], [[15, 0], [35, 0]], [[25, -10], [25, 10]], [[22, -2], [28, 3]], [[25, 2], [22, -3]],
   [[0, 0], [60, 60]], [[25, 80], [25, 12]], [[-60, -40], [70, 40]], [[100, 0], [-30, 20]], [[18, 6.5], [32, 6.5]]];
 const GOLDEN: Record<string, string> = {paged: 'd680d57d10576e8cb7a612f2c84e6f24d9e27f05f37fbdd718a4de112679a114', unpaged: '3e8ac78ca93ad2212bcf3c2208edfe86e2bbd9e86702466a6fe9d6a41a967f3c'};
 for (const paged of [true, false]) {
-  test(`routes the coarse search already finds are byte-identical to 3.59.4 (${paged ? 'paged' : 'unpaged'} ground)`, {timeout: 300_000}, async t => {
+  test(`routes the coarse search already finds are byte-identical to 0.64.4 (${paged ? 'paged' : 'unpaged'} ground)`, {timeout: 300_000}, async t => {
     const w = world(t, paged); await w.settle(2);
     w.act(TERRACE); w.act(FLIGHT); await w.settle(4);
     const {HUMAN_PROFILE} = await import('../../../../mars/viewer/engine/spatial/types.ts');

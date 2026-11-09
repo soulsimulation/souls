@@ -235,7 +235,7 @@ for (const skew of [-600_000, 600_000]) test(`pause and alive deadline use serve
   } finally { h.sites.dispose(); Date.now = realDateNow; }
 });
 
-// Release 1.1 walk: after `build step --say` the label grew to two lines on the same CanvasTexture; Chrome refused the
+// Release 0.1 walk: after `build step --say` the label grew to two lines on the same CanvasTexture; Chrome refused the
 // upload (glCopySubTextureCHROMIUM: Offset overflow) and a visitor kept the old one-line "paused" label, stretched.
 test('a label that changes size gets a fresh texture (the old one disposed once) carrying exactly the new text', () => {
   const painted: string[][] = []; let frame: string[] = [];

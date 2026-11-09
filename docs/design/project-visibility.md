@@ -56,7 +56,7 @@ the public publication input. The world viewer must download no extra board/chan
 
 ## Historical recovery
 
-The existing changelog starts at 3.0; [#585](https://github.com/soulsimulation/souls/issues/585) recovers earlier notes from
+The existing changelog started at 3.0 (now 0.5); [#585](https://github.com/soulsimulation/souls/issues/585) recovers earlier notes from
 preserved records. Prefer recorded release dates and source receipts over commit dates. Keep a private provenance
 map; publicly distinguish reconstructed historical summaries and uncertain dates from original release records.
 Do not invent a release or imply deployed status from a branch merge.

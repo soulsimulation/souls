@@ -64,7 +64,7 @@ echo "$BUILD" > "$OUT/BUILD"
 # world id. Without it the fork drew only the bare commons (lane FORKFIX). New worlds have other ids: unaffected.
 EDEN_WORLDS="${VITE_EDEN_EXPERIENCE_WORLD_IDS-pm-preview-eden-20261005}"
 # CDN1 (2026-10-20): reviewed CC0 models come from assets.eden.art (apps/web/src/cdn-manifest.json; tools/cdn/README.md).
-# The switch is build-time and off when absent in vite, so every live build from 3.20 (we-f62375187ae5) to 3.49 shipped
+# The switch is build-time and off when absent in vite, so every live build from 0.25 (we-f62375187ae5) to 0.54 shipped
 # without it: the release defaults it ON. Turn it off for one release with SIM_ASSETS_CDN_ENABLED=0 release.sh ...
 [ "$CDN" = 1 ] || echo "   CDN OFF for this build (SIM_ASSETS_CDN_ENABLED=0): every model is served from origin"
 if [ -n "${SIM_PREBUILT_WEB_ROOT:-}" ]; then

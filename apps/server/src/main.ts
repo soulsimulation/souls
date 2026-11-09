@@ -39,7 +39,7 @@ import {installBirthLooks} from './god/birth-look.ts';
 import { setKitViewerContract } from '@souls/generators';
 import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
-import { startWatchdog, writeLiveNow } from './load/watchdog.ts';
+import { stallConfig, startWatchdog, writeLiveNow } from './load/watchdog.ts';
 import { sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
@@ -60,7 +60,7 @@ await standby(async () => {
 bootAt.go = performance.now();
 // srv-load (LOAD-CONTRACT §4): the watchdog thread first, before the database opens, so <DATA_DIR>/live.json reports the
 // whole boot. Not during a standby wait (the serving process still owns the file then). SIM_HEALTH_PORT: its own /healthz.
-if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined });
+if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir) });
 bootPhase('boot:restore');
 
 // K1 / NT5: new kit fields are admitted only with the viewer that can draw them.

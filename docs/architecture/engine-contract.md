@@ -131,7 +131,7 @@ whose history began without them adopts them in one logged `rules` event at its 
 (`{soulsRepairAdoptV1: {contract: 'souls-repair-adoption/1', tick, fromRulesVersion, toRulesVersion, fromStateHash}}`). Its
 fold turns the rules on, and the world header's `rules_version` follows in the same acceptance. A new world is born without
 them and adopts at tick 0. A snapshot restores under the policy it was taken with; the state hash never names the rules
-(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (4.16,
+(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (0.120,
 or `marsFactory` alone) refuses an adopted history. `SIM_SOULS_REPAIR=0` adopts nothing, still replays a logged adoption, and
 is ignored for a world that has adopted. A factory that already has the rules (`SIM_SOULS_REPAIR=1`, `SIM_SHARED_CARRY=1`, or
 `soulsRepairV1: true`) is used as it is: an old history refuses it, as before.
