@@ -78,3 +78,12 @@ test('explicit raw event replay keeps the consumer cursor unchanged', async t =>
   assert.match(m.requests[0], /after=c_9/);
   assert.equal(m.state().cursor, 'c_10');
 });
+
+test('#1470: a failed receipt keeps the world\'s alternatives, short; a completed one and one without them are as before', () => {
+  const alternatives = [{ id: 'walk:lab-pond-hall', label: 'Walk to the pond hall, the long way round past the orchard' }, { id: 'walk:cottage/bench' }, { id: 'sit:here' }, { id: 'walk:knoll' }];
+  const failed = brief({ accepted: true, receipt: { id: 'r_1', capability: 'walk:reading-room', phase: 'failed', code: 'route.unreachable', reason: 'The way there closed.', alternatives } });
+  assert.deepEqual(failed.alternatives.map((a) => a.id), ['walk:lab-pond-hall', 'walk:cottage/bench', 'sit:here'], 'at most three, in the world\'s order');
+  assert.match(failed.failed, /route|closed/);
+  assert.equal('alternatives' in brief({ accepted: true, receipt: { id: 'r_2', capability: 'walk:knoll', phase: 'failed', code: 'route.unreachable' } }), false, 'absent: nothing added');
+  assert.equal('alternatives' in brief({ accepted: true, receipt: { id: 'r_3', capability: 'walk:knoll', phase: 'completed', alternatives } }), false, 'only a failed receipt');
+});

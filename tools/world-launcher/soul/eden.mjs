@@ -3130,6 +3130,8 @@ export function brief(out) {
   const adjusted = landingSentence(out.landing ?? rec?.result?.landing) ?? (out.resolved?.note && out.resolved.to !== out.resolved.from ? String(out.resolved.note).slice(0, 200) : null);
   if (adjusted) o.adjusted = adjusted;
   if (out.stalled) o.stalled = stalledSentence(out.stalled);
+  // #1470: a failed receipt that names other ways (a walk whose route died) keeps them, short, as a refusal does
+  if (failed && Array.isArray(rec.alternatives) && rec.alternatives.length) o.alternatives = shortAlternatives(rec.alternatives);
   // #832: an owner message that ends a wait must not push the receipt out: shorten the message texts (stderr's OWNER
   // MESSAGE line has them in full), then keep only the newest, so the agent still sees which act is open. Without
   // owner messages the output is as before (resolved, then receipt, go first).
