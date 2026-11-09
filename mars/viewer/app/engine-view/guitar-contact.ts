@@ -22,3 +22,11 @@ export function placeGuitar(obj:THREE.Object3D,origin:THREE.Vector3,fwd:THREE.Ve
   obj.matrix.setPosition(origin.clone().addScaledVector(fwd,pose.anchor[0]*scale).addScaledVector(right,pose.anchor[1]*scale).addScaledVector(up,pose.anchor[2]*scale));
   obj.matrixWorldNeedsUpdate=true;obj.visible=pose.weight>0;
 }
+
+/** Preserve the attained idle underlay through an interrupted entry; all inputs are observed clocks. */
+export function guitarIdleUnderlay(age:number|undefined,entry:number,normal:number,released?:number,duration?:number){
+  const smooth=(x:number)=>{const k=Math.max(0,Math.min(1,x));return k*k*(3-2*k);};
+  if(released===undefined)return (1-smooth((age??GUITAR_FADE)/GUITAR_FADE))*entry;
+  const r=smooth(released/GUITAR_FADE),d=smooth((duration??GUITAR_FADE)/GUITAR_FADE);
+  return (1-r)*(1-d)*entry+r*normal;
+}

@@ -67,7 +67,7 @@ import { sleepGoal, sleepHands, sleepHeadPitch, sleepRestWeight, sleepHeadRestLi
 import { PRONE_ACTIVITY } from '../../engine/construction/handup.ts';
 import { ACTIVITY_OVERLAYS, GROUND_SEAT, LYING, PIANO_FADE, SING_LET_GO, activityFrame, gameArmBlend, makeProp, placeProp, propFor, type ActivityFrame, type PropKind } from './activity-poses.ts';
 import { accompanistOf,GUITAR_FADE } from './piano-score.ts';
-import {placeGuitar} from './guitar-contact.ts';
+import {guitarIdleUnderlay,placeGuitar} from './guitar-contact.ts';
 import {posePianoHand} from './piano-hands.ts';
 import { handGameActive, handGameGestureClock, handGameSuppress, poseHandGames, type HandGameDiag } from './hand-games.ts';
 import type { HandHoldState } from '../../engine/social/hand-hold.ts';
@@ -192,10 +192,12 @@ type View = {
   prevDuration?: number;
   prevInstrument?: string;
   restAge?: number;
+  /** Observed idle clock at guitar entry; absent means an already settled/unknown entry. */
+  guitarEntryRestAge?: number;
   restFrom?: number;
   /** Idle variety weight drawn at the last render (Idle_Neutral + variant; diagnostics only). */
   variety?: number;
-  /** Entry 36: the idle-variety onset level when the body last stood idle (singing/guitar gestures fade out from it). */
+  /** Entry 36: the idle-variety onset level when the body last stood idle (singing gestures fade out from it). */
   singOnset?: number;
   /** Seconds since the current walk began (its weight left 0), and the rest clock then; undefined: not walking / long ago. */
   walkAge?: number;
@@ -325,6 +327,8 @@ export type SampledHuman = {
   prevActivityDuration?: number;
   prevInstrument?: string;
   restAge?: number;
+  /** Observed idle clock at guitar entry; absent means an already settled/unknown entry. */
+  guitarEntryRestAge?: number;
   /** Seconds since the current walk began (the Walk weight left 0; absent: not walking, or longer than a gesture fade). */
   walkAge?: number;
   /** The rest clock (restAge) when that walk began; absent: unknown. */
@@ -395,7 +399,7 @@ const baseOf = (act: string, base?: string) => { if (act === 'cycle') return 'si
 /** Sitting on the ground (sit-ground, or an overlay layered on it): the seat is the grass. */
 const onGround = (act: string, base?: string) => act === 'sit-ground' || (base === 'sit-ground' && OVERLAYS.has(act));
 /** Idle variety: now and then (about 6 s in every 25, per person) the Idle_Neutral clip blends in. */
-const IDLE_VARIETY_ONSET = 1.2;
+export const IDLE_VARIETY_ONSET = 1.2;
 /** An idle gesture playing when a reach or a walk starts fades out over this long (s) instead of being cut. */
 export const GESTURE_FADE = 1.4;
 /** Track names (three-sanitised bone names) of the arms and hands: shoulders to fingertips. */
@@ -618,6 +622,8 @@ export class HumanViews {
         const clock=world.tick*DT;
         if(v.activity==='wave'&&v.waveEvents?.length)v.waveEvents[v.waveEvents.length-1].end=clock;
         if(act==='wave'){if(!v.waveEvents?.length)v.waveRestAge=v.restAge;(v.waveEvents??=[]).push({start:clock});}
+        if(act==='play-music'&&e.human.instrument==='guitar')v.guitarEntryRestAge=v.restAge;
+        else if(!(act==='idle'&&v.activity==='play-music'&&v.instrument==='guitar'))v.guitarEntryRestAge=undefined;
         v.prevWaveDuration=v.activity==='wave'?v.since:undefined;
         v.prevAct = v.activity; v.prevBase = v.base; v.prevDuration=(v.age+1)*DT;v.prevInstrument=v.instrument;
       }
@@ -896,7 +902,9 @@ export class HumanViews {
       v.running = act === 'jog' || act === 'run' || (typeof f.speed === 'number' && f.speed > RUN_SPEED);
       v.speed = typeof f.speed === 'number' ? f.speed : 0;
       v.since = f.activityAge;
+      v.guitarEntryRestAge=f.guitarEntryRestAge;
       if (f.restAge !== undefined) v.restFrom = t - f.restAge;
+      else if(act==='idle'&&f.prevActivity==='play-music'&&f.prevInstrument==='guitar')v.restFrom=f.activityAge===undefined?undefined:t-f.activityAge;
       else if (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) v.restFrom = t;
       v.restAge = v.restFrom !== undefined && t >= v.restFrom ? t - v.restFrom : undefined;
       v.walkAge = f.walkAge;
@@ -1058,7 +1066,7 @@ export class HumanViews {
     // per 50 ms in take 3), while the arm eases onto the mic
     const singFade = v.activity === 'sing' && v.singOnset !== undefined && (v.since ?? 9) < GESTURE_FADE ? 1 - smooth((v.since ?? 9) / GESTURE_FADE) : 0;
     // A guitar's hands likewise enter from the idle clip already playing, rather than cutting its wrist pose at onset.
-    const guitarFade=v.activity==='play-music'&&v.instrument==='guitar'&&v.singOnset!==undefined&&(v.since??9)<GUITAR_FADE?1-smooth((v.since??9)/GUITAR_FADE):0;
+    const guitarActive=v.activity==='play-music'&&v.instrument==='guitar';
     // entry 35: a hand game holds idle gestures off, fading them out from its start and back in after it (no pop at a
     // join, a count's start or a release); rps keeps the variety layer for that fade
     const hgOff = handGameSuppress(v), gT = handGameGestureClock(v, tSec);
@@ -1068,7 +1076,7 @@ export class HumanViews {
     // Entry 7 (frisbee clear-v1): the arms lower out of the game on its own recorded clock; idle variety fades in under them
     const gameBlend = v.game?.flightPolicy === 'clear-v1' ? gameArmBlend(v.game, v.gameTick ?? 0, v.gameDt ?? .05) : 1;
     const gameShare = v.activity === 'idle' || v.game?.flightPolicy !== 'clear-v1' ? 1 : 1 - gameBlend;
-    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || guitarFade > 0 || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
+    const idleFree = (waveActive || v.activity === 'idle' || gameBlend < 1 || carryIdle || itemReach || GAIT_ACTS.has(v.activity) || ((v.activity === 'operate' || v.activity === 'reach') && reachFade > 0) || singFade > 0 || guitarActive || (v.activity === 'rps' && hgOff < 1)) && b.sitW === 0 && (!engineHands || reachFade > 0 || (v.itemPose?.idleBlend ?? 0) > 0) && (freeBody || carryIdle) && !lib.cur;
     // Entry 43 (entry 41's M04 finding): a let-go before a reach fades the gesture out on its own clock; the reach after
     // it then fades none of its own (its gesture is already gone), and the act's own return of the idle (after the arm is
     // down) still applies. A reach with no let-go keeps the fade over the reach. A put of a handle-held item starts
@@ -1094,15 +1102,16 @@ export class HumanViews {
     // the idle handoff fading in after it ends, instead of switching idle variety on at full weight (a 0.31 m palm jump, take 5)
     const after = !handoff && v.lastHandActuator ? handActuatorFrame(v.lastHandActuator, (v.handActuatorTime ?? tSec) - v.lastHandActuator.startTick * DT).idleBlend : 1;
     if (after >= 1) v.lastHandActuator = undefined;
-    const idleHandoff = Math.min(putReturn, letGoing ? letIdle : v.itemPose ? (letGone && v.itemPose.take ? 0 : v.itemPose.idleBlend) : (handoff ? (reachS < 0 ? 1 : Math.max(handoff.idleBlend, fadeOut)) : v.transfer?.endTick !== undefined ? smooth(((v.transferTime ?? tSec) - v.transfer.endTick * DT) / TRANSFER_HANDOFF) : v.transfer && transferS >= 0 ? fadeOut : singFade > 0 ? singFade : guitarFade > 0 ? guitarFade : after));
+    const idleHandoff = Math.min(putReturn, letGoing ? letIdle : v.itemPose ? (letGone && v.itemPose.take ? 0 : v.itemPose.idleBlend) : (handoff ? (reachS < 0 ? 1 : Math.max(handoff.idleBlend, fadeOut)) : v.transfer?.endTick !== undefined ? smooth(((v.transferTime ?? tSec) - v.transfer.endTick * DT) / TRANSFER_HANDOFF) : v.transfer && transferS >= 0 ? fadeOut : singFade > 0 ? singFade : after));
     v.idleLast = idleHandoff;
     // Idle variety (Idle_Neutral, fold arms, look around) fades in from when the body came to rest: switched on at full
     // weight it raised or crossed the arms in one frame whenever a walk ended inside a person's variety window
     // (entry 29's shared idle-onset fix, carried by entry 33: a hand-to-hair flash at each walk stop before a reach).
     const normalRestOnset=sample.kind==='sampled'&&sample.restOnset!==undefined?sample.restOnset:v.restAge===undefined?1:smooth(v.restAge/IDLE_VARIETY_ONSET);
     const waveRestOnset=v.waveRestAge===undefined?1:smooth(v.waveRestAge/IDLE_VARIETY_ONSET);
-    const restOnset = waveActive ? waveRestOnset : singFade > 0 || guitarFade > 0 ? v.singOnset! : normalRestOnset;
-    if (v.activity === 'idle') v.singOnset = restOnset; else if (v.activity !== 'sing'&&!(v.activity==='play-music'&&v.instrument==='guitar')) v.singOnset = undefined;
+    const entryOnset=v.guitarEntryRestAge===undefined?1:smooth(v.guitarEntryRestAge/IDLE_VARIETY_ONSET);
+    const restOnset = guitarActive||guitarRelease ? guitarIdleUnderlay(v.since,entryOnset,normalRestOnset,guitarRelease?v.since:undefined,v.prevDuration) : waveActive ? waveRestOnset : singFade > 0 ? v.singOnset! : normalRestOnset;
+    if (v.activity === 'idle') v.singOnset = restOnset; else if (v.activity !== 'sing') v.singOnset = undefined;
     const neutralW = extra.idleNeutral && idleFree ? (1 - w) * neutralWeight(h.name, gT) * idleHandoff * restOnset * (1 - hgOff) * idleShare * gameShare * (waveActive?1-waveBlend:1) : 0;
     const variant = idleFree ? idleVariant(h.name, gT) : null, variantA = variant ? libAction(v.rig, variant.clip) : null;
     const variantW = variantA ? (1 - w - neutralW) * variant!.w * idleHandoff * restOnset * (1 - hgOff) * idleShare * gameShare * (waveActive?1-waveBlend:1) : 0;

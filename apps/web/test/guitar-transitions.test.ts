@@ -59,3 +59,55 @@ test('a real recorded read after guitar keeps its book pose and immediately reli
  const p=new TakePeople(rec.finish());p.setTemplates([await template('woman',1.75)]);p.show(1.4);p.show(1.55);const state=p as unknown as {humans:{views:Map<string,{rig:{holder:THREE.Object3D}}>}};const holder=state.humans.views.get(ID)!.rig.holder;
  assert.equal(holder.getObjectByName('activity prop: guitar')?.visible??false,false,'new read owns its hands');assert.equal(holder.getObjectByName('activity prop: book')?.visible,true,'book is visible');
 });
+
+for(const entryRest of [.05,.4])for(const duration of [.1,.4,4])test(`guitar from restarted idle ${entryRest}s, stop ${duration}s: continuous observed underlay`,async()=>{
+ const v=await views();let previous:number[][]|undefined,maxStep=0;
+ for(let k=-1;k<=Math.round((duration+1.2)/DT);k++){
+  const age=k*DT,active=k>=0&&age<duration-1e-8,released=age>=duration-1e-8;
+  const f:SampledHuman={id:ID,p:[0,0,0],yaw:0,walk:0,walkDist:0,activity:active?'play-music':'idle',restAge:active?0:released?Math.max(0,age-duration):Math.max(0,entryRest+age),guitarEntryRestAge:entryRest,...(active?{instrument:'guitar',activityAge:age}:released?{activityAge:Math.max(0,age-duration),prevActivity:'play-music',prevInstrument:'guitar',prevActivityDuration:duration}:{})};
+  v.setFrame([f],100+age);v.render(1);const p=palms(v);if(previous)for(let i=0;i<2;i++)maxStep=Math.max(maxStep,distance(previous[i],p[i]));previous=p;
+  if(k>=0&&k%3===0){const fresh=await views();fresh.setFrame([f],100+age);fresh.render(1);assert.ok(p.every((p,i)=>distance(p,palms(fresh)[i])<1e-6),'fresh entry/release matches sequential');}
+ }
+ assert.ok(maxStep<=.08,`restarted idle path ${maxStep} m per50ms`);
+});
+async function shortChunks(){
+ const scene=openGround(),world=emptyWorld('guitar-short-history',scene),e=human(ID,0,0);world.entities[ID]=e;
+ e.human!.activity='read';const rt=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),all=new TakeRecorder(rt,{rulesVersion:'guitar-short-history'});let rec=new TakeRecorder(rt,{rulesVersion:'guitar-short-history'});const chunks:ReturnType<TakeRecorder['finish']>[]=[];
+ for(let k=0;k<60;k++){
+  if(k===10)e.human!.activity='idle';
+  if(k===14){e.human!.activity='play-music';e.human!.instrument='guitar';}
+  if(k===22){e.human!.activity='idle';delete e.human!.instrument;}
+  rt.step();if((k+1)%2===0){chunks.push(rec.finish());if(k<59)rec=new TakeRecorder(rt,{rulesVersion:'guitar-short-history'});}
+ }
+ return {take:all.finish(),chunks};
+}
+test('short actual chunks retain new idle entry and full idle recovery over repeated/backwards seeks',async()=>{
+ const {take,chunks}=await shortChunks(),tpl=await template('woman',1.75),whole=new TakePeople(take),part=new TakePeople(chunks[0]);whole.setTemplates([tpl]);part.setTemplates([tpl]);
+ // The approved projection starts at guitar entry; generic earlier idle seeks retain their existing index.
+ const order=[...Array.from({length:41},(_,i)=>i+15),45,25,15,23,47,23,15,45,47];
+ for(const k of order){
+  const c=chunks.find(c=>k>=c.startTick&&k<c.startTick+c.ticks)!;whole.show(k*DT);part.setTake(c);part.setWaterHistory(chunks);part.show((k-c.startTick)*DT,k*DT);
+  const a=whole.bones(ID)[ID].arms;assert.ok(a.every((a,i)=>distance(a.palm,part.bones(ID)[ID].arms[i].palm)<.0003),`short chunks agree tick${k}`);
+  const fresh=new TakePeople(c);fresh.setTemplates([tpl]);fresh.setWaterHistory(chunks);fresh.show((k-c.startTick)*DT,k*DT);assert.ok(a.every((a,i)=>distance(a.palm,fresh.bones(ID)[ID].arms[i].palm)<.0003),`fresh short chunk tick${k}`);
+ }
+});
+for(const boundary of ['missing','foreign','ambiguous'] as const)test(`guitar observation stops at ${boundary} history boundary`,async()=>{
+ const {chunks}=await shortChunks(),tpl=await template('woman',1.75);
+ // Both the active and recovered-idle window start after their transitions.
+ for(const index of [9,13]){
+  const c=chunks[index],prev=chunks[index-1],history=boundary==='missing'?[]:boundary==='foreign'?[{...prev,rulesVersion:'foreign'}]:[prev,{...prev,id:prev.id+'-ambiguous'}];
+  const bare=new TakePeople(c),p=new TakePeople(c);bare.setTemplates([tpl]);p.setTemplates([tpl]);p.setWaterHistory(history);
+  for(const local of [DT,0,DT,DT]){
+   bare.show(local);p.show(local);assert.ok(bare.bones(ID)[ID].arms.every((a,i)=>distance(a.palm,p.bones(ID)[ID].arms[i].palm)<1e-6),`${boundary} cannot certify a guitar transition`);
+  }
+ }
+});
+test('native recorded hand points take ownership during guitar idle recovery',async()=>{
+ const scene=openGround(),world=emptyWorld('guitar-hands',scene),e=human(ID,0,0);world.entities[ID]=e;
+ const rt=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),rec=new TakeRecorder(rt,{rulesVersion:'guitar-hands'});
+ for(let k=0;k<40;k++){if(k===10){e.human!.activity='play-music';e.human!.instrument='guitar';}if(k===14){e.human!.activity='idle';delete e.human!.instrument;e.human!.hands={left:[.2,1.2,-.25],right:[.2,1.2,.25]};}rt.step();}
+ const p=new TakePeople(rec.finish());p.setTemplates([await template('woman',1.75)]);p.show(.65);p.show(.8);
+ const arms=p.bones(ID)[ID].arms;assert.ok(arms.every(a=>a.source==='hands'),'recorded hand points own both targets');
+ const holder=(p as unknown as {humans:{views:Map<string,{rig:{holder:THREE.Object3D}}>}}).humans.views.get(ID)!.rig.holder;
+ assert.equal(holder.getObjectByName('activity prop: guitar')?.visible??false,false,'native hand ownership hides guitar');
+});
