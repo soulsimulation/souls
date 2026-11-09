@@ -68,6 +68,11 @@ test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, a
   for (let i = 0; i < 4; i++) {await run(30); check(`walking (${i})`);}
   // a god edit over a point whose verdict is kept (main ground, away from the Souls): a new static epoch, new places,
   // new things, and that point no longer standing room
+  // (a ride can move while the Souls walk, which leaves the labels cold and the oracle's fresh build asking no verdicts: on a
+  // slower runner it did. Warm again and list once, so the verdicts this step picks from are kept at the current epoch)
+  for (let i = 0; i < 4000 && !E.navWarmV1(0); i++) host.tickOnce();
+  offers(souls[0]!);
+  assert.ok(kept.connMemo && kept.connMemo.m.size > 0, 'warm again, the listing asked main-ground verdicts');
   const priv = host as unknown as {captureBody(): unknown; restoreBody(b: unknown): void}, before = priv.captureBody();
   const ep0 = E.staticEpochV1(), bodies = souls.map(s => host.engine.world.entities[s.entityId]!.pose.p);
   const under = [...kept.connMemo!.m].map(([k, ok]) => ({k, ok, p: k.split('|')[1]!.split(',').map(Number) as [number, number]}))
