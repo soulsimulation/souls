@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1495 core-incense-censer@1 is a new immutable incense stand using existing light/put-out contact and on state. No existing def bytes change. Exact def hash: 18f1966d130367164484742c3d5bde86c260d8c65997bc18dd63767b44003273. The narrow run (conformance.mjs --k 2 --filter core-incense-censer) baked, placed and rendered all 5 samples with 0 findings and 0 qualification gaps, so this supplement adds no findings. Burning smoke and contact appearance still require real-client qualification.",
+  "findings": []
+}
