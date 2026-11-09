@@ -128,6 +128,8 @@ const SHARED_WATER_WAIT_POLICY_V2 = 'shared-water-wait/2';
  * Hard cap: 180 s from the step's first wait, whatever the blocker does. /1 and /2 programmes keep their exact path. */
 const SHARED_WATER_WAIT_POLICY_V3 = 'shared-water-wait/3';
 const SHARED_WATER_WAIT_CAP_V3 = 180 * TPS;
+/** Backstop: a /3 walk still unfinished 45 s past the cap stops whatever it is doing, so no swim waits for ever. */
+const SHARED_WATER_WAIT_BACKSTOP_V3 = SHARED_WATER_WAIT_CAP_V3 + 45 * TPS;
 const SHARED_WATER_WAIT_POLICIES = new Set([SHARED_WATER_WAIT_POLICY, SHARED_WATER_WAIT_POLICY_V2, SHARED_WATER_WAIT_POLICY_V3]);
 type Op = { verb: string; params: Record<string, unknown>; settle: 'done' | 'held'; soft?: boolean; raw?: boolean } | { wait: number };
 type Prog = {
@@ -1108,8 +1110,9 @@ export class MarsEngine implements Engine {
     // The hard cap holds for a walk resubmitted just before it, too: past the cap, a walk that is really held stops and
     // the step fails shore.occupied-route naming the body it waited for (when one is named). Held means its record tree
     // is blocked, it names a people wait or body obstruction, or it made under 0.5 m of headway over the last 2 s. A swim
-    // that is moving freely is never cut off (a single tick's speed reads 0 on a start, a turn or an arrival).
-    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&this.sharedWaterHeldV3(p,rec)){
+    // that is moving freely is not cut off (a single tick's speed reads 0 on a start, a turn or an arrival) until the
+    // backstop, 45 s past the cap, when any walk still unfinished stops (a body jostled to and fro can't wait for ever).
+    if(p.waterWait?.step===p.index&&this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_CAP_V3&&(this.rt.tick-p.waterWait.since>=SHARED_WATER_WAIT_BACKSTOP_V3||this.sharedWaterHeldV3(p,rec))){
       const blocker=this.sharedWaterBlockingAction(p,rec)?.subjects?.find(id=>id!==p.actor&&!!this.ents[id]?.human)??this.sharedWaterSubjectsV3(rec).find(id=>id!==p.actor&&!!this.ents[id]?.human);
       const water:Diag={code:'shore.occupied-route',message:blocker?`${p.actor} must wait for ${blocker}`:`${p.actor} is held on the way into the water`,subjects:[p.actor,...(blocker?[blocker]:[])]};
       p.waterWait.capped=true;this.rt.cancel(rec.id,{code:'shore.wait-capped',message:'the shore wait reached its 180 s cap',subjects:water.subjects});p.walkStopping=water;p.waterStopRetry=water;return true;}

@@ -139,3 +139,14 @@ test('/3: a walk held past the cap with no body named is still stopped, and says
  assert.ok(cancels.includes('shore.wait-capped'),JSON.stringify(cancels));assert.equal(terminal?.kind,'failed',JSON.stringify(terminal));assert.equal(terminal.code,'shore.occupied-route');
  assert.match(terminal.message,/is held on the way into the water; waited the 180 s limit/);assert.ok(e.world.tick-start<=400);
 });
+test('/3 backstop: a walk still unfinished 45 s past the cap stops even while it keeps moving',()=>{
+ const e=setup(),stationary=structuredClone(e.world.entities.h_actor.human),p=e.perform({actor:'h_actor',label:'jostled past the cap',steps:[{verb:'walk_to',params:{to:'shore-water',spread:'pond-lap/1',spreadWaitPolicy:V3}},{verb:'rest',params:{seconds:1}}]});assert.ok(p.ok);
+ e.step();e.step();const eng=e as any,prog=eng.programs.get(p.id);assert.ok(prog?.action);lateHuman(e,'h_crossing',stationary);
+ // the walk reads as never held (a body jostled more than 0.5 m every 2 s): only the backstop can end it
+ eng.sharedWaterHeldV3=()=>false;prog.waterWait={step:prog.index,since:e.world.tick-3600,attempts:1};
+ const rt=eng.rt,cancels:{code:string;tick:number}[]=[],cancel=rt.cancel.bind(rt);rt.cancel=(id:string,why:any)=>{cancels.push({code:why?.code,tick:e.world.tick});return cancel(id,why);};
+ const start=e.world.tick;let terminal:any;for(let i=0;i<1400&&!terminal;i++){const r=e.step();terminal=r.programs.find(x=>x.id===p.id&&x.kind!=='step');assert.deepEqual(e.runtime.violations,[]);}
+ const capped=cancels.find(c=>c.code==='shore.wait-capped');assert.ok(capped,JSON.stringify(cancels));
+ assert.ok(capped.tick-start>=45*20-2&&capped.tick-start<=45*20+2,'stops at cap + 45 s: '+(capped.tick-start));
+ assert.equal(terminal?.kind,'failed',JSON.stringify(terminal));assert.equal(terminal.code,'shore.occupied-route');assert.match(terminal.message,/waited the 180 s limit at the shore/);
+});

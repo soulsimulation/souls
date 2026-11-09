@@ -314,7 +314,8 @@ The Mars engine is hard-forked under `mars/viewer/engine`. `load.ts` imports tha
   policy it was submitted with. Under `shared-water-wait/1` a swim blocked by another body retries a second at a time
   for at most 60 attempts; `/2` adds a courtesy where the larger entity id steps aside from a mutual wait. `/3` (written
   for new swims, #1291) counts those 60 attempts only while the blocking body is parked (no active movement of its
-  own), and caps the whole wait at 180 s from the first attempt: a walk still held past the cap is stopped
+  own), and caps the whole wait at 180 s from the first attempt: a walk still held past the cap (or any walk still
+  unfinished 45 s after it) is stopped
   (`shore.wait-capped`) and the swim fails `shore.occupied-route`, saying it waited the limit. It also breaks a published
   `deadlock.cycle` (typically at the one dry shore gate) at once: the larger id stops its walk (`shore.cycle-yield`),
   steps aside by native make-way and retries; with no room to step aside it keeps the plain wait.
