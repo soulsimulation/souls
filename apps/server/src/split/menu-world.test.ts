@@ -28,6 +28,8 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   'onRelocated', 'onRewound',
   // #1369: it tells Souls of a quarantine, called only from onRecovery on main
   'onQuarantined',
+  // #1496: it tells Souls their programmes stopped for a non-finite hold, called only from onRecovery on main
+  'onNonFiniteHeld',
   // #1324: the steer act's landing preview (previewSteerLandingV1), called only from the ride object's steer act on main
   'steerLanding']);
 
