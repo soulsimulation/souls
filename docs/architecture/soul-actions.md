@@ -709,3 +709,9 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Finished poetry folio (#1577)
+
+`core-poetry-folio@1` is a blank open folio on a display stand. Its `object:<id>:write` offer takes `text`, up to 100 characters and three lines. The existing hand-writing stroke commits the words and writer's Soul id together; interrupted approach or writing before contact leaves it blank. The write action requires empty text and there is no erase action, so a completed folio is a finished artifact rather than a rewritable notice. A god can place another blank folio for another poem.
+
+Nearby Souls discover the write schema while blank and use `read:<id>` after completion. Reading returns the exact poem with its writer and labels it as authored words, not world facts. The words and `textBy` credit persist in entity state. Existing access rules and `capability.params` / `object.state` refusals apply. This is one short displayed poem, not a multi-page publishing or portable-book system; #1033's family scale applicability remains separate.
