@@ -75,7 +75,10 @@ test('Eden 2026: a roof walk acted before navigation is warm waits and walks; ge
   assert.equal(done.phase, 'completed', JSON.stringify(done));
   assert.doesNotMatch(done.reason ?? '', /Navigation is still getting ready/, 'the wait reason is cleared once it is warm');
   assert.ok((body.human?.level ?? 0) > 0, 'Ana is up on the house roof');
-  // A2 (warm): the kitchen roof is refused at act time, with the reason it had before
+  // A2 (warm): the kitchen roof is refused at act time, with the reason it had before. The 4000 ticks above let the rides
+  // move, which makes the labels cold again (#901); acted cold it would wait instead (A1), so they are warmed right before
+  // the act: no tick runs between this and the act's route check (CI run 42567852343 hit the cold case)
+  assert.ok(E.navWarmV1(Infinity), 'warm right before the act');
   const warm = await L.act(bob, { capability: kitchen }) as Out;
   assert.equal(warm.accepted, false); assert.equal(warm.code, 'route.unreachable'); assert.equal(warm.reason, k.reason);
   // after the first build, moving rides (balloons, carousel, ferris wheel) invalidate the labels; a roof walk bound while they
