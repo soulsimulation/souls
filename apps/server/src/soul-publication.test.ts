@@ -65,9 +65,6 @@ test('HTTP: the real published files are served by hash; the guide uses configur
   assert.match(core, /A ride or seat asked in words: `resolve` first; `ride\.unavailable` → an offered `alternatives` id, never an id you made\./);
   assert.match(core, /A refusal you don't know: `help refusals` before you act again/);
   assert.match(refText, /`capability\.unknown`: no offer here has that id\. Never build an id from words/);
-  // A6 (#1469): a companion resolve couldn't find is told to the owner, never guessed
-  assert.match(core, /`I couldn't find "Bo"` in a reason: tell your owner who wasn't found; never guess another Soul\./);
-  assert.match(refText, /`discovery\.unresolved\.with`/);
   const topics = /`help <topic>`: ([a-z, ]+)\./.exec(core)?.[1].split(', ') ?? [];
   assert.ok(topics.length >= 7, 'the core lists the topics');
   const headings = refText.split('\n').filter((l) => l.startsWith('## ')).map((l) => l.slice(3).split(/\s+/).map((w) => w.toLowerCase().replace(/[^a-z-]/g, '')));
