@@ -1269,7 +1269,7 @@ export class EngineBridge {
       this.navWarm = E.navWarmV1(budgetMs);
       if (st) { const ms = performance.now() - t0; if (ms > 50) { const now = this.navProbe(); this.log(`[l4] nav warm slice ${Math.round(ms)} ms: spatial paged ${Math.round(now.paged - st.paged)} grids ${Math.round(now.grids - st.grids)} scan ${Math.round(now.scan - st.scan)} ms; largest unit ${Math.round(now.unit)} ms (${now.phase})`); } }
       if (this.navWarm && this.navPending) {
-        this.navPending = false; if (this.navCold === null) this.navCold = false;   // #901: a completed build re-arms the re-warm
+        this.navPending = false; if (this.navCold === null) { this.navCold = false; this.navColdSlices = 0; }   // #901: a completed build re-arms the re-warm, with a fresh burst
         const spots = this.navDeferred; this.navDeferred = [];
         const lines = this.navLines(spots, this.navRescueSouls()); if (lines.length) this.navLater = [...this.navLater, ...lines].slice(-4);
       }
@@ -1291,8 +1291,10 @@ export class EngineBridge {
       const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
       if (!souls.length) return;
       // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them. Marked cold, not unwarmed:
-      // navWarm=false would put the first-build path back on 20 ms a tick and undo the re-warm's back-off (#1499)
-      if (!E.navWarmV1?.(0)) { if (this.navCold === false) this.navCold = true; return; }
+      // navWarm=false would put the first-build path back on 20 ms a tick and undo the re-warm's back-off (#1499). After a
+      // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
+      // waiting Souls out and re-arms the re-warm.
+      if (!E.navWarmV1?.(0)) { if (this.navCold === null) { this.navWarm = false; this.navPending = true; } else this.navCold = true; return; }
       this.navRescueSouls(0, souls);
     } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
   }

@@ -158,3 +158,24 @@ test('#1499: a rescue waiting while a ride keeps moving reads cold without reset
   assert.ok(after.some(c => c.budget === 0 && c.tick % 10 === 3), 'the rescue did read the labels');
   assert.ok(w.state.navWaiting.has('s_waiting'), 'and the Soul stays queued while they are cold');
 });
+
+test('#1499: after a re-warm error a waiting rescue still gets the labels relabelled, and the re-warm comes back with a fresh burst', t => {
+  let fail = false, warm = true, slices = 0;
+  const w = fixture(t, budget => { if (fail) { fail = false; throw new Error('controlled re-warm failure'); } if (!warm && budget > 0 && --slices <= 0) warm = true; return warm; });
+  const minds = w.host.minds as unknown as Map<string, { entityId: string }>;
+  minds.set('s_waiting', { entityId: 'no-such-body' }); t.after(() => minds.delete('s_waiting'));
+  const upTo = (n: number) => { while (w.host.engine.world.tick < n) w.tick(); };
+  upTo(4); fail = true; warm = false; slices = 3; w.state.navWaiting.add('s_waiting');
+  upTo(5); assert.equal(w.state.navCold, null, 'the re-warm failed at its poll');
+  upTo(13); assert.equal(w.rescues(), 1, 'only the first build so far');
+  upTo(17);
+  const relabel = w.calls.filter(c => c.tick > 5 && c.budget > 0).map(c => c.tick);
+  assert.deepEqual(relabel, [14, 15, 16], 'the rescue read at 13 found them cold; the first-build path relabelled them');
+  assert.equal(w.rescues(), 2, 'its completion stepped the Souls out');
+  assert.equal(w.state.navCold, false, 'and re-armed the re-warm'); assert.equal(w.state.navPending, false);
+  upTo(40); assert.deepEqual(w.logs, ['nav re-warm: controlled re-warm failure']);
+  warm = false; slices = 1e9; upTo(80);   // cold again for good: the rescue read at 43 finds it
+  const burst = w.calls.filter(c => c.tick > 40 && c.budget > 0).map(c => c.tick);
+  assert.deepEqual(burst.slice(0, 30), Array.from({ length: 30 }, (_, i) => 44 + i), 'a fresh burst of 30, not the count left from before the error');
+  assert.ok(w.calls.filter(c => c.tick > 40).every(c => c.budget <= 10), 'and no first-build slice while the re-warm works');
+});
