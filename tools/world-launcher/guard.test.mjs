@@ -42,7 +42,7 @@ test('full-jitter backoff: uniform under min(5 min, 1 s * 2^n); defaults are the
 });
 
 test('(a) wedged, live.json: the watchdog shows the main thread stuck; SIGUSR2, SIGTERM, SIGKILL, restarted; problems say wedged', async () => {
-  const p = pool(R, { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
+  const p = pool(R, { FAKE_LIVE: '1', FAKE_STOP_MS: '50', FAKE_STALL_TOP: 'stuckInTheLoop apps/server/src/x.ts:12' });
   const port = await p.ensure(world('wa')); const pid = p.state('wa').child.pid;
   p.startGuard();
   await sleep(700);   // past liveStaleMs after up: live.json is judged from here
@@ -56,6 +56,8 @@ test('(a) wedged, live.json: the watchdog shows the main thread stuck; SIGUSR2, 
   assert.match(st.lastExit.reason, /wedged: main thread stuck/);
   assert.equal(st.lastExit.signal, 'SIGKILL', 'a busy-looping main thread runs no SIGTERM handler');
   assert.ok(p.lines.some((l) => /wa wedged \(main thread stuck/.test(l)), 'one line per transition');
+  // #457: the line names the frame the world's watchdog caught the main thread stuck in (live.json `stall`)
+  assert.ok(p.lines.some((l) => /wa wedged \(main thread stuck.*; stuck in stuckInTheLoop apps\/server\/src\/x\.ts:12\)/.test(l)), p.lines.join('\n'));
   assert.ok(p.problems().some((x) => x.code === 'wedged' && /was wedged/.test(x.text)), 'shown for a while after its restart');
   assert.ok(ms < 3000, `restarted ${ms} ms after the wedge`);
   await p.closeAll();

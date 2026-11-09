@@ -59,6 +59,8 @@ export type LiveJson = {
   stalled?: true;
   /** #1326: the clock is dilated (behind): its effective rate against the admin's; present only then. */
   slowed?: {clockRate: number; baseRate: number};
+  /** #457: the frame the main thread was last stuck in (the watchdog's capture), for 10 min after it; `top` = `fn file:line`. */
+  stall?: {at: number; stuckMs: number; top: string; frames: string[]};
 };
 
 /** #1326: the clock as the shared numbers tell it (main thread, watchdog and read workers alike). */
