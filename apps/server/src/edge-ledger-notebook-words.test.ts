@@ -117,3 +117,27 @@ test('notebook words resolve only where a notebook is offered', () => {
   for (const w of ['cross out my note on the lost-and-found', 'cross out my note on the lost and found']) assert.equal(resolve(w, [found]), found.id, w);
   assert.equal(resolve('cross out my line in the first-aid-log', [aid]), aid.id);
 });
+
+// #1229: "take down" and "remove" act on nothing when the words name a writable thing that isn't offered, and keep their free words
+test('#1229: take down and remove refuse a thing that is not offered, and keep topic and adjective words', () => {
+  const poster = mk('e_iiii0009', 'unpin', 'Take down a poster from the poster wall (poster-wall)', ''), wanted = mk('e_jjjj0010', 'unpin', 'Take down your note from the wanted/offered board (wanted-board)', '');
+  // A1: the words name something else, in any spelling the kit's synonyms use
+  for (const w of ['remove my journal note', 'take down my note in the notebook', 'take down my note from the guest book', 'remove my note from the visitors book', "take down my note in the visitors' book", 'remove my note from the guestbook', 'take down my diary note'])
+    assert.equal(resolve(w, [pin, unpin]), 'capability.unknown', w);
+  for (const w of ['take down my line from the board', 'remove my line on the noticeboard', 'take down my line at the sheet', 'remove my board note'])
+    assert.equal(resolve(w, [nbPin, nbUnpin]), 'capability.unknown', w);
+  const said = (input: string, caps: any[]) => (resolveCapability(input, { caps, target: () => ({ names: [], around: [], at: [1, 1] }), places: [], root: [], me: null } as any) as any).reason;
+  assert.match(said('take down my note from the guest book', [pin, unpin]), /take down or remove goes by "guest book", so nothing was done/);
+  // a board and a notebook both here: the word names one, and the other's note or line is never taken
+  assert.equal(resolve('take down my line in the notebook', [pin, unpin, nbPin, nbUnpin]), nbUnpin.id);
+  assert.notEqual(resolve('remove my journal note', [pin, unpin, nbPin, nbUnpin]), unpin.id, 'the board note stays');
+  assert.equal(resolve('take down my note from the notice board', [pin, unpin, nbPin, nbUnpin]), unpin.id);
+  // A2: as on main
+  assert.equal(resolve('take down my note', [pin, unpin]), unpin.id);
+  assert.equal(resolve('take down my note from the wanted board now', [pin, unpin]), unpin.id);
+  assert.equal(resolve('take down my note from the wanted board now', [wanted]), wanted.id);
+  assert.equal(resolve('remove my note from the noticeboard', [pin, unpin]), unpin.id, 'a synonym of what is offered');
+  assert.equal(resolve('take down my line in the journal', [nbPin, nbUnpin]), nbUnpin.id);
+  for (const w of ['take down the old poster', 'take down the board games poster', "remove Ben's poster"]) assert.equal(resolve(w, [poster]), poster.id, w);
+  assert.equal(resolve("remove Ben's note", [pin, unpin]), unpin.id);
+});
