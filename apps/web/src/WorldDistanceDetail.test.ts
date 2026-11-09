@@ -68,13 +68,13 @@ test('PERF-PASSES: a mesh inside a frozen thing keeps its world sphere while the
   const thing=new THREE.Group();s.root.add(thing);thing.add(s.far,s.bench);let frozen:{frozen?:unknown}={frozen:[]};thing.userData.frozenDrawn=frozen;s.root.updateMatrixWorld(true);
   detail.apply(s.root,s.camera,844);
   assert.equal(s.far.visible,false);assert.equal(s.bench.castShadow,false);assert.equal(s.near.visible,true);detail.restore();
-  const cands=(detail as unknown as {candidates:{mesh:THREE.Mesh;w?:{list:unknown}}[]}).candidates;
-  assert.ok(cands.find(c=>c.mesh===s.far)!.w&&cands.find(c=>c.mesh===s.far)!.w!.list===frozen.frozen,'the far cup cached its world sphere against the freeze');
-  assert.equal(cands.find(c=>c.mesh===s.near)!.w,undefined,'a loose mesh caches nothing');
+  const cands=(detail as unknown as {candidates:{mesh:THREE.Mesh;wList:unknown}[]}).candidates;
+  assert.ok(cands.find(c=>c.mesh===s.far)!.wList===frozen.frozen,'the far cup cached its world sphere against the freeze');
+  assert.equal(cands.find(c=>c.mesh===s.near)!.wList,undefined,'a loose mesh caches nothing');
   // the thing thaws (its list goes), moves next to the camera, and freezes again with a new list: the cup is seen at its new place
   frozen.frozen=undefined;thing.position.set(0,0,195);s.root.updateMatrixWorld(true);
   detail.apply(s.root,s.camera,844);assert.equal(s.far.visible,true,'thawed: read from its matrix again');detail.restore();
-  frozen={frozen:[]};thing.userData.frozenDrawn=frozen;detail.apply(s.root,s.camera,844);assert.equal(s.far.visible,true);assert.equal(cands.find(c=>c.mesh===s.far)!.w!.list,frozen.frozen,'cached against the new freeze');detail.restore();
+  frozen={frozen:[]};thing.userData.frozenDrawn=frozen;detail.apply(s.root,s.camera,844);assert.equal(s.far.visible,true);assert.equal(cands.find(c=>c.mesh===s.far)!.wList,frozen.frozen,'cached against the new freeze');detail.restore();
   // while frozen the cache is trusted: the camera moving is still followed (distance is per frame)
   s.camera.position.set(0,2,400);s.root.updateMatrixWorld(true);detail.apply(s.root,s.camera,844);assert.equal(s.far.visible,false,'a 10 cm cup 205 m away');detail.restore();
 });
@@ -88,12 +88,12 @@ test('shared ancestors are read once per apply, with current visibility and near
   const nested:unknown[]=[],meshes:THREE.Mesh[]=[];inner.userData.frozenDrawn={frozen:nested};
   for(let i=0;i<128;i++){const m=new THREE.Mesh(new THREE.SphereGeometry(.1,8,4),new THREE.MeshBasicMaterial());m.position.set(0,2,-200);m.castShadow=true;inner.add(m);meshes.push(m);}
   root.updateMatrixWorld(true);const detail=new WorldDistanceDetail(PHONE_DETAIL);
-  const candidates=()=>((detail as unknown as {candidates:{w?:{list:unknown}}[]}).candidates);
-  detail.apply(root,camera,844);assert.equal(reads,1);assert.equal(freezeReads,1);assert.ok(meshes.every(m=>!m.visible));assert.ok(candidates().every(c=>c.w?.list===nested),'nearest marker still wins');detail.restore();
+  const candidates=()=>((detail as unknown as {candidates:{wList:unknown}[]}).candidates);
+  detail.apply(root,camera,844);assert.equal(reads,1);assert.equal(freezeReads,1);assert.ok(meshes.every(m=>!m.visible));assert.ok(candidates().every(c=>c.wList===nested),'nearest marker still wins');detail.restore();
   shown=false;reads=freezeReads=0;detail.apply(root,camera,844);assert.equal(reads,1);assert.ok(meshes.every(m=>m.visible),'hidden ancestor is skipped, without changing its children');detail.restore();
   shown=true;mark={};delete inner.userData.frozenDrawn;outer.position.z=195;root.updateMatrixWorld(true);reads=freezeReads=0;
-  detail.apply(root,camera,844);assert.equal(reads,1);assert.equal(freezeReads,1);assert.ok(meshes.every(m=>m.visible&&m.castShadow));assert.ok(candidates().every(c=>!c.w),'thaw is seen on the next apply');detail.restore();
-  mark={frozen:[]};detail.apply(root,camera,844);assert.ok(candidates().every(c=>c.w?.list===mark.frozen));detail.dispose();
+  detail.apply(root,camera,844);assert.equal(reads,1);assert.equal(freezeReads,1);assert.ok(meshes.every(m=>m.visible&&m.castShadow));assert.ok(candidates().every(c=>c.wList===undefined),'thaw is seen on the next apply');detail.restore();
+  mark={frozen:[]};detail.apply(root,camera,844);assert.ok(candidates().every(c=>c.wList===mark.frozen));detail.dispose();
 });
 
 test('ancestor memo preserves scan ownership and parent-mesh culling, then replaces ancestry at the next scan',()=>{
@@ -145,4 +145,20 @@ test('P2 churn: render-time lists are reused across frames, every change is undo
   }
   const hiddenStore=lists.hidden;detail.apply(s.root,s.camera,844);assert.equal(lists.hidden,hiddenStore,'the same array, not a regrown one');
   detail.dispose();assert.equal(s.far.visible,true);assert.equal(lists.hidden.length,0);
+});
+
+test('P2 rescan: candidates and ancestry records are reused; removals, reparenting and new geometry are followed', () => {
+  const s=scene(),detail=new WorldDistanceDetail({...PHONE_DETAIL,rescanFrames:1});
+  const view=detail as unknown as {candidates:{mesh:THREE.Mesh;radius:number;ancestor?:{object:THREE.Object3D}}[]};
+  const thing=new THREE.Group(),other=new THREE.Group();s.root.add(thing,other);thing.add(s.far);thing.userData.frozenDrawn={frozen:[]};s.root.updateMatrixWorld(true);
+  detail.apply(s.root,s.camera,844);detail.restore();
+  const first=view.candidates.find(c=>c.mesh===s.far)!,list=view.candidates;
+  assert.equal(first.ancestor?.object,thing);assert.equal(s.far.visible,true);
+  detail.apply(s.root,s.camera,844);assert.equal(s.far.visible,false);detail.restore();
+  assert.equal(view.candidates,list,'the same array');assert.equal(view.candidates.find(c=>c.mesh===s.far),first,'the same candidate');
+  other.add(s.far);s.root.updateMatrixWorld(true);detail.apply(s.root,s.camera,844);detail.restore();
+  assert.equal(first.ancestor?.object,other,'a reparented mesh gets its new chain');
+  s.far.geometry=new THREE.SphereGeometry(20,8,4);detail.apply(s.root,s.camera,844);assert.equal(first.radius,20);assert.equal(s.far.visible,true,'a new, larger geometry is drawn');detail.restore();
+  const count=view.candidates.length;s.near.removeFromParent();detail.apply(s.root,s.camera,844);detail.restore();
+  assert.equal(view.candidates.length,count-1);assert.ok(!view.candidates.some(c=>c.mesh===s.near),'a removed mesh is no longer a candidate');
 });
