@@ -22,8 +22,8 @@ function stranded(policy:boolean,nudge=0){
   assert.ok((e as any).rt.forceCancel(c.human!.task!,{code:'stall.released',message:'test: force-ended mid-flight'}));
   // stood idle on this low flight, the body overlaps the deck's edge on its level-0 grid: the stranded state itself is flagged
   // (an idle body is not exempt as a climber is); that is the state the walk must recover from, so it is cleared here
+  if(nudge){c.pose.p=[c.pose.p[0]+nudge,c.pose.p[1],c.pose.p[2]];e.step();(e.runtime.violations as unknown[]).length=0;}   // a release that stands it off the centre line (the move itself is the release's, not under test)
   e.step();assert.deepEqual([...new Set(e.runtime.violations.map((d:any)=>d.code))].filter(c=>c!=='collision.human-static'),[]);(e.runtime.violations as unknown[]).length=0;
-  c.pose.p=[c.pose.p[0]+nudge,c.pose.p[1],c.pose.p[2]];
   assert.equal(c.human!.level,0);assert.ok(c.pose.p[1]>.2,'left standing on the flight, above its floor');
   return e;
 }
@@ -36,7 +36,7 @@ test('#1367 without the policy a walk from a body on a flight drops it to the fl
   assert.equal(v?.code,'motion.teleport',JSON.stringify(e.runtime.violations));
 });
 
-for(const [name,x,z,level,nudge] of [['down to the lawn',9,2,0,0],['up onto the deck',9,-2.2,1,0],['down, from a pose rounded off the path by 0.5 mm',9,2,0,.0005]] as const)
+for(const [name,x,z,level,nudge] of [['down to the lawn',9,2,0,0],['up onto the deck',9,-2.2,1,0],['down, from a pose rounded off the path by 0.5 mm',9,2,0,.0005],['down, released 0.25 m off the centre line (as a stall release on a flight does)',9,2,0,.25],['up, released 0.25 m off the centre line',9,-2.2,1,.25]] as const)
   test(`#1367 under flight-resume/1 a stranded climber walks ${name}: it resumes the flight, never jumps, and arrives on the floor`,()=>{
     const e=stranded(true,nudge),c=e.world.entities.climber;walk(e,x,z,level);
     let done=false;
