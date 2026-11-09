@@ -15,6 +15,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
   await host.enableSpreadV2?.();
   await host.enableRouteReachV1?.();
   if (LITTLE_MARTIANS_WORLD_KEYS.includes(worldKey)) return;
+  await host.enableSpreadFieldV1?.();   // #467: orders spreadV2's spots by room; not on the Little Martians worlds
   await host.enableOccupiedLinkRoutingV1?.();
   await host.enableConcurrentLinkEgressV1?.();
   await host.enableStairLandingClearanceV1?.();
