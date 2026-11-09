@@ -164,8 +164,7 @@ test('#1468: an available offer the planner refuses route-dead names alternative
   for (const [code, named] of [['route.unreachable', true], ['route.goal-blocked', true], ['seat.none-free', false]] as const) {
     // the planner seam, for this act's seat only: every other check is real
     engine.canPerform = (p: {actor: string; steps: {verb: string}[]}) => p.actor === w.soul.entityId && p.steps.some(s => /sit/.test(s.verb)) ? {code, message: `stubbed ${code}`} : real(p);
-    const r = await accept(w.host, w.edge.act(w.soul, {capability: sits[0]!.id})) as any;
-    engine.canPerform = real;
+    let r: any; try {r = await accept(w.host, w.edge.act(w.soul, {capability: sits[0]!.id}));} finally {engine.canPerform = real;}
     assert.equal(r.accepted, false, `${code}: ${JSON.stringify(r)}`); assert.equal(r.code, code);
     if (!named) {assert.equal(r.alternatives, undefined, `${code}: ${JSON.stringify(r.alternatives)}`); continue;}
     assert.ok(r.alternatives?.length >= 1 && r.alternatives.length <= 3, `${code}: 1-3 alternatives ${JSON.stringify(r)}`);
