@@ -18,7 +18,10 @@ test('#467 A1/A2: four walk:field returns get spaced goals, completed receipts, 
  t.after(()=>{w.brain.quiesce();w.host.stop();edge.comms?.close();w.db.close();});
  const settle=async(n=3)=>{for(let i=0;i<n;i++){w.host.tickOnce();await setImmediate();w.host.drainInputs();}};
  await settle();
- for(const p of [w.host.enableSpreadV2(),w.host.enableSpreadFieldV1()]){await accept(w.host,p);await settle();}
+ // one event after another: each copies the policy before it (edge-runtime-rules.ts)
+ await accept(w.host,Promise.resolve(w.host.enableSpreadV2()));await settle();
+ await accept(w.host,Promise.resolve(w.host.enableSpreadFieldV1()));await settle();
+ assert.equal((w.host.extra.runtimePolicy as {spreadV2?:boolean}).spreadV2,true,'spreadV2 kept');
  assert.equal((w.host.extra.runtimePolicy as {spreadFieldV1?:boolean}).spreadFieldV1,true);
  const placed=god.act({ops:[{op:'place',def:coreRef('pavilion'),name:'pavilion',p:[9,0,-5],params:{w:6,d:4}}]});assert.equal(placed.accepted,true,JSON.stringify(placed));await settle();
  const souls:{soulId:string;entityId:string;name:string;owner:string}[]=[];

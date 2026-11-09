@@ -1085,7 +1085,12 @@ export class MarsEngine implements Engine {
     // instead of packing its middle, so a later walker never aims at (or threads through) bodies standing there. Only a place
     // at least 8 m across both ways (a field, a lawn): a smaller room or deck keeps its centre-first order.
     const field=this.cfg.spreadFieldV1===true&&v2&&Math.min(ex,ez)>=8,room=(p:[number,number])=>field?Math.min(3,Math.floor(taken.reduce((m,t)=>Math.min(m,Math.hypot(t[0]-p[0],t[1]-p[1])),Infinity))):0;
-    const order=[...spots.slice(offset),...spots.slice(0,offset)].map((p,i)=>({p,i,room:room(p),band:lap?Math.round(Math.abs(Math.hypot(p[0]-e.pose.p[0],p[1]-e.pose.p[2])-6)/2):pond?Math.round(Math.hypot(p[0]-e.pose.p[0],p[1]-e.pose.p[2])/8):Math.round(Math.hypot(p[0]-mid[0],p[1]-mid[1])/2)})).sort((a,b)=>b.room-a.room||a.band-b.band||a.i-b.i).slice(0,24);
+    const ranked=[...spots.slice(offset),...spots.slice(0,offset)].map((p,i)=>({p,i,room:room(p),band:lap?Math.round(Math.abs(Math.hypot(p[0]-e.pose.p[0],p[1]-e.pose.p[2])-6)/2):pond?Math.round(Math.hypot(p[0]-e.pose.p[0],p[1]-e.pose.p[2])/8):Math.round(Math.hypot(p[0]-mid[0],p[1]-mid[1])/2)})).sort((a,b)=>a.band-b.band||a.i-b.i),centreFirst=ranked.slice(0,24);
+    // room first only while the roomiest spot has 2 m or more (a crowded place keeps the old order, #1545 review), and the old
+    // centre-first 24 are still tried after it before the outside ring: a spot no walk reaches keeps full room, so room
+    // alone must never cost a reachable spot (#1545 review)
+    const roomy=field&&ranked.some(x=>x.room>=2)?[...ranked].sort((a,b)=>b.room-a.room||a.band-b.band||a.i-b.i).slice(0,24):[];
+    const order=roomy.length?[...roomy,...centreFirst.filter(x=>!roomy.includes(x))]:centreFirst;
     let last:Diag={code:'route.unreachable',message:'no reachable spaced spot'},crowded:Diag|undefined;
     for(const {p} of order){const no=this.plan(this.movementVerb(actor,p[0],p[1]),{actor,x:p[0],z:p[1],level},subjects);if(!no)return {x:p[0],z:p[1],level};last=no;if(subjects&&this.waterBodyObstruction(no,actor))crowded??=no;}
     let ringLast:Diag|undefined;
