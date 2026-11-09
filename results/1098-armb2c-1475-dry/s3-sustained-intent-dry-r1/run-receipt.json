@@ -1,0 +1,341 @@
+{
+ "soulRun": 1,
+ "runId": "s3-sustained-intent-dry-r1",
+ "status": "completed",
+ "startedAt": "2026-11-09T18:50:34.260Z",
+ "spec": {
+  "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-sustained-intent-dry.json",
+  "sha256": "31e8b0d5f70eaefc8398cf101f8d39cd32a7e17994cd9950c83330a0f6fdc0f8",
+  "effective": {
+   "soulRun": 1,
+   "kind": "cast",
+   "name": "s3-sustained-intent-dry",
+   "cast": {
+    "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-sustained-intent-dry.cast.json",
+    "sha256": "a2f7d7b6a7d51f3ea34df556cbe74a8badd6d23bfe6fc434dfcb5b257ad8d2bf",
+    "name": "s3-sustained-intent-dry",
+    "seats": 2,
+    "consoleScript": 9
+   },
+   "world": {
+    "port": 4558,
+    "slug": "s3-sustained-intent",
+    "genesis": "worlds/templates/hello-hamlet.json",
+    "snapshot": null,
+    "source": {
+     "kind": "genesis",
+     "path": "worlds/templates/hello-hamlet.json",
+     "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+    }
+   },
+   "setup": null,
+   "durationSec": 300,
+   "observer": {
+    "check": false,
+    "required": false,
+    "cameras": null,
+    "timeoutMs": 60000,
+    "mode": "cameras",
+    "record": null,
+    "recordSize": "compact",
+    "recordStart": "arrival",
+    "freeComposition": null
+   },
+   "limits": {
+    "maxWallSec": 1300,
+    "maxControllers": 2,
+    "cleanupWaitMs": 15000
+   },
+   "controllers": {
+    "allowLiveModels": false
+   },
+   "retention": {
+    "worldData": "keep",
+    "controllerState": "keep"
+   },
+   "evaluation": {
+    "questions": [
+     {
+      "id": "errand-kept-through-burst",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/errand-kept-through-burst.mjs",
+      "sha256": "24f0279d7ca3850b34a0e8eb5d18c40243ef99d06c201d538418843581d9520a"
+     },
+     {
+      "id": "cancel-not-resumed",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/cancel-not-resumed.mjs",
+      "sha256": "1f7df3c4aafafcf4fd0e7050e3844c4b248fb7ce573ec199c515da9ccad05603"
+     }
+    ]
+   },
+   "scorer": {
+    "id": "controllability",
+    "version": "5",
+    "path": "tools/playtest/runs/controllability.mjs",
+    "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+   }
+  }
+ },
+ "source": {
+  "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+  "dirtyTrackedFiles": 0,
+  "node": "v26.8.2",
+  "serverRoot": {
+   "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+   "dirtyTrackedFiles": 0
+  },
+  "tools": {
+   "commit": "168ba5df9d1543fc30611ce0abc8de5038dd2c96",
+   "dirtyTrackedFiles": 0
+  }
+ },
+ "controllers": [
+  {
+   "id": "ada",
+   "adapter": "scripted-owner",
+   "model": null,
+   "effort": null
+  },
+  {
+   "id": "bo",
+   "adapter": "scripted-owner",
+   "model": null,
+   "effort": null
+  }
+ ],
+ "preflight": {
+  "files": {
+   "server": true,
+   "webDist": true,
+   "controllerCli": true
+  },
+  "portFree": true,
+  "scenario": {
+   "ok": true,
+   "allow": {
+    "allowed": true,
+    "note": "Claude unused; Codex limit errors stop the seat"
+   },
+   "checks": {
+    "quota": {
+     "skipped": "no Claude roles"
+    },
+    "serverRoot": true,
+    "webDist": true,
+    "controllerCli": true,
+    "playwright": "server root mars/viewer",
+    "claude": null,
+    "codex": null,
+    "providersOk": true,
+    "live": {
+     "eden-2026": {
+      "ok": true,
+      "build": "we-0d48d8f4c6fc",
+      "tickMs": {
+       "avg": 6.5,
+       "max": 79.4,
+       "n": 392
+      },
+      "clients": 1
+     },
+     "godmode-lab": {
+      "ok": true,
+      "build": "we-0d48d8f4c6fc",
+      "tickMs": {
+       "avg": 51.9,
+       "max": 51.9,
+       "n": 1
+      },
+      "clients": 0
+     }
+    },
+    "laptopLoad": [
+     5.1,
+     7.2,
+     9
+    ],
+    "freeGb": 16.2,
+    "machineOk": true
+   }
+  }
+ },
+ "references": {
+  "runDir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1",
+  "playtestDir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest",
+  "ledger": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/ledger.jsonl",
+  "cast": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/cast.effective.json",
+  "journal": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/director/commands.jsonl"
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "retention": {
+  "evidence": {
+   "kept": true,
+   "path": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1"
+  },
+  "worldData": {
+   "paths": [
+    "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/server/data"
+   ],
+   "sensitive": false,
+   "action": "kept by retention; use cleanup"
+  },
+  "controllerState": {
+   "paths": [
+    "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/ada",
+    "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/bo"
+   ],
+   "sensitive": true,
+   "publish": false,
+   "action": "kept by retention; use cleanup"
+  }
+ },
+ "exit": 0,
+ "endedAt": "2026-11-09T18:53:36.630Z",
+ "resources": {
+  "ok": true,
+  "owned": 4,
+  "released": 4,
+  "failed": [],
+  "borrowed": 2,
+  "entries": [
+   {
+    "seq": 1,
+    "kind": "checkout",
+    "id": "server-root",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "path": "<home>/souls-playtest-home/server",
+     "use": "read-only source and web build"
+    }
+   },
+   {
+    "seq": 2,
+    "kind": "port-range",
+    "id": "host",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "note": "other services on this host are never stopped"
+    }
+   },
+   {
+    "seq": 3,
+    "kind": "world",
+    "id": "s3-sustained-intent",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "pid": 89402,
+     "port": 4558,
+     "dataDir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/server/data"
+    }
+   },
+   {
+    "seq": 4,
+    "kind": "controller",
+    "id": "ada",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/ada",
+     "adapter": "scripted-owner",
+     "model": "haiku"
+    }
+   },
+   {
+    "seq": 5,
+    "kind": "controller",
+    "id": "bo",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/bo",
+     "adapter": "scripted-owner",
+     "model": "haiku"
+    }
+   },
+   {
+    "seq": 6,
+    "kind": "browser",
+    "id": "observer",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "gpu": "metal"
+    }
+   }
+  ]
+ },
+ "cost": {
+  "wallMs": 182370,
+  "executeMs": 182265,
+  "lifecycleOverheadMs": 105,
+  "runnerCpuUserMs": 1122,
+  "runnerCpuSystemMs": 356,
+  "runnerMaxRssMb": 266,
+  "runDirBytes": 3441698,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 93,
+   "classes": {
+    "browser": {
+     "cpuSec": 0.1,
+     "peakRssMb": 119,
+     "processes": 3
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 8.8,
+     "peakRssMb": 778,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 1.3,
+     "peakRssMb": 239,
+     "processes": 111
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (115 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ },
+ "evidence": {
+  "receipts": [
+   "0-preflight.json",
+   "1-provision.json",
+   "2-seats.json",
+   "3-play.json",
+   "4-close.json",
+   "5-review.json",
+   "6-develop.json",
+   "7-report.json"
+  ],
+  "verdict": {
+   "pass": true,
+   "checks": {
+    "allPresent": true,
+    "eachPresented": true,
+    "inOrder": true,
+    "eachOnce": true,
+    "redirect": true
+   }
+  },
+  "report": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/REPORT.md",
+  "build": "dev",
+  "skill": "2.11.1",
+  "cli": "2.24.11",
+  "tickValidity": null,
+  "infrastructureInvalid": false
+ }
+}

@@ -1,0 +1,335 @@
+{
+ "requestId": "bo-004",
+ "seat": "bo",
+ "soulId": "s_6864fc09a8",
+ "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about the pond, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+ "channel": "card",
+ "sentAt": "2026-11-09T18:46:24.529Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T18:46:24.593Z",
+ "ackText": "My turn",
+ "resultAt": "2026-11-09T18:46:24.699Z",
+ "resultText": "Gave my talk",
+ "resultState": "done",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T18:46:24.699Z",
+ "firstResultText": "Gave my talk",
+ "cardResults": [
+  {
+   "text": "Gave my talk",
+   "at": "2026-11-09T18:46:24.699Z",
+   "state": "done",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T18:46:34.505Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T18:46:34.505Z",
+   "mono": 132003,
+   "soulId": "s_6864fc09a8",
+   "name": "Bo",
+   "tick": 2617,
+   "place": "g-lab-pond-hall.hall",
+   "placePath": [
+    "Waterside Room",
+    "Waterside Hall",
+    "World"
+   ],
+   "pos": {
+    "x": 2,
+    "z": 37.11,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 77.30347222221536,
+    "hunger": 22.52583333333719,
+    "company": 37.70624999999754,
+    "restlessness": 20.662916666666895
+   },
+   "near": [
+    {
+     "id": "h_e5b26a79c5",
+     "who": "Ada",
+     "distance": "here",
+     "doing": "idle"
+    },
+    {
+     "id": "e_eeba8b72",
+     "who": "Waterside Hall",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "punt-e_a5ed4ac2-acc727",
+     "who": "e_a5ed4ac2 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d40138ac",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_f9a0f0e0",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_07b1df2f",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_c4789854",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_1b9121e7",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794249901614,
+   "lastReceipt": {
+    "id": "r_d24fc821-7375-48cc-829f-00f41f9a6bff",
+    "soulId": "s_6864fc09a8",
+    "capability": "walk:lab-pond-hall",
+    "phase": "completed",
+    "acceptedTick": 758,
+    "startedTick": 758,
+    "endedTick": 759,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall",
+     "target": "g-lab-pond-hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall"
+    },
+    "endedAt": {
+     "place": "g-lab-pond-hall.hall",
+     "placePath": [
+      "Waterside Room",
+      "Waterside Hall",
+      "World"
+     ],
+     "pos": [
+      2,
+      37.1
+     ],
+     "heading": 177,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_d24fc821-7375-48cc-829f-00f41f9a6bff",
+     "soulId": "s_6864fc09a8",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 758,
+     "startedTick": 758,
+     "endedTick": 759,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_f2c005a3-b17e-4bb7-bc4f-53abbb11f808",
+     "soulId": "s_6864fc09a8",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 102,
+     "startedTick": 102,
+     "endedTick": 738,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 177,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794249984531
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_0851ceee-c698-4391-b757-e5a80869eb3d",
+     "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about the pond, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "acknowledged",
+     "sentAt": 1794249984531,
+     "deliveredAt": 1794249984531,
+     "acknowledgedAt": 1794249984593,
+     "reply": "My turn",
+     "outcome": "done",
+     "result": "Gave my talk",
+     "resultAt": 1794249984699
+    }
+   },
+   "world": {
+    "tick": 2617,
+    "souls": [
+     {
+      "id": "h_6864fc09a8",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_e5b26a79c5",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 4
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_d24fc821-7375-48cc-829f-00f41f9a6bff",
+   "soulId": "s_6864fc09a8",
+   "capability": "walk:lab-pond-hall",
+   "phase": "completed",
+   "acceptedTick": 758,
+   "startedTick": 758,
+   "endedTick": 759,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall",
+    "target": "g-lab-pond-hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall"
+   },
+   "endedAt": {
+    "place": "g-lab-pond-hall.hall",
+    "placePath": [
+     "Waterside Room",
+     "Waterside Hall",
+     "World"
+    ],
+    "pos": [
+     2,
+     37.1
+    ],
+    "heading": 177,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_f2c005a3-b17e-4bb7-bc4f-53abbb11f808",
+   "soulId": "s_6864fc09a8",
+   "capability": "walk:lab-pond-hall",
+   "phase": "completed",
+   "acceptedTick": 102,
+   "startedTick": 102,
+   "endedTick": 738,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall",
+    "target": "g-lab-pond-hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall"
+   },
+   "endedAt": {
+    "place": "g-lab-pond-hall.hall",
+    "placePath": [
+     "Waterside Room",
+     "Waterside Hall",
+     "World"
+    ],
+    "pos": [
+     2,
+     37.1
+    ],
+    "heading": 177,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

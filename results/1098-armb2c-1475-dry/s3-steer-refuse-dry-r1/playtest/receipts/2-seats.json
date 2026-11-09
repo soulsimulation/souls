@@ -1,0 +1,41 @@
+{
+ "step": "seats",
+ "t": "2026-11-09T18:44:24.286Z",
+ "mono": 1785,
+ "ok": true,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T18:44:24.285Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-252627671f44fce322ed061e",
+   "assisted": false,
+   "wake": true
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-steer-refuse",
+   "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T18:44:24.286Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-44da6b43a4ee11432b6e1b0c",
+   "assisted": false,
+   "wake": true
+  }
+ ],
+ "onboarding": "parallel, during play"
+}

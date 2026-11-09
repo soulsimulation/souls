@@ -1,0 +1,346 @@
+{
+ "soulRun": 1,
+ "runId": "s3-steer-refuse-dry-r1",
+ "status": "completed",
+ "startedAt": "2026-11-09T18:44:22.382Z",
+ "spec": {
+  "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-steer-refuse-dry.json",
+  "sha256": "141bf459b03f4c788dbd87d2b94c04d901df16075b42aff190b45c6b2c43806f",
+  "effective": {
+   "soulRun": 1,
+   "kind": "cast",
+   "name": "s3-steer-refuse-dry",
+   "cast": {
+    "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-steer-refuse-dry.cast.json",
+    "sha256": "66022782e5456a3c88f5555524292292142fc65e62db60a549235a5bc14526b9",
+    "name": "s3-steer-refuse-dry",
+    "seats": 2,
+    "consoleScript": 2
+   },
+   "world": {
+    "port": 4552,
+    "slug": "s3-steer-refuse",
+    "genesis": "worlds/templates/hello-hamlet.json",
+    "snapshot": null,
+    "source": {
+     "kind": "genesis",
+     "path": "worlds/templates/hello-hamlet.json",
+     "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+    }
+   },
+   "setup": null,
+   "durationSec": 300,
+   "observer": {
+    "check": false,
+    "required": false,
+    "cameras": null,
+    "timeoutMs": 60000,
+    "mode": "cameras",
+    "record": null,
+    "recordSize": "compact",
+    "recordStart": "arrival",
+    "freeComposition": null
+   },
+   "limits": {
+    "maxWallSec": 1200,
+    "maxControllers": 2,
+    "cleanupWaitMs": 15000
+   },
+   "controllers": {
+    "allowLiveModels": false
+   },
+   "retention": {
+    "worldData": "keep",
+    "controllerState": "keep"
+   },
+   "evaluation": {
+    "questions": [
+     {
+      "id": "steer-honoured",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/steer-honoured.mjs",
+      "sha256": "a30658f1d0de21c39ae7c14786eeb5db083d48fa19dc0c2761430e749e3b6048"
+     },
+     {
+      "id": "refusal-recovered-v3",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/refusal-recovered-v3.mjs",
+      "sha256": "2154c274d507f4465e14782255863422b4ccae2d2f89ac8ea85e229fe773a8d1"
+     },
+     {
+      "id": "scene-finished",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/scene-finished.mjs",
+      "sha256": "220d1010c0a0c0fec512a1723fb80f47b055de840b4df4c8cff7941ca7eea2bb"
+     }
+    ]
+   },
+   "scorer": {
+    "id": "controllability",
+    "version": "5",
+    "path": "tools/playtest/runs/controllability.mjs",
+    "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+   }
+  }
+ },
+ "source": {
+  "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+  "dirtyTrackedFiles": 0,
+  "node": "v26.8.2",
+  "serverRoot": {
+   "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+   "dirtyTrackedFiles": 0
+  },
+  "tools": {
+   "commit": "168ba5df9d1543fc30611ce0abc8de5038dd2c96",
+   "dirtyTrackedFiles": 0
+  }
+ },
+ "controllers": [
+  {
+   "id": "ada",
+   "adapter": "scripted-owner",
+   "model": null,
+   "effort": null
+  },
+  {
+   "id": "bo",
+   "adapter": "scripted-owner",
+   "model": null,
+   "effort": null
+  }
+ ],
+ "preflight": {
+  "files": {
+   "server": true,
+   "webDist": true,
+   "controllerCli": true
+  },
+  "portFree": true,
+  "scenario": {
+   "ok": true,
+   "allow": {
+    "allowed": true,
+    "note": "Claude unused; Codex limit errors stop the seat"
+   },
+   "checks": {
+    "quota": {
+     "skipped": "no Claude roles"
+    },
+    "serverRoot": true,
+    "webDist": true,
+    "controllerCli": true,
+    "playwright": "server root mars/viewer",
+    "claude": null,
+    "codex": null,
+    "providersOk": true,
+    "live": {
+     "eden-2026": {
+      "ok": true,
+      "build": "we-0d48d8f4c6fc",
+      "tickMs": {
+       "avg": 7,
+       "max": 45.9,
+       "n": 386
+      },
+      "clients": 1
+     },
+     "godmode-lab": {
+      "ok": true,
+      "build": "we-0d48d8f4c6fc",
+      "tickMs": {
+       "avg": 33.2,
+       "max": 52.8,
+       "n": 17
+      },
+      "clients": 0
+     }
+    },
+    "laptopLoad": [
+     12.6,
+     13.5,
+     11.4
+    ],
+    "freeGb": 18.3,
+    "machineOk": false
+   }
+  }
+ },
+ "references": {
+  "runDir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1",
+  "playtestDir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest",
+  "ledger": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/ledger.jsonl",
+  "cast": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/cast.effective.json",
+  "journal": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/director/commands.jsonl"
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "retention": {
+  "evidence": {
+   "kept": true,
+   "path": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1"
+  },
+  "worldData": {
+   "paths": [
+    "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/server/data"
+   ],
+   "sensitive": false,
+   "action": "kept by retention; use cleanup"
+  },
+  "controllerState": {
+   "paths": [
+    "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/ada",
+    "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/bo"
+   ],
+   "sensitive": true,
+   "publish": false,
+   "action": "kept by retention; use cleanup"
+  }
+ },
+ "exit": 0,
+ "endedAt": "2026-11-09T18:46:34.805Z",
+ "resources": {
+  "ok": true,
+  "owned": 4,
+  "released": 4,
+  "failed": [],
+  "borrowed": 2,
+  "entries": [
+   {
+    "seq": 1,
+    "kind": "checkout",
+    "id": "server-root",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "path": "<home>/souls-playtest-home/server",
+     "use": "read-only source and web build"
+    }
+   },
+   {
+    "seq": 2,
+    "kind": "port-range",
+    "id": "host",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "note": "other services on this host are never stopped"
+    }
+   },
+   {
+    "seq": 3,
+    "kind": "world",
+    "id": "s3-steer-refuse",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "pid": 63035,
+     "port": 4552,
+     "dataDir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/server/data"
+    }
+   },
+   {
+    "seq": 4,
+    "kind": "controller",
+    "id": "ada",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/ada",
+     "adapter": "scripted-owner",
+     "model": "haiku"
+    }
+   },
+   {
+    "seq": 5,
+    "kind": "controller",
+    "id": "bo",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/seats/bo",
+     "adapter": "scripted-owner",
+     "model": "haiku"
+    }
+   },
+   {
+    "seq": 6,
+    "kind": "browser",
+    "id": "observer",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "gpu": "metal"
+    }
+   }
+  ]
+ },
+ "cost": {
+  "wallMs": 132423,
+  "executeMs": 132266,
+  "lifecycleOverheadMs": 157,
+  "runnerCpuUserMs": 892,
+  "runnerCpuSystemMs": 277,
+  "runnerMaxRssMb": 275,
+  "runDirBytes": 3264008,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 68,
+   "classes": {
+    "browser": {
+     "cpuSec": 0.1,
+     "peakRssMb": 119,
+     "processes": 3
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 8.7,
+     "peakRssMb": 929,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 1.2,
+     "peakRssMb": 258,
+     "processes": 82
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (86 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ },
+ "evidence": {
+  "receipts": [
+   "0-preflight.json",
+   "1-provision.json",
+   "2-seats.json",
+   "3-play.json",
+   "4-close.json",
+   "5-review.json",
+   "6-develop.json",
+   "7-report.json"
+  ],
+  "verdict": {
+   "pass": true,
+   "checks": {
+    "allPresent": true,
+    "eachPresented": true,
+    "inOrder": true,
+    "eachOnce": true,
+    "redirect": true
+   }
+  },
+  "report": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-steer-refuse-dry-r1/playtest/REPORT.md",
+  "build": "dev",
+  "skill": "2.11.1",
+  "cli": "2.24.11",
+  "tickValidity": null,
+  "infrastructureInvalid": false
+ }
+}

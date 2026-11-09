@@ -1,0 +1,25 @@
+{
+ "id": "ada",
+ "kind": "soul",
+ "adapter": "scripted-owner",
+ "model": "haiku",
+ "effort": "low",
+ "soulName": "Ada",
+ "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+ "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-reasonable-actions-dry-r1/playtest/seats/ada/folder",
+ "createdAt": "2026-11-09T18:46:40.103Z",
+ "sessionId": null,
+ "soulId": "s_52fb6af65e",
+ "ownerIdentity": "agent-350a36de70214d8f955eafdb",
+ "assisted": false,
+ "wake": true,
+ "onboard": {
+  "ok": true,
+  "pairedWithinSec": 3,
+  "timeoutSec": 90,
+  "onboardTurnWallMs": 347,
+  "attempts": 1,
+  "cliFile": "eden.mjs",
+  "lastStatus": null
+ }
+}

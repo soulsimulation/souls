@@ -1,0 +1,41 @@
+{
+ "step": "seats",
+ "t": "2026-11-09T18:50:36.129Z",
+ "mono": 1805,
+ "ok": true,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-sustained-intent",
+   "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T18:50:36.128Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-33cae263f8b1a4c45fe6f924",
+   "assisted": false,
+   "wake": true
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-sustained-intent",
+   "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T18:50:36.128Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-e659b7e8e49592d83dc550a3",
+   "assisted": false,
+   "wake": true
+  }
+ ],
+ "onboarding": "parallel, during play"
+}

@@ -1,0 +1,379 @@
+{
+ "requestId": "bo-007",
+ "seat": "bo",
+ "soulId": "s_778d305ed9",
+ "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+ "channel": "card",
+ "sentAt": "2026-11-09T18:53:24.390Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-09T18:53:24.485Z",
+ "ackText": "My turn",
+ "resultAt": "2026-11-09T18:53:24.603Z",
+ "resultText": "Gave my talk",
+ "resultState": "done",
+ "resultBy": "agent",
+ "firstResultAt": "2026-11-09T18:53:24.603Z",
+ "firstResultText": "Gave my talk",
+ "cardResults": [
+  {
+   "text": "Gave my talk",
+   "at": "2026-11-09T18:53:24.603Z",
+   "state": "done",
+   "by": "agent"
+  }
+ ],
+ "cutoffAt": "2026-11-09T18:53:26.334Z",
+ "cutoffReason": "result",
+ "samples": [
+  {
+   "t": "2026-11-09T18:53:26.333Z",
+   "mono": 172009,
+   "soulId": "s_778d305ed9",
+   "name": "Bo",
+   "tick": 3418,
+   "place": "g-lab-pond-hall.hall",
+   "placePath": [
+    "Waterside Room",
+    "Waterside Hall",
+    "World"
+   ],
+   "pos": {
+    "x": 1.9655643248686827,
+    "z": 37.116259734678906,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "standing",
+   "activity": "idle",
+   "doing": "standing around",
+   "mood": "curious",
+   "needs": {
+    "energy": 76.42749999999148,
+    "hunger": 23.301666666671707,
+    "company": 38.53749999999678,
+    "restlessness": 20.49083333333367
+   },
+   "near": [
+    {
+     "id": "h_db62fd242c",
+     "who": "Ada",
+     "distance": "here",
+     "doing": "idle"
+    },
+    {
+     "id": "e_c86274de",
+     "who": "Waterside Hall",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "punt-e_59f304a4-e4305c",
+     "who": "e_59f304a4 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_8eebe336",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_f855ddcf",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_d3703cc4",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_3a3ef290",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_cd7f4aa6",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794250362605,
+   "lastReceipt": {
+    "id": "r_fb09621d-3f72-4fbf-a0f6-abadacd54caf",
+    "soulId": "s_778d305ed9",
+    "capability": "walk:lab-pond-hall",
+    "phase": "completed",
+    "acceptedTick": 2544,
+    "startedTick": 2544,
+    "endedTick": 3308,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall",
+     "target": "g-lab-pond-hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall"
+    },
+    "endedAt": {
+     "place": "g-lab-pond-hall.hall",
+     "placePath": [
+      "Waterside Room",
+      "Waterside Hall",
+      "World"
+     ],
+     "pos": [
+      2,
+      37.1
+     ],
+     "heading": 170,
+     "posture": "standing"
+    }
+   },
+   "receipts": [
+    {
+     "id": "r_fb09621d-3f72-4fbf-a0f6-abadacd54caf",
+     "soulId": "s_778d305ed9",
+     "capability": "walk:lab-pond-hall",
+     "phase": "completed",
+     "acceptedTick": 2544,
+     "startedTick": 2544,
+     "endedTick": 3308,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "endedAt": {
+      "place": "g-lab-pond-hall.hall",
+      "placePath": [
+       "Waterside Room",
+       "Waterside Hall",
+       "World"
+      ],
+      "pos": [
+       2,
+       37.1
+      ],
+      "heading": 170,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_37549f6c-afab-496a-a6ef-201d3d9f5bb1",
+     "soulId": "s_778d305ed9",
+     "capability": "stand:here",
+     "phase": "completed",
+     "acceptedTick": 424,
+     "startedTick": null,
+     "endedTick": 425,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "field",
+      "placePath": [
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       -6,
+       -6.9
+      ],
+      "heading": 317,
+      "posture": "standing"
+     }
+    },
+    {
+     "id": "r_014dbf22-f96a-435b-a136-1fafb937353f",
+     "soulId": "s_778d305ed9",
+     "capability": "walk:flag-orchard",
+     "phase": "replaced",
+     "acceptedTick": 262,
+     "startedTick": 262,
+     "endedTick": 424,
+     "code": null,
+     "reason": "A newer action from this Soul replaced it.",
+     "chosen": {
+      "capability": "walk:flag-orchard",
+      "target": "e_8c00dd64",
+      "kind": "object"
+     },
+     "endedAt": {
+      "place": "field",
+      "placePath": [
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       -6,
+       -6.9
+      ],
+      "heading": 317,
+      "posture": "walking"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794250400392
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_86324111-aec6-4608-8c17-5016f75e1e1c",
+     "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "acknowledged",
+     "sentAt": 1794250404392,
+     "deliveredAt": 1794250404393,
+     "acknowledgedAt": 1794250404485,
+     "reply": "My turn",
+     "outcome": "done",
+     "result": "Gave my talk",
+     "resultAt": 1794250404603
+    }
+   },
+   "world": {
+    "tick": 3418,
+    "souls": [
+     {
+      "id": "h_db62fd242c",
+      "name": "Ada",
+      "doing": "standing around",
+      "region": "grounds"
+     },
+     {
+      "id": "h_778d305ed9",
+      "name": "Bo",
+      "doing": "standing around",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 5
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_fb09621d-3f72-4fbf-a0f6-abadacd54caf",
+   "soulId": "s_778d305ed9",
+   "capability": "walk:lab-pond-hall",
+   "phase": "completed",
+   "acceptedTick": 2544,
+   "startedTick": 2544,
+   "endedTick": 3308,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall",
+    "target": "g-lab-pond-hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall"
+   },
+   "endedAt": {
+    "place": "g-lab-pond-hall.hall",
+    "placePath": [
+     "Waterside Room",
+     "Waterside Hall",
+     "World"
+    ],
+    "pos": [
+     2,
+     37.1
+    ],
+    "heading": 170,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_37549f6c-afab-496a-a6ef-201d3d9f5bb1",
+   "soulId": "s_778d305ed9",
+   "capability": "stand:here",
+   "phase": "completed",
+   "acceptedTick": 424,
+   "startedTick": null,
+   "endedTick": 425,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "field",
+    "placePath": [
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     -6,
+     -6.9
+    ],
+    "heading": 317,
+    "posture": "standing"
+   }
+  },
+  {
+   "id": "r_014dbf22-f96a-435b-a136-1fafb937353f",
+   "soulId": "s_778d305ed9",
+   "capability": "walk:flag-orchard",
+   "phase": "replaced",
+   "acceptedTick": 262,
+   "startedTick": 262,
+   "endedTick": 424,
+   "code": null,
+   "reason": "A newer action from this Soul replaced it.",
+   "chosen": {
+    "capability": "walk:flag-orchard",
+    "target": "e_8c00dd64",
+    "kind": "object"
+   },
+   "endedAt": {
+    "place": "field",
+    "placePath": [
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     -6,
+     -6.9
+    ],
+    "heading": 317,
+    "posture": "walking"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": null,
+ "firstBodyChangeMono": null,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

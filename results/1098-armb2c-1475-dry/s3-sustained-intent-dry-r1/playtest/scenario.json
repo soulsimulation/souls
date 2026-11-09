@@ -1,0 +1,82 @@
+{
+ "name": "s3-sustained-intent-dry",
+ "version": 2,
+ "seed": 6234,
+ "kind": "direct",
+ "world": {
+  "kind": "dev",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "slug": "s3-sustained-intent",
+  "port": 4558,
+  "natives": false
+ },
+ "durationSec": 300,
+ "seats": [
+  {
+   "id": "ada",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Ada",
+   "persona": null,
+   "economy": "lean",
+   "startOffsetSec": 0
+  },
+  {
+   "id": "bo",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Bo",
+   "persona": null,
+   "economy": "lean",
+   "startOffsetSec": 0
+  }
+ ],
+ "god": null,
+ "director": {
+  "mode": "swarm",
+  "brief": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning.",
+  "order": [
+   "ada",
+   "bo"
+  ],
+  "room": {
+   "label": "the pond hall",
+   "match": [
+    "waterside",
+    "pond-hall",
+    "pond hall"
+   ]
+  }
+ },
+ "observer": {
+  "sampleSec": 10,
+  "cameras": [],
+  "viewport": [
+   1024,
+   640
+  ],
+  "dpr": 1
+ },
+ "review": {
+  "reviewer": false,
+  "developer": false,
+  "reviewerModel": "opus",
+  "developerModel": "opus",
+  "rubric": "accept3"
+ },
+ "rails": {
+  "onboardWallSec": 120,
+  "onboardTimeoutSec": 90,
+  "onboardConcurrency": 2,
+  "quotaStopPct": 90,
+  "maxTurnsPerRequest": 4,
+  "maxTurnWallSec": 120
+ },
+ "serverRoot": "<home>/souls-playtest-home/server",
+ "castPath": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-sustained-intent-dry-r1/cast.effective.json",
+ "castSha256": "b25b215527aaec0150cc64aa127cb6c81612425a17c31623ac70bbaae34ac7ae",
+ "headless": true,
+ "worldUrl": null
+}

@@ -1,0 +1,41 @@
+{
+ "step": "seats",
+ "t": "2026-11-09T18:46:40.104Z",
+ "mono": 1744,
+ "ok": true,
+ "seats": [
+  {
+   "id": "ada",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Ada",
+   "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+   "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-reasonable-actions-dry-r1/playtest/seats/ada/folder",
+   "createdAt": "2026-11-09T18:46:40.103Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-350a36de70214d8f955eafdb",
+   "assisted": false,
+   "wake": true
+  },
+  {
+   "id": "bo",
+   "kind": "soul",
+   "adapter": "scripted-owner",
+   "model": "haiku",
+   "effort": "low",
+   "soulName": "Bo",
+   "worldBase": "http://world.invalid/w/s3-reasonable-actions",
+   "folder": "<home>/souls-playtest-home/results/1098-armb2c-1475-dry/s3-reasonable-actions-dry-r1/playtest/seats/bo/folder",
+   "createdAt": "2026-11-09T18:46:40.104Z",
+   "sessionId": null,
+   "soulId": null,
+   "ownerIdentity": "agent-04173de8671f19d1a0b6bb71",
+   "assisted": false,
+   "wake": true
+  }
+ ],
+ "onboarding": "parallel, during play"
+}

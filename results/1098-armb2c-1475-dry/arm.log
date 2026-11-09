@@ -1,0 +1,8 @@
+2026-11-09T18:44:21Z arm start tools 168ba5df9 server 7c4b95b2e specs: tools/playtest/runs/specs/1098/s3-steer-refuse-dry.json tools/playtest/runs/specs/1098/s3-reasonable-actions-dry.json tools/playtest/runs/specs/1098/s3-sustained-intent-dry.json
+2026-11-09T18:44:21Z start s3-steer-refuse-dry-r1 load 13.50
+2026-11-09T18:46:37Z end s3-steer-refuse-dry-r1 rc=0 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=true
+2026-11-09T18:46:37Z start s3-reasonable-actions-dry-r1 load 10.13
+2026-11-09T18:50:31Z end s3-reasonable-actions-dry-r1 rc=0 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=true
+2026-11-09T18:50:31Z start s3-sustained-intent-dry-r1 load 7.30
+2026-11-09T18:53:39Z end s3-sustained-intent-dry-r1 rc=0 spend=0.0000 arm=0.0000 dollarHit=0 predeclared=true
+2026-11-09T18:53:39Z arm end, spent $0.0000
