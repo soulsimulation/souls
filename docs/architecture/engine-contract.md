@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `body-separation-3d/1` (#1455), adopted at boot after stair-way/1, the guard's body separation for a placement reads height: it keeps clear of every body whose height overlaps the placed body standing on that floor, whatever its level id (a climber carries a landing's), and no longer of a body with the same level id on another storey. Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `stand-height/1` (#1454), adopted at boot after quarantine-mark/1, a body the engine places upstairs (a restore, a settle, a stall release not from a carrier) stands at its floor's own height, never at the height it had; without it a body caught mid-climb could be stood on a floor cell in the air. Under `body-separation-3d/1` (#1455), adopted at boot last, after stand-height/1, the guard's body separation for a placement reads height: it keeps clear of every body whose height overlaps the placed body standing on that floor, whatever its level id (a climber carries a landing's), and no longer of a body with the same level id on another storey. Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
@@ -209,6 +209,8 @@ named, and the row or recipe carries those keys, so a replay applies them and no
 a read there would move the step check's memory where a replay's doesn't, and the boot would differ. A rule the step check
 can only see across ticks, like `motion.teleport`, is contained the same way.
 
+**`standingHoldsV1`** (#1440, `quarantine-mark/1`, a host-only logged runtime policy adopted at boot last) is part of world state, absent when empty. Once a broken body has been held 3 times in a cooldown, the quarantine event carries `standing: [{id, pose}]`, and from then the engine itself holds that body again whenever it finds it broken, at the pose where it last stood whole (the logged pose, which the mark then follows while the body is whole), at the start and end of each step, so the host never reads it broken and logs no more holds. A mark ends when the body has stayed whole for 1200 ticks, or is gone. A replay folds the same event and keeps the same marks; without the policy, every hold is logged as before. The engine guards each runtime invariant once: a list appended to or swapped back in keeps its existing guards.
+
 An entry stays a minute after it last fired, so a rule that flickers costs one row and stops nobody again. Each is counted
 once and doesn't fault again. A key that fired last tick is a break still standing, and a body inside something may walk out
 of it, never further in: a move that takes a body nearer the solid thing, inside its own width, or nearer the other body or
@@ -285,7 +287,10 @@ as `engine.unhashable`. Without `souls-repair/1`, `haltOnFault` is unchanged.
 A snapshot the engine refuses to capture (a `snapshot.*` refusal such as `snapshot.unencodable`) does not halt. On the
 periodic path (#1368), the manual `saveSnapshot` and the repair snapshot (#1376), it is skipped and counted at rung
 `contained` as `durability.snapshot-skipped`, and the clock runs on. A manual save answers `pending: true` and logs an
-`unsnappable-head` checkpoint. Other capture faults propagate as before.
+`unsnappable-head` checkpoint. A head holding a number that is no number (a body's NaN pose) is skipped the same way, as
+`snapshot.non-finite`, its row naming the first entity and field (#1492). Under `quarantine/1` the periodic path sweeps for
+broken bodies just before it captures (whether the tick ceiling, a request or the replay debt brought it due), as well as once
+a second, so the body is held on that tick and the capture sees it whole. Other capture faults propagate as before.
 
 ## Conformance
 

@@ -47,6 +47,8 @@ function cardMaterial(texture:THREE.Texture){
 const triangles=(g:THREE.BufferGeometry)=>(g.index?g.index.count:g.attributes.position?.count??0)/3;
 const inScene=(o:THREE.Object3D,root:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(p===root)return true;return false;};
 
+/** `n` elements of `from` at `at` into `to` at `into`, without a view object. */
+const copy=(from:ArrayLike<number>,at:number,to:Float32Array,into:number,n:number)=>{for(let k=0;k<n;k++)to[into+k]=from[at+k];};
 export class WorldFarStandIns{
   readonly group=new THREE.Group();
   private sources=new Map<THREE.InstancedMesh,Source>();private frame=0;private active:Source[]=[];private o:StandInOptions;private snapshot:Snapshotter;
@@ -105,8 +107,9 @@ export class WorldFarStandIns{
     for(let i=0;i<m.count;i++){
       const dx=s.centres[i*3]-cam.x,dy=s.centres[i*3+1]-cam.y,dz=s.centres[i*3+2]-cam.z,d=Math.sqrt(dx*dx+dy*dy+dz*dz)-s.radii[i];
       const far=s.texture!==null&&d>0&&s.radii[i]*pxPerUnit/d<limit;
-      if(far){cardM.set(s.cardMatrices.subarray(i*16,i*16+16),f*16);if(srcC&&cardC)cardC.set(srcC.subarray(i*3,i*3+3),f*3);f++;}
-      else{nearM.set(src.subarray(i*16,i*16+16),n*16);if(srcC&&nearC)nearC.set(srcC.subarray(i*3,i*3+3),n*3);n++;}
+      // PERF-CHURN (#1476): element copies, not subarray views: a view per instance per camera move was ~18% of a phone orbit's allocation
+      if(far){copy(s.cardMatrices,i*16,cardM,f*16,16);if(srcC&&cardC)copy(srcC,i*3,cardC,f*3,3);f++;}
+      else{copy(src,i*16,nearM,n*16,16);if(srcC&&nearC)copy(srcC,i*3,nearC,n*3,3);n++;}
     }
     s.near.count=n;s.cards.count=f;s.nearCount=n;s.farCount=f;
     s.near.instanceMatrix.needsUpdate=true;s.cards.instanceMatrix.needsUpdate=true;
