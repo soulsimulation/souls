@@ -352,6 +352,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // for a moment. `?entityBatches=0` turns it off, `?entityCell=<m>` sets the cell size (default 48 m).
     const entityBatchQuery=new URLSearchParams(location.search),entityBatchEnabled=entityBatchQuery.get('entityBatches')!=='0',entityCell=Number(entityBatchQuery.get('entityCell'))||96;
     const entityBatches=new StaticBatchOwner(scene,{cellSize:entityCell,maxMeshes:32768,maxNodes:262144,maxRootInputs:32768,maxMergedBytes:160*1024*1024,maxWorkingBytes:320*1024*1024,maxMeshesPerBatch:1024});
+    // PERF-HEAP (#1473): batches drop their CPU geometry after upload, so a restored context (no GL buffers) rebuilds them from sources.
+    const onBatchContextRestored=()=>{try{staticBatches.reset();entityBatches.reset();}catch{/* mid-commit/render: never here, events run between frames */}batchGeometry=null;batchRevision=-1;entityBatchRevision=-1;};
+    renderer.domElement.addEventListener('webglcontextrestored',onBatchContextRestored);
     let entityBatchRevision=-1,entityBatchChangedAt=0,entityBatchStillAt=0,entityBatchSeenRevision=-1,entityBatchGeneration=0,entityBatchDraw=true;  // entityBatchDraw: a proof's A/B switch (window.__soulsEntity.batching)
     const prepareEntityBatches=()=>{const revision=entityLayer.staticRevision;entityBatchRevision=revision;entityBatchSeenRevision=revision;void entityBatches.prepare(entityLayer.staticBatchRoots(32768),{sourcePolicy:'complete-roots/1',generation:++entityBatchGeneration,signal:abort.signal,budgetPolicy:'partial-cells/1',sharePlainMaterials:true,incremental:true,hideWholeRoots:true,sliceMs:24  /* PERF-LOAD: cell by cell, not one ~0.45 s task */,shaderMerge:{material:(m)=>mergedGlowMaterial(m,mergedRealismMaterial)??mergedRealismMaterial(m),attributes:(copy,mesh,toBatch,derived)=>{if(derived.userData.mergedRealism)mergedRealismAttributes(copy,mesh,toBatch,glowSourceMaterial(mesh)??mesh.material as THREE.Material);},source:glowSourceMaterial}}).catch(()=>{});};
     // Far plane covers the whole ±900 m terrain from anywhere in Eden: a nearer far plane slices the distant
@@ -1264,7 +1267,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       renderer.domElement.removeEventListener('pointercancel', onCancel);
       renderer.domElement.removeEventListener('click', onFlagClick);
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
-      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);renderer.domElement.removeEventListener('webglcontextrestored',onBatchContextRestored);
       navigation?.dispose();
       controls.dispose();
       controlsApi.current = null;
