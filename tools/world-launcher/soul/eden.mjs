@@ -2077,7 +2077,7 @@ return { tokensOf, indexCatalog, NEAR_METRES, bestPlace, find, placeView, query 
 })();
 // </inline catalog.mjs>
 
-const VERSION = "2.25.0";
+const VERSION = "2.29.0";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2631,7 +2631,7 @@ async function callOnceTo(url, o) {
     const a = await askServe({ op: "http", url, method: o.method, headers: o.headers, body: o.body, timeoutMs: o.timeoutMs }, o.timeoutMs + 5_000);
     // #1724: serve was asked and is still waiting on the world: that is a slow world, not a stopped serve
     if (a?.lost) return { status: 0, data: { error: { code: "unreachable", message: a.slow ? `the world did not answer within ${Math.round(o.timeoutMs / 1000)} s (serve is running and was still waiting)` : "the serve process stopped before it answered" } } };
-    if (a) return a;
+    if (a) { if (RECORD) o.via = "serve"; return a; }
   }
   return worldOnce(url, o);
 }
@@ -2666,7 +2666,16 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
 // tools/soul-trace's tap (node --import tap.mjs) sees fetch; it offers its wrapper here so these calls are traced the same way
 let TRACED = null;
 const tracedWorldFetch = () => (TRACED ??= globalThis[Symbol.for("soul-trace.wrap")]?.(worldFetch) ?? worldFetch);
-async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
+// #1773: with the session record on, a call this process makes itself is kept (a command's own call is kept by callOnce)
+async function worldOnce(url, o) {
+  if (!RECORD || o.recorded === true) return worldOnceTo(url, o);
+  const wallStart = Date.now(), t0 = performance.now();
+  let r;
+  try { r = await worldOnceTo(url, o); } catch (e) { recordCall("wire", url, o, wallStart, t0, { status: 0, data: { error: { code: "thrown", message: String(e?.message ?? e) } } }); throw e; }
+  recordCall("wire", url, o, wallStart, t0, r);
+  return r;
+}
+async function worldOnceTo(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
   let r;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
@@ -3150,9 +3159,10 @@ async function syncCatalog({ force = false } = {}) {
   // a world that has just started answers world.starting with a short Retry-After until its places and acts are laid out
   let r = null;
   for (let tries = 0; tries < 6; tries++) {
-    const t0 = performance.now();
-    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; break; /* no answer: use the copy */ }
+    const t0 = performance.now(), w0 = Date.now();
+    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
     publicReadReported(world + "/v1/edge/catalog", t0, r);
+    if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, r, { body: "the catalog itself is kept in world-catalog.json" });
     const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
     if (wait == null || wait > 10_000) break;
     await new Promise((ok) => setTimeout(ok, statedJitter(wait)));
@@ -3173,7 +3183,11 @@ async function syncLive({ force = false } = {}) {
   const have = readJsonFile(LIVE_FILE), mine = have?.world === world ? have : null;
   if (mine && !force && Date.now() - mine.receivedAt < LIVE_FRESH_MS) return mine;
   try {
-    const t0 = performance.now(), r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); publicReadReported(world + "/v1/edge/live", t0, r); if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const t0 = performance.now(), w0 = Date.now();
+    const r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
+    publicReadReported(world + "/v1/edge/live", t0, r);
+    if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, r, { body: "the live picture is kept in world-live.json" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const live = await r.json(), seen = new Map((mine?.speech ?? []).map((x) => [x.id, x]));
     for (const line of live.speech ?? []) seen.set(line.id, line);
     const next = { world, receivedAt: Date.now(), live: { ...live, speech: undefined }, speech: [...seen.values()].sort((a, b) => a.at - b.at).slice(-200) };
