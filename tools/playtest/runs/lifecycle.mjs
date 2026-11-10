@@ -11,7 +11,7 @@ import { validateSpec, portFree } from './spec.mjs';
 import { applySetup, applyWorldTime } from './setup.mjs';
 import { attachTrace, checkTap, summarizeTraces } from './diagnostics.mjs';
 import { writeJson, readJson } from '../lib/jsonl.mjs';
-import { scratchDir } from '../../lib/paths.mjs';
+import { outsideCheckout } from '../arena/seat-home.mjs';
 import { startProcessSampler } from './proc-cost.mjs';
 
 export const RECEIPT = 'run-receipt.json';
@@ -104,6 +104,14 @@ export async function executeCast({ castFile, playtestDir, serverRoot, hooks, al
   return code === 4 ? 0 : code;
 }
 
+/** Where a run goes without --out: SOULS_RUNS_DIR, else SIM_SCRATCH's soul-runs, else `souls-runs` beside the checkout,
+ *  never inside it: a live seat inside a checkout loads that project into every turn (#1098 arm B2, arena/seat-home.mjs). */
+export function defaultRunsDir(env = process.env) {
+  if (env.SOULS_RUNS_DIR) return resolve(env.SOULS_RUNS_DIR);
+  if (env.SIM_SCRATCH) return resolve(env.SIM_SCRATCH, 'soul-runs');
+  return outsideCheckout('souls-runs');
+}
+
 /** startRun → terminal receipt. status: refused (nothing created) | completed | failed | cancelled | stopped-limit.
  *  signal: an AbortSignal the caller aborts on SIGINT/SIGTERM. execute/scenarioPreflight/importer are injectable. */
 export async function startRun({ spec, specPath = null, specSha256 = null, serverRoot, outDir = null, signal = null, log = () => {},
@@ -115,7 +123,8 @@ export async function startRun({ spec, specPath = null, specSha256 = null, serve
   const eff = validation.effective;
 
   // Resources begin here: the run directory, its ledger and the terminal receipt.
-  const runDir = resolve(outDir ?? scratchDir(join('soul-runs', `${stamp()}-${eff.name}`)));
+  // #1098 arm B2: by default runs live beside the checkout, not in it, so live seats load no project (arena/seat-home.mjs)
+  const runDir = resolve(outDir ?? join(defaultRunsDir(), `${stamp()}-${eff.name}`));
   if (existsSync(join(runDir, RECEIPT))) return { status: 'refused', stage: 'validate', errors: [{ code: 'run.exists', message: `a run already exists at ${runDir}` }] };
   mkdirSync(runDir, { recursive: true });
   const playtestDir = join(runDir, 'playtest');
