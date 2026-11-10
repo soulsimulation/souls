@@ -66,6 +66,8 @@ test('a waiting Soul\'s act answers world.crowded {position, eta_s}; its reads s
   app.post('/v1/edge/act', c => c.json({accepted: true})); app.get('/v1/edge/here', c => c.json({here: 1}));
   const act = await app.request('/v1/edge/act', {method: 'POST', headers: {authorization: 'Bearer sim_wait'}, body: '{}'});
   assert.equal(act.status, 503); assert.equal(act.headers.get('retry-after'), '60');
+  assert.match(act.headers.get('server-timing') ?? '', /^world;dur=[0-9.]+, queue;dur=0\.0$/, '#1737: a refusal says its time too');
+  assert.match((await app.request('/v1/edge/here', {headers: {authorization: 'Bearer sim_free'}})).headers.get('server-timing') ?? '', /^world;dur=[0-9.]+, queue;dur=[0-9.]+$/);
   const body = await act.json() as {error: {code: string; position: number; eta_s: number; message: string}};
   assert.deepEqual([body.error.code, body.error.position, body.error.eta_s], ['world.crowded', 2, 360]); assert.match(body.error.message, /2nd in line/);
   assert.equal((await app.request('/v1/edge/here', {headers: {authorization: 'Bearer sim_wait'}})).status, 200);
