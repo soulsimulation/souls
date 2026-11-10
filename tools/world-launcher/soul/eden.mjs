@@ -3905,12 +3905,14 @@ export function wakeFound(find, tokensOf, text) {
   const known = new Map(), knows = (w) => { if (!known.has(w)) known.set(w, find(w).length > 0); return known.get(w); };
   const rows = [], seen = new Set(), clauses = String(text ?? "").slice(0, 200).split(/\s*(?:[,;.!?]|\band then\b|\bthen\b|\band\b)\s*/i).filter((c) => c.trim());
   const each = clauses.length > 1 ? 2 : WAKE_FOUND;
+  let anchor = null;   // "go to the library and read a book": the place an earlier clause named is where a later one happens
   for (const clause of clauses) {
     // "by the pond" keeps its relation word, so find reads the thing and its anchor
     const words = clause.toLowerCase().split(/[^a-z0-9]+/).filter((w) => WAKE_RELATION.has(w) || (tokensOf(w).length && knows(w)));
-    let found = [];
+    let found = anchor && words.length && !words.some((w) => WAKE_RELATION.has(w)) ? find(`${words.join(" ")} in ${anchor}`) : [];
     // "sit bench by pond": a word no row carries with the others ("sit") goes, first word first
-    while (words.length && !WAKE_RELATION.has(words[0]) && !(found = find(words.join(" "))).length) words.shift();
+    if (!found.length) while (words.length && !WAKE_RELATION.has(words[0]) && !(found = find(words.join(" "))).length) words.shift();
+    if (found[0]?.act?.startsWith("walk:")) anchor = words.filter((w) => !WAKE_RELATION.has(w)).join(" ");
     let n = 0;
     for (const r of found) {
       if (!r.act || seen.has(r.act) || n >= each) continue;

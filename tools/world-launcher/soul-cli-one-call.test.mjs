@@ -38,6 +38,11 @@ test('wakeFound: each clause on its own, unknown words left out, a word no row c
   assert.deepEqual(wakeFound(find, tokens, 'walk to the windmill, then dance').map((r) => r.act), ['walk:mill', 'walk:mill2', 'dance:here']);
   assert.deepEqual(wakeFound(find, tokens, 'could you sit on a bench by the pond').map((r) => r.act), ['sit:e_b']);
   assert.deepEqual(wakeFound(find, tokens, 'how are you?'), []);
+  // a place an earlier clause named is where a later clause happens: the library's reading, not the nearest one anywhere
+  const rows2 = {library: [{type: 'place', act: 'walk:library', name: 'Library'}], 'read book in library': [{act: 'read:lib.1', label: 'read (library chair)'}], 'read book': [{act: 'read:class.1', label: 'read (classroom)'}]};
+  const vocab2 = new Set(['library', 'read', 'book']);
+  const find2 = (w) => rows2[w] ?? (vocab2.has(w) ? [{type: 'thing', id: w}] : []);
+  assert.deepEqual(wakeFound(find2, tokens, 'Go to the library and read a book.').map((r) => r.act), ['walk:library', 'read:lib.1']);
 });
 
 test('a waking listen carries look and found from the disk copy only; act --for with no ack, then a late ack, links no later act', async t => {
