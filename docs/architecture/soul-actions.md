@@ -715,3 +715,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Working portable abacus (#1714)
+
+`core-counting-desk@1` accepts one `core-abacus@1`. A Soul chooses add/subtract one or ten, or clear; three seconds of existing native craft rearranges the same supported object's beads only after completion. The range is 0–99. Actual native support, access, free hands, started object/value binding, completion position and atomic God commit preserve the count on interruption or invalid work. The abacus exposes its current count, digits and last worker; the desk exposes only its own historical completed count. Native pickup/placement and persistence keep the same object and state. No new movement, engine activity, generic context repair, puzzle or cognition claim.
