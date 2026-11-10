@@ -3,18 +3,23 @@
 import type {Context, Hono} from 'hono';
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import {buildCatalog, type CatalogThingIn} from './catalog.ts';
+import {inPoly} from '../ledger/places.ts';
 
 type WorldEntity = {def?: string; label?: string; name?: string; human?: unknown; pose?: {p: number[]}};
 
 export function ledgerCatalog(L: EdgeLedger) {
   const world = L.host.engine.world as unknown as {entities: Record<string, WorldEntity>};
   const open = (id: string) => !L.knowledge?.isSecret(id), locate = L.places.locator();
+  // knowledge.hidesPoint for a Soul that knows no secret place: a secret room upstairs hides what stands under it too
+  const secretOutlines = L.knowledge?.marked().size ? [...L.places.byId.values()].filter(p => p.polygon.length && !open(p.id)).map(p => p.polygon) : [];
   const things: CatalogThingIn[] = [];
   for (const [id, e] of Object.entries(world.entities)) {
     if (e.human || !e.def || !e.pose || L.concealedThing?.(id)) continue;
-    const x = e.pose.p[0]!, z = e.pose.p[2]!; if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
-    const place = locate(x, z, 0);
-    things.push({id, kind: e.def, name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null});
+    const x = e.pose.p[0]!, z = e.pose.p[2]!, y = e.pose.p[1] ?? 0; if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    if (secretOutlines.some(poly => inPoly(x, z, poly))) continue;
+    // on its own floor, as its activity spots are: a lamp upstairs is in the bedroom, not the kitchen under it
+    const place = locate(x, z, Number.isFinite(y) ? L.levelAt?.(x, z, y) ?? 0 : 0);
+    things.push({id, kind: e.def, name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null, ...(L.seatThing?.(id) ? {seat: true} : {})});
   }
   // a spot of a thing the world no longer has (a god removed it; a world's authored spots outlive it) is not an act
   const spots = L.spots.spots.filter(s => !L.spotThingGone(s.id));

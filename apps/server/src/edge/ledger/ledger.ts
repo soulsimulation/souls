@@ -227,10 +227,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #1737: the world's structure is whole (places perceived, activity spots derived); set by the engine bridge. Until it
    *  first is, the catalog answers world.starting rather than publish a world with no acts in it. */
   structureReady?: () => boolean;
+  /** #1737: the level a thing standing at height y over (x, z) is on, as activity spots and places reckon it; set by the
+   *  engine bridge. Unset (a world with no floors above the ground): level 0. */
+  levelAt?: (x: number, z: number, y: number) => number;
+  /** #1737: the thing has a seat a body sits on (`sit:<id>` is offered from anywhere); set by the engine bridge. */
+  seatThing?: (id: string) => boolean;
   /** #1737: the thing a spot belongs to (`<activity>.<entity id>[.<n>]`) is in neither the engine nor the god's world: a
    *  god removed it, and the world's authored spots outlive it. (A pond or a pitch is the god's, not an engine body.) */
   spotThingGone(spotId: string): boolean {
-    const thing = spotThing(spotId); if (!thing || (this.host.engine.world.entities as Record<string, unknown>)[thing]) return false;
+    const thing = spotThing(spotId); if (!thing || (this.mw.world.entities as Record<string, unknown>)[thing]) return false;
     return this.thingName ? this.thingName(thing) === null : true;
   }
   /** #442 (mending.ts): what a completed repair did, read when its receipt ends, before the state changes. */
@@ -1322,11 +1327,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const m = mine ?? new Map(); m.set(sig, {tick, key, reads, value: core}); if (m.size > 8) m.delete(m.keys().next().value!); this.focusCache.set(soul.soulId, m);
     return only(this.bindsTail(soul, core, focus));
   }
-  /** #1737: does this focus name an activity spot by its id? (`<verb>:<spot id>`; the spot ids are indexed per spots object) */
+  /** #1737: does this focus name an activity spot (`<verb>:<spot id>`; the spot ids are indexed per spots object) or a seat by its id? */
   private asksSpot(focus: MenuFocus): boolean {
     if (!focus.ids.size) return false;
     const s = this.spots; if (this.spotIds?.of !== s) this.spotIds = {of: s, ids: new Set(s.spots.map(x => x.id))};
-    for (const id of focus.ids) if (this.spotIds.ids.has(id.slice(id.indexOf(':') + 1))) return true;
+    // (a seat by its thing's id too: `sit:e_…` is offered wherever the seat stands, beyond what the whole menu lists)
+    for (const id of focus.ids) if (this.spotIds.ids.has(id.slice(id.indexOf(':') + 1)) || /^sit:e_[0-9a-z]+$/.test(id)) return true;
     return false;
   }
   private spotIds: {of: SpotsData; ids: Set<string>} | null = null;
@@ -3587,7 +3593,18 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private secretOffer(soul: EdgeSoul, cap: EdgeCapability): boolean {
     if(!this.knowledge.marked().size)return false;
     if(cap.target?.kind==='place'&&!this.knowledge.knows(soul.soulId,cap.target.id))return true;
+    // #1737: a spot (or a game's place beside one, `<spot>.p<n>`) offered by id from anywhere leads into its place
+    if(cap.target?.kind==='spot'){const place=this.spotPlace(cap.target.id);if(place&&!this.knowledge.knows(soul.soulId,place))return true;}
+    // and a seat by its thing's id (`sit:e_…`, offered from anywhere) standing in a secret place, on any floor, as the catalog withholds it
+    if(cap.verb==='sit'&&cap.target?.kind==='object'){const p=(this.mw.world.entities as Record<string,{pose?:{p:number[]}}>)[cap.target.id]?.pose?.p;if(p&&this.knowledge.hidesPoint(soul.soulId,[p[0]!,p[2]!]))return true;}
     return [...this.places.byId.values()].some(p=>p.parts?.some(part=>(part.walk===cap.id||part.sit===cap.id)&&!knownPart(this,soul,p,part)));
+  }
+  private spotPlaces: {from: SpotsData; m: Map<string, string>} | null = null;
+  /** The place an activity spot or shelf is in, by its id (a game court's extra places go by their spot's). */
+  private spotPlace(id: string): string | undefined {
+    const spots = this.spots;
+    if (this.spotPlaces?.from !== spots) {const m = new Map<string, string>(); for (const s of [...spots.spots, ...spots.shelves]) if (s.place) m.set(s.id, s.place); this.spotPlaces = {from: spots, m};}
+    return this.spotPlaces.m.get(id) ?? this.spotPlaces.m.get(id.replace(/\.(?:p\d+|triangle)$/, ''));
   }
   /** SOULSIM-E: true when `asked` is an id the listing leaves out that resolveOnDemand offers (a far place's walk/run). Act
    *  and resolve let such an id through their place and strict/1 checks, which read the listing only. */
