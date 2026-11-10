@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {WorldModel,coreLibrary,applyBatch,opSchema} from '@souls/world-compiler';
 import {createCandleMolding} from './candle-molding.ts';
 import type {EdgeReceipt} from '../edge/contract.ts';
-function fixture(){
+function fixture(name:string|null='ana-mold'){
  const model=new WorldModel({constants:{extent:80,ground:'land'},seed:'candle-molding'});model.library=coreLibrary();
  const edit=(ops:unknown[])=>{const r=applyBatch(model,{ops:ops.map(o=>opSchema.parse(o))},'god',0);assert.equal(r.result.accepted,true,JSON.stringify(r.result));};
- edit([{op:'place',def:'core/candle-mold-bench@1',name:'ana-mold',p:[0,0],owner:'soul:ana',access:'public'}]);
+ edit([{op:'place',def:'core/candle-mold-bench@1',...(name===null?{}:{name}),p:[0,0],owner:'soul:ana',access:'public'}]);
  const id=[...model.entities.values()][0].id,entities:Record<string,any>={ana:{pose:{p:[0,0,1.1]},human:{}},[id]:{pose:{p:[0,0,0]},support:{kind:'ground'}}};let denied=false,refused=false,commits=0;
  const service=createCandleMolding({model,engine:{world:{entities,tick:20}},levelAt:()=>0,soul:()=>({id:'ana',entity_id:'ana',name:'Ana'}),denied:()=>denied?{code:'object.private',reason:'Private mold bench'}:null,commit(ops){commits++;if(refused)return{accepted:false};edit(ops);return{accepted:true};},log(){}}),soul={soulId:'ana',entityId:'ana',name:'Ana'} as never;
  let serial=0;const run=(verb:string,text?:string,change?:()=>void,end=120)=>{service.expect(soul,id,verb,text===undefined?undefined:{text});const r={id:'r'+serial++,soulId:'ana',capability:'object:'+id+':'+verb,phase:'started',acceptedTick:20,startedTick:20} as EdgeReceipt;service.onReceipt(r);change?.();service.onReceipt({...r,phase:'completed',endedTick:end});};
@@ -31,4 +31,8 @@ test('occupied output, exhausted stock and invalid choices refuse usefully witho
  for(const key of ['missing','old','wrong-action','wrong-tick']){
   const y=fixture();if(key!=='missing')y.service.expect(y.soul,y.id,'mold-candle');const r={id:'old',soulId:'ana',capability:'object:'+y.id+':'+(key==='wrong-action'?'choose-form':'mold-candle'),phase:'started',acceptedTick:key==='old'?19:20,startedTick:key==='wrong-tick'?19:20} as EdgeReceipt;y.service.onReceipt(r);y.service.onReceipt({...r,phase:'completed',endedTick:120});assert.equal(y.commits(),0,key);assert.equal(y.outputs().length,0,key);assert.equal(y.bench.state!.ivory,2,key);
  }
+});
+
+test('unnamed and maximum-length bench names produce readable admitted candles within the name limit',()=>{
+ for(const name of [null,'a'.repeat(48)]){const x=fixture(name);x.run('mold-candle');assert.equal(x.outputs().length,1);const out=x.outputs()[0];assert.equal(typeof out.name,'string');assert.ok(out.name!.length<=48);assert.match(out.name!,/ivory-pillar-candle-1$/);assert.equal(out.state!.sourceLabel,name||'candle-mold');assert.equal(x.bench.state!.ivory,1);assert.equal(x.bench.state!.wicks,5);assert.equal(x.bench.state!.made,1);}
 });

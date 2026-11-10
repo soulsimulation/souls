@@ -49,8 +49,8 @@ export function createCandleMolding(h:Host){
   const state:Record<string,unknown>={lastReceipt:r.id,lastCompletedTick:r.endedTick,maker:s.name.slice(0,80)},ops:Op[]=[];
   if(verb==='choose-form')state.form=q.choice;if(verb==='choose-color')state.waxColor=q.choice;
   if(verb==='mold-candle'){
-   const color=String(a.e.state!.waxColor) as keyof typeof CANDLE_COLORS,form=String(a.e.state!.form),serial=Number(a.e.state!.made)+1,label=a.e.name.slice(0,32)+'-'+color+'-'+form+'-candle-'+serial;
-   ops.push(opSchema.parse({op:'place',def:'core/molded-candle@1',name:label,in:{parent:id,slot:'output'},p:[0,0],params:{form,wax:CANDLE_COLORS[color]},state:{form,waxColor:color,waxUnits:1,wickUnits:1,maker:s.name.slice(0,80),sourceLabel:a.e.name.slice(0,60)},...(a.e.owner?{owner:a.e.owner}:{}),...(a.e.access?{access:a.e.access}:{})}));
+   const color=String(a.e.state!.waxColor) as keyof typeof CANDLE_COLORS,form=String(a.e.state!.form),serial=Number(a.e.state!.made)+1,sourceLabel=(a.e.name||'candle-mold').slice(0,60),suffix='-'+color+'-'+form+'-candle-'+serial,label=sourceLabel.slice(0,48-suffix.length)+suffix;
+   ops.push(opSchema.parse({op:'place',def:'core/molded-candle@1',name:label,in:{parent:id,slot:'output'},p:[0,0],params:{form,wax:CANDLE_COLORS[color]},state:{form,waxColor:color,waxUnits:1,wickUnits:1,maker:s.name.slice(0,80),sourceLabel},...(a.e.owner?{owner:a.e.owner}:{}),...(a.e.access?{access:a.e.access}:{})}));
    Object.assign(state,{[color]:Number(a.e.state![color])-1,wicks:Number(a.e.state!.wicks)-1,made:serial,lastOutput:label});
   }
   ops.push(opSchema.parse({op:'set',id,state}));if(!h.commit(ops,`${r.soulId} completed candle ${verb}`).accepted)h.log('candle molding: admitted batch refused; stock retained');
