@@ -112,3 +112,11 @@ test("the catalog vouches for the ids it publishes and says nothing about the re
   for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1", "sit-ground:here"]) assert.equal(ix.knows(id), true, id);
   for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "sit:e_tree", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
 });
+
+test("words that only say the verb narrow nothing: \"play music\" --verb play-music finds the instrument (#1737, lane M4)", () => {
+  const withViolin = { ...cat, acts: [...cat.acts, { id: "play-music:play-music.e_v1", verb: "play-music", place: "g-village", thing: "e_v1", at: [55, 2], label: "Fiddle a tune (bandstand violin in Eden Village)" }] };
+  const ix = indexCatalog(withViolin);
+  for (const words of ["play music", "music", "play", ""]) assert.equal(find(ix, words, { verb: "play-music" }).found[0]?.act, "play-music:play-music.e_v1", words);
+  assert.equal(find(ix, "violin", { verb: "play-music" }).found[0]?.act, "play-music:play-music.e_v1");
+  assert.equal(find(ix, "play music in the library", { verb: "play-music" }).found.length, 0, "a place word still narrows");
+});

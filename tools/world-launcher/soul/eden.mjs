@@ -1992,7 +1992,9 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8 } = {}) {
   const ref = around?.at ?? at, inScope = (placeId, point) => (!scope || scope.has(placeId ?? "")) && (!around || (dist(around.at, point) ?? 0) <= NEAR_METRES);
   const asked = verb ? [verb] : q.filter((w) => SYNONYMS[w]), verbs = new Map();
   for (const v of asked) { verbs.set(v, 6); for (const sVerb of SYNONYMS[v] ?? []) if (!verbs.has(sVerb)) verbs.set(sVerb, sVerb === v ? 6 : 3); }
-  const rest = q.filter((w) => !SYNONYMS[w] && w !== verb), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
+  // words that only say the verb ("play music" with --verb play-music) narrow nothing: what is left must name the place or thing
+  const verbWords = new Set([...verbs.keys()].flatMap((v) => v.split("-")));
+  const rest = q.filter((w) => !SYNONYMS[w] && !verbWords.has(w) && !verbWords.has(stem(w))), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
     if (!q.length || !inScope(p.id, p.at)) continue;
     const s = score(q, placeWords(p)); if (!s) continue;

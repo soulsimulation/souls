@@ -78,3 +78,13 @@ test('a catalog the world replaced is fetched once; a silent world leaves the co
   assert.equal(still.code, 0, still.err);
   assert.equal(still.json.found[0]?.id ?? still.json.found[0]?.place, 'p_lib', 'find still answers from the copy');
 });
+
+test('on a folder with no copy yet, find fetches the live picture and the catalog itself and answers at once (lane M4)', async t => {
+  const w = await world(t);
+  const first = await w.cli('find', 'read');
+  assert.equal(first.code, 0, first.err);
+  assert.equal(first.json.found[0]?.act, 'read:read.e_book', 'acts are found before any look');
+  assert.deepEqual(w.seen, ['/v1/edge/live', '/v1/edge/catalog']);
+  const q = await w.cli('query', '[{"verb":"read"}]');
+  assert.equal(q.code, 0, q.err); assert.match(JSON.stringify(q.json.answers), /read:read\.e_book/);
+});
