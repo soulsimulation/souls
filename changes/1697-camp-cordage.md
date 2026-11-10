@@ -1,1 +1,4 @@
+---
+type: feature
+---
 Souls can prepare a loose portable camp cord as a loop or bundled guyline, carry it, then return and untie it to recover its reusable binding. Existing native craft owns completion; current form and maker persist. No tension or load-bearing behavior is claimed.
