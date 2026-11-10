@@ -1937,7 +1937,7 @@ const approxTokens = (v) => Math.ceil(JSON.stringify(v).length / 4);
 /** The catalog with its lookups. Build once per catalog version. */
 function indexCatalog(cat) {
   const places = new Map(cat.places.map((p) => [p.id, p])), byRef = new Map(cat.places.filter((p) => p.ref).map((p) => [p.ref, p]));
-  const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t]));
+  const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t])), acts = new Map(cat.acts.map((a) => [a.id, a]));
   const push = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
   for (const p of cat.places) if (p.parent) push(kids, p.parent, p);
   for (const a of cat.acts) push(actsAt, a.place ?? "", a);
@@ -1947,7 +1947,10 @@ function indexCatalog(cat) {
   /** A place and every place inside it. */
   const within = (id) => { const root = place(id); if (!root) return new Set(); const out = new Set([root.id]), todo = [root.id]; while (todo.length) for (const k of kids.get(todo.pop()) ?? []) if (!out.has(k.id)) { out.add(k.id); todo.push(k.id); } return out; };
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
-  return { cat, places, things, kids, actsAt, thingsAt, place, pathOf, within, walkId };
+  /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a known thing.
+   *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && things.has(rest)); };
+  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows };
 }
 
 const WORDS = new WeakMap();
@@ -2054,7 +2057,7 @@ return { tokensOf, indexCatalog, NEAR_METRES, bestPlace, find, placeView, query 
 })();
 // </inline catalog.mjs>
 
-const VERSION = "2.24.11";
+const VERSION = "2.25.0";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2115,7 +2118,7 @@ function reportWrite(kind, fields) {
 }
 function reportRequest(url, method, t0, r) {
   if (!REPORTS) return;
-  try { reportWrite("http", reportPrune({ method, route: reportRoute(url), status: r?.status, durationMs: Math.round((performance.now() - t0) * 1000) / 1000, retryAfterMs: reportInt(r?.retryAfterMs), facts: reportFacts(r?.data) })); } catch { report.failures++; }
+  try { reportWrite("http", reportPrune({ method, route: reportRoute(url), status: r?.status, durationMs: Math.round((performance.now() - t0) * 1000) / 1000, retryAfterMs: reportInt(r?.retryAfterMs), serverMs: reportInt(r?.server?.world), queuedMs: reportInt(r?.server?.queue), load: typeof r?.load === "string" ? r.load.slice(0, 12) : undefined, facts: reportFacts(r?.data) })); } catch { report.failures++; }
 }
 /** A serve's own world call (inbox, stream, receipt poll), which no CLI process records for it. */
 async function serveCall(url, o) {
@@ -2237,6 +2240,12 @@ export const fullJitter = (attempt, rnd = Math.random) => rnd() * Math.min(RETRY
  *  does not come back on the same millisecond. */
 export const statedJitter = (ms, rnd = Math.random) => Math.min(RETRY.capMs, ms) * (1 + 0.2 * rnd());
 /** Retry-After in ms, from the header (seconds or an HTTP date) or the body (world.retry_after_s, retry_after). */
+/** #1724: the world's own time for an answer (`Server-Timing: world;dur=12.3, queue;dur=0.0`), in ms, or undefined. */
+export function serverTiming(header) {
+  if (typeof header !== "string") return undefined;
+  const out = {}; for (const m of header.matchAll(/(world|queue);dur=([0-9.]+)/g)) out[m[1]] = Math.round(Number(m[2]));
+  return Object.keys(out).length ? out : undefined;
+}
 export function retryAfterMs(headers, data) {
   const h = headers?.get?.("retry-after");
   if (h) { const n = Number(h); if (Number.isFinite(n) && n >= 0) return n * 1000; const at = Date.parse(h); if (Number.isFinite(at)) return Math.max(0, at - Date.now()); }
@@ -2491,7 +2500,7 @@ async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, s
   try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
   if (r.status >= 200 && r.status < 300) noteForMemory(url, method, body, data);
   // the world's idempotency layer marks a repeat it answered from the first write (apps/server/src/edge/events/idempotency.ts)
-  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null, ...(r.headers.get("idempotent-replay") === "true" ? { replayed: true } : {}) };
+  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), server: serverTiming(r.headers.get("server-timing")), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null, ...(r.headers.get("idempotent-replay") === "true" ? { replayed: true } : {}) };
 }
 
 // ---------------------------------------------------------------- memory
@@ -4878,10 +4887,11 @@ async function plan(...argv) {
   const up = await askServe({ op: "status" });
   if (!up?.serving) throw new Error(`A plan runs in serve, and none is up in this folder. Start one: ${CLI} serve`);
   const problems = [];
+  let known = null; try { known = (await worldCopy()).ix; } catch { /* no local copy: every step is checked by the world */ }
   for (const step of steps) {
-    // #1737: an offered id is what the world acts on: it is not read back through resolve (each such read is a call on the
-    // world; two plans cost 15 of them in #1724). The world refuses a bad step when it comes to it, and listen wakes.
-    if (OFFER_ID.test(step.id)) continue;
+    // #1737: an id the local catalog vouches for is not read back through resolve (each such read is a call on the world;
+    // two plans cost 15 of them in #1724). Any other step, and any step with params, is still checked by the world first.
+    if (known && !step.params && known.knows(step.id)) continue;
     const r = ok(await call("/v1/edge/resolve", { body: { capability: step.id, ...(step.params ? { params: step.params } : {}) } }), "resolve").resolve;
     const no = planStepProblem(step, r);
     if (no) problems.push(no);
@@ -4924,7 +4934,9 @@ home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for C
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
+world     look   find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]   query '<json questions>' [--budget tokens]   catalog [--refresh]
+          (the world is copied to this machine and kept current: these read the copy, make no call that waits on the world, and give the ids act takes)
+sense     here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
 do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]

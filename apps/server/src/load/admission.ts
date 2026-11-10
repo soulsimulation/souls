@@ -290,15 +290,19 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (token && account) { const tag = tagOf(token); if (tag) c.header('x-sim-account', tag); }
     if (lv !== 'green' && (c.res.status === 429 || c.res.status === 503) && !c.res.headers.has('Retry-After')) c.header('Retry-After', String(RETRY_S[lv]));
   };
+  // #1724: every answer says how long this world took over it and how much of that was waiting its turn, so a slow call
+  // can be laid beside the client's own clock (Server-Timing: world = arrival to answer, queue = admission wait; ms)
+  const timed = (c: Context, t0: number, queued = 0) => { c.header('Server-Timing', `world;dur=${(performance.now() - t0).toFixed(1)}, queue;dur=${queued.toFixed(1)}`); };
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');
     if (!edge) return next();
+    const t0 = performance.now();
     const lv = level(); (c.set as (k: string, v: unknown) => void)(LOAD_KEY, lv);
     const r = classify(c.req.method, path), token = bearer(c);
     // admitted already by the MessagePort front end (a read worker's forward, admissionPort below); the env is set
     // only by an in-process app.fetch, never by a client
-    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { await next(); stamp(c, lv, token); return; }
-    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); return; }
+    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { await next(); stamp(c, lv, token); timed(c, t0); return; }
+    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); timed(c, t0); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
     if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
@@ -309,14 +313,15 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     // the client went away = its socket closed (not `incoming.destroyed`: a fully read request body is destroyed too)
     const env = c.env as {incoming?: {socket?: {destroyed?: boolean}}} | undefined, hint = Number(c.req.header('x-sim-timeout-ms'));
     const t = adm.request({key: r.god ? 'god' : 'soul:' + token, god: r.god, route: r, hintMs: Number.isFinite(hint) ? hint : undefined, closed: () => env?.incoming ? env.incoming.socket?.destroyed === true : c.req.raw.signal?.aborted === true});
-    const refuse = (x: Refusal) => { adm.refused(r.god ? 'god' : 'soul:' + token, r.god, x.code, x.retryAfterS); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
+    const refuse = (x: Refusal) => { adm.refused(r.god ? 'god' : 'soul:' + token, r.god, x.code, x.retryAfterS); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token); timed(c, t0, performance.now() - t0);
       return c.json({contract: 'eden-edge/1', error: {code: x.code, message: x.message}, world: worldBlock(lv, x.retryAfterS)}, x.status); };
     if ('refusal' in t) return refuse(t.refusal);
     const v = await t.turn;
     if (v === 'dropped') return c.body(null, 499 as never);
     if (v !== 'run') return refuse(v);
+    const queued = t.waitedMs();
     try { await next(); } finally { t.done(); }
-    stamp(c, lv, token);
+    stamp(c, lv, token); timed(c, t0, queued);
   };
 }
 

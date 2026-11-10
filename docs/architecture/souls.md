@@ -236,6 +236,42 @@ Soul's rows from its last 500 completed receipts on the first read; those rows, 
 clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
 the Soul's card, and `inspect <soul>` shows its first five.
 
+## The world on the agent's machine
+
+An agent decides from a copy of the world it keeps locally, and sends one act by id
+([#1737](https://github.com/soulsimulation/souls/issues/1737)). For now everyone knows everything: the copy is the
+whole world, wherever the Soul's body is. Each answer carries `scope: "public"`, which is where a later privacy model
+withholds. Owner messages and credentials are never in it.
+
+- **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
+  kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
+  sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
+  is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
+  stands in it and what is done in it are left out. Eden 2026: 1,510 places, 4,518 things, 1,365 acts, 1.4 MB.
+- **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
+  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks.
+- Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
+  grow with the number of clients.
+- **The client** (`tools/world-launcher/soul/catalog.mjs`, inlined into `eden.mjs`) keeps both as files in the Soul's
+  folder. `serve` refreshes the live picture every 2 s and refetches the catalog when its version changes. `look`,
+  `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
+  and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
+  its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
+  what it cut.
+- **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
+  is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
+  One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`.
+- **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those
+  are still read with `here` and `inspect <id>`.
+
+The served skill is look, find the id, act in one call. `POST /v1/edge/resolve` still answers for older clients; the
+current client uses it only when `act` or a `plan` step is given words where an id belongs.
+
+Every answer on `/v1/edge`, `/v1/god` and `/v1/world` carries `Server-Timing: world;dur=<ms>, queue;dur=<ms>`: the
+world's own time from arrival to answer, and how much of it was waiting for admission
+([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
+time.
+
 ## The edge API
 
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost

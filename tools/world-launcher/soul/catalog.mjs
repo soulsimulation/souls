@@ -13,7 +13,7 @@ const approxTokens = (v) => Math.ceil(JSON.stringify(v).length / 4);
 /** The catalog with its lookups. Build once per catalog version. */
 export function indexCatalog(cat) {
   const places = new Map(cat.places.map((p) => [p.id, p])), byRef = new Map(cat.places.filter((p) => p.ref).map((p) => [p.ref, p]));
-  const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t]));
+  const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t])), acts = new Map(cat.acts.map((a) => [a.id, a]));
   const push = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
   for (const p of cat.places) if (p.parent) push(kids, p.parent, p);
   for (const a of cat.acts) push(actsAt, a.place ?? "", a);
@@ -23,7 +23,10 @@ export function indexCatalog(cat) {
   /** A place and every place inside it. */
   const within = (id) => { const root = place(id); if (!root) return new Set(); const out = new Set([root.id]), todo = [root.id]; while (todo.length) for (const k of kids.get(todo.pop()) ?? []) if (!out.has(k.id)) { out.add(k.id); todo.push(k.id); } return out; };
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
-  return { cat, places, things, kids, actsAt, thingsAt, place, pathOf, within, walkId };
+  /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a known thing.
+   *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && things.has(rest)); };
+  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows };
 }
 
 const WORDS = new WeakMap();

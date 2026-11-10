@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { indexCatalog, find, query, placeView, bestPlace } from "./catalog.mjs";
 
 const cat = {
-  contract: "soul-catalog/1", worldId: "w-1", scope: "public", placeVerbs: ["walk"],
+  contract: "soul-catalog/1", worldId: "w-1", scope: "public", placeVerbs: ["walk", "hang-out"],
   places: [
     { id: "world", name: "World", kind: "region", parent: null, at: [0, 0] },
     { id: "g-village", name: "Eden Village", kind: "district", parent: "world", at: [50, 0] },
@@ -90,4 +90,9 @@ test("the anchor of a relation is the best-named place, nearest on a tie", () =>
   assert.equal(bestPlace(ix, "library", at).id, "g-library");
   assert.equal(bestPlace(ix, "campus-library-annex", at).id, "g-annex");
   assert.equal(bestPlace(ix, "volcano", at), null);
+});
+
+test("the catalog vouches for the ids it publishes and says nothing about the rest", () => {
+  for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1"]) assert.equal(ix.knows(id), true, id);
+  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "wave:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
 });
