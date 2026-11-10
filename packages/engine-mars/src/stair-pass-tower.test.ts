@@ -101,3 +101,69 @@ function loop(seed: string, pass: boolean, T = 9000) {
   }
   return { e, copy, longestCancel, longestRefused, completed };
 }
+
+// #1723 cause 3 (the cand-6 `climbers` wait): W stands at the top, A climbs from the door to the top and B from the door to
+// room-2 120 ticks later, and W walks down at tick 150. W reaches room-2 and waits to enter the flight A climbs, so A passes back
+// (passBackForWaiter) down towards room 1, where B is arriving up the lower flight. On 40336d6df A's back-down waits for B and
+// B waits for A until the blocked-walk bound fails all three walks. Under stair-pass/1 the climber blocked by a partner backing
+// down yields in turn (it backs down its own flight while its way is clear), and the back-down itself is bounded like the hold.
+function converge(seed: string) {
+  const e = world(seed, true);
+  e.spawnHuman({ id: 'h_w', label: 'w', soul: 's_w' }); assert.ok(e.relocateHumanV1('h_w', [69, 23.4]));
+  walk(e, 'h_w', [68.75, 19.8, 28]); for (let k = 0; k < 3000 && e.programOf('h_w'); k++) e.step();
+  assert.equal(e.world.entities.h_w.human.level, 28, 'W starts at the top');
+  e.spawnHuman({ id: 'h_a', label: 'a', soul: 's_a' }); assert.ok(e.relocateHumanV1('h_a', [69, 23.4]));
+  e.spawnHuman({ id: 'h_b', label: 'b', soul: 's_b' }); assert.ok(e.relocateHumanV1('h_b', [69.8, 23.6]));
+  const ids = ['h_a', 'h_b', 'h_w'], progs: Record<string, string> = { h_a: walk(e, 'h_a', [69.6, 19.4, 28]) }, ends: Record<string, any> = {};
+  const refused: string[] = [], run: Record<string, number> = {}, longest: Record<string, number> = {}, mids: any[] = [];
+  let jump = 0, backed = 0;
+  for (let t = 0; t < 3000 && !(ends.h_a && ends.h_b && ends.h_w); t++) {
+    if (t === 120) progs.h_b = walk(e, 'h_b', [69.9, 20.4, 9]);
+    if (t === 150) progs.h_w = walk(e, 'h_w', [68.6, 24.4, 0]);
+    const before = Object.fromEntries(ids.map(id => [id, [...e.world.entities[id].pose.p]]));
+    const st = e.step(); for (const r of st.refusals ?? []) refused.push(`${t} ${r.code}`); for (const m of mids) m.step();
+    for (const p of st.programs) for (const id of ids) if (p.id === progs[id] && p.kind !== 'step') ends[id] ??= { t, ...p };
+    const execs = [...(e.rt.services.walkExecs?.values() ?? [])] as any[];
+    if (execs.some(x => x.passBack?.stage === 'back')) { backed++; if (backed === 20) mids.push(factory.restore(e.snapshot())); }
+    for (const id of ids) { const q = e.world.entities[id].pose.p, d = Math.hypot(q[0] - before[id][0], q[1] - before[id][1], q[2] - before[id][2]);
+      if (progs[id] && !ends[id]) jump = Math.max(jump, d); run[id] = d < 1e-6 && progs[id] && !ends[id] ? (run[id] ?? 0) + 1 : 0; longest[id] = Math.max(longest[id] ?? 0, run[id]); }
+  }
+  return { e, ends, refused, longest, jump, backed, mids };
+}
+test('#1723 cause 3 Tower House: a back-down that meets a climber converging on its entry resolves; all three walks complete, no long wait, and a snapshot taken mid-back-down continues alike', () => {
+  const r = converge('tower-converge');
+  assert.ok(r.backed > 0, 'the scene reaches a pass-back');
+  for (const id of ['h_a', 'h_b', 'h_w']) assert.equal(r.ends[id]?.kind, 'completed', `${id}: ${JSON.stringify(r.ends[id])}`);
+  assert.ok(Math.max(...Object.values(r.longest)) < 600, `longest still ${JSON.stringify(r.longest)} ticks: under 30 s`);
+  assert.ok(r.jump <= 0.2, `largest one-tick move ${r.jump.toFixed(3)} m`);
+  assert.deepEqual(r.e.runtime.violations.filter((d: any) => d.code === 'collision.human-human'), []);
+  assert.deepEqual(r.refused, []);
+  assert.equal(r.mids.length, 1, 'a snapshot was taken mid-back-down');
+  for (const m of r.mids) assert.equal(m.stateHash(), r.e.stateHash(), 'a snapshot taken mid-back-down restores and continues alike');
+});
+
+// #1723 cause 3, the back-down's bound: the same scene, with B marked as having already yielded to A once (so it does not yield
+// again, as a walk never trades pass-backs). A's back-down then waits on B, and ends after PASS_BACK_TICKS (400), so A climbs on.
+test('#1723 cause 3 Tower House: a back-down blocked by a body that will not yield again ends after its bound, and the walk climbs on', () => {
+  const e = world('tower-back-bound', true);
+  e.spawnHuman({ id: 'h_w', label: 'w', soul: 's_w' }); assert.ok(e.relocateHumanV1('h_w', [69, 23.4]));
+  walk(e, 'h_w', [68.75, 19.8, 28]); for (let k = 0; k < 3000 && e.programOf('h_w'); k++) e.step();
+  e.spawnHuman({ id: 'h_a', label: 'a', soul: 's_a' }); assert.ok(e.relocateHumanV1('h_a', [69, 23.4]));
+  e.spawnHuman({ id: 'h_b', label: 'b', soul: 's_b' }); assert.ok(e.relocateHumanV1('h_b', [69.8, 23.6]));
+  walk(e, 'h_a', [69.6, 19.4, 28]);
+  const exOf = (id: string) => ([...(e.rt.services.walkExecs?.values() ?? [])] as any[]).find(x => x.actor === id);
+  let began = -1, ended = -1, marked = false;
+  for (let t = 0; t < 1600 && ended < 0; t++) {
+    if (t === 120) walk(e, 'h_b', [69.9, 20.4, 9]);
+    if (t === 150) walk(e, 'h_w', [68.6, 24.4, 0]);
+    const xb = exOf('h_b'); if (xb && !marked) { xb.passBack = { by: 'h_a', other: '', mine: '', stage: 'done', since: 0 }; marked = true; }
+    e.step();
+    const pb = exOf('h_a')?.passBack;
+    if (pb?.stage === 'back' && began < 0) began = pb.since;
+    if (began >= 0 && pb?.stage === 'done') ended = e.rt.tick;
+  }
+  assert.ok(began >= 0, 'A passes back');
+  assert.ok(ended >= 0, 'A\'s back-down ends');
+  assert.ok(ended - began >= 400 && ended - began <= 410, `the back-down ended ${ended - began} ticks after it began`);
+  assert.equal(exOf('h_b')?.passBack?.stage, 'done', 'B did not pass back');
+});
