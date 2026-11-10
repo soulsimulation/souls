@@ -14,7 +14,7 @@ export type PresentationState = {title: string; presenter: SoulRef | null; start
   tickets: SoulRef[]; standby: SoulRef[]; audience: SoulRef[]; materials: string[]};
 
 export const DEFAULT_DOORS_OPEN_TICKS = 6000;   // 5 real minutes at 20 ticks/s
-export const DEFAULT_DURATION_TICKS = 3000;     // one in-world hour (72000-tick day)
+export const DEFAULT_DURATION_TICKS = 3000;     // 2.5 real minutes at 20 ticks/s: a native duration, not calendar time (#1649)
 
 const has = (list: SoulRef[], id: string) => list.some(s => s.soulId === id);
 const without = (list: SoulRef[], id: string) => list.filter(s => s.soulId !== id);

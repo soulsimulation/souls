@@ -38,7 +38,7 @@
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
 //   POST /__sim/worlds/<slug>/unlisted the world's owner (signed in, or their own agent's god token): {unlisted: true|false}
-//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token): a 16:9 JPEG as
+//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token) or a signed-in site owner: a 16:9 JPEG as
 //                                the body (thumbnail.mjs), or DELETE to fall back to the template's default; never wakes the world
 //   GET  /__sim/thumbs/<slug>/<sha>.jpg, /__sim/thumbs/_template/<sha>.jpg  the world list's pictures, immutable (#887)
 //   POST /__sim/op/soul-pending|soul-approve|soul-message|soul-inbox|soul-delete, /__sim/op/set-test  operator only: TEST Souls
@@ -104,7 +104,7 @@ import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:z
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
+import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, compileCacheDir, defaultCommand, forkCommand } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
@@ -281,14 +281,16 @@ export async function openLauncher(cfg = {}) {
       // who lives here (the public list the world page shows): the homepage's Souls count
       const souls = await fetch(`http://127.0.0.1:${st.port}${wp(w.slug)}/v1/world/souls`, { signal: AbortSignal.timeout(1500) }).then((x) => (x.ok ? x.json() : null)).then((d) => (Array.isArray(d?.souls) ? d.souls.length : null)).catch(() => null);
       stats.set(w.slug, { at: Date.now(), god: !!s.hasOwner, entities: s.entities, seq: s.seq, souls: souls ?? prev?.souls ?? w.souls ?? null });
-      if (w.god !== !!s.hasOwner || w.entities !== s.entities || (souls !== null && w.souls !== souls)) registry.update(w.slug, { god: !!s.hasOwner, entities: s.entities, seq: s.seq, ...(souls !== null ? { souls } : {}) });
+      // #1649: the world's own zone wins (its owner may have changed it); the registry keeps it for the next boot
+      const zone = isTimeZone(s.timeZone) && s.timeZone !== w.timeZone ? { timeZone: s.timeZone } : {};
+      if (w.god !== !!s.hasOwner || w.entities !== s.entities || (souls !== null && w.souls !== souls) || zone.timeZone) registry.update(w.slug, { god: !!s.hasOwner, entities: s.entities, seq: s.seq, ...(souls !== null ? { souls } : {}), ...zone });
     } catch { /* busy; keep the cached numbers */ }
   }
   const describe = (w) => {
     const st = pool.status(w.slug), s = stats.get(w.slug), t = templateList({ all: true }).find((x) => x.id === w.template);
     // two worlds with the same shown name are told apart by their slug (the address people see), e.g. "Mars · my-mars-2"
     const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name));
-    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, restarts: st.restarts ?? 0 };
+    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, restarts: st.restarts ?? 0 };
   };
   async function worldsJson() {
     await Promise.all(registry.worlds.map(refreshStats));
@@ -391,8 +393,12 @@ export async function openLauncher(cfg = {}) {
       return [400, { ok: false, code: 'invalid', message: `slug ${JSON.stringify(chosen)}: lowercase a-z0-9-, starting with a letter, not a reserved name` }];
     if (chosen && (taken.has(chosen) || existsSync(registry.worldDir(chosen))))
       return [409, { ok: false, code: 'exists', message: `slug ${chosen} is in use, archived, or has data on disk` }];
+    // #1649: the world's time zone, chosen in the New world dialog (the creator's browser zone by default); the world
+    // records it at its first real-time boot (WORLD_TIME_ZONE). Absent: the world's migration default.
+    const timeZone = body?.timeZone === undefined || body?.timeZone === null || body?.timeZone === '' ? null : body.timeZone;
+    if (timeZone !== null && !isTimeZone(timeZone)) return [400, { ok: false, code: 'time.zone-invalid', message: `timeZone: an IANA time zone name, e.g. "America/New_York"; got ${JSON.stringify(String(timeZone).slice(0, 64))}` }];
     const slug = chosen ?? slugFor(name, taken);
-    const entry = { slug, name, template: t.id, port: null, createdAt: Date.now(), ...(typeof body?.creator === 'string' && body.creator ? { createdBy: body.creator.slice(0, 40) } : {}), ...(op && typeof body?.unlisted === 'boolean' ? { unlisted: body.unlisted } : {}) };
+    const entry = { slug, name, template: t.id, port: null, createdAt: Date.now(), ...(timeZone ? { timeZone } : {}), ...(typeof body?.creator === 'string' && body.creator ? { createdBy: body.creator.slice(0, 40) } : {}), ...(op && typeof body?.unlisted === 'boolean' ? { unlisted: body.unlisted } : {}) };
     if (creationsClosed) return [503, { ok: false, code: 'handover', message: 'a new release is starting; try again in a minute' }];
     rmSync(registry.worldDir(slug), { recursive: true, force: true });
     mkdirSync(registry.worldDir(slug), { recursive: true });
@@ -525,10 +531,14 @@ export async function openLauncher(cfg = {}) {
   const GONE = [404, { ok: false, code: 'not-found', message: 'this world was archived while the thumbnail was being checked' }];
   async function ownerThumbnail(w, method, readBody, authorization) {
     const gone = () => registry.get(w.slug) !== w || closing.has(w.slug);
-    const a = await quietActorOf(w, authorization);
+    let a = await quietActorOf(w, authorization);
     if (gone()) return GONE;
     if (!a) return [401, { ok: false, code: 'unauthorized', message: "sign in, or use this world's god token", fix: "Run it from the world owner's agent folder (eden-god thumbnail), or send the owner's sign-in." }];
-    if (!isOwner(w, a)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+    // the site admin, by session only (the accounts the health page admits); the audit row tells it from the owner's own change
+    if (!isOwner(w, a)) {
+      if (a.via !== 'session' || !dash.owners().has(a.account)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner or the site admin sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+      a = { ...a, via: 'site-admin' };
+    }
     const wait = thumbRate(w.slug);
     if (wait !== null) return [429, rateRefusal(wait), { 'retry-after': String(wait) }];
     if (method === 'DELETE') {

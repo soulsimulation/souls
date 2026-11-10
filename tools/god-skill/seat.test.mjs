@@ -59,6 +59,9 @@ test('A1 A3 A5: two god seats beside two Souls, each principal reading only its 
   assert.deepEqual(list.d.gods, [{ world: 'a', paired: true }, { world: 'b', paired: true }]);
   assert.deepEqual(list.d.souls.map((s) => s.name), ['Mira', 'Ivo']);
   assert.match(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), /Ivo in b/);
+  // #1536: seats paired after the Souls are in the guide a new chat reads, with no Soul command in between
+  for (const f of ['CLAUDE.md', 'AGENTS.md']) assert.match(readFileSync(join(dir, f), 'utf8'), /God of a: `node eden-god\.mjs a status`\n- God of b: `node eden-god\.mjs b status`/, f);
+  assert.match(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), /- Mira in a: .*\n- Ivo in b: .*\n- God of a/, 'the Souls stay listed');
   await soul('guide');
   assert.match(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), /God of a: `node eden-god\.mjs a status`/);
   // A3: with the other side unreadable each principal still works
@@ -67,6 +70,18 @@ test('A1 A3 A5: two god seats beside two Souls, each principal reading only its 
   chmodSync(join(dir, '.souls/souls'), 0o700); chmodSync(join(dir, '.souls/gods'), 0o000);
   assert.equal((await soul('mira', 'here')).d.me.name, 'Mira', 'a Soul reads nothing under gods/');
   chmodSync(join(dir, '.souls/gods'), 0o700);
+});
+
+test('#1536: the guide head is refreshed in place: a person\'s own words around it stay, a guide without it is left alone', async (t) => {
+  const base = await worlds(t), dir = folder(t), soul = runner(dir, eden), godCli = runner(dir, god);
+  await soul('register', `${base}/a`); await soul('create', 'Mira');
+  const mine = 'My own notes, kept.\n\n', after = '\n\nA line of mine at the end.\n';
+  writeFileSync(join(dir, 'CLAUDE.md'), mine + readFileSync(join(dir, 'CLAUDE.md'), 'utf8') + after);
+  writeFileSync(join(dir, 'AGENTS.md'), 'Someone else\'s guide.\n');
+  await godCli('register', `${base}/a`, 'dev:owner'); assert.equal((await godCli('mint')).code, 0);
+  const claude = readFileSync(join(dir, 'CLAUDE.md'), 'utf8');
+  assert.ok(claude.startsWith(mine) && claude.endsWith(after)); assert.match(claude, /- Mira in a: `node eden\.mjs here`\n- God of a: `node eden-god\.mjs status`/);
+  assert.equal(readFileSync(join(dir, 'AGENTS.md'), 'utf8'), 'Someone else\'s guide.\n');
 });
 
 test('A2: a legacy god folder works unchanged, a home does not capture it, and import reuses the token', async (t) => {

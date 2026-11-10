@@ -8,7 +8,7 @@ import { createServer } from 'node:net';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cgroupHeadroomMb, memAvailableMb, PREWARM_MB, prewarmBlocked, rotateLog } from './production.mjs';
-import { SLUG_RE, worldIdOf } from './registry.mjs';
+import { SLUG_RE, isTimeZone, worldIdOf } from './registry.mjs';
 import { GUARD, bootMark, jitterMs, liveWedge, readLive } from './guard.mjs';
 const STRIP_HOOK = 'apps/server/src/strip-cache.mjs'; // lane BOOT2 (defaultCommand)
 
@@ -680,6 +680,9 @@ export function defaultCommand(world, port, o) {
     ...eyesEnv(world.slug),
     // measurement only (lane SLEEP): log the engine state hash at boot and at stop
     ...(process.env.SIM_BOOT_HASH === '1' ? { SIM_BOOT_HASH: '1' } : {}),
+    // #1649: the zone chosen at creation (recorded by the world's first real-time boot), and the launcher's real-time flag
+    ...(isTimeZone(world.timeZone) ? { WORLD_TIME_ZONE: world.timeZone } : {}),
+    ...(process.env.SIM_REAL_TIME ? { SIM_REAL_TIME: process.env.SIM_REAL_TIME } : {}),
     // Soul mode of the world's one skill (/SKILL.md) points at the Soul skill (/skill.md) and the current CLI (/eden.mjs);
     // the retained legacy CLI stays at /eden-agent.mjs for existing folders. All served as is from the published files.
     ...(o.soulSkillFile && existsSync(o.soulSkillFile) ? { EDGE_SKILL_FILE: resolve(o.soulSkillFile) } : {}),

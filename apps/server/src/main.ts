@@ -1,6 +1,7 @@
 import {closeContextViews} from './god/context-views.ts';
 import { Attention, unwatchedPace } from './attention.ts';
 import { ClockCatchUp } from './clock-catchup.ts';
+import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
 import { bootPhase } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
@@ -124,7 +125,7 @@ if(config.accountAuthRequired&&!auth.ready)throw Error('Account authentication v
 
 const living = config.worldKey !== 'toy' && config.livingWorld ? new LivingWorld(host) : null;
 if(edenCore)await settleEmptyEden(host,living,definition.customs);
-else if (living) { living.camp = config.worldKey === 'mars'; void living.install(definition.customs); }
+else if (living) { living.camp = config.worldKey === 'mars'; if (!realTimeEnabled()) void living.install(definition.customs); /* on real time the keeper below starts the clock, with these customs */ }
 const runtimePolicy = host.extra.runtimePolicy as { sleepBlockTicks: number; quietSeatCourtesy?: boolean } | undefined;
 let courtesy: Promise<unknown> = Promise.resolve();
 if (living && host.engine.configureRuntimePolicy && !runtimePolicy?.quietSeatCourtesy) {
@@ -174,6 +175,9 @@ const groundHost = god && (host.engine as unknown as {installGroundV1?:unknown})
 if (groundHost && edge) installGroundCapabilities(edge as never, god!, host);
 // Stage B (lane L9): Souls live among god-built things — entity physics into the engine, fixtures usable, bodies as entities.
 const engineBridge = god && config.engine === 'mars' && process.env.ENTITY_BRIDGE !== '0' ? installEngineBridge({ host, god, edge }) : undefined;
+// #1649: real time for every world through the one keeper. God worlds got theirs from the bridge (god/world-clock.ts);
+// an authored world (eden, mars, littlemartians) keeps the local time of its migration zone. Not the toy world.
+if (realTimeEnabled() && config.worldKey !== 'toy' && !hasRealClock(host)) installRealClock(host, { zone: () => defaultTimeZone(config.worldSlug ?? config.worldKey), customs: definition.customs, log: (m) => console.log(m) });
 if (god && process.env.BIRTH_LOOKS !== '0') installBirthLooks(host, edge);  // lane LOOKS: new Souls in new worlds get a varied kit look
 if (god) installWorldEnv(host, god, edge);  // R4-LIVE: Souls perceive the god's weather
 if (god) installLightning(god, edge, () => host.engine.world.tick);  // GOD-ENV: Souls see the bolts and hear the thunder
@@ -258,7 +262,8 @@ server.on('request', (req, res) => {
 // ...and when somebody comes back, the world's time of day jumps to now (clock-catchup.ts; lane SLEEP): also after the
 // launcher let the world exit while asleep, so this boot may itself be the return. Not in LivingWorld worlds (their
 // dayConfig also restarts the day's events), which the launcher never runs.
-const catchUp = process.env.SIM_UNWATCHED_PACE && !living ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
+// #1649: a real-time clock re-aligns itself to the wall when the world is watched again (god/world-clock.ts), so no catch-up.
+const catchUp = process.env.SIM_UNWATCHED_PACE && !living && !realTimeEnabled() ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
 if (process.env.SIM_UNWATCHED_PACE) new Attention((watched) => { host.setPace(watched ? 1 : unwatchedPace()); if (watched) void catchUp?.watched()?.catch(() => {}); else catchUp?.unwatched(); }).watch(server);
 // SIM_BOOT_HASH=1 (measurement only): the engine state this boot restored, to compare with the one its last stop saved
 if (process.env.SIM_BOOT_HASH === '1') console.log(`[boot] state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
