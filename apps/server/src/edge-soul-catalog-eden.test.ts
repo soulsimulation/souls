@@ -86,7 +86,8 @@ test('Eden: far spots by id, and what the catalog and live picture publish (thin
     const cat = (await get('/v1/edge/catalog')).body, ix = indexCatalog(cat), me = L.body(soul.entityId).pose.p, at = [me[0], me[2]];
     const ids = new Set<string>();
     for (const words of ['swim', 'lake', 'pond', 'jetty', 'shore', 'library', 'read a book', 'sit on the floor', 'eat', 'bench', 'kitchen', 'garden', 'dance', 'sleep', 'music', 'table', 'bandstand', 'classroom', 'river', 'sea'])
-      for (const row of findLocal(ix, words, {at}).found) if (row.act) ids.add(row.act);
+      // (a thing's hand act, `object:…`, needs the object framework this harness leaves out: god/hand-acts-far.test.ts)
+      for (const row of findLocal(ix, words, {at}).found) if (row.act && !row.act.startsWith('object:')) ids.add(row.act);
     assert.ok(ids.size >= 40, `find names ${ids.size} acts`);
     const unknown: string[] = [];
     for (const id of ids) {L.invalidateBodies(); const no = L.offerGate(soul, {capability: id}); if (no?.code === 'capability.unknown') unknown.push(id);}
