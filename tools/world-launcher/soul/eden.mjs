@@ -1850,7 +1850,7 @@ return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, ke
 })();
 // </inline client-body-kit.mjs>
 
-const VERSION = "2.24.11";
+const VERSION = "2.24.12";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -4663,7 +4663,16 @@ export const HELP_TOPICS = ["refusals", "rides", "plans", "messages", "listening
 export const SEE_TOPIC = { "act.not-an-id": "refusals", "capability.unknown": "refusals", "capability.params": "refusals", "ride.unavailable": "refusals",
   "route.unreachable": "refusals", "ride.no-landing-spot": "rides", "ride.out-of-bounds": "rides", "steer.unknown-place": "rides",
   "ride.steered": "rides", "ride.on-ground": "rides", "ride.not-aboard": "rides" };
-export const seeHelp = (code) => (Object.hasOwn(SEE_TOPIC, code ?? "") ? { see: `help ${SEE_TOPIC[code]}` } : {});
+// #1475 arm B3 (#1098 B2c: `see:` printed 3 times, followed 0 times): a refusals-topic code also prints the reference's own
+// step for it as `next`, so the rule is in the answer itself, not behind a help call. `see` stays for the rest of the section.
+export const NEXT_STEP = {
+  "act.not-an-id": "act takes an offered id: send one of `candidates`, or report that nothing fits.",
+  "capability.unknown": "no offer here has that id. Never build one from words: resolve \"<the words>\", then send a candidate or alternatives id.",
+  "capability.params": "resend with the params as `params` says.",
+  "ride.unavailable": "send an offered `alternatives` id, never an id you made; a `partial` one isn't what was asked: say so.",
+  "route.unreachable": "the room is closed: go where `alternatives` names, and tell your owner it isn't the room.",
+};
+export const seeHelp = (code) => (Object.hasOwn(SEE_TOPIC, code ?? "") ? { ...(Object.hasOwn(NEXT_STEP, code) ? { next: NEXT_STEP[code] } : {}), see: `help ${SEE_TOPIC[code]}` } : {});
 const stem = (w) => w.toLowerCase().replace(/[^a-z-]/g, "");   // the whole word: "messages" is not "message"
 /** Pure: the section of a markdown reference whose `## ` heading has the topic as a word, through the line before the next heading. */
 export function referenceSection(text, topic) {

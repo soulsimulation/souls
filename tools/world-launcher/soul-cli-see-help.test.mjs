@@ -8,7 +8,7 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {HELP_TOPICS, SEE_TOPIC, referenceSection} from './soul/eden.mjs';
+import {HELP_TOPICS, NEXT_STEP, SEE_TOPIC, referenceSection} from './soul/eden.mjs';
 
 const soul = fileURLToPath(new URL('./soul/', import.meta.url));
 const CLI = join(soul, 'eden.mjs'), notes = readFileSync(join(soul, 'schema-notes.md'), 'utf8');
@@ -19,6 +19,12 @@ test('every code that names a topic is written in that topic\'s section', () => 
     assert.ok(referenceSection(notes, topic).includes('`' + code + '`'), `${code} is in help ${topic}`);
   }
   assert.match(referenceSection(notes, 'refusals'), /`capability\.unknown`: no offer here has that id\. Never build an id from words[^]*`resolve "<the words>"`/);
+});
+
+test('#1475 arm B3: every refusals-topic code prints its own next step; the rides codes keep only see', () => {
+  for (const [code, topic] of Object.entries(SEE_TOPIC)) assert.equal(Object.hasOwn(NEXT_STEP, code), topic === 'refusals', code);
+  assert.match(NEXT_STEP['route.unreachable'], /go where `alternatives` names/);
+  assert.match(NEXT_STEP['capability.unknown'], /Never build one from words/);
 });
 
 test('act and resolve refusals end with see: help <topic>; an undocumented code and --json add nothing', async t => {
@@ -44,19 +50,19 @@ test('act and resolve refusals end with see: help <topic>; an undocumented code 
   const cli = (...args) => new Promise(res => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (e, out) => res({code: e?.code ?? 0, out: JSON.parse(out), text: out})));
 
   const made = await cli('act', 'fly:lab-pond-hall/hall');
-  assert.equal(made.out.code, 'capability.unknown'); assert.equal(made.out.see, 'help refusals');
+  assert.equal(made.out.code, 'capability.unknown'); assert.equal(made.out.see, 'help refusals'); assert.equal(made.out.next, NEXT_STEP['capability.unknown']);
   assert.equal(Object.keys(made.out).at(-1), 'see', 'the pointer is the last thing printed');
   assert.equal((await cli('act', 'walk:field')).out.see, 'help refusals');
-  assert.equal((await cli('act', 'object:balloon:steer', '{"to":"nowhere"}')).out.see, 'help rides');
+  const steer = (await cli('act', 'object:balloon:steer', '{"to":"nowhere"}')).out; assert.equal(steer.see, 'help rides'); assert.equal(steer.next, undefined);
   const other = await cli('act', 'dance:here');
   assert.equal(other.out.code, 'act.cooldown'); assert.equal(other.out.see, undefined);
   const raw = await cli('act', 'fly:lab-pond-hall/hall', '--json');
-  assert.equal(raw.out.code, 'capability.unknown'); assert.equal(raw.out.see, undefined, '--json is the world\'s answer');
+  assert.equal(raw.out.code, 'capability.unknown'); assert.equal(raw.out.see, undefined, '--json is the world\'s answer'); assert.equal(raw.out.next, undefined);
 
   const words = await cli('act', 'fly to the hall');
   assert.equal(words.code, 2); assert.equal(words.out.code, 'act.not-an-id'); assert.equal(words.out.see, 'help refusals');
   assert.equal((await cli('act', 'fly to the hall', '--json')).out.see, undefined);
   const ride = await cli('resolve', 'fly up to the pond hall');
-  assert.equal(ride.out.code, 'ride.unavailable'); assert.equal(ride.out.alternatives[0].id, 'walk:lab-pond-hall'); assert.equal(ride.out.see, 'help refusals');
+  assert.equal(ride.out.code, 'ride.unavailable'); assert.equal(ride.out.alternatives[0].id, 'walk:lab-pond-hall'); assert.equal(ride.out.see, 'help refusals'); assert.equal(ride.out.next, NEXT_STEP['ride.unavailable']);
   assert.equal((await cli('resolve', 'fly up to the pond hall', '--json')).out.see, undefined);
 });
