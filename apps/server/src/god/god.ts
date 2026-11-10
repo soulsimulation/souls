@@ -3,6 +3,7 @@
 // world process, persists commits, hands out god tokens by the same pairing
 // pattern Souls use, keeps undo/redo, routes prayers, and publishes diffs to
 // viewers (hub) and to gods (SSE).
+import { productionWorld, realTimeEnabled } from './real-clock.ts';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { TILE_M, tileOf } from '@souls/ground';
 import { WorldModel, correctKitDefines, type PlanOptions, creationInputFailure, definitionRefs, coreLibrary, libraryRef, applyBatch, padResettle, plan, batchSchema, hashOf, type Batch, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type UsesHook, type ResidentMove } from '@souls/world-compiler';
@@ -24,6 +25,18 @@ import { definitionUseClosure } from './unused-defs.ts';
 import { rewindChanges, rewindDependents } from './rewind.ts';
 import { GodTrace } from './trace.ts';
 import { repairBatch, tagPlaces, untagPlaces, type Repair } from './buildsafe.ts';
+/** #1649: a `world` op's time patch is held to the clock rules wherever it comes from (act, preview, env): on a production
+ *  world the clock is real time (no accelerated clock, no set hour, no day length); `clock: 'real'` needs real time on. */
+function worldClockFailure(ops: readonly { op: string; state?: unknown }[]) {
+  const realTime = realTimeEnabled(), production = productionWorld();
+  for (const [i, o] of ops.entries()) {
+    const t = o.op === 'world' ? (o.state as { time?: Record<string, unknown> } | undefined)?.time : undefined; if (!t) continue;
+    if (t.clock === 'real' && !realTime) return { op: i, code: 'time.real-clock-off', field: 'state.time.clock', detail: 'Real time is not on for this server.', fix: 'Leave time.clock unset.' };
+    if (realTime && production && (t.clock === 'accelerated' || t.set != null || t.dayTicks !== undefined))
+      return { op: i, code: 'time.accelerated-production', field: 'state.time', detail: "This world runs on real time; a set hour, a day length or the accelerated clock is a dev-world option only.", fix: "Preview another hour in the viewer (or look --hour); pause with POST /v1/god/env {timeScale: 0}." };
+  }
+  return null;
+}
 export type { WorldBuildMessage } from './builds.ts';
 const previewBatchSchema = batchSchema.extend({ build: buildFieldSchema.optional() });
 
@@ -401,6 +414,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const field = preview ? preview.build : this.callerField(input.build);
     const gate = this.helperGate(field, normalized.ops); if (gate) return { accepted: false, failures: [gate] };
     const retirement = this.retirementFailure(normalized.ops); if (retirement) return { accepted: false, failures: [retirement] };
+    if (!trusted) { const clock = worldClockFailure(normalized.ops); if (clock) return { accepted: false, failures: [clock] }; }
     const stale = [...this.stale(preview?.expect ?? {}), ...this.staleSubtrees(preview), ...this.stale(input.expect ?? {})];
     for (const expected of [input.expectWorldAbout, preview?.expectWorldAbout]) if (expected !== undefined && expected !== hashOf(this.model.state.about ?? null)) stale.push({ op: -1, code: 'revision.stale', field: 'expectWorldAbout', detail: 'World meaning changed since it was read. Read it again before replacing it.' });
     if (stale.length) return { accepted: false, failures: [...new Map(stale.map(f => [f.entity, f])).values()] };

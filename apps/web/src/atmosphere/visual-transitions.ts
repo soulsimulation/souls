@@ -1,5 +1,6 @@
 // Eden presentation only: no environment clock, native illumination or needs changes.
 import {parseLocalDateTime,sunTimes} from '../../../../mars/viewer/engine/env/sun.ts';
+import {equatorSun,sunSite} from '../sun-site.ts';
 const clamp=(x:number)=>Math.max(0,Math.min(1,x));
 const smooth=(x:number)=>{const t=clamp(x);return t*t*(3-2*t);};
 export const TWILIGHT_WORLD_HOURS=2.5;
@@ -13,8 +14,8 @@ export function visualDaylight(hour:number,rise:number,set:number){
 export function createEdenDaylight(){
  let date='',rise=0,set=0,valid=false;
  return (datetime:string,original:{daylight:number;warmth:number;blueHour:number})=>{
-  const next=datetime.slice(0,10);
-  if(next!==date){date=next;const times=sunTimes(next+'T12:00');valid=!!times.sunriseLocal&&!!times.sunsetLocal;
+  const next=datetime.slice(0,10)+(equatorSun()?'e':'');
+  if(next!==date){date=next;const noon=datetime.slice(0,10)+'T12:00',times=sunTimes(noon,...sunSite(noon));valid=!!times.sunriseLocal&&!!times.sunsetLocal;
    if(valid){rise=hour(times.sunriseLocal!);set=hour(times.sunsetLocal!);}}
   if(!valid)return original;
   const daylight=visualDaylight(hour(datetime),rise,set);

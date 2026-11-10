@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {writeFileSync, mkdirSync} from 'node:fs';
+import {setImmediate} from 'node:timers/promises';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture, invite, accept, factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {WorldModel, containerInside} from '../../packages/world-compiler/src/index.ts';
+import {TakeRecorder} from '../../mars/viewer/engine/take/recorder.ts';
+
+test('insulated fridge: real item identity, offers, close/reopen, cancellation, persistence and distant cost', {timeout:180000}, async t => {
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
+ const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});
+ t.after(()=>{comms.close();f.host.stop();f.db.close();});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});
+ installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
+ const tick=async(n=5)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};
+ const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};
+ await tick();await invite(f,'ana');const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Fridge storage test'}));
+ soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick();
+ const here=async()=>{const r=await app.request('/v1/edge/here?include=doHere');assert.equal(r.status,200);return(await r.json()).here;};
+ const absent=await here();
+ ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/drinks-fridge@3',name:`distant-fridge-${i}`,p:[120+i%10*2,120+Math.floor(i/10)*2]}))}));await tick(45);
+ const far=await here();assert.equal(JSON.stringify(far).length,JSON.stringify(absent).length,'100 distant fridges add zero compact context bytes');
+ assert.ok(!JSON.stringify(far).includes('distant-fridge'));
+ const idle=new TakeRecorder(f.host.engine.rt,{rulesVersion:'fridge-storage'});await tick(4);
+ const distantIds=new Set([...god.model.entities.values()].filter(e=>e.name?.startsWith('distant-fridge')).map(e=>e.id));
+ assert.ok(!Object.keys(idle.finish().tracks).some(id=>distantIds.has(id)),'no distant idle tracks');
+ const badFinish=god.act({ops:[{op:'place',def:'core/drinks-fridge@3',name:'unsupported-construction',p:[30,30],params:{condition:'construction'}}]});
+ assert.equal(badFinish.accepted,false,'new appliance domain rejects construction scaffolding');
+ const body=()=>f.host.engine.world.entities[soul.entityId],ax=body().pose.p[0],az=body().pose.p[2];
+ ok(god.act({ops:[{op:'place',def:'core/table@1',name:'table',p:[ax+2.4,az-.6]},
+ {op:'place',def:'core/bowl@2',name:'bowl',in:{parent:'table',slot:'top'},p:[.25,0]},
+ {op:'place',def:'core/lantern@3',name:'lantern',in:{parent:'table',slot:'top'},p:[-.25,0],state:{on:false}},
+ {op:'place',def:'core/drinks-fridge@3',name:'fridge',p:[ax+1,az+2.6],r:Math.PI}]}));await tick(60);
+ const ent=n=>{const e=[...god.model.entities.values()].find(e=>e.name===n);assert.ok(e,n);return e;};
+ const fridge=ent('fridge').id,bowl=ent('bowl').id,lantern=ent('lantern').id;
+ const item=id=>f.host.engine.world.entities[id];
+ const act=async(capability,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
+ const finish=async r=>{for(let i=0;i<1600;i++){const receipt=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','cancelled','replaced'].includes(receipt.phase)){assert.equal(receipt.phase,'completed',JSON.stringify(receipt));return receipt;}await tick(1);}throw Error('receipt timeout');};
+ const done=async cap=>finish(await act(cap));
+ await done(`pick-up:${bowl}`);assert.equal(item(bowl).support.kind,'in-hand');
+ assert.equal((await act(`put-in:${fridge}`,false)).code,'container.closed');
+ await done(`object:${fridge}:open`);
+ const offer=edge.capabilities(soul).find(c=>c.id===`put-in:${fridge}`);assert.ok(offer?.available,'storage offer discovered');
+ await done(`put-in:${fridge}`);
+ assert.deepEqual(item(bowl).support,{kind:'resting-on',on:fridge,slot:'in-1'});
+ assert.equal(ent('bowl').id,bowl);assert.equal(ent('bowl').in.parent,fridge);assert.equal(ent('bowl').in.slot,'in-1');
+ const opened=await here();assert.deepEqual(opened.objects.find(o=>o.id===fridge)?.state,{open:true,holds:['bowl']});
+ await done(`object:${fridge}:close`);
+ const closed=await here();assert.ok(!JSON.stringify(closed).includes(bowl),'opaque closed door conceals contents');
+ assert.ok(!edge.capabilities(soul).some(c=>c.target?.id===bowl),'closed item not offered');
+ const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);
+ assert.equal(restored.entities.get(bowl).in.parent,fridge);assert.equal(restored.entities.get(fridge).state.open,false);
+ const clone=factory.restore(f.host.engine.snapshot());assert.equal(clone.stateHash(),f.host.engine.stateHash());assert.equal(clone.world.entities[bowl].support.on,fridge);
+ await done(`object:${fridge}:open`);await done(`pick-up:${bowl}`);
+ assert.equal(item(bowl).support.kind,'in-hand');assert.equal(item(bowl).support.by,soul.entityId);
+ const interrupted=await act(`put-in:${fridge}`);await act('stand:here');await tick(70);
+ assert.equal(edge.receipt(soul.soulId,interrupted.receipt.id).phase,'replaced');assert.equal(item(bowl).support.kind,'in-hand','pre-handoff cancellation retains custody');
+ await done(`put-in:${fridge}`);await done(`pick-up:${lantern}`);
+ assert.equal((await act(`put-in:${fridge}`,false)).code,'item.does-not-fit');
+ assert.deepEqual(f.host.engine.runtime.violations,[]);
+ const report={status:'pass',hereBytes:{absent:JSON.stringify(absent).length,distant100:JSON.stringify(far).length},identityPreserved:true,persistence:true,cancelBeforeHandoff:true};
+ if(process.env.SOUL_ACTIONS_OUT){mkdirSync(process.env.SOUL_ACTIONS_OUT,{recursive:true});writeFileSync(`${process.env.SOUL_ACTIONS_OUT}/summary.json`,JSON.stringify(report,null,2));}
+ console.log(JSON.stringify(report));
+});

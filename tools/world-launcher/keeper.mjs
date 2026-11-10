@@ -40,6 +40,10 @@ const flag = (k) => { const i = rest.indexOf(`--${k}`); return i >= 0 ? rest[i +
 const log = (s) => console.log(`[keeper] ${s}`);
 if (!link) { console.error('[keeper] --link <release dir or symlink> is required'); process.exit(2); }
 link = resolve(link);
+// #1649: the stage this keeper serves, from its unit (sim-worlds@<stage> sets SIM_STAGE) or its stage link's name
+// (/srv/sim-worlds/<stage>): the launcher hands it to every world, where `production`/`legacy` refuse dev-only options.
+const stageOf = (env, linkPath) => env.SIM_STAGE || (['staging', 'production', 'legacy'].includes(linkPath.split('/').pop()) ? linkPath.split('/').pop() : '');
+const stage = stageOf(process.env, link);
 const port = Number(flag('port') ?? 4980);
 // a generation runs with cwd = its release: a relative --data would land in each release, so pin it now
 const di = rest.indexOf('--data');
@@ -65,7 +69,7 @@ function spawnGen(extraEnv = {}) {
   const dir = realpathSync(link);
   const script = join(dir, 'tools/world-launcher/launcher.mjs');
   if (!existsSync(script)) throw new Error(`no launcher in ${dir}`);
-  const child = fork(script, rest, { cwd: dir, env: { ...process.env, SIM_KEEPER: '1', ...extraEnv }, stdio: ['ignore', 'inherit', 'inherit', 'ipc'], serialization: 'json' });
+  const child = fork(script, rest, { cwd: dir, env: { ...process.env, SIM_KEEPER: '1', ...(stage ? { SIM_STAGE: stage } : {}), ...extraEnv }, stdio: ['ignore', 'inherit', 'inherit', 'ipc'], serialization: 'json' });
   const g = { n: ++genN, child, dir, build: readBuild(dir), pid: child.pid, up: false, exited: null, waiting: new Map(), onMsg: [] };
   let ready; g.ready = new Promise((yes, no) => { ready = { yes, no }; });
   child.on('message', (m) => onGenMessage(g, m, ready));

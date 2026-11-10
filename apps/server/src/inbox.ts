@@ -223,6 +223,13 @@ export class AgentInbox {
     // command, as before; a Soul's agent holds its whole backlog at once, so its retries stay idempotent.
     if (r?.acknowledged_at != null) {
       if (this.god(s) && this.get(s, 'AND n>? AND delivered_at IS NOT NULL', r.n)) throw new ApiError(404, 'not-found', 'this is no longer the latest message');
+      // #1753: acknowledged by the act linked to it (no ack of the agent's own): an ack that closes it is still a close, held
+      // while that act runs (#1295), and its words are the answer
+      if (!this.god(s) && outcome !== undefined && r.reply === null && r.outcome === null && r.result_at === null) {
+        this.held(s, id);
+        this.set(s, 'reply=?,outcome=?', r.n, typeof reply === 'string' ? reply.trim() || null : null, outcome === 'failed' ? 'failed' : 'done');
+        return {...this.view(s), latest: this.message(this.get(s, 'AND n=?', r.n)!)};
+      }
       return {...this.view(s), latest: this.message(r)};
     }
     if (!r) throw new ApiError(404, 'not-found', 'no such message (it may be too old)');
@@ -263,6 +270,14 @@ export class AgentInbox {
     const r = this.get(s, 'AND id=?', id); if (!r || (r.result_at !== null && (open || r.result_by !== 'server'))) return false;
     const line = text.replace(/\s+/g, ' ').trim(); if (!line) return false;
     this.set(s, "delivered_at=COALESCE(delivered_at,?),acknowledged_at=COALESCE(acknowledged_at,?),result=?,result_at=?,outcome=?,result_by='server'", r.n, this.now(), this.now(), line.length > 140 ? line.slice(0, 139) + '…' : line, this.now(), outcome);
+    return true;
+  }
+  /** #1753: an act linked to this message (`act --for`, a plan's step) is its acknowledgement: the agent sent no `ack`.
+   *  Only a message not acknowledged yet, with no reply; an `ack` sent anyway afterwards is answered as a retry. */
+  serverAck(s: InboxScope, id: string): boolean {
+    if (this.god(s)) return false;
+    const r = this.get(s, 'AND id=?', id); if (!r || r.acknowledged_at !== null) return false;
+    this.set(s, 'delivered_at=COALESCE(delivered_at,?),acknowledged_at=?', r.n, this.now(), this.now());
     return true;
   }
   /** D3c: the world's progress line for a linked act that served an earlier step; the message stays open. Never once it
