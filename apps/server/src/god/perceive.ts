@@ -145,6 +145,8 @@ export class GodPerceive {
     return o;
   }
   private objs: { kindOf(k: string): unknown; register(k: unknown): void } | null = null;
+  /** #1751: set while the object framework builds a whole menu (see wrapCapabilities). */
+  private wholeMenu = false;
   /** R4-INFO: each built object's place (innermost god-built or world place holding it) and standing level. */
   private placed = new Map<string, { place: string | null; level: number }>();
   private kinds = new Set<string>();
@@ -198,6 +200,8 @@ export class GodPerceive {
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
       policy:(id:string,soul:EdgeSoul,action:string)=>this.h.edge?.contactActuator?.policy(soul,id,action)??null,
+      wholeMenu: () => this.wholeMenu,
+      hidden: (soul: EdgeSoul, at: Vec2) => !!this.h.edge?.knowledge?.hidesPoint(soul.soulId, at),
       bodyAt: (soul: EdgeSoul): Vec2 | null => { const b = this.h.engine.world.entities[soul.entityId]; return b?.pose?.p ? [b.pose.p[0], b.pose.p[2]] : null; },
       commit: (id: string, patch: Record<string, unknown>, note: string) => this.h.commit!([{ op: 'set', id, state: patch }], note),
       stateOf: (id: string) => { const e = this.h.model.entities.get(id), def = e && this.h.model.resolvedDef(e.def); return e && def ? actuatedState(e, def) : null; },
@@ -480,7 +484,10 @@ export class GodPerceive {
   private wrapCapabilities(o: Pick<Objects, 'capabilities'> & { __godCaps?: boolean }) {
     if (o.__godCaps) return; o.__godCaps = true;
     const original = o.capabilities.bind(o);
-    o.capabilities = (...args) => original(...args).filter(cap =>
+    // #1751: a whole menu (no objects named) lists things within sight only; a focused build or an act takes one from anywhere
+    o.capabilities = (...args) => { const outer = this.wholeMenu; this.wholeMenu = !args[1]; try { return original(...args); } finally { this.wholeMenu = outer; } };
+    const listed = o.capabilities;
+    o.capabilities = (...args) => listed(...args).filter(cap =>
       // #442: a whole thing has nothing to repair (its row may lag a sync behind the state)
       !(cap.object && this.desired.has(cap.object) && (cap.blocked?.code === 'object.out-of-reach' || cap.blocked?.code === 'repair.not-broken')));
   }

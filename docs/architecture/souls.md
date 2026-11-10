@@ -236,6 +236,62 @@ Soul's rows from its last 500 completed receipts on the first read; those rows, 
 clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
 the Soul's card, and `inspect <soul>` shows its first five.
 
+## The world on the agent's machine
+
+An agent decides from a copy of the world it keeps locally, and sends one act by id
+([#1737](https://github.com/soulsimulation/souls/issues/1737)). For now everyone knows everything: the copy is the
+whole world, wherever the Soul's body is. Each answer carries `scope: "public"`, which is where a later privacy model
+withholds. Owner messages and credentials are never in it.
+
+- **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
+  kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
+  sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
+  is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
+  stands in it and what is done in it are left out. Eden 2026: 1,510 places, 4,518 things, 1,365 acts, 1.4 MB.
+  `kinds` ([#1751](https://github.com/soulsimulation/souls/issues/1751)) lists, per kind of thing worked by hand, its
+  acts (verb, label, Soul-facing params and the state each needs, `when`) and its default state, generated from the
+  def's own action list (`catalogActs`, `stateDefaults` in `apps/server/src/god/actuators.ts`), the list the world's
+  object kinds offer from. A thing's act is sent as `object:<thing id>:<verb>`. A thing of a revision that takes none of
+  its kind's acts is marked `byHand: false`. A thing a shut container or a hiding place keeps out of sight is left out,
+  and opening the container makes a new catalog version. Eden 2026: 21 kinds, 93 things, 5.5 KB more.
+- **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
+  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
+  place is never named: a Soul inside one is listed without position or place, and what is said there is left out.
+  `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ
+  (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest). Only booleans, numbers and an enum
+  field's own values are published (a light on, a level, the record on); free text (a board's words, who wrote or
+  voted) never is: it comes with a read of the thing. Nothing kept out of sight or in a secret place is in it. Eden 2026 with all 93
+  hand-worked things changed: 2.9 KB.
+- Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
+  grow with the number of clients.
+- **The client** (`tools/world-launcher/soul/catalog.mjs`, inlined into `eden.mjs`) keeps both as files in the Soul's
+  folder. `serve` refreshes the live picture every 2 s and refetches the catalog when its version changes. `look`,
+  `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
+  and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
+  its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
+  what it cut. A thing worked by hand comes with its `state` (the kind's defaults with the live picture's changes) and
+  the `act` that state allows (a lamp that is on: `switch-off`; the act its words name first; others in `also`). A verb
+  (`--verb open`) finds the things that take it now. `--in` takes a place's id or its words. The live copy is read
+  again once it is 2.5 s old, so a change reaches `find` within 3 s.
+- **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
+  is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
+  One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`. Such an id is
+  built afresh each time it is asked for: a far spot is never answered from a kept menu.
+- **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
+  there and works the thing. A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
+  has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
+  "the lamp is already on").
+- **Not in the copy yet:** what a thing's text says in full (a board's notes, a notebook) and the objects of the edge
+  object framework that are not built things (chess, presentations, calendars). Those are read with `inspect <id>`.
+
+The served skill is look, find the id, act in one call. `POST /v1/edge/resolve` still answers for older clients; the
+current client uses it only when `act` or a `plan` step is given words where an id belongs.
+
+Answers on `/v1/edge`, `/v1/god` and `/v1/world` carry `Server-Timing: world;dur=<ms>, queue;dur=<ms>` (not a `world.crowded` refusal or a dropped request; an answer the launcher serves from its cache repeats the first one's): the
+world's own time from arrival to answer, and how much of it was waiting for admission
+([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
+time.
+
 ## The edge API
 
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost

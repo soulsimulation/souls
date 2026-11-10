@@ -80,6 +80,10 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 export type ActuatorHost = {
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
+  /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
+  wholeMenu?(): boolean;
+  /** #1751: true when this point is inside a secret place this Soul has not been to or found. */
+  hidden?(soul: EdgeSoul, at: Vec2): boolean;
   deferContacts?: boolean;
   contactPlan?(soul:EdgeSoul,target:string,action:string,params?:Record<string,unknown>):{params:Record<string,unknown>;root:[number,number,number];level?:number;face?:[number,number];/** entry 32: where to step back to afterwards (a knock) */after?:[number,number];/** #1070: a close with nowhere to stand once it is shut */noRoom?:boolean}|null;
   /** Commit a state change of a god thing as an engine edit. */
@@ -334,17 +338,59 @@ function actionParams(a: Action): Record<string, { type: 'string'; maxLength: nu
   return out;
 }
 
+/** The name pattern an object action takes (kindActions offers no other). */
+const ACTION_NAME = /^[a-z][a-z0-9_-]{0,39}$/;
+/** #1751 (soul-catalog): a def's acts as the catalog publishes them, from the same list kindActions offers: the verb, its
+ *  label, the Soul-facing params, and the state it needs (`when`). A thing's act is sent as `object:<thing>:<verb>`. */
+export type CatalogKindAct = { verb: string; label: string; params?: ReturnType<typeof actionParams>; when?: { field: string; is?: unknown; not?: unknown }[] };
+export function catalogActs(def: StoredDef): CatalogKindAct[] {
+  return actionsOf(def).filter((a) => ACTION_NAME.test(a.name)).map((a) => {
+    const params = actionParams(a), when = a.when.map((w) => ({ field: w.field, ...(w.is !== undefined ? { is: w.is } : {}), ...(w.not !== undefined ? { not: w.not } : {}) }));
+    return { verb: a.name, label: a.label, ...(Object.keys(params).length ? { params } : {}), ...(when.length ? { when } : {}) };
+  });
+}
+/** #1751: the defaults of the state a def's acts read or write (what a thing is in until the live picture says otherwise). */
+export function stateDefaults(def: StoredDef): Record<string, unknown> {
+  const out: Record<string, unknown> = {}, defaults = def.state as Record<string, { default?: unknown }>;
+  for (const f of Object.keys(actuatedState({ state: {} } as Entity, def))) { const v = defaults[f]?.default; if (publishable(def, f, v)) out[f] = v; }
+  return out;
+}
+/** Longest enum value a published state carries. */
+export const STATE_TEXT_MAX = 80;
+/** #1751: what a published state may carry: a boolean, a number, or one of an enum field's own values. Free text (a
+ *  board's words, who wrote or voted, players) is never published: it comes with a read of the thing. */
+function publishable(def: StoredDef, field: string, v: unknown): boolean {
+  if (typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) return true;
+  const spec = (def.state as Record<string, { type?: string; values?: readonly unknown[] }>)[field];
+  return typeof v === 'string' && v.length <= STATE_TEXT_MAX && spec?.type === 'enum' && !!spec.values?.includes(v);
+}
+/** #1751: the fields of a thing's acted-on state that differ from its def's defaults, or null when none do: only what
+ *  `publishable` allows, never a notebook's. */
+export function stateDiff(e: Entity, def: StoredDef): Record<string, unknown> | null {
+  if (!e.state || def.tags?.includes('notebook')) return null;
+  let out: Record<string, unknown> | null = null;
+  const defaults = def.state as Record<string, { default?: unknown }>;
+  for (const [f, v] of Object.entries(actuatedState(e, def))) {
+    if (e.state[f] === undefined || same(v, defaults[f]?.default) || !publishable(def, f, v)) continue;
+    (out ??= {})[f] = v;
+  }
+  return out;
+}
+
 /** Object-kind actions for a def's actions (the `built` kind of things of that def). */
 export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: BuiltLike) => string) {
   const out: Record<string, any> = {};
   for (const a of actionsOf(def)) {
-    if (!/^[a-z][a-z0-9_-]{0,39}$/.test(a.name)) continue;
+    if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
       if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
-      if (d > ACT_SIGHT) return { code: 'object.out-of-reach', reason: `${nameOf(s)} is ${Math.round(d)} m away; walk closer first.` };
+      // #1751: a thing's act is taken by id from anywhere and walks there as part of the act (the plan's own walk). A whole
+      // menu still lists only things within sight (a far one costs nothing there), and a secret place's things stay unknown.
+      if (host.hidden?.(ctx.soul, s.at)) return { code: 'object.out-of-reach', reason: `You do not know the way to ${nameOf(s)}.` };
+      if (d > ACT_SIGHT && host.wholeMenu?.()) return { code: 'object.out-of-reach', reason: `${nameOf(s)} is ${Math.round(d)} m away; send its id to go and work it.` };
       const denied = s.key ? host.access?.(s.key, ctx.soul) : null; if (denied) return denied;
       const busy = s.key ? host.busy?.(s.key, a.name) : null; if (busy) return busy;
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
