@@ -2521,7 +2521,7 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
       done.catch(() => {});
       resolve({ status: res.statusCode ?? 0, ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300,
         headers: { get: (k) => { const v = res.headers[String(k).toLowerCase()]; return v === undefined ? null : Array.isArray(v) ? v.join(", ") : String(v); } },
-        text: async () => { ended ??= done; await ended; return Buffer.concat(chunks).toString("utf8"); } });
+        text: async () => { ended ??= done; await ended; return Buffer.concat(chunks).toString("utf8"); }, clone() { return this; } });
     });
     const onAbort = () => req.destroy(signal.reason instanceof Error ? signal.reason : new Error("This operation was aborted"));
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -2530,11 +2530,14 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
     req.end(data ?? undefined);
   });
 }
+// tools/soul-trace's tap (node --import tap.mjs) sees fetch; it offers its wrapper here so these calls are traced the same way
+let TRACED = null;
+const tracedWorldFetch = () => (TRACED ??= globalThis[Symbol.for("soul-trace.wrap")]?.(worldFetch) ?? worldFetch);
 async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
   let r;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
-    r = await worldFetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: signal && AbortSignal.any ? AbortSignal.any([timeout, signal]) : signal ?? timeout });
+    r = await tracedWorldFetch()(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: signal && AbortSignal.any ? AbortSignal.any([timeout, signal]) : signal ?? timeout });
   } catch (e) {
     return { status: 0, data: { error: { code: "unreachable", message: String(e.message) } } };
   }
