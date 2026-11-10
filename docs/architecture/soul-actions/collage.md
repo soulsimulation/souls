@@ -9,3 +9,5 @@ Kinds declare actions and text parameters; numeric coordinates/angles and enum c
 The first independent-piece attempt is retained: ordinary native surface placement snaps carried items to discrete slots. Free collage therefore uses finite material transfer plus an exact-definition observer decoration, with no engine or support change.
 
 Direction: https://github.com/soulsimulation/souls/blob/647d04a5ce5621717c2fad78c153d082e3dffcb2/docs/design/soul-actions-direction.md . Claude alone approves dependencies, integrates, merges and releases.
+
+Paper revision 2 raises only its logical envelope height to the supported 0.05 metre minimum for ordinary definition admission, preserving visible geometry and the published revision 1 bytes. New material/recovery uses revision 2; existing revision 1 portions remain recognized. The first comparison boot failure from revision 1 definition admission is retained and excluded.
