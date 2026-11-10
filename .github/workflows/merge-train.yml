@@ -57,24 +57,44 @@
 #                            default GITHUB_TOKEN do not start CI, so without it the train only merges PRs that are
 #                            already current with main; a PR that is behind gets needs:rebase
 #   CLAUDE_CODE_OAUTH_TOKEN  for the conflict-resolution step (skipped without it)
-# The workflow always runs from the default branch: pull_request_target and workflow_dispatch use main's copy, and a
-# review event only dispatches main's copy, so a PR cannot change the train that merges it.
+# The work always runs from the default branch's copy (workflow_dispatch --ref main), so a PR cannot change the train
+# that merges it. PR events (pull_request, pull_request_review) only relay: they hold no secret, check nothing out and
+# dispatch main's copy with GITHUB_TOKEN (actions: write), passing the PR number for a queue exit (#1597:
+# pull_request_target is blocked by GitHub's default policy from 2026-12-02). Limits of the relay: a fork PR's token is
+# read-only and GitHub runs no pull_request workflow for a PR with a merge conflict, so those events relay nothing. The
+# PR is still picked up by the next train run (each run re-reads the whole merge:ready queue, and a dropped PR that
+# still has the label is retried there); a manual dispatch of merge-train.yml on main starts one by hand.
 name: merge-train
 on:
-  pull_request_target:
+  pull_request:
     types: [labeled, unlabeled, dequeued]
   pull_request_review:
     types: [submitted]
   workflow_dispatch:
+    inputs:
+      exit:
+        description: "Queue exit only (the relay sets it): unlabeled or dequeued. Empty runs the train"
+        required: false
+        default: ''
+      pr:
+        description: Queue exit only, the PR number
+        required: false
+        default: ''
+      reason:
+        description: Queue exit only, the queue's dequeue reason
+        required: false
+        default: ''
 permissions:
   contents: read
 jobs:
-  # A maintainer approval (or their approved:maintainer label) may unblock a waiting T3/T4 PR: start main's train (no
-  # PR code or secrets used here). The gate itself is the required proof-ok check (tools/proof/gate.mjs).
+  # merge:ready added, or a maintainer approval (or their approved:maintainer label) that may unblock a waiting T3/T4
+  # PR: start main's train (no PR code or secrets used here). The gate itself is the required proof-ok check
+  # (tools/proof/gate.mjs).
   kick:
     if: >-
       (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') ||
-      (github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'approved:maintainer')
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'merge:ready') ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'approved:maintainer')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -86,12 +106,29 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: gh workflow run merge-train.yml --repo "$REPO" --ref "$DEFAULT_BRANCH"
 
+  # merge:ready removed, or the queue dropped the PR: relay the PR number to main's queue-exit below.
+  relay-exit:
+    if: >-
+      github.event_name == 'pull_request' &&
+      (github.event.action == 'dequeued' || (github.event.action == 'unlabeled' && github.event.label.name == 'merge:ready'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          REASON: ${{ github.event.reason }}
+        run: gh workflow run merge-train.yml --repo "$REPO" --ref "$DEFAULT_BRANCH" -f exit="$ACTION" -f pr="$PR" -f reason="$REASON"
+
   # The queue's way back to the author (queue mode, see the header). Runs main's script; no PR code. A dequeue is read
   # after a short wait, so a PR that merged or that the queue re-entered is left alone.
   queue-exit:
-    if: >-
-      github.event_name == 'pull_request_target' &&
-      (github.event.action == 'dequeued' || (github.event.action == 'unlabeled' && github.event.label.name == 'merge:ready'))
+    if: github.event_name == 'workflow_dispatch' && inputs.exit != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -101,9 +138,9 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
       REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number }}
-      ACTION: ${{ github.event.action }}
-      REASON: ${{ github.event.reason }}
+      PR: ${{ inputs.pr }}
+      ACTION: ${{ inputs.exit }}
+      REASON: ${{ inputs.reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,6 +148,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
       - run: |
+          case "$ACTION:$PR" in unlabeled:*|dequeued:*) ;; *) echo "::error::exit must be unlabeled or dequeued"; exit 1;; esac
+          [[ "$PR" =~ ^[1-9][0-9]*$ ]] || { echo "::error::pr must be a PR number"; exit 1; }
           if [ "$ACTION" = unlabeled ]; then
             node .github/scripts/merge-train.mjs hold --repo "$REPO" --pr "$PR"
           else
@@ -119,9 +158,7 @@ jobs:
           fi
 
   train:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'merge:ready')
+    if: github.event_name == 'workflow_dispatch' && inputs.exit == ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
     concurrency:

@@ -46,7 +46,9 @@ test('helpers: full jitter stays under the capped exponential; a stated wait is 
   assert.equal(retryAfterMs(new Headers(), {}), null);
   assert.equal(retryClass('GET', '/v1/edge/here?include=doHere'), 'read'); assert.equal(retryClass('POST', '/v1/edge/resolve'), 'read');
   for (const p of ['/v1/edge/act', '/v1/edge/say', '/v1/edge/converse', '/v1/edge/objects/o1/act']) assert.equal(retryClass('POST', p), 'keyed', p);
-  for (const p of ['/v1/edge/inbox/m1/ack', '/v1/edge/inbox/m1/result', '/v1/agent/create']) assert.equal(retryClass('POST', p), 'none', p);
+  assert.equal(retryClass('POST', '/v1/agent/create'), 'none');
+  // #1753: an ack or result is answered the same however often it is sent, so it is retried with one key until answered
+  for (const p of ['/v1/edge/inbox/m1/ack', '/v1/edge/inbox/m1/result']) assert.equal(retryClass('POST', p), 'keyed', p);
 });
 
 test('a read honours Retry-After: one calm line, the stated wait, then the answer', { timeout: 8_000 }, async t => {
@@ -68,12 +70,17 @@ test('a world that stays busy: the CLI waits 3 times, then exits 75 with a clean
   assert.match(got.stderr, /world\.busy — the world is busy\. Try once again in 2 s; do not loop/);
 });
 
-test('writes without an idempotency key are never repeated: ack on world.busy and on unreachable', { timeout: 8_000 }, async t => {
-  const f = await fixture(t, (_req, res, n) => n === 1 ? busy(res) : res.socket.destroy());
+test('#1753: ack and result are retried with one key after a busy refusal and a dropped connection', { timeout: 15_000 }, async t => {
+  const ok = (res, body) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+  const f = await fixture(t, (req, res, n) => n === 1 ? busy(res, 'world.busy', 0) : n === 3 ? res.socket.destroy() : req.url.includes('/inbox/m1/') && req.method === 'POST' ? ok(res, { inbox: { latest: { id: 'm1', state: 'acknowledged' } } }) : ok(res, { message: { id: 'm1', state: 'acknowledged' } }));
   const a = await f.run('ack', 'm1', 'Got it.');
-  assert.equal(a.code, 75); assert.equal(f.seen.length, 1); assert.match(a.stderr, /world\.busy/);
+  assert.equal(a.code, 0, a.stderr);
+  const acks = f.seen.filter((x) => x.url.endsWith('/ack'));
+  assert.equal(acks.length, 2); assert.ok(acks[0].key); assert.equal(acks[1].key, acks[0].key, 'one key for every try');
   const b = await f.run('result', 'm1', 'done', 'Waved.');
-  assert.equal(b.code, 75); assert.equal(f.seen.length, 2); assert.match(b.stderr, /Not retried: this write has no safe retry/);
+  assert.equal(b.code, 0, b.stderr);
+  const results = f.seen.filter((x) => x.url.endsWith('/result'));
+  assert.equal(results.length, 2); assert.equal(results[1].key, results[0].key);
 });
 
 test('act and say retry with the same Idempotency-Key and body after a busy refusal and a dropped connection', { timeout: 8_000 }, async t => {
