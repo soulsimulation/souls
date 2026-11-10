@@ -1,0 +1,6 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "id": "sand-timer-20261110",
+  "reason": "New immutable core-sand-timer@1 and core-timer-table@1: portable finite sand, completed native intervals and retained open-frame geometry.",
+  "findings": []
+}
