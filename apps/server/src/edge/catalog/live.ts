@@ -108,10 +108,15 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
   // the push's own time: the picture's build (shared with GET), and the diff, frame and fan-out on top of it
   const cost = {runs: 0, ms: [] as number[], build: [] as number[], push: [] as number[], bytes: 0, since: Date.now(), tick: 0};
   const rec = (a: number[], v: number) => { if (timer && a.length < 4800) a.push(v); };   // only while the push runs; a minute's worth
+  // a thing's state and the places change at a commit, not on a tick: each is in the key, so neither waits for the next
+  // bucket (a bucket lasts longer while the clock runs slow, and never ends while it is paused). The ledger's thing states
+  // are a new Map at each change, so a new Map is a new version.
+  let thingsSeen: unknown = null, thingsVer = 0;
+  const thingsVersion = () => { const s = L.thingStates?.() ?? null; if (s !== thingsSeen) { thingsSeen = s; thingsVer++; } return thingsVer; };
   const current = () => {
     const nowShown = `${L.knowledge?.version ?? 0}|${L.places.version}`;
     if (nowShown !== shown) { shown = nowShown; ring.length = 0; }
-    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${L.knowledge?.version ?? 0}`;
+    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}`;
     if (kept?.key === key) return kept;
     const tb = performance.now(), pic = build(tick), td = performance.now(); rec(cost.build, td - tb);
     if (!kept) { kept = {key, pic, seq: 1, body: null, hash: null}; return kept; }

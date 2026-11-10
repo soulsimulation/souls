@@ -30,5 +30,7 @@ export function fakeLiveWorld() {
   const advance = (ticks = 10) => { world.tick += ticks; };
   const say = (soulId: string, id: string, text: string) => spectate({kind: 'speech', tick: world.tick, at: 1, id, from: {soulId, name: minds.get(soulId)?.name}, channel: {}, text});
   const secret = (id: string, on: boolean) => { if (on) secrets.add(id); else secrets.delete(id); knowledge.version++; };
-  return {hub, app, get, advance, say, secret, setThing, entities, world};
+  // a place's outline redrawn (the places' version moves, the knowledge's does not)
+  const reshape = (id: string, polygon: [number, number][]) => { (places.byId.get(id) as {polygon: [number, number][]}).polygon = polygon; places.version++; };
+  return {hub, app, get, advance, say, secret, reshape, setThing, entities, world};
 }

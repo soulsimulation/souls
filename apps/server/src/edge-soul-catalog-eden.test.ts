@@ -286,11 +286,21 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     w.god.engineAct([{op: 'set', id: up.id, state: {on: false}}] as never, 'test: switch upstairs');
     await run(12);
     assert.deepEqual((await get('/v1/edge/live')).body.things[up.id], {on: false});
+    // #1755: the push, held across it (the whole picture first, then each change)
+    const frames: {event: string; data: any}[] = [], stop = live.subscribe(null, (event, data) => frames.push({event, data: JSON.parse(data)}));
+    assert.deepEqual(frames[0]!.data.things[up.id], {on: false}, 'the whole picture carries it while its room is public');
     L.knowledge.setSecret(up.place, true);
     try {
       await run(12);
       assert.equal((await get('/v1/edge/live')).body.things[up.id], undefined, 'not in live once its room is secret');
       assert.equal((await get('/v1/edge/catalog')).body.things.some((x: any) => x.id === up.id), false, 'nor in the catalog');
-    } finally { L.knowledge.setSecret(up.place, false); }
+      const from = frames.findIndex(f => f.data.things?.del?.includes(up.id));
+      assert.ok(from > 0, 'the push deletes it');
+      w.god.engineAct([{op: 'set', id: up.id, state: {on: true}}] as never, 'test: switch upstairs, hidden');
+      w.god.engineAct([{op: 'set', id: up.id, state: {on: false}}] as never, 'test: and again');
+      await run(12); await get('/v1/edge/live');
+      const late = live.subscribe(null, (event, data) => frames.push({event, data: JSON.parse(data)})); late();
+      assert.ok(!JSON.stringify(frames.slice(from).map(f => f.data)).includes(`"${up.id}":`), 'no frame after, nor a later whole picture, carries its state');
+    } finally { stop(); L.knowledge.setSecret(up.place, false); }
   });
 });

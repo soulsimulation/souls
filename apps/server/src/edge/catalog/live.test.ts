@@ -90,6 +90,21 @@ test('a thing\'s state is pushed; one inside a secret outline, on any floor, is 
   back.stop(); c.stop(); w.hub.close();
 });
 
+test('a thing\'s change and a redrawn secret outline are sent at once, not at the next tick bucket (a slow or paused clock)', async () => {
+  const w = fakeWorld(), c = follow(w.hub);
+  w.setThing('e_door', {open: true}); await w.get();   // no tick: the clock is paused
+  assert.deepEqual(c.got.at(-1)!.data.things, {set: {e_door: {open: true}}, del: []}, 'a thing\'s change is pushed without the clock moving');
+  assert.deepEqual((await w.get()).things, {e_door: {open: true}}, 'and GET carries it');
+  w.secret('g-attic', true); await w.get();
+  const n = c.got.length;
+  w.reshape('g-attic', [[0, 0], [10, 0], [10, 10], [0, 10]]); await w.get();   // the secret room now covers the yard: Ada and the door
+  assert.equal(c.got.length, n + 1, 'one frame, still without the clock moving');
+  assert.deepEqual(c.got.at(-1)!.data.things, {set: {}, del: ['e_door']});
+  assert.deepEqual(c.got.at(-1)!.data.souls.set, [{id: 's_a', name: 'Ada', at: null, place: null, doing: null}]);
+  const pic = JSON.stringify(await w.get()); assert.ok(!pic.includes('"e_door":') && !pic.includes('[1,1]'), 'GET withholds both at once');
+  c.stop(); w.hub.close();
+});
+
 test('the push runs only while someone holds it', async () => {
   const w = fakeWorld();
   assert.equal(w.hub.subscribers(), 0);
