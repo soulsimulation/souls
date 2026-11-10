@@ -253,3 +253,12 @@ test('#1453 known limit: a body more than 0.27 m off this 1 m flight\'s line is 
   const e=stranded(true),c=e.world.entities.climber,p=[...c.pose.p] as [number,number,number];
   for(const [off,want] of [[.26,false],[.27,false],[.28,true],[.3,true]] as const){c.pose.p=[p[0]+off,p[1],p[2]];assert.equal(flagged(e),want,`${off} m off the line`);}
 });
+
+test('#1453 under flight-resume/1 a release stands the body clear of every flight end on its landing level, not on the point where climbers step on and off',()=>{
+  const {e,c}=releasedOnFlight(true);
+  const sp=(e as any).rt.services.spatial;sp.sync((e as any).rt.world);
+  const r=(e as any).bodyRadiusV1(c);
+  const ends=sp.scene.links.filter((l:any)=>l.usable).flatMap((l:any)=>[l.from,l.to]).filter((q:any)=>q.level===c.human!.level);
+  assert.ok(ends.length>0,'the landing level has flight ends');
+  for(const q of ends)assert.ok(Math.hypot(q.p[0]-c.pose.p[0],q.p[1]-c.pose.p[2])>=2*r-1e-9,`clear of the flight end at ${JSON.stringify(q.p)}: ${JSON.stringify(c.pose.p)}`);
+});
