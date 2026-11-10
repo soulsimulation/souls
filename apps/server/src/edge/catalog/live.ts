@@ -28,6 +28,23 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     if (speech.length > LIVE_SPEECH) speech.shift();
   });
   let kept: {key: string; body: string} | null = null;
+  // #1751: things whose acted-on state differs from their kind's default (a lamp on, a door open), only the fields that
+  // differ; nothing a shut container keeps out of sight and nothing in a place kept off the map. Built again only when the
+  // world's things change (a new states map) or what is secret does.
+  let shown: {states: unknown; secrets: number; things: Record<string, Record<string, unknown>>; more: number} | null = null;
+  const thingsNow = () => {
+    const states = L.thingStates?.(), secrets = L.knowledge?.version ?? 0;
+    if (shown && shown.states === states && shown.secrets === secrets) return shown;
+    const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, things: Record<string, Record<string, unknown>> = {};
+    let n = 0, more = 0; const locate = states?.size ? L.places.locator() : null;
+    for (const [id, st] of [...(states ?? [])].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+      const p = world.entities[id]?.pose?.p; if (!p || L.concealedThing?.(id)) continue;
+      let hid = false; for (let q = locate!(p[0]!, p[2]!, 0), k = 0; q && k < 12 && !hid; q = q.parent ? L.places.byId.get(q.parent) : undefined, k++) hid = secret(q.id);
+      if (hid) continue;
+      if (n++ < LIVE_THINGS) things[id] = st; else more++;
+    }
+    return (shown = {states, secrets, things, more});
+  };
   const build = (tick: number) => {
     const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, r1 = (n: number) => Math.round(n * 10) / 10;
     type Row = {id: string; name: string; at: number[] | null; place: string | null; doing: string | null};
@@ -40,14 +57,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     }).sort((a, b) => a.id < b.id ? -1 : 1);
     // #1751: things whose acted-on state differs from their kind's default (a lamp on, a door open), only the fields that
     // differ; nothing a shut container keeps out of sight and nothing in a place kept off the map
-    const things: Record<string, Record<string, unknown>> = {}; let n = 0, more = 0;
-    const states = L.thingStates?.(), locate = states?.size ? L.places.locator() : null;
-    for (const [id, st] of [...(states ?? [])].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
-      const p = world.entities[id]?.pose?.p; if (!p || L.concealedThing?.(id)) continue;
-      let hid = false; for (let q = locate!(p[0]!, p[2]!, 0), k = 0; q && k < 12 && !hid; q = q.parent ? L.places.byId.get(q.parent) : undefined, k++) hid = secret(q.id);
-      if (hid) continue;
-      if (n++ < LIVE_THINGS) things[id] = st; else more++;
-    }
+    const {things, more} = thingsNow();
     return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech, things, ...(more ? {thingsMore: more} : {})});
   };
   app.get('/v1/edge/live', (c: Context) => {
