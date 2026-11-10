@@ -14,6 +14,7 @@ import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
 import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
 import { assertSeatHome } from './seat-home.mjs';
+import { recordOn } from '../record/switch.mjs';
 
 export const ADAPTERS = { 'claude-headless': claude, 'codex-headless': codex, 'scripted-owner': scriptedOwner };
 export const LIVE_ADAPTERS = new Set(['claude-headless', 'codex-headless']);
@@ -87,7 +88,7 @@ export class Seat {
       let up = true;
       for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
       if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
-      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) { await cli('import'); if (this.seat.record !== false) this.info.recordOn = recordOn(this.folder); }
       this.ownerSettings();
       if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
       this.info.sessionId = null; this.save();
@@ -232,7 +233,7 @@ export class Seat {
     this.save();
     for (const e of r.stream) appendJsonl(join(this.dir, 'transcript.jsonl'), { turn: n, ...e });
     const rec = { turn: n, reason, startedAt: started.t, endedAt: ended.t, startMono: started.mono, endMono: ended.mono, wallMs: r.wallMs, usage: r.usage ? { ...r.usage, costUsd: turnCost, ...(sessionCost != null ? { sessionCostUsd: sessionCost } : {}) } : r.usage, finalText: r.finalText,
-      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null, ...(r.seatCheck ? { seatCheck: r.seatCheck } : {}) };
+      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null, ...(r.seatCheck ? { seatCheck: r.seatCheck } : {}), ...(r.backgroundEnded?.length ? { backgroundEnded: r.backgroundEnded } : {}) };
     appendJsonl(join(this.dir, 'turns.jsonl'), rec);
     const u = r.usage ?? {};
     appendJsonl(join(this.dir, 'cost.jsonl'), { t: ended.t, mono: ended.mono, turn: n, inputTokens: u.inputTokens ?? null, cachedTokens: u.cachedTokens ?? null,
@@ -240,6 +241,9 @@ export class Seat {
       ...(hold ? { reservedUsd: hold.usd } : {}) });
     writeFileSync(join(this.dir, 'chat-as-rendered.md'), `\n<!-- turn ${n} (${reason}) ${started.t} -->\n\n${this.adapter.renderChat(r.stream)}`, { flag: 'a' });
     this.inTurn = false;
+    // #1774: an agent that put its own `listen` in the background (as the skill says) expects Claude Code to keep it and
+    // wake it; the turn's end ended it, so the harness's listen takes over now, on a seat that keeps the wake loop.
+    if (!this.waking && !this.stopped && r.backgroundEnded?.some((c) => /\blisten\b/.test(c))) this.wakeLoop();
     if (this.waking && !this.stopped) this.startListen();
     return rec;
   }
@@ -340,6 +344,8 @@ export function createSeat({ runDir, seat, worldBase, rails }) {
     const identity = newIdentity();
     writeFileSync(join(s.folder, '.eden-agent.json'), JSON.stringify({ identity }) + '\n', { mode: 0o600 });
     s.info.ownerIdentity = identity;
+    // #1774: the client's full session record (#1773), on before the seat's first command; seat.record false turns it off
+    if (seat.record !== false) s.info.recordOn = recordOn(s.folder);
   }
   s.save();
   return s;
