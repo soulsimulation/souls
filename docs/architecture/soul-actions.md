@@ -12,6 +12,12 @@ context-size checks below), regression runs, and an uncut real-client recording 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
   `upright-carry`, containers with an `inside`, the tea defs, and so on). Older revisions of a def keep their old,
   hand-free behaviour, so existing worlds do not change until a god places the new revision.
+- **Land-art materials ([#1541](https://github.com/soulsimulation/souls/issues/1541)).** `core-smooth-stone@1`,
+  `core-flat-stone@1` and `core-driftwood-piece@1` are separate small items, using the same native pickup and
+  ground placement as a lantern. Pick up a piece, walk to a chosen clear place (or stop along a route), and use
+  `put-down:here`; pick it up again to rearrange it. The ground placement is in front of the body and may turn toward clear ground,
+  rather than setting an arbitrary coordinate. Each entity keeps its actual saved position. There is no preset
+  composition, stacking rule, special land-art action or new placement authority.
 - **Storage with and without a door ([#435](https://github.com/soulsimulation/souls/issues/435)).** A container with an
   `inside` (entry 42) is open only while its door or drawer is, if its def declares an `open` state. One that declares
   none has no door: `core-swap-shelf@1` is always open, so what is on it is seen nearby and taken without an open step,
@@ -709,3 +715,9 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Finished poetry folio (#1577)
+
+`core-poetry-folio@1` is a blank open folio on a display stand. Its `object:<id>:write` offer takes `text`, up to 100 characters and three lines. The existing hand-writing stroke commits the words and writer's Soul id together; interrupted approach or writing before contact leaves it blank. The write action requires empty text and there is no erase action, so a completed folio is a finished artifact rather than a rewritable notice. A god can place another blank folio for another poem.
+
+Nearby Souls discover the write schema while blank and use `read:<id>` after completion. Reading returns the exact poem with its writer and labels it as authored words, not world facts. The words and `textBy` credit persist in entity state. Existing access rules and `capability.params` / `object.state` refusals apply. This is one short displayed poem, not a multi-page publishing or portable-book system; #1033's family scale applicability remains separate.
