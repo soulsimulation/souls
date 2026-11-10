@@ -100,7 +100,7 @@ export function productionSettings(cfg, origin) {
     base, devAuth, publicOrigin, authEnvFile: cfg.authEnvFile ?? null, maxWorlds, maxRunning,
     minFreeMb: cfg.minFreeMb ?? 0, worldHeapMb: cfg.worldHeapMb ?? 0,
     // #1649: the deploy stage (sim-worlds@<stage>.service sets SIM_STAGE=%i); `production` refuses dev-only world options
-    stage: cfg.stage ?? (/^[a-z][a-z0-9-]{0,31}$/.test(process.env.SIM_STAGE ?? '') ? process.env.SIM_STAGE : null),
+    stage: cfg.stage ?? (/^[a-z][a-z0-9-]{0,31}$/.test(process.env.SIM_STAGE ?? '') ? process.env.SIM_STAGE : null),   // keeper.mjs stageOf
   };
 }
 

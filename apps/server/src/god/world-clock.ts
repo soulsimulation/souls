@@ -8,7 +8,7 @@
 import type { WorldHost } from '../world.ts';
 import type { GodMode } from './god.ts';
 import { config } from '../config.ts';
-import { defaultTimeZone, installRealClock, isTimeZone, realTimeEnabled } from './real-clock.ts';
+import { defaultTimeZone, installRealClock, isTimeZone, productionWorld, realTimeEnabled } from './real-clock.ts';
 
 /** The rules payload that (re)starts the clock at `tick` with `dayTicks`, continuing from `prev` when given. */
 export function clockConfig(tick: number, dayTicks: number, prev?: { origin: number; dayTicks: number }) {
@@ -58,6 +58,12 @@ export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string
   const time = () => god.model.state.time as TimeState;
   const realTime = o.realTime ?? realTimeEnabled(), slug = o.slug ?? config.worldSlug ?? config.worldKey;
   if (realTime) migrateWorldTime(god, slug, log);
+  else if (time()?.clock === 'real') {
+    // real time turned off again (a rollback): the world goes back to the accelerated clock it runs, so nothing that reads
+    // `time.clock` (weather durations, the viewer's sun) disagrees with the clock
+    const r = god.engineAct([{ op: 'world', state: { time: { clock: null } } }] as never, 'world clock: real time is off (#1649 rollback)');
+    log(r.accepted ? 'world clock: back on the accelerated clock (real time off)' : `world clock: rollback refused: ${JSON.stringify(r.failures ?? [])}`);
+  }
   const real = realTime ? installRealClock(host, { zone: () => worldTimeZone(god, slug), paused: () => time()?.paused === true,
     active: () => time()?.clock !== 'accelerated', now: o.now, checkMs: o.checkMs, log }) : null;
   const want = () => {
@@ -97,7 +103,8 @@ export function worldTimeZone(god: GodMode, slug?: string): string {
 export function migrateWorldTime(god: GodMode, slug: string | undefined, log: (m: string) => void = () => {}) {
   const t = god.model.state.time as TimeState, patch: Record<string, unknown> = {};
   if (!isTimeZone(t?.timeZone)) patch.timeZone = defaultTimeZone(slug);
-  if (t?.clock !== 'real' && t?.clock !== 'accelerated') patch.clock = 'real';
+  if (t?.clock !== 'real' && (t?.clock !== 'accelerated' || productionWorld())) patch.clock = 'real';
+  if (productionWorld() && (t?.set != null)) patch.set = null;
   if (!Object.keys(patch).length) return;
   const what = Object.entries(patch).map(([k, v]) => `${k} ${v}`).join(', ');
   const r = god.engineAct([{ op: 'world', state: { time: patch } }] as never, `world clock: ${what} (real-time migration, #1649)`);

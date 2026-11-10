@@ -125,7 +125,7 @@ if(config.accountAuthRequired&&!auth.ready)throw Error('Account authentication v
 
 const living = config.worldKey !== 'toy' && config.livingWorld ? new LivingWorld(host) : null;
 if(edenCore)await settleEmptyEden(host,living,definition.customs);
-else if (living) { living.camp = config.worldKey === 'mars'; void living.install(definition.customs, realTimeEnabled() ? defaultTimeZone(config.worldSlug ?? config.worldKey) : undefined); }
+else if (living) { living.camp = config.worldKey === 'mars'; if (!realTimeEnabled()) void living.install(definition.customs); /* on real time the keeper below starts the clock, with these customs */ }
 const runtimePolicy = host.extra.runtimePolicy as { sleepBlockTicks: number; quietSeatCourtesy?: boolean } | undefined;
 let courtesy: Promise<unknown> = Promise.resolve();
 if (living && host.engine.configureRuntimePolicy && !runtimePolicy?.quietSeatCourtesy) {
@@ -177,7 +177,7 @@ if (groundHost && edge) installGroundCapabilities(edge as never, god!, host);
 const engineBridge = god && config.engine === 'mars' && process.env.ENTITY_BRIDGE !== '0' ? installEngineBridge({ host, god, edge }) : undefined;
 // #1649: real time for every world through the one keeper. God worlds got theirs from the bridge (god/world-clock.ts);
 // an authored world (eden, mars, littlemartians) keeps the local time of its migration zone. Not the toy world.
-if (realTimeEnabled() && config.worldKey !== 'toy' && !hasRealClock(host)) installRealClock(host, { zone: () => defaultTimeZone(config.worldSlug ?? config.worldKey), log: (m) => console.log(m) });
+if (realTimeEnabled() && config.worldKey !== 'toy' && !hasRealClock(host)) installRealClock(host, { zone: () => defaultTimeZone(config.worldSlug ?? config.worldKey), customs: definition.customs, log: (m) => console.log(m) });
 if (god && process.env.BIRTH_LOOKS !== '0') installBirthLooks(host, edge);  // lane LOOKS: new Souls in new worlds get a varied kit look
 if (god) installWorldEnv(host, god, edge);  // R4-LIVE: Souls perceive the god's weather
 if (god) installLightning(god, edge, () => host.engine.world.tick);  // GOD-ENV: Souls see the bolts and hear the thunder

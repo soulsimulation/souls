@@ -1246,7 +1246,9 @@ export class WorldHost {
           m.nextEvalTick=Math.min(m.nextEvalTick,tick+1+hash32(m.soulId)%20);
           m.evalTrigger='world-event';m.lastFingerprint='';
         }
-        if (p?.dayConfig) { this.extra.living = { ...p.dayConfig, lastDay: -1, event: 'a new place', quiet: false }; for (const m of this.minds.values()) m.life ??= newLife(tick); }
+        // #1649: a real-time re-alignment (`realign`) moves the origin only and keeps the day's state
+        if (p?.dayConfig && p.realign === true && this.extra.living) { const was = this.extra.living as Record<string, unknown>; this.extra.living = { ...p.dayConfig, lastDay: was.lastDay, event: was.event, quiet: was.quiet, ...(was.quietDay !== undefined ? { quietDay: was.quietDay } : {}) }; }
+        else if (p?.dayConfig) { this.extra.living = { ...p.dayConfig, lastDay: -1, event: 'a new place', quiet: false }; for (const m of this.minds.values()) m.life ??= newLife(tick); }
         if(p?.runtimePolicy)this.extra.runtimePolicy=structuredClone(p.runtimePolicy);
         const day = this.living;
         if (p?.quiet && day) { day.quiet = true; day.quietDay = p.day; }
@@ -1505,8 +1507,8 @@ export class WorldHost {
     for (const m of this.minds.values()) {
       if (!m.life) continue;
       const e = this.engine.world.entities[m.entityId]; if (!e?.human) continue;
-      // #1649: needs move over a real day on a real-time clock; every other clock keeps the accelerated day they always had
-      const needsDay = this.living?.dayTicks === REAL_DAY_TICKS ? REAL_DAY_TICKS : DAY_TICKS;
+      // #1649: needs move over a real day on a real-time clock (its dayConfig names a zone); other clocks keep the accelerated day
+      const needsDay = (this.living as {zone?: string} | undefined)?.zone ? REAL_DAY_TICKS : DAY_TICKS;   // also while a real-time clock is paused
       const floater=(e as unknown as {body?:{family:string}}).body?.family==='floater';
       const nearby = [...this.mindByEntity.values()].some(other => { const b = this.engine.world.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; });
       const humanRest=(this.extra.runtimePolicy as {humanRestNeedsV1?:boolean}|undefined)?.humanRestNeedsV1===true;

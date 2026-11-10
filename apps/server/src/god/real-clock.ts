@@ -77,9 +77,10 @@ export const MIGRATION_ZONES: Readonly<Record<string, string>> = Object.freeze({
 export const DEFAULT_TIME_ZONE = 'America/New_York';
 export function defaultTimeZone(slug: string | undefined): string { return (slug && MIGRATION_ZONES[slug]) || DEFAULT_TIME_ZONE; }
 
-/** #1649: the deploy's explicit production marker. The production unit sets SIM_STAGE=production (sim-worlds@.service:
- *  the instance name), the launcher passes it to every world; anything else (staging, local, tests) is a dev world. */
-export function productionWorld(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_STAGE === 'production'; }
+/** #1649: the deploy's explicit production marker. The keeper names its stage from the unit instance it runs
+ *  (sim-worlds@<stage>: SIM_STAGE, or its --link /srv/sim-worlds/<stage>), the launcher passes it to every world; the
+ *  public stages (production, legacy) are production; anything else (staging, local, tests) is a dev world. */
+export function productionWorld(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_STAGE === 'production' || env.SIM_STAGE === 'legacy'; }
 
 /** A world clock's mode: real time, or the dev-only accelerated clock (`time.clock: 'accelerated'`). With the flag off
  *  every world keeps the accelerated clock it always had. */
@@ -101,6 +102,8 @@ export type RealClockOptions = {
   /** The god paused time (the clock stands still). */ paused?: () => boolean;
   /** Whether this keeper owns the clock now (false: another mode, e.g. the dev-only accelerated clock). */ active?: () => boolean;
   now?: () => number; checkMs?: number; log?: (m: string) => void;
+  /** The customs of a world whose clock has not started yet (LivingWorld's; later configs carry the running ones). */
+  customs?: string[];
 };
 const kept = new WeakSet<object>();
 /** Whether a real-time keeper already runs this host's clock. */
@@ -123,12 +126,14 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
       if (l && l.dayTicks === PAUSED_TICKS) return Promise.resolve();
       // the time of day stands where it is (the phase of the running day), on a day too long to move
       const days = l ? Math.max(0, tick - l.origin) / l.dayTicks : 0;
-      payload = { dayConfig: { origin: Math.round(tick - days * PAUSED_TICKS), dayTicks: PAUSED_TICKS, customs: l?.customs ?? [], zone }, why: 'world clock: paused by the god' };
+      payload = { dayConfig: { origin: Math.round(tick - days * PAUSED_TICKS), dayTicks: PAUSED_TICKS, customs: l?.customs ?? o.customs ?? [], zone }, why: 'world clock: paused by the god' };
     } else {
       if (l && l.zone === zone && Math.abs(realClockDriftMs(l, tick, now(), zone)) < REALIGN_MS) return Promise.resolve();
       const c = realClockConfig(tick, now(), zone);
-      payload = { ...c, dayConfig: { ...c.dayConfig, customs: l?.customs ?? [] } };
+      payload = { ...c, dayConfig: { ...c.dayConfig, customs: l?.customs ?? o.customs ?? [] } };
     }
+    // a clock that already runs only moves its origin: the day's state (last day turn, event, quiet) is kept (world.ts)
+    if (l) (payload as { realign?: boolean }).realign = true;
     pending = host.enqueue('rules', 'world', payload).then(() => {}).finally(() => { pending = undefined; });
     return pending.then(sync);
   };

@@ -81,7 +81,7 @@ export function envPatch(state: WorldState, env: EnvInput, journalSeq: number, c
     if (!ctx.realTime) throw new ApiError(409, 'time.real-clock-off', 'Real time is not on for this server (SIM_REAL_TIME).');
     if (env.timeOfDay !== undefined || (env.timeScale !== undefined && Number(env.timeScale) !== 0)) throw new ApiError(400, 'invalid', 'realTime: true takes no timeOfDay or timeScale');
     out.time = { ...out.time, clock: 'real', paused: false };
-  } else if (real && !ctx.production && (env.timeOfDay !== undefined || (env.timeScale !== undefined && Number(env.timeScale) !== 0))) out.time = { ...out.time, clock: 'accelerated' };
+  } else if (real && !ctx.production && (env.timeOfDay !== undefined || (env.timeScale !== undefined && Number(env.timeScale) !== 0))) out.time = { ...out.time, clock: 'accelerated', ...(env.timeOfDay === undefined ? { set: null } : {}) };
   if (env.timeOfDay !== undefined) out.time = { ...out.time, set: { hour: round(parseHour(env.timeOfDay)), n: journalSeq } };
   if (env.timeScale !== undefined) {
     const s = Number(env.timeScale);

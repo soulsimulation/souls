@@ -105,12 +105,17 @@ switch independent. A previously saved master mute migrates to both switches off
   and the viewer's sun, which on real time is an equator sun on the local clock (daylight about 06:00 to 18:00, all
   year; `apps/web/src/sun-site.ts`). Authored worlds without a god (eden, mars, littlemartians run by `main.ts`) keep
   the local time of their migration zone through the same keeper. Old-world forks served by `tools/core` are out of scope.
-- **Time setter on real time.** `POST /v1/god/env` on a production world (the deploy's marker `SIM_STAGE=production`,
-  set by `sim-worlds@.service` as the instance name and passed to every world by the launcher) refuses `timeOfDay`
+  A re-alignment only moves the clock's origin (`realign`), so the day's state (last day turn, event, quiet) is kept.
+  When daylight saving ends, the local clock, and so the world's, goes back an hour once.
+- **Time setter on real time.** `POST /v1/god/env` on a production world (the deploy's marker `SIM_STAGE`: the keeper
+  takes it from its unit, `sim-worlds@<stage>`, or its stage link's name, and the launcher passes it to every world;
+  `production` and `legacy` are production) refuses `timeOfDay`
   (`time.real-clock`: preview another hour in the viewer or with `look --hour`) and a speed (`timeScale` > 0,
   `time.accelerated-production`); pausing (`timeScale: 0`) and resuming (`realTime: true`) stay allowed. On a dev world
   a set hour or speed puts the world on the dev-only accelerated clock (`time.clock: 'accelerated'`, as playtests need);
-  `realTime: true` puts it back.
+  `realTime: true` puts it back. `POST /v1/god/act` holds the same rule for a `world` op's time (`clock: 'accelerated'`,
+  `set` or `dayTicks` on a production world: `time.accelerated-production`). With the flag off again, a migrated world's
+  `time.clock` is cleared at boot so nothing reads a clock it does not run.
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,

@@ -135,7 +135,7 @@ test('#1649 envPatch on a real-time world: production previews the hour and refu
   assert.throws(() => patchForSeq(base, { timeScale: 24 }, 1, prod), (e: any) => e.code === 'time.accelerated-production');
   assert.deepEqual(patchForSeq(base, { timeScale: 0 }, 1, prod).time, { paused: true }, 'pausing stays allowed');
   assert.deepEqual(patchForSeq(base, { realTime: true }, 1, prod).time, { clock: 'real', paused: false }, 'resume on real time');
-  assert.deepEqual(patchForSeq(base, { timeScale: 24 }, 1, dev).time, { clock: 'accelerated', paused: false, dayTicks: 72000 }, 'a dev world may speed up');
+  assert.deepEqual(patchForSeq(base, { timeScale: 24 }, 1, dev).time, { clock: 'accelerated', set: null, paused: false, dayTicks: 72000 }, 'a dev world may speed up (a stale set hour is dropped)');
   // a playtest's default (#888): midday, paused, on a dev world: the accelerated clock at 12:00
   assert.deepEqual(patchForSeq(base, { timeOfDay: 12, timeScale: 0 }, 5, dev).time, { clock: 'accelerated', set: { hour: 12, n: 5 }, paused: true });
   const fast = { ...base, time: { ...base.time, clock: 'accelerated' } };
