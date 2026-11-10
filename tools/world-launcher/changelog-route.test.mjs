@@ -13,7 +13,7 @@ const dir = mkdtempSync(join(tmpdir(), 'launcher-changelog-'));
 const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
 const webDir = join(dir, 'web'); mkdirSync(join(webDir, 'assets'), { recursive: true });
 writeFileSync(join(webDir, 'index.html'), '<!doctype html><title>Sim</title>');
-const PAGE = '<!doctype html><title>Changelog · Sim</title><main><section class="cl-release" id="v4.0"></section></main>';
+const PAGE = '<!doctype html><title>Changelog · Sim</title><main><section class="cl-release" id="v0.105"></section></main>';
 writeFileSync(join(webDir, 'changelog.html'), PAGE);
 const command = () => { throw Error('no world is started in this test'); };
 const opts = (port, extra = {}) => ({ port, range: [P0 + 2, P0 + 2], dataDir: join(dir, `data-${port}`), webDir, templatesDir, command, eager: 0, log: () => {}, ...extra });

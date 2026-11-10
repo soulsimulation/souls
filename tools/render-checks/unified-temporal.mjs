@@ -16,7 +16,7 @@ try{
  const results=[];
  for(const [i,mode]of (process.argv[4]??'moving,frozen,no-shadows').split(',').entries()){
   if(!['moving','frozen','no-shadows'].includes(mode))throw Error('unknown temporal condition');
-  const r=await world.api('/v1/god/act',{body:{ops:[{op:'world',state:{time:{set:{hour:12,n:i+100},paused:mode==='frozen'},weather:{kind:'clear',clouds:0,wind:0,rain:0,fog:0}}}]}});
+  const r=await world.api('/v1/god/act',{body:{ops:[{op:'world',state:{time:{set:{hour:12,n:i+100},paused:mode==='frozen',clock:'accelerated'},weather:{kind:'clear',clouds:0,wind:0,rain:0,fog:0}}}]}});
   if(!r.accepted)throw Error(JSON.stringify(r));
   await delay(1000);
   await page.goto(world.base+'/?shot=1&eye=-20,18,8&at=-14,1,-26',{timeout:120000});

@@ -201,7 +201,22 @@ test('Clerk sign-in: the owner’s verified session sets it, another account’s
     assert.equal((await send('dev:alice')).status, 401, 'no dev identity on a Clerk launcher');
     r = await send(alice); const b = await r.json();
     assert.equal(r.status, 200, JSON.stringify(b)); assert.equal(b.thumbnailSource, 'owner');
-  } finally { await C.close(); }
+    // #1279: the site admin, a signed-in site owner, sets it on a world they do not own; a god token gives them no such reach
+    const bobId = await verifiedCreator(`Bearer ${bob}`, child, corigin, new URL('../..', import.meta.url).pathname);
+    process.env.SIM_SITE_OWNERS = bobId;
+    assert.equal((await send('dev:alice')).status, 401, 'still no dev identity');
+    assert.equal((await send('god_unknown')).status, 401, 'a token this world does not know is nobody');
+    r = await send(bob); const admin = await r.json();
+    assert.equal(r.status, 200, JSON.stringify(admin)); assert.equal(admin.thumbnailSource, 'owner');
+    const rows = readFileSync(join(cdir, 'data', 'audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((x) => x.op === 'thumbnail');
+    assert.deepEqual(rows.map((x) => [x.by, x.via]), [[aliceId, 'session'], [bobId, 'site-admin']], 'the owner and the admin are told apart');
+    r = await fetch(`${corigin}/__sim/worlds/alice-fen/thumbnail`, { method: 'POST', headers: { 'content-type': 'image/jpeg', authorization: `Bearer ${bob}` }, body: jpeg(1000, 1000) });
+    assert.equal(r.status, 400, 'the same gate as the owner'); assert.equal((await r.json()).code, 'thumbnail.dimensions');
+    r = await fetch(`${corigin}/__sim/worlds/alice-fen/thumbnail`, { method: 'DELETE', headers: { authorization: `Bearer ${bob}` } });
+    assert.equal(r.status, 200, 'and may clear it');
+    delete process.env.SIM_SITE_OWNERS;
+    assert.equal((await send(bob)).status, 403, 'no longer a site owner, no longer allowed');
+  } finally { delete process.env.SIM_SITE_OWNERS; await C.close(); }
 });
 
 test('archived while an upload is being checked: nothing is written into the moved folder, and restore still works', async () => {
