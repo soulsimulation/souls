@@ -721,3 +721,11 @@ Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun 
 `core-poetry-folio@1` is a blank open folio on a display stand. Its `object:<id>:write` offer takes `text`, up to 100 characters and three lines. The existing hand-writing stroke commits the words and writer's Soul id together; interrupted approach or writing before contact leaves it blank. The write action requires empty text and there is no erase action, so a completed folio is a finished artifact rather than a rewritable notice. A god can place another blank folio for another poem.
 
 Nearby Souls discover the write schema while blank and use `read:<id>` after completion. Reading returns the exact poem with its writer and labels it as authored words, not world facts. The words and `textBy` credit persist in entity state. Existing access rules and `capability.params` / `object.state` refusals apply. This is one short displayed poem, not a multi-page publishing or portable-book system; #1033's family scale applicability remains separate.
+
+A knotting desk (`core-knotting-desk@1`) works with the same portable `core-knot-board@1`.
+Choose `tie-overhand`/`untie-overhand` for its red left cord, or `tie-eight`/`untie-eight` for
+its blue right cord. Six seconds of completed native craft changes only that cord; interruption
+preserves both. Existing access, actual resting support, free hands and starting board/cord state
+are rechecked before the completed transaction. The board exposes its current knots/worker and
+normal pickup/placement; the desk reports only its own historical work. These are authored
+three-dimensional knot paths, not load-bearing rope simulation or a knot-teaching certification.

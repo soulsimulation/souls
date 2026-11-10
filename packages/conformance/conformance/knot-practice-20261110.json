@@ -1,0 +1,17 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-10 #1727: same finite portable two-cord knot board and knotting desk on existing native craft. Scoped EF4 K2 placed/baked/rendered both definitions at ten samples with zero findings/gaps. Registered builder separately checks all four independent cord-state combinations; raw authored family stays within400 triangles. No prior revisions, baselines or budgets changed.",
+  "defs": [
+    {
+      "def": "core-knot-board@1",
+      "hash": "cd46f7e3b62724451a916a2f85fb41cd9e9a12bb77d27e29f048c82c547535c1"
+    },
+    {
+      "def": "core-knotting-desk@1",
+      "hash": "66929654c5e0bc51be3fe93ee0e578253d5dc506271e7454e032bc64edafd51b"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}
