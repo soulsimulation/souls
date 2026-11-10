@@ -94,6 +94,10 @@ touched, and why. A rung-1 action touches the same kinds of file:
 Persistence: the guestbook keeps its entries in the entity's state, so it needed no new store. A new faculty that keeps
 something else must say where it lives and how it survives a restart.
 
+For a family that changes state or creates an artifact when native work completes, use the shared
+[Soul completion commit template](soul-completion.md). Do not copy a `god.act` callback: Soul work must not enter God
+Undo history or clear God Redo, and its committed output still needs context and derived geometry updates.
+
 A changed def is a new revision: old revisions keep their bytes, and the revision needs a conformance supplement in the
 same change.
 
