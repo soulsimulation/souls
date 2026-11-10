@@ -148,6 +148,7 @@ test('an authored world (no god) keeps real time through the same keeper; custom
   await keeper.sync();
   assert.equal(hasRealClock(host), true);
   assert.equal(events.length, 1);
+  assert.equal(events[0].realign, undefined, 'from the accelerated clock: a fresh day state, not a re-alignment');
   assert.deepEqual(host.living.customs, ['supper at the long table'], 'customs carry over');
   assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(0, 16), '2026-11-09T18:00', '18:00 in New York');
   tick += 20 * 30; wall += 30_000; await keeper.sync();
@@ -155,6 +156,7 @@ test('an authored world (no god) keeps real time through the same keeper; custom
   wall += 3_600_000; host.pace = 0.25;   // nobody watching; the periodic check skips a slowed world (sync on demand still works)
   await keeper.sync();
   assert.equal(events.length, 2, 'an explicit sync re-aligns');
+  assert.equal(events[1].realign, true, 'already on real time: a re-alignment');
   assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(11, 16), '19:00');
   keeper.stop();
 });

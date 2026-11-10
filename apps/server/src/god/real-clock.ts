@@ -132,8 +132,9 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
       const c = realClockConfig(tick, now(), zone);
       payload = { ...c, dayConfig: { ...c.dayConfig, customs: l?.customs ?? o.customs ?? [] } };
     }
-    // a clock that already runs only moves its origin: the day's state (last day turn, event, quiet) is kept (world.ts)
-    if (l) (payload as { realign?: boolean }).realign = true;
+    // a clock already on real time only moves its origin: the day's state (last day turn, event, quiet) is kept (world.ts).
+    // Coming from another clock (the accelerated one, whose day numbers differ), the day state starts over.
+    if (l?.zone) (payload as { realign?: boolean }).realign = true;
     pending = host.enqueue('rules', 'world', payload).then(() => {}).finally(() => { pending = undefined; });
     return pending.then(sync);
   };
