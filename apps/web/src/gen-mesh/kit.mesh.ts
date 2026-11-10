@@ -1,3 +1,4 @@
+import { addPavementChalk, pavementChalkKey } from './pavement-chalk.ts';
 // kit/2 mesh half: rounded low-poly primitives merged into few draws; parts with a `role` stay
 // separate under pivot groups so creature gaits and spinning wheels can move them. Owner: L1.
 // Geometry is cached per (def hash, palette) so many instances share one BufferGeometry.
@@ -244,6 +245,7 @@ registerMesh({
     let proto = cache.get(key);
     if (!proto) {
       proto = buildKit(parsed.data, { ...ctx, state: ctx.entity.state ?? {}, flameHint: flameHint(ctx.def), plant: isPlantDef(ctx.def), smokeFx: !ctx.def.components.route && !ctx.def.tags.includes('moving') });
+      addPavementChalk(proto, ctx);
       // lane PERF-MATERIALS: a kit of several static casters casts as one proxy (shadow-proxy.ts); role parts keep their own
       try { addShadowProxy(proto, { generated: true }); } catch (e) { console.warn('kit shadow proxy skipped', e); }
       cache.set(key, proto);
@@ -262,5 +264,5 @@ registerMesh({
 
 // K2: $params can change geometry; both prototype and instance identity include numeric values.
 function kitCacheKey(ctx: MeshCtx, args: KitProgramArgs): string {
-  return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state);
+  return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state) + (pavementChalkKey(ctx) ? ':chalk:' + pavementChalkKey(ctx) : '');
 }
