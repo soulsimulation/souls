@@ -13,6 +13,7 @@ import { browserQuality } from './quality-tier.ts';
 import { worldArrivalPose } from './arrival-shot.ts';
 import { calendarClock, entityWorldState, entryWorldClock, setWeatherOf, shotClockAt } from './world-env.ts';
 import { visitorPreviewHour } from './visitor-hour.ts';
+import { realClockOf, setEquatorSun } from './sun-site.ts';
 import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { compileSceneAsync } from './gen-mesh/texture-budget.ts';
 import { arrivalMark } from './arrival-marks.ts';
@@ -80,6 +81,7 @@ function arrive(early: EarlyLayer, made: NonNullable<Made>, done: () => void) {
   camera.position.fromArray(pose.eye); camera.lookAt(target);
   // the world's clock as the page's HTML gave it (the server writes it; apps/server/src/edge-snapshot.ts withWorldClock): the
   // sky, sun and night fill as LiveWorld's first take will set them, instead of the no-clock midday it then jumped from
+  setEquatorSun(realClockOf(entityWorldState(layer)));
   let clock = calendarClock(entryWorldClock(), entityWorldState(layer));
   if (clock) { light.setNightLighting(true); light.update(shotClockAt(clock, visitorPreviewHour()));
     if (!Number.isFinite(light.daylight)) { clock = null; light.setNightLighting(false); light.update(null); } }   // a clock the sun cannot place: midday, never a black poster

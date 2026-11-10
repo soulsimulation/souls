@@ -6,13 +6,17 @@ import {threadCpuUsage} from 'node:process';
 export const MENU_STATS = process.env.EDGE_MENU_STATS === '1';
 /** Debug: compare every kept menu with a fresh build and log differences (costs a full rebuild per read). */
 export const MENU_ORACLE = process.env.EDGE_MENU_ORACLE === '1';
+/** #1770 plan-once: an act binds its offer once and plans each leg once (SIM_PLAN_ONCE=0 turns the reuse off). */
+export const PLAN_ONCE = process.env.SIM_PLAN_ONCE !== '0';
+/** #1770 debug: every plan-once reuse is compared with a fresh computation, and a difference is logged and counted. */
+export const PLAN_ONCE_ORACLE = process.env.SIM_PLAN_ONCE_ORACLE === '1';
 type Counts = Record<string, number>;
 export const menuStats = {
   cap: {hit: 0, hitKept: 0, miss: 0, missKey: 0, missAge: 0, missReads: 0, missAbsent: 0, oracleMiss: 0, cpuUs: 0} as Counts,   // hit: same tick; hitKept: kept across ticks (tail redone)
   capClear: {} as Counts,   // site → global clears
   capDrop: {} as Counts,    // site → one Soul's entry dropped
   src: {hit: 0, miss: 0, cpuUs: 0} as Counts,
-  one: {n: 0, sameTick: 0, kept: 0, keptFocus: 0, built: 0, oracleMiss: 0, cpuUs: 0} as Counts,   // L3 item 4: bindOne (one offer)
+  one: {n: 0, sameTick: 0, kept: 0, keptFocus: 0, built: 0, turn: 0, oracleMiss: 0, cpuUs: 0} as Counts,   // L3 item 4: bindOne (one offer)
   words: {exact: 0, kept: 0, built: 0, exactified: 0, fellBack: 0, oracleMiss: 0, focused: 0, focusUnknown: 0, focusSkipped: 0, keepNarrowed: 0, keepWidened: 0, focusOracleMiss: 0} as Counts,   // L3 (b): the words menu (resolve / act in words); srv-act-words: focused words
   missBySoul: {} as Counts,   // soulId → menu rebuilds
 };

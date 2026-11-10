@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 (#1651): opt-in core-garden-sprinkler@2 adds existing upright transport to the immutable @1 sprinkler. Valve/nozzle geometry, water sound, state, reach and contact actions stay unchanged. Qualification uses the existing raw family and rendered conformance checks; no new hold or older supplement changes.",
+  "findings": []
+}

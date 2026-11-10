@@ -451,6 +451,21 @@ test('workflow: only a label being added starts the train or the kick; removing 
   }
 });
 
+test('workflow: no pull_request_target (#1597); PR events only relay to main\'s copy, with no checkout or secret', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dir = new URL('../workflows/', import.meta.url);
+  for (const f of readdirSync(dir)) assert.doesNotMatch(readFileSync(new URL(f, dir), 'utf8'), /^\s*pull_request_target:/m, f);
+  const yml = readFileSync(new URL('merge-train.yml', dir), 'utf8');
+  const job = name => yml.slice(yml.indexOf(`\n  ${name}:\n`), yml.indexOf('\n\n  ', yml.indexOf(`\n  ${name}:\n`) + 1));
+  for (const name of ['kick', 'relay-exit']) {
+    assert.doesNotMatch(job(name), /checkout|secrets\./, `${name} holds no secret and runs no code`);
+    assert.match(job(name), /gh workflow run merge-train\.yml --repo "\$REPO" --ref "\$DEFAULT_BRANCH"/);
+  }
+  assert.match(job('train'), /if: github\.event_name == 'workflow_dispatch' && inputs\.exit == ''/);
+  assert.match(job('queue-exit'), /if: github\.event_name == 'workflow_dispatch' && inputs\.exit != ''/);
+  assert.match(job('queue-exit'), /\^\[1-9\]\[0-9\]\*\$/, 'the relayed PR number is checked');
+});
+
 test('workflow: every gh workflow run dispatch uses github.token, not the PAT (Next PR chain)', async () => {
   const { readFileSync } = await import('node:fs');
   const yml = readFileSync(new URL('../workflows/merge-train.yml', import.meta.url), 'utf8');

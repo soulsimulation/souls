@@ -12,8 +12,10 @@ import type { EdgeCapability } from './edge/contract.ts';
 const NO_EDEN = existsSync(new URL('../../../worlds/templates/eden-2026.json', import.meta.url)) ? false : 'needs worlds/templates/eden-2026.json (lane/engine content)';
 type NavV1 = { navWarmV1(ms: number): boolean };
 type Cap = { id: string; available: boolean; blocked?: { code: string } };
-/** Poll ticks plus slices: ~70-150 ms of relabel at 10 ms a tick, x3 for a loaded runner. */
-const BOUND_TICKS = 10 + 45;
+/** Poll ticks plus slices. The relabel runs in 10 ms wall-clock slices, so a slower machine needs more of them for the
+ *  same work: ~70-150 ms of relabel here, but a loaded CI runner (server-5) took past the old bound of 55. What is proved is
+ *  that ticks alone warm the labels, not how fast; 600 ticks (6 s of slices) still fails a loop that never relabels. */
+const BOUND_TICKS = 600;
 
 test('Eden 2026: labels a moving ride invalidated after the first build are warmed by the tick loop alone', { timeout: 900_000, skip: NO_EDEN }, async (t) => {
   const w = await bootEden();

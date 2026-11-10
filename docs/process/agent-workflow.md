@@ -41,7 +41,10 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 When a PR is ready, label it `merge:ready`. Its heavy CI jobs run only inside the [CI window](../testing.md#ci-window)
 (a ready PR labelled `ci:run` or `merge:ready`), so open the window with `ci:run` and add `merge:ready` once `ci-ok`
 is green. From there the train takes over, one PR at a time, and first picks how
-the PR lands (`landingMode` in `.github/scripts/merge-train.mjs`):
+the PR lands (`landingMode` in `.github/scripts/merge-train.mjs`). The label event only relays: a `pull_request` job
+dispatches `main`'s copy of `merge-train.yml`, which does the work, so a PR never runs its own train (#1597). A fork PR's token
+can't dispatch, and GitHub runs no `pull_request` workflow for a PR with a merge conflict, so such a label waits for
+the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 
 - **Non-strict**: a T0–T2 PR that touches no strict path, whose required checks are green on its current head, which
   GitHub reports mergeable without conflict, and while `main`'s CI is green, is squash-merged as is, even when it is

@@ -124,14 +124,23 @@ A ride (a balloon, a punt) is an object: `object:<ride>:join`, then, seated, `ob
 
 ## When an owner message ends a wait
 
-`wait` and `act --wait` return early with `ownerMessages` when the owner writes. If the `receipt` beside them has not ended (`done: false`), that act is still going: do not report it failed. `wait` returns at once while a message is not acked, so ack it first, then `wait 60 <receiptId>`, or check with `receipt <receiptId>`. A long message may be shortened here (`textShortened`, `ownerMessagesOmitted`); stderr and `listen` have it in full.
+`wait` and `act --wait` return early with `ownerMessages` when the owner writes. If the `receipt` beside them has not ended (`done: false`), that act is still going: do not report it failed. `wait` returns at once while a message is not acked: serve it (`act <id> --for <message id>` acks it) or ack it first, then `wait 60 <receiptId>`, or check with `receipt <receiptId>`. A long message may be shortened here (`textShortened`, `ownerMessagesOmitted`); stderr and `listen` have it in full.
+
+## One call per owner message
+
+A waking `listen` carries each message, `found` (at most a few ids from this machine's copy for the message's words:
+candidates to choose from, never a reading of the message) and `look` (where you are, what is done here, who is near and
+the last words said, from the copy, at most 1,600 bytes). Send the id that does what was asked as
+`act <id> --for <message id> --wait`: the world acknowledges the message when it takes the act (the owner's card reads
+Acknowledged, then the act, then Done or why not) and closes it when the act ends. An `ack` or `result` sent anyway
+changes nothing the act did. When nothing in `found` or `look` fits, `find` first: it costs no call.
 
 ## Listening without restarts
 
 If your host streams each line a running command prints and wakes you on it (Claude Code's Monitor tool does), run
 `listen --follow` there once instead of restarting `listen` after every wake. It stays open, prints one JSON line per
 wake (`messages`, `addressed` or `plan`, at most 2,000 characters), and moves its own cursor, so each message comes once.
-Ack and act as usual; do not restart it. It prints a last line with `ended` when it stops (`listen --take`, a listen
+Act on each message as usual (`act <id> --for <message id>`, no ack first); do not restart it. It prints a last line with `ended` when it stops (`listen --take`, a listen
 for this Soul from elsewhere, or the host stopping it; a hard kill prints nothing). To fit, a line shortens long texts,
 cuts a plan to its refused step (`pending` has it all) and, with many messages at once, keeps the newest and says how
 many it left out (`messagesOmitted`): `listen --once` shows every message still unacknowledged in full. Without such a
@@ -174,7 +183,8 @@ words; keep it true. Add `--now "<line>"` to `act`, `say`, `ack`, `result` or `w
   that time are that write, not a new one. `--key <k>` on `act` and `say` names the key yourself.
 - **Never wrap the CLI in retry loops** (no `while`/`until`/`for` loops, no `sleep 15` and try again scripts): each
   retry costs the world, and the CLI already retries what is safe. Reads are retried; `act` and `say` only with the
-  same idempotency key, so one command never acts twice; `ack` and `result` never.
+  same idempotency key, so one command never acts twice; `ack` and `result` the same way, and the world answers a repeat of
+  either as the first.
 - **`slowed`** (the first field of any command's output, or a `SLOWED: …` line on stderr) is one sentence about the
   world refusing or slowing you in the last minute, with the count and the next try ("The world asked me to slow down
   for 5 s: …; retrying in 5 s."). When it appears, repeat that sentence to your person in your next reply, as it is,
