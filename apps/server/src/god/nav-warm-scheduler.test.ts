@@ -12,7 +12,7 @@ type SchedulerState = {
   reconciled: boolean; navWarm: boolean; navPending: boolean; navDeferred: Point[]; navLater: string[];
   reconcile(): void; flush(): void; writeBack(): void; perceiveStep(tick: number): void;
   spotsStep(): void; layersStep(): void; flushMapNotices(): void; evacuateSites(): void; rescueTrapped(): void;
-  navRescueSouls(): number; navLines(spots: Point[], stepped: number): string[]; navWaiting: Set<string>; navCold: boolean | null;
+  navRescueSouls(): number; navLines(spots: Point[], stepped: number): string[]; navWaiting: Set<string>; navCold: boolean | null; navHeld: boolean;
 };
 /** Exercise the installed listener and real navStep through completed host ticks. Only the engine's readiness
  * interface and unrelated bridge jobs are controlled; the cadence, readiness/error transitions and edit re-arm are real. */
@@ -141,7 +141,7 @@ test('#901: a re-warm error is logged once and the poll stops until the first-bu
   assert.equal(w.calls.at(-1)!.tick, 45, 'and the completed build re-arms the poll');
 });
 
-test('#1499: a rescue waiting while a ride keeps moving reads cold without resetting the re-warm back-off', t => {
+test('#1499: a rescue waiting while a ride keeps moving gets a slice every tick at the first build\'s budget, through the re-warm', t => {
   let warm = true;
   const w = fixture(t, () => warm);
   const minds = w.host.minds as unknown as Map<string, { entityId: string }>;
@@ -150,13 +150,32 @@ test('#1499: a rescue waiting while a ride keeps moving reads cold without reset
   upTo(4); warm = false; w.state.navWaiting.add('s_waiting');   // a ride moves every slice; a Soul waits on a rescue
   upTo(200);
   const after = w.calls.slice(1);
-  assert.equal(w.state.navWarm, true, 'the first-build path stays done'); assert.equal(w.state.navCold, true);
-  assert.ok(after.every(c => c.budget <= 10), `no 20 ms first-build slice after the build: ${after.filter(c => c.budget > 10).map(c => c.tick)}`);
-  const sliced = after.filter(c => c.budget > 0).map(c => c.tick);
-  assert.deepEqual(sliced.slice(0, 30), Array.from({ length: 30 }, (_, i) => 5 + i), 'the burst');
-  assert.deepEqual(sliced.slice(30), Array.from({ length: 17 }, (_, i) => 35 + 10 * i), 'then one slice per poll, rescue or not');
-  assert.ok(after.some(c => c.budget === 0 && c.tick % 10 === 3), 'the rescue did read the labels');
+  assert.equal(w.state.navWarm, true, 'the first-build path stays done'); assert.equal(w.state.navPending, false); assert.equal(w.state.navCold, true);
+  const sliced = (lo: number, hi: number) => after.filter(c => c.budget > 0 && c.tick >= lo && c.tick <= hi);
+  assert.deepEqual(sliced(5, 34).map(c => c.tick), Array.from({ length: 30 }, (_, i) => 5 + i), 'the burst');
+  assert.ok(sliced(5, 43).every(c => c.budget === 10), 'at the back-off budget until a rescue reads them cold');
+  assert.ok(after.some(c => c.budget === 0 && c.tick === 43), 'the rescue read at 43 found them cold');
+  assert.equal(w.state.navHeld, true);
+  assert.deepEqual(sliced(44, 199).map(c => c.tick), Array.from({ length: 156 }, (_, i) => 44 + i), 'then a slice every tick, no burst cap and no poll mode');
+  assert.ok(sliced(44, 199).every(c => c.budget === 20), 'at the first build\'s 20 ms while the Soul waits');
   assert.ok(w.state.navWaiting.has('s_waiting'), 'and the Soul stays queued while they are cold');
+});
+
+test('#1499 review: the tick the labels turn warm, the waiting Soul is asked, and with nobody waiting the back-off returns', t => {
+  let warm = true, slices = 0;
+  const w = fixture(t, budget => { if (!warm && budget > 0 && --slices <= 0) warm = true; return warm; });
+  const minds = w.host.minds as unknown as Map<string, { entityId: string }>;
+  minds.set('s_waiting', { entityId: 'no-such-body' }); t.after(() => minds.delete('s_waiting'));
+  const upTo = (n: number) => { while (w.host.engine.world.tick < n) w.tick(); };
+  upTo(4); warm = false; slices = 1e9; w.state.navWaiting.add('s_waiting'); upTo(50);
+  assert.equal(w.state.navHeld, true); const before = w.rescues();
+  slices = 4; upTo(60);   // a relabel of 4 slices at 20 ms, from tick 50
+  assert.equal(w.rescues(), before + 1, 'the waiting Soul was asked in the tick the labels turned warm (53), not at the next rescue read');
+  assert.equal(w.state.navHeld, false); assert.equal(w.state.navCold, false);
+  w.state.navWaiting.clear(); warm = false; slices = 1e9; upTo(160);   // cold again, nobody waiting
+  const late = w.calls.filter(c => c.tick >= 60 && c.budget > 0);
+  assert.ok(late.every(c => c.budget === 10), 'the back-off budget');
+  assert.ok(late.length <= 30 + 10, `and the burst cap with poll mode: ${late.length} slices over 100 ticks`);
 });
 
 test('#1499: after a re-warm error a waiting rescue still gets the labels relabelled, and the re-warm comes back with a fresh burst', t => {
@@ -179,5 +198,5 @@ test('#1499: after a re-warm error a waiting rescue still gets the labels relabe
   assert.deepEqual(w.logs, ['nav re-warm: controlled re-warm failure']);
   warm = false; slices = 1e9; upTo(120);   // cold again for good: the rescue read at 83 finds it
   assert.deepEqual(sliced(78, 120).slice(0, 30), Array.from({ length: 30 }, (_, i) => 84 + i), 'a fresh burst of 30, not the 33 left from before the error');
-  assert.ok(w.calls.filter(c => c.tick > 77).every(c => c.budget <= 10), 'and no first-build slice while the re-warm works');
+  assert.equal(w.state.navWarm, true); assert.equal(w.state.navPending, false, 'the re-warm relabels them, not the first-build path');
 });
