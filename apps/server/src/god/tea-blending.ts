@@ -15,9 +15,10 @@ export function createTeaBlending(h:TeaBlendingHost) {
   const denied=h.denied(id,soul);if(denied)return{no:denied};
   const st=e.state!,n=Object.fromEntries(fields.map(k=>[k,Number(st[k])]));
   if(fields.some(k=>!Number.isInteger(n[k])||n[k]<0||n[k]>8||e.params?.[k]!==n[k])||n.blendGreen+n.blendMint>4||n.reserveGreen+n.reserveMint>8||n.green+n.blendGreen+n.reserveGreen!==8||n.mint+n.blendMint+n.reserveMint!==8)return{no:{code:'object.state',reason:'Restore the caddy’s matching finite stocks and mixed quantities before working it.'}};
-  const native=h.engine.world.entities[id],parent=h.model.entities.get(e.in.parent),pd=parent&&h.model.resolvedDef(parent.def);
+  const native=h.engine.world.entities[id],parent=h.model.entities.get(e.in.parent);
+  if(parent){const parentDenied=h.denied(parent.id,soul);if(parentDenied)return{no:parentDenied};}
+  const pd=parent&&h.model.resolvedDef(parent.def);
   if(!parent||!pd?.components.surface||pd.components.carryable||native?.support?.kind!=='resting-on'||native.support.on!==parent.id||!e.in.slot||!h.model.slotsOf(parent).some(s=>s.id===e.in.slot&&s.kind==='surface')||!native.pose||!h.engine.world.entities[parent.id]?.pose)return{no:{code:'object.state',reason:'Put this caddy on a stable permitted fixed table before choosing or mixing leaves; held custom work is unavailable.'}};
-  const parentDenied=h.denied(parent.id,soul);if(parentDenied)return{no:parentDenied};
   const body=h.engine.world.entities[soul.entityId];if(!body?.human||!body.pose)return{no:{code:'body.unavailable',reason:'Your body is unavailable.'}};
   if(body.human.holding||Object.values(body.human.hands??{}).some(Boolean)||body.human.handActuator||Object.values(h.engine.world.entities).some(b=>b.support?.kind==='in-hand'&&b.support.by===soul.entityId))return{no:{code:'object.state',reason:'Put down held items before working the tea caddy.'}};
   if(Number(st.batches)>=100000||Number(st.recoveries)>=100000)return{no:{code:'object.state',reason:'This caddy’s bounded preparation record is full.'}};
