@@ -52,6 +52,20 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
   mountLiveRoute(app, {ledger: L}, {onSpectator: (l: (m: object) => void) => {hear = l;}} as never, catalog.version);
   const get = async (path: string, headers: Record<string, string> = {}) => {const r = await app.request(path, {headers}); return {status: r.status, etag: r.headers.get('etag'), body: r.status === 200 ? await r.json() as any : null};};
 
+  await t.test('until the world first has its whole structure, the catalog asks again shortly rather than publish no acts', async () => {
+    assert.equal(L.structureReady?.(), true, 'Eden after 120 ticks is whole');
+    const was = L.structureReady, early = new Hono(); let whole = false;
+    L.structureReady = () => whole;
+    try {
+      mountCatalogRoute(early, {ledger: L});
+      const a = await early.request('/v1/edge/catalog');
+      assert.equal(a.status, 503); assert.equal(a.headers.get('retry-after'), '2'); assert.equal(((await a.json()) as any).error.code, 'world.starting');
+      whole = true; const b = await early.request('/v1/edge/catalog');
+      assert.equal(b.status, 200); assert.ok(((await b.json()) as any).counts.acts > 1000);
+      whole = false; assert.equal((await early.request('/v1/edge/catalog')).status, 200, 'once whole, it stays served');
+    } finally {L.structureReady = was;}
+  });
+
   await t.test('the catalog is served by tag, and a place made secret leaves it', async () => {
     const first = await get('/v1/edge/catalog');
     assert.equal(first.status, 200); assert.equal(first.body.contract, 'soul-catalog/1');

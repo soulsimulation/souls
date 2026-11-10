@@ -320,6 +320,8 @@ export class EngineBridge {
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
       this.edge.thingsVersion=()=>`${this.godEdits}:${this.completedEdits}`;
+      // #1737: the catalog waits for the first whole picture: places published and activity spots derived (sliced after listen)
+      this.edge.structureReady=()=>{try{return this.contextReady()&&!this.activitySpots.pendingFirst();}catch{return false;}};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
     if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),

@@ -21,6 +21,7 @@ export function ledgerCatalog(L: EdgeLedger) {
   return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots, things});
 }
 
+const STARTING_MAX_MS = 30_000;
 export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
   const L = deps.ledger;
   let kept: {key: string; value: ReturnType<typeof buildCatalog>} | null = null;
@@ -33,7 +34,17 @@ export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
     if (kept?.key !== key) kept = {key, value: ledgerCatalog(L)};
     return kept.value;
   };
+  // Just after listen the world is still placing its places and activity spots (slices on its clock, a few seconds on Eden):
+  // a catalog then would have no acts, and a client would keep it. Until the first whole picture, ask again shortly.
+  // Bounded: a world that is still not whole STARTING_MAX_MS after the first ask is served as it is.
+  let ready = false, firstAsk = 0;
+  const isReady = () => {
+    if (ready) return true;
+    firstAsk ||= Date.now();
+    return (ready = (L.structureReady?.() ?? true) || Date.now() - firstAsk > STARTING_MAX_MS);
+  };
   app.get('/v1/edge/catalog', (c: Context) => {
+    if (!isReady()) {c.header('Retry-After', '2'); c.header('Cache-Control', 'no-store'); return c.json({contract: 'eden-edge/1', error: {code: 'world.starting', message: 'The world is still laying out its places; ask again in 2 s.'}}, 503);}
     const cat = current();
     c.header('Cache-Control', 'public, max-age=0, must-revalidate'); c.header('ETag', cat.etag); c.header('Content-Type', 'application/json; charset=utf-8');
     const asked = (c.req.header('if-none-match') ?? '').split(',').map(s => s.trim());
@@ -41,5 +52,6 @@ export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
     return c.body(cat.serialized, 200);
   });
   // The version alone: what an answer names so a client knows its copy is old.
-  return {version: () => current().version};
+  // (null until the catalog is served: a client then has nothing to compare and keeps asking the catalog itself)
+  return {version: () => isReady() ? current().version : null};
 }

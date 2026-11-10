@@ -3009,7 +3009,14 @@ let CATALOG_IX = null;
 async function syncCatalog({ force = false } = {}) {
   const world = need(load(), "world", `Register this folder first: ${CLI} register <world url>`);
   let have = readJsonFile(CATALOG_FILE); if (have?.world !== world) have = null;
-  let r = null; try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { /* no answer: use the copy */ }
+  // a world that has just started answers world.starting with a short Retry-After until its places and acts are laid out
+  let r = null;
+  for (let tries = 0; tries < 6; tries++) {
+    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; break; /* no answer: use the copy */ }
+    const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
+    if (wait == null || wait > 10_000) break;
+    await new Promise((ok) => setTimeout(ok, statedJitter(wait)));
+  }
   if (r?.status === 304) return { ...have, changed: false };
   if (!r?.ok) {
     const said = r ? `HTTP ${r.status}` : "no answer";

@@ -224,6 +224,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #1737: the god's authored edits, as made and as folded into the engine; set by the engine bridge. A move, rename or
    *  removal of a thing changes it, so the catalog that names things is rebuilt. */
   thingsVersion?: () => string;
+  /** #1737: the world's structure is whole (places perceived, activity spots derived); set by the engine bridge. Until it
+   *  first is, the catalog answers world.starting rather than publish a world with no acts in it. */
+  structureReady?: () => boolean;
   /** #1737: the thing a spot belongs to (`<activity>.<entity id>[.<n>]`) is in neither the engine nor the god's world: a
    *  god removed it, and the world's authored spots outlive it. (A pond or a pitch is the god's, not an engine body.) */
   spotThingGone(spotId: string): boolean {

@@ -19,11 +19,12 @@ const catalogOf = (version, bookName) => ({contract: 'soul-catalog/1', worldId: 
 
 async function world(t) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'eden-local-world-'));
-  const state = {version: 'v1', book: 'Old Atlas', up: true};
+  const state = {version: 'v1', book: 'Old Atlas', up: true, starting: 0};
   const server = createServer((req, res) => {
     const url = req.url.split('?')[0]; seen.push(url);
     if (!state.up) {res.writeHead(503, {'content-type': 'application/json'}); return res.end('{"error":{"code":"world.busy"}}');}
     if (url === '/v1/edge/catalog') {
+      if (state.starting > 0) {state.starting--; res.writeHead(503, {'content-type': 'application/json', 'retry-after': '1'}); return res.end('{"error":{"code":"world.starting"}}');}
       const tag = `"${state.version}"`;
       if (req.headers['if-none-match'] === tag) {res.writeHead(304, {etag: tag}); return res.end();}
       res.writeHead(200, {'content-type': 'application/json', etag: tag}); return res.end(JSON.stringify(catalogOf(state.version, state.book)));
@@ -87,4 +88,13 @@ test('on a folder with no copy yet, find fetches the live picture and the catalo
   assert.deepEqual(w.seen, ['/v1/edge/live', '/v1/edge/catalog']);
   const q = await w.cli('query', '[{"verb":"read"}]');
   assert.equal(q.code, 0, q.err); assert.match(JSON.stringify(q.json.answers), /read:read\.e_book/);
+});
+
+test('a world that has just started: find waits out world.starting and answers with the whole catalog (lane M4, #1737)', async t => {
+  const w = await world(t); w.state.starting = 2;
+  const t0 = Date.now(), first = await w.cli('find', 'read');
+  assert.equal(first.code, 0, first.err);
+  assert.equal(first.json.found[0]?.act, 'read:read.e_book');
+  assert.deepEqual(w.seen, ['/v1/edge/live', '/v1/edge/catalog', '/v1/edge/catalog', '/v1/edge/catalog']);
+  assert.ok(Date.now() - t0 >= 2_000, 'it waited the stated second, twice');
 });
