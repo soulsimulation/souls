@@ -17,12 +17,16 @@ export function plateAnchor(ground: readonly [number,number,number], eye: {x:num
   return [ground[0]+x/n*radius, ground[1], ground[2]+z/n*radius];
 }
 
-/** One Soul's name plate: name, doing line, card line, channel chip. No leader line (C2): the plate sits under its body. */
+/** How a shown doing line is displayed: a line box clamped to `DOING_LINES` lines (#1645). */
+export const DOING_DISPLAY = '-webkit-box', DOING_LINES = 2;
+/** One Soul's name plate: name, doing line, card line, channel chip. No leader line (C2): the plate sits under its body.
+ * The doing line wraps inside the plate's max width and stops at two lines with an ellipsis (#1645); show it with
+ * `line.style.display = DOING_DISPLAY`, never `''`, which would drop the clamp. */
 export function nameTag(doc: Pick<Document,'createElement'>) {
   const el = doc.createElement('div'); el.className = 'world-name-tag';
   el.style.cssText = 'font:11px/1.25 system-ui,sans-serif;color:#fff;background:rgba(18,20,18,.66);padding:2px 7px 3px;margin-top:2px;border-radius:5px;text-align:center;white-space:nowrap;pointer-events:auto;cursor:pointer;max-width:260px';
   const name = doc.createElement('b'), line = doc.createElement('div'), card = doc.createElement('div'), chan = doc.createElement('div');
-  line.style.cssText = 'opacity:.85'; card.style.cssText = 'opacity:.7;font-style:italic'; chan.style.cssText = 'display:none;font-size:10px;margin-top:1px;white-space:normal;max-width:240px'; chan.dataset.channelChip = '';
+  line.style.cssText = `opacity:.85;white-space:normal;overflow-wrap:anywhere;max-width:240px;margin:0 auto;display:none;-webkit-box-orient:vertical;-webkit-line-clamp:${DOING_LINES};line-clamp:${DOING_LINES};overflow:hidden`; card.style.cssText = 'opacity:.7;font-style:italic'; chan.style.cssText = 'display:none;font-size:10px;margin-top:1px;white-space:normal;max-width:240px'; chan.dataset.channelChip = '';
   el.append(name, line, card, chan);
   return {el, name, line, card, chan};
 }

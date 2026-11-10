@@ -86,6 +86,11 @@ and external-model analysis require explicit scopes; an anomaly trigger cannot a
 
 ## Privacy and supervision
 
+The local session record (#1773, `tools/soul-trace/README.md`) is the owner's own full-content counterpart: off
+unless `.eden-record-on` is in the Soul's folder, invisible to the agent, never uploaded, and collected with the
+harness transcript into a private folder only by the owner's command. Nothing below is relaxed by it.
+
+
 Default to structured operational facts. Do not upload raw agent transcripts, hidden reasoning, credentials,
 environment files, owner conversations or screenshots. Selected text/media requires explicit attachment consent
 and scope; redact locally before transfer, with defensive server validation as well. Let the sender see what will

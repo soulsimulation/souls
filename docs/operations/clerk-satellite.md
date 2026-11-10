@@ -81,12 +81,12 @@ it is live:
    ```bash
    bash -s <<'CUTOVER'
    set -uo pipefail
-   REL=/srv/sim-worlds/production                     # the live release (4.17 or later)
+   REL=/srv/sim-worlds/production                     # the live release (0.121 or later)
    SRC="$REL/tools/world-launcher/deploy/caddy/sim-eden-art.caddy"
    SITE=/etc/caddy/sites/sim-eden-art.caddy
    PORT="$(sed -n 's/.*--port \([0-9][0-9]*\).*/\1/p' /etc/sim-worlds/production.conf)"
    [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "no --port in production.conf: stopping, nothing changed"; exit 1; }
-   grep -q '^https://sim\.eden\.art {' "$SRC" || { echo "the live release has no sim-eden-art.caddy: ship 4.17 first"; exit 1; }
+   grep -q '^https://sim\.eden\.art {' "$SRC" || { echo "the live release has no sim-eden-art.caddy: ship 0.121 first"; exit 1; }
    grep -qE '^\s*import sites/\*\.caddy' /etc/caddy/Caddyfile || { echo "the Caddyfile does not import sites/*.caddy: stopping, nothing changed"; exit 1; }
    BAK=""
    if [ -e "$SITE" ]; then BAK="$SITE.bak.$(date +%s)"; cp -a "$SITE" "$BAK" || { echo "cannot back up $SITE: stopping, nothing changed"; exit 1; }; fi

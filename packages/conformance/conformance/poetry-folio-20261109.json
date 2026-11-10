@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1577: core-poetry-folio@1 is a blank-to-finished authored artifact on the existing contact writing/sign reading faculty. Scoped EF4 k=2 placed, baked and rendered all five samples with zero findings or qualification gaps. Empty-text action gating and no erase action preserve the finished poem; no earlier revisions or budgets change.",
+  "defs": [
+    {
+      "def": "core-poetry-folio@1",
+      "hash": "deec1076e71ff1b603ef7ef492d28e51fd5966952548c93f68c8cc38389112fa"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}

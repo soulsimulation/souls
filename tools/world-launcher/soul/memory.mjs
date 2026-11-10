@@ -9,7 +9,7 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join, relative } from "node:path";
-import { openMemoryFolder } from "../../edge-skill/memory-folder.mjs";
+import { PROJECTION_BUDGETS, openMemoryFolder } from "../../edge-skill/memory-folder.mjs";
 import { buildBrief } from "./brief.mjs";
 import { SUMMARY } from "./consolidate.mjs";
 import { createPeople } from "./people.mjs";
@@ -87,7 +87,7 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
   let people = createPeople({ world });
   // A day consolidation has summarized stays in the log, and its journal page doesn't come back.
   const journalAfter = () => { try { return JSON.parse(readFileSync(join(soulDir, "memory", "consolidation.json"), "utf8")).through ?? null; } catch { return null; } };
-  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter() }); flushPeople(); return opened; };
+  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
   // No people/ folder until there is someone in it; a record folded into another leaves no file behind.
   function flushPeople() {
     const { write, remove } = people.changes(), dir = join(soulDir, "memory", "people");
@@ -356,6 +356,7 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
       const consolidated = join(soulDir, "MEMORY.md"), walk = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? 1 : -1)).flatMap((d) => (d.isDirectory() ? (d.name === "log" ? [] : walk(join(dir, d.name))) : d.name.endsWith(".md") ? [join(dir, d.name)] : []));
       const plain = (l) => l.replace(/\\(.)/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
       let more = 0;
+      const hits = [];   // every projection line that matched, shown or only counted
       for (const file of [...walk(root), ...(existsSync(consolidated) ? [consolidated] : [])]) {
         let title = null, section = null;
         for (const raw of readFileSync(file, "utf8").split("\n")) {
@@ -363,6 +364,7 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
           if (raw.startsWith("# ")) { title = line.slice(2); section = null; }
           else if (raw.startsWith("## ")) section = line.slice(3);
           if (!raw.trim() || !terms.every((t) => line.toLowerCase().includes(t))) continue;
+          hits.push(line);
           if (matches.length >= SEARCH_MAX) { more++; continue; }
           // A person's file is titled with a name a world gave them, so its title vouches for nothing.
           const where = file === consolidated ? "MEMORY.md" : relative(root, file), from = where.startsWith("people") ? section ?? "name" : [title, section].filter(Boolean).join(" / ");
@@ -370,6 +372,26 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
           matches.push({ text: line.replace(/^[-> ]+/, ""), file: where, provenance: from, untrusted: !mine });
         }
       }
+      // A projection keeps only its newest entries (PROJECTION_BUDGETS); what it dropped is still in the log, and found there.
+      const has = (t) => hits.some((l) => l.includes(t)) || matches.some((m) => m.text.includes(t)), hit = (t) => terms.every((w) => t.toLowerCase().includes(w)), logged = new Set();
+      const older = (text, provenance, { untrusted = true, shown = text } = {}) => {
+        if (logged.has(text) || !hit(text) || has(shown)) return;
+        logged.add(text);
+        if (matches.length >= SEARCH_MAX) more++; else matches.push({ text, file: "log", provenance: `${provenance}, older, in the log only`, untrusted });
+      };
+      let log = ""; try { log = readFileSync(join(root, "log", "memory-events.jsonl"), "utf8"); } catch { /* no log yet */ }
+      const judged = new Map();   // the Soul's own note on a place, the latest kept, as places.md would show it
+      for (const raw of log.split("\n")) {
+        if (!raw) continue;
+        let r; try { r = JSON.parse(raw); } catch { continue; }
+        const e = r?.value;
+        if (r?.kind === "remember") { if (typeof e?.place === "string" && typeof e.note === "string") { judged.delete(e.place); judged.set(e.place, e.note); } continue; }
+        if (e?.type === "outcome") {
+          for (const f of e.learned ?? []) older(`${f.fact} — about ${f.about}; source ${f.source}; provenance ${f.provenance}`, "Knowledge — attributable reports");
+          for (const o of e.produced ?? []) older(`${o.id}: ${o.title} (${o.kind}), at ${o.where}`, "Ledger / Produced");
+        } else if (e?.type === "arrival" && e.placeId) older(`${e.placeId} | ${e.seen?.[e.placeId] ?? e.placeId}`, "Places");
+      }
+      for (const [place, note] of judged) older(`${place} — Judgment: ${note}`, "Places / my judgment", { untrusted: false, shown: `Judgment: ${note}` });
       return { query, matches, ...(more ? { more } : {}) };
     },
   };
