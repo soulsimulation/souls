@@ -1,0 +1,9 @@
+# Placed camp sighting compass
+
+`core/camp-compass@1` is a portable instrument. Its index points along local -z. World north is -z and bearings increase clockwise. `object:<id>:choose-bearing` takes text decimal degrees `text` in [0,360); `object:<id>:sight` walks normally and performs three seconds of native operate work while the compass rests on a fixed surface. Empty hands and access to both objects are required. Completion binds the exact instrument, support, definitions, ownership, parameters, state, body and world poses; premature or interrupted receipts do not record a sight.
+
+The actual index heading is normalized negative world yaw in degrees. The record retains selected bearing, measured heading, signed shortest bearing-minus-heading in [-180,180), completed count and observer. Red north and gold target needles show the **last sight snapshot**, not continuous magnetic simulation. Re-sight after turning, moving or changing the bezel. Normal custody preserves the same instrument; held sighting is deliberately unavailable. No route following, magnetic physics or new movement authority is introduced.
+
+Kind data publishes numeric state and acts. Own inspection includes the observer name and requirements. The exact-family observer builds two disposable arrows after cloning the static prototype; free bearings do not create unbounded cached prototypes. No per-frame state mutation or absent-family scan is introduced.
+
+Integration uses dependency-only 26787cddcd9b44b3059059e940701e45d243b4a2: main375 plus catalogue eb6, completion bd and startup3baf. Latest-main M3 integration is a separate owner obligation, not claimed by this proof. Named compass hooks in actuators, perception and engine bridge require serial integration with other action families. Claude alone signs and merges T3 work.

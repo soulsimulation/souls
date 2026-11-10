@@ -78,6 +78,7 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  compass?(soul:EdgeSoul,id:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
@@ -406,6 +407,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
       if(host.deferContacts&&a.name==='close'&&def.components.opening&&s.key&&host.contactPlan?.(ctx.soul,s.key,a.name)?.noRoom)return {code:'contact.no-room',reason:'There is nowhere to stand clear of it once it is shut.'};
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
+      const compass=s.key?host.compass?.(ctx.soul,s.key,a.name):null;if(compass)return 'code' in compass?compass:null;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
@@ -424,6 +426,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
       validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
+        const compass=s.key?host.compass?.(ctx.soul,s.key,a.name):null;if(compass&&!('code'in compass))return{state:s,result:{action:a.name,summary:compass.summary},bodies:[{label:a.label,steps:compass.steps}]};
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
@@ -489,6 +492,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // Entry 43: so does a tea act (tea.ts)
     if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
     // #438: and a picking act (harvest.ts)
+    if(host.compass?.(soul,id,a.name))return out;
     const pick = host.harvest?.(soul, id, a.name, (input.params ?? {}) as Record<string, unknown>);
     if (pick) { if (!('code' in pick)) host.harvestBegun?.(soul); return out; }
     // W5: water moves between two things (tank → can, can → planter) in one commit, planned again at commit time
