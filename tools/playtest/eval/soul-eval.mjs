@@ -10,7 +10,7 @@
 // local episode runs on its own fresh fake-mind world, which keeps its own model budget (default $0.50 a day).
 // Docs: docs/testing/soul-eval.md.
 import { resolve, join, relative } from 'node:path';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
 import { LIVE_ADAPTERS } from '../arena/seat.mjs';
@@ -97,12 +97,23 @@ function cleanEnvReport() {
   return { names, configIsolated: !!process.env.CLAUDE_CONFIG_DIR };
 }
 
+/** result.json, or one rebuilt from the episodes a stopped run left (episodes/<n>/episode.json and run.json). */
+export function loadResult(dir) {
+  const d = resolve(dir), r = readJson(join(d, 'result.json'));
+  if (r) return r;
+  const meta = readJson(join(d, 'run.json'));
+  if (!meta) return null;
+  const eps = existsSync(join(d, 'episodes')) ? readdirSync(join(d, 'episodes')).sort().map((e) => readJson(join(d, 'episodes', e, 'episode.json'))).filter(Boolean) : [];
+  for (const [i, e] of eps.entries()) e.repeat ??= Number(/-r(\d+)$/.exec(readdirSync(join(d, 'episodes')).sort()[i])?.[1] ?? 1);
+  return { ...meta, stoppedBy: 'the run stopped before it wrote result.json; rebuilt from its finished episodes', spentUsd: eps.reduce((s, e) => s + (e.seat.costUsd ?? 0) + (e.kickoff?.costUsd ?? 0), 0), episodes: eps, summary: summarize(eps) };
+}
+
 async function main() {
   const { cmd, o } = parseArgs(process.argv.slice(2));
   if (cmd === 'run') { await runEval(o); return; }
   if (cmd === 'report') {
     const dir = o._[0]; if (!dir) throw new Error('report <out> [--against <out>]');
-    const a = readJson(join(resolve(dir), 'result.json')), b = o.against ? readJson(join(resolve(o.against), 'result.json')) : null;
+    const a = loadResult(dir), b = o.against ? loadResult(o.against) : null;
     if (!a) throw new Error(`no result.json in ${dir}`);
     process.stdout.write(renderReport(a, b));
     return;

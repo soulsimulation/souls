@@ -27,14 +27,10 @@
     "match": "^Go to the windmill, then sit",
     "do": [
      [
-      "act",
-      "walk:eden-windmill",
-      "--wait",
-      "60"
-     ],
-     [
-      "act",
-      "sit-ground:here"
+      "plan",
+      "[\"walk:eden-windmill\",\"sit-ground:here\"]",
+      "--for",
+      "{id}"
      ]
     ]
    },
