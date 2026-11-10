@@ -2167,7 +2167,7 @@ const RECORD_LIMITS = { fieldBytes: 64 * 1024, outputBytes: 64 * 1024, fileBytes
 const RECORD_QUIET = new Set(["register", "create", "pair", "adopt", "approval", "doctor", "import", "export", "init", "upgrade"]);
 const RECORD_SECRET_KEY = /^(authorization|cookie|password|pollsecret|credentials?|api[-_]?key|bearer|identity|.*token|.*secret)$/i;
 let RECORD = false;
-const rec = { proc: null, seq: 0, start: 0, wall: 0, failures: 0, bytes: 0, secrets: new Set(), quiet: false, out: { stdout: [], stderr: [] }, outBytes: { stdout: 0, stderr: 0 } };
+const rec = { dir: null, proc: null, seq: 0, start: 0, wall: 0, failures: 0, bytes: 0, secrets: new Set(), quiet: false, out: { stdout: [], stderr: [] }, outBytes: { stdout: 0, stderr: 0 } };
 const recordHere = () => {
   if (plainFile(RECORD_ON) !== true && !(HOME && SEAT && plainFile(joinPath(HOME.root, RECORD_ON)) === true)) return false;
   try { return lstatSync(RECORD_DIR).isDirectory() && !lstatSync(RECORD_DIR).isSymbolicLink(); } catch (e) { return e?.code === "ENOENT"; }
@@ -2206,8 +2206,8 @@ function recordWrite(kind, fields) {
     if (!rec.proc) recordInit(null, null);
     const head = { v: RECORD_SCHEMA, kind, proc: rec.proc, seq: ++rec.seq, at: Date.now(), mono: Math.round((performance.now() - rec.start) * 1000) / 1000 };
     const line = JSON.stringify({ ...head, ...fields }) + "\n";
-    if (rec.bytes > RECORD_LIMITS.fileBytes) recordRoll(RECORD_DIR);
-    appendFileSync(joinPath(RECORD_DIR, RECORD_FILE), line, { mode: 0o600 });
+    if (rec.bytes > RECORD_LIMITS.fileBytes) recordRoll(rec.dir);
+    appendFileSync(joinPath(rec.dir, RECORD_FILE), line, { mode: 0o600 });
     rec.bytes += Buffer.byteLength(line);
   } catch { rec.failures++; }
 }
@@ -2216,10 +2216,11 @@ function recordInit(cmd, args) {
   if (!RECORD || rec.proc || rec.failures) return;
   try {
     rec.proc = randomBytes(8).toString("hex"); rec.start = performance.now(); rec.wall = Date.now();
-    mkdirSync(RECORD_DIR, { recursive: true, mode: 0o700 });
+    rec.dir = resolvePath(RECORD_DIR);   // a command that moves to another folder later still writes here
+    mkdirSync(rec.dir, { recursive: true, mode: 0o700 });
     try { const s = load(); recordSecret(s.token); recordSecret(s.identity); recordSecret(s.home?.token); } catch {}
     rec.quiet = !cmd || RECORD_QUIET.has(cmd);
-    recordRoll(RECORD_DIR);
+    recordRoll(rec.dir);
     process.once("exit", (code) => recordEnd(code));
     recordWrite("proc.start", reportPrune({ cli: "eden.mjs", version: VERSION, node: process.version, pid: process.pid, ppid: process.ppid, command: cmd ?? undefined, argv: rec.quiet ? undefined : recordScrub(args ?? []), quiet: rec.quiet || undefined,
       clocks: { at: "local-wall-ms", mono: "process-monotonic-ms", wallStart: "local-wall-ms", sentAt: "server-wall-ms", ticks: "world-tick" }, omitted: ["authorization", "token", "credentials"] }));
@@ -2245,8 +2246,9 @@ function recordEnd(code) {
     const bytes = rec.outBytes[name];
     if (!bytes) return undefined;
     try { text = JSON.stringify(recordScrub(JSON.parse(text), new Set()), null, 1) + "\n"; } catch {}   // an answer as printed, its credential keys out
-    const kept = recordScrub(text.slice(0, RECORD_LIMITS.outputBytes));
-    return bytes > RECORD_LIMITS.outputBytes || typeof kept !== "string" ? { cut: true, bytes, head: typeof kept === "string" ? kept : kept.head } : kept;
+    for (const t of rec.secrets) if (text.includes(t)) text = text.split(t).join("[omitted]");   // whole values first, then the cut
+    const kept = text.slice(0, RECORD_LIMITS.outputBytes);
+    return bytes > RECORD_LIMITS.outputBytes || kept.length < text.length ? { cut: true, bytes, head: kept } : kept;
   };
   recordWrite("proc.end", { exitCode: Number.isSafeInteger(code) ? code : null, wallStart: rec.wall, ms: Math.round((performance.now() - rec.start) * 1000) / 1000, stdout: output("stdout"), stderr: output("stderr"), records: rec.seq + 1 });
 }
@@ -2257,7 +2259,9 @@ const recordIds = (path, body, data) => {
   if (f.receipt?.id) receipts.add(f.receipt.id);
   for (const e of f.events ?? []) receipts.add(e.id);
   for (const x of f.messages ?? []) messages.add(x.id);
-  for (const x of [f.for, reportRef(body?.for)]) if (x && x !== "none") messages.add(x);
+  // `for` names an owner message only on the edge's own writes; elsewhere (an approval or a doctor's lookup) it is a pairing code
+  const edgeWrite = /\/v1\/edge\/(act|say|converse|inbox\/)/.test(path);
+  for (const x of [f.for, edgeWrite ? reportRef(body?.for) : undefined]) if (x && x !== "none") messages.add(x);
   return reportPrune({ receipts: receipts.size ? [...receipts] : undefined, messages: messages.size ? [...messages] : undefined, clientRef: reportRef(body?.clientRef) });
 };
 /** A plain fetch (catalog, live picture, the classified stream): its time and status; the body lives elsewhere. */
@@ -2275,9 +2279,9 @@ function recordCall(kind, url, o, wallStart, t0, r, extra = {}) {
   try {
     recordBearer(o.headers);
     const u = new URL(String(url)), path = u.pathname + u.search, slim = o.recorded === "proxied" || rec.quiet;
-    recordWrite(kind, reportPrune({ ...extra, method: o.method ?? "GET", path, key: reportRef(o.headers?.["idempotency-key"]), wallStart, ms: Math.round((performance.now() - t0) * 1000) / 1000, timeoutMs: reportInt(o.timeoutMs),
+    recordWrite(kind, reportPrune({ ...extra, method: o.method ?? "GET", path, key: rec.quiet ? undefined : reportRef(o.headers?.["idempotency-key"]), wallStart, ms: Math.round((performance.now() - t0) * 1000) / 1000, timeoutMs: reportInt(o.timeoutMs),
       status: r?.status, server: r?.server && Object.keys(r.server).length ? r.server : undefined, load: typeof r?.load === "string" ? r.load.slice(0, 12) : undefined, retryAfterMs: reportInt(r?.retryAfterMs), replayed: r?.replayed || undefined,
-      proxied: o.recorded === "proxied" || undefined, ids: recordIds(path, o.body, r?.data), req: slim || o.body === undefined ? undefined : recordScrub(o.body), res: slim ? undefined : recordScrub(r?.data) }));
+      proxied: o.recorded === "proxied" || undefined, ids: rec.quiet ? undefined : recordIds(path, o.body, r?.data), req: slim || o.body === undefined ? undefined : recordScrub(o.body), res: slim ? undefined : recordScrub(r?.data) }));
   } catch { rec.failures++; }
 }
 

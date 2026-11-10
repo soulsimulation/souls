@@ -17,7 +17,7 @@
 // sessions by date, not by folder, so a Codex transcript (or any other) is taken only when named with --transcript, and
 // only if its recorded working directory is <folder>.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,14 +89,25 @@ export function transcriptFacts(text) {
   }
   return { cwd, first, last, harness };
 }
+/** The working directory a transcript was recorded in, read from its first lines only (at most 256 KB). */
+export function transcriptCwd(file) {
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(256 * 1024), n = readSync(fd, buf, 0, buf.length, 0), head = buf.subarray(0, n).toString('utf8');
+    for (const line of head.split('\n')) { let row; try { row = JSON.parse(line); } catch { continue; } const c = row.cwd ?? (row.type === 'session_meta' ? row.payload?.cwd : null); if (c) return c; }
+    return null;
+  } finally { closeSync(fd); }
+}
 export function findTranscripts({ cwd, since, until, claudeDirs, named }) {
   const found = [], skipped = [], searched = [];
   const take = (file, origin) => {
+    // another folder's transcript (another project whose folder name reads the same) is not read past the line that
+    // says where it was recorded, and is left unnamed
+    if (transcriptCwd(file) !== cwd) { if (origin === 'named') skipped.push({ file, why: 'its recorded working directory is not the collected folder' }); return false; }
     const text = readFileSync(file, 'utf8'), f = transcriptFacts(text);
-    // another folder whose project name reads the same: left unnamed, as it is not this session's
-    if (f.cwd !== cwd) { if (origin === 'named') skipped.push({ file, why: 'its recorded working directory is not the collected folder' }); return; }
-    if (origin !== 'named' && (f.last === null || f.last < since || f.first > until)) return;
+    if (f.last === null || f.last < since || f.first > until) { if (origin === 'named') skipped.push({ file, why: 'nothing in it falls within the session\'s window (--since/--until widen it)' }); return false; }
     found.push({ file, origin, ...f });
+    return true;
   };
   for (const file of named) take(resolve(file), 'named');
   for (const dir of claudeDirs) {
@@ -107,11 +118,9 @@ export function findTranscripts({ cwd, since, until, claudeDirs, named }) {
       if (!f.endsWith('.jsonl')) continue;
       const file = join(project, f);
       if (statSync(file).mtimeMs < since) continue;   // last written before the session began
-      const before = found.length;
-      take(file, 'claude-code');
-      // a matched session's subagent transcripts sit in a folder named after it
+      // a matched session's subagent transcripts sit in a folder named after it, each checked the same way
       const sub = join(project, f.replace(/\.jsonl$/, ''), 'subagents');
-      if (found.length > before && existsSync(sub)) for (const s of readdirSync(sub)) if (s.endsWith('.jsonl')) found.push({ file: join(sub, s), origin: 'claude-code subagent', ...transcriptFacts(readFileSync(join(sub, s), 'utf8')) });
+      if (take(file, 'claude-code') && existsSync(sub)) for (const s of readdirSync(sub)) if (s.endsWith('.jsonl')) take(join(sub, s), 'claude-code subagent');
     }
   }
   return { found, skipped, searched };
@@ -181,8 +190,9 @@ export async function collect(o) {
   const recDir = join(at.runtime, '.eden-record'), files = recordFiles(recDir);
   if (!files.length) throw new Error(`No session record in ${at.kind === 'home' ? 'this Soul\'s runtime folder' : o.folder}. Put an empty file named .eden-record-on in ${at.kind === 'home' ? 'the home\'s .souls/ folder or the Soul\'s runtime folder' : 'the Soul\'s folder'} before the session.`);
   const rows = files.flatMap((f) => lines(readFileSync(join(recDir, f), 'utf8')));
-  const stamps = rows.map((r) => r.at).filter(Number.isFinite);
-  const since = o.since ?? Math.min(...stamps) - WINDOW_BEFORE_MS, until = o.until ?? Math.max(...stamps) + WINDOW_AFTER_MS;
+  const span = (list) => list.reduce(([lo, hi], r) => (Number.isFinite(r.at) ? [Math.min(lo, r.at), Math.max(hi, r.at)] : [lo, hi]), [Infinity, -Infinity]);
+  const [first, last] = span(rows);
+  const since = o.since ?? first - WINDOW_BEFORE_MS, until = o.until ?? last + WINDOW_AFTER_MS;
   mkdirSync(out, { recursive: true, mode: 0o700 });
   for (const d of ['client', 'transcripts', 'world']) mkdirSync(join(out, d), { mode: 0o700 });
   writeFileSync(join(out, '.gitignore'), '*\n');
@@ -199,8 +209,8 @@ export async function collect(o) {
   };
   // the record files that reach into the window, whole
   for (const f of files) {
-    const own = lines(readFileSync(join(recDir, f), 'utf8')).map((r) => r.at).filter(Number.isFinite);
-    if (own.length && (Math.max(...own) < since || Math.min(...own) > until)) continue;
+    const [lo, hi] = span(lines(readFileSync(join(recDir, f), 'utf8')));
+    if (Number.isFinite(lo) && (hi < since || lo > until)) continue;
     keep(`client/${f}`, join(recDir, f), 'The client\'s full record (soul-trace/2): commands, their output, world calls with request and answer, serve\'s own calls, waits.', '`at` and `wallStart` local wall ms; `mono` ms since the process began; `sentAt` world wall ms; ticks world ticks');
   }
   if (existsSync(join(at.runtime, '.eden-serve.log'))) keep('client/serve.log', join(at.runtime, '.eden-serve.log'), 'The serve process\'s own log: one line per thing it noticed or did, each with an ISO time.', 'ISO local wall time at the start of each line');

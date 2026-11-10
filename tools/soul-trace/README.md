@@ -104,6 +104,9 @@ agent sees changes, byte for byte: no command, help or guide line, answer field 
   fetches keep only time and status); `proxied: true` is serve's wire time for a command's call;
 - `wait`: a retry or a stated wait.
 
+Each process reads the switch once when it starts, so a running `serve` keeps recording until it is restarted
+(`serve --stop`, then `serve`) after the switch is removed, and starts recording only once restarted after it is added.
+
 Never recorded: the token, any Authorization header, the credentials file. Credential-like keys and every bearer
 value are replaced with `[omitted]`, and the commands that handle codes or tokens (`register`, `create`, `pair`,
 `adopt`, `approval`, `doctor`, `import`, `export`, `init`, `upgrade`) keep only their name, exit and times.
@@ -118,8 +121,8 @@ the client record and `serve` log; the harness transcripts; the end state of eve
 record names (fetched once); the versions in use (client, skill, catalog, world build); a `manifest.json` (marked
 `private`) and a README for the analysing agent. Any token the folder or home holds is replaced wherever it appears.
 
-Transcripts: collect takes by itself only Claude Code transcripts recorded with a working directory exactly equal
-to `<folder>`, within the session's window, opening only that folder's project directory under `CLAUDE_CONFIG_DIR`,
+Transcripts: collect takes by itself only Claude Code transcripts (and their subagents' transcripts) recorded with a
+working directory exactly equal to `<folder>`, within the session's window, opening only that folder's project directory under `CLAUDE_CONFIG_DIR`,
 `~/.claude` or `--claude-dir`; it never lists other projects. Codex keeps sessions by date, so a Codex transcript is
 taken only when named with `--transcript`, and only when it was recorded in `<folder>`. With none found it says so
 and what to pass.

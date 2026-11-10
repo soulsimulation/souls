@@ -47,6 +47,9 @@ async function session() {
   ]));
   mkdirSync(join(project, 'mine', 'subagents'), { recursive: true });
   writeFileSync(join(project, 'mine', 'subagents', 'agent-1.jsonl'), jsonl([{ type: 'user', cwd: folder, timestamp: iso(now - 25_000), message: { content: 'sub' } }]));
+  // a subagent of this session that ran in another folder (a worktree), and one from a month ago
+  writeFileSync(join(project, 'mine', 'subagents', 'agent-2.jsonl'), jsonl([{ type: 'user', cwd: other, timestamp: iso(now - 25_000), message: { content: 'DECOYCHAT' } }]));
+  writeFileSync(join(project, 'mine', 'subagents', 'agent-3.jsonl'), jsonl([{ type: 'user', cwd: folder, timestamp: iso(now - 30 * 86_400_000), message: { content: 'OLDSESSION' } }]));
   // an old session in the same folder, long before this one
   writeFileSync(join(project, 'old.jsonl'), jsonl([{ type: 'user', cwd: folder, timestamp: iso(now - 86_400_000), message: { content: 'OLDSESSION' } }]));
   utimesSync(join(project, 'old.jsonl'), (now - 86_400_000) / 1000, (now - 86_400_000) / 1000);

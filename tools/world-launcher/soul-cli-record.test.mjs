@@ -97,9 +97,12 @@ test('on: commands and world calls are kept with their content, ids and times, a
 test('a command that handles codes or tokens keeps only its name, exit and times', { timeout: 60_000 }, async () => {
   const w = await world(), d = folder(w.url, true);
   try {
-    await run(d, 'create', 'Ada', '--for', 'CODE-PLANTED');
+    // an account world: the window code goes to the world in the request body
+    writeFileSync(join(d, '.eden-agent.json'), JSON.stringify({ world: w.url, worldId: 'w1', accountAuth: true }), { mode: 0o600 });
+    await run(d, 'create', 'Ada', '--for', 'K7QX-M2PA');
+    assert.ok(w.seen.some((x) => x.body.includes('K7QX-M2PA')), 'the code reached the world');
     const raw = recordText(d), start = records(d).find((r) => r.kind === 'proc.start');
-    assert.ok(!raw.includes('CODE-PLANTED') && !raw.includes('PLANTEDTOKEN'));
+    assert.ok(raw.length > 0 && !raw.includes('K7QX-M2PA') && !raw.includes('PLANTEDTOKEN'));
     assert.equal(start.command, 'create'); assert.equal(start.quiet, true); assert.equal(start.argv, undefined);
     assert.ok(records(d).filter((r) => r.kind === 'http' || r.kind === 'wire').every((r) => r.req === undefined && r.res === undefined));
   } finally { w.close(); rmSync(d, { recursive: true, force: true }); }
