@@ -88,6 +88,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  campChair?: {plan(soul:EdgeSoul,id:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|{code:string;reason:string}|null};
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -192,6 +193,7 @@ export class GodPerceive {
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
+      campChair:(soul:EdgeSoul,id:string,action:string)=>this.h.campChair?.plan(soul,id,action)??null,
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
