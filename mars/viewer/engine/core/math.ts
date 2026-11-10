@@ -334,3 +334,10 @@ export function dlog(x: number): number {
   }
   return k === 0 ? f - s * (f - R) : dk * LN2_HI - ((s * (f - R) - dk * LN2_LO) - f);
 }
+
+/** Stable FNV-1a unit phase shared by native and presentation consumers. */
+export function idPhase(id: string, salt = 0): number {
+  let h = (0x811c9dc5 ^ salt) >>> 0;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0;
+  return h / 0x100000000;
+}

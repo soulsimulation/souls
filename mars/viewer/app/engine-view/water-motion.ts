@@ -1,6 +1,6 @@
 // Cosmetic water poses over recorded native support; no root or contact displacement.
 import type {ShoreContactV1} from '../../../../packages/engine-contract/src/shore.ts';
-import {idPhase} from '../../engine/bodies/pose.ts';
+import {idPhase} from '../../engine/core/math.ts';
 export type WaterMotion={kind:'surface-swim'|'upright-swim'|'tread';phase:number;bodyPitch:number;hipUp:number;hands:[[number,number,number],[number,number,number]];feet:[[number,number,number],[number,number,number]];floating:boolean};
 /** All offsets are forward/right/up metres, take time only. Bed-supported swimming
  * keeps the existing feet; buoyant phases get gentle alternating kicks. No depth

@@ -2,7 +2,7 @@
 // speed, a small sway and a yaw drift — all pure functions of (entity id, sampled tick, sampled speed).
 // No wall clock and no frame-to-frame state, so a replay at the same tick draws the same head (and a
 // paused take holds still unless the caller advances the tick). Deterministic trig (core/math dsin).
-import { clamp, dsin, type Vec3 } from '../core/math.ts';
+import { clamp, dsin, idPhase, type Vec3 } from '../core/math.ts';
 import type { FloaterBody } from './body.ts';
 import {MOTION_LIMITS,type MotionAdapter,type BodyMotionState} from './motion.ts';
 
@@ -12,11 +12,7 @@ export type FloaterPose = { p: Vec3; yaw: number; pitch: number; roll: number };
 export const BOB = { amp: 0.045, periodMin: 3.2, periodMax: 4.6, swayRoll: 0.035, swayPitch: 0.025, yawDrift: 0.05, leanPerMps: 0.12, leanMax: 0.16 };
 
 /** FNV-1a of the id → [0, 1): a stable per-entity phase/period so heads never bob in unison. */
-export function idPhase(id: string, salt = 0): number {
-  let h = (0x811c9dc5 ^ salt) >>> 0;
-  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0;
-  return h / 0x100000000;
-}
+export {idPhase} from '../core/math.ts';
 
 const TWO_PI = 2 * Math.PI;
 
