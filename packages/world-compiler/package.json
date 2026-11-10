@@ -12,7 +12,7 @@
     "./weather-rules": "./src/weather-rules.ts"
   },
   "scripts": {
-    "test": "node --test src/*.test.ts src/core-kit/*.test.ts"
+    "test": "node --test src/*.test.ts src/core-kit/*.test.ts scripts/*.test.mjs"
   },
   "dependencies": {
     "@souls/ground": "workspace:*",
