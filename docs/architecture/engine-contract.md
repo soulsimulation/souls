@@ -117,7 +117,7 @@ own grid and radius, so its steps are unchanged. Under `body-step-guard/1`, a lo
 adopts once at boot (history before it replays as recorded; the physical-binding readers of the Eden worlds take it as a runtime policy, like the clock and the courtesy flags), every placement the engine writes outside a step also passes
 it (`bodyStandsClear`) and keeps the invariant's body separation: an edge relocation, a recovery restore and a stall release
 stand a body only where its own radius fits (a floater's 0.35 m or its own) and apart from other bodies by both radii, and a
-stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `stand-height/1` (#1454), adopted at boot last (after quarantine-mark/1), a body the engine places upstairs (a restore, a settle, a stall release not from a carrier) stands at its floor's own height, never at the height it had; without it a body caught mid-climb could be stood on a floor cell in the air. Births keep their own arrival check. A carrier's rider
+stall release with nothing clear near leaves the body where it stands. Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `stand-height/1` (#1454), adopted at boot last (after quarantine-mark/1), a body the engine places upstairs (a restore, a settle, a stall release not from a carrier) stands at its floor's own height, never at the height it had; without it a body caught mid-climb could be stood on a floor cell in the air. Under `stand-height/2` (#1521), adopted right after it, the same holds on the ground floor of a world without a ground field (Eden core): a stall release on level 0 stands the body at that level's floor height. Without it, a body stalled mid-climb onto the commons deck was set down at y 0.24 in the air, and every later walk was refused `motion.teleport`, because the walk's first tick puts the body on its floor. Adopting `stand-height/2` also stands any free body already left that way on its floor, once. A free body is idle, with no programme, nothing holding it and not seated or riding, and stands more than a step (0.15 m) above level 0's floor. It goes to the same point if that point is clear, otherwise to the nearest free standing spot, with each spot in one plan kept apart from the others. Planning only reads: it never takes a body out of the entity table, so the live table keeps the same order as a replay. A stall release on level 0 that finds nowhere clear near a body standing in the air, not even its own point, leaves the body held (`stall.no-floor-spot`), never released in the air. The stall guard tells the owner once, with a failed `stall.no-floor-spot` receipt, and a `stand:here` answers the same refusal. The guard doesn't log another release while that hold is unchanged. The adoption's own event carries each body, its place and its Soul, and the Soul is told (`world.stood-on-floor`). Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
@@ -131,7 +131,7 @@ whose history began without them adopts them in one logged `rules` event at its 
 (`{soulsRepairAdoptV1: {contract: 'souls-repair-adoption/1', tick, fromRulesVersion, toRulesVersion, fromStateHash}}`). Its
 fold turns the rules on, and the world header's `rules_version` follows in the same acceptance. A new world is born without
 them and adopts at tick 0. A snapshot restores under the policy it was taken with; the state hash never names the rules
-(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (4.16,
+(only the rules version does), so adoption leaves it unchanged. **Adoption is one way:** a reader without the rules (0.120,
 or `marsFactory` alone) refuses an adopted history. `SIM_SOULS_REPAIR=0` adopts nothing, still replays a logged adoption, and
 is ignored for a world that has adopted. A factory that already has the rules (`SIM_SOULS_REPAIR=1`, `SIM_SHARED_CARRY=1`, or
 `soulsRepairV1: true`) is used as it is: an old history refuses it, as before.
@@ -279,6 +279,42 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   it in the same place. A body that breaks again within a cooldown is quarantined and held again, alone (#1377): its own
   programmes stop and nobody else's. Its glitch row is written at most twice a cooldown; the log event, which a replay
   needs, every time.
+
+**Any other number that is no number: nonfinite-hold/1 (#1496).** A logged, host-only runtime policy
+(`runtimePolicy.nonFiniteHoldV1`, adopted at boot last, after quarantine-mark/1 and stand-height/1, effective only with quarantine/1). The durable clock
+hashes the head every tick. When that hash still fails on a non-finite number after quarantine/1 has held any broken body,
+for example an object's pose, a field of the world such as the weather, or a programme's own state:
+- The engine (`planNonFiniteV1`) plans for every such number in the world (every entity, every kind) and in the
+  programmes, all or nothing:
+  - A body's pose and human state are never patched here; that is quarantine/1's, and a body quarantine/1 leaves broken
+    (a pitch, for example) halts as below. A body's other fields are patched like any other number.
+  - An entity's pose is one unit, and only a free component's pose is ever put back. A free component is on the
+    ground, on a surface or in a hand. Its def (from the world's library, else the catalog; an unknown def is not free) has no slots, it is joined to nothing, nothing rests on it, and no body names it in its state:
+    a seat, a berth or a link. Its kind can never carry, seat, berth or hold a body. The whole pose comes back from
+    the last good snapshot (the recovery baseline) (`from: 'baseline'`), but only if the component's support is the
+    same as it was then and no body stands within its radius.
+  - Otherwise the component is set down at a free spot near the arrival (`from: 'arrival'`, the eject), found by the
+    same search a held body uses, and its holder lets go.
+  - Any other kind with a broken pose is not moved: it halts. That includes a carrier, a boat, a bed, a ride and a
+    frame part.
+  - Any other number goes back to its value at the same path in the baseline (`from: 'baseline'`), else 0
+    (`from: 'zero'`).
+  - More than 64 numbers, or a pose nothing legal can put back, plans nothing at all, so no patch is ever partial.
+- What the patches touched stops (`state.non-finite`): a programme whose own state was patched, the programmes of a body
+  whose fields were patched, and the holder of an item that was set down. Each of those Souls is named in the event, and
+  the edge ledger ends its open acts and tells it.
+- The baseline is restored once per baseline, into a scratch engine that is only read. A break that comes back every tick
+  writes its event every tick, because a replay needs it. Its glitch row is written at most twice a cooldown.
+- One `nonFiniteHoldV1` rules event (author `world:nonfinite-hold`) carries the exact patches. A replay writes the same
+  ones through the same engine method (`applyNonFiniteV1`) and reads nothing. The glitch row (rung `contained`, rule
+  `state.non-finite`) names each field and where its value came from. The hash is then taken again, and the frontier is
+  written through the event, so no frontier is ever hashed over a non-finite head.
+- A periodic capture skipped as `snapshot.non-finite` puts its numbers back the same way, so the next capture isn't
+  skipped for them again.
+- What it can't put back is still `engine.unhashable` or `durability.clock-frontier`, as below: a number in the Soul
+  kernel, a body pose quarantine/1 left broken, any entity but a free component with a broken pose, or more than 64 numbers. The tick
+  throws and the process exits, and the supervisor restarts it from the log. A world never runs on with its clock
+  stopped. If a deterministic rule produces that number, the restart meets it again and loops; that is a known limit.
 
 **What still halts:** a failed write (`failCheckpoint`, a database that won't write, a clock frontier that can't be
 persisted), each named `durability.*`. Under quarantine/1 a baseline that won't restore is no longer one; without it, it

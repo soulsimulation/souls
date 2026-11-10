@@ -31,8 +31,9 @@ export type StallGuardHost = {
   probe(entityId: string): Probe | null;
   /** Logs the release ('edge-stop' {stallReleaseV1}); resolves once the world applied it. */
   release(soul: EdgeSoul, reason: {code: string; message: string}): Promise<unknown>;
-  /** The owner's receipt for the release (stall:released, completed, code stall.released). */
-  record(soul: EdgeSoul, reason: string, detail: Record<string, unknown>): void;
+  /** The owner's receipt for the release (stall:released, completed, code stall.released); #1521: or, when the world could not
+   *  set the body down (`held`), failed with code stall.no-floor-spot. */
+  record(soul: EdgeSoul, reason: string, detail: Record<string, unknown>, held?: boolean): void;
 };
 
 export type StallV1 = {contract: 'stall/1'; what: string; holders: string[]; markers: string[]; seconds: number; trigger: 'limit' | 'owner-request' | 'stand'};
@@ -48,6 +49,8 @@ function what(p: Probe): string {
 export class StallGuard {
   private seen = new Map<string, {sig: string; since: number}>();
   private releasing = new Set<string>();
+  /** #1521: a hold the world could not release (nowhere clear on the floor), by its signature: told once, not re-logged. */
+  private kept = new Map<string, string>();
   private h: StallGuardHost;
   private opts: {limitS?: number};
   constructor(h: StallGuardHost, opts: {limitS?: number} = {}) {this.h = h; this.opts = opts;}
@@ -67,7 +70,9 @@ export class StallGuard {
     for (const soul of this.h.souls()) {
       live.add(soul.soulId);
       const p = this.h.probe(soul.entityId);
-      if (!p || !p.held || !p.candidate || p.exempt) {this.seen.delete(soul.soulId); continue;}
+      if (!p || !p.held || !p.candidate || p.exempt) {this.seen.delete(soul.soulId); this.kept.delete(soul.soulId); continue;}
+      if (this.kept.get(soul.soulId) === p.signature) continue;   // #1521: already told it could not be set down; once per hold
+      this.kept.delete(soul.soulId);
       const s = this.seen.get(soul.soulId);
       if (!s || s.sig !== p.signature) {this.seen.set(soul.soulId, {sig: p.signature, since: tick}); continue;}
       // `since` is first sight, up to a sample (1 s) after the hold stopped moving, and the logged release lands a tick or
@@ -75,10 +80,11 @@ export class StallGuard {
       if (tick - s.since + 2 * TPS >= this.limitTicks(p)) void this.fire(soul, p, Math.round((tick - s.since) / TPS), p.pending ? 'owner-request' : 'limit');
     }
     for (const id of this.seen.keys()) if (!live.has(id)) this.seen.delete(id);
+    for (const id of this.kept.keys()) if (!live.has(id)) this.kept.delete(id);
   }
 
   /** stand:here from the owner's agent: a stalled hold (of a kind that should end by itself) is released at once. */
-  async ownerStand(soul: EdgeSoul): Promise<boolean> {
+  async ownerStand(soul: EdgeSoul): Promise<boolean | 'held'> {
     const p = this.off ? null : this.h.probe(soul.entityId);
     if (!p || !p.held || !p.candidate || p.exempt) return false;
     const s = this.seen.get(soul.soulId), still = s && s.sig === p.signature ? this.h.tick() - s.since : 0;
@@ -89,7 +95,7 @@ export class StallGuard {
     return this.fire(soul, p, s ? Math.round((this.h.tick() - s.since) / TPS) : 0, 'stand');
   }
 
-  private async fire(soul: EdgeSoul, p: Probe, seconds: number, trigger: StallV1['trigger']): Promise<boolean> {
+  private async fire(soul: EdgeSoul, p: Probe, seconds: number, trigger: StallV1['trigger']): Promise<boolean | 'held'> {
     if (this.releasing.has(soul.soulId)) return false;
     this.releasing.add(soul.soulId);
     const w = what(p), message = `${soul.name} was stuck ${w}${seconds ? ` for ${seconds} s` : ''}; the world ended it and set ${soul.name} down nearby.`;
@@ -97,6 +103,13 @@ export class StallGuard {
       await this.h.release(soul, {code: 'stall.released', message});
       this.seen.delete(soul.soulId);
       const stallV1: StallV1 = {contract: 'stall/1', what: w, holders: p.holders.map(x => `${x.verb}${x.phase ? ':' + x.phase : ''}`), markers: p.markers, seconds, trigger};
+      // #1521: the world may refuse (stand-height/2: nowhere clear on the floor near a body above it). Say what happened, once.
+      const after = this.h.probe(soul.entityId);
+      if (after?.held) {
+        this.kept.set(soul.soulId, after.signature);
+        this.h.record(soul, `${soul.name} is stuck ${w}, and there is nowhere clear on the floor near ${soul.name} to set them down, so the world kept them where they are (stall.no-floor-spot).`, {stallV1}, true);
+        return 'held';
+      }
       this.h.record(soul, message, {stallV1});
       return true;
     } catch {return false;} finally {this.releasing.delete(soul.soulId);}

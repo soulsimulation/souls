@@ -34,7 +34,10 @@ export function validateScenario(s) {
   const errs = [];
   if (!s?.name || !/^[a-z0-9-]+$/.test(s.name)) errs.push('name: lowercase letters, digits and -');
   if (s?.world?.kind !== 'dev') errs.push('world.kind must be "dev" (the only kind run provisions)');
-  if (!s?.world?.genesis || !existsSync(join(REPO, s.world.genesis))) errs.push(`world.genesis ${s?.world?.genesis} not found in the repo`);
+  // A frozen snapshot alone names the world (#883); a genesis given beside it must still exist.
+  if (s?.world?.snapshot) { if (!existsSync(resolve(REPO, s.world.snapshot))) errs.push(`world.snapshot ${s.world.snapshot} not found`); }
+  else if (!s?.world?.genesis) errs.push(`world.genesis ${s?.world?.genesis} not found in the repo`);
+  if (s?.world?.genesis && !existsSync(join(REPO, s.world.genesis))) errs.push(`world.genesis ${s.world.genesis} not found in the repo`);
   if (!Number.isInteger(s?.world?.port)) errs.push('world.port required');
   if (!(s?.durationSec > 0)) errs.push('durationSec > 0');
   const ids = new Set();
@@ -43,6 +46,7 @@ export function validateScenario(s) {
     if (!ADAPTERS.includes(x.adapter)) errs.push(`seats[${i}].adapter ${x.adapter}`);
     if (x.adapter === 'claude-headless' && !x.model) errs.push(`seats[${i}].model required for a Claude seat`);
     if (!x.soulName) errs.push(`seats[${i}].soulName required`);
+    if (x.briefBytes != null && !(Number.isSafeInteger(x.briefBytes) && x.briefBytes >= 0)) errs.push(`seats[${i}].briefBytes must be a whole number of bytes, 0 for no brief`);
     if (x.adapter === 'scripted-owner') for (const e of validateScript(x.script)) errs.push(`seats[${i}].${e}`);
     if (x.persona && !existsSync(join(PERSONAS, `${x.persona}.md`))) errs.push(`seats[${i}].persona ${x.persona}: no personas/${x.persona}.md`);
   }

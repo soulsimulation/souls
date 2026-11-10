@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 (#1591): core-bench@3 retains the frozen repairable @2 geometry, state and seats, adding opt-in two-hand upright transport. A narrow production K=2 run across core-bench placed, baked and rendered all 20 samples of 4 revisions with zero findings and zero qualification gaps. No budget hold is added; older revisions remain unchanged.",
+  "findings": []
+}
