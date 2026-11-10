@@ -83,14 +83,23 @@ export function rememberHome(homedir, root) {
 }
 /** A home with nothing in it yet: no Soul, no god seat, no approval waiting. */
 export function emptyHome(root) {
-  const c = readJsonQuietly(join(root, "config.json")) ?? {}, pending = join(root, "pending");
-  const waiting = existsSync(pending) && readdirSync(pending).some((k) => readJsonQuietly(join(pending, k, STATE_FILE))?.pendingApproval);
-  return !Object.keys(c.souls ?? {}).length && !Object.keys(c.gods ?? {}).length && !(existsSync(join(root, "souls")) && readdirSync(join(root, "souls")).length) && !waiting;
+  // Anything unreadable or unexpected counts as in use: a home that can't be read is never removed.
+  const strict = (file, fallback) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch (e) { if (e.code === "ENOENT" && fallback !== undefined) return fallback; throw e; } };
+  try {
+    const c = strict(join(root, "config.json")), creds = strict(join(root, CREDENTIALS), {}), pending = join(root, "pending");
+    const held = (o) => Object.values(o ?? {}).some((v) => v && typeof v === "object" && Object.keys(v).length);
+    const seats = existsSync(pending) ? readdirSync(pending).map((k) => strict(join(pending, k, STATE_FILE), {})) : [];
+    return !Object.keys(c.souls ?? {}).length && !Object.keys(c.gods ?? {}).length && !held(creds.souls) && !held(creds.gods) && !held(creds.approvals)
+      && !seats.some((st) => st.pendingApproval || st.pendingCreate || st.soul)
+      && !["souls", "gods", "memory", "MEMORY.md"].some((n) => existsSync(join(root, n)) && (n === "MEMORY.md" || readdirSync(join(root, n)).length));
+  } catch { return false; }
 }
 /** The skill's own version, from its frontmatter. */
 export const skillVersionOf = (text) => /^\s*version:\s*"?([0-9][0-9.]*)"?\s*$/m.exec(String(text ?? ""))?.[1] ?? null;
 /** Where a home keeps the skill: SKILL.md beside .souls/, and the project copies where a person put them. */
 export const SKILL_COPIES = ["SKILL.md", ".claude/skills/souls/SKILL.md", ".agents/skills/souls/SKILL.md"];
+/** A file is the Souls skill only when its frontmatter says so: another skill's SKILL.md is never ours to replace. */
+export const isSoulsSkill = (text) => /^---\n[\s\S]*?^name:\s*"?souls"?\s*$[\s\S]*?^---$/m.test(String(text ?? ""));
 
 function writeJson(file, value, mode = 0o600) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -535,16 +544,18 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   /** Each skill copy beside the home and in `also` (the folder an agent works in), and its version. */
   const skillVersions = (also = []) => {
     const here = real(also[0] ?? folder());   // paths are said from where the agent works, never whole
+    const said = (file) => { const r = relative(here, file); return r.startsWith("..") ? `beside the home: ${relative(real(folder()), file)}` : r; };
     return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
-      .map((file) => ({ file, text: read(file) })).filter((c) => c.text !== null).map(({ file, text }) => ({ rel: relative(here, file), file, version: skillVersionOf(text) }));
+      .map((file) => ({ file, text: read(file) })).filter((c) => isSoulsSkill(c.text)).map(({ file, text }) => ({ rel: said(file), file, version: skillVersionOf(text) }));
   };
-  /** The copies older than `version`: what `upgrade` refreshes. */
-  const skillBehind = (version, also) => skillVersions(also).filter((c) => newerThan(version, c.version));
+  /** The versioned copies older than `version`: what `upgrade` refreshes. */
+  const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
   /** The served skill, verified by the caller, over every copy older than it, never over one as new. With no SKILL.md
    *  anywhere, it lands in the first of `also` (the folder the agent works in), else beside the home. */
   function installSkill(bytes, version, also = []) {
-    const none = !skillVersions(also).some((c) => basename(c.file) === "SKILL.md" && !c.file.includes("/skills/souls/")), wrote = [];
-    const targets = [...(none ? [{ file: join(also[0] ?? folder(), "SKILL.md"), rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
+    const fresh = join(also[0] ?? folder(), "SKILL.md"), wrote = [];
+    const none = !skillVersions(also).length && !existsSync(fresh);   // never over a file that isn't ours
+    const targets = [...(none ? [{ file: fresh, rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
     for (const { file, rel } of targets) {
       const tmp = `${file}.${process.pid}.tmp`;
       writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);

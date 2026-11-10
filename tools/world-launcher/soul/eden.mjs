@@ -106,14 +106,23 @@ function rememberHome(homedir, root) {
 }
 /** A home with nothing in it yet: no Soul, no god seat, no approval waiting. */
 function emptyHome(root) {
-  const c = readJsonQuietly(join(root, "config.json")) ?? {}, pending = join(root, "pending");
-  const waiting = existsSync(pending) && readdirSync(pending).some((k) => readJsonQuietly(join(pending, k, STATE_FILE))?.pendingApproval);
-  return !Object.keys(c.souls ?? {}).length && !Object.keys(c.gods ?? {}).length && !(existsSync(join(root, "souls")) && readdirSync(join(root, "souls")).length) && !waiting;
+  // Anything unreadable or unexpected counts as in use: a home that can't be read is never removed.
+  const strict = (file, fallback) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch (e) { if (e.code === "ENOENT" && fallback !== undefined) return fallback; throw e; } };
+  try {
+    const c = strict(join(root, "config.json")), creds = strict(join(root, CREDENTIALS), {}), pending = join(root, "pending");
+    const held = (o) => Object.values(o ?? {}).some((v) => v && typeof v === "object" && Object.keys(v).length);
+    const seats = existsSync(pending) ? readdirSync(pending).map((k) => strict(join(pending, k, STATE_FILE), {})) : [];
+    return !Object.keys(c.souls ?? {}).length && !Object.keys(c.gods ?? {}).length && !held(creds.souls) && !held(creds.gods) && !held(creds.approvals)
+      && !seats.some((st) => st.pendingApproval || st.pendingCreate || st.soul)
+      && !["souls", "gods", "memory", "MEMORY.md"].some((n) => existsSync(join(root, n)) && (n === "MEMORY.md" || readdirSync(join(root, n)).length));
+  } catch { return false; }
 }
 /** The skill's own version, from its frontmatter. */
 const skillVersionOf = (text) => /^\s*version:\s*"?([0-9][0-9.]*)"?\s*$/m.exec(String(text ?? ""))?.[1] ?? null;
 /** Where a home keeps the skill: SKILL.md beside .souls/, and the project copies where a person put them. */
 const SKILL_COPIES = ["SKILL.md", ".claude/skills/souls/SKILL.md", ".agents/skills/souls/SKILL.md"];
+/** A file is the Souls skill only when its frontmatter says so: another skill's SKILL.md is never ours to replace. */
+const isSoulsSkill = (text) => /^---\n[\s\S]*?^name:\s*"?souls"?\s*$[\s\S]*?^---$/m.test(String(text ?? ""));
 
 function writeJson(file, value, mode = 0o600) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -558,16 +567,18 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   /** Each skill copy beside the home and in `also` (the folder an agent works in), and its version. */
   const skillVersions = (also = []) => {
     const here = real(also[0] ?? folder());   // paths are said from where the agent works, never whole
+    const said = (file) => { const r = relative(here, file); return r.startsWith("..") ? `beside the home: ${relative(real(folder()), file)}` : r; };
     return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
-      .map((file) => ({ file, text: read(file) })).filter((c) => c.text !== null).map(({ file, text }) => ({ rel: relative(here, file), file, version: skillVersionOf(text) }));
+      .map((file) => ({ file, text: read(file) })).filter((c) => isSoulsSkill(c.text)).map(({ file, text }) => ({ rel: said(file), file, version: skillVersionOf(text) }));
   };
-  /** The copies older than `version`: what `upgrade` refreshes. */
-  const skillBehind = (version, also) => skillVersions(also).filter((c) => newerThan(version, c.version));
+  /** The versioned copies older than `version`: what `upgrade` refreshes. */
+  const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
   /** The served skill, verified by the caller, over every copy older than it, never over one as new. With no SKILL.md
    *  anywhere, it lands in the first of `also` (the folder the agent works in), else beside the home. */
   function installSkill(bytes, version, also = []) {
-    const none = !skillVersions(also).some((c) => basename(c.file) === "SKILL.md" && !c.file.includes("/skills/souls/")), wrote = [];
-    const targets = [...(none ? [{ file: join(also[0] ?? folder(), "SKILL.md"), rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
+    const fresh = join(also[0] ?? folder(), "SKILL.md"), wrote = [];
+    const none = !skillVersions(also).length && !existsSync(fresh);   // never over a file that isn't ours
+    const targets = [...(none ? [{ file: fresh, rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
     for (const { file, rel } of targets) {
       const tmp = `${file}.${process.pid}.tmp`;
       writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
@@ -592,7 +603,7 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   if (!existsSync(at("config.json"))) rediscover();
   return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
-return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
+return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, isSoulsSkill, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
 // </inline home.mjs>
 
@@ -2992,15 +3003,19 @@ function publicApproval(a, world) {
   };
 }
 
-/** #1875 A6: this home (or legacy folder) already holds a token the world accepts for Soul `id`. Asks the world once. */
+/** #1875 A6: true when this home (or legacy folder) holds a token the world accepts for Soul `id`; false when it holds
+ *  none or the world refuses it; null when the world could not say (unreachable, busy). Asks the world once. Only a false
+ *  ever leads to a new pairing, because a new pairing retires the token a running listen or serve holds. */
 async function connectedAlready(id) {
   const kept = HOME ? HOME.config().souls[id] : null;
   if (HOME && kept?.state !== "active") return false;
   const s = HOME ? HOME.load(HOME.soul(id)) : load();
   if (!s.token || !s.world || (!HOME && s.soul !== id)) return false;
   const r = await worldOnce(`${s.world}/v1/agent/me`, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: 15_000 });
-  return r.status === 200 && r.data?.soul?.id === id;
+  if (r.status === 200) return r.data?.soul?.id === id;
+  return r.status === 401 || r.status === 403 ? false : null;
 }
+const UNSURE = (id) => Object.assign(new Error(`The world did not say whether ${id} is still connected here, so nothing was paired again (a new pairing would retire a working token). Try once more in a minute.`), { exitCode: 75 });
 
 /** In a home, a name the account already holds here is adopted, not made again. */
 async function alreadyOwned(name, s) {
@@ -3020,7 +3035,7 @@ async function create(...argv) {
   if (HOME && !fresh && !s.pendingCreate && !s.pendingApproval) {
     const owned = await alreadyOwned(name, s);
     // A Soul this home keeps whose token the world no longer takes is paired again, never made twice.
-    if (owned?.code === "already-here" && !(await connectedAlready(owned.soul.id))) { const r = await pair(owned.soul.id, ...(code ? ["--for", code] : [])); return r.paired ? { ...r, reconnection: "reconnected" } : r; }
+    if (owned?.code === "already-here" && (await connectedAlready(owned.soul.id)) === false) { const r = await pair(owned.soul.id, ...(code ? ["--for", code] : [])); return r.paired ? { ...r, reconnection: "reconnected" } : r; }
     if (owned) return owned;
   }
   if (!HOME && !fresh && s.soul && s.token && !s.pendingApproval && (await connectedAlready(s.soul))) {
@@ -3060,7 +3075,9 @@ function keepPending(name, description, lc) {
   return p;
 }
 async function paired(id, name, s = load(), { made = true } = {}) {
-  if (!made && HOME && (await connectedAlready(id))) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
+  const live = !made && HOME ? await connectedAlready(id) : false;
+  if (live === null) throw UNSURE(id);
+  if (live) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
   if (!(s.soul === id && s.token)) await devPair(id);
   writeGuide(name);
   return { created: true, soul: { id, name }, paired: true };
@@ -3109,7 +3126,9 @@ async function finishCreate(p, firstWaitMs) {
 async function pair(...argv) {
   const { rest: [id], code } = forOption(argv);
   if (!/^s_[A-Za-z0-9_-]+$/.test(id ?? "")) throw new Error("usage: pair <soulId> [--for <CODE>]");
-  if (await connectedAlready(id)) return { paired: true, soul: id, reconnection: "already connected" };
+  const live = await connectedAlready(id);
+  if (live === null) throw UNSURE(id);
+  if (live) return { paired: true, soul: id, reconnection: "already connected" };
   const s = load();
   if (s.accountAuth) return startApproval({ soulId: id }, code);
   await devPair(id);
@@ -3173,7 +3192,7 @@ async function approval(action = "status") {
   if (!s.pendingApproval && action !== "cancel" && HOME && SEAT?.kind === "seat") {
     // A second onboarding's `approval wait`: the Soul it would wait for is already here and paired.
     const here = HOME.principals().filter((p) => p.state === "active" && p.world === SEAT.key);
-    if (here.length === 1 && (await connectedAlready(here[0].id))) return { status: "ready", soul: { id: here[0].id, name: here[0].name }, paired: true, reconnection: "already connected", next: `${CLI} status` };
+    if (here.length === 1 && (await connectedAlready(here[0].id)) === true) return { status: "ready", soul: { id: here[0].id, name: here[0].name }, paired: true, reconnection: "already connected", next: `${CLI} status` };
   }
   const p = need(s, "pendingApproval", "Run create or pair first.");
   const body = { approvalId: p.approvalId, pollSecret: p.input.pollSecret };
@@ -5540,7 +5559,7 @@ const homeRoots = (except) => soulHome.knownHomes(homedir()).filter((r) => !exce
 function homeChoice(root, url) {
   const elsewhere = homeRoots(root).map((h) => ({ home: tilde(h.root), souls: h.souls.map((x) => `${soulHome.norm(x.name)}@${x.world}`) }));
   return {
-    home: tilde(root), reaches: "this folder and the folders below it",
+    home: tilde(root).startsWith("~") ? tilde(root) : "./.souls", reaches: "this folder and the folders below it",
     ask: "Ask your owner once, before create: keep Souls in this folder, or in a home every folder reaches (~/.souls)?",
     global: `${CLI} register ${url} --global`, here: "nothing to run",
     ...(elsewhere.length ? { elsewhere, note: "A Soul already lives in a home on this machine: reach it there rather than making it again." } : {}),

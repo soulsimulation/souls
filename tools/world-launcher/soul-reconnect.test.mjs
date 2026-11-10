@@ -20,7 +20,7 @@ const skillText = (v) => `---\nname: souls\nmetadata:\n  version: "${v}"\n---\n\
 
 /** /w/dev (self-made identities) and /w/acct (approvals). Every pairing mints a new token and only the newest works. */
 async function world(t, { client = null, bundle = null, skill = null } = {}) {
-  const souls = new Map(), live = new Map(), approvals = new Map(), hits = [];
+  const souls = new Map(), live = new Map(), approvals = new Map(), hits = [], flags = { busyMe: false };
   let mints = 0;
   const mint = (id) => { const token = `sim_${id}_${++mints}`; live.set(id, token); return token; };
   const server = createServer((req, res) => { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
@@ -50,6 +50,7 @@ async function world(t, { client = null, bundle = null, skill = null } = {}) {
       return json(res, 200, { approval: { id: body.approvalId, status: 'ready', soulId: a.soulId, name: a.name }, token: a.token ?? (a.token = mint(a.soulId)) });
     }
     if (!me || live.get(me[2]) !== me[1]) return json(res, 401, { code: 'control.revoked', reason: 'moved' });
+    if (path === '/v1/agent/me' && flags.busyMe) return json(res, 503, { code: 'world.busy' });
     if (path === '/v1/agent/me') return json(res, 200, { soul: { id: me[2], name: souls.get(me[2]).name }, inbox: {} });
     if (path.startsWith('/v1/edge/here')) return json(res, 200, { here: { me: { id: me[2], name: souls.get(me[2]).name } } });
     json(res, 404, { code: 'no-route', path });
@@ -58,7 +59,7 @@ async function world(t, { client = null, bundle = null, skill = null } = {}) {
   t.after(() => { server.closeAllConnections(); server.close(); });
   const base = `http://127.0.0.1:${server.address().port}/w`;
   const approve = (id) => { const a = approvals.get(id), known = [...souls].find(([, s]) => s.name === a.name); const soulId = known?.[0] ?? `s_acct${souls.size + 1}`; if (!known) souls.set(soulId, { name: a.name, owner: 'human', slug: 'acct' }); Object.assign(a, { status: 'ready', soulId }); };
-  return { base, souls, live, hits, approve, approvals, mints: () => mints };
+  return { base, souls, live, hits, approve, approvals, flags, mints: () => mints };
 }
 const runIn = (cwd, home) => (...args) => new Promise((resolve) => {
   const child = spawn(process.execPath, [cli, ...args], { cwd, env: { ...process.env, HOME: home, SOULS_HOME: '', SOULS_PRINCIPAL: '', EDEN_TIME_SCALE: '0.01' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -232,7 +233,7 @@ test('A2 A3: a current client with an older skill copy: update names the skill, 
   mkdirSync(join(home, '.agents/skills/souls'), { recursive: true }); writeFileSync(join(home, '.agents/skills/souls/SKILL.md'), skillText('2.12.0'));
   const reg = await run('register', `${w.base}/dev`);
   assert.deepEqual(reg.d.update, { from: '2.12.0', to: ours, run: 'node eden.mjs upgrade', what: 'the skill (.agents/skills/souls/SKILL.md)' });
-  const up = await run('upgrade'); assert.equal(up.d.upgraded, true, up.err); assert.deepEqual(up.d.skill.wrote.sort(), ['.agents/skills/souls/SKILL.md', 'SKILL.md']);
+  const up = await run('upgrade'); assert.equal(up.d.upgraded, true, up.err); assert.deepEqual(up.d.skill.wrote, ['.agents/skills/souls/SKILL.md'], 'only the copy there was; no new file');
   assert.ok(!w.hits.includes('dev/eden.mjs'), 'the client was not fetched');
   assert.equal((await run('list')).d.update, undefined);
   assert.equal((await run('upgrade')).d.upgraded, false, 'twice changes nothing');
@@ -248,4 +249,34 @@ test('A2: with the user-level home, upgrade refreshes the skill copies of the fo
   assert.deepEqual(up.d.skill.wrote.sort(), ['.claude/skills/souls/SKILL.md', 'SKILL.md'], 'said from the working folder');
   for (const f of ['SKILL.md', '.claude/skills/souls/SKILL.md']) assert.equal(skillVersionOf(readFileSync(join(proj, f), 'utf8')), ours, f);
   assert.ok(!existsSync(join(home, 'SKILL.md')), 'a copy is not added beside the user-level home');
+});
+
+test('review: another skill\'s SKILL.md is never counted, flagged or replaced', async (t) => {
+  const skill = Buffer.from(skillText(ours)), client = { contract: 'eden-edge/1', version: ours, bytes: 1, sha256: 'x', minVersion: '2.0.0', skill: { version: ours, bytes: skill.length, sha256: sha(skill) } };
+  const w = await world(t, { client, skill }), home = tmp(t), run = runIn(home, home), other = '---\nname: my-other-skill\nversion: 1.0.0\n---\nmine\n';
+  writeFileSync(join(home, 'SKILL.md'), other);
+  const reg = await run('register', `${w.base}/dev`); assert.equal(reg.d.update, undefined, reg.out);
+  const up = await run('upgrade'); assert.equal(up.d.upgraded, false, up.out);
+  assert.equal(readFileSync(join(home, 'SKILL.md'), 'utf8'), other);
+});
+
+test('review: a world that cannot say whether the token works never gets a second pairing', async (t) => {
+  const w = await world(t), home = tmp(t), run = runIn(home, home), root = join(home, '.souls');
+  await run('register', `${w.base}/dev`); const id = (await run('create', 'Ivo')).d.soul.id, minted = w.mints();
+  w.flags.busyMe = true;
+  const c = await run('create', 'Ivo'); assert.equal(c.d.created, false, c.out + c.err); assert.equal(c.d.code, 'already-here');
+  const p = await run('pair', id); assert.equal(p.code, 75, p.out + p.err); assert.match(p.err, /nothing was paired again/);
+  assert.equal(w.mints(), minted); w.flags.busyMe = false; oneSoul(w, root, 'Ivo');
+});
+
+test('review: register --global keeps a home it cannot read, or one holding a god', async (t) => {
+  const w = await world(t), home = tmp(t), a = join(home, 'a'); mkdirSync(a);
+  const run = runIn(a, home), url = `${w.base}/dev`;
+  await run('register', url);
+  writeFileSync(join(a, '.souls', 'config.json'), '{ not json');
+  const r = await run('register', url, '--global'); assert.equal(r.code, 1, r.out); assert.ok(existsSync(join(a, '.souls', 'credentials.json')));
+  writeFileSync(join(a, '.souls', 'config.json'), JSON.stringify({ worlds: {}, souls: {}, gods: {} }));
+  const creds = JSON.parse(readFileSync(join(a, '.souls', 'credentials.json'), 'utf8')); creds.gods = { dev: { token: 'god' } };
+  writeFileSync(join(a, '.souls', 'credentials.json'), JSON.stringify(creds));
+  assert.equal((await run('register', url, '--global')).code, 1); assert.ok(existsSync(join(a, '.souls')));
 });
