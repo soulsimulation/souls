@@ -326,7 +326,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
-    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;planOnceSpatialV1(this.rt.services.spatial);
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     if(this.cfg.stairWayV1===true)this.rt.services.stairWayV1=true;   // #1428
@@ -383,7 +383,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
-    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;planOnceSpatialV1(this.rt.services.spatial);
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     if(this.cfg.stairWayV1===true)this.rt.services.stairWayV1=true;   // #1428
@@ -3175,7 +3175,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
-    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;planOnceSpatialV1(this.rt.services.spatial);
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     if(this.cfg.stairWayV1===true)this.rt.services.stairWayV1=true;   // #1428
@@ -3287,6 +3287,10 @@ for (const name of Object.getOwnPropertyNames(MarsEngine.prototype)) {
   Object.defineProperty(wrapped, 'name', { value: name });
   Object.defineProperty(MarsEngine.prototype, name, { ...d, value: wrapped });
 }
+/** #1770 plan-once: the server's engines keep route results per navigation epoch (Spatial.routeMemo; exact, bounded).
+ *  SIM_PLAN_ONCE=0 turns it off; SIM_PLAN_ONCE_ORACLE=1 checks every reuse against a fresh search. */
+const PLAN_ONCE = process.env.SIM_PLAN_ONCE !== '0', PLAN_ONCE_ORACLE = process.env.SIM_PLAN_ONCE_ORACLE === '1', ROUTE_MEMO_CAP = 256;
+function planOnceSpatialV1(sp: Spatial | undefined) { if (PLAN_ONCE && sp && !sp.routeMemo) sp.enableRouteMemo(ROUTE_MEMO_CAP, PLAN_ONCE_ORACLE); }
 const TABLE_CHECK = process.env.SIM_TABLE_CHECK === '1';
 /** The cached listing; under SIM_TABLE_CHECK=1 first proved equal to a fresh one. */
 function checkedTable(t: EntityTable): EntityTable {

@@ -105,6 +105,10 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   --from-pid <the world's process>` (or `--env-file`/`--env` with the world's settings) boots an online-backup copy with
   this tree's code, adopts, runs `--ticks` (default 1200) and prints one JSON line: adopted or refused and why, running or
   halted, the hashes before and after. The original is opened read-only and the copy is deleted afterwards.
+- `GET /w/<slug>/healthz` also carries `api`: per-route server time (queue and handler p50/p99/p99.9, the last 5–10 min and
+  since start) for the Soul and god API, by a closed list of route ids. `live.json` carries the same. Each API answer's
+  `Server-Timing` adds `launcher;dur` and `upstream;dur` at the launcher. A main-thread stall over 1 s is a timestamped
+  `[stall]` line in the world's log. To place a slow answer, see `docs/architecture/load.md` §4 (#1750).
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor

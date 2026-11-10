@@ -1,3 +1,4 @@
+import { commitSoulCompletion } from './soul-completion.ts';
 import { createRabbitCare, type RabbitCare } from './rabbit-care.ts';
 // The engine bridge (spec eden4/31 B2/B3, plan 33 §3.5, lane L9): Souls live among god-built things.
 //
@@ -24,7 +25,6 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
-import { commitSoulCompletion } from './soul-completion.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
@@ -1987,7 +1987,7 @@ export class EngineBridge {
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
     L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
-    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? null;
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply
