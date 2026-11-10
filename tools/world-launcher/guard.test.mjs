@@ -42,7 +42,7 @@ test('full-jitter backoff: uniform under min(5 min, 1 s * 2^n); defaults are the
 });
 
 test('(a) wedged, live.json: the watchdog shows the main thread stuck; SIGUSR2, SIGTERM, SIGKILL, restarted; problems say wedged', async () => {
-  const p = pool(R, { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
+  const p = pool(R, { FAKE_LIVE: '1', FAKE_STOP_MS: '50', FAKE_STALL_TOP: 'stuckInTheLoop apps/server/src/x.ts:12' });
   const port = await p.ensure(world('wa')); const pid = p.state('wa').child.pid;
   p.startGuard();
   await sleep(700);   // past liveStaleMs after up: live.json is judged from here
@@ -56,27 +56,62 @@ test('(a) wedged, live.json: the watchdog shows the main thread stuck; SIGUSR2, 
   assert.match(st.lastExit.reason, /wedged: main thread stuck/);
   assert.equal(st.lastExit.signal, 'SIGKILL', 'a busy-looping main thread runs no SIGTERM handler');
   assert.ok(p.lines.some((l) => /wa wedged \(main thread stuck/.test(l)), 'one line per transition');
+  // #457: the line names the frame the world's watchdog caught the main thread stuck in (live.json `stall`)
+  assert.ok(p.lines.some((l) => /wa wedged \(main thread stuck.*; stuck in stuckInTheLoop apps\/server\/src\/x\.ts:12\)/.test(l)), p.lines.join('\n'));
   assert.ok(p.problems().some((x) => x.code === 'wedged' && /was wedged/.test(x.text)), 'shown for a while after its restart');
   assert.ok(ms < 3000, `restarted ${ms} ms after the wedge`);
   await p.closeAll();
 });
 
-test('#1150 halted: live.json says the clock stopped; a `halted` problem and status, not wedged and not restarted, gone once a restart boots it', async () => {
+test('#1150 rewound: each new rung 3 is a `rewound` problem, the world keeps running, and the next one is seen too', async () => {
+  const p = pool([5105, 5107], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
+  const port = await p.ensure(world('wr')); const pid = p.state('wr').child.pid;
+  p.startGuard(); await sleep(250);
+  assert.deepEqual(p.problems(), []);
+  await get(port, 'wr', '/rewind');
+  await until(() => p.problems().some((x) => x.code === 'rewound'), 2000, 'rewound in problems');
+  assert.match(p.problems().find((x) => x.code === 'rewound').text, /rewind 1/); assert.equal(p.status('wr').pid, pid, 'nothing restarts it');
+  await get(port, 'wr', '/rewind');
+  await until(() => /rewind 2/.test(p.problems().find((x) => x.code === 'rewound')?.text ?? ''), 2000, 'the second is its own alert');
+  await p.stop('wr');
+});
+
+test('#1150, #1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator', async () => {
   const p = pool([P0, P0 + 2], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
-  const port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
+  let port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
   p.startGuard();
   await sleep(250);
   assert.deepEqual(p.problems(), []); assert.equal(p.status('wh').halted, undefined);
   await get(port, 'wh', '/halt');
-  await until(() => p.problems().some((x) => x.code === 'halted'), 2000, 'halted in problems');
-  assert.equal(p.status('wh').halted, true);
-  await sleep(800);   // past liveStaleMs: still answering, so not judged wedged
-  assert.deepEqual(p.problems().map((x) => x.code), ['halted']); assert.equal(p.status('wh').pid, pid, 'the guard leaves it: its process and evidence stay up');
-  await p.stop('wh');
-  assert.deepEqual(p.problems(), [], 'stopped: nothing is halted now');
-  const again = await p.ensure(world('wh'));
+  await until(() => p.lines.some((l) => /world wh halted: its clock has stopped; restarting it/.test(l)), 2000, 'the guard restarts it');
+  await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid, 3000, 'running again in a new process');
+  assert.ok(p.lines.some((l) => /world wh exited .* after it halted/.test(l)), p.lines.join('\n'));
+  assert.deepEqual(p.problems().map((x) => x.code), ['halted'], 'shown for wedgeShownMs after the restart, as a wedge is');
+  assert.match(p.problems()[0].text, /halted .* ago and was restarted/);
+  // a second halt inside the window: left halted, its process and evidence up
+  const pid2 = p.state('wh').child.pid; port = p.state('wh').port ?? port;
+  await sleep(300); await get(port, 'wh', '/halt');
+  await until(() => p.status('wh').halted === true, 2000, 'halted again');
+  await sleep(800);
+  assert.equal(p.state('wh').child.pid, pid2, 'not restarted twice in one window');
+  assert.deepEqual(p.problems().map((x) => x.code), ['halted']);
+  assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 1);
+  await p.closeAll();
+});
+
+test('#1326 stalled: live.json says the clock owes ticks and has none; a `stalled` problem with the tick age, gone once it ticks again; never restarted for it', async () => {
+  const p = pool([P0, P0 + 2], { FAKE_LIVE: '1' });
+  const port = await p.ensure(world('ws')); const pid = p.state('ws').child.pid;
+  p.startGuard();
   await sleep(250);
-  assert.ok(again); assert.deepEqual(p.problems(), [], 'the restarted process has its own live.json');
+  assert.deepEqual(p.problems(), []);
+  await get(port, 'ws', '/stall');
+  await until(() => p.problems().some((x) => x.code === 'stalled'), 2000, 'stalled in problems');
+  assert.match(p.problems().find((x) => x.code === 'stalled').text, /ws stalled: its clock has not ticked for \d+ s/);
+  await sleep(800);
+  assert.equal(p.state('ws').child.pid, pid, 'a stall is reported, not restarted');
+  await get(port, 'ws', '/unstall');
+  await until(() => !p.problems().length, 2000, 'cleared once it ticks');
   await p.closeAll();
 });
 

@@ -32,7 +32,7 @@ export function focusSig(f: MenuFocus): string {return `${[...f.ids].sort().join
 /** The offers `here` reads (L3 item 4): every `…:here` offer, invitations, every seat, and the offers whose target is one
  *  of `targets` (the places and things around the Soul, the places its exits lead to). */
 export function hereFocus(targets: Iterable<string>): MenuFocus {
-  const t = new Set(targets), ids = new Set<string>();
+  const t = new Set(targets), ids = new Set<string>(['stop:current']);   // #1381: the stop of the act under way, while one is open
   // a gait to a place or a stroll through it copies its walk: their targets are here already; sit:here reads every seat
   return {ids, verbs: new Set(['sit', 'accept', 'decline']), targets: t, here: true};
 }

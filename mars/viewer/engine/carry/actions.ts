@@ -12,7 +12,7 @@ import type { ActionDef, CancelResult, Diagnostic, StepResult } from '../actions
 import { DT, type Runtime } from '../runtime/runtime.ts';
 import type { Entity, Pose } from '../world/types.ts';
 import type { Spatial } from '../spatial/service.ts';
-import { makeWay, stairBlocker, traffic, walkTo, takeReplan } from '../locomotion/walk.ts';
+import { makeWay, registerClearOf, stairBlocker, traffic, walkTo, takeReplan } from '../locomotion/walk.ts';
 import { CARRY_CLIMB_SPEED, climbPose, type ClimbPose } from './climb.ts';
 import { entityFootprint } from '../spatial/service.ts';
 import { carriedPose, carrierSpots, entityFrame, formationFor, laidPose, worldDiscs, isCarryLoad, type SE2 } from './formation.ts';
@@ -189,8 +189,8 @@ function pathBystander(rt: Runtime, ex: CarryExec, u: number): string | null {
  * carrier spot from the current pose to the end, +0.15 m), or the carry has stopped moving. A walker
  * blocked in the formation's way steps aside to such a spot and walks on once its goal passes it.
  */
-function clearOfRoute(rt: Runtime, ex: CarryExec, q: Vec2): boolean {
-  if (!rt.isActive(ex.id) || ex.phase !== 'move') return true;
+function clearOfRoute(rt: Runtime, ex: CarryExec | undefined, q: Vec2): boolean {
+  if (!ex || ex.phase !== 'move') return true;
   const { traj, f } = ex.p;
   const U = traj.u[traj.u.length - 1];
   const i0 = ex.i;
@@ -202,6 +202,7 @@ function clearOfRoute(rt: Runtime, ex: CarryExec, q: Vec2): boolean {
   ex.i = i0; // poseAtU advances the segment cursor; restore it
   return clear;
 }
+registerClearOf('carry', (rt, ref, q) => clearOfRoute(rt, rt.execOf(ref.action) as CarryExec | undefined, q));
 
 /** A non-crew person standing within a body width of any station, or inside a laid footprint (+0.4 m). */
 export function carryBystanderAt(rt: Runtime, ex: CarryExec, spots: Vec2[], frame: ReturnType<typeof entityFrame> | null): string | null {
@@ -457,7 +458,7 @@ export const carry: ActionDef<CarryParams, CarryProgram, CarryExec> = {
         ex.u = Math.min(U, ex.u + ex.v * dt);
         applyFormation(rt, ex, poseAtU(ex, ex.u));
         const c = poseAtU(ex, ex.u);
-        makeWay(rt, ahead, [c.x, c.z], { by: `the crew carrying ${p.item}`, subjects: [p.item, ...p.crew], test: (q) => clearOfRoute(rt, ex, q) });
+        makeWay(rt, ahead, [c.x, c.z], { by: `the crew carrying ${p.item}`, subjects: [p.item, ...p.crew], test: { kind: 'carry', action: ex.id } });
         // waited long enough: the people in the way are not going anywhere (another crew, a
         // boxed-in bystander) → replan the rest of the carry treating them as soft obstacles
         ex.waited = (ex.waited ?? 0) + 1;

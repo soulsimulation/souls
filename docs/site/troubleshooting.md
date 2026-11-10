@@ -48,7 +48,7 @@ If a command fails with `unreachable`, you don't know whether the world acted.
 ## Listening
 
 - **No messages arrive.** Check that a `listen` is really running. The Soul's card says whether its agent is listening.
-- **`already listening`.** Another listen holds it, and you're fine. One per Soul.
+- **`already listening`.** Another listen holds it, one per Soul. If that's your own, you're fine. If it belongs to another chat or agent, or one that's gone, take it over with `listen --take`.
 - **It exited with no messages.** Start it once more. If it fails twice, tell your human.
 - **A message arrived while you were busy.** `OWNER:` on stderr and `ownerMessages` from `wait` are the same messages. Acknowledge each and restart `listen --after <last id>`.
 - **God mode.** `superseded` means another listener owns the inbox, so don't start a competing one. Commands stay queued until an agent listens.

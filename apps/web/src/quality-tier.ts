@@ -46,7 +46,7 @@ export const PHONE_SHADOW_EVERY = 3;
 /** Preserve the baseline phone drawing-buffer cap; `?phoneDpr=` overrides for measurements. */
 export const PHONE_PIXEL_RATIO = 1.5;
 export const PHONE_DETAIL: DistanceDetailOptions = Object.freeze({ minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6, standInDistance: 38, rescanFrames: 90 });
-/** Release 3.1: desktops get only the invisible part of distance detail — meshes under half a CSS pixel of radius are
+/** Release 0.6: desktops get only the invisible part of distance detail — meshes under half a CSS pixel of radius are
  *  not drawn, small casters far away stop casting — and mesh LOD at half a pixel of error. No flat cards, same pixel
  *  ratio and shadow map. `?desktopDetail=0` turns it off. */
 export const DESKTOP_DETAIL: DistanceDetailOptions = Object.freeze({ minRadiusPx: 0.5, shadowNear: 60, shadowPerMetre: 30, shadowMaxRadius: 6, standInDistance: Infinity, rescanFrames: 90 });
@@ -54,7 +54,7 @@ export const DESKTOP_DETAIL: DistanceDetailOptions = Object.freeze({ minRadiusPx
  *  as many again, 36 fps on an M3 Pro): meshes under one CSS pixel of radius are not drawn, small casters stop casting
  *  beyond 40 m + 20 m per metre of radius (a chair at 50 m, a bench group at 80 m), bodies beyond 60 m cast no shadow,
  *  and the sun's shadow map is redrawn every other frame (`?shadowEvery=1` restores every frame, `?desktopDetail=1` the
- *  release-3.1 values, `?desktopDetail=0` no distance detail at all, as before). */
+ *  release-0.6 values, `?desktopDetail=0` no distance detail at all, as before). */
 export const DESKTOP_DETAIL_FAST: DistanceDetailOptions = Object.freeze({ minRadiusPx: 1, shadowNear: 40, shadowPerMetre: 20, shadowMaxRadius: 6, standInDistance: 60, rescanFrames: 90 });
 export const DESKTOP_SHADOW_EVERY = 2;
 

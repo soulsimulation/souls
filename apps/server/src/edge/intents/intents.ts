@@ -22,11 +22,11 @@ export type Resolution =
   | {ok: true; kind: 'plan'; capability: string; label: string; steps: Steps; chosen: Chosen}
   | {ok: true; kind: 'attention'; capability: string; gaze: Gaze; yaw?: number; chosen: Chosen}
   | {ok: true; kind: 'setting'; capability: string; apply: () => void; chosen: Chosen}
-  | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
+  | {ok: false; code: string; reason: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[];retry_after?:number};
 import {classWords} from './class-words.ts';
 import {signWords} from '../ledger/vocabulary.ts';
 export type IntentInput = {verb?: unknown; target?: unknown; params?: unknown; clientRef?: unknown; [k: string]: unknown};
-type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[]};
+type Refused = {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[];resolvedIfName?:{input:string;placeId:string;name:string};ambiguous?:string[];retry_after?:number};
 
 /** Intent verbs this module resolves (anything else is passed on as `<verb>:<target>` to ordinary capabilities). */
 export const INTENT_VERBS = ['sit', 'go', 'walk', 'swim', 'approach', 'follow', 'walk-with', 'turn', 'face', 'look', 'auto-face'];
@@ -187,7 +187,7 @@ export class Intents {
     // Preserve exact non-place destinations such as a carrier boarding object.
     const exact = caps.find(c => c.verb==='walk'&&(c.id===asked||c.id === `walk:${asked}`));
     // RT: a walk the body cannot make from here is refused with the engine's route code, not resolved and then refused at act
-    const dead = (c: EdgeCapability, p?: typeof plans) => {const d = this.L.routeProblem(P.soul, c.id, p); return d ? no(d.code, d.reason) : null;};
+    const dead = (c: EdgeCapability, p?: typeof plans) => {const d = this.L.routeProblem(P.soul, c.id, p); return d ? {...no(d.code, d.reason), ...(d.retry_after ? {retry_after: d.retry_after} : {})} : null;};   // #1287: a step-out's wait carries its seconds
     if (exact?.target?.kind === 'object') {if (!exact.available && exact.blocked) return no(exact.blocked.code, exact.blocked.reason);return dead(exact) ?? walkTo(exact);}
     const object=offeredWalkObject(this.L,P.soul,asked);if(object){if(!object.ok)return object;const d=dead(object.cap);if(d)return d;const out=walkTo(object.cap);return {...out,chosen:{...out.chosen,matchedBy:object.matchedBy}};}
     const r=resolvePlaceForVerb(this.L,P.soul,exact?.target?.kind==='place'?exact.target.id:asked);
@@ -285,7 +285,7 @@ export class Intents {
 
   // ------------------------------------------------------------------ acting
   /** act {verb, target}: resolve now (the step starts now) and act on the concrete choice; the receipt says what it chose. */
-  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string} | Refused> {
+  async act(soul: EdgeSoul, input: IntentInput): Promise<{accepted: true; receipt: EdgeReceipt; chosen: Chosen; resolved?: {from: string; to: string; note: string}; channel: string; repeat?: true} | Refused> {
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
     if (clientRef) {const old = this.L.coreA.byClientRef(soul.soulId, clientRef); if (old) return {accepted: true, receipt: old, chosen: (old as {chosen?: Chosen}).chosen ?? {}, channel: (old as {channel?: string}).channel ?? 'body'};}
     await this.L.coreA.reclaim(soul);
@@ -295,6 +295,8 @@ export class Intents {
     if (r.kind === 'capability') {
       const out = await this.L.act(soul, {capability: r.capability, params: {...extra, ...(r.params ?? {})}, ...(clientRef ? {clientRef} : {})});
       if (!out.accepted) return {...out, ...(r.chosen.seat ? {} : {})} as Refused;
+      // #1272: the act under way answered: it stays as it was chosen
+      if (out.repeat) return {accepted: true, receipt: out.receipt, chosen: (out.receipt.chosen as Chosen) ?? {}, channel: out.receipt.channel ?? 'body', repeat: true};
       const chosen={...r.chosen,...(out.receipt.chosen as Chosen??{})};
       const receipt = this.L.coreA.setDetail(out.receipt.id, {chosen, intent: intentOf(input)}) ?? out.receipt;
       return {accepted: true, receipt, chosen, channel: (receipt as {channel?: string}).channel ?? 'body', ...(out.resolved ? {resolved: out.resolved} : {})};
@@ -346,8 +348,10 @@ export class Intents {
   /** A dry run's answer for one resolved capability (the full path below and the exact-walk fast path share it). */
   private capabilityWould(soul: EdgeSoul, cap: EdgeCapability, asked: string, params: Record<string, unknown>, note: string, extra?: Record<string, unknown>): Record<string, unknown> {
     const P = new Perception(this.L, soul), at = this.L.coreA.targetPoint(soul, cap);
+    // #1329 part 3: a ride's rider is in it: no walk to it (it was measured to the ride's place centre, 27.6 m from the basket aloft)
+    const carrier = cap.verb === 'object' && cap.object ? this.L.rideCarrier(cap.object) : undefined, ride = carrier ? this.L.aboard(soul.entityId) : null, aboard = !!ride && ride.id === carrier && ride.riderPhase !== 'boarding';
     return {ok: true, would: {capability: cap.id, label: cap.label, available: cap.available, ...(cap.blocked ? {blocked: cap.blocked} : {}), ...(Object.keys(params).length ? {params} : {}), channel: cap.verb === 'face' ? 'attention' : 'body',
-      ...resolvedParts(this.L,soul,cap,asked), ...(note ? {resolved: note + (extra?.with ? `. Act it with these params (act ${cap.id} '${JSON.stringify(extra)}'), or act the same words; an act without "with" is solo.` : '')} : {}), ...(at && P.pos ? this.eta(P, at) : {})}};
+      ...resolvedParts(this.L,soul,cap,asked), ...(note ? {resolved: note + (extra?.with ? `. Act it with these params (act ${cap.id} '${JSON.stringify(extra)}'), or act the same words; an act without "with" is solo.` : '')} : {}), ...(aboard ? {distance: 0, eta: durationWord(0), route: 'aboard'} : at && P.pos ? this.eta(P, at) : {})}};
   }
   /** Latency only (continuity r3, 2026-10-30: two concurrent `resolve walk:<ref>` each built the whole-world menu and
    *  stalled Eden 2026 ~1.9 s). A listed exact walk act would take its fast path for resolves over act's narrow bindings

@@ -68,6 +68,20 @@ test('soul queue: nothing overwrites, the oldest waits first, listen takes the w
 
 // Baseline id kept for the release gate. The Soul box became a queue (MSG 1.9.5): a newer message no longer replaces
 // the older one; the rest of the old contract (transitions, validation, isolation, presence expiry, restart) holds.
+test('unfinished lists what was acked with no result, newest first, behind a newer message', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const db = new Db(join(dir, 'fixture.db')), inbox = new AgentInbox(db, 'w1', () => 1000), a = {scope: 'soul:a', owner: 'alice'};
+  t.after(() => db.close());
+  const first = inbox.send(a, 'walk to the pond').latest!, second = inbox.send(a, 'and wave').latest!;
+  assert.deepEqual(inbox.unfinished(a), []);
+  inbox.takeBacklog(a, undefined); inbox.acknowledge(a, first.id, 'on my way');
+  assert.deepEqual(inbox.unfinished(a), [{id: first.id, text: 'walk to the pond'}], 'a newer message does not hide it');
+  inbox.acknowledge(a, second.id, 'waving');
+  assert.deepEqual(inbox.unfinished(a).map(m => m.id), [second.id, first.id]);
+  inbox.result(a, first.id, 'at the pond', 'done');
+  assert.deepEqual(inbox.unfinished(a).map(m => m.id), [second.id]);
+});
+
 test('one durable latest message: truthful transitions, replacement, isolation, expiry and restart', t => {
   const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   let db = new Db(join(dir, 'fixture.db')), now = 1000, inbox = new AgentInbox(db, 'w1', () => now);

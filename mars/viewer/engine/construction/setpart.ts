@@ -34,7 +34,7 @@ import { crewCheck, f2, fail, lerpPose, smooth, spatialOf, sweepPoses, type Fail
 import { isKitUpright, isStanding, isSupported } from './rules.ts';
 import { envelopeGap, GIVE_MAX, REACH_DOWN, setHands, T } from './handup.ts';
 import { BODY_MODEL, restHands } from '../body/model.ts';
-import { makeWay } from '../locomotion/walk.ts';
+import { makeWay, registerClearOf } from '../locomotion/walk.ts';
 import { flatObb, isPlywood } from './deck.ts';
 import { deckSurfaces } from './contributor.ts';
 import type { Contributor } from '../spatial/service.ts';
@@ -447,8 +447,8 @@ function liftBystander(rt: Runtime, ex: Exec, seg: Seg, k: number): { who: strin
   return null;
 }
 /** True when a person standing at q is clear of the lift crew's feet for the rest of the program (makeWay's clearOf). */
-function clearOfLift(rt: Runtime, ex: Exec, q: Vec2): boolean {
-  if (!rt.isActive(ex.id)) return true;
+function clearOfLift(rt: Runtime, ex: Exec | undefined, q: Vec2): boolean {
+  if (!ex) return true;
   for (let s = Math.max(0, ex.si); s < ex.prog.segs.length; s++) {
     const seg = ex.prog.segs[s];
     if (seg.who !== 'lift' || !seg.follow) continue;
@@ -456,6 +456,7 @@ function clearOfLift(rt: Runtime, ex: Exec, q: Vec2): boolean {
   }
   return true;
 }
+registerClearOf('setpart', (rt, ref, q) => clearOfLift(rt, rt.execOf(ref.action) as Exec | undefined, q));
 
 export function stepSetPart(rt: Runtime, ex: Exec, dt: number): StepResult {
   const w = rt.world;
@@ -496,7 +497,7 @@ export function stepSetPart(rt: Runtime, ex: Exec, dt: number): StepResult {
       const by = liftBystander(rt, ex, seg, k0);
       if (by) {
         const crew = ex.p.lift.map((l) => l.actor);
-        makeWay(rt, by.who, by.at, { by: `the crew setting ${e.id}`, subjects: [e.id, ...crew], test: (q) => clearOfLift(rt, ex, q) });
+        makeWay(rt, by.who, by.at, { by: `the crew setting ${e.id}`, subjects: [e.id, ...crew], test: { kind: 'setpart', action: ex.id } });
         return { status: 'blocked', diagnostic: { code: 'setpart.path-occupied', message: `the crew setting ${e.id} holds it and waits for ${by.who} to move out of its way (${seg.phase})`, subjects: [e.id, by.who, ...crew], at: [by.at[0], e.pose.p[1], by.at[1]] } };
       }
     }

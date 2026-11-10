@@ -4,7 +4,7 @@
 // cancel. Plans are durable (SQLite) and replay-safe: every act a plan makes carries clientRef `pl:<plan>:<step>:<attempt>`,
 // so re-running a step after a restart returns the receipt the first try created instead of acting twice.
 import {randomBytes} from 'node:crypto';
-import {EdgeError, SEAT_KEPT, type EdgeReceipt, type EdgeSoul} from '../contract.ts';
+import {ActPending, EdgeError, SEAT_KEPT, type EdgeReceipt, type EdgeSoul} from '../contract.ts';
 import type {EventStreams, StreamEvent} from '../comms/stream.ts';
 import {EVENT_KINDS, kindMatches, oneLine, type Envelope} from '../events/envelope.ts';
 
@@ -12,7 +12,7 @@ export type OnRefusal = 'pause-and-notify' | 'skip' | 'cancel';
 export const ON_REFUSAL: OnRefusal[] = ['pause-and-notify', 'skip', 'cancel'];
 export const PLAN_MAX_STEPS = 20, STEP_MAX_MS = 6 * 3600_000, PLAN_TICK_MS = 1000;
 /** A `for` step whose act the world ended early for one of these reasons (someone bumped a lying body, a restart) acts again. */
-const RESUMABLE = /^(pose\.moved|action\.interrupted|receipt\.lost-on-restart|state\.safe-stop-timeout)$/;
+const RESUMABLE = /^(pose\.moved|action\.interrupted|receipt\.lost-on-restart|state\.safe-stop-timeout|nav\.warm-timeout)$/;
 const TRANSIENT_RETRY_MS = 5000, TRANSIENT_MAX = 12, REISSUE_MAX = 60, REISSUE_GAP_MS = 5000, REISSUE_MIN_LEFT_MS = 15_000;
 /** Verbs whose posture or activity a `for` step keeps up by acting again when the body's own activity ends early. */
 const REHOLD = new Set(['sit', 'sit-ground', 'lie', 'nap', 'read', 'rest', 'warm-by-fire', 'gather', 'swim', 'dance', 'jump', 'stretch', 'jumping-jacks', 'yoga', 'pushups', 'situps', 'play-piano', 'paint', 'play-music', 'write', 'play-game', 'craft', 'cook', 'wander', 'hang-out']);
@@ -98,7 +98,8 @@ export class Plans {
   constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number} = {}) {
     this.core = core; this.actor = actor; this.envelope = envelope;
     core.db.exec(`CREATE TABLE IF NOT EXISTS edge_plans_v1 (world_id TEXT NOT NULL, plan_id TEXT NOT NULL, soul_id TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (world_id, plan_id)) WITHOUT ROWID;
-      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);`);
+      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);
+      CREATE INDEX IF NOT EXISTS edge_plans_v1_soul_at ON edge_plans_v1 (world_id, soul_id, created_at);`);
     for (const r of core.db.prepare("SELECT body FROM edge_plans_v1 WHERE world_id = ? AND state IN ('running','paused') ORDER BY created_at").all(core.worldId) as {body: string}[]) {
       const p = JSON.parse(r.body) as Plan;
       const prior = this.active.get(p.soulId);
@@ -248,6 +249,9 @@ export class Plans {
       let out: Record<string, unknown>;
       try { out = await this.actor.act(soul, input); }
       catch (e) {
+        // #1327: handed to the world, not recorded yet. Try again later with the same clientRef (not counted as a fault): it
+        // is answered pending again, with the committed receipt once it exists, or acts afresh if the hand-off was lost.
+        if (e instanceof ActPending) { s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p); return; }
         if (e instanceof EdgeError && e.status < 500 && e.status !== 429) { this.busy.delete(p.id); return this.stepFailed(p, e.code, e.message); }
         s.state.transient++; s.state.status = 'starting'; s.state.retryAt = this.core.now() + TRANSIENT_RETRY_MS; this.save(p);
         if (s.state.transient > TRANSIENT_MAX) { this.busy.delete(p.id); return this.stepFailed(p, 'plan.unavailable', 'The world could not take this step after repeated tries.'); }

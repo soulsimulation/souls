@@ -81,14 +81,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
+      # #1462: a removed or renamed gate test is declared in tools/test-harness/renames.json in the same change, and a
+      # newly skipped one in quarantine.json, so a release never blocks on an intended rewrite (docs/testing/remote-gate.md#renames)
+      - name: Gate renames and skips declared
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node .github/scripts/gate-renames.mjs --base "$BASE" --head HEAD
       - name: Media manifest, CI scope, proof, merge train, restack, hooks, changelog and guard tests
         run: >-
           node --test --test-concurrency=1
           tools/assets/manifest.test.mjs
           tools/assets/mars-web.test.mjs
           .github/scripts/ci-scope.test.mjs
+          .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
           .github/scripts/guards.test.mjs
@@ -167,7 +175,9 @@ jobs:
               pnpm test:mars
               ;;
             web)
-              # V4-web: every apps/web unit test, TSX included
+              # V4-web: every apps/web unit test, TSX included. The root build first, as V2-build-root does before V4 in
+              # the gate: docs-site.test.ts checks its files and skips without it (#1463: a skip is not proof)
+              pnpm --filter @souls/web build
               bash tools/test-harness/web-suite.sh
               ;;
             docs-reference)
@@ -175,7 +185,20 @@ jobs:
               node --test --test-concurrency=1 tools/docs/generate.test.mjs
               ;;
             launcher)
-              # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts)
+              # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts).
+              # restic for backup-restic.test.mjs, the same pinned release binary the gate's image installs
+              # (modal_suite.py); without it that test skips (#1463: a skip is not proof). x86_64 only; elsewhere it skips
+              # and the release gate runs the step on Modal.
+              if [ "$(uname -m)" = x86_64 ] && ! command -v restic >/dev/null; then
+                mkdir -p "$RUNNER_TEMP/bin"
+                # #1507: the release CDN 504s at times; retry with backoff, and still fail loudly once retries run out
+                curl -fsSL --connect-timeout 20 --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/restic.bz2" \
+                  https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 \
+                  || { echo "::error::restic download failed after 5 retries (#1507); backup-restic.test.mjs would only skip, so this job fails"; exit 1; }
+                echo "3d4d43c169a9e28ea76303b1e8b810f0dcede7478555fdaa8959971ad499e324  $RUNNER_TEMP/restic.bz2" | sha256sum -c -
+                bunzip2 -c "$RUNNER_TEMP/restic.bz2" > "$RUNNER_TEMP/bin/restic" && chmod 755 "$RUNNER_TEMP/bin/restic"
+                export PATH="$RUNNER_TEMP/bin:$PATH"; restic version
+              fi
               node --test --test-concurrency=1 tools/world-launcher/*.test.mjs
               ;;
             client-cli)

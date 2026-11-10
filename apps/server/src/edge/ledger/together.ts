@@ -127,6 +127,13 @@ const SHARED_RAISE_REFUSED = new Set(['raise.arc-blocked', 'raise.station-blocke
 /** PC14 (#693): what the native beam plan refuses before anyone is asked (not bodies: someone busy waits for the commit). */
 const SHARED_BEAM_REFUSED = new Set(['beam.misaligned', 'beam.seat-taken', 'beam.no-seat', 'beam.not-staged', 'beam.not-beam', 'beam.not-upright', 'beam.upright-not-standing', 'beam.upright-unsupported', 'beam.station-unreachable', 'reach.too-high', 'lift.path-blocked']);
 const SHARED_ROUTE_REFUSED = new Set(['carry.no-route', 'carry.clearance', 'carry.target-blocked', 'carry.pickup-blocked']);
+/** #1261 review: what a put-down while riding says, naming the next step: the ride's own leave as the menu offers it
+ *  (its object id, not the carrier's engine id), as rideStandRefusal names it; aloft, the ride lands by itself first. */
+export const rideDownReason = (phase: string, caps: readonly {id: string; available: boolean}[]): string => {
+  if (phase === 'aloft') return 'Not while riding: it lands by itself and you step out then; put it down after that.';
+  const leave = caps.find(c => /^object:[^:]+:leave$/.test(c.id) && c.available);
+  return `Not while riding: disembark first${leave ? ` (${leave.id} while it is on the ground)` : ''}, then put it down.`;
+};
 /** PC07 (#686): a native hold-up shorter than this is part of ordinary motion; one that lasts this long is reported as
  *  `lasting` (the crew still holds the load: nobody lets go on a timeout, PC02 §3). Ticks at 20 Hz. */
 const SHARED_BLOCK_TICKS = 10, SHARED_LASTING_TICKS = 600;
@@ -501,7 +508,7 @@ export class Together {
     }
     // items: what is in my hand, or what I can pick up
     if (held) {
-      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: 'Not while riding.'}} : {})},
+      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: rideDownReason(aloft.phase, [])}} : {})},
         {label: `Put down ${held.name}`, steps: [pose('put-down', 1.5, {prop: held.kind, release: true})], together: {kind: 'item', op: 'put-down', item: held.id}});
       if (held.kind === 'food' || held.kind === 'cup') {
         const verb = held.kind === 'food' ? 'eat' : 'drink';
@@ -1214,7 +1221,7 @@ export class Together {
   /** PC14 (#693): a raised upright joined by beams is never lowered; its crew lets go once its frame stands on its own. */
   private holdStopLabel(inv: Invite): string {
     const s = inv.shared!, x = this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined;
-    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
+    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding, unless nothing on the frame changes for five minutes)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
   }
   /** Who stopped the operation, in words: a member's own stop, or (PC09) a member who went away. */
   stopWords(st: {name: string; away?: true}): string {return st.away ? `${st.name} went away (their mind left the world)` : `${st.name} asked to stop`;}
@@ -1265,7 +1272,7 @@ export class Together {
     if (raises(s)) {
       const before = !st.phase || st.phase === 'approach' || st.phase === 'grip';
       const joined = !!(this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined)?.connections?.length;
-      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, and it is never lowered`
+      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, or if nothing on the frame changes for five minutes, and it is never lowered`
         : joined ? `beams join ${load} into a frame that stands on its own, so ${crew} let go and it stands there`
         : st.unsafe !== undefined ? `${load} cannot come down yet (${st.unsafe}), so ${crew} keep holding it and lower it as soon as it is clear` : before ? `${load} has not been lifted, so ${crew} let go of it where it lies` : `${crew} lower ${load} back where it lay, along the way it came up`;
       return `${this.stopWords(st)} (${op.id}): ${how}. Your hands and walking stay committed until ${joined ? 'it stands on its own' : 'it is down'}; you can still talk and look around.`;
@@ -1297,8 +1304,8 @@ export class Together {
   private sharedStopped(inv: Invite) {
     const s = inv.shared!, op = s.op!, st = op.stop!, x = this.w.entities[s.load.entity], crew = listed(this.sharedMembers(inv).map(m => m.name));
     if (raises(s)) {
-      const installed = (x as {phase?: string} | undefined)?.phase === 'installed';
-      const where = installed ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
+      const installed = (x as {phase?: string} | undefined)?.phase === 'installed', alone = (x as {support?: {kind: string}} | undefined)?.support?.kind === 'connected';
+      const where = installed ? alone ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : `${s.load.name} stands where it was, though its frame isn't finished; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
       this.sharedEnd(inv, 'stopped', 'shared.stopped', `${st.away ? `Stopped because ${st.name} went away` : `Stopped at ${st.name}'s request`} (${op.id}): ${where}. ${crew} have let go and are free again; nothing is resumed on its own.`);
       return;
     }
@@ -1332,6 +1339,8 @@ export class Together {
     this.sharedEnd(inv, arrived ? 'arrived' : 'ended', ev.code ?? 'action.failed', raises(s) ? `The shared raise of ${s.load.name} ended${ev.message ? ` (${ev.message})` : ''}.` : deckOf(s) ? `The shared ${DECK_WORDS[deckOf(s)!].op} of ${s.load.name} ended before it was in place${ev.message ? ` (${this.beamWhy({code: ev.code ?? '', message: ev.message})})` : ''}; it lies where it was.` : seats(s) ? `The shared beam seating of ${s.load.name} ended before it was seated${ev.message ? ` (${this.beamWhy({code: ev.code ?? '', message: ev.message})})` : ''}; it lies where it was.` : `The shared carry of ${s.load.name} ended before ${s.destination.name}${ev.message ? ` (${ev.message})` : ''}.`);
     return true;
   }
+  /** #1150 rung 3: the world went back, so every committed shared operation is over and its claims go with it. */
+  rewound(code: string, reason: string) {for (const inv of this.committed()) if (inv.shared?.op) this.sharedEnd(inv, 'ended', code, reason);}
   /** PC02 §3 release, in one transaction: the operation ends, the claims go and every member's still-open receipt ends
    *  (`completed` on arrival; `completed` with `shared.stopped` and its reason after a stop's cleanup, PC02 §2; else
    *  `failed` with the code). */
@@ -2074,6 +2083,9 @@ export class Together {
       if (!target) return {capability: verb + ':here', note: `${raw} is ${verb}:here`};
       return {capability: verb + ':here', params: verb === 'point' ? {at: target} : {to: target}, note: `${raw} is ${verb}:here (${verb === 'point' ? 'at' : 'to'} ${target})`};
     }
+    // #1381: while an act is open, "stop", "pause", "cancel", "stop what you are doing" are the explicit stop of it
+    if (/^(?:stop|halt|pause|cancel|wait,?\s+(?:stop|pause))(?:,?\s+(?:stop|pause|that|it|now|what\s+(?:i\s+am|i'm|you\s+are|you're)\s+doing))?$/.test(t) && caps.some(c => c.id === 'stop:current' && c.available))
+      return {capability: 'stop:current', note: `${raw} is stop:current (stops the act under way where you are)`};
     // stop / unfollow: stand:here ends whatever the body is doing, a follow or walk-with included
     if (/^(?:stop|halt|stand still|unfollow(?:\s+.+)?|stop\s+(?:that|it|everything|moving|walking|what\s+(?:i\s+am|i'm|you\s+are|you're)\s+doing)|(?:stop|quit)\s+(?:following|walking\s+with|tagging\s+along\s+with|going\s+with|accompanying)(?:\s+.+)?)$/.test(t) && caps.some(c => c.id === 'stand:here'))
       return {capability: 'stand:here', note: `${raw} is stand:here (stops what you are doing, a follow included)`};
@@ -2107,8 +2119,13 @@ export class Together {
       const c = capFor('give', o); if (!c) return tooFar('give', o);
       return {capability: c.id, note: `${raw} is ${c.id}${held ? ` (${held.name})` : ''}`};
     }
-    if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
-      if (!held) return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+    if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?!\s+(?:by|in|over|round|around)\b|\s+off\s+at\b)(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
+      // #1261: a world may offer its own put-down for what is in the hand (a god-built thing: god/held.ts), as for give
+      if (!held) {
+        const own = caps.find(c => c.id === 'put-down:here'), id = own?.target?.id;
+        if (own) return {capability: own.id, note: `${raw} is put-down:here (${id ? this.thingName?.(id) ?? id : own.label})`};
+        return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+      }
       return {capability: 'put-down:here', note: `${raw} is put-down:here (${held.name})`};
     }
     if (held && ((held.kind === 'food' && /^(?:eat|have|finish)\b/.test(t) && (/\b(?:it|this|that|food|snack|bread|apple|cake)\b/.test(t) || t === 'eat')) || (held.kind === 'cup' && /^(?:drink|sip|have|finish)\b/.test(t) && (/\b(?:it|this|that|tea|coffee|cup|drink)\b/.test(t) || t === 'drink'))))
@@ -2126,14 +2143,18 @@ export class Together {
       if (kind) {
         if (held) return {code: 'hands.full', reason: `You are holding ${held.name}; put it down or give it away first.`, did_you_mean: caps.filter(c => c.id === 'put-down:here' || c.verb === 'give').slice(0, 4).map(c => ({id: c.id, label: c.label}))};
         const lying = caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && this.item(c.target.id)?.kind === kind)[0];
-        const c = lying ?? caps.find(c => c.id === 'pick-up:' + kind);
-        // entry 43: a world thing of that word lying near (a god-built mug) when no prop of the kind is: the one called
-        // exactly that first, then one whose name has the word, nearest first (labels end "(N m)"). #435: a real thing called
-        // that, free to take and within REAL_THING_NEAR, also comes before a place's prop of the kind ("pick up the apple" is
-        // the apple on the table); one further off or not hers does not take a Soul away from the prop beside her
-        const named = !lying ? caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && /^e_/.test(c.target.id)).map(c => {const n = (c.label.replace(/^Pick up\s+/, '').replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() ?? '').toLowerCase(), d = Number(/\(([\d.]+) m/.exec(c.label)?.[1] ?? 99);
-          const w = what.replace(/^(?:the|a|an|my|that|this)\s+/, '').trim(); return {c, rank: n === w ? 0 : new RegExp(`(^|[^a-z])${w.replace(/[^a-z ]/g, '')}([^a-z]|$)`).test(n) ? 1 : 9, d};}).filter(x => x.rank < 9 && (!c || (x.c.available && x.d <= REAL_THING_NEAR))).sort((a, b) => a.rank - b.rank || a.d - b.d)[0]?.c : undefined;
+        // entry 43: a world thing of that word lying near (a god-built mug): the one called exactly that first, then one whose
+        // name has the words, nearest first (labels end "(N m)"); a space in the words matches a name's hyphen or underscore.
+        // With a place's prop of the kind on offer, a real thing must be free to take, and then: #435: one word wins within
+        // REAL_THING_NEAR ("pick up the apple" is the apple on the table; one further off does not take a Soul away from the prop
+        // beside her). #437: a name of more than one word wins wherever it is ("the coffee mug" by a tea room is the god-built
+        // coffee-mug). A lying prop still comes first.
+        const source = caps.find(c => c.id === 'pick-up:' + kind);
+        const w = what.replace(/^(?:the|a|an|my|that|this)\s+/, '').trim(), wre = w.replace(/[-_]+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim().split(/\s+/).join('[^a-z0-9]+'), wordEnd = /\d$/.test(wre) ? '[^a-z0-9]' : '[^a-z]';
+        const named = !lying ? caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && /^e_/.test(c.target.id)).map(c => {const n = (c.label.replace(/^(?:Pick up|Take)\s+/, '').replace(/(?:\s+\([^)]*\))?\s+out of\s.*$/, '').replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() ?? '').toLowerCase(), d = Number(/\(([\d.]+) m/.exec(c.label)?.[1] ?? 99);
+          return {c, rank: n === w || n.replace(/[-_]+/g, ' ') === w ? 0 : wre && new RegExp(`(^|[^a-z])${wre}(${wordEnd}|$)`).test(n) ? 1 : 9, d};}).filter(x => x.rank < 9 && (!source || (x.c.available && (/[\s_-]/.test(w) || x.d <= REAL_THING_NEAR)))).sort((a, b) => a.rank - b.rank || a.d - b.d)[0]?.c : undefined;
         if (named) return {capability: named.id, note: `${raw} is ${named.id} (${named.label})`};
+        const c = lying ?? source;
         if (!c) {
           const me = this.posOf(soul.soulId), far = me ? this.sources().filter(s => s.kind === kind && s.place).map(s => ({s, d: Math.hypot(s.at[0] - me[0], s.at[1] - me[1])})).sort((a, b) => a.d - b.d) : [];
           const hit = far.map(f => ({f, w: caps.find(c => c.verb === 'walk' && c.target && (c.target.id === f.s.place || this.p.places.byId.get(f.s.place!)?.parent === c.target.id))})).find(x => x.w), walk = hit?.w;

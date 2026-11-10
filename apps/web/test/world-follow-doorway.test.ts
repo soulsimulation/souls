@@ -26,7 +26,7 @@ test('Follow a Soul just inside a doorway: the camera comes in through the door 
     const follow=new WorldFollow();let offset=new THREE.Vector3(0,1.4,6);  // outside, looking in through the door
     assert.ok(seen(root,at,offset),'the starting view threads the doorway (the sightline alone is clear)');
     for(let i=0;i<180;i++){offset=follow.resolve(at,offset,[root],1/60);
-      if(i<60)continue;  // the move in
+      if(i<80)continue;  // the move in (#1316: eased, about 1.3 s; it was 1 s)
       const eye=at.clone().add(offset);
       assert.ok(inside(eye),`Soul at ${at.toArray()}, frame ${i}: camera ${eye.toArray().map(v=>v.toFixed(2))} inside the room`);
       assert.ok(seen(root,at,offset),`frame ${i}: the Soul is in sight`);
