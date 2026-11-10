@@ -110,7 +110,7 @@ export function loadResult(dir) {
 
 async function main() {
   const { cmd, o } = parseArgs(process.argv.slice(2));
-  if (cmd === 'run') { await runEval(o); return; }
+  if (cmd === 'run') { await runEval(o); process.exit(0); }   // a seat's in-flight turn or timers must not hold the lock past the result
   if (cmd === 'report') {
     const dir = o._[0]; if (!dir) throw new Error('report <out> [--against <out>]');
     const a = loadResult(dir), b = o.against ? loadResult(o.against) : null;
@@ -118,7 +118,7 @@ async function main() {
     process.stdout.write(renderReport(a, b));
     return;
   }
-  if (cmd === 'load') { const { runLoad } = await import('./load.mjs'); await runLoad(o); return; }
+  if (cmd === 'load') { const { runLoad } = await import('./load.mjs'); await runLoad(o); process.exit(0); }
   process.stderr.write('usage: soul-eval.mjs run|report|load (see the header)\n'); process.exitCode = 2;
 }
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('soul-eval.mjs')) main().catch((e) => { log(e.stack ?? e.message); process.exitCode = 1; });

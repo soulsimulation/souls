@@ -138,7 +138,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     if (closed && !verdict.ok && t - closedAt >= graceSec * 1000) { endedBy = 'closed-unmet'; break; }
   }
   const endLocal = Date.now();
-  await Promise.race([seat.stop(), sleep((rails.maxTurnWallSec ?? 240) * 1000 + 5000)]);
+  let cap; await Promise.race([seat.stop(), new Promise((ok) => { cap = setTimeout(ok, (rails.maxTurnWallSec ?? 240) * 1000 + 5000); })]); clearTimeout(cap);
   await cli(seat.folder, ['serve', '--stop']).catch(() => {});
 
   const trace = readJsonl(traceFile);
