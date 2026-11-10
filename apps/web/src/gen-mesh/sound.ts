@@ -1,3 +1,4 @@
+import {FluteAudio} from './flute-audio.ts';
 // VOCAB-W2 + W7: the soundscape. Procedural WebAudio only (no audio files, nothing to license or download).
 //
 // Sources (planned in sound-plan.ts, pure and tested): every def's `components.sound` (one spec or a list; each
@@ -80,6 +81,7 @@ function pianoKey(c: AudioContext, out: AudioNode, at: number, midi: number, pea
 // blend has put the hands on the keys (#422), and a note scheduled but not yet started is cancelled when its player stops.
 const PIANO_RADIUS = 24, PIANO_VOLUME = 0.55, PIANO_AHEAD = 0.35, pianoDone = new Map<string, number>();
 const pianoQueued = new QueuedNotes<OscillatorNode>();
+const fluteAudio=new FluteAudio();
 let pianoNear = false, audioNow = 0;
 function playPianos(host: Host, x: number, y: number, z: number) {
   pianoNear = false;
@@ -490,7 +492,7 @@ function scanWorld(model: WorldModel) {
     const def = model.resolvedDef(e.def); if (!def || def.form !== 'point') continue;
     const p = model.worldPose(e), b = def.size?.box ?? [1, 1, 1], tall = (b[1] ?? 1) * p.s, wide = Math.max(b[0] ?? 1, b[2] ?? 1) * p.s;
     if (tall > 1.8) obstacles.push([p.x, Math.min(3, (tall * wide) / 12), p.z]);   // weight: how much wind it blocks
-    try { ys.push(model.terrain.sample(p.x, p.z)); } catch { /* no terrain */ }
+    try { ys.push(model.terrain.peek(p.x, p.z)); } catch { /* no terrain */ }   // PERF-ARRIVAL: no tile bake per thing (as placeOf)
   }
   ys.sort((a, b) => a - b); typicalGround = ys.length ? ys[Math.floor(ys.length / 2)] : 0;
 }
@@ -518,10 +520,13 @@ const musicOn = () => settings.music;
 // after the last near tick (hysteresis) and the music ramps the change over ~1 s (music.ts), so it breathes instead of
 // stepping.
 const DUCK_HOLD_MS = 2500; let duckHeldUntil = 0;
-const musicDuck = () => { const now = performance.now(); if (pianoNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
+const musicDuck = () => { const now = performance.now(); if (fluteAudio.near || pianoNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
 const musicSync = () => syncMusic({ on: musicOn(), station: settings.station, audible: audible(), volume: settings.volume * musicDuck(), unlocked: !!ctx && ctx.state === 'running' });
 function unlock() {
-  if (ctx || typeof AudioContext === 'undefined') return;
+  // #1389: a tap also wakes a context the browser suspended or interrupted (iOS after the page was in the background);
+  // only a tap may, and the music waits on this one (`unlocked`)
+  if (ctx) { if (ctx.state !== 'running' && audible()) void ctx.resume().catch(() => {}); return; }
+  if (typeof AudioContext === 'undefined') return;
   try { ctx = new AudioContext(); master = ctx.createGain(); applyMaster(); master.connect(ctx.destination); meter = ctx.createAnalyser(); meter.fftSize = 2048; master.connect(meter); noise(ctx).stop(); } catch { ctx = null; }
 }
 function step(host: Host) {
@@ -545,6 +550,7 @@ function step(host: Host) {
   // entry 36: one audio clock reading per tick for every instrument and the voice (ctx.currentTime moves in 128-sample
   // steps while the tick runs: read per instrument, the voice landed up to one step (2.9 ms) off the piano's note)
   audioNow = ctx?.currentTime ?? 0;
+  if(ctx&&master&&typeof host.worldSeconds==='number')fluteAudio.update(ctx,master,host.worldSeconds,audioNow,host.residents?.()??[],[x,y,z],settings.muted);
   if (!settings.muted) { playPianos(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { pianoNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
   const heard: Heard[] = [], playlist = musicPlaying();
   for (const e of [...objects, ...ambient, ...people]) {
@@ -619,7 +625,7 @@ export function startSoundLayer() {
   subscribeAudioSettings(()=>{settings=audioSettings();applyMaster();lastAmb=0;musicSync();});
   const w = window as unknown as { __soulsEntity?: Host; __edenSound?: unknown };
   w.__edenSound = {
-    state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, piano: { near: pianoNear, scheduled: pianoDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
+    state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, flute: fluteAudio.state(), piano: { near: pianoNear, scheduled: pianoDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
       radio: { near: radioNear, ids: radioIds.size, scheduled: radioDone.size, radios: [...radios].map(([id, r]) => ({ id, on: r.on, station: r.station, gain: +r.gain.toFixed(3), tunes: r.tunes, tuning: typeof w.__soulsEntity?.worldSeconds === 'number' && w.__soulsEntity.worldSeconds - r.tunedAt < TUNE.toLocked, hiss: +r.hiss.gain.value.toFixed(3) })) }, voice: { near: voiceNear, singers: [...singers].map(([id, s]) => ({ id, with: s.with })), scheduled: voiceLog.length },
       world: { trees: trees.count, exposure: +exposure.toFixed(2), night: +night.toFixed(2), typicalGround: +typicalGround.toFixed(1) },
       emitters: [...objects, ...ambient, ...people].map((e) => ({ id: e.id, kind: e.spec.kind, variant: e.spec.variant ?? 0, source: e.source, when: e.spec.when ?? null, on: condition(e.spec.when, e.state, night) })),

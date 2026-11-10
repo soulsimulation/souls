@@ -5,7 +5,7 @@ import {authoredBoundariesDeclarationV1Schema} from '@souls/engine-contract';
 //   the log alone, and the ENGINE (depiction: bodies, motion), which replays the
 //   programs that decisions started. Models never appear here.
 // Used identically by the live loop, the restart fast-forward and replay tests.
-import type { Engine } from '@souls/engine-contract';
+import { NONFINITE_HELD, QUARANTINED, REWOUND, type Engine } from '@souls/engine-contract';
 import {
   applyAll, bind, changesOf, emptyKernel, kernelHash, seedVocabulary, sweep, whyNot, BASE_MANNERS,
   type Change, type KState, type Thing,
@@ -205,6 +205,10 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
       return {};
     }
     case 'rules': {
+      if(e.payload?.lastRungInPlace){engine.stopAllV1?.(REWOUND);engine.containV1?.(e.payload.lastRungInPlace.contained??[]);return {};}
+      if(e.payload?.quarantineV1){const q=e.payload.quarantineV1;if(!engine.stopBodiesV1||!engine.containV1)throw Error('quarantine.reader-required');engine.stopBodiesV1(q.bodies??[],QUARANTINED);for(const h of q.held??[]){if(!engine.holdBodyV1)throw Error('quarantine.reader-required');try{engine.holdBodyV1(h.id,h.pose);}catch{/* as live: a hold that fails costs only itself */}}if(q.standing?.length){if(!engine.markStandingV1)throw Error('quarantine.reader-required');for(const m of q.standing)engine.markStandingV1(m.id,m.pose);}engine.containV1(q.contained??[]);return {};}   // #1369
+      if(e.payload?.nonFiniteHoldV1){if(!engine.applyNonFiniteV1)throw Error('nonfinite-hold.reader-required');engine.applyNonFiniteV1(e.payload.nonFiniteHoldV1.patches??[],NONFINITE_HELD);return {};}   // #1496: the logged patches, as live wrote them; nothing is read again
+      if(e.payload?.soulsRepairAdoptV1){if(Object.keys(e.payload).length!==1||!engine.adoptSoulsRepairV1)throw Error('souls-repair-adoption.reader-required');engine.adoptSoulsRepairV1(e.payload.soulsRepairAdoptV1);}   // #1323
       if(e.payload?.nativeSleepSnapshotPolicy){if(Object.keys(e.payload).length!==1||!engine.adoptNativeSleepSnapshotV1)throw Error('sleep-snapshot.reader-required');engine.adoptNativeSleepSnapshotV1(e.payload.nativeSleepSnapshotPolicy);}
       if(e.payload?.commonsNewcomerResources){if(Object.keys(e.payload).length!==1||!engine.adoptCommonsNewcomerResourcesV1)throw Error('newcomer-resources.reader-required');engine.adoptCommonsNewcomerResourcesV1(e.payload.commonsNewcomerResources);
         for(const a of engine.anchors())if(!k.things[a.id]){const r=applyAll(k,[{op:'appear',id:a.id,kind:a.kind==='region'?'region':'place',name:a.name,at:a.in??null,traits:{...(a.entity?{entity:a.entity}:{}),...(a.point?{point:a.point}:{})}}],'world');if(!r.ok)throw Error('newcomer-resources.anchor:'+r.message);}}
@@ -287,6 +291,9 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
       if (rules?.runtimePolicy) {
         if (!engine.configureRuntimePolicy) throw Error('runtime-policy.unsupported');
         engine.configureRuntimePolicy(rules.runtimePolicy);
+        // #1521 stand-height/2's one-time repair, logged with its adoption: the same bodies to the same places, nothing read again
+        const stood = (e.payload as {standHeightRepairV2?: {bodies?: {id: string; p: [number, number, number]}[]}} | null)?.standHeightRepairV2;
+        if (stood) { if (!engine.standOnFloorV2) throw Error('stand-height.reader-required'); engine.standOnFloorV2(stood.bodies ?? []); }
       }
       if (rules?.dayConfig) engine.configureClock?.(rules.dayConfig);
       if (rules?.quiet) engine.beginQuiet?.();
@@ -331,10 +338,13 @@ export function replayFromGenesis(factory: { genesis(seed: string): unknown; cre
     const recipe=repair.payload.recovery as import('./world.ts').RecoveryRecipe;
     if (!factory.restore) throw new Error('recovery requires a checkpoint factory');
     engine=factory.restore(structuredClone(recipe.baseline.runtime)); kernel=structuredClone(recipe.baseline.kernel!); counts={...recipe.baseline.counts};
+    if (recipe.lastRung) { engine.stopAllV1!(REWOUND, recipe.untilTick); for (const e of recipe.events) { try { foldEvent(engine,kernel,e,counts); } catch { /* as the live rewind: it costs only itself */ } } engine.setClockV1!(recipe.untilTick); engine.containV1!(recipe.lastRung.contained ?? []); }
+    else {
     for (const m of recipe.baseline.minds) if (m.pending && recipe.excluded.includes(m.pending.card)) engine.stop(m.pending.program);
     for (const actor of recipe.edge?.stopActors ?? []) { const program=engine.programOf(actor); if (program) engine.stop(program); }
     for (const e of recipe.events) { while (engine.world.tick<e.tick) engine.step(); foldEvent(engine,kernel,e,counts); }
     while (engine.world.tick<recipe.untilTick) engine.step();
+    }
     suffix=events.filter(e=>e.seq>repair.seq);
   } else { engine=factory.create(factory.genesis(seed)); kernel=initKernel(engine,pinnedVocabulary(events)); counts={}; }
   let i=0;

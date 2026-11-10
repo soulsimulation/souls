@@ -38,7 +38,7 @@
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
 //   POST /__sim/worlds/<slug>/unlisted the world's owner (signed in, or their own agent's god token): {unlisted: true|false}
-//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token): a 16:9 JPEG as
+//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token) or a signed-in site owner: a 16:9 JPEG as
 //                                the body (thumbnail.mjs), or DELETE to fall back to the template's default; never wakes the world
 //   GET  /__sim/thumbs/<slug>/<sha>.jpg, /__sim/thumbs/_template/<sha>.jpg  the world list's pictures, immutable (#887)
 //   POST /__sim/op/soul-pending|soul-approve|soul-message|soul-inbox|soul-delete, /__sim/op/set-test  operator only: TEST Souls
@@ -118,6 +118,7 @@ import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
+import { mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
 import { opSoul, opSetTest } from './op-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
@@ -524,10 +525,14 @@ export async function openLauncher(cfg = {}) {
   const GONE = [404, { ok: false, code: 'not-found', message: 'this world was archived while the thumbnail was being checked' }];
   async function ownerThumbnail(w, method, readBody, authorization) {
     const gone = () => registry.get(w.slug) !== w || closing.has(w.slug);
-    const a = await quietActorOf(w, authorization);
+    let a = await quietActorOf(w, authorization);
     if (gone()) return GONE;
     if (!a) return [401, { ok: false, code: 'unauthorized', message: "sign in, or use this world's god token", fix: "Run it from the world owner's agent folder (eden-god thumbnail), or send the owner's sign-in." }];
-    if (!isOwner(w, a)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+    // the site admin, by session only (the accounts the health page admits); the audit row tells it from the owner's own change
+    if (!isOwner(w, a)) {
+      if (a.via !== 'session' || !dash.owners().has(a.account)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner or the site admin sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+      a = { ...a, via: 'site-admin' };
+    }
     const wait = thumbRate(w.slug);
     if (wait !== null) return [429, rateRefusal(wait), { 'retry-after': String(wait) }];
     if (method === 'DELETE') {
@@ -827,7 +832,9 @@ export async function openLauncher(cfg = {}) {
     let r;
     try {
       r = await c3.get(key, ttlMs, () => new Promise((yes, no) => {
-        const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...hopless(req.headers), 'x-forwarded-for': xff } }, (u) => {
+        // One flight serves every caller waiting on it, so it always asks for the whole answer: a world's 304 to one would be the others' empty page.
+        const { 'if-none-match': _inm, ...asked } = hopless(req.headers);
+        const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...asked, 'x-forwarded-for': xff } }, (u) => {
           const chunks = []; u.on('data', (c) => chunks.push(c)); u.on('error', no);
           u.on('end', () => { sawLoad(slug, u.headers['x-sim-load']); const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers; const body = Buffer.concat(chunks); yes({ status: u.statusCode ?? 502, headers: { ...headers, 'content-length': String(body.length) }, body }); });
         });
@@ -835,6 +842,8 @@ export async function openLauncher(cfg = {}) {
       }));
     } catch { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); return; }
     if (clientGone(req, res)) return;
+    const tag = r.status === 200 ? r.headers.etag : undefined;
+    if (tag && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === tag)) { const { 'content-length': _l, 'content-type': _t, ...kept } = r.headers; res.writeHead(304, robotsOf(slug, { ...kept, 'x-sim-cache': r.cache })).end(); return; }
     res.writeHead(r.status, robotsOf(slug, { ...r.headers, 'x-sim-cache': r.cache })).end(req.method === 'HEAD' ? undefined : r.body);
   }
   /** Retired (a newer launcher serves now): anything still arriving here, on a connection opened before the switch,
@@ -1068,6 +1077,9 @@ export async function openLauncher(cfg = {}) {
       if (world) {
         if (!SLUG_RE.test(world)) { json(res, 404, { ok: false, code: 'world.not-served' }); return; }
         if (path === `/w/${world}`) { res.writeHead(308, { location: `${wp(world)}/${url.search}` }).end(); return; }
+        // #897: an unlisted world has no public reader (its page and skills still answer at their URLs)
+        let plain = path; try { plain = decodeURIComponent(path); } catch { /* malformed: compared as sent */ }
+        if (plain === `/w/${world}/llms.txt` && (req.method === 'GET' || req.method === 'HEAD')) { const w = registry.get(world); if (w && isUnlisted(w)) { json(res, 404, { ok: false, code: 'world.unlisted' }); return; } }
         // a world's site routes answer the relay above, never the public proxy
         if (path.startsWith(`/w/${world}/v1/site/`)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         await toWorld(req, res, world, url); return;
@@ -1083,7 +1095,11 @@ export async function openLauncher(cfg = {}) {
         if (path === '/' || path === '/index.html') { if (serveFile(res, join(webDir, 'index.html'), 'no-cache')) return; res.writeHead(500, { 'content-type': 'text/plain' }).end('The web app is not built: pnpm --filter @souls/web build'); return; }
         // #896: the docs, llms.txt and the changelog's Markdown twin, all built into the web build (apps/web/src/docs-site.ts).
         // A page answers as HTML, or as its Markdown twin at <path>.md or for `Accept: text/markdown`.
-        if (path === '/llms.txt' || path === '/llms-full.txt') { if (serveFile(res, join(webDir, path.slice(1)), 'no-cache', req)) return; }
+        if (path === '/llms-full.txt' && serveFile(res, join(webDir, 'llms-full.txt'), 'no-cache', req)) return;
+        // #897: the root llms.txt is the build's docs index plus every listed world's reader (registry, per request)
+        if (path === '/llms.txt') { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { idx = null; }
+          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) })); return; } }
+        if (path === '/.well-known/mcp/server.json') { json(res, 200, mcpServerJson({ origin: publicOrigin, base: B, version: BUILD }), { 'cache-control': 'public, max-age=3600', 'x-robots-tag': 'noindex' }); return; }
         const doc = docFile(path, req.headers.accept), negotiated = /^\/docs(?:\.md$|\/|$)|^\/changelog(?:\/|\.md)?$/.test(path);
         if (negotiated) res.setHeader('vary', 'Accept');
         if (doc && serveFile(res, join(webDir, doc), 'no-cache', req)) return;

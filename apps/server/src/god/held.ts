@@ -7,6 +7,7 @@
 //   - pick-up / put-on / put-down receipts: outcome.changed names what is now held or where it was put;
 //   - `put-down:here` (on the ground in front of you) while holding a god thing.
 import type { EdgeLedger } from '../edge/ledger/ledger.ts';
+import { rideDownReason } from '../edge/ledger/together.ts';
 import type { WorldModel } from '@souls/world-compiler';
 import { groundPutDistance, groundPutNeed } from '../../../../mars/viewer/engine/items/actions.ts';
 
@@ -52,9 +53,11 @@ export function installHeld(L: EdgeLedger, h: HeldHost) {
     const clear = (yaw: number) => !!h.engine.standableNearV1?.([p[0] + Math.cos(yaw) * ahead, p[2] + Math.sin(yaw) * ahead], level, soul.entityId, need, 0);
     const face = [0, 1, -1, 2, -2, 3, -3, 4].map((k) => yaw0 + (k * Math.PI) / 4).find(clear);
     const label = `Put ${name(x.id)} down on the ground here`;
-    caps.push({ id: 'put-down:here', verb: 'put-down', label, target: { id: x.id, kind: 'item' }, available: face !== undefined,
-      ...(face === undefined ? { blocked: { code: 'item.no-room', reason: 'No clear ground around you to put it on; step somewhere more open first.' } } : {}) });
-    if (face !== undefined) plans.set('put-down:here', { label, steps: [...(seated ? [{ verb: 'stand', params: {} }] : []),
+    // #1261 review: not while riding, as the edge's own put-down (now that plain words reach this offer too)
+    const ride = L.aboard(soul.entityId), aloft = !!ride;
+    caps.push({ id: 'put-down:here', verb: 'put-down', label, target: { id: x.id, kind: 'item' }, available: face !== undefined && !aloft,
+      ...(aloft ? { blocked: { code: 'ride.aboard', reason: rideDownReason(ride!.phase, []) } } : face === undefined ? { blocked: { code: 'item.no-room', reason: 'No clear ground around you to put it on; step somewhere more open first.' } } : {}) });
+    if (face !== undefined && !aloft) plans.set('put-down:here', { label, steps: [...(seated ? [{ verb: 'stand', params: {} }] : []),
       ...(face !== yaw0 ? [{ verb: 'mars:walk_to', params: { x: p[0], z: p[2], level, face: Math.atan2(Math.sin(face), Math.cos(face)) } }] : []),
       { verb: 'mars:put_item', params: { item: x.id, surfaceSlot: 'ground' } }] });
   };

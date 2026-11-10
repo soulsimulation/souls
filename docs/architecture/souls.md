@@ -27,7 +27,42 @@ The agent keeps its state in that folder: `.eden-agent.json` (world, Soul, token
 (`.client-queue.json`), the cadence state, logs (`live-log.jsonl`, `cost-log.jsonl`), owner messages and replies
 (`OWNER-REQUESTS.jsonl`, `OWNER-REPLIES.jsonl`), `PERSONA.md`, `PRIORITIES.md`, and the `memory/` folder. A `STOP`
 file stops the mind. The owner can message the Soul from the web (`/v1/edge/owner/:soulId/inbox`); the agent reads
-them with `listen` and answers with `ack` / `result`.
+them with `listen` and answers with `ack` / `result`. Between pickup and the result the owner's view carries `doing`
+(`apps/server/src/edge/owner-doing.ts`), read only from world records: `thinking` from pickup until the agent's first
+act, acknowledgement or result while it isn't away, then the newest act begun since pickup with its receipt phase
+(`running`, `done`, `failed`, `refused`, `cut`, or a plan step's `paused`) and `step n of m` for a server plan's act.
+Only acts begun before the message's result count (its last act stays shown), or within 15 minutes of pickup while it
+has none. With no record there is no `doing`, and the agent's own answers never carry it.
+
+## Identity and durable reads
+
+Every Soul has one cross-world identity, `traveller` = `<home world>/<home Soul id>`: on `here.near`, `around.souls`,
+`inspect <soul>` and `GET /v1/edge/public/souls/:id`. A visiting incarnation shows its home identity; a Soul that never
+travelled shows this world and its own id. `id` is per world; this is what a world reports across them, a claim and not a
+proof, so the CLI's people record shows it and moves no row on it (see People).
+
+What the edge may point at instead of copying:
+
+| Evidence | Read | Kept |
+|---|---|---|
+| Receipt | `GET /v1/edge/receipts/:id` (the Soul's own) | For the world's life: `edge_receipts_v1` is never pruned |
+| Conversation turn | `GET /v1/edge/conversations/:id/turns` (members from when they joined; past members for the turns they were present, their last 200 memberships of it) | For the world's life: `edge_comms_turns` is never pruned |
+| Object | `GET /v1/edge/objects/:id` | While it exists; then `{object: null, tombstone: {id, kind, lastName, goneAt, goneTick}}`, for a listed kind, or a Soul that held a role in it or acted on it. Tombstones are kept for the world's life, one row each, holding the object's last state |
+| Event stream | `GET /v1/edge/events` | Not durable: pruned by count and age, so copy what matters |
+
+A Soul's home world answers only its travel calls while it is away, so these reads wait until it is back. For a moment on
+arrival a visitor can show its local identity, before its travel row lands.
+
+`status` shows `pairedAs`, the label of the pairing that holds the Soul: all a world knows of its controller. The managed
+runtime's lease stays local to its journal.
+
+`status` is what a new chat runs first, so a paired Soul always gets JSON with exit 0, and the world gets one try of five seconds, straight past `serve`. A busy world is `reachable: true` with `busy`; anything else unanswered is `reachable: false`, with `worldSaid` if it gave a reason. With
+the world down it says `reachable: false`, who the Soul is and where it last was; with control gone it says `paired: false`,
+why, and the exact `adopt`. `listening` and `listener` are what is open in this folder (a `listen` or `serve`), checked
+locally, because the world's `connected` also counts the last minute and `wait`'s peek: `link` stays what the owner sees. A
+Soul under the managed runtime reads `listening: false` here, since that runtime listens from its own client.
+`unfinished` names the owner messages acked with no `result`, the newest five, listed by `/v1/agent/me`, so another harness can finish them, and `listen --take` moves the
+listen here from another chat in the same folder. The world keeps messages until they are acked, so nothing is lost by that.
 
 ## The Souls home
 
@@ -42,37 +77,191 @@ upward from the current folder like `.git`, stopping at the user's home folder (
   credentials.json   mode 0600: every token, dev identity and approval poll secret, keyed by principal and world
   souls/<soulId>/    soul.json (identity); runtime/ holds state.json, listen lock, serve socket and log, per Soul
   pending/<world>/   a world's seat: the state of a pairing that has no Soul yet
+  gods/<world>/      a god seat: what the god CLI keeps today, minus its token
   bin/eden.mjs       the CLI, for folders below the home
 ```
 
 With one Soul every command works as it did. With several, name one first: `node eden.mjs mira here`, `mira@eden` when
 two share a name, `@eden create "Ivo"` to pick the world. Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
-and reuses its token. Everything but `credentials.json` is safe to read or back up.
+and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
+
+A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and once it
+holds a token the home's guide (`CLAUDE.md`, `AGENTS.md`) lists it beside the Souls, so the next chat finds it; only the
+guide's head is rewritten, and a guide this home didn't write is left alone. With
+several seats `node eden-god.mjs <world> <command>` picks one (`@<world>` when a command has that name). Its working directory stays yours, because god commands take
+relative files; only its own state moves. A folder with no home keeps `.eden-god.json` as ever, and that file wins until
+`node eden.mjs import` moves it in. Acting as a god reads nothing under `souls/`, and acting as a Soul nothing under
+`gods/`. A seat also holds the look keeper's per-start localhost secret (`.eden-god.wire.json`, 0600).
+
+One client and one project skill (`.claude/skills/souls/`, `.agents/skills/souls/`) serve every world in a home, because
+offers are data fetched from the world. `/v1/config` says which bundle a world serves: `soulClient: {contract, version,
+bytes, sha256, minVersion}`, read by `register`, so no command pays for it. A home records that per world. A world
+needing more than this client refuses at `register` with the exact `upgrade <world>`, and `upgrade` installs the bundle
+only if its length and SHA-256 match, it is newer than the home's, and no other world in the home speaks another contract
+(a world on an untrusted site can be passed over with `--trust`; a trusted one can't). Every copy of the CLI in the home hands over to `bin/eden.mjs` once that is newer. A world pinned to an older bundle keeps
+working: it never downgrades the home.
+
+Length and hash prove a bundle arrived whole, not that it is safe, and a client runs with every Soul's token in the home.
+So a home trusts one site unasked: its first world, once a `register` there has succeeded. A bundle from any other
+origin, or over plain http off this machine, needs a person's `upgrade <world> --trust`, naming the world. A home from
+before this client trusts nothing until a person says so. Reading a world, a travel answer and an imported file never add
+to the list, so a Soul moved in with `import` starts with no trusted site. `upgrade` follows no redirect.
 
 Reconciling needs the account's list, which `/v1/me` gives a dev identity. A delegated Soul token sees only its own Soul,
-so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one, and
-`adopt` takes an id. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
+so on an account world `doctor` checks each Soul through its token and only the world saying `retired` retires one.
+A window code stands in for the account there: `doctor --for <CODE>` (`@<world> doctor --for <CODE>` for another world: a code goes
+only to the world named, or the home's current one) lists the Souls that account holds there (ids and names, nothing else), `adopt <name> --for <CODE>` finds one by name (an imported Soul's world comes from its file, so import only your own export), and `create <name> --for <CODE>` for a name
+the account already holds reconnects that Soul instead of making a second one. The code conveys no control: approval
+still does. Without a code, a taken name stays `name-taken` and reveals nothing.
+
+A home can lose a file and keep its Souls. Without `credentials.json`, `status` names the Soul and says `adopt`, and memory
+still reads, because it never needed a token. A `config.json` moved aside comes back on the next command, which finds the
+Souls in `souls/` (god seats are not rebuilt this way). A Soul brought in by `import` starts unpaired: `status` and `memory` work,
+and `adopt` registers its world if the home hasn't, without trusting that site: the url came from a file. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
 under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/upload.mjs`, which read that file directly.
 
 `eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run
 `node tools/world-launcher/soul/inline.mjs`.
+
+## Memory
+
+A Soul in a home keeps one memory across every world it visits, in `souls/<id>/memory/`: an append-only log
+(`memory/log/memory-events.jsonl`) and the projections regenerated from it (`self`, `goals`, `schedule`, `places`,
+`knowledge`, `lessons`, `ledger`, `people/`, `journal/`). The record format and its validators are
+`tools/edge-skill/memory-folder.mjs`, the same module the 1.9 line uses; every record on the shipping line adds `world`,
+`when` (`{real, tick, worldDay, time}`) and `seen` (the names as they appeared). `tools/world-launcher/soul/memory.mjs`
+feeds it, and both are inlined into `eden.mjs`.
+
+Writing costs no request and no model call. Every answer from a world passes one place in the client, and with `serve`
+up only `serve` reaches it, so a terminal receipt, an arrival, a first meeting within 8 m, a heard turn and an owner
+message's result each add one record, once. An idle Soul writes nothing. A failure to write is said on stderr and never
+fails the command; a torn or conflicting log fails closed and stays as it was.
+
+Place ids repeat across worlds, so the log holds them as `<world>:<place>`, as it does receipts and learned facts. A
+record's own `seen` names make it stand alone: a place renamed by a god keeps the old name on old records and reads
+`formerly` in `places.md`, and an id gone from the world is only ever text. Speech and other Souls' reports carry
+UNTRUSTED through every projection.
+
+`worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
+last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
+`remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
+`memory <words>` searches the projections and says where each line came from.
+
+The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
+`ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/edge-skill/memory-folder.mjs`). Each keeps its newest
+entries (facts and things made by when they reached the log, places by last visit) and ends with a line counting the
+older ones; the ledger's cost section keeps the last 31 days. `memory` also searches the log for the learned facts, things
+made and places a projection dropped, marked `log` and untrusted, and for the Soul's own note on a place that left
+`places.md`, marked as its own; `more` counts every match once. People files have their own caps (below), journal pages
+are one per day, and the brief has its budget. Each command that touches memory still replays the whole log: about 3 ms
+for an empty memory and about 200 ms at 3,600 events (a heavy 30-day life). A 1.9 folder's projections have no budget. A legacy folder has no memory, so a Soul run by
+the managed runtime (`tools/soul-runtime`, which runs only a legacy folder) writes none and gets no brief: it keeps its own
+continuity in its SQLite journal, its `plan` and `openOwnerTasks` (#1227). The home marks
+everything a world reported as untrusted itself, whatever the world said about it. `memory/` and `MEMORY.md` are in the
+home's `.gitignore`, added to an older home when it next opens: they hold private conversations.
+
+### People
+
+`people/<slug>-<hash>.md` is one file per Soul met, keyed on the traveller id (`<home>/<id>`, hashed into the file name so
+two ids never share a file; `<world>/<id>` until the world gives one). `tools/world-launcher/soul/people.mjs` projects it
+from the log: first met and last contact on both clocks, episodes as pointers to conversations and shared receipts with a
+line each, this Soul's own beliefs, what worlds say of them, their last words, what this Soul has told them (its own `say`
+and `converse` from what it sent), and commitments. World text is under a heading marked UNTRUSTED, and a world's provenance
+is only a label: "my judgment" is what `remember` wrote. The title's name is a world's too, and `memory` says so. A file for
+someone met once stays under 2 KB, any file under 8 KB. No one met, no folder.
+
+Each Soul a world shows is its own row, and a world speaks only for its own. A traveller id naming a Soul elsewhere is a
+claim: it puts that row in the same file, under a heading that says whose word it is, and changes nothing else. A claim moves
+and merges no row. A note or a promise stays on the row it was written about, so a stranger who claims to be a friend gets
+none of it, and the brief says only that a world says so. A visitor's own world is the one that can vouch for them, so a
+promise to a friend at home closes on what that friend did at home.
+
+`remember --person <id|name> --promise "<what>" [--by me|them]` opens a commitment, and every open one is in the brief with
+its id, whoever is near. It closes only with `remember --kept <promise id> --evidence <id>`, and the log has to hold, later
+in the log than the promise (a world picks its own timestamps), a conversation turn of theirs, or for a promise of mine a
+completed receipt that names them. An owner's message, or an act alone, keeps nothing: a promise is kept by what happened, not
+by the mind saying so. Any turn of theirs since counts, even a greeting: the mind names which.
+
+### Consolidation
+
+The pass is opt-in: it spends the owner's money and sends journal text to a model, so nothing runs until they say yes. Once a
+journal holds days a pass could take, with no answer yet, `status` carries `consolidation.offer`, the text an agent puts to its
+owner once: what a pass does, what it costs and what leaves the machine. `consolidate asked` records that the question was put;
+`consolidate on` or `consolidate off` records the answer for the whole home (`consolidation.enabled` in `config.json`), and the
+caps stay per Soul, so a yes in a home of three can cost three times the caps. Until it's on, `consolidate` says so and an idle
+`serve` doesn't look. `off` stops what comes next, not a pass already running.
+
+Once on, `consolidate [--force]`, and an idle `serve` on the owner's schedule, summarizes the oldest journal days past 32 KB into
+`MEMORY.md`, keeps a note written twice as one with a count, gathers those, and writes `memory/soul-proposal.diff` for the
+owner. It never writes `SOUL.md`, so pinned lines can't change, and never touches the log; a summarized day's journal page
+stops being projected. A day too big for one pass is read as far as fits. `memory` searches `MEMORY.md`, and the brief's
+"Earlier" holds the newest summary, quoted: a summary of what worlds said is still a world's words.
+
+The owner pays, so caps come before any call (`consolidation` in `config.json`: `callsPerDay` 2, `tokensPerPass` 8,000 with
+600 kept for the answer, `everyHours` 24 or 0 for never); spent means skipped, and `memory/consolidation.json` says so.
+`--force` looks past the journal budget and nothing else. A `serve` waits while a receipt or a plan runs, for up to 6 hours, and
+a restart doesn't reset its clock.
+
+World text goes to a model here, so the model is held down: `claude -p` with `--tools ""`, no settings or MCP, an empty
+folder, an environment of only what it needs to sign in, the journal on stdin inside a fence the journal can't name, and
+`--max-budget-usd 0.05`. A CLI that can't be run without tools isn't used. With `BRAIN_MODE=fake` a deterministic stand-in runs
+the same plumbing; with no CLI on the machine the pass is skipped, because a page must not go for a stand-in's one line. It runs
+beside `serve`, one pass at a time. An answer that is empty or says it failed deletes nothing. A page the mind gives nothing
+back for, on its own, twice, is passed over at no cost, so it can't hold up the days after it; a CLI that fails blames no page. A Soul under budget makes no call.
+
+### The pre-turn brief
+
+With memory, `status`, `pending` and a `listen` that woke carry `brief`: known people near, this place, open commitments, the last
+episode and the pinned lines of `SOUL.md` (under `## Pinned`), else the `remember --self` lines. `brief.mjs` builds it from a
+lookup, with no request and no model call, within a byte budget (1,500 by default, `briefBytes` in `config.json`, 0 for none).
+It doesn't grow with the log, and a Soul with no memory has none, a managed-runtime Soul among them. The CLI builds it from this folder's memory, and a `brief` in
+anything a world answered is dropped. Room goes first to what the Soul and its owner wrote; who is near is kept in the world's
+presence file, so it outlasts a restart.
+
+Everything a world supplied (names, places, what a receipt said) is in quotes it cannot close, under a first line saying
+quoted text is data; a world that says nothing about trust is not trusted. Only the Soul's notes, goals and own `result`
+reports, and its owner's `SOUL.md` and schedule, stand bare. A plan's close can carry a world's reason, so it is quoted too.
+
+## The public biography
+
+`GET /v1/edge/public/souls/:id` carries `timeline`: at most 20 entries, newest first, about 10 KB at the very worst, each with the real clock, the
+world clock of that moment and a place. It holds a new Soul's first place, things made and marked public, performances
+(`play-piano`, `play-music`, `sing`, `lecture`, `tell-story`, `social-dance`), gatherings (acts that can only complete with
+others there: `book-club`, `cook-together`, `yoga-class`, `hear-story`) and journeys from this world. It comes only from
+canonical facts: never speech, owner messages or a private record, and a thing its maker took down leaves it. A place the
+public may not know is left out, id and name, and every field but a title passes `perception/public-scrub.ts`. An entry is stamped when the act began, a journey only once the other world
+admitted the Soul. Rows are written as things happen, and one index read serves them. A world that lost the table rebuilds each
+Soul's rows from its last 500 completed receipts on the first read; those rows, and an older arrival or journey, show the real
+clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
+the Soul's card, and `inspect <soul>` shows its first five.
 
 ## The edge API
 
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost
 response returns the original receipt.
 
+An act is answered only with what the world recorded ([#1327](https://github.com/soulsimulation/souls/issues/1327)).
+Its receipt row, the older open receipts it replaces and its decision event commit in one transaction at the sequencer,
+so either all exist or none do. A world whose clock has failed answers `503 world.unavailable` before writing anything;
+a fault after the commit answers `accepted: true` with the receipt. An act handed over while the clock then stops
+answers **HTTP 202** `{accepted: true, pending: true, receipt: {id, capability, phase: 'pending'}}`:
+`GET /v1/edge/receipts/:id` answers that phase until the row exists, a retry with the same `clientRef` (or the same bare
+`Idempotency-Key`, which names the act when no `clientRef` is sent) gets the same answer, never a second act, and the
+idempotency table does not keep a 202. If the clock fails instead (the engine halts, a checkpoint fails) before the act
+was recorded, the hand-off is refused: the receipt route answers 404 `not-found` and a retry gets `503 world.unavailable`;
+nothing was written. Keys and clientRefs must be unique per act: a receipt keeps its clientRef.
+
 | Route | Purpose |
 |---|---|
 | `GET /v1/edge/boot` | Fresh session: clocks, the Soul (`me`), `here` with local offers, and the static manifest; never cached |
 | `GET /v1/edge/boot/static[?page=]`, `GET /v1/edge/boot/places` | Public, ETag-cached world knowledge: destinations, rules, verbs (paged within a 10 KB budget), and the full authored map |
-| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters |
-| `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
+| `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters. A `far` line ends with the walk to that place when one would go and `exits` doesn't already give it; `flags` lists the nearest four named flags, each with its walk when a route reaches it, leaving out any in a place the Soul doesn't know |
+| `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `capabilities` lists a page; `?all=1` lists the whole menu. `?search=<words>` lists the whole menu (as `?all=1`, with or without it) and adds a walk for each known place the words name, as `resolve` reads them (a far place's walk is made on demand and is in no menu). It also answers `search: {query, places, placesMatched, truncated, note?}`, with `places` the walk ids, best first, at most 12. A search has its own rate limit, 30 a minute, as `around` does. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
 | `GET /v1/edge/map` | Public map: the places, and the named god flags as `flags: [{name, walk, at}]` |
 | `POST /v1/edge/resolve` | Dry run of an action: the resolved target and capability, no event |
-| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, `alternatives`: at most 3 offers available here and now) |
-| `GET /v1/edge/receipts/:id` | A receipt: accepted, started, completed, failed or replaced, with the reason |
+| `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, or when no walk reaches the offer now (route-dead: `route.unreachable`, `route.goal-blocked`, `route.link-unusable`, `route.unknown-level`, whether the offer was already blocked when listed or the planner refuses its walk at act time), `alternatives`: at most 3 offers available here and now, never the refused one; a walk that waited for navigation and then fails route-dead carries them on its failed receipt). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272). `stop:current` (offered only while an act is open; the words "stop", "pause", "cancel" or "wait, pause" mean it then; bare "wait" does not) stops the act under way where the body is, keeping its posture. That act's receipt ends `failed` with `act.stopped`. The stop's own receipt completes with `stopped: <receipt>`, and a linked owner message closes "Stopped at your request before it finished". `params.receipt` stops only that act. Nothing running is refused `act.none-running`, naming the last act and how it ended; nothing is written. An ended act is refused `act.already-ended`, and a shared carry `act.shared`, which names `stop-carry:<op>` (#1381) |
+| `GET /v1/edge/receipts/:id` | A receipt: accepted, started (the program began), completed, failed or replaced, with the reason; `firstMotionTick` once the body visibly began |
 | `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership) |
 | `GET /v1/edge/objects`, `POST /v1/edge/objects/:id/act` | Things the Soul can read, write or use |
 | `GET /v1/edge/wait?after=&timeout=` | Long poll (1–55 s): new events for this Soul, or an owner message |
@@ -80,10 +269,10 @@ response returns the original receipt.
 | `GET`/`PUT /v1/edge/body`, `POST /v1/edge/body/uploads` | The Soul's body look; uploaded models (moderated) |
 | `POST`/`GET /v1/edge/reminders`, `DELETE /v1/edge/reminders/:id` | Personal reminders |
 | `GET /v1/edge/view` | Eyes |
-| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages |
+| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running |
 | `GET`/`POST /v1/edge/travel` | Travel between worlds of one site ([worlds](worlds.md#travel-between-worlds)) |
 
-Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token.
+Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. What the world says of a Soul on its public record passes through `perception/public-scrub.ts` as a whole, so no field, present or future, carries the id, ref or name of a secret place or anything inside one: a list loses the entry, an object the field. A receipt that ended inside one goes, and so does an open one while the Soul is in there. What the Soul said itself (its name, description, `now`, speech and the titles of what it made) is its own and isn't touched, so a Soul that knows a secret place can say so, and a title on its timeline can name one.
 
 **Place names.** Place targets resolve by exact id, normalized name, declared alias, then a conservative fuzzy match
 (edit distance ≤ 2, clear runner-up gap). Ambiguous or low-confidence names are refused with hints; an unknown id is
@@ -113,6 +302,16 @@ gets the caption. The launcher passes its own `EDGE_EYES*` settings to children 
 list of slugs). Budgets: at most one new picture per 30 s per Soul and 12 per minute per world
 (`EDGE_EYES_SOUL_SECONDS`, `EDGE_EYES_GLOBAL_PER_MINUTE` may tighten, never relax). The picture hides the Soul itself,
 spectator overlays and anyone not in the Soul's sightline.
+
+The browser is the release's own Playwright Chromium under `PLAYWRIGHT_BROWSERS_PATH`. A release that bumps Playwright
+expects a new `chromium-<rev>` (#1340), and `release.sh`'s stage installs it ([release](../release.md)). The worker launches, in order:
+`EDGE_EYES_CHROME` (an explicit executable), Playwright's expected Chromium, or the newest other `chromium-<rev>` already
+installed there. It logs which one it chose. With none, it exits with a "no browser" reason that
+`/v1/edge/view/status` shows, along with the install command, and it retries after 30 minutes instead of every two.
+Before a release, `node tools/world-launcher/deploy/eyes-browser.mjs --tree <release> --browsers <path>`, run as the
+worlds' user, prints the expected revision and what Eyes would launch. It exits 1 when there is no browser. To install
+the expected revision, in the release as the worlds' user, run
+`PLAYWRIGHT_BROWSERS_PATH=<path> pnpm --filter mars-campus-viewer exec playwright install chromium`.
 
 ## The body without its agent
 
@@ -173,3 +372,28 @@ Some engine behaviour changes are adopted per world as logged `rules` facts, so 
 example is `walkSettleWaitV1` (`WorldHost.enableWalkSettleWaitV1`): when a walker's final recentering is blocked by a
 person, it reports the native wait with the blocker instead of an unnamed settle. It is off by default and enabled only
 through an explicit world descriptor; once adopted, a rollback must use a reader that understands it.
+
+`routeReachV1` (route-reach/1, #872; `WorldHost.enableRouteReachV1`) is turned on at edge startup
+(`edge-runtime-rules.ts`). It changes three things in the paged ground planner (`mars/viewer/engine/spatial/tiled.ts`):
+
+- **Far walks from an upper floor.** A walk from an upper floor to a goal more than 72 m away is no longer refused
+  `ground.too-far`. The first chunk goes down the building's own stairs to standable ground toward the goal, and the
+  walk continues from there a chunk at a time, like any paged walk.
+- **Hops cut short by the window.** A fine hop that fails on its tile window is retried once on a window one ground tile
+  wider before the walk is refused. A fence or a building's walls can push the way round outside the first window.
+- **Full places.** A place is reported `route.region-full` only when people fill it. A place whose spots cannot be
+  reached gets the planner's own refusal instead.
+
+A place that no walk reaches within one planning window (72 m) still refuses at once. Like every paged walk, a farther walk
+is checked beyond the first chunk only on the coarse ground grid, so a goal sealed off by thin walls is found out when the
+walk reaches it, and the walk then fails `route.unreachable` there.
+
+A Soul that stands cut off from the main walkable area (a shut door with no handle, an edit that walled it in) is not
+refused when it asks for a walk out. The act first steps it to the nearest open ground, a logged `edge-relocate` under
+`nav-connect/1`, then walks, and the receipt reason says "Moved to open ground first". Every walk form does this: an
+offered id, words, or `{verb, target}`. `here` exits and far lines read the same check, so they list those walks as
+reachable. The step-out happens at most once a minute for each Soul. A Soul cut off again within that minute is refused
+`route.unreachable`, with a reason that gives the seconds until it can step out again, and `retry_after` on the act,
+the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
+not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
+isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).

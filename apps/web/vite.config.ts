@@ -6,6 +6,7 @@ import { anonymousHello } from '../../packages/client/src/hello.ts';
 import { PWA_MANIFEST, pwaHeadTags, pwaManifest, type PwaIcons } from './src/pwa-manifest.ts';
 import { changelogHtml } from './src/changelog-page.ts';
 import { buildDocs } from './src/docs-site.ts';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +62,13 @@ function phasedEntry(): Plugin {
       const imports: string[] = [], seen = new Set<string>();
       const walk = (f: string) => { for (const i of byFile.get(f)?.imports ?? []) if (!seen.has(i)) { seen.add(i); walk(i); imports.push(i); } };
       walk(early.fileName);
-      return rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports);
+      // #1266: the bytes of every file the page names (its code and style), for the boot light's first share of the bar
+      const out = rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports), sizes: Record<string, number> = {};
+      for (const [, url, file] of out.matchAll(/["'(]((?:[^"'()]*\/)?(assets\/[\w.-]+\.(?:js|css)))["')]/g)) {
+        const item = ctx.bundle?.[file]; if (!item) continue;
+        sizes[url.startsWith('/') ? url : '/' + url] = Buffer.byteLength(item.type === 'chunk' ? item.code : typeof item.source === 'string' ? item.source : Buffer.from(item.source));
+      }
+      return out.replace('</head>', `    <script>window.__simCodeBytes=${JSON.stringify(sizes)}</script>\n  </head>`);
     } },
   };
 }
@@ -120,7 +127,8 @@ function changelogPage(): Plugin {
 // docs/<slug>/index.html and its Markdown twin docs/<slug>.md (/docs: docs/index.html and docs.md), llms.txt, llms-full.txt,
 // docs/pages.json (the launcher's sitemap) and changelog.md (the changelog page's own source). Static files, no script, no
 // chunk: the viewer bundle is untouched. SIM_SITE_ORIGIN (default https://soul.game) is the origin canonical URLs and
-// llms.txt name. docs/site/WRITING.md is the writing guide, not a page.
+// llms.txt name. docs/site/WRITING.md is the writing guide, not a page. #898: the reference pages' generated part is not
+// in the tree; tools/docs/generate.mjs writes it here from the server's own modules, and a build it can't serve in full fails.
 function docsSite(): Plugin {
   let base = '/';
   const dir = fileURLToPath(new URL('../../docs/site', import.meta.url)), template = fileURLToPath(new URL('./docs-template.html', import.meta.url));
@@ -133,7 +141,8 @@ function docsSite(): Plugin {
     configResolved(c) { base = c.base; },
     generateBundle() {
       const t0 = performance.now();
-      const { pages, out } = buildDocs({ files: files(dir).map((f) => relative(dir, f)), read: (r) => readFileSync(join(dir, r), 'utf8'), template: readFileSync(template, 'utf8'),
+      const generated: Record<string, string> = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../../tools/docs/generate.mjs', import.meta.url)), '--json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+      const { pages, out } = buildDocs({ files: files(dir).map((f) => relative(dir, f)), read: (r) => generated[r] ?? readFileSync(join(dir, r), 'utf8'), template: readFileSync(template, 'utf8'),
         changelog: readFileSync(changelog, 'utf8'), base, origin });
       for (const [fileName, source] of out) this.emitFile({ type: 'asset', fileName, source });
       this.info(`docs: ${pages.length} pages (${pages.filter((p) => !p.stub).length} published) in ${(performance.now() - t0).toFixed(0)} ms`);

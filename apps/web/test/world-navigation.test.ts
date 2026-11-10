@@ -60,6 +60,19 @@ test('Follow consumes real wheel and drag deltas, never programmatic controls up
   }finally{controls.dispose();}
 });
 
+test('#1316: a button held elsewhere on the page never turns a frame\'s follow update into viewer input',async()=>{
+  const f=fixture();f.nav.dispose();f.context.mode='follow';f.context.navigation='orbit';
+  const inputs:number[]=[];
+  const controls=createWorldOrbitControls(f.camera,f.canvas as never,f.target,f.context,()=>{inputs.push(1);});
+  try{
+    // A drag on a slider or panel text: pointermove with a button held, on the document, never on the canvas.
+    const e=new Event('pointermove',{cancelable:true});Object.assign(e,{pointerId:9,pointerType:'mouse',clientX:300,clientY:100,button:0,buttons:1});f.doc.dispatchEvent(e);
+    f.camera.position.x+=.3;controls.update();   // the same frame, Follow carries the camera with its Soul
+    await Promise.resolve();
+    assert.equal(inputs.length,0);
+  }finally{controls.dispose();}
+});
+
 test('WASD and Q/E move an explicitly focused scene at frame-independent speed; no keys outside scene ownership',()=>{
   const distance=(fps:number)=>{
     const f=fixture();try{

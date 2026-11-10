@@ -4,7 +4,7 @@ Souls now use the things in a world with their own hands. Ask in plain words and
 thing changes at the moment the hand touches it: a lamp lights, a door swings, water runs, the kettle clicks on. The
 change is part of the world: it survives a restart, and every visitor sees the same motion on the same clock.
 
-This page covers Soul Actions entries 1–44 and the everyday-life families that follow them (openings: a tent flap and a field gate; public writing: a guestbook). Each entry was accepted with a deterministic native test (including the
+This page covers Soul Actions entries 1–44 and the everyday-life families that follow them (books and notebooks, #428; openings: a tent flap and a field gate; public writing: a guestbook). Each entry was accepted with a deterministic native test (including the
 context-size checks below), regression runs, and an uncut real-client recording driven by plain words.
 
 ## How it works
@@ -12,12 +12,33 @@ context-size checks below), regression runs, and an uncut real-client recording 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
   `upright-carry`, containers with an `inside`, the tea defs, and so on). Older revisions of a def keep their old,
   hand-free behaviour, so existing worlds do not change until a god places the new revision.
+- **Land-art materials ([#1541](https://github.com/soulsimulation/souls/issues/1541)).** `core-smooth-stone@1`,
+  `core-flat-stone@1` and `core-driftwood-piece@1` are separate small items, using the same native pickup and
+  ground placement as a lantern. Pick up a piece, walk to a chosen clear place (or stop along a route), and use
+  `put-down:here`; pick it up again to rearrange it. The ground placement is in front of the body and may turn toward clear ground,
+  rather than setting an arbitrary coordinate. Each entity keeps its actual saved position. There is no preset
+  composition, stacking rule, special land-art action or new placement authority.
+- **Campsite table setup ([#1605](https://github.com/soulsimulation/souls/issues/1605)).** `core-table@2` is a solo,
+  two-hand carry revision of the fixed table. Carry it empty to a named clear place, then use the existing `put-on`
+  and `pick-up` offers to stage and retrieve real bowls, lanterns and other fitting items on its relocated surface.
+  Native support and persistent parent/slot placement follow the same table identity. Unload before moving it again:
+  the native fixture mover refuses a loaded table (`move_fixture.contents`). It does not fold, and the fixed `@1`
+  table and the heavier crew work table are unchanged.
 - **Storage with and without a door ([#435](https://github.com/soulsimulation/souls/issues/435)).** A container with an
   `inside` (entry 42) is open only while its door or drawer is, if its def declares an `open` state. One that declares
   none has no door: `core-swap-shelf@1` is always open, so what is on it is seen nearby and taken without an open step,
   and the viewer draws it as an ordinary thing. A container whose def declares a `leftBy` state field records who left
   each thing in it (item id = Soul id, set when the thing comes to rest from a Soul's hand, pruned to what is still
   inside). Nearby perception and the take offer name the leaver; god-placed things have none.
+- **Real fridge contents ([#1566](https://github.com/soulsimulation/souls/issues/1566)).** `core-drinks-fridge@3` is an
+  insulated, opaque-door revision with one waist-height shelf for a real carried item. Open it, put the item inside,
+  close it, then reopen and take the same item out. Contents and custody persist; the closed door conceals them.
+  The older glass display revisions keep their decorative bottles. This revision supports new, worn and damaged finishes;
+  construction scaffolding is unsupported. It makes no cooling or preservation claim.
+- **Actual bookcase stock ([#1578](https://github.com/soulsimulation/souls/issues/1578)).** `core-bookcase@2` removes the
+  decorative books and provides three places on its waist-height shelf for real books or small items. Souls shelve and
+  retrieve each entity by hand; nearby context names the actual contents. Item identity, appearance and existing metadata
+  persist. This adds no authored-passage reading contract. Other shelves remain empty; the old decorative revision is unchanged.
 - **Litter and bins ([#1088](https://github.com/soulsimulation/souls/issues/1088), W065).** `core-bin@2` and `core-wheelie-bin@2`
   are the street bins, open at the top, on the same container faculty with data only: three places down inside at the
   level of the rubbish already in them, reached over the rim. `core-wrapper@1` is a small thing to pick up. "put the
@@ -208,6 +229,66 @@ context-size checks below), regression runs, and an uncut real-client recording 
   - **Invariant.** `stairsBear` is checked at every tick end: an installed flight's hook is joined to an installed beam
     and an installed tread to an installed flight, both ways (`stair.unsupported`).
   - **Rules version.** `+shared-stairs/1`, after PC15's suffix.
+- **Projects: a bay from a blueprint (PC17, [#696](https://github.com/soulsimulation/souls/issues/696); off unless `SIM_SHARED_CARRY=1`).**
+  Three things, kept apart. A **blueprint** (`rack-bay@1`, `packages/engine-mars/src/project/rack-bay.blueprint.json`) is
+  the target graph: parts by key, the defs each may be, where each goes in the site's own frame, what it rests on. A
+  **procedure** (`rack-bay-build@1`) is 32 finite maneuvers over those keys in three sections (`stock`, `frames`,
+  `deck-stairs`), each ending at a checkpoint where nobody holds anything. Neither schema can name a Soul, an entity or
+  a world. A **project** (`edge_projects_v1`, `apps/server/src/god/projects.ts`) is one site: where it is, which real
+  thing is each part, its revision and who has agreed to what. It stores no progress.
+  - **Organize.** `organize:rack-bay-build@1 {at, yaw, with}` is on the menu of a Soul within 25 m of loose stock, and
+    binds each part to the nearest loose thing of a def it may be. It moves nobody; `with` names who is told. Refusals,
+    before anyone is asked: `project.stock-short` (counted per def), `project.site-blocked`, `project.unknown-place`.
+  - **Progress** is read from the world on every read (`progressOf`): real parts, joints, support, floors and links. A
+    god's joint advances it, a removal takes it back, editing the row does nothing. Complete means all 29 joints
+    reciprocal, both frames standing on their own, a floor on the sheet and a usable stairs link.
+  - **Discovery.** `inspect <project>` gives blueprint, procedure, revision, section, counts, each ready maneuver's exact
+    offer and params, what is missing and who has agreed, within the 4 KB budget. `here` adds one line under `projects`,
+    only within 30 m of the site or to a Soul who agreed, was told or organized it. Anyone else gains nothing.
+  - **Offers it adds to.** `carry-with:<part> {to: "project:<id>"}` lays a part on its spot. `raise-with:<upright>
+    {project}` stands a frame where the blueprint says, whichever way round it came to lie (`raise_hold_v1` `baseV1`).
+    Everything else is the ordinary offer.
+  - **Volunteer.** `volunteer:<project> {revision, section, maneuvers, expires}` is bounded advance consent: one section,
+    one revision, a stated number of maneuvers and an expiry. While it holds, an invitation to that Soul for a ready
+    maneuver of that section, with that part and as the plan calls for it, is accepted through the ordinary `accept`, on
+    the Soul's own receipt, and the Soul is told. Anything else stays an ordinary invitation: a load off the plan, a
+    maneuver not ready, another section, consent spent, expired or left. A Soul with an open receipt, or too far off, is
+    not started and its invitation stays open. `leave-project:<project>` ends it at once. It holds no body.
+  - **Revise.** `revise-project:<project> {at, yaw, part, entity}` is the organizer's. Moving the site or binding a part
+    of another def revision is material: the revision bumps, every agreement lapses, each volunteer is told what changed,
+    and a `volunteer` for the old revision is refused `project.revision-changed`, naming it. A like-for-like swap is not.
+    A site with anything built on it does not move (`project.site-built`).
+  - **Across a restart.** The model can't say a frame stands on its beams, so a boot, or any re-derive of a frame, stands
+    a released frame back on `ground`. Nothing is kept or granted. A project reads a release from the frame itself: nobody
+    holds it, it is installed, and it stands on its own by the beams it has. So a restart doesn't undo a release, and every
+    later step already asks that same question. A god's edit that stops the frames standing on their own undoes it, as it
+    should.
+  - **Extending a bay doesn't rewind the world.** `framesStand` judges a whole group, so an edit can change what a frame it
+    never touched is judged on. The world-edit fold settles that where it lands (`settleFrames`): whatever the rule no longer
+    supports stands on the ground, in the same application as the edit and before any invariant looks, and replay does the
+    same. A frame the edit didn't touch and that still stands keeps what it had; one it touched is re-derived to the ground, as
+    any god's joined upright is. The log and the god's reply, on an undo or redo too, name every frame that stopped standing
+    (`frames.settled`). Nothing is refused, so a god can extend a bay: a new upright with too few beams stands the group down
+    until it has them. This covers frames and beams at the edit only. A state that reaches the invariants any other way,
+    a restored snapshot or a stair or deck a god's edit leaves unsupported, is the repair ladder's
+    ([#1150](https://github.com/soulsimulation/souls/issues/1150)).
+  - **No crew waits for good.** A crew's stop waits while the frame they hold can't stand, in case someone finishes it, and as
+    long as the build goes on. Under the repair rules, a stop a Soul asked for whose body, load and frame joins don't change
+    for five minutes, or half an hour whatever changes, gives up (`world.stop-gave-up`): the crew lets go, the part stands
+    where it is as a god's joined upright does, and crews on the rest of that frame are let go with them
+    (`world.frame-let-go`). That answers a frame nobody can finish now, such as after a god extends its group, or a beam
+    removed from under a held upright. A member who fades, or whose owner retires them, mid-hold is a stop the same way:
+    a retired body stays until the crew lets go, then leaves the world. It is no glitch. The crew hears that the part stands where it was and its frame isn't
+    finished. Only joins seated count as progress: a beam on its way doesn't, so a slow build can still lose its waiting crew.
+  - **Known stalls.** Two restarts mid-build still stall, with the clock running: one just after a beam is seated, before
+    the model has heard, and one with exactly one beam in.
+  - **Crews side by side.** A shared carry asks `clearLiftV1`: it doesn't lift while a body stands in the load's cover or
+    someone on the move could reach it within the lift (`carry.pickup-occupied`), stops dead rather than braking when a
+    person or another crew's load comes into its way (`carry.path-occupied`), and lifts the way the load lies unless no
+    route allows it, because a lift the other way round swings the load half a turn. A crew that sets a flight steps
+    clear of it before letting go, waiting by name for whoever stands behind it, and a stop in those moments lowers it. Two crews can still hold each other up; that is a named wait, never a halted world, and
+    any member can stop. The procedure's dependencies keep neighbouring work apart so that is rare.
+  - **Rules version.** `+shared-bay/1`, after PC16's suffix.
 - **Shared proposals (PC04, [#683](https://github.com/soulsimulation/souls/issues/683); off unless `SIM_SHARED_CARRY=1`).**
   A `shared-carry` load is also offered `carry-with:<id>`, which takes `to` (a place) and `with` (who: names or ids,
   comma-separated or in words, "Bo and Cy" or "Bo, Cy and Dee"; a Soul whose whole name is the phrase, nearby, stays one
@@ -370,7 +451,7 @@ context-size checks below), regression runs, and an uncut real-client recording 
       body; it is never relocated to a starting place.
 - **Plain words.** Everyday phrases resolve to the offers a Soul has where it stands. "turn on", "switch on" and
   "light" all mean switching on; "shut" means close; "wipe" or "clean" mean erase; "put up" means pin; "tune" or "change
-  the station" mean the radio's station; "put on a record" or "play a record" mean the record player, with the
+  the station" mean the radio's station; "put on a record", "play a record" or "turn on the record player" mean the record player ("stop the record" stops it), with the
   sleeve the Soul picks as the `record` param. A word only applies when that action is on offer.
 - **Contact, then change.** The body walks to a stand point clear of the thing, turns to face it, and reaches. The
   world changes at the recorded contact: at the end of a door's swing, at the click of a switch, at the first knock.
@@ -384,15 +465,33 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Family | What a Soul can do | Plain words that work |
 |---|---|---|
 | Lights and fire | Switch lamps, string lights and neon signs on and off; light and put out candles, lanterns, torches and a campfire | "turn on the reading lamp", "switch off the string lights", "light the candle", "put out the campfire", "light the torch" |
-| Doors and openings | Open and close doors, gates (a picket gate and a five-bar field gate), windows, cupboard and locker doors, fridge doors, curtains, blinds, drawers and a tent flap; doors and gates open on the way while walking somewhere; knock; the owner locks and unlocks; anyone inside can always walk out | "open the garden door", "close the window", "close the curtains", "open the blind", "open the drawer", "open the tent flap", "close the field gate", "knock on the door", "lock the door" |
-| Water and garden | Turn taps, an outdoor shower, a sprinkler and a fountain on and off; fill a watering can at the tap and water a bed; planters dry out over the days and grow in stages | "turn on the garden tap", "turn off the outdoor shower", "turn on the fountain", "water the rose bed" |
+| Doors and openings | Open and close doors, gates (a picket gate and a five-bar field gate), windows, cupboard and locker doors, fridge doors, curtains, blinds, drawers and a tent flap; turn a shop's Open / Closed sign; open and close a garden parasol, which shades whoever stands under it; doors and gates open on the way while walking somewhere; knock; the owner locks and unlocks; anyone inside can always walk out | "open the garden door", "close the window", "close the curtains", "turn the sign to closed", "open the parasol", "open the blind", "open the drawer", "open the tent flap", "close the field gate", "knock on the door", "lock the door" |
+| Water and garden | Turn taps, an outdoor shower, a sprinkler and a fountain on and off; fill a watering can at the tap and water a bed; planters dry out over the days and grow in stages; pick the ripe tomatoes into a basket and flowers for a vase, and carry them indoors | "turn on the garden tap", "turn off the outdoor shower", "turn on the fountain", "water the rose bed", "pick the tomatoes", "put the basket on the counter", "pick flowers for the vase", "put the vase on the table" |
 | Carrying and things | Carry an upright load or a chair with both hands and set it down somewhere; carry a loose rack beam or plywood sheet with both hands and lay it down (a 12 ft frame is refused: it needs two carriers); pick up a lantern or a bowl and set it on a table; hand a carried thing to another Soul, who accepts or declines; put small things into a drawer or locker and take them out; leave a small thing on a swap shelf and take what someone else left; hand a found thing in at a lost-and-found, where only its owner can claim it; hide a small thing in a hollow stump or a wall niche, and search one to find what is there; stock a pantry and take things out of it; eat an apple or a bun from the hand, bite by bite | "carry the bench to the courtyard" (any place name), "carry the beam" with `{"to": "yard"}`, "pick up the lantern", "put the bowl on the table", "give the lantern to Ben" then "accept", "put the bowl in the chest", "take the bowl out of the chest", "leave the book on the swap shelf", "take the book from the swap shelf", "put the bowl in the lost and found", "take my bowl from the lost and found", "hide the book in the stump", "search the stump", "look in the niche", "search around here" |
 | Writing and boards | Write on and wipe whiteboards and chalkboards; pin and take down notes; sign a sign-up sheet; sign a guestbook with a few words; vote in a poll; put up and take down posters; post wanted and offered notes, reply to them and take one on | "write on the whiteboard: Choir practice Thursday at six", "wipe the chalkboard", "sign the sign-up sheet", "sign the guestbook" with `{"text": "Lovely garden"}`, "vote on the poll", "take down my note from the pinboard", "reply to Ben's note" |
+| Books and notebooks | Write one signed line in a notebook on a lectern by hand (the hand writes on the sloped page) and cross your own line out; read what others wrote, with their names; read a library book held by a lectern, a passage at a time, carrying on where you stopped | "write in the notebook" with `{"text": "Came by at noon"}`, "cross out my line in the notebook", "read the notebook", "read the book on the lectern" |
 | Music | Ring a bell pull; play the piano and the drums, alone or as a duet on one shared clock; sing at a microphone with an accompanist; turn on a jukebox or a radio and change its station; put on the record you pick at a record player (an unknown sleeve is refused with the list of sleeves). Visitors hear all of these. | "ring the bell", "play the piano", "play the nearest drums", "sing at the microphone", "stop singing", "turn on the jukebox", "change the station", "put on a record" with `{"record": "Low Tide"}` |
-| Play and social | Frisbee with clear lanes and three-person triangles; noughts and crosses and checkers with honest turns; rock-paper-scissors and holding hands, both by consent | "mark the centre", "wipe the game board for a new game", "move c3 to d4", "jump d4 to f6", "play rock-paper-scissors with Bea" then "accept" |
-| Food | Make tea: fill the kettle at the sink, switch it on, wait for the boil and pour; carry a mug, offer it to someone, drink it in sips, and rinse the mug | "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea", "offer Ben the tea", "drink the tea", "rinse the mug", "wash up" |
+| Play and social | Frisbee with clear lanes and three-person triangles; noughts and crosses and checkers with honest turns; rock-paper-scissors and holding hands, both by consent; pick up a set of three juggling balls and juggle them, with the set back in hand when they stop | "mark the centre", "wipe the game board for a new game", "move c3 to d4", "jump d4 to f6", "play rock-paper-scissors with Bea" then "accept", "juggle" |
+| Food | Make tea or coffee: fill the kettle at the sink, switch it on, wait for the boil and pour; carry a mug, offer it to someone, drink it in sips, and rinse the mug | "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea", "make a cup of coffee", "offer Ben the tea", "offer Ben the coffee", "drink the coffee", "rinse the mug", "wash up" |
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
 | Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
+
+`core/chalkboard@3` also offers existing two-hand upright carrying: write an attributed message, carry the same board
+with `{"to": "display spot"}`, then read, rewrite or erase it at its new position. Its text, author and placement
+persist together. Earlier chalkboard revisions remain fixed; writing still requires contact and access.
+`core/bench@3` combines the repairable bench with existing two-hand upright carrying. Carry the damaged bench to a
+chosen campsite, fetch a hammer and repair it there, then use its native seats at that new position. Damage, repair
+receipt and placement persist. Occupied benches and full hands retain existing carry refusals; earlier revisions stay fixed.
+`core/arranging-vase@1` holds up to three real `core/cut-flower@1` stems in distinct native slots. Pick a chosen stem,
+put it in the vase, or retrieve that particular stem; nearby contents name the actual items. Individual identities,
+petal colors and placement persist. The stationary vase has an open mouth on a pedestal; heads remain above its rim.
+This is separate from the existing harvested preset bunch and adds no growth or wilting.
+`core/candle-stand@2` adds existing two-hand upright carrying to the hand-lit floor candle. Carry real stands to
+chosen clear places, arrange them, then light or put out each at its relocated wick. Their identities, positions
+and independent on/off states persist. The authored candle/flame/light and old fixed revision remain unchanged.
+### Hand-rung chime
+
+`core-wind-chime@2` reuses the finite bell pull: a Soul pulls its wooden pendant once, rings a short two-tone chime and returns to rest. Each completed pull increments the persistent `rings` count; cancellation before the peal leaves it unchanged. It is silent at rest. The original `@1` retains its ambient wind sound.
 
 ## Making: paintings and chalk
 
@@ -475,6 +574,34 @@ ends "(their words, not world facts)", and the Soul learns one fact per signer, 
 name it by its entity name ("sign the guestbook"); the def's other synonyms ("visitors' book") help catalogue search but
 not plain words at a thing.
 
+### Picking from the garden (#438)
+
+A harvest basket (`core-harvest-basket@1`) and a flower vase (`core-flower-vase@1`) pick from a growing planter
+(`core-garden-planter@2`, unchanged). "pick the tomatoes" (harvest the tomatoes, pick the fruit) is one act: the Soul picks
+up the basket in the right hand if it is not holding it, walks to the nearest fruiting planter, and reaches into the plants
+with the free left hand. "pick the tomatoes from the rose bed" goes to that planter (by its name, up to two words after
+"from") and never to a nearer one; a name no planter nearby has, or a named planter that is not ripe, is refused by name. At the hand's contact the planter goes back to flowering and the basket holds three tomatoes (it
+holds six). "pick flowers for the vase" (pick some flowers) is the same act with the vase: a flowering planter goes back to
+leafy and the vase holds a bunch of three. An act interrupted before the contact changes nothing, and the receipt reports what the hand did, not that the steps ran: it is `completed` only if the contact picked. Two Souls after one ripe bed: the first hand picks and the other receipt fails `harvest.not-ripe`. A fetch held up for two minutes fails `harvest.fetch-blocked`. What a vessel picks (the
+stage it picks from and leaves, its state field, how many, where the hand goes) is one row of data per def
+(`packages/world-compiler/src/core-kit/harvest.ts`); the faculty is `apps/server/src/god/harvest.ts`. A picked planter
+fruits or flowers again through the daily growth pass while it stays watered. "put the basket on the counter" is the
+ordinary put-on. Refusals say why: nothing ripe (with the nearest planter's stage), the vessel full, in someone else's
+hand, someone else's private planter, or the Soul's hands full. A planter offers nothing new: the picking offer belongs to
+the basket and the vase. Nothing takes the tomatoes or the flowers out yet, so a full basket or vase stays full.
+
+### Coffee (#437)
+
+A coffee mug (`core-coffee-mug@1`) is the tea mug's faculty with data only: the `tea-cup` tag, the same state, kettle,
+pour, hand-over, sips and rinse. Its `coffee` tag names what it holds, so its offers ("Make a cup of coffee"), summaries,
+refusals and nearby fact (`coffee: 0.4`) say coffee. It starts with a spoonful of ground coffee in it, where a tea mug
+has its bag; a rinsed mug has none, so it can't make coffee again. Words that name a drink take only a mug whose offer
+names it, nearest first: "make a cup of tea" leaves a nearer coffee mug alone. Words that name neither ("drink it",
+"wash the mug") take the nearest mug of either kind. "pour the tea" from a kettle fills the nearest empty mug, which may
+be a coffee mug, and then says coffee. "pick up the coffee mug" takes the god-built mug even beside a tea room
+that hands out prop cups: a name of more than one word comes before a prop source wherever the thing is, and one word
+comes first within 8 m ("pick up the mug" is the mug on the counter; "pick up the apple" is not one 55 m off).
+
 ## What other Souls perceive
 
 A Soul's `here` frame lists a few nearby things with compact facts, and only for things in the same enclosed place,
@@ -486,12 +613,14 @@ within about 4 m and in plain sight:
   lost-and-found: whose each thing is and who found it ("bowl (Ana's, found by Ben)");
 - a pantry: what it `holds` (names only); a food in the hand or bitten: its `bites` left, then `eaten`;
 - a planter: `dry` only when dry, and its growth `stage`; a kettle: its phase (cold, heating, boiling, hot);
-  a mug: how much `tea` is left, `empty` once drunk, `clean` once washed;
+  a mug: how much `tea` (or `coffee`) is left, `empty` once drunk, `clean` once washed; a basket: its `fruit` and a vase its
+  `flowers`, once they hold some;
 - a neon sign's words, attributed to whoever wrote them and marked untrusted;
 - a finished painting or chalk drawing: its maker and title ("an easel with Ana’s painting “Quiet sky”", "Ana’s chalk drawing “Sun” on the pavement, fading"), never the drawing itself;
 - who is holding hands, who is offering a hand-over, and who is holding what.
 
-Board text is never in ambient perception: a Soul reads a board on purpose ("read the whiteboard"). Knocks are heard
+Board and notebook text is never in ambient perception: a Soul reads a board or a notebook on purpose ("read the
+whiteboard"); a notebook's offer names only how many lines are written. Knocks are heard
 by the Souls the door shuts in, on the other side.
 
 **Distant things cost nothing.** Every entry's native test measures the `here` frame with the thing absent, with 100 of
@@ -540,10 +669,14 @@ Other known limits:
 - Picking up something at the back of a counter bends the body deeply.
 - At a hand-over the model's record of who holds the item lags the engine by a few samples.
 - The `here` frame lists at most two things of a kind (three seats); more appear only as a count under `more`.
-- Some defs are over the library's geometry budgets: triangles for the fountain, curtained window, drawer chests,
-  watering can, kettle, mug and bell pull, and draw calls for the newest door and locker revisions. They are getting
-  lighter revisions family by family (#494). The drum kit, mic stand and jukebox already have one (`@2`, in budget);
-  their `@1` keeps its bytes and its recorded hold, because published revisions are immutable.
+- A parasol's `me.shade` is a disc under the open canopy at any hour but night: it doesn't follow the sun's angle, and it
+  says nothing about rain. The lean observation in `tools/edge-skill/eden-agent.mjs` lists its own `me` fields and doesn't
+  carry `shade` yet, so that client sees only the parasol's `open` row.
+- Lighter revisions within the library's triangle budgets (#494): drum kit, mic stand, jukebox, garden fountain and
+  curtained window `@2`; watering can, drawer chest, bell pull, kettle and mug `@3`. The older revision keeps its bytes
+  and its recorded hold, because published revisions are immutable. The mug `@3` shows its tea level in fifths. The
+  lockable door (`@3`) draws five parts because its lock's thumb-turn, bolt and key move on their own, and the newest
+  lockers revision is over its draw budget too; those, and construction-view draw overruns, stay pinned (see #494).
 - Portable lights were rebuilt as carry-and-set-down (entry 29); the earlier version is retired. Mixed-outfit seams
   (entry 11) remain parked.
 
@@ -594,3 +727,69 @@ This adds a one-time client HTTP lookup, possibly up to five seconds of initial 
 The recorder and sampleTake already preserve discrete support/held fields at the same native tick. The current reproduced defect was one tick of stale presented held-item metadata after native support changed, rather than the historical seven-sample recording report. New hand-over invitations persist `custodyPolicy: same-tick-v1`; body records copy that marker. At the existing receiver commit, the existing support-derived publisher updates both participants' presented maps, preserving other held items and tag filtering. Old invitations/absent-policy records retain their pinned legacy world/event hash trace and timing. No recorder, ownership/contact clock, movement or consent path is replaced.
 
 This adds two holder lookups (four existing hand scans) once at the active transfer, and 31 serialized bytes per invitation/action marker, not an idle reconciliation hook or new Soul context field. Actual native-hand contact is checked against the take's existing 5.5 mm precision and the 8 cm/50 ms M04 motion bound. The marker can change one fresh receiver palm by 1.575 mm when its pose switches from fixed reach goal to recorded hand; the separate shared 3.937 mm fresh/continuous drift remains disclosed. Exact discrete custody is required; exact cross-mode skin-palm equality is not claimed.
+
+### Books and notebooks (#428)
+
+`core-lectern@2` has a `book` parameter that names a book of the published library catalogue (its id; `''`, the
+default, means no particular book). A Soul reading at it reads that book's next passage in any world, using the same
+per-Soul progress as the library: the next read carries on, and another Soul starts at the beginning.
+`core-lectern@1` reads as before (Eden's library on Eden, the world's lore or constitution elsewhere).
+
+`core-notebook-stand@1` is the same lectern holding an open notebook. It is the pinboard's faculty (entry 19) with data
+only: up to 8 signed lines of 60 characters, 2 per Soul, and only a line's writer crosses it out (the line goes). The
+hand writes each line at its own ruling on the page (`notebookLine`, shared with the viewer). The stroke's `tilt` lays
+the existing write and wipe stroke on the sloped page, so the hand stays at the page and no second movement
+path exists. Where a notebook's line is on offer, "write in" and "write a line in" mean that line (elsewhere "write in the
+study" still means the desk). "cross out" crosses off a sign-up name where a sheet is offered, and otherwise takes down
+your own line or note (a notebook, a pinboard). Crossing a line out removes it, and the lines after it move up a ruling.
+Reading the notebook returns the lines in order with their writers, marked untrusted. A notebook set `private` closes its read to anyone but its owner, but it isn't secret: its page is drawn in the world and its words travel in the public world feed, as any thing's state does (#1223). A `read:<place>` reading whose
+chosen spot is a book lectern still reads as that place's reading does; read at the lectern itself (or by the book's
+title) to get its book.
+Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
+`books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+
+### Mending camping canvas
+
+`core/tent@3` adds a torn-canvas repair to the existing hand-operated tent; older revisions stay unchanged.
+A nearby Soul sees the damage and `object:<tent>:repair` offer. With a `core/sewing-awl@1` nearby, the existing
+repair faculty fetches the tool and works at the tear; only successful completion mends the canvas and records
+who repaired it. Interruption leaves it torn and the awl stays in hand. The awl can be put down and carried again.
+The original flap actions and mat declaration remain. The interior mat is not currently an admitted adult berth,
+so this addition does not enable sleeping inside tents. There is no automatic wear or cloth/weather simulation;
+the world creator can place or mark a tent with `broken: true`.
+## Portable area irrigation (#1651)
+
+`core/garden-sprinkler@2` adds opt-in two-hand upright carry to the unchanged sprinkler. Carry it to a chosen clear place, set it down, then switch it on by hand. At that contact, the existing irrigation faculty wets the actual planters in its forward arc within reach, from its current world pose. Turn it off and move the same entity to tend another patch. Moisture and sprinkler placement/state persist; this is contact-time watering, not continuous irrigation or a new water-supply simulation. Existing @1 remains fixed. No new contact, placement, ownership or native movement path is introduced.
+### Expanded record repertoire (content)
+
+`core/record-player@2` retains the existing record-selection action and four original choices, adding two original eight-second scores: `Paper Lanterns` and `Open Window`. Select with `put-on-record` and its `record` parameter; normal hand contact starts the chosen shared-clock piece. Stop at the existing power knob. The selected title persists. The new console uses simpler geometry while retaining the original tonearm/knob locations; the first revision stays unchanged. This is new playable music content, not a new Soul action or arbitrary user-authored notation. Original seeded piano behavior is unchanged.
+### Botanical flower press
+
+`core/flower-press@1` is a fixed hinged press with authored botanical material on its backing paper.
+`object:<press-id>:close` preserves the material at native close contact (`pressed=true`);
+`object:<press-id>:open` reveals the flattened artwork again; `read:<press-id>` reads its lasting status label.
+These actions use empty parameters and existing access, state and interruption rules. An approach interrupted before contact leaves raw material.
+The preserved state survives reopening and persistence. This is a compact art-making interaction, with no
+botanical drying-time simulation or removable output item.
+A fixed **gold-seam restoration stand** (`core-gold-seam-station@1`) holds one supplied cracked ceramic
+bowl. Its existing `repair` offer fetches a real `core-lacquer-brush@1`, then native tool repair performs six
+short dabs. The artwork stays cracked until the receipt completes; interruption leaves it unrepaired.
+Completion preserves the artwork identity and replaces dark crack geometry with golden seams. Existing
+`repairedBy` stores the repair receipt provenance, not a display author name. The whole artwork loses its
+repair offer; the completed receipt reports the outcome and the brush stays in hand. This is an authored
+restoration, with no curing simulation or removable bowl. No new contact or repair mechanism is introduced.
+### Intention paper ritual (#1655)
+
+`core-intention-burner@1` combines existing native hand writing and action-specific fire contact on one fixed
+stand. A permitted Soul supplies words, reads them, then lights the paper's lower edge. Contact commits `on`
+and irreversible `spent` state with a released status; conditional kit geometry replaces the supplied paper with
+charred material. Putting out the tray removes the flame and preserves that material/status. Spent paper cannot
+be rewritten or relit. Existing sign read exposes words/status; rendered glyphs, refill, a removable output,
+progressive combustion, fire spread and mental-state effects are not claimed. Earlier words may remain in world history;
+this is not secure erasure. No contact or reader registry changes.
+### Finished poetry folio (#1577)
+
+`core-poetry-folio@1` is a blank open folio on a display stand. Its `object:<id>:write` offer takes `text`, up to 100 characters and three lines. The existing hand-writing stroke commits the words and writer's Soul id together; interrupted approach or writing before contact leaves it blank. The write action requires empty text and there is no erase action, so a completed folio is a finished artifact rather than a rewritable notice. A god can place another blank folio for another poem.
+
+Nearby Souls discover the write schema while blank and use `read:<id>` after completion. Reading returns the exact poem with its writer and labels it as authored words, not world facts. The words and `textBy` credit persist in entity state. Existing access rules and `capability.params` / `object.state` refusals apply. This is one short displayed poem, not a multi-page publishing or portable-book system; #1033's family scale applicability remains separate.
