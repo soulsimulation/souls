@@ -395,7 +395,6 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
-      if(!s.removed&&s.key){const own=host.reedBasket?.(ctx.soul,s.key,a.name,params);if(own)return 'code'in own?own:null;}
       if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
@@ -409,6 +408,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
       if(host.deferContacts&&a.name==='close'&&def.components.opening&&s.key&&host.contactPlan?.(ctx.soul,s.key,a.name)?.noRoom)return {code:'contact.no-room',reason:'There is nowhere to stand clear of it once it is shut.'};
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
+      const basket=s.key?host.reedBasket?.(ctx.soul,s.key,a.name,params):null;if(basket)return 'code'in basket?basket:null;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
