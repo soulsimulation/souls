@@ -455,6 +455,9 @@ export class Spatial {
     const physics = world.entityPhysicsV1?.hash;
     if (!changed && this.pages && this.pagesPhysics === physics) return this.pagedWindows(world, rects, key, { ...this.pages.all, bounds: g.boundsOf(rects[0]) }, false, t0);
     this.pagesPhysics = physics;
+    // #1770 plan-once: a physics hash change can re-collect these lists without moving the epoch (a label-only edit).
+    // Kept routes (routeMemo) stay exact only while a route result reads nothing from them that leaves the epoch alone
+    // (today: obstacle and link ids and reasons, never labels). A route field that reads more must move the epoch here.
     const obstacles: Obstacle[] = [...this.base.obstacles];
     const surfaces: Surface[] = [...this.base.surfaces];
     const links: Link[] = [...this.base.links];
