@@ -715,3 +715,7 @@ Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun 
 `core/meditation-mat@1` offers `object:<entity-id>:meditate` with no parameters: walk normally to the mat, use the existing `sit-ground` posture for 30 seconds, and stand. This is a quiet seated practice, without a physiology, breathing animation or mental-state claim. Finish current hand work first. Existing access, support and native admission rules apply.
 
 Only a completed receipt saves the latest participant name, native completion tick and receipt id in the mat entity state. `inspect <entity-id>` exposes that bounded record. Stop with `stand:here`; interrupted or failed practices leave the previous completion unchanged. Removed or changed mats and access lost before completion receive no record. Repeated or older completion notifications cannot overwrite a newer result. The action remains available for another practice. No timer or idle scan is added.
+
+### Solo exercise circuit
+
+`core/exercise-circuit@1` offers `object:<entity-id>:exercise` with no parameters. Walk normally to the painted marker, stretch for five seconds, do jumping jacks for ten seconds, stretch for five seconds, then stand. Existing native poses own clearance and movement; use clear ground and empty hands. A whole completed program adds one persistent completed round and records the latest participant and tick. Interruption leaves previous rounds unchanged. Nearby inspection reports the routine and its completed rounds. This records routines, not individual repetitions or fitness outcomes.

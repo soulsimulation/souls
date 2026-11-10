@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1604: core-exercise-circuit@1 adds a solo native stretch/jumping-jack program and durable completed-round record. Scoped EF4 k=2 placed, baked and rendered all five samples with zero findings or qualification gaps. No inherited budget hold or previous supplement changes.",
+  "defs": [
+    {
+      "def": "core-exercise-circuit@1",
+      "hash": "76a3185b15bfc8741c1b92a3321fb7b6517a2a304db0d373c9447a21724abae4"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}
