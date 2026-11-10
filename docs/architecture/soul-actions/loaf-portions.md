@@ -1,0 +1,9 @@
+# Real loaf portioning
+
+Put an intact `core/camp-loaf-whole@1` on the same fixed worktop as a `core/loaf-portion-board@1`. Choose its actual ID, choose two or four pieces, then complete three seconds of native handwork. One atomic engine-authored batch removes that exact source and admits two real halves or four quarters, preserving the original four food bites and authored 0.8kg across the new pieces. Outputs inherit source owner/access, local orientation and scale. New names derive from the board, source and portion ordinal.
+
+The pieces use existing native food/custody. Each half has two bites and authored mass0.4kg; each quarter has one bite and mass0.2kg. Native food remaining state and visible food geometry decrease when eaten; empty crumbs retain the same entity and conservative carry profile. There is no dynamic density/digestion model, knife custody, physical tearing solver or actual multi-Soul sharing choreography. A partially eaten source cannot be divided.
+
+The board, real source and fixed parent definitions, state, parameters, ownership, access, model/native poses and support are stamped across work. Empty hands, native duration, exact body/receipt and current reach/access/clear output are rechecked before atomic admission. A denied, interrupted, stale or failed birth leaves the original loaf and board history unchanged. Inspection never looks up a foreign target name or kind without permission; the board reports only its own recorded target string.
+
+Feature-free26787 retains published catalogue eb6, completion bd and startup3baf. Latest-main integration and unmerged dependency approval remain external Claude obligations. Named additive God hooks require serial integration with other action families; no client, vocabulary, ledger, food profile, protected engine, support or movement contract changes. Claude alone approves, merges and releases T3 work.
