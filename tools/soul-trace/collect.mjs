@@ -234,7 +234,7 @@ export async function collect(o) {
   const clientFile = [join(cwd, 'eden.mjs'), join(cwd, '.souls', 'bin', 'eden.mjs')].find((f) => existsSync(f));
   const versionsOut = {
     client: { recorded: [...versions], file: clientFile ? { path: clientFile.slice(cwd.length + 1), sha256: sha(readFileSync(clientFile)), version: /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(clientFile, 'utf8'))?.[1] ?? null } : null },
-    skill: skills, catalog: catalog ? { etag: catalog.etag ?? null, fetchedAt: catalog.fetchedAt ?? null, version: catalog.catalog?.version ?? null } : null,
+    skill: skills, catalog: catalog ? { etag: catalog.etag ?? null, fetchedAt: catalog.fetchedAt ?? null, contract: catalog.catalog?.contract ?? null, worldId: catalog.catalog?.worldId ?? null, version: catalog.catalog?.version ?? null } : null,
     world: config?.body ? { build: config.body.build ?? config.body.version ?? config.body.release ?? null, soulClient: config.body.soulClient ? { version: config.body.soulClient.version, sha256: config.body.soulClient.sha256 } : null } : null,
   };
   write('versions.json', versionsOut, 'Versions in use: the client (as recorded and as on disk), the skill files, the local catalog copy, the world\'s build.', 'collection time');
