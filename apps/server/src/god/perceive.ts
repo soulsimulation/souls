@@ -109,6 +109,7 @@ export type PerceiveHost = {
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, and whether a thing is whole (a whole one is no built object). */
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
+  drilling?:import('./panel-drilling.ts').PanelDrilling;
   /** Entry 43 (tea.ts): the kettle and cup acts. */
   tea?: { plan(soul: { entityId: string }, id: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** #438 (harvest.ts): picking from a planter into a basket or a vase. */
@@ -198,6 +199,8 @@ export class GodPerceive {
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
+      drilling:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.drilling?.plan(soul,id,action,params)??null,
+      drillingBegun:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.drilling?.begin(soul,id,action,params),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
