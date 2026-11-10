@@ -10,7 +10,7 @@ import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { installWorldClock, syncWorldClock, worldTimeZone } from './world-clock.ts';
-import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
+import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, productionWorld, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 test('world time is the local wall time of a UTC instant in the world zone', () => {
@@ -187,4 +187,19 @@ test('needs move over the clock day: a real day is 24 times slower than the acce
   assert.ok(a.needs.hunger > b.needs.hunger + 50, `accelerated ${a.needs.hunger} vs real ${b.needs.hunger}`);
   const c = newLife(0); advanceNeeds(c, REAL_DAY_TICKS, 'idle', false, false, false, REAL_DAY_TICKS);
   assert.equal(c.needs.hunger, a.needs.hunger, 'one real day of a real clock = one accelerated day of the old one');
+});
+
+test('#1649 review: the production marker fails closed when no stage is set', () => {
+  // a named stage decides
+  assert.equal(productionWorld({ SIM_STAGE: 'production' }), true);
+  assert.equal(productionWorld({ SIM_STAGE: 'legacy', DEV_AUTH: '1' }), true);
+  assert.equal(productionWorld({ SIM_STAGE: 'staging', PUBLIC_URL: 'https://sim.eden.art' }), false);
+  // no stage (an older keeper kept by activate.sh --reload): production unless an explicit dev signal is present
+  assert.equal(productionWorld({ PUBLIC_URL: 'https://soul.game', DEV_AUTH: '0' }), true);
+  assert.equal(productionWorld({ PUBLIC_URL: 'https://sim.eden.art' }), true);
+  assert.equal(productionWorld({ PUBLIC_URL: 'not a url' }), true);
+  assert.equal(productionWorld({ PUBLIC_URL: 'https://soul.game', DEV_AUTH: '1' }), false);
+  assert.equal(productionWorld({}), false, 'unset PUBLIC_URL reads http://localhost');
+  for (const u of ['http://localhost:4500', 'http://127.0.0.1:4980', 'http://[::1]:4500', 'http://app.localhost:3000', 'http://sim.test'])
+    assert.equal(productionWorld({ PUBLIC_URL: u, DEV_AUTH: '0' }), false, u);
 });

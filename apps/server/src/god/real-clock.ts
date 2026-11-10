@@ -77,10 +77,26 @@ export const MIGRATION_ZONES: Readonly<Record<string, string>> = Object.freeze({
 export const DEFAULT_TIME_ZONE = 'America/New_York';
 export function defaultTimeZone(slug: string | undefined): string { return (slug && MIGRATION_ZONES[slug]) || DEFAULT_TIME_ZONE; }
 
-/** #1649: the deploy's explicit production marker. The keeper names its stage from the unit instance it runs
+/** A dev signal: dev auth, or a world whose public URL is local (unset reads http://localhost, config.ts). */
+function devSignal(env: Record<string, string | undefined>): boolean {
+  if (env.DEV_AUTH === '1') return true;
+  const url = (env.PUBLIC_URL ?? '').trim();
+  if (!url) return true;
+  let host: string;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  return host === 'localhost' || host === '[::1]' || host === '::1' || /^127\./.test(host) || host.endsWith('.localhost') || host.endsWith('.test');
+}
+
+/** #1649: the deploy's production marker. The keeper names its stage from the unit instance it runs
  *  (sim-worlds@<stage>: SIM_STAGE, or its --link /srv/sim-worlds/<stage>), the launcher passes it to every world; the
- *  public stages (production, legacy) are production; anything else (staging, local, tests) is a dev world. */
-export function productionWorld(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_STAGE === 'production' || env.SIM_STAGE === 'legacy'; }
+ *  public stages (production, legacy) are production, a named other stage (staging) is a dev world. It fails closed:
+ *  with no stage (a release activated with --reload keeps an older keeper that sets none) a world is production unless
+ *  it carries an explicit dev signal (DEV_AUTH=1, or a local or unset PUBLIC_URL), so local runs and tests stay dev. */
+export function productionWorld(env: Record<string, string | undefined> = process.env): boolean {
+  const stage = env.SIM_STAGE?.trim();
+  if (stage) return stage === 'production' || stage === 'legacy';
+  return !devSignal(env);
+}
 
 /** A world clock's mode: real time, or the dev-only accelerated clock (`time.clock: 'accelerated'`). With the flag off
  *  every world keeps the accelerated clock it always had. */
