@@ -715,3 +715,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Camp laundry
+
+`core/laundry-board@1` holds one `core/camp-linen@1` with one finite soap/water charge. Three existing ten-second native craft operations wash dirty linen, wring wet linen, then fold it damp. Exact linen/stage/text/body/operation receipt binding and completion rechecks preserve support/access/custody; washing consumes supplies in the same atomic batch as the first stage. Current stage and maker follow native carrying and completed restart. No drying clock, dry result, clothing physics or smaller admission bounds. Mid-work restart conservatively loses ephemeral completion binding; completed state persists.
