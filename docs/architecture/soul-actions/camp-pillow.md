@@ -20,3 +20,5 @@ and grip are acceptable. No client, vocabulary, resolver or engine changes are r
 
 Source: `apps/server/src/god/camp-pillow.ts`; kinds: `packages/world-compiler/src/core-kit/camp-pillow.ts`;
 native proof: `tools/soul-actions/camp-pillow.test.mjs`. The owning PR carries exact source/media/proof pins.
+
+Reviewable implementation: [PR #1891](https://github.com/soulsimulation/souls/pull/1891); [qualified proof](https://github.com/soulsimulation/souls/releases/download/proofs-1891/pr-1891.proof.json).
