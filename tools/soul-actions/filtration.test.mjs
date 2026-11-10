@@ -1,0 +1,38 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {setImmediate} from 'node:timers/promises';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture,invite,accept,factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {indexCatalog,find} from '../world-launcher/soul/catalog.mjs';import {WorldModel} from '../../packages/world-compiler/src/index.ts';
+test('supported cold filtration, finite cartridge replacement and same-carafe handling',{timeout:60000},async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
+ const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});
+ installEngineBridge({host:f.host,god,edge,log:console.log,worldLore:false,worldClock:false});
+ t.after(()=>{comms.close();f.host.stop();f.db.close()});
+ const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs()}},ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r};
+ const act=async(id,params={})=>{const input={capability:id,params};return edge.offerGate(soul,input)??await accept(f.host,edge.act(soul,input));};
+ const finish=async r=>{ok(r);for(let n=0;n<3000;n++){const end=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(end.phase))return end;await tick()}assert.fail('native timeout')};
+ await tick(5);ok(god.act({ops:[{op:'place',def:'core/zone@1',name:'filter-start',shape:{area:[[-21,-1],[-19,-1],[-19,1],[-21,1]]}}]}));await tick(25);
+ await invite(f,'ana');const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Filter finite water into a real carafe'}));soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick(5);
+ assert.equal((await finish(await act('walk:filter-start'))).phase,'completed');
+ const here=async()=>{const r=await app.request('/v1/edge/here?include=doHere');assert.equal(r.status,200);return(await r.json()).here},bytes=async()=>Buffer.byteLength(JSON.stringify(await here()));const absent=await bytes();
+ ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/camp-water-filter@1',name:'far-filter-'+i,p:[100+i%10*5,100+Math.floor(i/10)*5]}))}));await tick(20);const distant100=await bytes();assert.equal(distant100,absent);
+ ok(god.act({ops:[{op:'place',def:'core/camp-water-filter@1',name:'camp-filter',p:[20,0]},{op:'place',def:'core/table@1',name:'filter-table',tmp:'$rack',p:[21.3,0]},{op:'place',def:'core/filter-carafe@1',name:'filter-carafe',in:{parent:'$rack',slot:'top'}}]}));await tick(30);
+ const item=n=>[...god.model.entities.values()].find(e=>e.name===n),source=item('camp-filter').id,carafe=item('filter-carafe').id,table=item('filter-table').id,cap=a=>'object:'+source+':'+a;
+ const at=f.host.engine.world.entities[soul.entityId].pose.p;assert.ok(Math.hypot(20-at[0],at[2])>30);
+ for(const [action,reason]of[['empty-carafe',/already empty/],['replace-cartridge',/until spent/]]){const no=await act(cap(action),{text:carafe});assert.equal(no.accepted,false);assert.equal(no.capability,cap(action));assert.equal(no.code,'object.state');assert.match(no.reason,reason)}
+ for(let i=0;i<200&&!edge.structureReady();i++)await tick();const cr=await app.request('/v1/edge/catalog');assert.equal(cr.status,200);const catalog=await cr.json();assert.equal(catalog.kinds['core-filter-carafe'].state.water,0);const found=find(indexCatalog(catalog),'camp filter').found.find(v=>v.id===source);assert.ok(found);assert.ok([found.act,...(found.also??[])].includes(cap('filter-water')));
+ ok(god.act({ops:[{op:'place',def:'core/rock@1',name:'unrelated-edit',p:[-10,10]}]}));const mark=item('unrelated-edit').id,seq=god.store.undoable().seq;
+ const first=ok(await act(cap('filter-water'),{text:carafe}));assert.equal(first.receipt.capability,cap('filter-water'));await tick(5);assert.equal(item('camp-filter').state.cloudy,3);assert.equal((await finish(first)).phase,'completed');assert.equal(item('camp-filter').state.cloudy,2);assert.equal(item('camp-filter').state.capacity,1);assert.equal(item('filter-carafe').state.water,1);const filledLive=await(await app.request('/v1/edge/live')).json();assert.equal(filledLive.things[carafe].water,1);
+ const nearby=await bytes();assert.match(JSON.stringify(await here()),/Camp filter/);assert.equal(god.store.undoable().seq,seq);ok(god.undo());assert.equal(god.model.entities.has(mark),false);assert.equal(item('filter-carafe').state.water,1);ok(god.redo());assert.ok(god.model.entities.has(mark));
+ const full=await act(cap('filter-water'),{text:carafe});assert.equal(full.accepted,false);assert.match(full.reason,/full carafe/);
+ assert.equal((await finish(await act('pick-up:'+carafe))).phase,'completed');assert.equal(f.host.engine.world.entities[carafe].support.by,soul.entityId);assert.equal((await act(cap('empty-carafe'),{text:carafe})).accepted,false);assert.equal((await finish(await act('put-on:'+table))).phase,'completed');await tick(15);
+ const run=async action=>{const r=ok(await act(cap(action),{text:carafe}));assert.equal(r.receipt.capability,cap(action));assert.equal((await finish(r)).phase,'completed')};
+ await run('empty-carafe');assert.equal(item('filter-carafe').state.water,0);await run('filter-water');assert.equal(item('camp-filter').state.capacity,0);await run('empty-carafe');await run('replace-cartridge');assert.equal(item('camp-filter').state.spares,0);assert.equal(item('camp-filter').state.capacity,2);
+ const before=structuredClone(item('camp-filter').state);const interrupted=ok(await act(cap('filter-water'),{text:carafe}));await tick(20);const inUse=await bytes();assert.equal(edge.receipt(soul.soulId,interrupted.receipt.id).phase,'started');await finish(await act('stand:here'));assert.deepEqual(item('camp-filter').state,before);assert.equal(item('filter-carafe').state.water,0);
+ const live=await(await app.request('/v1/edge/live')).json();assert.equal(live.things[source].cloudy,1);assert.equal(live.things[source].filtered,2);assert.equal(live.things[source].spares,0);assert.equal(live.things[carafe]?.water??catalog.kinds['core-filter-carafe'].state.water,0);
+ const snap=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.deepEqual(snap.entities.get(carafe),JSON.parse(JSON.stringify(item('filter-carafe'))));assert.deepEqual(f.host.engine.runtime.violations,[]);
+ console.log(JSON.stringify({supportedColdAllThree:true,exactReceipt:true,ordinaryWalk:true,finiteWaterCartridgeSpare:true,sameCarafe:true,interruptionNoCredit:true,undoRedo:true,catalogLive:true,snapshot:true,contextBytes:{absent,distant100,nearby,inUse}}));
+});

@@ -1,0 +1,1 @@
+Souls can operate a finite camp water filter, replace its spent cartridge from supplied spares, and drain/refill the same real portable carafe. Water clarity is simulated; no potability or health claim.
