@@ -18,3 +18,8 @@ test('registered candle builder shows selected form/color and on-only flame with
  for(const wax of Object.values(CANDLE_COLORS))for(const form of ['pillar','taper']){const off=draw(form,wax,false),on=draw(form,wax,true);assert.ok(on.vertices>off.vertices,'flame is visible only when on');assert.deepEqual(draw(form,wax,false),off,'return to unlit material');}
  assert.notDeepEqual(draw('pillar',CANDLE_COLORS.red,false),draw('taper',CANDLE_COLORS.red,false),'chosen forms retain distinct authored geometry');
 });
+test('registered mold bench visibly loses only its finite supplied wax and wick stock within raw budget',()=>{
+ const model=new WorldModel({constants:{extent:80,ground:'land'},seed:'mold-bench-render'});model.library=coreLibrary();const def=model.library.get('core-candle-mold-bench@1')!,materials=new MaterialLib();
+ const draw=(full:boolean)=>{const state={red:full?2:0,blue:full?2:0,ivory:full?2:0,wicks:full?6:0},entity:Entity={id:'render-mold-bench',name:'supplied mold',def:def.ref,in:{parent:'world'},by:'test',born:0,v:1,state,params:{}};const ctx:MeshCtx={def,entity,params:{},args:def.make.kind==='gen'?def.make.args as Record<string,unknown>:{},baked:model.bake(def,{},0),model,materials,tint:(key,fallback)=>key?def.palette?.[key]??fallback:fallback};const root=meshFor(def)!.build(ctx)!;let triangles=0;root.traverse(o=>{const m=o as THREE.Mesh;if(m.isMesh)triangles+=(m.geometry.index?.count??m.geometry.attributes.position.count)/3;});assert.ok(triangles>0&&triangles<=400);return triangles;};
+ assert.ok(draw(true)>draw(false));assert.equal(draw(true),draw(true),'finite stock state stays stable');
+});
