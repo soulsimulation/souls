@@ -18,8 +18,9 @@ interrupted session without restoring its spent charge or changing completed his
 
 Permission, owner/access, definition, relevant state, transforms, support, body, native program and started receipt
 bind each phase and completion. Shared `commitSoulWork` keeps pulse/history out of God Undo. No renderer moves the
-actor or invents a timer. The existing emissive-face glow renders state; there is no surrounding illumination claim. operation and grip are approximate, with release/idle
+actor or invents a timer. The existing emissive-face glow renders state; there is no surrounding illumination claim. Operation and grip are approximate, with release/idle
 cleanup. No receiver, long-distance optical readability, multi-Soul receipt, confidentiality or authenticity claim.
 
-The PR journal will host required focused checks, native2×2 comparison and uncut real-speed actual proof. Explicit
+[PR #1835](https://github.com/soulsimulation/souls/pull/1835) hosts focused checks, native2×2 comparison and
+[whole actual proof](https://github.com/soulsimulation/souls/releases/download/proofs-1835/pr-1835.signal-performance.mp4). Explicit
 dependency base is recorded there; Claude alone owns T3 sign-off, CI allocation, integration and release.
