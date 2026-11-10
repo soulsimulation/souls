@@ -467,6 +467,9 @@ export function farOutcome(far: FarAct, finished: boolean, soul: EdgeSoul, find:
   if (!finished) return { code: 'object.not-reached', reason: `Stopped before reaching ${t.name}; nothing changed.` };
   const me = host.bodyAt(soul), at = host.thingAt?.(far.id);
   if (!me || !at || Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_REACH + 1) return { code: 'object.not-reached', reason: `Did not reach ${t.name}; nothing changed.` };
+  // the thing may have turned private or locked, or its policy changed, during the walk: the same named refusal a near act gets
+  const denied = host.access?.(far.id, soul); if (denied) return denied;
+  const policy = host.policy?.(far.id, soul, a.name); if (policy) return policy;
   const no = whenRefusal(a, t.state, t.name); if (no) return no;
   const patch = actionPatch(t.def, a, t.state, far.params, soul);
   if (Object.keys(patch).length && !host.commit(far.id, patch, `${soul.soulId} ${a.name} ${t.name}`).accepted) return { code: 'object.refused', reason: `The world refused that change to ${t.name}.` };
@@ -480,7 +483,11 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
   objects.act = (id: string, soul: EdgeSoul, input: Record<string, unknown>) => {
     const out = orig(id, soul, input);
     if (!out?.accepted) return out;
-    host.deferFar?.(soul, null);   // a newer act of this Soul's replaces a far act it held
+    // a held far act is dropped or held only once this act's transaction commits: a newer act whose admission rolls back
+    // leaves the earlier far act held, so its walk still ends in the change or a named refusal
+    const db = (objects as unknown as { core?: { db?: unknown } }).core?.db;
+    const committed = (f: () => void) => { if (!db) return f(); try { afterCommit(db as never, f); } catch { f(); } };
+    if (host.deferFar) committed(() => host.deferFar!(soul, null));   // a newer act of this Soul's replaces a far act it held
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
@@ -496,20 +503,18 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     if (water) {
       if (isRefusal(water)) { log(`water ${a.name} on ${id}: ${water.reason}`); return out; }
       const go = () => { try { const now = waterPlan(a, id, soul, host); if (!now || isRefusal(now)) { log(`water ${a.name} on ${id}: by commit time ${now ? now.reason : 'not water'}`); return; } const r = host.water!.commit(now.set, `${soul.soulId} ${a.name} ${t.name}: ${now.litres} L`); if (!r.accepted) log(`water ${a.name} on ${id}: the world refused ${JSON.stringify(now.set)}`); } catch (e) { log(`water ${a.name} on ${id}: ${(e as Error).message}`); } };
-      const db0 = (objects as unknown as { core?: { db?: unknown } }).core?.db;
-      try { if (db0) afterCommit(db0 as never, go); else setImmediate(go); } catch { setImmediate(go); }
+      try { if (db) afterCommit(db as never, go); else setImmediate(go); } catch { setImmediate(go); }
       return out;
     }
     // #1751: taken by id from beyond sight, the change waits for the body: it is made when the act's walk and reach end
     // at the thing (farOutcome), never from across the world at the moment it is accepted
     const me = host.bodyAt(soul), at = host.thingAt?.(id);
-    if (host.deferFar && me && at && Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_SIGHT) { host.deferFar(soul, { id, action: a.name, params: (input.params ?? {}) as Record<string, unknown>, capability: `object:${id}:${a.name}` }); return out; }
+    if (host.deferFar && me && at && Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_SIGHT) { const far = { id, action: a.name, params: (input.params ?? {}) as Record<string, unknown>, capability: `object:${id}:${a.name}` }; committed(() => host.deferFar!(soul, far)); return out; }
     const patch = actionPatch(t.def, a, t.state, (input.params ?? {}) as Record<string, unknown>, soul);
     if (!Object.keys(patch).length) return out;
     // the object act runs inside the ledger's transaction (and may still roll back with the body's admission): change the
     // world only once that transaction has committed, never inside it (the world store has its own transaction)
     const apply = () => { try { const r = host.commit(id, patch, `${soul.soulId} ${a.name} ${t.name}`); if (!r.accepted) log(`actuator ${a.name} on ${id}: the world refused ${JSON.stringify(patch)}`); } catch (e) { log(`actuator ${a.name} on ${id}: ${(e as Error).message}`); } };
-    const db = (objects as unknown as { core?: { db?: unknown } }).core?.db;
     try { if (db) afterCommit(db as never, apply); else setImmediate(apply); } catch { setImmediate(apply); }
     return out;
   };
