@@ -107,6 +107,7 @@ export type ActuatorHost = {
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, as native steps; the world changes when the receipt completes. */
+  zine?(soul:EdgeSoul,thing:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   repair?(soul: EdgeSoul, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
 };
 export type Thing = { id: string; name: string; def: StoredDef; state: Record<string, unknown>; params: Record<string, unknown> };
@@ -348,6 +349,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
       if(host.deferContacts&&a.name==='close'&&def.components.opening&&s.key&&host.contactPlan?.(ctx.soul,s.key,a.name)?.noRoom)return {code:'contact.no-room',reason:'There is nowhere to stand clear of it once it is shut.'};
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
+      const zine=s.key?host.zine?.(ctx.soul,s.key,a.name):null;if(zine)return 'code'in zine?zine:null;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
@@ -366,6 +368,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
       validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
+        const zine=s.key?host.zine?.(ctx.soul,s.key,a.name):null;if(zine&&!('code'in zine))return{state:s,result:{action:a.name,summary:zine.summary},bodies:[{label:a.label,steps:zine.steps}]};
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
@@ -382,6 +385,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
         const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null;
         const patch = water && !isRefusal(water) ? { litres: water.litres } : actionPatch(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, params, ctx.soul);
+        if(def.name==='core-three-page-zine'&&def.version===1)return{state:s,result:{action:a.name,set:patch},bodies:[{label:a.label,steps:a.name.startsWith('page-')?[{verb:'stand',params:{}}]:[{verb:'mars:pose_v1',params:{activity:'craft',prop:'brush',seconds:2,face:s.at}},{verb:'stand',params:{}}]}]};
         // A door works from either side. Prefer the side the Soul already occupies,
         // so "close behind me" cannot silently walk it back out of the room.
         const front=contact&&def.components.opening&&s.front&&s.at
