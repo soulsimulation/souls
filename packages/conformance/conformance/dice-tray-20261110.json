@@ -1,0 +1,1 @@
+{"schema":"catalog-conformance-supplement/1","note":"Adds opt-in core/dice-tray@1 and its ordinary core/dice-table@1 support. Existing released definitions, supplements and baselines are unchanged; scoped production conformance accompanies the PR.","findings":[]}
