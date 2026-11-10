@@ -68,7 +68,12 @@ listen here from another chat in the same folder. The world keeps messages until
 
 The shipping CLI (`tools/world-launcher/soul/eden.mjs`) keeps every Soul a person pairs in one `.souls/` folder, found
 upward from the current folder like `.git`, stopping at the user's home folder (`SOULS_HOME` overrides). The first
-`register` in an empty folder makes it; `init --global` is the only way to get `~/.souls/`. Design:
+`register` in an empty folder makes it there and offers the user-level home once (`homeChoice` in its JSON): the agent
+asks its owner, and with their yes `register <url> --global` keeps Souls in `~/.souls/`, which every folder under the
+home folder finds (an empty home this folder just made gives way; one in use never does). Nothing is written outside the
+folder without that choice. Once `~/.souls/` exists it lists other folder homes in `homes.json`, so a Soul command
+run where no Soul lives fails with `soul.elsewhere`, naming the home that holds one and how to reach it (`cd`, or
+`export` there and `import` here). `init --global` makes an empty `~/.souls/`. Design:
 [Soul context](../design/soul-context.md); code: `tools/world-launcher/soul/home.mjs`.
 
 ```text
@@ -82,7 +87,23 @@ upward from the current folder like `.git`, stopping at the user's home folder (
 ```
 
 With one Soul every command works as it did. With several, name one first: `node eden.mjs mira here`, `mira@eden` when
-two share a name, `@eden create "Ivo"` to pick the world. Each run works inside that Soul's `runtime/`, so nothing
+two share a name, `@eden create "Ivo"` to pick the world. Unnamed, a Soul command refuses with `soul.ambiguous`, naming
+each `name@world`, unless one is the home's `default`; god seats refuse the same way.
+
+Reconnecting changes nothing that already works (#1875). `register` for a world the seat knows, `create <name>` for a
+Soul this home keeps, `pair` and `adopt` for a Soul whose token the world still takes, and `approval wait` with nothing
+pending once that world's Soul is paired all answer `reconnection: "already connected"` and pair nothing. A kept Soul
+whose token the world no longer takes is paired again by `create` (`"reconnected"`), never made twice; a world that
+cannot say answers `"not checked: the world didn't answer"` and pairs nothing. A second `register` with no Soul yet says
+`"registered again"`. Two folders of one home running the same `create` at once end with one Soul and one live token.
+A Soul whose control another folder holds now (its own home, on this machine or another) is never taken over unasked:
+the world refuses a repair request for it with 409 `soul.held-elsewhere` before any request exists (nothing reaches the
+owner's window), unless the request says `move: true`; the refusal says only that it is held. With a window code the CLI
+reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that account's Souls only) first, so it can name
+the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
+folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
+A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
+the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
@@ -96,9 +117,15 @@ relative files; only its own state moves. A folder with no home keeps `.eden-god
 
 One client and one project skill (`.claude/skills/souls/`, `.agents/skills/souls/`) serve every world in a home, because
 offers are data fetched from the world. `/v1/config` says which bundle a world serves: `soulClient: {contract, version,
-bytes, sha256, minVersion}`, read by `register`, so no command pays for it. A home records that per world. A world
+bytes, sha256, minVersion, skill: {version, bytes, sha256}}`, read by `register`. A home records that per world with
+when it read it. Every command in a home then carries `update: {from, to, run}` while its world serves a newer client,
+or a newer skill than a copy the home keeps; a record older than 10 minutes is read again once, alongside the command,
+so a warm one costs nothing. The skill's first rule is to run it and reread SKILL.md. The CLI and the skill carry one
+version number. A world
 needing more than this client refuses at `register` with the exact `upgrade <world>`, and `upgrade` installs the bundle
-only if its length and SHA-256 match, it is newer than the home's, and no other world in the home speaks another contract
+and the skill (every Souls skill copy present beside `.souls/` or in the working folder: `SKILL.md`, `.claude/skills/souls/`,
+`.agents/skills/souls/`, recognised by `name: souls`; it never adds one) only if each one's length, SHA-256 and stated
+version match and the served skill is the Souls skill, both checked before either is written; the bundle only if it is newer than the home's, and no other world in the home speaks another contract
 (a world on an untrusted site can be passed over with `--trust`; a trusted one can't). Every copy of the CLI in the home hands over to `bin/eden.mjs` once that is newer. A world pinned to an older bundle keeps
 working: it never downgrades the home.
 
