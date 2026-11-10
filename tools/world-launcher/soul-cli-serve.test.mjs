@@ -400,7 +400,7 @@ test('the harness listen keeps working through serve: same output, by cursor, an
   const r = await held;
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.json.messages.map((m) => [m.id, m.text]), [['msg_2', 'Say hello']]);
-  assert.match(r.json.next, /ack each/);
+  assert.match(r.json.next, /act <id> --for <message id> --wait/);
   w.owner('msg_3', 'And wave');
   const next = await w.cli('listen', '--after', 'msg_2');
   assert.deepEqual(next.json.messages.map((m) => m.id), ['msg_3'], 'the next listen gets only the new one');
