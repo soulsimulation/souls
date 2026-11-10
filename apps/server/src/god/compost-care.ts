@@ -17,7 +17,7 @@ export function createCompostCare(h:CompostCareHost){
   if(!b?.human||!at||at.length!==3||!at.every(Number.isFinite))return fail('Your native body is unavailable.','body.unavailable');
   if(b.human.holding||b.human.hands||b.human.handActuator||Object.values(h.engine.world.entities).some(x=>x.support?.kind==='in-hand'&&x.support.by===s.entityId))return fail('Empty your hands before feeding the planter.');
   const floor=h.levelAt(at[0],at[2],at[1]),stockFloor=h.levelAt(p.x,p.z,supportY(h.model,e));
-  if(floor!==stockFloor||!finishing&&Math.hypot(at[0]-p.x,at[2]-p.z)>ACT_REACH)return fail('Start nearby on the same native floor as the compost supply.','object.out-of-reach');
+  if(finishing&&floor!==stockFloor)return fail('Complete the feeding beside the planter on the compost supply native floor.','object.out-of-reach');
   const portions=Number(e.state?.portions??3);if(!Number.isFinite(portions)||portions<1)return fail('No whole supplied compost portion remains.');
   if(text===undefined)return{e,b};if(typeof text!=='string'||!text.trim())return fail('Choose an existing nearby garden planter reference.');
   let target;try{target=h.model.get(text.trim());}catch{}if(!target)return fail('That planter is no longer there.','object.gone');
