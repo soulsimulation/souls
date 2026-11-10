@@ -128,6 +128,8 @@ export type ActivityWorld = {
   enterable(place: string | undefined): boolean;
   /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
   gone?(spotId: string): boolean;
+  /** #628 (knowledge/1): the spot stands in a secret place this Soul has not been to or found; a refusal never names it. */
+  hidden?(spotId: string, at: V2): boolean;
   /** Nearest free native seat within `radius` m: its sit capability id and plan. */
   /** The nearest free seat within `radius` m; `here` (D2, "sit down" means here): only a seat in the Soul's own room or
    *  within HERE_SEAT_M with no enclosure boundary between (EdgeLedger.seatIsHere). */
@@ -196,8 +198,10 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
         for (let t = 0.1; t <= 0.9 + 1e-9 && L > 1e-6; t += 0.1) {const p: V2 = [Math.round((s.at[0] + back[0] * t) * 100) / 100, Math.round((s.at[1] + back[1] * t) * 100) / 100], c = w.clearance(p[0], p[1]); if (c > 0) seen = true; if (c >= STAND_CLEAR) {at = p; break;}}
         // #628: a standing spot whose line back is blocked too (a kitchen counter's own chair stands where its user would): the nearest
         // clear point beside it, within SIDE_STEP of the spot's own distance from the thing, so the Soul still works at it
-        if (!at && s.base === 'idle' && L > 1e-6) at = besideAt(s.at, f, L, w);
         if (!at && (here >= 0.05 || !seen)) at = s.at;   // nothing clearer behind it: as before (ground with room enough, or no ground data)
+        // #628: only a spot refused before (no room where it is, nor straight back: a kitchen counter's own chair stands where its user
+        // would) uses the nearest clear point beside it, within SIDE_STEP of the spot's own distance from the thing; a spot used before keeps its point
+        if (!at && s.base === 'idle' && L > 1e-6) at = besideAt(s.at, f, L, w);
       }
       standAt.set(s.id, at);
     }
@@ -208,6 +212,8 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
   // nearest few per activity), not every spot within reach (1.5 s of a 4 s first sweep on Eden 2026); old worlds unchanged
   const reach0 = data.spots.filter(s => (d2(s.at, w.me) <= SPOT_REACH || !!want?.has(s.id)) && w.enterable(s.place) && !w.gone?.(s.id)), ok = (s: Spot) => !!clearAt(s);
   const live = data.nearest ? reach0 : reach0.filter(ok);
+  // #628: a spot used from a point away from its own is taken by a body near that point too (read once its point is known)
+  const besideTaken = (s: Spot) => {const at = clearAt(s); return !!at && at !== s.at && w.taken(at);};
   // #1737: why a spot asked for by id is not on offer now; said in the refusal, never a bare "not an offer"
   const why = new Map<string, {code: string; reason: string}>();
   if (want?.size) for (const s of data.spots) {
@@ -215,11 +221,12 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
     const name = s.label ?? 'that spot';
     if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
-    else if (w.taken(s.at, s.id)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
+    else if (w.taken(s.at, s.id) || besideTaken(s)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
     else if (!ok(s)) {
-      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead
-      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.taken(o.at, o.id))
-        .sort((x, y) => d2(x.at, s.at) - d2(y.at, s.at) || x.id.localeCompare(y.id)).find(ok);
+      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead; never one in a secret place
+      // this Soul does not know (knowledge/1: nothing names a secret place)
+      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.hidden?.(o.id, o.at) && !w.taken(o.at, o.id))
+        .sort((x, y) => d2(x.at, s.at) - d2(y.at, s.at) || x.id.localeCompare(y.id)).find(o => ok(o) && !besideTaken(o));
       why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}: something stands everywhere a step around it, and waiting will not change that, so nothing was done.${alt ? ` The nearest other one is ${alt.label ?? 'another spot'} (${s.activity}:${alt.id}).` : ''}`});
     }
   }
@@ -342,7 +349,8 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
       const def = SPOT_ACTIVITIES[activity], id = `${activity}:${s.id}`; if (plans.has(id)) continue;
       // a seat at a group someone is already waiting in ("join them") is always offered, past the nearest-N cap
       const joinable = !!s.together && w.groupSize(s.together.group) > 0;
-      if (data.nearest) {const n = offered.get(activity) ?? 0, asked = !!want?.has(s.id); if ((n >= data.nearest && !joinable && !asked) || !ok(s)) continue; if (!joinable && !asked) offered.set(activity, n + 1);}
+      if (data.nearest) {const n = offered.get(activity) ?? 0, asked = !!want?.has(s.id); if ((n >= data.nearest && !joinable && !asked) || !ok(s) || besideTaken(s)) continue; if (!joinable && !asked) offered.set(activity, n + 1);}
+      else if (besideTaken(s)) continue;
       // R5: a listener's seat is offered once someone is telling the story (its required spot is in use)
       const needs = s.requires ? data.spots.find(x => x.id === s.requires) : undefined, missing = !!needs && !w.taken(needs.at, needs.id);
       const waiting = s.together ? w.groupSize(s.together.group) : 0, withWho = s.together ? (waiting ? `; ${waiting} waiting on the other end, join them` : (s.together.alone === 'start' ? `; starts after ${s.together.wait} s, others may join` : `; waits up to ${s.together.wait} s for someone to join`)) : '';

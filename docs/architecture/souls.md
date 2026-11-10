@@ -273,9 +273,11 @@ withholds. Owner messages and credentials are never in it.
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
   One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
   a spot whose thing a god removed. A standing spot with no room where it is (a kitchen counter's own chair on it) is used
-  from the first clear point straight back from its thing, else from the nearest clear point beside it, within 0.9 m and
-  within 0.5 m of the spot's own distance from the thing (#628). `spot.no-room` is left for a spot with no clear ground
-  anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. A spot or seat in a secret place the Soul has not been to or found is
+  from the first clear point straight back from its thing. Only when that fails, and the spot has no room at all where it
+  is, is it used from the nearest clear point beside it, within 0.9 m and within 0.5 m of the spot's own distance from the
+  thing (#628); a body near that point takes the spot too. `spot.no-room` is left for a spot with no clear ground
+  anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity that is
+  not in a secret place the Soul does not know. A spot or seat in a secret place the Soul has not been to or found is
   `capability.unknown`, with no reason that names the place. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those

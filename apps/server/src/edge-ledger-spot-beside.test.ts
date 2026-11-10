@@ -56,3 +56,34 @@ test('besideAt: the nearest clear point to the spot, never inside the thing, nul
   assert.ok(kitchen(p[0], p[1]) >= 0.28 && !counter(p[0], p[1]));
   assert.equal(besideAt([10, 0.85], [10, 0], 0.85, {clearance: walled}), null);
 });
+
+test('a refusal never names an alternative in a secret place the Soul does not know; it names the next one, or none', () => {
+  const more = loadSpots({contract: 'activity-spots/1', spots: [...spots, {id: 'craft.e_far', activity: 'craft', base: 'idle', at: [80, 0.85], faceTo: [80, 0], label: 'potting table'}]}).data;
+  const secret = (ids: string[]) => ({...world(walled), hidden: (id: string) => ids.includes(id)});
+  const reason = (ids: string[]) => activityCapabilities(more, secret(ids) as never, new Set(['craft.e_counter'])).why.get('craft.e_counter')!.reason;
+  assert.match(reason([]), /workbench in the barn \(craft:craft\.e_bench\)/);
+  const next = reason(['craft.e_bench']);
+  assert.doesNotMatch(next, /barn|e_bench/, 'the secret one is not named');
+  assert.match(next, /potting table \(craft:craft\.e_far\)/, 'the nearest one it may know is');
+  const none = reason(['craft.e_bench', 'craft.e_far']);
+  assert.doesNotMatch(none, /nearest other one|barn|potting/, 'no alternative at all rather than a secret one');
+  assert.match(none, /waiting will not change that, so nothing was done\.$/);
+});
+
+test('a spot with a little room where it is and its line back blocked keeps its own point (main used it there)', () => {
+  // 0.1 m of clearance on the spot itself, nothing clear straight back, clear floor 0.6 m to the side: before #628 it walked to
+  // the spot itself; the side search runs only where the old rule refused
+  const band = (x: number, z: number) => (counter(x, z) ? 0 : Math.abs(x - 10) < 0.4 && z >= 0.4 && z <= 2 ? (Math.abs(x - 10) < 0.05 && Math.abs(z - 0.85) < 0.05 ? 0.1 : 0) : 2);
+  assert.equal(band(10, 0.85), 0.1);
+  assert.deepEqual(goal(activityCapabilities(data, world(band) as never, new Set(['craft.e_counter'])), 'craft:craft.e_counter'), [10, 0.85]);
+});
+
+test('a spot used from beside it is taken by a body standing on that point, and the refusal says so', () => {
+  const first = goal(activityCapabilities(data, world(kitchen) as never, new Set(['craft.e_counter'])), 'craft:craft.e_counter');
+  // another body 0.6 m past the beside point, away from the spot: more than 0.7 m from the spot itself, so only the new check sees it
+  const body: V2 = [first[0] - 0.6, first[1]], near = (p: V2) => Math.hypot(p[0] - body[0], p[1] - body[1]) < 0.7;
+  assert.ok(!near([10, 0.85]) && near(first), `the body is near the beside point only (${first})`);
+  const out = activityCapabilities(data, {...world(kitchen), taken: (at: V2) => near(at)} as never, new Set(['craft.e_counter']));
+  assert.equal(out.caps.some(c => c.id === 'craft:craft.e_counter'), false, 'not offered');
+  assert.equal(out.why.get('craft.e_counter')?.code, 'spot.taken');
+});
