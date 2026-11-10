@@ -9,7 +9,7 @@ import {mountCatalogRoute} from './edge/catalog/routes.ts';
 import {mountLiveRoute} from './edge/catalog/live.ts';
 import {SPOT_REACH} from './edge/ledger/activities.ts';
 // the client's own search over the catalog, as `find` runs it
-import {indexCatalog, find as findLocal} from '../../../tools/world-launcher/soul/catalog.mjs';
+const CLIENT_CATALOG = new URL('../../../tools/world-launcher/soul/catalog.mjs', import.meta.url).href;
 
 type Spot = {id: string; activity: string; at: [number, number]; level?: number; together?: unknown; base: string; place?: string};
 
@@ -68,6 +68,7 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
   });
 
   await t.test('every act a find row names is taken, or refused with a reason of its own', async () => {
+    const {indexCatalog, find: findLocal} = await import(CLIENT_CATALOG) as {indexCatalog: (c: unknown) => unknown; find: (ix: unknown, w: string, o: object) => {found: {act?: string}[]}};
     const cat = (await get('/v1/edge/catalog')).body, ix = indexCatalog(cat), me = L.body(soul.entityId).pose.p, at = [me[0], me[2]];
     const ids = new Set<string>();
     for (const words of ['swim', 'lake', 'pond', 'jetty', 'shore', 'library', 'read a book', 'sit on the floor', 'eat', 'bench', 'kitchen', 'garden', 'dance', 'sleep', 'music', 'table', 'bandstand', 'classroom', 'river', 'sea'])
