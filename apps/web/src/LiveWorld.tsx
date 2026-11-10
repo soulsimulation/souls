@@ -115,7 +115,7 @@ import {WorldEdgeItems} from './WorldEdgeItems.ts';
 import { WorldNavigation, createWorldOrbitControls, type ManualNavigation, type CameraMove } from './WorldNavigation.ts';
 import {WorldPlaceCamera} from './WorldPlaceCamera.ts';
 import { composeVisibleViewport, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
-import { nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
+import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
 import {paintSpeakingDot,speakingNow} from './dialogue-speaking.ts';
 import {WorldGames} from './WorldGames.ts';
@@ -983,10 +983,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           const away = past.current ? null : bodyLabel(soul.body);   // LINK: "Asleep" / "Zombie" over a body whose agent is away
           const doing = past.current ? activityWords(activity,soul.id) : away ?? doingText(soul.doing,activity,soul.id);
           const card = cardText(cards.get(soul.id));
-          const text = `${soul.name}|${doing}|${card}|${soul.id === soulId||groupSelection.has(soul.id)}`;
+          const hovered = hover.hoveredSoul === soul.id;   // #1645: hovering shows the doing here, under the body, not in a bubble above
+          const text = `${soul.name}|${doing}|${card}|${soul.id === soulId||groupSelection.has(soul.id)}|${hovered}`;
           if (text !== l.text) {
-            l.text = text; l.name.textContent = soul.name; l.line.textContent = clip(doing, 48); l.card.textContent = clip(card, 48);
-            l.line.style.display = doing && (soul.id===soulId||!!away) ? '' : 'none'; l.card.style.display = card && soul.id===soulId ? '' : 'none';
+            l.text = text; l.name.textContent = soul.name; l.line.textContent = clip(doing, 200); l.line.title = doing; l.card.textContent = clip(card, 48);
+            l.line.style.display = doing && (soul.id===soulId||!!away||hovered) ? DOING_DISPLAY : 'none'; l.card.style.display = card && soul.id===soulId ? '' : 'none';
             (l.obj.element as HTMLElement).style.outline = soul.id === soulId||groupSelection.has(soul.id) ? '2px solid #ffd34d' : 'none';
           }
         }

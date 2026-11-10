@@ -102,9 +102,10 @@ node .claude/skills/proof/record.mjs --url '...' --steps .e2e/proof/<slug>/steps
 - Playwright is resolved the same way the playtest harness does (`tools/playtest/lib/platform.mjs`: a global
   `playwright`, else `@playwright/test` from `mars/viewer`). No GPU is needed; WebGL runs on SwiftShader.
 - `--max-seconds` defaults to the policy's `max_seconds`. Exit 3 means the journey ran past it: shorten it.
-- With ffmpeg: an mp4 with a progress bar along the bottom and a `hh:mm:ss / total` timecode (the timecode needs an
-  ffmpeg built with drawtext; the sidecar's `timecode` says whether it is there). Without ffmpeg: the raw `.webm`;
-  say so in the PR (players still show their own scrub bar).
+- With ffmpeg: an mp4 with a thin progress line along the bottom edge and a small `m:ss.s / total` timecode chip at
+  the bottom left. The recorder's Chromium draws the timecode, so it needs no ffmpeg `drawtext` or fonts; the
+  sidecar's `timecode` says whether it is there. Without ffmpeg: the raw `.webm`; say so in the PR (players still show
+  their own scrub bar).
 - Each clip gets a `<clip>.json` sidecar: url, viewport, `durationSec`, `videoSec` (the recording's own length, about a
   second longer), `start`, `startedAt`, marks (`arrived` among them), `worldTime`, console errors, `privacy`, commit and
   dirty flag. Sidecars hold local paths: they stay unpublished, and `upload.mjs` refuses one. A Playwright without `page.screencast` records from page creation
