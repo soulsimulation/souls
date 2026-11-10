@@ -12,7 +12,7 @@
 // The object id is the entity id. Objects follow the entity world: re-derived on each god edit, removed with the thing.
 // No edge file changes: the kind registers on the ledger's comms objects when they exist; the read capability goes in
 // through the ledger's world-profile hook (as nav.ts's `walk:<path>`).
-import { checkersStatus, containerInside, gameStatus, type Entity, type StoredDef, type WorldModel } from '@souls/world-compiler';
+import { checkersStatus, containerInside, gameStatus, isTeaCupDef, type Entity, type StoredDef, type WorldModel } from '@souls/world-compiler';
 import { paintingLine } from '../art/art.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { EdgeLedger } from '../edge/ledger/ledger.ts';
@@ -263,7 +263,12 @@ export class GodPerceive {
   private wantOne(e: Entity, layersOn: boolean): { w: Want; sign?: SignRow } | null {
     const m = this.h.model, def = m.resolvedDef(e.def); if (!def) return null;
     const c = def.components as Record<string, unknown>;
-    if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) return null;
+    // #1884: legacy tea cups still publish their own acts while the native body owns their pose.
+    // On restart the projection is rebuilt from scratch; excluding the held cup marks its saved facade gone.
+    const native = this.h.engine.world.entities[e.id], support = native?.support;
+    const heldCup = isTeaCupDef(def as never) && support?.kind === 'in-hand'
+      && e.in.parent === support.by && !!this.h.engine.world.entities[support.by]?.human;
+    if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || (this.h.engineOwned(e) && !heldCup)) return null;
     if (keptShut(m, e)) return null;   // entry 42: kept in a shut drawer or locker: not a thing anyone sees until it is opened
     const text = signText(e, def), acts = this.h.commit ? actionsOf(def).some((a) => a.name !== 'repair' || !this.h.mending?.whole(e.id)) : false;
     // LAYERS: an owned, priced or scheduled thing is seen as such (a loaf for sale, Ana's door, the café's hours)
