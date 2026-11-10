@@ -9,6 +9,7 @@ import type { WorldHost } from '../world.ts';
 import type { GodMode } from './god.ts';
 import { config } from '../config.ts';
 import { defaultTimeZone, installRealClock, isTimeZone, productionWorld, realTimeEnabled } from './real-clock.ts';
+import { cutOverReminders, cutOverStamps, stampShift, type CutOver } from './clock-cutover.ts';
 
 /** The rules payload that (re)starts the clock at `tick` with `dayTicks`, continuing from `prev` when given. */
 export function clockConfig(tick: number, dayTicks: number, prev?: { origin: number; dayTicks: number }) {
@@ -49,7 +50,7 @@ const synchronizers = new WeakMap<GodMode, () => Promise<void>>();
 /** Wait for the logged clock configuration to reach the engine before reporting its applied time. */
 export async function syncWorldClock(god: GodMode): Promise<void> { await synchronizers.get(god)?.(); }
 
-/** #1649 options: real time (default SIM_REAL_TIME=1), the world's slug (its migration zone), and test seams. */
+/** #1649 options: real time (default on; SIM_REAL_TIME=0 turns it off), the world's slug (its migration zone), and test seams. */
 export type WorldClockOptions = { realTime?: boolean; slug?: string; now?: () => number; checkMs?: number };
 
 type TimeState = { dayTicks?: number; paused?: boolean; set?: { hour: number; n: number } | null; timeZone?: string | null; clock?: 'real' | 'accelerated' | null } | undefined;
@@ -65,7 +66,7 @@ export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string
     log(r.accepted ? 'world clock: back on the accelerated clock (real time off)' : `world clock: rollback refused: ${JSON.stringify(r.failures ?? [])}`);
   }
   const real = realTime ? installRealClock(host, { zone: () => worldTimeZone(god, slug), paused: () => time()?.paused === true,
-    active: () => time()?.clock !== 'accelerated', now: o.now, checkMs: o.checkMs, log }) : null;
+    active: () => time()?.clock !== 'accelerated', now: o.now, checkMs: o.checkMs, log, onCutOver: (c) => cutOverWorld(host, god, c, log) }) : null;
   const want = () => {
     const t = time();
     const d = Number(t?.dayTicks);
@@ -109,4 +110,13 @@ export function migrateWorldTime(god: GodMode, slug: string | undefined, log: (m
   const what = Object.entries(patch).map(([k, v]) => `${k} ${v}`).join(', ');
   const r = god.engineAct([{ op: 'world', state: { time: patch } }] as never, `world clock: ${what} (real-time migration, #1649)`);
   log(r.accepted ? `world clock: ${what} (migrated)` : `world clock: migration (${what}) refused: ${JSON.stringify(r.failures ?? [])}`);
+}
+
+/** #1649 part 4: a god world's clock came onto real time: pending world-clock reminders and age-counting day stamps
+ *  (posters, fading chalk) move to the new day count (clock-cutover.ts); history is left as recorded. Idempotent: each
+ *  part records that it ran. A throw is retried by the clock keeper. */
+export function cutOverWorld(host: Pick<WorldHost, 'db' | 'worldId'>, god: GodMode, c: CutOver, log: (m: string) => void = () => {}) {
+  const reminders = cutOverReminders(host.db.db, host.worldId, c);
+  const stamps = cutOverStamps(god as never, c, log);
+  if (reminders || stamps) log(`world clock: cut-over to real time (tick ${c.tick}, day count back ${stampShift(c)}): ${reminders} reminder(s) and ${stamps ?? 0} stamped thing(s) mapped`);
 }

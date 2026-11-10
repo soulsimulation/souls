@@ -93,7 +93,7 @@ switch independent. A previously saved master mute migrates to both switches off
   released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
   (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
   (`apps/server/src/clock-catchup.ts`) without simulating the gap.
-- **Real time (#1649, behind `SIM_REAL_TIME=1` while it rolls out).** A god world's clock is the real time in the world's
+- **Real time (#1649; on by default, `SIM_REAL_TIME=0` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
   whose origin makes the engine read local time (`apps/server/src/god/real-clock.ts`), and logs a new one only at boot,
@@ -116,6 +116,21 @@ switch independent. A previously saved master mute migrates to both switches off
   `realTime: true` puts it back. `POST /v1/god/act` holds the same rule for a `world` op's time (`clock: 'accelerated'`,
   `set` or `dayTicks` on a production world: `time.accelerated-production`). With the flag off again, a migrated world's
   `time.clock` is cleared at boot so nothing reads a clock it does not run.
+- **The cut-over: existing data (#1649 part 4).** A world that ran on the accelerated clock (one world day per real
+  hour) is hundreds of world days in; on real time its day and date are the local ones, so the day number goes back once,
+  when its clock first comes onto real time (`apps/server/src/god/clock-cutover.ts`, run by the clock keeper after that
+  clock event applies). The mapping: history (timeline rows, receipts, journals, the ledger's recorded `worldDay`) keeps
+  the clock reading it was recorded with; pending world-clock reminders keep their time of day and their distance in
+  world days (due tomorrow at 18:00 stays due tomorrow at 18:00, local); age-counting day stamps (poster records' `day`,
+  a fading chalk drawing's `state.day`) move back with the day number, so each keeps its age (never below day 0), as one
+  recorded engine edit; calendar items are scheduled by tick, so an upcoming one starts at the same real moment;
+  real-clock and delivered reminders are untouched; nothing is deleted. The clock event names the cut-over
+  (`dayConfig.cutOver`, carried on by later clock events), and each part records that it ran (the reminder rows with a
+  marker row in one transaction, `edge_clock_cutover_v1`; the stamps as an engine edit whose note names the cut-over
+  tick), so a mapping that failed or was cut short by a restart is finished at the next boot, and never runs twice. A
+  world paused on the accelerated clock keeps that day count (and its needs keep the accelerated day) until it runs
+  again, and the cut-over happens then. A dev world switched back to the accelerated clock is not mapped back.
+  Schedules a Soul's own agent keeps on its side (world minutes in its own files) are not the server's to map.
 - **Choosing and changing the zone (#1649 part 3).** The New world dialog has a time zone field, prefilled with the
   creator's browser zone; the launcher refuses an invalid one (`time.zone-invalid`), keeps it on the registry row and
   passes it to the world as `WORLD_TIME_ZONE`, which the first real-time boot records as `time.timeZone` (before the slug

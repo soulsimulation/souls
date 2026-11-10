@@ -10,7 +10,7 @@
 // from the wall (a restart, a slowed or stalled tick loop, a daylight-saving change), as an ordinary rules event, so a
 // replay reaches the same state. Nothing is simulated for skipped time, and nothing is stored but the zone.
 //
-// Behind SIM_REAL_TIME=1 until the consumers have moved over (#1649 PR plan); off, the accelerated clock is unchanged.
+// On by default (#1649 part 4); SIM_REAL_TIME=0 turns it off, and the accelerated clock is then unchanged.
 
 /** The engine's clock epoch: elapsed 0 reads 2026-10-03T06:00 (engine-mars updateClock, brain clockAt). */
 export const CLOCK_BASE_MS = Date.UTC(2026, 9, 3, 6);
@@ -21,8 +21,9 @@ export const REAL_DAY_TICKS = (86_400_000 / TICK_MS) as 1_728_000;
 /** A watched world's clock may drift this far from the wall before one re-alignment is logged. */
 export const REALIGN_MS = 60_000;
 
-/** Real time is on (SIM_REAL_TIME=1). Off by default until #1649's consumers have all moved over. */
-export function realTimeEnabled(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_REAL_TIME === '1'; }
+/** Real time is on: every world's clock is the local time in its zone (#1649). SIM_REAL_TIME=0 turns it off (the
+ *  rollback switch, and tests that pin the old accelerated clock). */
+export function realTimeEnabled(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_REAL_TIME !== '0'; }
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 function formatter(timeZone: string): Intl.DateTimeFormat {
@@ -109,6 +110,10 @@ export type RealClockOptions = {
   now?: () => number; checkMs?: number; log?: (m: string) => void;
   /** The customs of a world whose clock has not started yet (LivingWorld's; later configs carry the running ones). */
   customs?: string[];
+  /** #1649 part 4: the clock came onto real time from another clock (the cut-over), and its rules event has applied: map
+   *  the data that counts world days (clock-cutover.ts). Called once per cut-over per process, and again after a throw
+   *  or a restart, so it must be idempotent; a failure is logged and never stops the clock. */
+  onCutOver?: (c: { tick: number; from: { origin: number; dayTicks: number }; to: { origin: number; dayTicks: number } }) => void;
 };
 const kept = new WeakSet<object>();
 /** Whether a real-time keeper already runs this host's clock. */
@@ -122,25 +127,39 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
   kept.add(host);
   const now = o.now ?? Date.now, active = o.active ?? (() => true);
   let pending: Promise<void> | undefined;
+  type Cut = { tick: number; from: { origin: number; dayTicks: number }; to: { origin: number; dayTicks: number } };
+  const mapped = new Set<number>();
+  // the cut-over named by the running clock is mapped once (the mapping itself is idempotent and records that it ran);
+  // a failure is logged and tried again at the next sync or boot
+  const mapCut = (c: Cut | undefined) => {
+    if (!c || mapped.has(c.tick) || !o.onCutOver) return;
+    try { o.onCutOver(c); mapped.add(c.tick); } catch (e) { o.log?.(`world clock: cut-over mapping failed (tried again later): ${(e as Error).message}`); }
+  };
   const sync = (): Promise<void> => {
     if (!active()) return Promise.resolve();
     if (pending) return pending.then(sync);
-    const l = host.living as (ClockHost['living'] & { zone?: string }) | undefined, tick = host.engine.world.tick, zone = o.zone();
+    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick, zone = o.zone();
+    mapCut(l?.cutOver);
     let payload: { dayConfig: Record<string, unknown>; why: string };
     if (o.paused?.()) {
       if (l && l.dayTicks === PAUSED_TICKS) return Promise.resolve();
-      // the time of day stands where it is (the phase of the running day), on a day too long to move
+      // the time of day stands where it is (the phase of the running day), on a day too long to move. Paused from another
+      // clock, it keeps that clock's day count and names no zone, so the cut-over comes when the clock runs again.
       const days = l ? Math.max(0, tick - l.origin) / l.dayTicks : 0;
-      payload = { dayConfig: { origin: Math.round(tick - days * PAUSED_TICKS), dayTicks: PAUSED_TICKS, customs: l?.customs ?? o.customs ?? [], zone }, why: 'world clock: paused by the god' };
+      payload = { dayConfig: { origin: Math.round(tick - days * PAUSED_TICKS), dayTicks: PAUSED_TICKS, customs: l?.customs ?? o.customs ?? [], ...(!l || l.zone ? { zone } : {}), ...(l?.cutOver ? { cutOver: l.cutOver } : {}) }, why: 'world clock: paused by the god' };
     } else {
       if (l && l.zone === zone && Math.abs(realClockDriftMs(l, tick, now(), zone)) < REALIGN_MS) return Promise.resolve();
       const c = realClockConfig(tick, now(), zone);
-      payload = { ...c, dayConfig: { ...c.dayConfig, customs: l?.customs ?? o.customs ?? [] } };
+      payload = { ...c, dayConfig: { ...c.dayConfig, customs: l?.customs ?? o.customs ?? [], ...(l?.cutOver ? { cutOver: l.cutOver } : {}) } };
     }
     // a clock already on real time only moves its origin: the day's state (last day turn, event, quiet) is kept (world.ts).
     // Coming from another clock (the accelerated one, whose day numbers differ), the day state starts over.
     if (l?.zone) (payload as { realign?: boolean }).realign = true;
-    pending = host.enqueue('rules', 'world', payload).then(() => {}).finally(() => { pending = undefined; });
+    const d = payload.dayConfig as { origin: number; dayTicks: number };
+    // #1649 part 4: coming onto real time from another clock is the cut-over. The clock event names it (and later clock
+    // events carry it on), so the mapping is finished after a failure or a restart.
+    if (l && !l.zone && d.dayTicks === REAL_DAY_TICKS) payload.dayConfig.cutOver = { tick, from: { origin: l.origin, dayTicks: l.dayTicks }, to: { origin: d.origin, dayTicks: d.dayTicks } };
+    pending = host.enqueue('rules', 'world', payload).then(() => { mapCut((host.living as { cutOver?: Cut } | undefined)?.cutOver); }).finally(() => { pending = undefined; });
     return pending.then(sync);
   };
   const schedule = () => { void sync().catch((e: Error) => o.log?.(`world clock: ${e.message}`)); };
