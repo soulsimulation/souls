@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1615: core-record-player@2 adds two original selectable scores with a simpler independently budgeted console. The first revision and original four scores remain unchanged. Scoped EF4 k=2 placed, baked and rendered all five samples with zero findings/gaps. No inherited budget hold or previous supplement changes.",
+  "defs": [
+    {
+      "def": "core-record-player@2",
+      "hash": "eef013a9e99a3ffdfd6b235560057a47108c9a24096842e5afce1f00e8f27556"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}
