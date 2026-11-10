@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { catalogActs, kindActions, stateDefaults, stateDiff, STATE_TEXT_MAX } from './actuators.ts';
 
+const bucket = { name: 'core-ash-bucket', version: 1, tags: [], components: {}, state: { ash: { type: 'number', default: 0 }, note: { type: 'string', default: '' } }, actions: [] } as never;
 const lamp = { name: 'core-desk-lamp', version: 1, tags: ['hand-operated'], components: {}, state: { on: { type: 'boolean', default: true } },
   actions: [{ name: 'switch-on', label: 'Switch on', roles: 'anyone', reach: 'touch', params: {}, when: [{ field: 'on', is: false }], then: [{ op: 'set', field: 'on', value: true }] },
     { name: 'switch-off', label: 'Switch off', roles: 'anyone', reach: 'touch', params: {}, when: [{ field: 'on', is: true }], then: [{ op: 'set', field: 'on', value: false }] }] } as never;
@@ -25,6 +26,8 @@ test('a thing\'s state is published only where it differs from the default: bool
   const d = stateDiff({ id: 'b', state: { text: 'meet me at noon', textBy: 's_ana', leftBy: 'e_1=s_ana', count: 2, tune: 'Reel' } } as never, board)!;
   assert.deepEqual(d, { count: 2, tune: 'Reel' });
   assert.equal(stateDiff({ id: 'b', state: { tune: 'x'.repeat(STATE_TEXT_MAX + 1) } } as never, board), null, 'not one of the enum\'s values');
+  assert.deepEqual(stateDefaults(bucket), { ash: 0 }, 'a thing with no acts of its own publishes its declared state');
+  assert.deepEqual(stateDiff({ id: 'k', state: { ash: 3, note: 'hi' } } as never, bucket), { ash: 3 });
   assert.equal(stateDiff({ id: 'n', state: { text: 'secret line' } } as never, { ...(board as object), tags: ['hand-writable', 'notebook'] } as never), null, 'a notebook\'s lines come with a read');
 });
 
