@@ -1,1 +1,5 @@
-{"reason":"New vertical-training marker on existing native stair links and completion/elevation milestones; no inherited budget holds.","findings":[]}
+{
+  "schema": "library-conformance-supplement/1",
+  "reason": "New vertical-training marker on existing native stair links and completion/elevation milestones; no inherited budget holds.",
+  "findings": []
+}

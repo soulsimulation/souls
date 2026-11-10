@@ -48,6 +48,8 @@ A run can also choose the world source (genesis or frozen snapshot), apply god-e
 compose its cast and scripted direction in the spec; the model-free `scripted-owner` seat adapter plays a Soul through the
 world's served `eden.mjs` from a per-seat script, so composed scenes need no live model. `playtest.mjs run` behaves as
 before for existing scenarios; a scripted direction entry with `seat: "*"` is now a broadcast.
+A frozen snapshot needs no genesis beside it. After boot the runner checks that the world is physically the
+snapshot it seeded, ignoring only Soul-body defs that no entity uses, because boot drops those.
 
 Everything prints JSON on stdout and logs to stderr. `--server-root` is the Souls checkout whose server the dev worlds
 run from (it needs a built `apps/web/dist`). Pass it explicitly, and pass `--out` or `--runs-root` for where runs go.
@@ -77,7 +79,18 @@ credentials afterwards. Seats are told to run one command per tool call, from th
 (`node eden.mjs ...`), and no `cd` or `&&` chains. Between turns a Claude seat keeps `node eden.mjs listen` running,
 and when it exits with messages the harness wakes the seat with that output, as Claude Code does for a finished
 background task. Codex seats wake only when `wake: true`. An optional god seat sets itself up from the world's
-served god skill.
+served god skill. Before each turn a Claude seat (god seat included) runs `claude auth status`; on a failure it checks once
+more after 5 s, and if that fails too the turn is not run. It is recorded in `turns.jsonl` with `authFailed: true` and
+listed in `infrastructure-invalid.jsonl` (check `H-g`), so a signed-out CLI never scores as the agent's failure. Only
+the pass or fail and the exit code are kept, never the status output.
+
+A Claude seat starts from a clean environment, not the launcher's (#1687). It gets HOME, PATH, USER, LOGNAME, LANG,
+LC_ALL, TERM, SHELL, TMPDIR, CLAUDE_CONFIG_DIR, ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN, plus the seat's own
+settings. Add further names with `PLAYTEST_SEAT_ENV_PASS` (comma- or space-separated). An agent session's own variables
+can turn on extra tools: on #1098 they added about 14k tokens to every call. **Seat check:** when a new session's first
+call carries more input context than `PLAYTEST_SEAT_CTX_MAX` (default 20000 tokens; 0 turns the check off), that
+turn ends at once. The seat then takes no further live turn, and `turns.jsonl` records `seatCheck`. `run-specs.sh` stops
+the arm after such a run (exit 8). For #1098's CTRL the first call carried 17.4k.
 
 ### Personas
 
