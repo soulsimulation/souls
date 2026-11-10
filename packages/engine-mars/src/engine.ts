@@ -78,7 +78,7 @@ import { decodeSnapshot, type RuntimeSnapshot, type RuntimeSnapshotCapture } fro
 import {encode} from '../../../mars/viewer/engine/runtime/codec.ts';
 import { dcos,dsin,hypot } from '../../../mars/viewer/engine/core/math.ts';
 import { clearanceAt, nearestBlocker } from '../../../mars/viewer/engine/spatial/grid.ts';
-import { acknowledgeRelocation, rememberPosesAfterRestore } from '../../../mars/viewer/engine/runtime/invariants.ts';
+import { acknowledgeRelocation, rememberPosesAfterRestore, MAX_HUMAN_STEP_PER_TICK } from '../../../mars/viewer/engine/runtime/invariants.ts';
 import { REFUSALS_ALLOWED, REFUSAL_WINDOW_TICKS, SOULS_REPAIR_POLICY, refusableRule, refusalDiag, settleDiag } from './refuse.ts';
 import { listTable, stableIndices, withEntityList, type EntityTable } from '../../../mars/viewer/engine/world/entity-list.ts';
 import { CATALOG, HUMAN_RADIUS } from '../../../mars/viewer/engine/world/catalog.ts';
@@ -182,7 +182,7 @@ const bodyEntriesV1 = <T,>(entries: Map<string, T>, v: { subjects?: string[] }):
   return out;
 };
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
-export type MarsWorldConfig = { /** #1454 stand-height/1 (runtime policy): the engine stands a body it places upstairs at its floor's own height, never the height it had. */ standHeightV1?:boolean; /** #1428 stair-way/1 (runtime policy): a walk's way on a link leg is the link's exit (walk.ts pointAt). */ stairWayV1?:boolean; /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
+export type MarsWorldConfig = { /** #1454 stand-height/1 (runtime policy): the engine stands a body it places upstairs at its floor's own height, never the height it had. */ standHeightV1?:boolean; /** #1521 stand-height/2 (runtime policy): on a world with no ground field, a body a stall release sets down on level 0 stands at that level's floor height, never the height it had (a mid-climb height left it in the air, and every walk was refused motion.teleport); adopting it once stands any such body already left in the air on its floor. */ standHeightV2?:boolean; /** #1428 stair-way/1 (runtime policy): a walk's way on a link leg is the link's exit (walk.ts pointAt). */ stairWayV1?:boolean; /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
 export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arrival:[0,18],arrivalPlace:'garden',reference:[0,16],grounds:{id:'grounds',name:'Ceramic garden'}};
 export const GREEN_FIELD_WORLD:MarsWorldConfig={scene:'greenfield',arrival:[0,0],arrivalPlace:'field',reference:[2,0],grounds:{id:'grounds',name:'Green field'}};
 export const EDEN_COMMONS_WORLD:MarsWorldConfig={scene:'eden-commons',arrival:[14,4],arrivalPlace:'commons',reference:[9,5],grounds:{id:'grounds',name:'Eden commons'}};
@@ -192,7 +192,7 @@ export const EDEN_SAFE_COMMONS_WORLD:MarsWorldConfig={...EDEN_COMMONS_WORLD,safe
  *  runtime-policy-registry.test.ts fails. */
 export const RUNTIME_POLICY_FLAGS=['walkSettleWaitV1','occupiedLinkRoutingV1','concurrentLinkEgressV1','stairLandingClearanceV1',
   'fixtureGroundGoalsV1','nativeArrivalWitnessV1','quietLandingCourtesyV1','quietStallReleaseV1','stairMakeWayV1','reflexTimeoutV1',
-  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1','refusalSettleV1','stairWayV1','standHeightV1'] as const satisfies readonly (keyof MarsWorldConfig)[];
+  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1','refusalSettleV1','stairWayV1','standHeightV1','standHeightV2'] as const satisfies readonly (keyof MarsWorldConfig)[];
 export type RuntimePolicyV1={sleepBlockTicks:number;quietSeatCourtesy?:boolean}&{[K in typeof RUNTIME_POLICY_FLAGS[number]]?:boolean};
 /** #1363: every `cfg` key a world may change after genesis without changing its rules version: the runtime policy, the render
  *  clock (`configureClock`) and ground-reclaim/1 (its own logged fact, `enableGroundReclaimV1`). Each still enters the state
@@ -326,7 +326,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
-    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;planOnceSpatialV1(this.rt.services.spatial);
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     if(this.cfg.stairWayV1===true)this.rt.services.stairWayV1=true;   // #1428
@@ -372,7 +372,7 @@ export class MarsEngine implements Engine {
   stateHash(): string { return this.stateHashWithWorld(this.rt.stateHash()); }
   /** Reuse only the native hash captured synchronously by snapshot(); never cache a live world hash across calls. */
   private stateHashWithWorld(nativeStateHash: string): string { return hashOf(this.stateHashInputs(nativeStateHash)); }
-  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.stairWayV1===true?{stairWayPolicy:'stair-way/1'}:{}),...(this.cfg.standHeightV1===true?{standHeightPolicy:'stand-height/1'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
+  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.stairWayV1===true?{stairWayPolicy:'stair-way/1'}:{}),...(this.cfg.standHeightV1===true?{standHeightPolicy:'stand-height/1'}:{}),...(this.cfg.standHeightV2===true?{standHeightGroundPolicy:'stand-height/2'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
   // Preserve the contract serializer's exact bytes; only the Node digest implementation changes.
   physicalHash(): string { return createHash('sha256').update(stableStringify(physicalView(this.world))).digest('hex'); }
 
@@ -383,7 +383,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
-    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;planOnceSpatialV1(this.rt.services.spatial);
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     if(this.cfg.stairWayV1===true)this.rt.services.stairWayV1=true;   // #1428
@@ -1604,11 +1604,52 @@ export class MarsEngine implements Engine {
     const f=this.rt.world.groundV1&&!upper?(this.rt.services.spatial as Spatial).ground:undefined;
     // #1454 stand-height/1: upstairs at that floor's own height (a carrier's exit keeps its own); off, the body's height as recorded
     const floorY=upper&&xz&&from.y===undefined&&this.cfg.standHeightV1===true?(()=>{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);const g=sp.levelAt(level,xz);return g&&clearanceAt(g,xz)>0?g.y:undefined;})():undefined;   // only on a cell of that floor (with the guard off, xz is where the body stood: a flight or the air)
-    const y=xz&&f?standOn(f,xz[0],xz[1]):(from.y??floorY??a.pose.p[1]);
+    // #1521 stand-height/2: on level 0 of a world with no ground field, at that level's floor height (a mid-climb height left the
+    // body in the air, and the first tick of every walk, dropping it to the floor, was refused motion.teleport); off, as recorded
+    const xz2=xz;
+    // #1521 review: nowhere clear near (not even its own point, which `xz` already tries), and above its floor: never released in
+    // the air. It stays held, named; the stall guard tells the owner once (stall.no-floor-spot)
+    if(!xz2&&!upper&&!f&&from.y===undefined&&this.cfg.standHeightV2===true&&a.pose.p[1]-this.floorHeightV2([r3(a.pose.p[0]),r3(a.pose.p[2])])>MAX_HUMAN_STEP_PER_TICK){console.warn(`[engine] stall.no-floor-spot: ${actor} is not released: nowhere clear on its floor near it, and it is above the floor`);return null;}
+    const groundY=!upper&&xz2&&!f&&from.y===undefined&&this.cfg.standHeightV2===true?this.floorHeightV2(xz2):undefined;
+    const y=xz2&&f?standOn(f,xz2[0],xz2[1]):(from.y??floorY??groundY??a.pose.p[1]);
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
-    const r=releaseBody(this.rt,actor,xz?[r3(xz[0]),r3(y),r3(xz[1])]:null,reason);
+    const r=releaseBody(this.rt,actor,xz2?[r3(xz2[0]),r3(y),r3(xz2[1])]:null,reason);
     if(r&&pp&&own)this.end(pp,'failed',reason);
     return r;
+  }
+  /** #1521: the height of level 0's floor at (x, z) on a world with no ground field (its grid's, else 0, as a level-0 restore). */
+  private floorHeightV2(xz: [number, number]): number { const sp = this.rt.services.spatial as Spatial; sp.sync(this.rt.world); const g = sp.levelAt(0, xz); return r3(g ? g.y : 0); }
+  /** #1521 stand-height/2's one-time repair, a pure read: on a world with no ground field, every body on level 0 that stands free
+   *  (no programme, nothing holding it, not seated, riding, berthed, on a link or climbing) more than a step (0.15 m) above that
+   *  level's floor, and where it can stand: the floor at the same point if clear, else the nearest free standing spot (the search
+   *  a held body uses, never through geometry). A body with nowhere clear is left out. The host logs what this returns. */
+  planAboveFloorV2(): { id: string; p: [number, number, number] }[] {
+    if (this.rt.world.groundV1) return [];
+    const out: { id: string; p: [number, number, number] }[] = [], guard = this.cfg.bodyStepGuardV1 === true, planned: [number, number][] = [];
+    for (const a of (listEntities(this.ents) as any[]).filter(o => o.kind === 'human').sort((x, y) => (x.id < y.id ? -1 : 1))) {
+      const h = a.human, p = a.pose?.p;
+      if (!h || (h.level ?? 0) !== 0 || !Array.isArray(p) || !p.every(Number.isFinite)) continue;
+      if (h.carrier || h.riding || h.on || h.berth || h.sleepPose || h.seatHeight !== undefined || h.boatPassenger || h.boatTransit || h.shore || h.grip || h.baseActivity === 'sit' || String(h.activity ?? '').startsWith('climb')) continue;
+      if (this.byActor.has(a.id) || probeBody(this.rt, a.id)?.held) continue;
+      const floor = this.floorHeightV2([p[0], p[2]]); if (p[1] - floor <= MAX_HUMAN_STEP_PER_TICK) continue;   // within a step: the step check lets the next tick reach the floor
+      const radius = guard ? this.bodyRadiusV1(a) : a.body?.radius ?? HUMAN_RADIUS, sp = this.rt.services.spatial as Spatial; sp.sync(this.rt.world);
+      const g = sp.levelAt(0, [p[0], p[2]]), others = (listEntities(this.ents) as any[]).filter(o => o.kind === 'human' && o.id !== a.id && (o.human?.level ?? 0) === 0);
+      const here = !!g && clearanceAt(g, [p[0], p[2]]) >= radius && !others.some(o => hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < 0.8) && !planned.some(([x, z]) => hypot(x - p[0], z - p[2]) < 0.8) && (!guard || this.placeClearV1(a, p[0], p[2], 0, this.guardBodiesV1()));
+      // a pure read: the body's own place is skipped, never taken out of the table (that reorders the live table, and a replay
+      // only folds the logged result: #1522 review); spots already planned keep clear of each other
+      const xz = here ? [p[0], p[2]] as [number, number] : (() => { try { return this.freeStandingNearV1([r3(p[0]), r3(p[2])], radius, guard ? a : undefined, { skip: a.id, also: planned }); } catch { return null; } })();
+      if (!xz) continue;
+      planned.push([xz[0], xz[1]]);
+      out.push({ id: a.id, p: [r3(xz[0]), this.floorHeightV2(xz), r3(xz[1])] });
+    }
+    return out;
+  }
+  /** #1521: stands each body where the logged repair says (a replay passes the same list and reads nothing). Never throws. */
+  standOnFloorV2(bodies: { id: string; p: [number, number, number] }[]): string[] {
+    const done: string[] = [];
+    for (const b of bodies) { const a = this.ents[b.id]; if (!a?.human || !Array.isArray(b.p) || b.p.length !== 3 || !b.p.every(Number.isFinite)) continue; a.pose.p = [b.p[0], b.p[1], b.p[2]]; a.pose.pitch = 0; a.pose.roll = 0; a.human.speed = 0; acknowledgeRelocation(this.rt, b.id); done.push(b.id); }
+    this.tableCacheV1 = null; rememberPosesAfterRestore(this.rt);
+    return done;
   }
   /** #1332 body-step-guard/1: the nearest point to `at` on upper `level` where the invariant passes body `a` standing (rings of
    *  0.4 m out to 2 m, as a restore keeps a body on its floor), or null. */
@@ -1994,11 +2035,13 @@ export class MarsEngine implements Engine {
   }
   /** birth-near/1: the nearest ground point (rings of 0.25 m out to 12 m) with a clear standing disc, nobody within
    * 0.8 m and no deep water. Walkability from there is proved by the caller's own physical walk, never assumed. */
-  private freeStandingNearV1(at: [number, number], radius: number, who?: any): [number, number] | null {
+  /** `opts` (#1521): `skip` a body's own place without taking it out of the table (a plan must not reorder it), and keep clear of
+   *  `also`, spots already promised in the same plan. Without them, as before. */
+  private freeStandingNearV1(at: [number, number], radius: number, who?: any, opts?: { skip?: string; also?: [number, number][] }): [number, number] | null {
     if (!Array.isArray(at) || at.length !== 2 || !at.every(Number.isFinite)) return null;
     const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
     const f = this.rt.world.groundV1 ? spatial.ground?.field : undefined;
-    const people = Object.values(this.ents).filter((e: any) => e.kind === 'human' && (e.human?.level ?? 0) === 0).map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]), bodies = who ? this.guardBodiesV1() : [];
+    const people = [...Object.values(this.ents).filter((e: any) => e.kind === 'human' && (e.human?.level ?? 0) === 0 && e.id !== opts?.skip).map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]), ...(opts?.also ?? [])], bodies = who ? this.guardBodiesV1() : [];
     for (let ring = 0; ring <= 48; ring++) { const n = Math.max(1, ring * 8); for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2, x = r3(at[0] + dcos(ang) * ring * 0.25), z = r3(at[1] + dsin(ang) * ring * 0.25);
       const grid = spatial.levelAt(0, [x, z]);
@@ -2987,6 +3030,7 @@ export class MarsEngine implements Engine {
     // #1428 stair-way/1 (prospective): a link leg's way is its exit, so a make-way test never throws on a climber.
     if(policy.stairWayV1===true){this.cfg={...this.cfg,stairWayV1:true};this.rt.services.stairWayV1=true;}
     if(policy.standHeightV1===true)this.cfg={...this.cfg,standHeightV1:true};   // #1454
+    if(policy.standHeightV2===true)this.cfg={...this.cfg,standHeightV2:true};   // #1521
     if(policy.reflexTimeoutV1===true)this.cfg={...this.cfg,reflexTimeoutV1:true};
     if(policy.edgeMotionV1===true)this.cfg={...this.cfg,edgeMotionV1:true};
     if(policy.spreadV2===true)this.cfg={...this.cfg,spreadV2:true};
@@ -3131,7 +3175,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
     if(this.cfg.occupiedLinkRoutingV1===true)this.rt.services.occupiedLinkRoutingV1=true;
     if(this.cfg.concurrentLinkEgressV1===true)this.rt.services.concurrentLinkEgressV1=true;
-    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;
+    if(this.cfg.routeReachV1===true&&this.rt.services.spatial)this.rt.services.spatial.routeReachV1=true;planOnceSpatialV1(this.rt.services.spatial);
     if(this.cfg.stairLandingClearanceV1===true)this.rt.services.stairLandingClearanceV1=true;
     if(this.cfg.shoreDepartV1===true)this.rt.services.shoreDepartV1=true;
     if(this.cfg.stairWayV1===true)this.rt.services.stairWayV1=true;   // #1428
@@ -3243,6 +3287,10 @@ for (const name of Object.getOwnPropertyNames(MarsEngine.prototype)) {
   Object.defineProperty(wrapped, 'name', { value: name });
   Object.defineProperty(MarsEngine.prototype, name, { ...d, value: wrapped });
 }
+/** #1770 plan-once: the server's engines keep route results per navigation epoch (Spatial.routeMemo; exact, bounded).
+ *  SIM_PLAN_ONCE=0 turns it off; SIM_PLAN_ONCE_ORACLE=1 checks every reuse against a fresh search. */
+const PLAN_ONCE = process.env.SIM_PLAN_ONCE !== '0', PLAN_ONCE_ORACLE = process.env.SIM_PLAN_ONCE_ORACLE === '1', ROUTE_MEMO_CAP = 256;
+function planOnceSpatialV1(sp: Spatial | undefined) { if (PLAN_ONCE && sp && !sp.routeMemo) sp.enableRouteMemo(ROUTE_MEMO_CAP, PLAN_ONCE_ORACLE); }
 const TABLE_CHECK = process.env.SIM_TABLE_CHECK === '1';
 /** The cached listing; under SIM_TABLE_CHECK=1 first proved equal to a fresh one. */
 function checkedTable(t: EntityTable): EntityTable {

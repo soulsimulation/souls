@@ -11,9 +11,9 @@ import { computeMetrics, readLedger } from './metrics.mjs';
 import { loadSpecs } from './report.mjs';
 import { buildStory } from './story.mjs'; // story (worker S)
 import { renderStoryHtml } from './story-html.mjs'; // story (worker S)
-import { scratchDir } from '../../lib/paths.mjs';
+import { outsideCheckout } from '../arena/seat-home.mjs';
 
-export const DEFAULT_RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? scratchDir('playtest/runs');
+export const DEFAULT_RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? outsideCheckout('souls-playtest-runs');   // #1098 arm B2: live seats never inside a checkout
 const PHYS = new Set(['inside-solid', 'no-progress', 'stuck-receipt']);
 
 // ---------- small helpers

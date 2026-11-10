@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "Tent canvas mending (#1565): new immutable core-tent@3 keeps the existing tent flap actions, bed-slot declaration and admission limits, adds broken/repairedBy state and a data-driven sewing-awl repair; core-sewing-awl@1 is a carried tool. Frozen tent revisions remain unchanged. Production K=2 runs for core-tent (three revisions, 57 samples) and core-sewing-awl (five samples) placed, baked and built gallery geometry with zero findings and zero qualification gaps. No thresholds or baselines changed.",
+  "findings": []
+}

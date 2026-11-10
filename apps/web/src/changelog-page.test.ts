@@ -8,7 +8,7 @@ const SAMPLE = `# Changelog
 
 User-facing changes to Sim, newest first.
 
-## 4.1 (2026-11-02)
+## 0.2 (2026-11-02)
 
 ### Features
 
@@ -20,9 +20,9 @@ User-facing changes to Sim, newest first.
 
 - Doors <script>alert(1)</script> & "quotes" stay text.
 
-## 4.0 (2026-10-29)
+## 0.1 (2026-10-29)
 
-Rolled back; superseded by 4.1.
+Rolled back; superseded by 0.2.
 
 ## Earlier
 
@@ -40,12 +40,12 @@ function assertTextOnlySelfContained(page: string) {
 
 await test('releases newest first, with groups, entries, wrapped lines and paragraphs; the intro is dropped', () => {
   const log = parseChangelog(SAMPLE);
-  assert.deepEqual(log.releases.map((r) => [r.version, r.date]), [['4.1', '2026-11-02'], ['4.0', '2026-10-29']]);
+  assert.deepEqual(log.releases.map((r) => [r.version, r.date]), [['0.2', '2026-11-02'], ['0.1', '2026-10-29']]);
   assert.deepEqual(log.releases[0]!.blocks, [
     { kind: 'group', title: 'Features', items: ['Souls can paint with `brush` colours.', 'A long entry that the compiler wrapped onto a second line.'] },
     { kind: 'group', title: 'Fixes', items: ['Doors <script>alert(1)</script> & "quotes" stay text.'] },
   ]);
-  assert.deepEqual(log.releases[1]!.blocks, [{ kind: 'text', text: 'Rolled back; superseded by 4.1.' }]);
+  assert.deepEqual(log.releases[1]!.blocks, [{ kind: 'text', text: 'Rolled back; superseded by 0.2.' }]);
   assert.deepEqual(log.notes, [{ title: 'Earlier', text: ['Earlier development is recorded in the git history.'] }]);
 });
 
@@ -54,12 +54,12 @@ await test('rendered HTML escapes entry text, renders `code`, anchors each relea
   assert.ok(!html.includes('<script>'), 'an entry never becomes markup');
   assert.match(html, /Doors &lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; &quot;quotes&quot; stay text\./);
   assert.match(html, /paint with <code>brush<\/code> colours/);
-  assert.match(html, /<section class="cl-release" id="v4\.1"[^>]*>\s*<h2 id="v4\.1-h"><a class="cl-v" href="#v4\.1">4\.1<\/a> <time datetime="2026-11-02">November 2, 2026<\/time>/);
-  assert.ok(html.indexOf('id="v4.1"') < html.indexOf('id="v4.0"'), 'newest first, as the file lists them');
+  assert.match(html, /<section class="cl-release" id="v0\.2"[^>]*>\s*<h2 id="v0\.2-h"><a class="cl-v" href="#v0\.2">0\.2<\/a> <time datetime="2026-11-02">November 2, 2026<\/time>/);
+  assert.ok(html.indexOf('id="v0.2"') < html.indexOf('id="v0.1"'), 'newest first, as the file lists them');
   assert.match(html, /<a href="\/worlds\/">← Worlds<\/a>/);
   assert.match(html, /<h2>Earlier<\/h2>/);
   assert.equal(inline('a `<b>` c'), 'a <code>&lt;b&gt;</code> c');
-  assert.equal(releaseId('3.62'), 'v3.62');
+  assert.equal(releaseId('0.67'), 'v0.67');
 });
 
 await test('refused: a CHANGELOG.md without release headings fails the build with a reason; a template without the slot too', () => {
@@ -104,7 +104,7 @@ await test('text-only page template plus real CHANGELOG.md: every release, no su
 });
 
 const JOURNAL = {
-  id: 'tea', version: '4.1', date: '2026-11-02', title: 'Tea <together>', result: 'Serve & wash',
+  id: 'tea', version: '0.2', date: '2026-11-02', title: 'Tea <together>', result: 'Serve & wash',
   limitations: 'Historical branch footage; not production verification.',
   source: { url: 'https://github.com/soulsimulation/souls/pull/493', commit: 'a'.repeat(40), capturedOn: '2026-10-31', environment: 'historical-test' },
   media: { kind: 'video', url: 'https://github.com/soulsimulation/souls/releases/download/proofs/tea.mp4',
@@ -113,13 +113,13 @@ const JOURNAL = {
 
 await test('public journal preserves exact association, stable anchors, escaped prose and user-initiated media', () => {
   const html = changelogHtml('<main><!--changelog--></main>', SAMPLE, '/', [JOURNAL]);
-  assert.match(html, /id="v4.1-journal-tea"/);
+  assert.match(html, /id="v0.2-journal-tea"/);
   assert.match(html, /Tea &lt;together&gt;/);
   assert.match(html, /Wash &lt;cup&gt;/);
   assert.match(html, /controls preload="none" playsinline poster=/);
   assert.match(html, /Historical test capture · 2026-10-31/);
-  assert.match(html, /href="#v4.1">← Back to release 4.1/);
-  assert.ok(html.indexOf('id="v4.1-journal-tea"') < html.indexOf('id="v4.0"'));
+  assert.match(html, /href="#v0.2">← Back to release 0.2/);
+  assert.ok(html.indexOf('id="v0.2-journal-tea"') < html.indexOf('id="v0.1"'));
   assert.ok(!/<script|autoplay|<iframe|onerror=/.test(html));
   assert.match(html, /If media cannot load/);
 });
@@ -147,7 +147,7 @@ await test('public projection refuses unknown/private fields, wrong association,
     'https://assets.eden.art/private/a.mp4', 'https://assets.eden.art/public-journal/../private/a.mp4',
     'https://github.com/soulsimulation/souls/releases/download/proofs-x/a.mp4',
     'https://github.com/soulsimulation/souls/releases/download/proofs-761-extra/a.mp4',
-    'https://github.com/soulsimulation/souls/releases/download/v4.1/a.mp4',
+    'https://github.com/soulsimulation/souls/releases/download/v0.2/a.mp4',
   ]) bad.push({ ...JOURNAL, media: { ...JOURNAL.media, url } });
   for (const input of bad) assert.throws(() => parsePublicJournal([input], parseChangelog(SAMPLE)));
   assert.throws(() => parsePublicJournal([JOURNAL, JOURNAL], parseChangelog(SAMPLE)), /duplicate/);
@@ -157,7 +157,7 @@ await test('retired proof stays text-only and traceable; stills are lazy and nev
   const retired = changelogHtml('<main><!--changelog--></main>', SAMPLE, '/', [{ ...JOURNAL, media: { ...JOURNAL.media, status: 'retired' } }]);
   assert.match(retired, /Media retired or unavailable/);
   assert.ok(!/<video|<img|<source/.test(retired));
-  assert.match(retired, /v4.1-journal-tea/);
+  assert.match(retired, /v0.2-journal-tea/);
   const still = changelogHtml('<main><!--changelog--></main>', SAMPLE, '/', [{ ...JOURNAL, media: { ...JOURNAL.media, kind: 'image' } }]);
   assert.match(still, /loading="lazy" decoding="async"/);
   assert.match(still, /Still image; does not demonstrate motion/);
@@ -167,6 +167,6 @@ await test('reviewed real public projection builds with compiled history and con
   const md = readFileSync(new URL('../../../CHANGELOG.md', import.meta.url), 'utf8');
   const entries = JSON.parse(readFileSync(new URL('../../../tools/changelog/public-journal.json', import.meta.url), 'utf8'));
   const html = changelogHtml('<main><!--changelog--></main>', md, '/', entries);
-  assert.match(html, /v4.07-journal-soul-actions-tea/);
+  assert.match(html, /v0.111-journal-soul-actions-tea/);
   assert.ok(!/localhost|127\.0\.0\.1|\/Users\/|ownerId|workerId|transcript|token[=:]/i.test(html));
 });

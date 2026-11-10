@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 (#1582): core-chalkboard@3 reuses the frozen @2 face and writing contract, adding opt-in two-hand upright carrying. A narrow production K=2 run across core-chalkboard placed, baked and rendered all 15 samples of 3 revisions with zero findings and zero qualification gaps. No budget hold is added; older revisions remain unchanged.",
+  "findings": []
+}

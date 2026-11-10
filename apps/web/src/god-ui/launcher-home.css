@@ -1,78 +1,101 @@
-/* Homepage under the world launcher (LauncherHome.tsx); extends .world-list in styles.css. */
-.lh-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
-.lh-top p { margin: 0; max-width: 620px; }
-.lh-new { font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 11px 18px; border-radius: 8px; border: 1px solid var(--fg); background: var(--fg); color: var(--bg); cursor: pointer; white-space: nowrap; }
+/* Homepage under the world launcher (LauncherHome.tsx); extends .world-list in styles.css.
+   The page speaks in the same system font as the bar inside a world (.human-world); monospace is kept for the prompt line. */
+.world-list.lh { max-width: 1400px; margin: 0 auto; padding: max(20px, var(--sa-t)) max(32px, var(--sa-r)) max(32px, var(--sa-b)) max(32px, var(--sa-l)); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
+.lh button { font-family: inherit; }
+
+/* The top bar: the mark and the name on the left, New world and the account on the right */
+.lh-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; padding: 0; border: 0; position: static; background: none; }
+.lh-title { display: flex; align-items: center; gap: 10px; }
+.lh-wordmark { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+/* Same black circle as in a world (#1034), so the mark shows on the light page. */
+.lh-title .eden-mark { display: flex; flex: none; width: 38px; height: 38px; border-radius: 50%; background: #000; overflow: hidden; }
+.lh-title .eden-mark img { display: block; width: 38px; height: 38px; }
+.lh-bar .lh-actions { display: flex; align-items: center; gap: 8px; margin: 0; }
+.lh-new { font: 600 14px/1 system-ui, -apple-system, sans-serif; height: 38px; padding: 0 18px; border-radius: 19px; border: 0; background: var(--fg); color: var(--bg); cursor: pointer; white-space: nowrap; }
 .lh-new:hover { opacity: .88; }
-.lh-empty { margin: 40px 0; padding: 36px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
-.lh-empty p { margin: 0 0 10px; }
-.lh-cards > a.lh-card { display: flex; flex-direction: column; text-decoration: none; min-height: 170px; }
-.lh-card h2 { margin: 0 0 10px; font-size: 18px; overflow-wrap: anywhere; }
-.lh-card p { margin: 0 0 6px; }
-/* #887: a 16:9 picture across the top of the card (the card's 24px padding is bled out); its box is fixed before it loads */
-.lh-cards > a.lh-card > .lh-thumb { display: block; flex: none; width: calc(100% + 48px); max-width: none; height: auto; aspect-ratio: 16 / 9; object-fit: cover; margin: -24px -24px 16px; border-radius: 11px 11px 0 0; background: var(--line); }
-.lh-cards > a.lh-card > .lh-thumb[hidden] { display: none; }
-.lh-meta { color: var(--fg); }
-.lh-claimed { color: var(--accent); }
-.lh-unclaimed { color: var(--warn); }
-.lh-tag { margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.lh-foot { margin-top: auto !important; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; }
-.lh-path { flex-basis: 100%; }
-.lh-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
-.lh-dot.lh-running { background: #2fb36a; }
+.lh-signin { font-size: 14px; font-weight: 600; height: 38px; padding: 0 16px; border-radius: 19px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+.lh-account { position: relative; }
+.lh-avatar { width: 38px; height: 38px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-size: 15px; font-weight: 600; cursor: pointer; }
+.lh-avatar:hover, .lh-avatar[aria-expanded="true"] { border-color: var(--dim); }
+.lh-menu { position: absolute; right: 0; top: 46px; z-index: 20; min-width: 220px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, .28); }
+.lh-menu-who { margin: 0; padding: 8px 10px 10px; font-size: 13px; color: var(--dim); overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
+.lh-menu button { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; text-align: left; font-size: 14px; background: none; border: 0; border-radius: 8px; color: inherit; cursor: pointer; }
+.lh-menu button:hover { background: var(--bg); }
+
+/* The world grid: each card is its picture, with the name and one status line over it */
+.lh-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 14px; font-size: 24px; font-weight: 600; letter-spacing: -.01em; }
+.lh-count { font-size: 14px; font-weight: 400; color: var(--dim); }
+.lh-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.lh-card { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: var(--line); color: #fff; text-decoration: none; }
+/* #887: the picture fills the card; its box is fixed before it loads */
+.lh-card > .lh-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform .4s ease; }
+.lh-card > .lh-thumb[hidden] { display: none; }
+.lh-card:hover > .lh-thumb { transform: scale(1.03); }
+.lh-card:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.lh-label-over { position: absolute; left: 0; right: 0; bottom: 0; padding: 48px 16px 14px; background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, .72)); }
+.lh-card h2 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; text-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+.lh-meta { margin: 3px 0 0; font-size: 13px; color: rgba(255, 255, 255, .82); }
+.lh-world-slug { margin: 1px 0 0; font-size: 12px; color: rgba(255, 255, 255, .75); overflow-wrap: anywhere; }
+.lh-tag { margin-left: 8px; font-size: 13px; font-weight: 400; color: rgba(255, 255, 255, .7); }
+.lh-unclaimed { color: #f2c27a; }
+.lh-dot { width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: rgba(255, 255, 255, .5); display: inline-block; vertical-align: 1px; }
+.lh-dot.lh-running { background: #2fd27a; }
 .lh-dot.lh-starting, .lh-dot.lh-restarting { background: #e0a434; }
 .lh-dot.lh-failed { background: var(--bad); }
+
+.lh-empty { margin: 40px 0; padding: 36px; border: 1px dashed var(--line); border-radius: 14px; text-align: center; }
+.lh-empty p { margin: 0 0 10px; }
+
+/* The New world dialog */
 .lh-backdrop { position: fixed; inset: 0; background: rgba(16, 17, 16, .42); display: flex; align-items: flex-start; justify-content: center; padding: 9vh 16px 16px; z-index: 50; overflow: auto; }
 .lh-dialog { width: min(560px, 100%); background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 14px; padding: 24px 26px 20px; box-shadow: 0 18px 60px rgba(0, 0, 0, .25); }
 .lh-dialog h2 { margin: 0 0 18px; font-size: 18px; }
 .lh-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); margin: 0 0 6px; padding: 0; }
-.lh-dialog input[type="text"], .lh-dialog #lh-name, .lh-dialog #lh-god { width: 100%; font-size: 16px; padding: 10px 12px; border-radius: 8px; background: var(--bg); }
-.lh-slug { margin: 6px 0 16px; font-size: 11.5px; min-height: 1.2em; }
+.lh-opt { text-transform: none; letter-spacing: 0; }
+.lh-dialog input[type="text"], .lh-dialog #lh-name, .lh-dialog #lh-god { width: 100%; font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 8px; background: var(--bg); }
+.lh-dialog #lh-god { margin-bottom: 16px; }
+.lh-slug { margin: 6px 0 16px; font-size: 12px; min-height: 1.2em; }
 .lh-templates { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
 .lh-template { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 .lh-template.on { border-color: var(--fg); background: var(--bg); }
 .lh-template input { margin: 2px 0 0; }
 .lh-template b { display: block; margin-bottom: 2px; }
-.lh-desc { display: block; color: var(--dim); }
-.lh-after { margin: 16px 0 0; font-size: 11.5px; }
-.lh-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
-.lh-cancel, .lh-create { font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-.lh-cancel { background: transparent; border: 1px solid var(--line); }
+.lh-desc { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--dim); }
+.lh-after { margin: 16px 0 0; font-size: 12px; }
+.lh-dialog .lh-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.lh-cancel, .lh-create { font: 600 14px/1 system-ui, -apple-system, sans-serif; padding: 11px 18px; border-radius: 19px; cursor: pointer; }
+.lh-cancel { background: transparent; border: 1px solid var(--line); color: inherit; }
 .lh-create { background: var(--fg); color: var(--bg); border: 1px solid var(--fg); min-width: 150px; }
 .lh-create:disabled { opacity: .5; cursor: default; }
-.lh-wait { margin: 10px 0 0; font-size: 11.5px; text-align: right; }
-.lh-cards { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-.lh-actions { display: flex; align-items: center; gap: 14px; }
+.lh-wait { margin: 10px 0 0; font-size: 12px; text-align: right; }
 .lh-link { font: inherit; background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
-/* P6: the world list a visitor opens */
-.lh-top h1 { margin: 0 0 10px; }
-.lh-h { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; margin: 40px 0 0; font-weight: 600; }
-.lh-h .dim { margin-left: 6px; }
-.lh-new { font-size: 14px; padding: 13px 22px; }
-.lh-cards { margin-top: 16px !important; }
-.lh-cards > a.lh-card { min-height: 150px; }
-.lh-god b { font-weight: 600; }
-.lh-open { margin-top: 10px; font-size: 12px; font-weight: 600; }
-.lh-card:hover .lh-open { text-decoration: underline; }
-.lh-opt { text-transform: none; letter-spacing: 0; }
-.lh-dialog #lh-god { margin-bottom: 16px; }
+
+/* #897: the For agents prompt under the world list */
+.lh-agents { margin-top: 56px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 12px 40px; align-items: center; }
+.lh-agents .lh-h { font-size: 20px; margin: 0 0 6px; text-transform: none; letter-spacing: -.01em; color: var(--fg); }
+.lh-agents-head p { margin: 0; font-size: 14px; }
+.lh-prompt { display: flex; gap: 12px; align-items: center; padding: 14px 14px 14px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.lh-prompt-line { flex: 1; min-width: 0; margin: 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; user-select: all; }
+.lh-copy { flex: none; height: 36px; padding: 0 18px; border-radius: 18px; border: 0; background: var(--fg); color: var(--bg); font-size: 14px; font-weight: 600; cursor: pointer; }
+.lh-copy:hover { opacity: .88; }
+.lh-agents-more { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--dim); text-decoration: none; }
+.lh-agents-more:hover { color: var(--fg); text-decoration: underline; }
+/* #388, #897: changelog and docs */
+.lh-footer { margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; }
+.lh-footer a { color: var(--dim); text-decoration: none; }
+.lh-footer a:hover { color: var(--fg); text-decoration: underline; }
+.lh-footer { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 24px; flex-wrap: wrap; }
+.lh-footer-links { display: flex; gap: 18px; flex-wrap: wrap; margin: 0; padding: 0; border: 0; }
+.lh-credit { margin: 0; color: var(--dim); }
+.lh-credit a { color: var(--fg); }
+
+@media (max-width: 960px) { .lh-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
-  .world-list.lh { margin: 3vh auto; padding: 16px; }
-  .lh-top { flex-direction: column; align-items: stretch; }
-  .lh-top .lh-actions { justify-content: space-between; margin-top: 4px; }
+  .world-list.lh { padding: max(12px, var(--sa-t)) 16px 24px; }
+  .lh-bar { margin-bottom: 24px; }
+  .lh-new { padding: 0 14px; }
+  .lh-cards { grid-template-columns: 1fr; gap: 12px; }
+  .lh-agents { grid-template-columns: 1fr; padding: 20px; }
+  .lh-prompt { flex-direction: column; align-items: stretch; }
   .lh-dialog { padding: 20px 16px 16px; }
 }
-.lh-desc { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.lh-card .lh-world-slug{margin:4px 0 14px;font:600 13px/1.4 ui-monospace,monospace;color:var(--fg);overflow-wrap:anywhere}
-.lh-footer{margin-top:56px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px}
-.lh-footer a{color:var(--dim);text-decoration:none}
-.lh-footer a:hover{color:var(--fg);text-decoration:underline}
-
-.lh-title{display:flex;align-items:center;gap:10px}
-/* Same black circle as in a world (#1034), so the halo shows on the light page. */
-.lh-title .eden-mark{display:flex;flex:none;width:38px;height:38px;border-radius:50%;background:#000}
-.lh-title .eden-mark img{display:block;width:38px;height:38px}
-/* #897: the For agents prompt under the world list */
-.lh-agents{margin-top:44px}
-.lh-agents p{margin:0 0 10px;font-size:13px}
-.lh-prompt{display:flex;gap:10px;align-items:center;max-width:760px}
-.lh-prompt input{flex:1;min-width:0;font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit}
