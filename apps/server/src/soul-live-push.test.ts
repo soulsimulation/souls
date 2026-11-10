@@ -20,9 +20,10 @@ async function until<T>(f: () => T, ms = 5000, every = 10): Promise<T | null> { 
 async function setup(t: any, {push = true} = {}) {
   const w = fakeLiveWorld(), f = eventsFixture(['Roger'], {events: {live: push ? w.hub : null}});
   const fixture = getRequestListener(f.app.fetch), live = getRequestListener(w.app.fetch), seen: {path: string; at: number}[] = [];
-  let refuse = false;
+  let refuse = false, cut = false;
   const server = createServer((req, res) => {
     const path = req.url!.split('?')[0]!; seen.push({path, at: Date.now()});
+    if (cut && path === '/v1/edge/events') { req.socket.destroy(); return; }
     if (refuse && path === '/v1/edge/events') { res.writeHead(503, {'content-type': 'application/json', 'retry-after': '1'}); return res.end('{"error":{"code":"world.busy"}}'); }
     if (path === '/v1/edge/live') return live(req, res);
     if (path === '/v1/edge/catalog') { res.writeHead(200, {'content-type': 'application/json', etag: '"cat-1"'}); return res.end(JSON.stringify({contract: 'soul-catalog/1', worldId: 'w-1', scope: 'public', placeVerbs: [], anywhere: [], places: [], things: [], acts: [], counts: {places: 0, things: 0, acts: 0, kinds: 0}})); }
@@ -43,7 +44,7 @@ async function setup(t: any, {push = true} = {}) {
   // the copy's row for s_b at x (the world rounds to 0.1 m)
   const bAt = (x: number) => rowOf('s_b')?.at?.[0] === x;
   const moveB = async (x: number) => { w.entities.h_b!.pose.p = [x, 0, 50]; w.advance(); };
-  return {w, f, dir, child, copy, rowOf, bAt, moveB, seen, log: () => log, refuse: (on: boolean) => { refuse = on; if (on) server.closeAllConnections(); }};
+  return {w, f, dir, child, copy, rowOf, bAt, moveB, seen, log: () => log, refuse: (on: boolean) => { refuse = on; if (on) server.closeAllConnections(); }, cut: (on: boolean) => { cut = on; if (on) server.closeAllConnections(); }};
 }
 
 test('serve keeps the copy by the push: each change within 1 s, no poll while it comes, a divergence repaired, a suspend caught up once', {timeout: 120_000}, async (t) => {
@@ -108,4 +109,18 @@ test('a world without the push: serve polls the live picture as before, with no 
   assert.ok(await until(() => s.bAt(77), 5000, 50), 'the poll brings the change');
   assert.equal(s.copy().pushed, undefined);
   assert.doesNotMatch(s.log(), /live|push/i, 'nothing said about a push the world does not have');
+});
+
+test('a stream cut off with no answer at all is asked for again as soon as the poll reaches the world, not after its whole backoff', {timeout: 90_000}, async (t) => {
+  const s = await setup(t);
+  assert.ok(await until(() => s.copy()?.pushed && s.copy()?.live?.epoch, 10_000), s.log());
+  s.cut(true);
+  await sleep(12_000);   // several failed tries: the stream's backoff has grown past the poll's 2 s
+  for (let i = 0; i < 3; i++) { await s.moveB(95 + i); await sleep(200); }
+  const n = s.seen.length, restored = Date.now(); s.cut(false);
+  const back = await until(() => s.seen.slice(n).find((r: any) => r.path === '/v1/edge/events'), 20_000, 20);
+  assert.ok(back, 'the stream is asked for again');
+  t.diagnostic(`stream asked for again ${back!.at - restored} ms after the world answered again`);
+  assert.ok(back!.at - restored < 5_000, 'within the poll\'s reach, not the backoff');
+  assert.ok(await until(() => s.bAt(97) && s.copy()?.pushed, 3000), 'and the copy is kept by the push again');
 });

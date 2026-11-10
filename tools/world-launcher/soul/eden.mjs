@@ -3126,6 +3126,9 @@ async function worldCopy() {
 // serve keeps both files current, so a command reads them from disk and never waits.
 // One round at a time, and a world that does not answer is asked less often (2 s, then 4, 8, 16, 32 s), never in a pile.
 let FOLLOWING = false, FOLLOW_SKIP = 0, FOLLOW_FAILS = 0, PUSHED_AT = 0;
+// #1755: a stream waiting out its backoff after the world stopped answering is told the moment the poll reaches it again
+let WORLD_BACK = [];
+const worldBack = () => { const w = WORLD_BACK; WORLD_BACK = []; for (const f of w) f(); };
 async function followWorld() {
   if (FOLLOWING) return;
   if (Date.now() - PUSHED_AT < soulLive.PUSHED_FRESH_MS) return;   // the world's push keeps the copy: the poll is the fallback (#1755)
@@ -3134,7 +3137,7 @@ async function followWorld() {
   try {
     const live = await syncLive({ force: true });
     if (!live || live.stale) { FOLLOW_FAILS = Math.min(FOLLOW_FAILS + 1, 4); FOLLOW_SKIP = 2 ** FOLLOW_FAILS - 1; return; }
-    FOLLOW_FAILS = 0;
+    FOLLOW_FAILS = 0; worldBack();
     if (catalogOld(readJsonFile(CATALOG_FILE), load().world, live)) { const c = await syncCatalog(); if (c.stale) { FOLLOW_FAILS = 1; FOLLOW_SKIP = 1; } }
   } finally { FOLLOWING = false; }
 }
@@ -4728,7 +4731,9 @@ async function serveForeground() {
       if (stopping || terminal) return;
       if (resync) continue;   // #1755: straight back, without the copy's seq: the world sends the whole picture
       attempt = Math.min(attempt + 1, 6);
-      await pause(gone ? ADDRESSED_BYE_MS : ms != null ? statedJitter(ms) : fullJitter(attempt));
+      // a world that did not answer at all is asked again once the poll reaches it (#1755); an HTTP refusal, a stated wait or a newer stream keeps its wait
+      const back = !gone && ms == null && !code ? new Promise((done) => WORLD_BACK.push(done)) : null;
+      await Promise.race([pause(gone ? ADDRESSED_BYE_MS : ms != null ? statedJitter(ms) : fullJitter(attempt)), ...(back ? [back] : [])]);
     }
   }
   // One heavy request at a time, and soul.busy waited out here instead of handed back. Only reads and keyed writes repeat.
