@@ -1,0 +1,3 @@
+/** Exact-definition projection: each integral card appears once, at its authoritative deck/spread location. */
+import {reflectionShapes} from '../../../../packages/world-compiler/src/core-kit/reflection-cards.ts';import {buildKit} from './kit.mesh.ts';import {registerMesh} from './registry.ts';
+registerMesh({gen:'tag:reflection-cards',build(ctx){if(ctx.def.name!=='core-reflection-cards'||ctx.def.version!==1)return null;return buildKit({round:0,shapes:reflectionShapes(ctx.entity.state??{})},ctx)},instanceKey(ctx){return ctx.def.hash+':'+JSON.stringify([...Array.from({length:8},(_,i)=>ctx.entity.state?.['d'+i]),...Array.from({length:3},(_,i)=>[ctx.entity.state?.['p'+i],ctx.entity.state?.['face'+i]])])}});

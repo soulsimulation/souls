@@ -1,0 +1,1 @@
+Add a portable reflection-card tray with eight unique cards, persistent deck order and three spread positions. Native cut, deal without replacement, turn and gather preserve card identities through handling and restart.
