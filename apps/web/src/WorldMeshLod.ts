@@ -12,14 +12,14 @@ export {workerSimplifier} from './mesh-lod-worker-client.ts';
  * renderer.render swaps in the coarsest level whose error projects below `maxErrorPx` CSS pixels at that mesh's nearest
  * distance from the camera. `restore` puts the original geometry back right after rendering, so picking, raycasts,
  * static batching checks and tests never see a level. Levels are built lazily after the simplifier has loaded: in a
- * worker when one is given (`workerSimplifier`, release 3.1: no main-thread stalls), else one mesh per frame within a
+ * worker when one is given (`workerSimplifier`, release 0.6: no main-thread stalls), else one mesh per frame within a
  * small time budget; until then, and for anything unsuitable, the original is drawn. */
 export type MeshLodOptions={minTriangles:number;maxErrorPx:number;ratios:readonly number[];rescanFrames:number;budgetMs:number;
   /** Hard cap on any level's deviation in metres: decals (tyre tracks, paths, shadows painted on the ground) sit ~2.5 cm
    * above the terrain and must stay above a simplified surface. */
   maxWorldError:number};
 export const PHONE_MESH_LOD:MeshLodOptions=Object.freeze({minTriangles:6000,maxErrorPx:1,ratios:[0.3,0.1,0.03],rescanFrames:120,budgetMs:6,maxWorldError:0.015});
-/** Desktop (release 3.1): the same levels, swapped in only when their error is under half a CSS pixel. */
+/** Desktop (release 0.6): the same levels, swapped in only when their error is under half a CSS pixel. */
 export const DESKTOP_MESH_LOD:MeshLodOptions=Object.freeze({...PHONE_MESH_LOD,maxErrorPx:0.5});
 /** Vertex colours carry painted ground (tyre tracks, paths, soil patches): a colour step of ~0.03 counts like a 1.5 cm
  * displacement, so painted detail survives simplification. Normals keep the shading of folds. */

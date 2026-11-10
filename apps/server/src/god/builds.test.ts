@@ -4,8 +4,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Hono } from 'hono';
-import { coreRef, hashOf } from '@sim/world-compiler';
-import { work } from '@sim/world-compiler/work-meter';
+import { coreRef, hashOf } from '@souls/world-compiler';
+import { work } from '@souls/world-compiler/work-meter';
 import { Db } from '../db.ts';
 import { ApiError } from '../souls.ts';
 import { GodMode, type GodEvent, type WorldDiffMessage, type WorldBuildMessage, type GodOptions } from './god.ts';
@@ -201,7 +201,7 @@ test('batch echo, rev and receipt share one commit; retry does not count again; 
   }
 });
 
-// R2F (release 1.1 walk, release-check-1015): a visitor's feed while the lead narrates after a pause, then commits.
+// R2F (release 0.1 walk, release-check-1015): a visitor's feed while the lead narrates after a pause, then commits.
 // Production defaults (10 min pause, 30 min closure). `walk` in fixtures/build-messages.json is this feed as the viewer
 // replays it (apps/web/src/WorldBuildSites.test.ts); BUILD_EXPORT_FIXTURES=1 rewrites it. Only the replay projection is
 // stored and compared: a diff's catalog defs (core-bench's description, defaults, hash) and an upsert's default params
@@ -456,7 +456,7 @@ test('closed retention prunes by rev and never loses the world revision high-wat
   const next = f.god.builds.start({ id: 'next', title: 'Next', steps: ['a'], site: { at: [0, 0], size: [10, 10] } }, caller) as any; assert.equal(next.build.rev, 405);
 });
 
-// Z3: work budgets, not milliseconds (see @sim/world-compiler/work-meter): the same answer on any CPU, so these run in the gate.
+// Z3: work budgets, not milliseconds (see @souls/world-compiler/work-meter): the same answer on any CPU, so these run in the gate.
 // Measured 2026-10-20, identical on every run: build overhead 1,935 per five-place batch (a plain batch is 44,642 at p50),
 // touch 1, undo p95 70,035; two live claims add 662 per batch and 3,410 to the 200-upsert check. Budgets are about 2x.
 const BUILD_WORK = { overheadP95: 4_000, touchMax: 2, undoP95: 140_000 }, CLAIM_WORK = { overheadP95: 1_400, check200Overhead: 7_000 };

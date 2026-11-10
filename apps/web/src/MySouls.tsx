@@ -1,12 +1,14 @@
-import {useEffect,useState,type ReactNode} from 'react';
+import {useEffect,useState,useSyncExternalStore,type ReactNode} from 'react';
+import {createPortal} from 'react-dom';
+import {MENU_SOULS_SHOWN,menuSoulsShown,menuSoulsSlot,subscribeMenuSoulsSlot} from './hud-menu.ts';
 import {NavbarMenu} from './NavbarMenu.tsx';
 import {orderedSoulIds,readSoulRecency,selectedSoulIds} from './soul-recency.ts';
-import type {PublicSoul} from '@sim/protocol';
+import type {PublicSoul} from '@souls/protocol';
 import {worldKey,worldPath} from './world-path.ts';
 import {requestSoulConversations} from './dialogue-speaking.ts';
 import {soulAvatars} from './SoulAvatars.ts';
 import {soulAvatarImage} from './soul-avatar-source.ts';
-import type {Api} from './useSim.ts';
+import type {Api} from './useSouls.ts';
 import {useOwnedAgentPresence} from './agent-presence.ts';
 import {newest,ownerLink,readBody,type Body} from './soul-state.ts';
 const ID=/^[a-zA-Z0-9_-]{1,100}$/;
@@ -48,7 +50,17 @@ export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,rece
  const open=(id:string)=>{remember(id);select(id);follow?.(id);};
  const chip=(soul:PublicSoul,close?:()=>void)=>{const st=stateOf(soul),mark=st?CHIP_MARK[st]:undefined,dim=st==='zombie'||st==='asleep'||st==='disconnected';
   return <button type="button" key={soul.id} className={(present&&!present.has(soul.id))||dim?'my-souls-away':undefined} data-link-state={st??undefined} onContextMenu={e=>{e.preventDefault();remember(soul.id);select(soul.id);requestSoulConversations(soul.id);}} title={`${soul.name}${st?` · ${CHIP_WORD[st]}`:''} · Soul details · right-click for conversations`} aria-label={`Open ${soul.name}${st?` (${CHIP_WORD[st]})`:''}`} onClick={()=>{open(soul.id);close?.();}}><SoulAvatar soul={soul}/>{close&&<span>{soul.name}</span>}{mark&&<span className={mark.cls} aria-hidden="true">{mark.text}</span>}</button>;};
- return <div className="my-souls" aria-label="Your account Souls">{pinned.length>3
+ // #1391 part b: the phone menu's Souls section, open by default, up to 5 with Show more / Show fewer (hud-menu.ts slot)
+ const slot=useSyncExternalStore(subscribeMenuSoulsSlot,menuSoulsSlot,menuSoulsSlot);
+ const [listOpen,setListOpen]=useState(true),[expanded,setExpanded]=useState(false);
+ const {shown,hidden}=menuSoulsShown(pinned,expanded);
+ const menuList=slot.el&&pinned.length>0&&createPortal(<div role="group" className="hud-menu-souls" aria-label="Your Souls">
+   <button type="button" className="hud-menu-row hud-menu-souls-head" aria-expanded={listOpen} onClick={()=>setListOpen(!listOpen)}><span>Souls</span><span className="hud-menu-value">{pinned.length} <span aria-hidden="true">{listOpen?'▴':'▾'}</span></span></button>
+   {listOpen&&<div className="hud-menu-soul-list">{shown.map(soul=>chip(soul,slot.close))}
+     {pinned.length>MENU_SOULS_SHOWN&&<button type="button" className="hud-menu-row hud-menu-souls-more" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show fewer':`Show ${hidden} more`}</button>}</div>}
+   {newSoul&&<div className="hud-menu-new-soul" onClick={slot.close}>{newSoul}</div>}
+  </div>,slot.el);
+ return <div className="my-souls" aria-label="Your account Souls">{menuList}{pinned.length>3
   ? <NavbarMenu label="Your Souls" className="souls-menu" trigger={<span className="soul-avatar-pile">{pinned.slice(0,3).map((soul,i)=><span key={soul.id} style={{zIndex:3-i}} data-soul-id={soul.id}><SoulAvatar soul={soul}/></span>)}</span>}>
       {close=><>{pinned.map(soul=>chip(soul,close))}<div onClick={close}>{newSoul}</div></>}
     </NavbarMenu>

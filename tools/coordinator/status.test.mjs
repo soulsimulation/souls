@@ -24,6 +24,7 @@ test('checkStates: stale results (cancelled or superseded Actions runs) never co
   assert.deepEqual(checkStates({ runs, workflowRuns, required }), { 'ci-ok': 'pending', 'proof-ok': 'pass', gitleaks: 'pending', fragment: 'missing' });
   // Without the Actions runs a red from a cancelled run would read as a failure; that is the bug this avoids.
   assert.equal(checkStates({ runs, required })['ci-ok'], 'fail:failure');
+  assert.equal(checkStates({ runs: [{ id: 2, name: 'ci-ok', status: 'completed', conclusion: 'failure', check_suite: { id: 1 } }], workflowRuns: [{ id: 1, workflow_id: 7, check_suite_id: 1, status: 'completed', conclusion: 'failure' }, { id: 3, workflow_id: 7, check_suite_id: 2, status: 'completed', conclusion: 'skipped' }], required })['ci-ok'], 'fail:failure', 'a run with every job skipped replaces nothing');
 });
 
 test('checkStates: the newest live run wins; commit statuses fill names with no check run', () => {

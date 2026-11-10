@@ -13,8 +13,9 @@ import { readJson, readJsonl } from '../lib/jsonl.mjs';
 import { loadRun } from '../review/run.mjs';
 import { computeMetrics, readLedger } from '../review/metrics.mjs';
 import { runOracles } from '../review/oracles.mjs';
+import { SCORER, closureOf, refusedResult, scoreRun, scorecardMeasures, renderScorecard } from './controllability.mjs';
 
-export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '1' });
+export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '4' }); // v2: the controllability scorecard (#1097); v3: questions read a close without `result` (#1269); v4: nor a refused one (#1309)
 export const SCHEMA = 'soul-run-evaluation/1';
 export const INDEX_SCHEMA = 'soul-run-index/1';
 const VERDICTS = ['pass', 'fail', 'unknown'];
@@ -64,7 +65,11 @@ export function seatSteps(file, seat) {
         open.set(c.id, s); steps.push(s);
       } else if (c.type === 'tool_result' && open.has(c.tool_use_id)) {
         const s = open.get(c.tool_use_id), raw = typeof c.content === 'string' ? c.content : JSON.stringify(c.content ?? '');
-        let out = raw; try { out = JSON.parse(raw); } catch { /* plain text */ }
+        let out = raw; try { out = JSON.parse(raw); } catch {
+          // #1098: the CLI can print owner banner lines ("OWNER: 1 message(s) waiting …") before its JSON answer; read the
+          // answer from the first line that opens a JSON object
+          const j = raw.search(/^\{/m); if (j > 0) { try { out = JSON.parse(raw.slice(j)); } catch { /* plain text */ } }
+        }
         Object.assign(s, { resultLine: i + 1, doneMs: ev._rx ?? null, out, isError: !!c.is_error });
       }
     }
@@ -126,7 +131,8 @@ export function joinRequests(sr) {
       const ci = d.cutoffs.findIndex((c) => c.requestId === del.requestId), cut = ci >= 0 ? d.cutoffs[ci] : null;
       const mine = sr.steps[seat] ?? [], mid = del.messageId;
       const ack = mid ? mine.find((s) => s.verb === 'ack' && s.args[0] === mid) : null;
-      const result = mid ? mine.find((s) => s.verb === 'result' && s.args[0] === mid) : null;
+      const forOfReceipt = receiptsFor(mine);
+      const result = mid ? mine.find((s) => (s.verb === 'result' && !refusedResult(s) && s.args[0] === mid) || closureOf(s, forOfReceipt)?.id === mid) : null;
       // An act belongs to a request when the CLI says so (`for`); a refusal carries no `for`, so an act between this
       // request's ack and result calls in the same transcript belongs to it too.
       const between = (s) => ack && s.line > ack.line && (!result || s.line < result.line);
@@ -134,7 +140,7 @@ export function joinRequests(sr) {
       const say = mine.filter((s) => s.verb === 'say' && between(s));
       const cutMs = cut ? Date.parse(cut.t) : null;
       const physical = acts.map((s) => ({ capability: s.out?.receipt?.capability ?? s.out?.resolved ?? null, waited: s.args.includes('--wait'), ...actOutcome(s), ref: ref(sr, s.file, s.resultLine ?? s.line) }));
-      const seatOutcome = result ? (result.out?.outcome ?? result.args[1] ?? null) : null;
+      const seatOutcome = result ? (result.out?.outcome ?? (result.verb === 'result' ? result.args[1] : closureOf(result, forOfReceipt)?.outcome) ?? null) : null;
       const r = {
         requestId: del.requestId, seat, channel: del.channel ?? dec.scripted?.channel ?? null, text: dec.scripted?.text ?? dec.decision?.text ?? null,
         budgetSec: dec.scripted?.budgetSec ?? null, broadcast: !!dec.scripted?.broadcast, sentAt: dec.t, messageId: mid ?? null,
@@ -221,10 +227,32 @@ export function standardMeasures(sr, requests) {
     M.push(measured('costUsd', 'token-cost', 'USD', r3(sum('costUsd')), { n: usage.length, basis: 'adapter-reported cost per turn', sources: Object.keys(sr.steps).map((s) => sr.at('seats', s, 'turns.jsonl')) }));
   }
   if (sr.receipt?.cost) M.push(measured('lifecycleOverheadMs', 'lifecycle', 'ms', sr.receipt.cost.lifecycleOverheadMs ?? null, { basis: `run wall ${sr.receipt.cost.wallMs} ms minus scenario execution ${sr.receipt.cost.executeMs} ms`, sources: ['run-receipt.json'] }));
+  M.push(directionsMeasure(sr));
   const em = sr.playtestDir ? readJson(join(sr.playtestDir, 'emergence.json'), null) : null;
   if (!em?.metric?.souls) M.push({ ...unavailable('coLocationRatio', 'social-heuristic', 'ratio', em ? 'emergence.json saw no Souls (it reads observer samples)' : 'no emergence.json', 'review/emergence.mjs'), heuristic: true });
   else M.push({ ...measured('coLocationRatio', 'social-heuristic', 'ratio', em.metric.coLocation?.ratio ?? null, { n: em.metric.souls, basis: `HEURISTIC, not a social outcome: ${em.metric.basis?.coLocation ?? 'co-location'}`, sources: [sr.at('emergence.json')] }), heuristic: true });
   return M;
+}
+
+/** Directed casts (#783): the direction journal (director/commands.jsonl) as counts by command and outcome, and each
+ *  redirection with its target, run-relative time, outcome and whether the target spoke afterwards (director/speech.jsonl,
+ *  world time after the command's wall time; with expect words, whether that speech contained one). */
+export function directionsMeasure(sr) {
+  const BASIS = 'console commands recorded by the swarm orchestrator (typed, scripted or from the lifecycle), with the outcome it applied';
+  const file = sr.playtestDir ? join(sr.playtestDir, 'director', 'commands.jsonl') : null;
+  if (!file || !existsSync(file)) return unavailable('directions', 'direction', 'commands', 'no direction journal (not a directed cast, or recorded before #783)', BASIS);
+  // A torn or unparsed line (a killed run's last write) is skipped and counted, never read as a command.
+  const lines = readJsonl(file), cmds = lines.filter((c) => typeof c?.cmd === 'string' && typeof c?.outcome === 'string');
+  const speech = readJsonl(join(sr.playtestDir, 'director', 'speech.jsonl'));
+  const byCommand = {};
+  for (const c of cmds) { const b = (byCommand[c.cmd] ??= { applied: 0, held: 0, refused: 0 }); b[c.outcome] = (b[c.outcome] ?? 0) + 1; }
+  const redirections = cmds.filter((c) => c.cmd === 'redirect').map((c) => {
+    const after = speech.filter((x) => x.seat === c.target && (x.atMs ?? Date.parse(x.t)) > Date.parse(c.t));
+    const words = Array.isArray(c.expect) ? c.expect.map((w) => String(w).toLowerCase()) : null;
+    return { target: c.target, source: c.source, atSec: c.elapsedSec, outcome: c.outcome, ...(c.reason ? { reason: c.reason } : {}), requestIds: c.requestIds ?? [], spokeAfter: after.length > 0, ...(words ? { expect: words, expectHeard: after.some((x) => words.some((w) => String(x.text ?? '').toLowerCase().includes(w))) } : {}) };
+  });
+  return { ...measured('directions', 'direction', 'commands', cmds.length, { n: cmds.length, basis: BASIS, sources: [sr.at('director', 'commands.jsonl'), ...(speech.length ? [sr.at('director', 'speech.jsonl')] : [])] }),
+    byCommand, refused: cmds.filter((c) => c.outcome === 'refused').length, skipped: lines.length - cmds.length, redirections };
 }
 
 /** Load a question module: default export {id, version, question, assumptions?, score(ctx)}. */
@@ -241,13 +269,28 @@ export async function loadQuestion(file) {
   return { ...q, path, sha256: sha256(readFileSync(path)) };
 }
 
+const receiptsFor = (steps) => new Map(steps.filter((s) => s.verb === 'act' && s.out?.receipt?.id && s.out?.for).map((s) => [s.out.receipt.id, s.out.for]));
+/** The steps as a question reads them (#1269): a close made by the finishing command is followed by the `result` step it replaced,
+ *  so a question written for `result` reads it, with no new question version. The scorer places closes itself and gets the raw steps. */
+export function questionSteps(steps) {
+  const forOfReceipt = receiptsFor(steps), seen = new Set(steps.filter((s) => s.verb === 'result' && !refusedResult(s)).map((s) => s.args[0]));
+  return steps.flatMap((s) => {
+    if (refusedResult(s)) return [{ ...s, verb: 'result-refused' }];   // #1309: the world refused it, so it closed nothing
+    const c = closureOf(s, forOfReceipt); if (!c || seen.has(c.id)) return [s];
+    seen.add(c.id);
+    const text = s.verb === 'ack' ? s.args[1] : s.verb === 'say' ? s.args[0] : undefined;
+    return [s, { ...s, verb: 'result', args: [c.id, c.outcome, ...(text ? [text] : [])], out: { outcome: c.outcome }, viaClose: true }];
+  });
+}
+
 /** The read-only context a question scorer gets. */
 function questionContext(sr, requests, sources) {
-  const packs = sr.run?.evidence ?? [];
+  const packs = sr.run?.evidence ?? [], asRead = new Map();
   return {
     runId: sr.runId, status: sr.status, scenario: sr.scenario, setup: sr.setup, requests, seats: sr.seatIds,
-    steps: (seat) => sr.steps[seat] ?? [],
+    steps: (seat) => { if (!asRead.has(seat)) asRead.set(seat, questionSteps(sr.steps[seat] ?? [])); return asRead.get(seat); },
     hasTranscript: (seat) => (sr.steps[seat]?.length ?? 0) > 0,
+    listens: (seat) => (sr.playtestDir ? readJsonl(join(sr.playtestDir, 'seats', seat, 'listen.jsonl')) : []),
     observer: { packs: packs.length, available: packs.length > 0, receipt: sr.receipt?.observer ?? null },
     evidencePacks: packs,
     ref: (path, line = null) => ({ path, ...(line ? { line } : {}), sha256: sources[path]?.sha256 ?? null }),
@@ -282,7 +325,7 @@ function scenarioAcceptance(sr) {
 export function runIdentity(sr) {
   const sc = sr.scenario ? structuredClone(sr.scenario) : null;
   if (sc) {
-    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot']) delete sc[k]; if (sc.world) delete sc.world.port;
+    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot', 'castPath']) delete sc[k]; if (sc.world) delete sc.world.port;
     // A traced seat is a different condition from an untraced one, but its run-specific trace file and ids are not.
     for (const s of sc.seats ?? []) if (s.diagnostics?.trace) s.diagnostics = { trace: true };
   }
@@ -311,7 +354,7 @@ export function runIdentity(sr) {
 
 function evaluatorFiles() {
   const here = dirname(new URL(import.meta.url).pathname);
-  const files = ['runs/evaluate.mjs', 'review/run.mjs', 'review/metrics.mjs', 'review/oracles.mjs'];
+  const files = ['runs/evaluate.mjs', 'runs/controllability.mjs', 'review/run.mjs', 'review/metrics.mjs', 'review/oracles.mjs'];
   const root = resolve(here, '..');
   const out = Object.fromEntries(files.map((f) => [f, existsSync(join(root, f)) ? sha256(readFileSync(join(root, f))).slice(0, 16) : null]));
   let commit = null, dirty = null;
@@ -337,6 +380,11 @@ export async function evaluateRun(dir, { questions = [], write = true, now = () 
   for (const q of sr.receipt?.spec?.effective?.evaluation?.questions ?? []) if (!loaded.some((l) => l.sha256 === q.sha256)) answers.push({ id: q.id ?? basename(q.path), basis: 'predeclared', verdict: 'unknown', uncertainty: 'the predeclared scorer file is missing or changed since the run (hash mismatch)', evidence: [], scorer: q });
   const review = sr.playtestDir ? readJson(join(sr.playtestDir, 'receipts', '5-review.json'), null) : null;
   const identity = runIdentity(sr);
+  // The scorecard's definitions are predeclared the way questions are: their hash is in the effective spec at the run.
+  const scorerSha = sha256(readFileSync(new URL('./controllability.mjs', import.meta.url)));
+  const declaredScorer = sr.receipt?.spec?.effective?.scorer ?? null;
+  const scorecard = scoreRun(sr, { answers, scorer: { sha256: scorerSha, predeclared: declaredScorer?.sha256 === scorerSha, ...(declaredScorer && declaredScorer.sha256 !== scorerSha ? { note: `the scorer changed since the run (spec had ${declaredScorer.sha256.slice(0, 16)})` } : !declaredScorer ? { note: 'the run\'s spec names no scorer hash (an earlier run)' } : {}) } });
+  measures.push(...scorecardMeasures(scorecard));
   const evaluation = {
     schema: SCHEMA, evaluator: evaluatorFiles(), createdAt: now().toISOString(),
     offline: { worldStarted: false, controllersStarted: false, network: false, modelCalls: 0 },
@@ -351,6 +399,7 @@ export async function evaluateRun(dir, { questions = [], write = true, now = () 
       semanticReview: review ? { mode: sr.scenario?.review?.mode ?? 'model', provider: (sr.scenario?.review?.mode ?? 'model') === 'model' ? 'claude' : null, model: (sr.scenario?.review?.mode ?? 'model') === 'model' ? (sr.scenario?.review?.reviewerModel ?? 'opus') : null, requests: review.requests ?? 0, inputs: (sr.scenario?.review?.mode ?? 'model') === 'model' ? 'bounded per-request evidence projections (review/run.mjs projectEvidence)' : 'deterministic oracles only', outputs: ['ledger.tsv', 'reviews.jsonl'].map((f) => sr.at(f)).filter((f) => before[f]), note: 'indexed, not re-run; evaluate makes no model call' } : null,
     },
     measures,
+    scorecard: { file: 'scorecard.json', scorer: scorecard.scorer },
     acceptance: { scenario: sr.playtestDir ? scenarioAcceptance(sr) : null, predeclared: answers.filter((a) => a.basis === 'predeclared') },
     questions: answers.filter((a) => a.basis === 'exploratory'),
     requests,
@@ -364,15 +413,16 @@ export async function evaluateRun(dir, { questions = [], write = true, now = () 
   };
   const after = indexSources(sr.runDir);
   evaluation.sources.unchanged = JSON.stringify(before) === JSON.stringify(after);
-  if (!write) return { evaluation, dir: null };
+  if (!write) return { evaluation, scorecard, dir: null };
   const root = join(sr.runDir, 'evaluations');
   mkdirSync(root, { recursive: true });
   const n = readdirSync(root).filter((d) => /^\d{3}-/.test(d)).length + 1;
   const out = join(root, `${String(n).padStart(3, '0')}-v${EVALUATOR.version}`);
   mkdirSync(out);
   writeFileSync(join(out, 'evaluation.json'), JSON.stringify(evaluation, null, 1) + '\n');
-  writeFileSync(join(out, 'EVALUATION.md'), renderEvaluation(evaluation));
-  return { evaluation, dir: out };
+  writeFileSync(join(out, 'scorecard.json'), JSON.stringify(scorecard, null, 1) + '\n');
+  writeFileSync(join(out, 'EVALUATION.md'), renderEvaluation(evaluation) + '\n' + renderScorecard(scorecard));
+  return { evaluation, scorecard, dir: out };
 }
 
 const fmt = (v) => (v == null ? '—' : typeof v === 'number' ? String(v) : String(v));

@@ -1,4 +1,4 @@
-// node --test tools/world-launcher/guard.test.mjs (lane L1, server-reliability tranche; fake worlds on 5101-5103, a launcher on 5110 + 5107-5108)
+// node --test tools/world-launcher/guard.test.mjs (lane L1, server-reliability tranche; fake worlds on a free block of ports, and a launcher)
 // The guard over world processes (LOAD-CONTRACT §4), with its numbers scaled down: a wedged world is restarted, a slow
 // boot that keeps moving lives, a stuck boot is killed, a flapping world is held until resumed, exit 75 restarts at once.
 // Real-time runs of (a) and (b) with the production numbers: a separate real-time harness kept outside the repo.
@@ -9,13 +9,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChildPool, backoffMs } from './children.mjs';
 import { GUARD, bootMark, jitterMs, liveWedge } from './guard.mjs';
+import { testPort } from '../../apps/server/test/test-port.ts';
+const P0 = await testPort(10);
 
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms, what) => { const t0 = Date.now(); for (;;) { const v = await f(); if (v) return v; if (Date.now() - t0 > ms) throw new Error(`not within ${ms} ms: ${what}`); await sleep(25); } };
 // scaled: a look every 100 ms, wedged after 6 failed looks or a live.json 600 ms stale
 const FAST = { pollMs: 100, timeoutMs: 150, failures: 6, suspectFailures: 1, liveStaleMs: 600, turnAgeMs: 600, usr2WaitMs: 100, termGraceMs: 300, bootStallMs: 600, silentBootStallMs: 600, bootSlowMs: 300, backoffBaseMs: 20, backoffCapMs: 100, resetAfterMs: 60_000, breakerN: 5, breakerWindowMs: 60_000, crashloopN: 2, wedgeShownMs: 60_000 };
-const pools = [], R = [5101, 5103];   // (ceilings.test.mjs, which may run beside this file, uses 5104-5106 and 5109)
+const pools = [], R = [P0, P0 + 2];
 const pool = (range, env = {}, o = {}) => {
   const command = (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port), DATA_DIR: w.dataDir, FAKE_LIVE_MS: '100', FAKE_TURN_MS: '600', ...env } });
   const lines = [];
@@ -40,7 +42,7 @@ test('full-jitter backoff: uniform under min(5 min, 1 s * 2^n); defaults are the
 });
 
 test('(a) wedged, live.json: the watchdog shows the main thread stuck; SIGUSR2, SIGTERM, SIGKILL, restarted; problems say wedged', async () => {
-  const p = pool(R, { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
+  const p = pool(R, { FAKE_LIVE: '1', FAKE_STOP_MS: '50', FAKE_STALL_TOP: 'stuckInTheLoop apps/server/src/x.ts:12' });
   const port = await p.ensure(world('wa')); const pid = p.state('wa').child.pid;
   p.startGuard();
   await sleep(700);   // past liveStaleMs after up: live.json is judged from here
@@ -54,8 +56,62 @@ test('(a) wedged, live.json: the watchdog shows the main thread stuck; SIGUSR2, 
   assert.match(st.lastExit.reason, /wedged: main thread stuck/);
   assert.equal(st.lastExit.signal, 'SIGKILL', 'a busy-looping main thread runs no SIGTERM handler');
   assert.ok(p.lines.some((l) => /wa wedged \(main thread stuck/.test(l)), 'one line per transition');
+  // #457: the line names the frame the world's watchdog caught the main thread stuck in (live.json `stall`)
+  assert.ok(p.lines.some((l) => /wa wedged \(main thread stuck.*; stuck in stuckInTheLoop apps\/server\/src\/x\.ts:12\)/.test(l)), p.lines.join('\n'));
   assert.ok(p.problems().some((x) => x.code === 'wedged' && /was wedged/.test(x.text)), 'shown for a while after its restart');
   assert.ok(ms < 3000, `restarted ${ms} ms after the wedge`);
+  await p.closeAll();
+});
+
+test('#1150 rewound: each new rung 3 is a `rewound` problem, the world keeps running, and the next one is seen too', async () => {
+  const p = pool([5105, 5107], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
+  const port = await p.ensure(world('wr')); const pid = p.state('wr').child.pid;
+  p.startGuard(); await sleep(250);
+  assert.deepEqual(p.problems(), []);
+  await get(port, 'wr', '/rewind');
+  await until(() => p.problems().some((x) => x.code === 'rewound'), 2000, 'rewound in problems');
+  assert.match(p.problems().find((x) => x.code === 'rewound').text, /rewind 1/); assert.equal(p.status('wr').pid, pid, 'nothing restarts it');
+  await get(port, 'wr', '/rewind');
+  await until(() => /rewind 2/.test(p.problems().find((x) => x.code === 'rewound')?.text ?? ''), 2000, 'the second is its own alert');
+  await p.stop('wr');
+});
+
+test('#1150, #1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator', async () => {
+  const p = pool([P0, P0 + 2], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
+  let port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
+  p.startGuard();
+  await sleep(250);
+  assert.deepEqual(p.problems(), []); assert.equal(p.status('wh').halted, undefined);
+  await get(port, 'wh', '/halt');
+  await until(() => p.lines.some((l) => /world wh halted: its clock has stopped; restarting it/.test(l)), 2000, 'the guard restarts it');
+  await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid, 3000, 'running again in a new process');
+  assert.ok(p.lines.some((l) => /world wh exited .* after it halted/.test(l)), p.lines.join('\n'));
+  assert.deepEqual(p.problems().map((x) => x.code), ['halted'], 'shown for wedgeShownMs after the restart, as a wedge is');
+  assert.match(p.problems()[0].text, /halted .* ago and was restarted/);
+  // a second halt inside the window: left halted, its process and evidence up
+  const pid2 = p.state('wh').child.pid; port = p.state('wh').port ?? port;
+  await sleep(300); await get(port, 'wh', '/halt');
+  await until(() => p.status('wh').halted === true, 2000, 'halted again');
+  await sleep(800);
+  assert.equal(p.state('wh').child.pid, pid2, 'not restarted twice in one window');
+  assert.deepEqual(p.problems().map((x) => x.code), ['halted']);
+  assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 1);
+  await p.closeAll();
+});
+
+test('#1326 stalled: live.json says the clock owes ticks and has none; a `stalled` problem with the tick age, gone once it ticks again; never restarted for it', async () => {
+  const p = pool([P0, P0 + 2], { FAKE_LIVE: '1' });
+  const port = await p.ensure(world('ws')); const pid = p.state('ws').child.pid;
+  p.startGuard();
+  await sleep(250);
+  assert.deepEqual(p.problems(), []);
+  await get(port, 'ws', '/stall');
+  await until(() => p.problems().some((x) => x.code === 'stalled'), 2000, 'stalled in problems');
+  assert.match(p.problems().find((x) => x.code === 'stalled').text, /ws stalled: its clock has not ticked for \d+ s/);
+  await sleep(800);
+  assert.equal(p.state('ws').child.pid, pid, 'a stall is reported, not restarted');
+  await get(port, 'ws', '/unstall');
+  await until(() => !p.problems().length, 2000, 'cleared once it ticks');
   await p.closeAll();
 });
 
@@ -154,8 +210,8 @@ test('(e) the launcher: a wedge is in /__sim/healthz (hostCodes) and world-probl
   const webDir = join(dir, 'web'); mkdirSync(webDir); writeFileSync(join(webDir, 'index.html'), '<!doctype html>');
   const flap = new Set();
   const command = (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port), DATA_DIR: w.dataDir, ...(flap.has(w.slug) ? { FAKE_FLAP_MS: '150' } : {}) } });
-  const P = 5110, base = `http://127.0.0.1:${P}`, lines = [];
-  const L = await openLauncher({ port: P, range: [5107, 5108], dataDir: join(dir, 'data'), webDir, templatesDir, command, eager: 0, log: (s) => lines.push(s), prewarm: false, publicOrigin: 'http://sim.test', devAuth: true, guard: FAST, problemsEveryMs: 100 });
+  const P = P0 + 9, base = `http://127.0.0.1:${P}`, lines = [];
+  const L = await openLauncher({ port: P, range: [P0 + 6, P0 + 7], dataDir: join(dir, 'data'), webDir, templatesDir, command, eager: 0, log: (s) => lines.push(s), prewarm: false, publicOrigin: 'http://sim.test', devAuth: true, guard: FAST, problemsEveryMs: 100 });
   const health = () => fetch(`${base}/__sim/healthz`).then((r) => r.json());
   try {
     const { slug } = await (await fetch(`${base}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Ledge' }) })).json();
@@ -188,13 +244,13 @@ test('(e) the launcher: a wedge is in /__sim/healthz (hostCodes) and world-probl
 
 test('watchdog ports across a handover: an adopted world keeps its port, held from every other world here, passed on again', async () => {
   const p = pool(R, {}, { healthPorts: true });
-  p.adopt(world('ho'), { port: 5101, pid: 999_999, script: 'x', healthPort: 5103 });
-  assert.ok(p.usedPorts().has(5101) && p.usedPorts().has(5103), 'both of the previous process\'s ports are held');
+  p.adopt(world('ho'), { port: P0, pid: 999_999, script: 'x', healthPort: P0 + 2 });
+  assert.ok(p.usedPorts().has(P0) && p.usedPorts().has(P0 + 2), 'both of the previous process\'s ports are held');
   const port = await p.ensure(world('other'));
-  assert.equal(port, 5102); assert.equal(p.state('other').healthPort, null, 'no third port: runs without one');
-  assert.ok(p.lines.some((l) => /world other: no free watchdog port in 5101-5103; liveness from live.json and the main \/healthz only/.test(l)), 'the degraded mode is said once');
+  assert.equal(port, P0 + 1); assert.equal(p.state('other').healthPort, null, 'no third port: runs without one');
+  assert.ok(p.lines.some((l) => l.includes(`world other: no free watchdog port in ${P0}-${P0 + 2}; liveness from live.json and the main /healthz only`)), 'the degraded mode is said once');
   assert.match(p.status('other').watchdog, /none/);
-  assert.equal(p.status('ho').healthPort, 5103);
+  assert.equal(p.status('ho').healthPort, P0 + 2);
   p.kids.delete('ho');
   await p.closeAll();
 });
@@ -205,8 +261,8 @@ test('(d) the proxy: Soul calls to a booting world are answered 503 world.starti
   const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
   const webDir = join(dir, 'web'); mkdirSync(webDir); writeFileSync(join(webDir, 'index.html'), '<!doctype html>');
   const command = (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port), DATA_DIR: w.dataDir, FAKE_BOOT_MS: '2500' } });
-  const P = 5110, base = `http://127.0.0.1:${P}`;
-  const L = await openLauncher({ port: P, range: [5107, 5108], dataDir: join(dir, 'data'), webDir, templatesDir, command, eager: 0, log: () => {}, prewarm: false, publicOrigin: 'http://sim.test', devAuth: true, guard: { ...FAST, bootStallMs: 60_000, silentBootStallMs: 60_000 } });
+  const P = P0 + 9, base = `http://127.0.0.1:${P}`;
+  const L = await openLauncher({ port: P, range: [P0 + 6, P0 + 7], dataDir: join(dir, 'data'), webDir, templatesDir, command, eager: 0, log: () => {}, prewarm: false, publicOrigin: 'http://sim.test', devAuth: true, guard: { ...FAST, bootStallMs: 60_000, silentBootStallMs: 60_000 } });
   const soul = (i, path = '/v1/edge/here', method = 'GET') => { const t0 = performance.now(); return fetch(`${base}/w/edgey/${path.replace(/^\//, '')}`, { method, headers: { authorization: `Bearer sim_s_soul${i}_secret`, 'x-forwarded-for': `198.51.100.${i % 250}` } }).then(async (r) => ({ status: r.status, ms: performance.now() - t0, retry: r.headers.get('retry-after'), body: await r.json().catch(() => null) })); };
   try {
     await Promise.all(Array.from({ length: 100 }, () => fetch(`${base}/__sim/healthz`).then((r) => r.arrayBuffer())));   // 100 open keep-alive connections: the timing is the launcher's, not connection setup

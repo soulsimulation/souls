@@ -9,12 +9,16 @@ import {fixture, invite, accept} from '../test/native-owner-fixture.ts';
 import {buildApp} from './http.ts';
 import {config} from './config.ts';
 import {GodMode} from './god/god.ts';
-import {coreRef} from '@sim/world-compiler';
+import {coreRef} from '@souls/world-compiler';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {streamSSE} from 'hono/streaming';
+import {testPort} from '../test/test-port.ts';
+const TEST_PORT_1=await testPort();
+const TEST_PORT_2=await testPort();
+const TEST_PORT_3=await testPort();
 
 test('soul queue: nothing overwrites, the oldest waits first, listen takes the whole backlog, ack and result per id, restart', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   let db = new Db(join(dir, 'fixture.db')), now = 1000, inbox = new AgentInbox(db, 'w1', () => now);
   const a = {scope: 'soul:a', owner: 'alice'}, b = {scope: 'soul:a', owner: 'bob'}, other = new AgentInbox(db, 'w2', () => now);
   assert.deepEqual(inbox.view(a), {connected: false, lastSeenAt: null, listenedAt: null, latest: null, queued: 0, presence: 'away'});
@@ -64,8 +68,22 @@ test('soul queue: nothing overwrites, the oldest waits first, listen takes the w
 
 // Baseline id kept for the release gate. The Soul box became a queue (MSG 1.9.5): a newer message no longer replaces
 // the older one; the rest of the old contract (transitions, validation, isolation, presence expiry, restart) holds.
+test('unfinished lists what was acked with no result, newest first, behind a newer message', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const db = new Db(join(dir, 'fixture.db')), inbox = new AgentInbox(db, 'w1', () => 1000), a = {scope: 'soul:a', owner: 'alice'};
+  t.after(() => db.close());
+  const first = inbox.send(a, 'walk to the pond').latest!, second = inbox.send(a, 'and wave').latest!;
+  assert.deepEqual(inbox.unfinished(a), []);
+  inbox.takeBacklog(a, undefined); inbox.acknowledge(a, first.id, 'on my way');
+  assert.deepEqual(inbox.unfinished(a), [{id: first.id, text: 'walk to the pond'}], 'a newer message does not hide it');
+  inbox.acknowledge(a, second.id, 'waving');
+  assert.deepEqual(inbox.unfinished(a).map(m => m.id), [second.id, first.id]);
+  inbox.result(a, first.id, 'at the pond', 'done');
+  assert.deepEqual(inbox.unfinished(a).map(m => m.id), [second.id]);
+});
+
 test('one durable latest message: truthful transitions, replacement, isolation, expiry and restart', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   let db = new Db(join(dir, 'fixture.db')), now = 1000, inbox = new AgentInbox(db, 'w1', () => now);
   const a = {scope: 'soul:a', owner: 'alice'}, b = {scope: 'soul:a', owner: 'bob'}, other = new AgentInbox(db, 'w2', () => now);
   assert.equal(inbox.view(a).latest, null);
@@ -95,7 +113,7 @@ test('one durable latest message: truthful transitions, replacement, isolation, 
 // then 'away' (was 'recent' after a short gap); after handing messages, a newer queued message within the grace still shows
 // 'listening' (was "nobody listens until the agent runs listen again"). The full new contract is the PRESENCE test below.
 test('presence stays listening across the gap between two long-polls, not after the listener is gone or once it holds a message', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const db = new Db(join(dir, 'fixture.db')); t.after(() => db.close());
   let now = 1000; const inbox = new AgentInbox(db, 'w1', () => now), a = {scope: 'soul:a', owner: 'alice'};
   inbox.touch(a); const end = inbox.listening(a); assert.equal(inbox.view(a).presence, 'listening');
@@ -109,7 +127,7 @@ test('presence stays listening across the gap between two long-polls, not after 
 });
 
 test('PRESENCE: a Soul listens while a listen is open or closed <= 60 s ago; other traffic, a stepped-back clock and the god box', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   let db = new Db(join(dir, 'fixture.db')); t.after(() => db.close());
   let now = 1000, inbox = new AgentInbox(db, 'w1', () => now); const a = {scope: 'soul:a', owner: 'alice'}, g = {scope: 'god', owner: 'alice'};
   assert.equal(inbox.view(a).presence, 'away'); assert.equal(inbox.view(a).listenedAt, null, 'never seen');
@@ -139,7 +157,7 @@ test('PRESENCE: a Soul listens while a listen is open or closed <= 60 s ago; oth
 });
 
 test('PRESENCE: an older agent_inbox_v1 table without listened_at gains the column at boot and keeps its rows', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-inbox-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const db = new Db(join(dir, 'fixture.db')); t.after(() => db.close());
   db.db.exec(`CREATE TABLE agent_inbox_v1 (world_id TEXT NOT NULL, scope TEXT NOT NULL, owner TEXT NOT NULL, id TEXT, text TEXT, sent_at INTEGER, delivered_at INTEGER, acknowledged_at INTEGER, reply TEXT, last_seen_at INTEGER, PRIMARY KEY(world_id,scope,owner)) WITHOUT ROWID;
     INSERT INTO agent_inbox_v1(world_id,scope,owner,last_seen_at) VALUES('w1','soul:a','alice',7)`);
@@ -199,11 +217,11 @@ test('real owner and paired HTTP flows: absent, browser, command polling, listen
   await invite(f, 'alice'); await invite(f, 'bob');
   const a = await accept(f.host, f.souls.create('dev:alice', {name: 'Avery', description: 'Inbox fixture'}));
   const b = await accept(f.host, f.souls.create('dev:bob', {name: 'Briar', description: 'Other owner fixture'}));
-  const tokenA = f.souls.pairExchange(f.souls.pairCode(a, 'http://127.0.0.1:5960').code, 'scripted').token;
-  const tokenB = f.souls.pairExchange(f.souls.pairCode(b, 'http://127.0.0.1:5960').code, 'scripted').token;
+  const tokenA = f.souls.pairExchange(f.souls.pairCode(a, `http://127.0.0.1:${TEST_PORT_1}`).code, 'scripted').token;
+  const tokenB = f.souls.pairExchange(f.souls.pairCode(b, `http://127.0.0.1:${TEST_PORT_1}`).code, 'scripted').token;
   const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:alice', tick: () => f.host.engine.world.tick, emit() {}});
   const owner = f.db.user('dev:alice')!, godToken = god.mintFor(owner, 'scripted'), browserToken = god.mintFor(owner, 'browser');
-  const app = buildApp({cfg: {...config, port: 5960, worldPath: '/w/eden', publicUrl: 'http://127.0.0.1:5960/w/eden', accountAuthRequired: false, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), god, hub: {clients: new Map(), refreshMe() {}} as never});
+  const app = buildApp({cfg: {...config, port: TEST_PORT_1, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT_1}/w/eden`, accountAuthRequired: false, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), god, hub: {clients: new Map(), refreshMe() {}} as never});
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   app.get('/v1/test-inbox-binary', c => c.body(png, 200, {'content-type': 'image/png', etag: 'fixture-original', 'cache-control': 'public, max-age=60'}));
   app.get('/v1/test-inbox-sse', c => streamSSE(c, async stream => { await stream.writeSSE({event: 'fixture', data: 'Original stream data'}); }));
@@ -325,7 +343,7 @@ test('owner box and edge command need an invited owner (same gate as the central
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
   await invite(f, 'carol');
   const s = await accept(f.host, f.souls.create('dev:carol', {name: 'Cato', description: 'Invite gate fixture'}));
-  const app = buildApp({cfg: {...config, port: 5961, worldPath: '/w/eden', publicUrl: 'http://127.0.0.1:5961/w/eden', accountAuthRequired: false, inviteRequired: true, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), hub: {clients: new Map(), refreshMe() {}} as never});
+  const app = buildApp({cfg: {...config, port: TEST_PORT_2, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT_2}/w/eden`, accountAuthRequired: false, inviteRequired: true, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), hub: {clients: new Map(), refreshMe() {}} as never});
   const post = (path: string) => app.request(path, {method: 'POST', headers: {authorization: 'Bearer dev:carol', 'content-type': 'application/json'}, body: JSON.stringify({text: 'come home'})});
   assert.equal((await post(`/v1/souls/${s.id}/command`)).status, 200);
   (f.db as unknown as {db: {prepare(q: string): {run(...a: unknown[]): void}}}).db.prepare('UPDATE users SET invited_by = NULL WHERE id = ?').run('dev:carol');
@@ -337,7 +355,7 @@ test('owner box and edge command need an invited owner (same gate as the central
 // #399: the god's presence after a listen hands over a command is 'working' however the clock moves between the
 // middleware's seen stamp and the delivery stamp (it read 'listening' when a millisecond passed in between).
 test('god presence is working right after a listen hands over a command, even if the clock ticks in between', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-godp-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-godp-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   let now = 1000;
   const db = new Db(join(dir, 'p.db')), inbox = new AgentInbox(db, 'w1', () => now++);   // every read of the clock moves it 1 ms
   t.after(() => db.close());
@@ -351,7 +369,7 @@ test('god presence is working right after a listen hands over a command, even if
 });
 
 test('god queue: commands typed while away wait in order; tickets move pending -> in progress -> done/failed/withdrawn', async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'sim-godq-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const dir = mkdtempSync(join(tmpdir(), 'souls-godq-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   let db = new Db(join(dir, 'q.db')), now = 1000, inbox = new AgentInbox(db, 'w1', () => now);
   const g = {scope: 'god', owner: 'alice'}, other = {scope: 'god', owner: 'bob'};
   const a = inbox.send(g, 'Build a pier').latest!; now++;
@@ -432,7 +450,7 @@ test('god queue over HTTP: a real build links its ticket to where it stands; fai
   await invite(f, 'alice');
   const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:alice', tick: () => f.host.engine.world.tick, emit() {}});
   const owner = f.db.user('dev:alice')!, godToken = god.mintFor(owner, 'scripted');
-  const app = buildApp({cfg: {...config, port: 5962, worldPath: '/w/eden', publicUrl: 'http://127.0.0.1:5962/w/eden', accountAuthRequired: false, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), god, hub: {clients: new Map(), refreshMe() {}} as never});
+  const app = buildApp({cfg: {...config, port: TEST_PORT_3, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT_3}/w/eden`, accountAuthRequired: false, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), god, hub: {clients: new Map(), refreshMe() {}} as never});
   const req = async (path: string, token?: string, body?: unknown) => {
     const r = await app.request(path, {method: body === undefined ? 'GET' : 'POST', headers: {...(token ? {authorization: `Bearer ${token}`} : {}), 'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
     return {status: r.status, data: await r.json() as any};
@@ -479,9 +497,9 @@ test('after a boot, one client reconnecting N times in a row is never refused an
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
   await invite(f, 'alice');
   const a = await accept(f.host, f.souls.create('dev:alice', {name: 'Avery', description: 'Reboot fixture'}));
-  const tokenA = f.souls.pairExchange(f.souls.pairCode(a, 'http://127.0.0.1:5960').code, 'scripted').token;
+  const tokenA = f.souls.pairExchange(f.souls.pairCode(a, `http://127.0.0.1:${TEST_PORT_1}`).code, 'scripted').token;
   const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:alice', tick: () => f.host.engine.world.tick, emit() {}});
-  const boot = () => buildApp({cfg: {...config, port: 5960, worldPath: '/w/eden', publicUrl: 'http://127.0.0.1:5960/w/eden', accountAuthRequired: false, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), god, hub: {clients: new Map(), refreshMe() {}} as never});
+  const boot = () => buildApp({cfg: {...config, port: TEST_PORT_1, worldPath: '/w/eden', publicUrl: `http://127.0.0.1:${TEST_PORT_1}/w/eden`, accountAuthRequired: false, webDir: '/nonexistent-inbox-fixture', marsWebDir: '/nonexistent-inbox-fixture'}, db: f.db, host: f.host, auth: f.auth, brain: f.brain, souls: f.souls, edge: new EdgeLedger(f.host, f.db), god, hub: {clients: new Map(), refreshMe() {}} as never});
   const req = async (app: ReturnType<typeof boot>, path: string, token?: string, body?: unknown, signal?: AbortSignal) => {
     const r = await app.request(path, {method: body === undefined ? 'GET' : 'POST', headers: {...(token ? {authorization: `Bearer ${token}`} : {}), 'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)}), ...(signal ? {signal} : {})});
     return {status: r.status, data: await r.json() as any};

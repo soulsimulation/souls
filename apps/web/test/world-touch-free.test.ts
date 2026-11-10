@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { WorldTouchFree, inStickZone, stickDeflection, STICK_RADIUS, LONG_PRESS_MS, type TouchCamera } from '../src/touch/WorldTouchFree.ts';
-import { WorldRtsCamera, RISE_PER_PIXEL } from '../src/WorldRtsCamera.ts';
+import { WorldRtsCamera, RISE_PER_PIXEL, farLimit } from '../src/WorldRtsCamera.ts';
 import { createWorldOrbitControls, stickStep, manualCameraStep, type NavigationContext } from '../src/WorldNavigation.ts';
 
 // #891 touch Free camera. A 400 × 800 phone view: the stick zone is x ≤ 180, y ≥ 440.
@@ -217,7 +217,23 @@ test('a touch look ending on a far ground point at the map edge never moves the 
     f.rts.touchLookEnd();f.rts.setTouchHeld(false);for (let i = 0; i < 10; i++) f.frame();
     assert.ok(f.camera.position.distanceTo(eye) < 1e-9, `eye moved ${f.camera.position.distanceTo(eye).toFixed(2)} m`);
     assert.ok(f.camera.getWorldDirection(new THREE.Vector3()).angleTo(gaze) < 1e-6, 'the view does not turn');
-    assert.ok(Math.abs(f.controls.target.z) <= 160 && Math.abs(f.controls.target.x) <= 160, 'the pivot is inside the map plus margin');
+    assert.ok(Math.abs(f.controls.target.z) <= 100 + farLimit([-100, -100, 100, 100]) && Math.abs(f.controls.target.x) <= 100 + farLimit([-100, -100, 100, 100]), 'the pivot is inside the eye guard\'s rectangle');
+  } finally { f.rts.dispose(); }
+});
+
+// #660 x #891: past the old pivot wall (map edge + 60 m) the eye still walks (the eye guard is edge + farLimit), so a touch
+// look there must commit too; otherwise the next pinch swings the view back to the old head offset
+test('a touch look past the old pivot wall still commits: the next pinch does not swing the view', () => {
+  const f = rtsRig();try {
+    f.camera.position.set(0, 10, 260);f.controls.target.set(0, 0, 225);f.camera.lookAt(f.controls.target);f.camera.updateMatrixWorld();f.frame();
+    assert.ok(f.camera.position.z > 160 + 1, `the eye stands past the old wall (z ${f.camera.position.z.toFixed(1)})`);
+    f.rts.setTouchHeld(true);f.rts.touchLook(300, 0);f.frame();
+    f.rts.touchLookEnd();f.rts.setTouchHeld(false);f.frame();
+    const gaze = f.camera.getWorldDirection(new THREE.Vector3());
+    assert.equal(f.rts.headLook.yaw, 0, 'the look committed: no head offset left');
+    f.rts.touchPinch(500, 500, 1.5, true);for (let i = 0; i < 20; i++) f.frame(1 / 30);
+    const turn = f.camera.getWorldDirection(new THREE.Vector3()).angleTo(gaze);
+    assert.ok(turn < .02, `the pinch kept the view (turned ${turn.toFixed(3)} rad)`);
   } finally { f.rts.dispose(); }
 });
 
@@ -232,4 +248,28 @@ test('pinch zooms like the wheel toward the point between the fingers; double-ta
     if (f.controls.target.distanceTo(at) > 1e-6) flights++;assert.equal(flights, 0, 'the browser dblclick after a double-tap does not fly again');
     assert.ok(at.y < .1, 'flew to the ground point under the second tap');
   } finally { f.rts.dispose(); }
+});
+
+// #1387: the stick's home ring shows exactly while a lower-left touch would make the stick (Free, touch screen, no stick up).
+test('the stick home ring: Free on a touch screen only, hidden while the stick is up, gone on dispose', () => {
+  const made: { hidden: boolean; removed: boolean; style: Record<string, string> }[] = [];
+  const el = () => { const e = { hidden: false, removed: false, style: {} as Record<string, string>, className: '', setAttribute() {}, append() {}, remove() { e.removed = true; } }; made.push(e); return e; };
+  const doc = Object.assign(new EventTarget(), { createElement: el, defaultView: { matchMedia: (q: string) => ({ matches: q === '(pointer: coarse)' }) } });
+  const canvas = Object.assign(new EventTarget(), { ownerDocument: doc, getBoundingClientRect: () => VIEW }) as unknown as HTMLCanvasElement;
+  const host = { ownerDocument: doc, getBoundingClientRect: () => VIEW, append() {} } as unknown as HTMLElement;
+  let free = true;
+  const camera: TouchCamera = { setStick() {}, walking: false, setTouchHeld() {}, touchLook() {}, touchLookEnd() {}, touchPinch() {}, touchRise() {}, touchFly() {} };
+  const t = new WorldTouchFree(canvas, host, { camera, free: () => free, soulAt: () => false });
+  t.sync(); assert.equal(t.state.home, true); const ring = made[0]; assert.equal(ring.hidden, false);
+  const ev = (type: string, x: number, y: number, t: number) => Object.defineProperty(Object.assign(new Event(type, { cancelable: true }), { pointerType: 'touch', pointerId: 1, clientX: x, clientY: y }), 'timeStamp', { value: t });
+  const down = (x: number, y: number) => canvas.dispatchEvent(ev('pointerdown', x, y, 0));
+  down(60, 700); t.sync(); assert.equal(t.state.stick, true); assert.equal(ring.hidden, true, 'the floating stick replaces it');
+  doc.dispatchEvent(ev('pointerup', 60, 700, 100));
+  t.sync(); assert.equal(ring.hidden, false, 'back when the thumb lifts');
+  free = false; t.sync(); assert.equal(ring.hidden, true, 'Follow or Broadcast: no stick, no ring');
+  free = true; t.sync(); assert.equal(ring.hidden, false);
+  t.dispose(); assert.equal(ring.removed, true);
+  const fine = Object.assign(new EventTarget(), { createElement: el, defaultView: { matchMedia: () => ({ matches: false }) } });
+  const t2 = new WorldTouchFree(Object.assign(new EventTarget(), { ownerDocument: fine, getBoundingClientRect: () => VIEW }) as unknown as HTMLCanvasElement, { ownerDocument: fine, getBoundingClientRect: () => VIEW, append() {} } as unknown as HTMLElement, { camera, free: () => true, soulAt: () => false });
+  t2.sync(); assert.equal(t2.state.home, false, 'a mouse never sees the ring'); t2.dispose();
 });

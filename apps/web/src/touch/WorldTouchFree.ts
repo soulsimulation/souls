@@ -2,6 +2,8 @@
  * a floating stick under the thumb (shown only while touched) that walks the eye; one finger elsewhere looks in place;
  * pinch glides toward the point between the fingers; a two-finger vertical drag rises or lowers; a double-tap flies there.
  * Long-pressing the stick where it appeared arms an auto-walk lock: lifting while deflected keeps walking until the next touch.
+ * #1387: while the stick is available (Free, a touch screen, no stick up), a faint ring marks its home in the lower left,
+ * so the two one-finger drags are told apart by where they start: from the ring, move; anywhere else, turn.
  *
  * This module only reads gestures. Every movement goes through the camera's own paths (WorldRtsCamera: the stick is WASD,
  * the rise is Q/E, the look is right-drag, the pinch is the wheel and the double-tap is the double-click), so its clamps hold.
@@ -70,6 +72,9 @@ export class WorldTouchFree {
   private pair: Pair | null = null;
   private documentListening = false;
   private stickEl: HTMLDivElement | null = null;
+  private homeEl: HTMLDivElement | null = null;
+  private homeShown = false;
+  private coarse = false;
   private knobEl: HTMLDivElement | null = null;
   private canvas: HTMLCanvasElement;
   private host: HTMLElement;
@@ -79,11 +84,29 @@ export class WorldTouchFree {
     this.canvas = canvas; this.host = host; this.o = o; this.timers = timers;
     // Capture: a stick touch is the stick's alone (no orbit, tap selection, hover long-press or keyboard focus).
     canvas.addEventListener('pointerdown', this.onDown, { capture: true });
+    try { this.coarse = !!host.ownerDocument?.defaultView?.matchMedia?.('(pointer: coarse)').matches; } catch { this.coarse = false; }
+  }
+  /** Each frame: show the stick's home ring exactly while a touch in the lower left would make the stick (#1387). */
+  sync() {
+    const want = this.coarse && !this.origin && !this.locked && this.o.free();
+    if (want === this.homeShown) return;
+    this.homeShown = want;
+    if (want && !this.homeEl && typeof this.host.ownerDocument?.createElement === 'function') {
+      const doc = this.host.ownerDocument, ring = doc.createElement('div'), dot = doc.createElement('div');
+      ring.className = 'world-touch-home'; ring.setAttribute('aria-hidden', 'true');
+      const size = STICK_RADIUS * 2;
+      // the middle of the stick's zone, kept within reach of a thumb on a large screen
+      Object.assign(ring.style, { position: 'absolute', left: `min(${STICK_ZONE.width * 50}%, 110px)`, bottom: `min(${STICK_ZONE.height * 50}%, 150px)`, width: `${size}px`, height: `${size}px`,
+        transform: 'translate(-50%, 50%)', borderRadius: '50%', border: '2px dashed rgba(255,255,255,.45)', background: 'rgba(20,24,28,.12)', pointerEvents: 'none', zIndex: '2', boxSizing: 'border-box' });
+      Object.assign(dot.style, { position: 'absolute', left: '50%', top: '50%', width: '18px', height: '18px', margin: '-9px 0 0 -9px', borderRadius: '50%', background: 'rgba(255,255,255,.45)' });
+      ring.append(dot); this.host.append(ring); this.homeEl = ring;
+    }
+    if (this.homeEl) this.homeEl.hidden = !want;
   }
   /** The viewer's tap handler asks before it selects or sets the pivot: true when this touch was a gesture. */
   consumed(pointerId: number): boolean { return this.claimed.delete(pointerId); }
   /** Diagnostics/tests: the stick is shown, the auto-walk lock is on, fingers tracked. */
-  get state() { return { stick: !!this.origin, locked: this.locked, armed: this.lockArmed, fingers: this.fingers.size, pair: this.pair?.mode ?? null }; }
+  get state() { return { stick: !!this.origin, home: this.homeShown, locked: this.locked, armed: this.lockArmed, fingers: this.fingers.size, pair: this.pair?.mode ?? null }; }
 
   private onDown = (e: PointerEvent) => {
     if (e.pointerType !== 'touch') return;
@@ -224,6 +247,6 @@ export class WorldTouchFree {
     doc.removeEventListener('pointermove', this.onMove); doc.removeEventListener('pointerup', this.onUp); doc.removeEventListener('pointercancel', this.onUp);
     if (this.pressTimer !== null) this.timers.clear(this.pressTimer);
     this.pressTimer = null; this.fingers.clear(); this.claimed.clear(); this.documentListening = false;
-    this.stickEl?.remove(); this.stickEl = null; this.knobEl = null;
+    this.stickEl?.remove(); this.stickEl = null; this.knobEl = null; this.homeEl?.remove(); this.homeEl = null; this.homeShown = false;
   }
 }

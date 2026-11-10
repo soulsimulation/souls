@@ -23,7 +23,15 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   'onDecision', 'onRecovery', 'onProgram', 'afterTick', 'contactTicks', 'ambientLife', 'unstick', 'arm', 'decide', 'recordRefusal', 'metrics', 'actVerificationSit',
   'act', 'actMenu', 'actOnce', 'standIfSeated', 'launch', 'relaunchStuck', 'acceptInvite', 'performBodies', 'performAtomicObjectBodies',
   'syncCarrierPlaces', 'boardingIssue', 'steerTarget', 'steerCheck', 'rideFrames', 'godInterrupted', 'setDetail', 'stallGuard', 'conversationPartners', 'posture',
-  'ambientChoice']);
+  'ambientChoice', 'navWarmFor', 'openShared', 'commitShared',
+  // #1150: they tell Souls of a rewind or a relocation, called only from onRecovery on main
+  'onRelocated', 'onRewound',
+  // #1369: it tells Souls of a quarantine, called only from onRecovery on main
+  'onQuarantined',
+  // #1496: it tells Souls their programmes stopped for a non-finite hold, called only from onRecovery on main
+  'onNonFiniteHeld',
+  // #1324: the steer act's landing preview (previewSteerLandingV1), called only from the ride object's steer act on main
+  'steerLanding']);
 
 test('grep: no engine reach in the read code (ledger read methods, perception, together, god-nav, human capabilities, deck)', () => {
   const ledger = [...reaches('edge/ledger/ledger.ts', /host\.engine/g)].filter(([m]) => !LEDGER_MAIN_ONLY.has(m));
@@ -93,4 +101,11 @@ test('VerdictTable: a shipped verdict answers; a miss answers feasible and is qu
   assert.deepEqual(t.canPerform(p, 'route|1|0,0,0'), {code: 'route.unreachable', message: 'm'});
   assert.equal(t.canPerform(p, 'route|1|0,0,1'), null, 'another cell is another verdict');
   t.forget('a'); assert.equal(t.canPerform(p, 'route|1|0,0,0'), null);
+});
+
+test('#1287: navRescueV1 is the engine\'s own, looked up per read (a wrapped rescue is seen); absent stays absent', () => {
+  const {e} = fakeEngine(), mw = new LiveMenuWorld(e as never);
+  assert.equal(mw.navRescueV1, undefined);
+  (e as Record<string, unknown>).navRescueV1 = function (this: unknown, id: string) {return this === e ? {id} : null;};
+  assert.deepEqual(mw.navRescueV1!('a', 0), {id: 'a'});
 });

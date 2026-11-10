@@ -92,6 +92,18 @@ export function countEvent(name: CountedEvent | `enter world ${string}`) {
  *  the card, an #approve link or a window code. Fixup 2026-10-21: the new worlds' card never counted, and a card that only
  *  watched another window's approval counted it again. */
 const pairings = new Set<string>();
+/** #1385: the referrer the page had before the Clerk presync (index.html) left for the sync and came back, which leaves
+ *  the sync as the browser's referrer. Read once, and only within a minute; counted as any referrer (countedReferrer). */
+export const PRESYNC_REFERRER = 'soul.presync-referrer';
+export function presyncReferrer(storage: Pick<Storage, 'getItem' | 'removeItem'> | null, now: number): string | null {
+  try {
+    const raw = storage?.getItem(PRESYNC_REFERRER); if (!raw) return null;
+    storage!.removeItem(PRESYNC_REFERRER);
+    const v = JSON.parse(raw) as { r?: unknown; t?: unknown };
+    return typeof v.r === 'string' && typeof v.t === 'number' && now - v.t >= 0 && now - v.t < 60_000 ? v.r : null;
+  } catch { return null; }
+}
+
 /** Whether a card counts its pairing now: Approve was pressed in it and the server took it (creating or ready). */
 export const pairingTaken = (pressed: boolean, status: string | undefined) => pressed && (status === 'creating' || status === 'ready');
 export function countPairing(key: string) {
@@ -102,11 +114,12 @@ export function countPairing(key: string) {
  *  #advanced view) the first live frame was drawn. A tab hidden during the arrival draws nothing, so it counts on the first
  *  visible frame. */
 let counted = false;
+const sessionStore = () => { try { return sessionStorage; } catch { return null; } };
 export function countPage(base: string) {
   if (counted) return; counted = true;
   const at = counting(); if (!at) return;
   const path = countedPath(location.pathname, base); if (!path) return;
   const slug = path.startsWith('/w/') ? path.slice(3) : null;
-  send(countUrl(at, { path, title: slug ?? 'worlds', referrer: countedReferrer(document.referrer, location.origin, base), width }));
+  send(countUrl(at, { path, title: slug ?? 'worlds', referrer: countedReferrer(presyncReferrer(sessionStore(), Date.now()) ?? document.referrer, location.origin, base), width }));
   if (slug) void Promise.race([whenMarked('card-done'), whenMarked('first-live-frame')]).then(() => countEvent(`enter world ${slug}`));
 }

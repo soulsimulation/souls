@@ -6,8 +6,10 @@ import { tmpdir, homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cacheAdd, cacheKey, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
-import { combineReceipts } from './ship-receipt.mjs';
+import { CI_COVERED, ciEvidence, ciLogSkips, cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
+import { combineReceipts, publicReceipt } from './ship-receipt.mjs';
+import { receiptProblems, releaseReceiptProblems } from '../world-launcher/deploy/ship/root-release.mjs';
+import { JOBS } from '../../.github/scripts/ci-scope.mjs';
 
 // Preserve fixture artifacts under the same no-delete rule as release work.
 const retireFixture = dir => { const trash = join(homedir(), '.Trash'); mkdirSync(trash, { recursive: true }); renameSync(dir, join(trash, dir.split('/').at(-1) + '-' + Date.now())); };
@@ -78,6 +80,49 @@ test('removing either a passing or a failing baseline assertion blocks coverage 
     assert.equal(r.status, 'blocked'); assert.equal(r.removed[0].id, 'deleted'); assert.equal(r.fixed.length, 0);
   }
 });
+const rename = (from, to, extra = {}) => ({ step: 'V4-web', from, to, reason: 'Fixture: the same check under its reviewed new name', pr: '#1', ...extra });
+const renamesOf = (...entries) => validateRenames({ schemaVersion: 1, entries });
+const pairRenamed = (baselineNodes, candidateNodes, renames, entries = []) => compareRuns(run(tap(baselineNodes)), run(tap(candidateNodes)), manifest(entries), new Set(), { renames });
+test('renames: a listed rename is satisfied only when every replacement ran and passed; anything unlisted still blocks', () => {
+  const ok = pairRenamed([{ name: 'keep' }, { name: 'old name' }], [{ name: 'keep' }, { name: 'new name' }], renamesOf(rename('old name', 'new name')));
+  assert.equal(ok.status, 'pass', ok.blockers.join('\n')); assert.deepEqual(ok.removed, []);
+  assert.deepEqual(ok.renamed, [{ step: 'V4-web', from: 'old name', to: ['new name'], reason: 'Fixture: the same check under its reviewed new name', pr: '#1' }]);
+  // one old assertion replaced by several: all of them must pass
+  const many = renamesOf(rename('old name', ['new a', 'new b']));
+  assert.equal(pairRenamed([{ name: 'old name' }], [{ name: 'new a' }, { name: 'new b' }], many).status, 'pass');
+  const missing = pairRenamed([{ name: 'old name' }], [{ name: 'new a' }], many);
+  assert.equal(missing.status, 'blocked'); assert.deepEqual(missing.removed, [{ step: 'V4-web', id: 'old name', rename: { to: ['new a', 'new b'], notPassing: ['new b'], inBaseline: [] } }]);
+  // a replacement the baseline already ran is not a rename: deleting A and pointing it at the existing B is coverage loss
+  const folded = pairRenamed([{ name: 'old name' }, { name: 'existing' }], [{ name: 'existing' }], renamesOf(rename('old name', 'existing')));
+  assert.equal(folded.status, 'blocked'); assert.deepEqual(folded.removed[0].rename.inBaseline, ['existing']); assert.deepEqual(folded.renamed, []);
+  for (const status of ['fail', 'skip', 'todo']) {
+    const r = pairRenamed([{ name: 'old name' }], [{ name: 'new name', status }], renamesOf(rename('old name', 'new name')));
+    assert.equal(r.status, 'blocked'); assert.equal(r.removed[0].rename.notPassing[0], 'new name'); assert.equal(r.renamed.length, 0);
+  }
+  // unlisted, another step's entry, or no list at all: still a removed assertion
+  assert.equal(pairRenamed([{ name: 'old name' }], [{ name: 'new name' }], renamesOf(rename('other', 'new name'))).removed[0].id, 'old name');
+  assert.equal(pairRenamed([{ name: 'old name' }], [{ name: 'new name' }], renamesOf(rename('old name', 'new name', { step: 'V2-build-root' }))).status, 'blocked');
+  assert.equal(pair([{ name: 'old name' }], [{ name: 'new name' }]).status, 'blocked');
+  // an entry whose old id still runs changes nothing
+  const stale = pairRenamed([{ name: 'old name' }], [{ name: 'old name' }, { name: 'new name' }], renamesOf(rename('old name', 'new name')));
+  assert.equal(stale.status, 'pass'); assert.deepEqual(stale.renamed, []);
+});
+test('renames: the list is strict about its fields, steps, PR and duplicates', () => {
+  assert.throws(() => validateRenames({ entries: [] }), /schemaVersion 1/);
+  for (const bad of [{ reason: ' ' }, { to: [] }, { to: ['ok', ''] }, { from: undefined }]) assert.throws(() => renamesOf(rename('a', 'b', bad)), /step, from, to/);
+  for (const pr of ['867', '#', 1, undefined]) assert.throws(() => renamesOf(rename('a', 'b', { pr })), /pr must be/);
+  assert.throws(() => renamesOf(rename('a', 'b', { step: 'V9-nope' })), /unknown rename step/);
+  assert.throws(() => renamesOf(rename('a', 'b', { step: REQUIRED_STEPS.find(s => s.startsWith('V6-')) })), /V6 scenarios/);
+  assert.throws(() => renamesOf(rename('a', ['b', 'a'])), /distinct/);
+  assert.throws(() => renamesOf(rename('a', ['b', 'b'])), /distinct/);
+  assert.throws(() => renamesOf(rename('a', 'b'), rename('a', 'c')), /duplicate rename/);
+  assert.deepEqual(renamesOf(rename('a', 'b')).get(`V4-web\u0000a`).to, ['b']);
+});
+test('renames: the committed list validates, and is left out of the suite cache key, unlike quarantine.json (#1461)', () => {
+  const list = JSON.parse(readFileSync(new URL('./renames.json', import.meta.url), 'utf8'));
+  assert.ok(validateRenames(list).size >= 1);
+  assert.ok(COMPARISON_ONLY.includes('renames.json') && !COMPARISON_ONLY.includes('quarantine.json') && !DRIVER_ONLY.includes('quarantine.json'));
+});
 test('skip and TODO changes cannot turn failures into success', () => {
   for (const status of ['skip', 'todo']) {
     const r = pair([{ name: 'working' }], [{ name: 'working', status }], [entry('working', { status })]);
@@ -134,7 +179,7 @@ test('package names prevent equal test names in different packages from collidin
   assert.equal(p.packageExits['engine-mars'], 1);
 });
 test('actual Node TAP catches an additional failure in the same already failing file', t => {
-  const dir = mkdtempSync(join(process.env.GATE_TEST_TMPDIR || tmpdir(), 'sim-release-tap-real-'));
+  const dir = mkdtempSync(join(process.env.GATE_TEST_TMPDIR || tmpdir(), 'souls-release-tap-real-'));
   t.after(() => retireFixture(dir));
   const path = join(dir, 'real.test.mjs');
   const env = { ...process.env }; delete env.NODE_TEST_CONTEXT;
@@ -152,7 +197,7 @@ test('actual Node TAP catches an additional failure in the same already failing 
 
 const expected = { schemaVersion: 1, sourceSha: 'a'.repeat(40), harnessRef: 'b'.repeat(40), harnessTree: 'c'.repeat(40), harnessArchiveSha256: 'd'.repeat(64), node: '22' };
 function fixture(t, { exit = '0', step = 'V4-web', metadata = {}, log = tap([{ name: 'works' }]), summary = true, attribution = [{ event: 'test:pass', file: '/work/head/apps/web/src/widget.test.ts', name: 'works', type: 'test' }, { event: 'test:summary' }] } = {}) {
-  const dir = mkdtempSync(join(process.env.GATE_TEST_TMPDIR || tmpdir(), 'sim-release-gate-'));
+  const dir = mkdtempSync(join(process.env.GATE_TEST_TMPDIR || tmpdir(), 'souls-release-gate-'));
   t.after(() => retireFixture(dir));
   mkdirSync(join(dir, 'out/suite'), { recursive: true });
   writeFileSync(join(dir, 'out/RUN-METADATA.json'), JSON.stringify({ ...expected, baselineSha: null, suiteCompleted: true, skip: ['V7', 'V8'], serverFiles: [], nodeVersion: 'v22.23.0', pnpmVersion: '10.27.0', ...metadata }));
@@ -323,7 +368,7 @@ test('the fixed release contract includes every package/server/web/harness step'
 const shaOf = b => createHash('sha256').update(b).digest('hex');
 const gitIn = (dir, ...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' }).trim();
 function gateRepo(t) {
-  const dir = mkdtempSync(join(process.env.GATE_TEST_TMPDIR || tmpdir(), 'sim-gate-repo-'));
+  const dir = mkdtempSync(join(process.env.GATE_TEST_TMPDIR || tmpdir(), 'souls-gate-repo-'));
   t.after(() => retireFixture(dir));
   gitIn(dir, 'init', '-q', '-b', 'main');
   const commit = (path, text) => {
@@ -364,7 +409,7 @@ function fakeModal(calls, nodeVersionFor = () => 'v22.23.0', onlys = []) {
     return { exit: 0, timedOut: false, log: join(out, 'gate-driver.log'), logSha256: '' };
   };
 }
-const gate = async (repo, args, remoteRun, lines = []) => ({ rc: await main(args, { root: repo.dir, remoteRun, log: l => lines.push(l) }), lines });
+const gate = async (repo, args, remoteRun, lines = [], extra = {}) => ({ rc: await main(args, { root: repo.dir, remoteRun, log: l => lines.push(l), repo: null, ...extra }), lines });
 const receiptOf = out => JSON.parse(readFileSync(join(out, 'receipt.json'), 'utf8'));
 
 function collisionFixture(t) {
@@ -496,7 +541,7 @@ test('solo baseline imports reuse only the verified executed suite, retain drive
 });
 
 test('baseline reuse: a miss runs main once and caches it; the next gate on the same harness tree runs only the candidate', async t => {
-  const repo = gateRepo(t), tmp = dirname(repo.dir), cache = mkdtempSync(join(tmp, 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), tmp = dirname(repo.dir), cache = mkdtempSync(join(tmp, 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), calls = [];
   const out1 = join(repo.dir, '.lane/g1');
   const first = await gate(repo, [c1, '--baseline', repo.base, '--out', out1, '--cache', cache], fakeModal(calls));
@@ -517,8 +562,19 @@ test('baseline reuse: a miss runs main once and caches it; the next gate on the 
   assert.deepEqual(r2.cache.stored.map(s => s.label), ['candidate']); assert.equal(r2.status, 'pass');
   assert.ok(existsSync(join(cache, `${c2}-${r2.harness.suiteTree}-node22/CACHE.json`)));
 });
+test('the receipt hashes the harness rename list, and an invalid list stops the gate before Modal', async t => {
+  const repo = gateRepo(t), list = JSON.stringify({ schemaVersion: 1, entries: [{ step: 'V4-web', from: 'gone', to: 'works', reason: 'fixture rename', pr: '#2' }] }) + '\n';
+  repo.commit('tools/test-harness/renames.json', list);
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), calls = [], out1 = join(repo.dir, '.lane/r1');
+  const first = await gate(repo, [c1, '--baseline', repo.base, '--out', out1, '--no-cache'], fakeModal(calls));
+  assert.equal(first.rc, 0, receiptOf(out1).blockers.join('\n')); assert.equal(receiptOf(out1).renamesSha256, shaOf(Buffer.from(list)));
+  repo.commit('tools/test-harness/renames.json', JSON.stringify({ schemaVersion: 1, entries: [{ step: 'V4-web', from: 'gone', to: 'works', reason: 'no pr' }] }));
+  calls.length = 0; const out2 = join(repo.dir, '.lane/r2');
+  const second = await gate(repo, [c1, '--baseline', repo.base, '--out', out2, '--no-cache'], fakeModal(calls));
+  assert.equal(second.rc, 1); assert.deepEqual(calls, []); assert.match(receiptOf(out2).blockers.join('\n'), /pr must be/);
+});
 test('a modified cache entry or another harness tree is a miss, never a silent reuse', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), calls = [];
   await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal(calls));
   const tree = suiteTree(repo.dir, 'HEAD'), m = manifest(), at = { root: repo.dir };
@@ -538,7 +594,7 @@ test('a modified cache entry or another harness tree is a miss, never a silent r
   assert.equal(r.cache.notStored.find(s => s.label === 'baseline').reason, 'already cached');
 });
 test('a cached baseline on another Node patch is run again, never compared across runtimes', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), calls = [];
   await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal(calls));
   const c2 = repo.commit('apps/web/src/b.ts', 'two\n'); calls.length = 0;
@@ -567,7 +623,7 @@ test('--baseline-results alone imports the baseline and runs only the candidate;
   assert.match(receiptOf(wrong).blockers.join('\n'), /baseline: metadata mismatch: sourceSha/);
 });
 test('cache-add stores only a validated run named by a passing gate receipt', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n');
   const out = join(repo.dir, '.lane/g1');
   await gate(repo, [c1, '--baseline', repo.base, '--out', out, '--no-cache'], fakeModal([]));
@@ -577,14 +633,14 @@ test('cache-add stores only a validated run named by a passing gate receipt', as
   assert.equal(entry.provenance.label, 'candidate'); assert.equal(entry.provenance.receiptSha256, shaOf(readFileSync(join(out, 'receipt.json'))));
   // a blocked gate's run, or a run whose metadata no longer matches its harness, is refused
   const receipt = receiptOf(out); writeFileSync(join(out, 'receipt.json'), JSON.stringify({ ...receipt, status: 'blocked' }));
-  assert.match(cacheAdd(join(out, 'baseline'), { root: repo.dir, cacheDir: mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')) }).reason, /status blocked/);
+  assert.match(cacheAdd(join(out, 'baseline'), { root: repo.dir, cacheDir: mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')) }).reason, /status blocked/);
   writeFileSync(join(out, 'receipt.json'), JSON.stringify(receipt));
   const meta = join(out, 'baseline/out/RUN-METADATA.json'), m = JSON.parse(readFileSync(meta, 'utf8'));
   writeFileSync(meta, JSON.stringify({ ...m, harnessArchiveSha256: 'e'.repeat(64) }));
   assert.match(cacheAdd(join(out, 'baseline'), { root: repo.dir, cacheDir: cache }).reason, /metadata mismatch: harnessArchiveSha256/);
 });
 test('a dry run prints the plan without Modal and without writing an output directory', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n');
   const never = async () => { throw Error('Modal contacted'); };
   const out = join(repo.dir, '.lane/dry');
@@ -607,6 +663,7 @@ test('scope: steps follow the changed areas; docs/tools never gate; anything unn
   assert.deepEqual(scopeFor(['packages/kernel/src/a.ts']).steps, ['V1-types', 'V3-packages', 'V3-mars-engine', 'V3-walk', 'V5-server-full']);
   assert.deepEqual(scopeFor(['tools/world-launcher/launcher.mjs']).steps, ['V3-launcher-unit', ...V6]);
   assert.deepEqual(scopeFor(['tools/edge-skill/a.mjs', 'tools/client-eval/b.mjs']).steps, ['V3-client-cli']);
+  assert.deepEqual(scopeFor(['tools/body-authoring/pip/robot.mjs']), { resolved: 'scoped', steps: ['V5-server-full'], diff: { files: 1, byArea: { 'tools/body-authoring/': 1 }, unmapped: [], unmappedCount: 0 } });
   const none = scopeFor(['docs/a.md', 'tools/test-harness/x.mjs', 'tools/ops/y.sh', 'README.md', '']);
   assert.equal(none.resolved, 'none'); assert.deepEqual(none.steps, []); assert.deepEqual(none.diff.byArea, { 'docs/': 2, 'tools/': 2 });
   for (const f of ['pnpm-lock.yaml', 'package.json', 'mars/viewer/engine/x.ts', 'worlds/eden/a.json', 'vendor/x.js', '.github/workflows/ci.yml']) {
@@ -618,7 +675,7 @@ test('scope: steps follow the changed areas; docs/tools never gate; anything unn
   assert.throws(() => parseArgs(['abc', '--scope', 'some']), /--scope is full or auto/);
 });
 test('scope auto: a web-only candidate runs only its steps against the cached full baseline and is never cached', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/server/src/a.ts', 'one\n'), calls = [];
   await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal(calls));
   const c2 = repo.commit('apps/web/src/b.ts', 'two\n'); calls.length = 0; const onlys = [];
@@ -641,7 +698,7 @@ test('scope auto: a web-only candidate runs only its steps against the cached fu
   assert.deepEqual(onlys, [[]]); assert.equal(receiptOf(fullOut).scope.resolved, 'full'); assert.equal(receiptOf(fullOut).cache.stored[0].label, 'candidate');
 });
 test('scope auto: docs/tools-only candidates are not gated (exit 0, no Modal); an unnamed path runs the full contract', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('docs/notes.md', 'notes\n');
   const c2 = repo.commit('tools/ops/tool.sh', 'echo\n');
   const out = join(repo.dir, '.lane/none'), never = async () => { throw Error('Modal contacted'); };
@@ -658,7 +715,7 @@ test('scope auto: docs/tools-only candidates are not gated (exit 0, no Modal); a
   assert.equal(f.scope.resolved, 'full'); assert.deepEqual(f.scope.diff.unmapped, ['pnpm-lock.yaml']); assert.deepEqual(onlys, [[], []]);
 });
 test('cache-add stores a bare remote-suite run (no gate receipt) only when it passes on its own quarantine', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), head = gitIn(repo.dir, 'rev-parse', 'HEAD');
   const runs = join(repo.dir, '.lane/runs'), bare = join(runs, 'bare'), failing = join(runs, 'failing');
   await fakeModal([])(bare, c1, head, '22', repo.dir);
@@ -682,7 +739,7 @@ test('cache-add stores a bare remote-suite run (no gate receipt) only when it pa
   assert.match(cacheAdd(failing, { root: repo.dir, cacheDir: cache }).reason, /metadata mismatch: harnessTree/);
 });
 test('suite tree: a driver-only edit keeps the cache key and reuses the baseline; a container-side edit changes it', async t => {
-  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'sim-gate-cache-')); t.after(() => retireFixture(cache));
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   repo.commit('tools/test-harness/modal_suite.py', 'V5_SHARDS = 2\n'); repo.commit('tools/test-harness/release-gate.mjs', '// driver v1\n');
   const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), before = suiteTree(repo.dir, 'HEAD'), full = gitIn(repo.dir, 'rev-parse', 'HEAD:tools/test-harness');
   await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
@@ -704,6 +761,227 @@ test('suite tree: a driver-only edit keeps the cache key and reuses the baseline
   await gate(repo, [c3, '--baseline', c2, '--out', out3, '--cache', cache], fakeModal(calls));
   assert.equal(receiptOf(out3).baseline.source, 'run'); assert.deepEqual(calls.sort(), [c2, c3].sort());
 });
+test('suite tree: a renames-only change keeps the cached baseline; a quarantine change still re-runs it (#1461)', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const list = entries => JSON.stringify({ schemaVersion: 1, entries }) + '\n';
+  repo.commit('tools/test-harness/renames.json', list([]));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), before = suiteTree(repo.dir, 'HEAD');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
+  repo.commit('tools/test-harness/renames.json', list([{ step: 'V4-web', from: 'old', to: 'works', reason: 'fixture rename', pr: '#3' }]));
+  assert.equal(suiteTree(repo.dir, 'HEAD'), before);
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'), calls = [], out = join(repo.dir, '.lane/g2');
+  const { rc } = await gate(repo, [c2, '--baseline', c1, '--out', out, '--cache', cache], fakeModal(calls));
+  const r = receiptOf(out);
+  assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(calls, [c2]); assert.equal(r.baseline.source, 'cached');
+  assert.equal(r.renamesSha256, shaOf(Buffer.from(list([{ step: 'V4-web', from: 'old', to: 'works', reason: 'fixture rename', pr: '#3' }]))));
+  // a file the containers read (quarantine.json, read by the harness self-tests) changes the key: the baseline runs again
+  repo.commit('tools/test-harness/quarantine.json', JSON.stringify({ ...manifest(), note: 'edited' }));
+  assert.notEqual(suiteTree(repo.dir, 'HEAD'), before);
+  const c3 = repo.commit('apps/web/src/c.ts', 'three\n'); calls.length = 0;
+  const out3 = join(repo.dir, '.lane/g3');
+  await gate(repo, [c3, '--baseline', c2, '--out', out3, '--cache', cache], fakeModal(calls));
+  assert.equal(receiptOf(out3).baseline.source, 'run'); assert.deepEqual(calls.sort(), [c2, c3].sort());
+});
+test('cache: an entry stored under the old suite-tree definition is found when its harness recomputes to the current tree (#1461)', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), tree = suiteTree(repo.dir, 'HEAD');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
+  // what an entry keyed before #1461 looks like: the same run under another suite-tree hash in its name and CACHE.json
+  const now = cacheKey({ sourceSha: c1, suiteTree: tree, node: '22' }), oldKey = cacheKey({ sourceSha: c1, suiteTree: 'e'.repeat(64), node: '22' });
+  renameSync(join(cache, now), join(cache, oldKey));
+  const entryPath = join(cache, oldKey, 'CACHE.json'), entry = JSON.parse(readFileSync(entryPath, 'utf8'));
+  writeFileSync(entryPath, JSON.stringify({ ...entry, key: oldKey, suiteTree: 'e'.repeat(64) }));
+  const hit = lookupCache(cache, { sourceSha: c1, suiteTree: tree, node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir);
+  assert.equal(hit.hit, true, hit.reason); assert.equal(hit.legacyKey, true); assert.equal(hit.key, oldKey);
+  assert.match(lookupCache(cache, { sourceSha: c1, suiteTree: 'f'.repeat(64), node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir).reason, /no cached run/);
+  assert.match(lookupCache(cache, { sourceSha: c1, suiteTree: tree, node: '26' }, manifest(), REQUIRED_STEPS, {}, repo.dir).reason, /no cached run/);
+  // through the gate: the old-key entry is the baseline, no baseline run
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'), calls = [], out = join(repo.dir, '.lane/g2');
+  const { rc } = await gate(repo, [c2, '--baseline', c1, '--out', out, '--cache', cache], fakeModal(calls));
+  const r = receiptOf(out);
+  assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(calls, [c2]); assert.equal(r.baseline.source, 'cached'); assert.equal(r.baseline.legacyKey, true);
+});
+// ── CI evidence (#1463) ──
+const CI_STEPS = ['V1-types', 'V2-build-root', 'V3-client-cli', 'V3-launcher-unit', 'V4-web', 'V5-server-full'];
+const here = p => readFileSync(new URL(p, import.meta.url), 'utf8');
+const tapLog = (names = ['works'], skipped = []) => [...names.map((n, i) => `2026-11-09T02:37:10.7160585Z ok ${i + 1} - ${n}`),
+  ...skipped.map((n, i) => `2026-11-09T02:37:10.7160585Z ok ${names.length + i + 1} - ${n} # SKIP fixture`),
+  `2026-11-09T02:37:10.7Z # tests ${names.length + skipped.length}`, '2026-11-09T02:37:10.7Z # pass 1', `2026-11-09T02:37:10.7Z # skipped ${skipped.length}`, '2026-11-09T02:37:10.7Z # todo 0'].join('\n');
+const allJobs = { 'types-web': 'success', 'client-cli': 'success', launcher: 'success', web: 'success', latency: 'success', 'server-0': 'success', 'server-1': 'success', 'server-2': 'success', packages: 'success', native: 'success' };
+function fakeGithub({ sha, runs, jobs, logs = {} }) {
+  const calls = [];
+  const ids = {};
+  const api = path => { calls.push(path);
+    if (path.includes('/workflows/ci.yml/runs?head_sha=')) return { workflow_runs: runs };
+    const id = Number(/\/runs\/(\d+)\/jobs/.exec(path)?.[1]); return { jobs: Object.entries(jobs[id] || {}).map(([name, conclusion], i) => { ids[1000 + i] = name; return { id: 1000 + i, name, conclusion }; }) }; };
+  const log = id => { const name = ids[id]; if (logs[name] instanceof Error) throw logs[name]; return logs[name] ?? tapLog(); };
+  const files = { '.github/workflows/ci.yml': here('../../.github/workflows/ci.yml'), '.github/scripts/server-test-files.mjs': 'export const SERVER_SHARDS = 3;\n',
+    '.github/scripts/ci-scope.mjs': '// picker\n', 'package.json': here('../../package.json'), 'tools/test-harness/web-suite.sh': here('./web-suite.sh'), 'tools/test-harness/web-loader.mjs': '// loader\n' };
+  const base = { ...files };
+  return { api, log, calls, files, base, args: (extra = {}) => ({ repo: 'o/r', api, log, file: p => files[p] ?? null, baselineFile: p => base[p] ?? null, ...extra }) };
+}
+const ciRun = (sha, extra = {}) => ({ id: 7, head_sha: sha, event: 'push', head_branch: 'main', status: 'completed', conclusion: 'success', path: '.github/workflows/ci.yml', html_url: 'https://github.com/o/r/actions/runs/7', ...extra });
+
+test('CI evidence: the covered table is exact, and ci.yml still runs each covered command with those jobs', () => {
+  assert.deepEqual(Object.keys(CI_COVERED).sort(), [...CI_STEPS].sort());
+  const ci = here('../../.github/workflows/ci.yml'), names = new Set(JOBS.map(j => j.name));
+  for (const [step, c] of Object.entries(CI_COVERED)) {
+    assert.ok(ci.includes(c.command), `${step}: ci.yml runs ${c.command}`);
+    for (const j of c.jobs) assert.ok(j === 'server-*' ? names.has('server-0') : names.has(j), `${step}: CI job ${j}`);
+  }
+  // the package.json scripts CI calls are the gate's commands today (one-validation.sh)
+  const scripts = JSON.parse(here('../../package.json')).scripts, ov = here('./one-validation.sh').replaceAll(' --test-reporter=tap', '');
+  assert.ok(ov.includes(scripts.typecheck)); assert.ok(ov.includes(scripts['test:client']));
+  // the gate commands CI does not run the same way (one-validation.sh) stay on Modal
+  for (const step of ['V2-build-worlds', 'V3-harness', 'V3-walk', 'V3-bundle', 'V3-packages', 'V3-mars-engine', ...REQUIRED_STEPS.filter(s => s.startsWith('V6-'))]) assert.ok(!CI_COVERED[step], step);
+});
+
+test('CI evidence: only a successful push-to-main or merge_group ci.yml run at the exact sha, and only steps whose jobs all succeeded', () => {
+  const sha = 'a'.repeat(40);
+  const full = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } });
+  const r = ciEvidence(sha, full.args());
+  assert.deepEqual(r.covered, CI_STEPS, JSON.stringify(r.notCovered)); assert.equal(r.run.id, 7); assert.equal(r.run.event, 'push');
+  assert.match(full.calls[1], /runs\/7\/jobs\?filter=latest/);
+  const again = fakeGithub({ sha, runs: [ciRun(sha, { run_attempt: 2 })], jobs: { 7: allJobs } });
+  assert.equal(ciEvidence(sha, again.args()).run.attempt, 2);
+  // a failed or missing server shard keeps V5 on Modal; other steps stay covered
+  const shard = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: { ...allJobs, 'server-2': 'cancelled' } } });
+  const s2 = ciEvidence(sha, shard.args());
+  assert.ok(!s2.covered.includes('V5-server-full')); assert.match(s2.notCovered['V5-server-full'], /server-2=cancelled/);
+  // a path-scoped merge-group run covers what it ran
+  const mg = fakeGithub({ sha, runs: [ciRun(sha, { id: 8, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 8: { 'types-web': 'success', web: 'success' } } });
+  assert.deepEqual(ciEvidence(sha, mg.args()).covered, ['V1-types', 'V2-build-root', 'V4-web']);
+  // a push run is preferred over a newer merge-group run
+  const both = fakeGithub({ sha, runs: [ciRun(sha), ciRun(sha, { id: 9, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 7: allJobs, 9: {} } });
+  assert.equal(ciEvidence(sha, both.args()).run.id, 7);
+  // refused: failed, in progress, another sha, a pull_request run, a push to another branch, another workflow file
+  for (const bad of [{ conclusion: 'failure' }, { status: 'in_progress', conclusion: null }, { head_sha: 'b'.repeat(40) }, { event: 'pull_request' },
+    { head_branch: 'feature' }, { path: '.github/workflows/other.yml' }]) {
+    const g = fakeGithub({ sha, runs: [ciRun(sha, bad)], jobs: { 7: allJobs } });
+    const e = ciEvidence(sha, g.args());
+    assert.deepEqual(e.covered, [], JSON.stringify(bad)); assert.match(e.reason, /no successful push\/merge_group ci.yml run/);
+  }
+  assert.match(ciEvidence(sha, full.args({ repo: null })).reason, /no GitHub repository/);
+  assert.match(ciEvidence(sha, full.args({ api: () => { throw Error('HTTP 403'); } })).reason, /could not read CI runs: HTTP 403/);
+});
+
+test('CI evidence is bound to the baseline\'s CI definitions: each weakening probe falls back to Modal (#1463 review)', () => {
+  const sha = 'a'.repeat(40);
+  const probe = edit => { const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); edit(g.files); return ciEvidence(sha, g.args()); };
+  const yml = f => f['.github/workflows/ci.yml'];
+  const workflowProbes = {
+    'web-suite.sh || true': f => { f['.github/workflows/ci.yml'] = yml(f).replace('bash tools/test-harness/web-suite.sh', 'bash tools/test-harness/web-suite.sh || true'); },
+    'continue-on-error': f => { f['.github/workflows/ci.yml'] = yml(f).replace('    timeout-minutes: ${{ matrix.kind', '    continue-on-error: true\n    timeout-minutes: ${{ matrix.kind'); },
+    'test name filter': f => { f['.github/workflows/ci.yml'] = yml(f).replace('node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', 'node --test --test-name-pattern=nothing --test-concurrency=1 tools/world-launcher/*.test.mjs'); },
+    'echo of the command': f => { f['.github/workflows/ci.yml'] = yml(f).replace('              pnpm typecheck\n', '              echo "pnpm typecheck"\n'); },
+  };
+  for (const [name, edit] of Object.entries(workflowProbes)) {
+    const r = probe(edit);
+    assert.deepEqual(r.covered, [], name);
+    for (const step of CI_STEPS) assert.match(r.notCovered[step], /CI definitions differ from the baseline's: ci\.yml|does not run/, `${name}: ${step}`);
+  }
+  // a file one step depends on drops only that step
+  const one = (edit, step, why) => { const r = probe(edit); assert.deepEqual(r.covered, CI_STEPS.filter(s => s !== step), step); assert.match(r.notCovered[step], why); };
+  one(f => { f['tools/test-harness/web-suite.sh'] += 'exit 0\n'; }, 'V4-web', /web-suite\.sh/);
+  one(f => { f['tools/test-harness/web-loader.mjs'] += '// changed\n'; }, 'V4-web', /web-loader\.mjs/);
+  one(f => { f['.github/scripts/server-test-files.mjs'] = 'export const SERVER_SHARDS = 4;\n'; }, 'V5-server-full', /server-test-files\.mjs/);
+  one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, typecheck: 'true' } }); }, 'V1-types', /package\.json#typecheck/);
+  one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, 'test:client': 'true' } }); }, 'V3-client-cli', /package\.json#test:client/);
+  // the job picker and a missing baseline definition drop everything; comments and the repo job do not count
+  assert.deepEqual(probe(f => { f['.github/scripts/ci-scope.mjs'] += '// changed\n'; }).covered, []);
+  const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs } }); delete g.base['.github/workflows/ci.yml'];
+  assert.deepEqual(ciEvidence(sha, g.args()).covered, []);
+  assert.deepEqual(probe(f => { f['.github/workflows/ci.yml'] = yml(f).replace('  repo:\n', '  repo:\n    # a comment\n').replace('timeout-minutes: 10\n', 'timeout-minutes: 11\n'); }).covered, CI_STEPS);
+});
+
+test('CI evidence refuses a covered job whose log shows an unquarantined skip or todo, or no complete test summary', () => {
+  const sha = 'a'.repeat(40);
+  const real = here('../world-launcher/backup-restic.test.mjs').includes("'backup, version history, restore by night, retention, off-box copy'");
+  assert.ok(real, 'the launcher test the CI job used to skip');
+  const skip = 'backup, version history, restore by night, retention, off-box copy';
+  const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs }, logs: { launcher: tapLog(['works'], [skip]), 'server-1': '2026-11-09T02:37:10.7Z no tests ran\n' } });
+  const r = ciEvidence(sha, g.args());
+  assert.match(r.notCovered['V3-launcher-unit'], /unquarantined skip "backup, version history/);
+  assert.match(r.notCovered['V5-server-full'], /server-1: incomplete node test summaries/);
+  assert.deepEqual(r.covered, ['V1-types', 'V2-build-root', 'V3-client-cli', 'V4-web']);
+  // a quarantined skip is evidence, and is listed
+  const q = { entries: [{ step: 'V3-launcher-unit', id: skip, status: 'skip', reason: 'fixture', owner: 'fixture' }] };
+  const ok = ciEvidence(sha, g.args({ quarantine: q }));
+  assert.ok(ok.covered.includes('V3-launcher-unit')); assert.equal(ok.quarantinedSkips['V3-launcher-unit'][0].id, skip);
+  // a summary that does not add up, or an unreadable log, is not evidence
+  const odd = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs }, logs: { web: tapLog(['a']).replace('# skipped 0', '# skipped 2'), 'client-cli': new Error('HTTP 410 gone') } });
+  const o = ciEvidence(sha, odd.args());
+  assert.match(o.notCovered['V4-web'], /incomplete/); assert.match(o.notCovered['V3-client-cli'], /log unreadable \(HTTP 410 gone\)/);
+  // the real CI log shapes (TAP behind timestamps, nested and escaped titles) parse
+  const parsed = ciLogSkips(['2026-11-09T02:37:10.7Z     ok 3 - \\#12 nested # TODO later', '2026-11-09T02:37:10.7Z not ok 4 - flaky # SKIP off', '2026-11-09T02:37:10.7Z # tests 4', '2026-11-09T02:37:10.7Z # skipped 1', '2026-11-09T02:37:10.7Z # todo 1'].join('\n'));
+  assert.deepEqual(parsed, { skipped: [{ id: '\\#12 nested', status: 'todo' }, { id: 'flaky', status: 'skip' }], summaries: 1, complete: true });
+});
+
+test('CI evidence gate: Modal runs only the uncovered steps against the cached full baseline; the receipt keeps its verdict and ships', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', join(repo.dir, '.lane/g1'), '--cache', cache], fakeModal([]));
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'), calls = [], onlys = [], seen = [], out = join(repo.dir, '.lane/g2');
+  const evidence = sha => { seen.push(sha); return { covered: CI_STEPS, notCovered: {}, run: { id: 7, event: 'push', headSha: sha }, jobs: {} }; };
+  const executed = REQUIRED_STEPS.filter(s => !CI_STEPS.includes(s));
+  const { rc } = await gate(repo, [c2, '--baseline', c1, '--out', out, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: evidence });
+  const r = receiptOf(out);
+  assert.equal(rc, 0, r.blockers.join('\n')); assert.deepEqual(seen, [c2]); assert.deepEqual(calls, [c2]); assert.deepEqual(onlys, [executed]);
+  assert.equal(r.status, 'pass'); assert.equal(r.scope.resolved, 'full'); assert.deepEqual(r.scope.steps, REQUIRED_STEPS);
+  assert.deepEqual(r.scope.executed, executed); assert.deepEqual(r.scope.ciCovered, CI_STEPS); assert.equal(r.ciEvidence.run.id, 7);
+  assert.equal(r.baseline.source, 'cached'); assert.deepEqual(Object.keys(r.runs.candidate.steps).sort(), [...executed].sort());
+  for (const k of ['blockers', 'newFailures', 'removed', 'unexpectedSkips']) assert.deepEqual(r[k], [], k);
+  // the ship receipt and ship.sh's preflight accept it unchanged; V7 stays required
+  const v7 = { schemaVersion: 1, step: 'V7', status: 'pass', dirty: false, source: c2, at: '2026-11-08T00:00:00.000Z', checks: [{ id: 'walk', ok: true }], failed: [] };
+  const combined = combineReceipts(r, v7);
+  assert.equal(combined.status, 'pass', combined.blockers.join('\n')); assert.deepEqual(combined.remainingExclusions, ['V8']);
+  assert.deepEqual(receiptProblems(r, { ...combined, gate: { sha256: 'g' } }, c2, 'g'), []);
+  assert.deepEqual(releaseReceiptProblems(publicReceipt(r, 'a'.repeat(64), v7, 'b'.repeat(64)), c2), []);
+  assert.equal(combineReceipts(r, { ...v7, status: 'fail', checks: [{ id: 'walk', ok: false }] }).status, 'blocked');
+  // the partial candidate is cached under a key naming its steps, and is the next gate's baseline for those steps
+  const partKey = cacheKey({ sourceSha: c2, suiteTree: r.harness.suiteTree, node: '22', only: executed });
+  assert.ok(existsSync(join(cache, partKey, 'CACHE.json'))); assert.ok(!existsSync(join(cache, cacheKey({ sourceSha: c2, suiteTree: r.harness.suiteTree, node: '22' }))));
+  const c3 = repo.commit('apps/web/src/c.ts', 'three\n'); calls.length = 0; onlys.length = 0;
+  const out3 = join(repo.dir, '.lane/g3');
+  const third = await gate(repo, [c3, '--baseline', c2, '--out', out3, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: evidence });
+  const r3 = receiptOf(out3);
+  assert.equal(third.rc, 0, r3.blockers.join('\n')); assert.deepEqual(calls, [c3]); assert.equal(r3.baseline.source, 'cached'); assert.deepEqual(r3.baseline.only, executed);
+  assert.equal(r3.baseline.cacheKey, partKey);
+  // a steps-only cached run never stands in for a full baseline
+  assert.match(lookupCache(cache, { sourceSha: c2, suiteTree: r.harness.suiteTree, node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir).reason, /no cached run/);
+});
+
+test('CI evidence gate: none (or --no-ci-evidence, or another Node) runs the full contract; a miss runs the baseline on the same steps', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), calls = [], onlys = [], out = join(repo.dir, '.lane/n1');
+  await gate(repo, [c1, '--baseline', repo.base, '--out', out, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: () => ({ covered: [], reason: 'no successful push/merge_group ci.yml run' }) });
+  const r = receiptOf(out);
+  assert.deepEqual(onlys, [[], []]); assert.deepEqual(r.scope.executed, REQUIRED_STEPS); assert.match(r.ciEvidence.reason, /no successful/); assert.equal(r.status, 'pass');
+  let asked = 0; const evidence = () => { asked++; return { covered: CI_STEPS, notCovered: {}, run: { id: 1 }, jobs: {} }; };
+  const c2 = repo.commit('apps/web/src/b.ts', 'two\n'); onlys.length = 0;
+  await gate(repo, [c2, '--baseline', c1, '--out', join(repo.dir, '.lane/n2'), '--no-cache', '--no-ci-evidence'], fakeModal([], undefined, onlys), [], { ciEvidence: evidence });
+  assert.equal(asked, 0); assert.deepEqual(onlys, [[], []]); assert.equal(receiptOf(join(repo.dir, '.lane/n2')).ciEvidence, undefined);
+  onlys.length = 0;
+  await gate(repo, [c2, '--baseline', c1, '--out', join(repo.dir, '.lane/n3'), '--no-cache', '--node', '26'], fakeModal([], () => 'v26.1.0', onlys), [], { ciEvidence: evidence });
+  assert.equal(asked, 0); assert.match(receiptOf(join(repo.dir, '.lane/n3')).ciEvidence.reason, /CI runs Node 22/);
+  // a baseline with no cached run of either shape runs once, on exactly the executed steps, and is cached under that key
+  const executed = REQUIRED_STEPS.filter(s => !CI_STEPS.includes(s)); onlys.length = 0; calls.length = 0;
+  const out4 = join(repo.dir, '.lane/n4');
+  const c3 = repo.commit('apps/web/src/c.ts', 'three\n');
+  const c4 = repo.commit('apps/web/src/d.ts', 'four\n');
+  const fourth = await gate(repo, [c4, '--baseline', c3, '--out', out4, '--cache', cache], fakeModal(calls, undefined, onlys), [], { ciEvidence: evidence });
+  const r4 = receiptOf(out4);
+  assert.equal(fourth.rc, 0, r4.blockers.join('\n')); assert.deepEqual(calls.sort(), [c3, c4].sort()); assert.deepEqual(onlys, [executed, executed]);
+  assert.equal(r4.baseline.source, 'run'); assert.deepEqual(r4.baseline.only, executed); assert.match(r4.baseline.cacheMiss, /steps-only: no cached run/);
+  assert.deepEqual(r4.cache.stored.map(s => s.label), ['baseline', 'candidate']);
+  // the dry run says what CI covers and what Modal runs
+  const lines = [];
+  await gate(repo, [c4, '--baseline', c3, '--cache', cache, '--dry-run'], fakeModal([]), lines, { ciEvidence: evidence });
+  const plan = JSON.parse(lines[0]);
+  assert.deepEqual(plan.candidate.steps, executed); assert.deepEqual(plan.scope.ciCovered, CI_STEPS); assert.equal(plan.ciEvidence.run.id, 1);
+  assert.match(lines.at(-1), new RegExp(`executed=${executed.length} ci_covered=${CI_STEPS.length} baseline_source=cached modal_runs=1`));
+});
+
 test('against a cached baseline with other driver files, only their own removed self-tests are not lost coverage', () => {
   const harness = (names, source) => { const p = parseTap(tap(names.map(name => ({ name, source }))), 'V3-harness');
     return { errors: [], steps: { 'V3-harness': { exit: '0', tests: p.tests, executedFiles: [] } } }; };
@@ -742,7 +1020,7 @@ function carryFixture(t) {
   const original = readRun(originalOut, meta, manifest()); assert.deepEqual(original.errors, []);
   writeFileSync(join(originalGate, 'receipt.json'), JSON.stringify({ schemaVersion: 1, status: 'pass', refs: { candidate: { sha: source } },
     scope: { resolved: 'full', steps: REQUIRED_STEPS }, blockers: [], newFailures: [], removed: [], unexpectedSkips: [], runs: { candidate: original } }));
-  const cacheRoot = mkdtempSync(join(dirname(repo.dir), 'sim-carry-cache-')); t.after(() => retireFixture(cacheRoot));
+  const cacheRoot = mkdtempSync(join(dirname(repo.dir), 'souls-carry-cache-')); t.after(() => retireFixture(cacheRoot));
   const stored = storeCache(cacheRoot, original, { via: 'gate', label: 'candidate', gate: originalGate, status: 'pass' }, repo.dir);
   assert.equal(stored.stored, true, stored.reason);
   const after = structuredClone(before); after.note.push('reviewed new-key registration');

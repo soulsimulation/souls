@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
-import {retainedCommonsShoreFactory,nativeSleepSnapshotFactoryV1} from '@sim/engine-mars';
+import {retainedCommonsShoreFactory,nativeSleepSnapshotFactoryV1} from '@souls/engine-mars';
 import type {WorldState as NativeWorld} from '../../../mars/viewer/engine/world/types.ts';
 import {fixture,invite,accept} from '../test/native-owner-fixture.ts';
 import {LivingWorld} from './living.ts';
@@ -138,7 +138,9 @@ test('a Soul left in water floats at the surface: zombie floating (no shuffles),
 test('idle reflex: a silent connected Soul sits and dozes within 2 h; an owner message ends it at once',{timeout:1800000},async t=>{
  // Test actual idle postures on open ground. Seat approaches and random drifts can otherwise leave the Soul
  // beside furniture where native nap correctly refuses pose.no-room; the separate wander tests cover movement.
- const w=await world(['ana'],{seatRadiusM:0,reflexRadiusM:0});t.after(w.close);const s=w.souls[0],e=w.ents()[s.entityId],eng=w.f.host.engine as any;
+ // #1431: a fixed Soul id. The idle reflex picks each move by mix(soulId+':idle', n), so a random id made this test a draw
+ // (one CI run never sat). This id sits and dozes plainly within the 2 h; the assertions are unchanged.
+ const w=await world(['ana'],{seatRadiusM:0,reflexRadiusM:0},'s_5ea7ed0001');t.after(w.close);const s=w.souls[0],e=w.ents()[s.entityId],eng=w.f.host.engine as any;
  const at=e.pose.p.slice();assert.ok(eng.dryGroundAtV1(at[0],at[2]),'the posture fixture is dry');
  assert.ok(eng.clearanceUpToV1(at[0],at[2],1)>=0.9,'the posture fixture has native nap clearance');
  assert.equal(eng.canPerform({actor:s.entityId,label:'fixture nap',steps:[{verb:'mars:pose_v1',params:{activity:'nap',seconds:5}}]}),null,'native nap is initially admissible');

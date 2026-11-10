@@ -1,5 +1,5 @@
 import type { GodMode } from './god.ts';
-import type { Entity, WorldModel } from '@sim/world-compiler';
+import type { Entity, WorldModel } from '@souls/world-compiler';
 import { contextHash } from './context-view-cache.ts';
 import { humanTitle, meaningParts } from './meaning.ts';
 import { withoutHidden } from '../moderation/routes.ts';
@@ -81,7 +81,7 @@ export function* contextTargetRows(m: WorldModel, artBasePath?: string): Generat
             number,
             number,
             number
-        ] = [p.x, p.y + box[1] * p.s / 2, p.z], radius0 = Math.max(.5, Math.hypot(box[0], box[2]) * p.s / 2);
+        ] = [p.x, p.y + box[1] * p.s / 2, p.z], radius0 = Math.max(.5, Math.hypot(box[0], box[2]) * p.s / 2, (d.components.shade?.radius ?? 0) * p.s);
         const area = e.shape && 'area' in e.shape ? e.shape.area : undefined;
         let radius = radius0;
         if (area?.length) {

@@ -53,7 +53,7 @@ export function inline(text: string): string {
   return text.split(/(`[^`]+`)/).map((part) => (/^`[^`]+`$/.test(part) ? `<code>${escapeHtml(part.slice(1, -1))}</code>` : escapeHtml(part))).join('');
 }
 
-/** A release's anchor: `v4.0`, `v3.62` (stable, so a visitor can link one release). */
+/** A release's anchor: `v0.105`, `v0.67` (stable, so a visitor can link one release). */
 export const releaseId = (version: string) => 'v' + version.replace(/[^A-Za-z0-9._-]/g, '-');
 
 const LONG_DATE = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
@@ -74,8 +74,8 @@ function publicUrl(value: unknown, media: boolean): string {
   // Canonical href equality above also rejects dot-segment/backslash normalization before allowlisting paths.
   const allowed = media
     ? (u.origin === 'https://assets.eden.art' && /^\/public-journal\/[A-Za-z0-9._/-]+$/.test(u.pathname)) ||
-      (u.origin === 'https://github.com' && /^\/genekogan\/souls\/releases\/download\/proofs(?:-\d+)?\/[A-Za-z0-9._-]+$/.test(u.pathname))
-    : u.origin === 'https://github.com' && /^\/genekogan\/souls\/(?:pull\/\d+|commit\/[a-f0-9]{40}|releases\/tag\/[A-Za-z0-9._-]+)$/.test(u.pathname);
+      (u.origin === 'https://github.com' && /^\/(?:soulsimulation|genekogan)\/souls\/releases\/download\/proofs(?:-\d+)?\/[A-Za-z0-9._-]+$/.test(u.pathname))
+    : u.origin === 'https://github.com' && /^\/(?:soulsimulation|genekogan)\/souls\/(?:pull\/\d+|commit\/[a-f0-9]{40}|releases\/tag\/[A-Za-z0-9._-]+)$/.test(u.pathname);
   if (!allowed) throw Error('Public journal: URL outside publication allowlist');
   return value;
 }
@@ -136,7 +136,7 @@ function renderJournal(e: PublicJournal): string {
 export function renderChangelog(log: Changelog, { home, journal = [] }: { home: string; journal?: PublicJournal[] }): string {
   const out: string[] = [];
   out.push(`<nav class="cl-nav"><a href="${escapeHtml(home)}">← Worlds</a></nav>`);
-  out.push('<header class="cl-head"><h1>Changelog</h1><p>What changed in Sim, release by release. Newest first.</p></header>');
+  out.push('<header class="cl-head"><h1>Changelog</h1><p>What changed in Souls, release by release. Newest first.</p></header>');
   for (const r of log.releases) {
     const id = releaseId(r.version);
     out.push(`<section class="cl-release" id="${escapeHtml(id)}" aria-labelledby="${escapeHtml(id)}-h">`);

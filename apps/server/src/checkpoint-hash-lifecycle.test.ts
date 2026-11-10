@@ -1,8 +1,8 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate as turn } from 'node:timers/promises';
-import { toyFactory } from '@sim/engine-toy';
-import type { Engine, EngineFactory, EngineCheckpoint } from '@sim/engine-contract';
+import { toyFactory } from '@souls/engine-toy';
+import type { Engine, EngineFactory, EngineCheckpoint } from '@souls/engine-contract';
 import { Db } from './db.ts';
 import { WorldHost, type SnapshotBody } from './world.ts';
 
@@ -89,7 +89,10 @@ test('same-tick supersession and stop cancel deferred hash ownership without a s
 test('synchronous invalid-domain capture never replaces the previous recovery ownership', t => {
   const f = fixture(t), baseline = f.priv.recoveryBaseline;
   t.mock.method(f.host.engine as Engine & Required<Pick<Engine, 'captureCheckpoint'>>, 'captureCheckpoint', () => { throw Error('non-finite number in hashed state'); });
-  assert.throws(() => f.priv.schedulePeriodicSnapshot(), /non-finite/);
+  // #1492: skipped by name (snapshot.non-finite), never thrown out of the tick; anything else still propagates
+  assert.doesNotThrow(() => f.priv.schedulePeriodicSnapshot());
+  t.mock.method(f.host.engine as Engine & Required<Pick<Engine, 'captureCheckpoint'>>, 'captureCheckpoint', () => { throw Error('captured hashability value has no owned shape'); });
+  assert.throws(() => f.priv.schedulePeriodicSnapshot(), /no owned shape/);
   assert.strictEqual(f.priv.recoveryBaseline, baseline); assert.equal(f.priv.recoveryCapture, null); assert.equal(f.priv.periodicSnapshot, null);
 });
 

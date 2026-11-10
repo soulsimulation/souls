@@ -1,0 +1,24 @@
+{
+ "soulRun": 1,
+ "name": "s3-sustained-intent-remeasure-sonnet",
+ "cast": {
+  "file": "s3-sustained-intent-candidate-sonnet.cast.json"
+ },
+ "observer": {
+  "check": false
+ },
+ "limits": {
+  "maxWallSec": 1300,
+  "maxControllers": 2
+ },
+ "evaluation": {
+  "questions": [
+   "../../questions/errand-kept-through-burst.mjs",
+   "../../questions/cancel-not-resumed.mjs",
+   "../../questions/reasonable-carried-out-v3.mjs"
+  ]
+ },
+ "controllers": {
+  "allowLiveModels": true
+ }
+}

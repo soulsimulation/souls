@@ -12,9 +12,9 @@ import { loadSnapshot } from './snapshot-wire.ts';
 import { snapshotModel } from './snapshot-model.ts';
 import type { SnapshotDecoder, SnapshotDelta } from './snapshot-delta.ts';
 import * as THREE from 'three';
-import { TILE_M, TILE_N, Terrain, groundForTile, heightAt, waterLevelAt, type Ground } from '@sim/ground';
-import { WorldModel, stableStringify, CAN_OPENING, CAN_ROSE, CUP_RIM, KETTLE_OPENING, KETTLE_SPOUT, KETTLE_SPOUT_ANGLE, KETTLE_SWITCH, SPOUT_SPEED, cupSteam, spoutSpeed, isKettleDef, isTeaCupDef, kettleHeat, spoutRun, containerInside, type Def, type Entity, type StoredDef } from '@sim/world-compiler';
-import { GENERATORS } from '@sim/generators';
+import { TILE_M, TILE_N, Terrain, groundForTile, heightAt, waterLevelAt, type Ground } from '@souls/ground';
+import { WorldModel, stableStringify, CAN_OPENING, CAN_ROSE, CUP_RIM, KETTLE_OPENING, KETTLE_SPOUT, KETTLE_SPOUT_ANGLE, KETTLE_SWITCH, SPOUT_SPEED, cupSteam, spoutSpeed, isKettleDef, isTeaCupDef, kettleHeat, spoutRun, containerInside, keptBehindDoor, type Def, type Entity, type StoredDef } from '@souls/world-compiler';
+import { GENERATORS } from '@souls/generators';
 import { meshFor, type MeshCtx } from './gen-mesh/index.ts';
 import { clearBuildingPrefetch, prefetchBuilding } from './gen-mesh/building.mesh.ts';
 import { MaterialLib } from './gen-mesh/materials.ts';
@@ -545,6 +545,7 @@ export class WorldEntityLayer {
     this.seq = delta.seq;
     this.sites.reset((delta.builds ?? []) as PublicSite[], delta.buildsRev ?? 0, delta.now);
     // entities: a record that differs from ours is replaced and drawn again (eased only when it is new to the picture)
+    const existingParents = new Set(delta.upserts.map(e => e.in.parent).filter(id => m.entities.has(id)));
     const queue: { id: string; ease: boolean }[] = [], upserted = new Set<string>();
     for (const e of delta.upserts as unknown as Entity[]) {
       const cur = m.entities.get(e.id);
@@ -565,7 +566,7 @@ export class WorldEntityLayer {
     const seen = new Set<string>();
     for (let i = 0; i < queue.length;) {
       const until = performance.now() + RESYNC_SLICE_MS;
-      m.readPass(() => { while (i < queue.length) { const { id, ease } = queue[i++]; if (seen.has(id)) continue; seen.add(id); const e = m.entities.get(id); if (e) { this.draw(e, ease); last.drawn++; } if (performance.now() >= until) break; } });
+      m.readPass(() => { while (i < queue.length) { const { id, ease } = queue[i++]; if (seen.has(id)) continue; seen.add(id); const e = m.entities.get(id); if (e) { this.draw(e, ease, false, existingParents.has(e.in.parent)); last.drawn++; } if (performance.now() >= until) break; } });
       if (i < queue.length) { await nextTask('user-visible'); if (signal.aborted || this.model !== m) return; }
     }
     this.stats.resyncs++;
@@ -654,12 +655,12 @@ export class WorldEntityLayer {
         const { enter } = this.ring.update(pose.eye[0], pose.eye[2], true);
         sorted = enter.flatMap((id) => { const e = m.entities.get(id); return e ? [e] : []; }); far = -1;
         if (!workersLater) { this.prefetchBuildings(m, sorted, pending); await nextTask(); if (signal.aborted || this.model !== m) return; }
-        (window as unknown as { __simStream?: unknown }).__simStream = { inner: this.ring.inner, outer: this.ring.outer, things: this.ring.size, ring: sorted.length, stats: this.streamStats };   // probes
+        (window as unknown as { __soulsStream?: unknown }).__soulsStream = { inner: this.ring.inner, outer: this.ring.outer, things: this.ring.size, ring: sorted.length, stats: this.streamStats };   // probes
       }
       // t4-phone-new: of the near things, those the arrival camera can see (or whose shadow can reach its view) are drawn
       // before the poster; the fill then draws the next things in view, then the near ones behind or beside it (arrival-view.ts)
       const { list: all, first: nearCount } = view && keyOf && byId ? viewFirst(sorted, far < 0 ? sorted.length : far, arrivalSeen(m, view, keyOf, byId, true), FILL_AHEAD) : { list: sorted, first: far < 0 ? sorted.length : far };
-      (window as unknown as { __simViewFirst?: unknown }).__simViewFirst = { near: far < 0 ? sorted.length : far, seen: nearCount, wedge: view, eager: eagerShas().length, eagerKB: Math.round(Object.values(eagerSizes).reduce((a, b) => a + b, 0) / 1e3) };   // probes
+      (window as unknown as { __soulsViewFirst?: unknown }).__soulsViewFirst = { near: far < 0 ? sorted.length : far, seen: nearCount, wedge: view, eager: eagerShas().length, eagerKB: Math.round(Object.values(eagerSizes).reduce((a, b) => a + b, 0) / 1e3) };   // probes
       for (let i = 0; i < all.length;) {
         if (i >= nearCount && !this.filling) { this.active = true; this.building = false; this.filling = true; this.fill = this.fillRest(m, all, i, pending, signal, workersLater); return; }
         const until = performance.now() + BUILD_SLICE_MS;
@@ -732,6 +733,7 @@ export class WorldEntityLayer {
       if(contextChanged&&(d as DiffMsg&{by?:string}).by!=='engine')this.onContextChanged?.();
       for (const def of [...(d.defs ?? []), ...d.diff.defs]) { this.model.defs.set('sha:' + def.hash, def); this.model.defs.set(def.ref, def); if (def.ref.startsWith('core-')) this.model.defs.set('core/' + def.ref.slice(5), def); }
       for (const id of d.diff.removes) { this.touched.add(id); this.model.delete(id); this.undraw(id, held.has(id) ? SITE_REFINEMENT.removalDelaySeconds : 0); }
+      const existingParents = new Set(d.diff.upserts.map(e => e.in.parent).filter(id => this.model!.entities.has(id)));
       for (const e of d.diff.upserts) this.touched.add(e.id);
       if (d.ground || d.diff.world) this.groundTouched = true;
       for (const e of d.diff.upserts) { if (this.model.entities.has(e.id)) this.model.delete(e.id); this.model.insert(e); }
@@ -743,7 +745,7 @@ export class WorldEntityLayer {
       if (d.ground) { const grew = JSON.stringify(d.ground.extent) !== JSON.stringify(this.model.ground().extent); this.model.terrain = sameBase(this.model.ground(), d.ground) ? this.model.terrain.retile(d.ground, d.diff.tiles) : new Terrain(d.ground); this.rebuildTerrain(new Set(d.diff.tiles)); this.rebuildWater(); if (grew) this.buildHorizon(); }
       if (d.diff.world) { const before = JSON.stringify((this.model.state as { ground?: unknown }).ground ?? null); this.model.state = { ...this.model.state, ...d.diff.world } as WorldModel['state']; if (JSON.stringify((this.model.state as { ground?: unknown }).ground ?? null) !== before) this.rebuildTerrain(); }
       if (d.ground) this.sites.refreshAll(true); else this.sites.refitDiff(d);
-      for (const e of d.diff.upserts) this.draw(e, true);
+      for (const e of d.diff.upserts) this.draw(e, true, false, existingParents.has(e.in.parent));
       // children ride with a moved parent: refresh their targets without easing
       const upserted = new Set(d.diff.upserts.map(e => e.id));
       for (const e of d.diff.upserts) for (const cid of this.model.subtree(e.id).slice(1)) { const c = this.model.entities.get(cid); if (c && !upserted.has(cid)) this.draw(c, false); }
@@ -758,6 +760,8 @@ export class WorldEntityLayer {
   private overrides = new Map<string, THREE.Vector3>();
   /** BALLOON-BODY: the native twin's yaw (Core convention: rotation.y = -yaw), so the drawn cabin's door is Core's door. */
   private overrideYaw = new Map<string, number>();
+  /** PC13 (#692): a loose part a crew raises turns about its own z; the recording owns that too, while their hands are on it. */
+  private overrideRoll = new Map<string, number>();
   private recordedItems = new Set<string>();
   private missingItemAt = new Map<string,number>();
   private lightMoves = new Set<string>();
@@ -843,7 +847,7 @@ export class WorldEntityLayer {
   private transported = new Set<string>();
   /** The recorded native load owns its airborne pose, not the slower world-edit
    * stream. Only active human grips and their settling loads are visited. */
-  transportPoses(entities: Record<string, {p: readonly number[]; yaw: number; state: Record<string, unknown>}>, bodies: readonly string[]) {
+  transportPoses(entities: Record<string, {p: readonly number[]; yaw: number; roll?: number; state: Record<string, unknown>}>, bodies: readonly string[]) {
     const held = new Set<string>();
     for (const body of bodies) {
       const grip = entities[body]?.state.grip as {entity?: string} | undefined;
@@ -855,13 +859,13 @@ export class WorldEntityLayer {
     }
     for (const id of this.transported) {
       const e = entities[id], d = this.drawn.get(id);
-      if (!e || !d) { this.transported.delete(id); this.overrides.delete(id); this.overrideYaw.delete(id); continue; }
+      if (!e || !d) { this.transported.delete(id); this.overrides.delete(id); this.overrideYaw.delete(id); this.overrideRoll.delete(id); continue; }
       const p = e.p;
       if (!held.has(id) && d.to.p.distanceToSquared(new THREE.Vector3(p[0], p[1], p[2])) < .0001) {
-        this.transported.delete(id); this.overrides.delete(id); this.overrideYaw.delete(id); d.settled = false; continue;
+        this.transported.delete(id); this.overrides.delete(id); this.overrideYaw.delete(id); if (this.overrideRoll.delete(id)) { const r = this.model?.entities.get(id)?.r; d.obj.rotation.z = Array.isArray(r) ? r[2] : 0; } d.settled = false; continue;
       }
       const pose = this.overrides.get(id) ?? new THREE.Vector3();
-      pose.set(p[0], p[1], p[2]); this.overrides.set(id, pose); this.overrideYaw.set(id, e.yaw); this.live.add(id);
+      pose.set(p[0], p[1], p[2]); this.overrides.set(id, pose); this.overrideYaw.set(id, e.yaw); if (e.roll || this.overrideRoll.has(id)) this.overrideRoll.set(id, e.roll ?? 0); this.live.add(id);
     }
   }
 
@@ -928,10 +932,10 @@ export class WorldEntityLayer {
       // entry 44: a mug being drunk from or rinsed follows the drawn hand (its figure's cup pose), not the recorded item pose:
       // the engine's mug is the same timeline resolved on a 1.75 m body, the drawn one on this rig's own lips
       const cupHand = !d.removing && this.held.has(id) && !d.obj.userData.handleGrip && this.cupHeld(id, d);
-      const ride = cupHand ? undefined : this.overrides.get(id); if (ride) { d.obj.position.copy(ride); const yaw = this.overrideYaw.get(id); if (yaw !== undefined) d.obj.rotation.y = -yaw; }
+      const ride = cupHand ? undefined : this.overrides.get(id); if (ride) { d.obj.position.copy(ride); const yaw = this.overrideYaw.get(id); if (yaw !== undefined) d.obj.rotation.y = -yaw; const roll = this.overrideRoll.get(id); if (roll !== undefined) d.obj.rotation.z = roll; }
       const s = d.from.s + (d.to.s - d.from.s) * t;
       d.obj.scale.setScalar(s);
-      const shown = this.interiorVisible(id, d);
+      const shown = this.interiorVisible(id, d) && !this.juggled?.has(id);
       const inHand = cupHand || (!ride && !d.removing && this.held.has(id) && (d.obj.userData.handleGrip ? this.handleHeld(id, d) : this.handPoint(this.held.get(id)!, d.obj.position)));
       if (!inHand || !d.obj.userData.cupShown) this.cupWater(id, null);
       if (!inHand && this.pours.has(id)) this.pours.get(id)!.visible = false;
@@ -1001,6 +1005,9 @@ export class WorldEntityLayer {
     for (const id of this.glowAnim) { const d = this.drawn.get(id)!; if (d.obj.visible && ((d.k! + frame) & (d.offscreen ? 15 : 3)) === 0) this.syncGlow(d, nowMs); }
   }
   private syncGlow(d: Drawn, nowMs: number) { animate(d.obj, d.motion!.entity, d.motion!.def, nowMs / 1000, { y: d.to.p.y, yaw: d.motion!.yaw }); d.glowStale = false; }
+  /** #441: held sets drawn as flying balls this frame (WorldGames): each is drawn whole or as balls, never both. */
+  private juggled?: ReadonlySet<string>;
+  setJuggled(sets: ReadonlySet<string>) { this.juggled = sets; }
   /** Viewer B7: where a body's figure holds a carried thing — the palm of its raised hand (the carrying arm is posed to
    *  the engine's hand point; the free one hangs lower), or between both palms when they are level (two-handed / seated).
    *  The figure is the native people view's rig, found in the scene by its name (= the body's engine id). False when the
@@ -1588,7 +1595,7 @@ export class WorldEntityLayer {
 
   // ---------- things ----------
 
-  private draw(e: Entity, ease: boolean, force = false) {
+  private draw(e: Entity, ease: boolean, force = false, existingParent = false) {
     const m = this.model!; const def = m.resolvedDef(e.def);
     if (!def) return;
     // PERF-STREAM: a thing beyond the ring is not built (its record is kept; it is drawn when the camera comes); one that
@@ -1598,7 +1605,9 @@ export class WorldEntityLayer {
     if (def.tags.includes('horizon')) this.horizonBy.add(e.id); else this.horizonBy.delete(e.id);
     const parent = e.in.parent !== 'world' ? m.entities.get(e.in.parent) : undefined;
     if (parent && m.resolvedDef(parent.def)?.components.body) this.held.set(e.id, parent.id); else this.held.delete(e.id);
-    if (parent && containerInside(m.resolvedDef(parent.def))?.slots.some((s) => s.id === e.in.slot)) this.keptIn.set(e.id, parent.id); else this.keptIn.delete(e.id);
+    // #435: a doorless container (a swap shelf) hides nothing and has no lid to follow, so its contents are ordinary things
+    const pdef = parent && m.resolvedDef(parent.def);
+    if (pdef && keptBehindDoor(pdef, e.in.slot)) this.keptIn.set(e.id, parent!.id); else this.keptIn.delete(e.id);
     const existing = this.drawn.get(e.id);
     const defHash = def.hash + ':' + JSON.stringify(e.params ?? {}) + ':' + JSON.stringify(e.state ?? {}) + ':' + JSON.stringify(e.shape ?? null) + ':' + JSON.stringify(e.r ?? 0);
     const builder = meshFor(def);
@@ -1610,6 +1619,9 @@ export class WorldEntityLayer {
     const inPlace = !!existing && !existing.removing && existing.to.p.distanceTo(target) < 1e-6 && existing.to.s === wp.s && def.tags.includes('hand-operated') && (def.tags.includes('neon') || hasFlames(def));
     if (inPlace) ease = false;
     const refinement = ease && !isWorld ? this.sites.refinement(e, m) : null;
+    // #1664: a newly admitted surface child is already supported, not an airborne God creation.
+    // Preserve construction refinement and all births without a parent that existed before this update.
+    if (!existing && existingParent && !refinement && parent && pdef?.slots.some(slot => slot.id === e.in.slot && slot.kind === 'surface')) ease = false;
     if (existing && existing.defHash === defHash && !existing.removing && !force) {
       if (isWorld) return;
       // The parent or slot can change without changing the world pose. Resolve its host again even when no easing is needed.
@@ -1876,7 +1888,7 @@ function waterLevel(g: Ground, x: number, z: number): number | null {
   }
   return level ?? g.seaLevel ?? null;
 }
-// indexed reads, not array destructuring: the same arithmetic as @sim/ground's pointInPoly (L3e)
+// indexed reads, not array destructuring: the same arithmetic as @souls/ground's pointInPoly (L3e)
 function pointInPoly(px: number, pz: number, poly: [number, number][]) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {

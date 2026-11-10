@@ -309,6 +309,17 @@ test('privacy is never waived or skipped for Dependabot, including linked issue 
 });
 
 // #765: proof links count, and proof.json is fetched, only from a proof host.
+test('proofHostProblem: a repository\'s earlier name counts as it, and only that exact name (#1183)', () => {
+  const repo = 'soulsimulation/souls', gh = path => `https://github.com/${path}`, opts = { repo, cdn: null };
+  for (const path of ['genekogan/souls/releases/download/proofs/pr-1.desktop.mp4', 'genekogan/souls/releases/download/proofs-1101/pr-1101.proof.json', 'soulsimulation/souls/releases/download/proofs-7/x.mp4'])
+    assert.equal(proofHostProblem(gh(path), opts), null, path);
+  for (const path of ['genekogan/other/releases/download/proofs/x.mp4', 'evil/souls/releases/download/proofs/x.mp4', 'genekogan/souls2/releases/download/proofs/x.mp4',
+    'xgenekogan/souls/releases/download/proofs/x.mp4', 'genekogan/souls/releases/download/v0.119/x.mp4', 'genekogan/souls/releases/download/proofs/../v1/x.mp4'])
+    assert.match(String(proofHostProblem(gh(path), opts)), /proofs release \(soulsimulation\/souls\)/, path);
+  assert.match(String(proofHostProblem(gh('genekogan/souls/releases/download/proofs/x.mp4'), { repo: 'o/r', cdn: null })), /proofs release \(o\/r\)/, 'another repository gains nothing');
+  assert.deepEqual(allowedProofLinks([gh('genekogan/souls/releases/download/proofs/x.mp4')], opts), { ok: [gh('genekogan/souls/releases/download/proofs/x.mp4')], ignored: [] });
+});
+
 test('proofHostProblem: this repository\'s proofs releases, GitHub attachments and the proof CDN only', () => {
   const ok = (u, o = { repo: 'o/r' }) => assert.equal(proofHostProblem(u, o), null, u);
   const no = (u, re, o = { repo: 'o/r' }) => assert.match(String(proofHostProblem(u, o)), re, u);
@@ -329,7 +340,7 @@ test('proofHostProblem: this repository\'s proofs releases, GitHub attachments a
   no(VIDEO.replace('https:', 'http:'), /not https/);
   // other repositories and other release tags
   no('https://github.com/evil/r/releases/download/proofs-7/x.mp4', /proofs release \(o\/r\)/);
-  no('https://github.com/o/r/releases/download/v4.14/x.mp4', /proofs release/);
+  no('https://github.com/o/r/releases/download/v0.118/x.mp4', /proofs release/);
   no('https://github.com/o/r/releases/download/proofs-x/x.mp4', /proofs release/);
   no('https://github.com/o/r/releases/download/proofs-7/../v1/x.mp4', /proofs release/);
   no('https://github.com/o/r/blob/main/x.mp4', /proofs release/);
@@ -360,4 +371,32 @@ test('prMode never fetches a proof.json from a host outside the allowlist', asyn
   assert.deepEqual(fetched, []);
   assert.equal(result.ok, false);
   assert.ok(result.warnings.some(w => w.startsWith(`ignored proof link ${evil}`)));
+});
+
+test('a note cut inside a link renders without the partial link, and device details stay blocked (#1055)', () => {
+  const link = 'https://github.com/o/r/releases/tag/v1';
+  const withNote = note => checkPr({ body: body({ acceptance: `- [x] **A1** One — evidence: ${note}` }), tier: 'T1', policy });
+  const row = r => renderComment(r).split('\n').find(l => l.includes('A1 One'));
+
+  const lead = 'x'.repeat(109);
+  const cut = withNote(`${lead} ${link} and more`);
+  assert.equal(cut.checklist[0].note.slice(0, 120), `${lead} https://gi`, 'the cut falls inside the host');
+  assert.ok(row(cut).includes(`| ${lead} |`));
+
+  // A whole link that ends at the cut stays, and so does a cut through plain words.
+  assert.ok(row(withNote(`${'x'.repeat(119 - link.length)} ${link} tail`)).includes(`${link} |`));
+  assert.ok(row(withNote(`${'y'.repeat(200)} ${link}`)).includes(`| ${'y'.repeat(120)} |`));
+
+  // Real device details stay blocked: anywhere in the note, across the cut by checkPr's whole-body scan,
+  // and in the kept text by the comment's own check.
+  const hostUrl = ['http://', 'build-box', ':8080/x'].join('');
+  for (const note of [`see ${hostUrl}`, `${lead} ${hostUrl}`]) {
+    const blocked = withNote(note);
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.problems.join(' '), /device details detected/);
+    assert.ok(!renderComment(blocked).includes('build-box'));
+  }
+  const kept = withNote('fine');
+  kept.checklist[0].note = `see ${hostUrl}`;
+  assert.throws(() => renderComment(kept), /Publication blocked: local service URL/);
 });
