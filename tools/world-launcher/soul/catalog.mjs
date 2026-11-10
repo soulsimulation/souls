@@ -30,7 +30,8 @@ export function indexCatalog(cat) {
   const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && SEAT_KIND.test(things.get(rest)?.kind ?? "")) || handVouches(id); };
   /** `object:<thing>:<verb>`: a thing of a kind that takes that verb by hand. */
   const handVouches = (id) => { const m = /^object:([^:]+):([^:]+)$/.exec(id); return !!m && !!handOf(things.get(m[1]))?.acts.some((a) => a.verb === m[2]); };
-  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, handOf };
+  const verbs = new Set(cat.acts.map((a) => a.verb));
+  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, verbs, handOf };
 }
 
 const same = (a, b) => a === b || (a == null && b == null) || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9);
@@ -83,9 +84,12 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
   const q = tokensOf(text), scope = inPlace ? ix.within(inPlace) : null;
   if (inPlace && !scope.size) return { found: [], note: `No place called "${inPlace}" in the catalog.` };
   const ref = around?.at ?? at, inScope = (placeId, point) => (!scope || scope.has(placeId ?? "")) && (!around || (dist(around.at, point) ?? 0) <= NEAR_METRES);
-  const asked = verb ? [verb] : q.filter((w) => SYNONYMS[w]), verbs = new Map();
-  for (const v of asked) { verbs.set(v, 6); for (const sVerb of SYNONYMS[v] ?? []) if (!verbs.has(sVerb)) verbs.set(sVerb, sVerb === v ? 6 : 3); }
-  const rest = q.filter((w) => !SYNONYMS[w] && w !== verb), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
+  // a word that is itself a verb of this world ("read a book") asks for that verb first, its synonyms after
+  const asked = verb ? [verb] : q.filter((w) => SYNONYMS[w] || ix.verbs?.has(w)), verbs = new Map();
+  for (const v of asked) { if (!SYNONYMS[v] || ix.verbs?.has(v)) verbs.set(v, 6); for (const sVerb of SYNONYMS[v] ?? []) if (!verbs.has(sVerb)) verbs.set(sVerb, sVerb === v ? 6 : 3); }
+  // words that only say the verb ("play music" with --verb play-music) narrow nothing: what is left must name the place or thing
+  const verbWords = new Set([...verbs.keys()].flatMap((v) => v.split("-")));
+  const rest = q.filter((w) => !SYNONYMS[w] && !verbWords.has(w) && !verbWords.has(stem(w))), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
     if (!q.length || !inScope(p.id, p.at)) continue;
     const s = score(q, placeWords(p)); if (!s) continue;
@@ -102,7 +106,7 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
     // one row per thing: a table's four seats are one way to eat there, the nearest seat's id standing for it
     const key = `${a.verb}|${a.thing ?? a.id}`, d = dist(ref, a.at), seen = grouped.get(key);
     if (seen) { seen.n++; if ((d ?? 0) < (seen.d ?? 0)) Object.assign(seen, { d, a }); continue; }
-    grouped.set(key, { s, d, a, n: 1 });
+    grouped.set(key, { s: a.with ? s - 0.5 : s, d, a, n: 1 });   // one that needs others after one a Soul can do alone
   }
   for (const g of grouped.values()) out.push({ s: g.s, d: g.d, row: { type: "act", act: g.a.id, verb: g.a.verb, label: g.a.label, in: whereOf(ix, g.a.place), place: g.a.place, ...metres(g.a.at), ...(g.n > 1 ? { places: g.n } : {}), ...(g.a.with ? { needsOthers: g.a.with } : {}), ...(g.a.needs ? { needs: g.a.needs } : {}) } });
   // what a body does right where it stands: found by its words like anything else, and nearest of all

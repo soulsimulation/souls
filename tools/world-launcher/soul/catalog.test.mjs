@@ -152,3 +152,18 @@ test("a thing's hand acts are vouched for by the catalog and named by query", ()
   assert.equal(hix.knows("object:e_l3:dim"), true, "a revision's own entry"); assert.equal(hix.knows("object:e_l1:dim"), false);
   assert.deepEqual(handActs(hix, handCat.things.find((t) => t.id === "e_bd"), {}).map((a) => a.verb), ["write", "erase"], "a field the catalog does not publish is the world's to judge");
 });
+
+test("words that only say the verb narrow nothing: \"play music\" --verb play-music finds the instrument (#1737, lane M4)", () => {
+  const withViolin = { ...cat, acts: [...cat.acts, { id: "play-music:play-music.e_v1", verb: "play-music", place: "g-village", thing: "e_v1", at: [55, 2], label: "Fiddle a tune (bandstand violin in Eden Village)" }] };
+  const ix = indexCatalog(withViolin);
+  for (const words of ["play music", "music", "play", ""]) assert.equal(find(ix, words, { verb: "play-music" }).found[0]?.act, "play-music:play-music.e_v1", words);
+  assert.equal(find(ix, "violin", { verb: "play-music" }).found[0]?.act, "play-music:play-music.e_v1");
+  assert.equal(find(ix, "play music in the library", { verb: "play-music" }).found.length, 0, "a place word still narrows");
+});
+
+test("a word that is a verb of the world asks for it first; an act that needs others comes after one done alone (#1737)", () => {
+  const ix = indexCatalog({ ...cat, acts: [...cat.acts, { id: "read:read.e_c0", verb: "read", place: "g-library.reading", thing: "e_c0", at: [71, 1], label: "read (library chair in Reading Room)" }] });
+  const rows = find(ix, "read a book in the library").found;
+  assert.equal(rows[0]?.verb, "read", JSON.stringify(rows.map((r) => r.act)));
+  assert.ok(rows.findIndex((r) => r.verb === "book-club") > rows.findIndex((r) => r.verb === "read"));
+});
