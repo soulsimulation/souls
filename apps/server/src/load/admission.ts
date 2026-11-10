@@ -9,6 +9,7 @@ import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
 import {apiRoute, handlerMsOf, recordApi} from './api-times.ts';
 import {noteAnswer} from './stall-log.ts';
+import {withSequencerMark} from './wait-mark.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
@@ -71,7 +72,7 @@ type Bucket = {tokens: number; at: number; seen: number};
 type Strikes = {slow: number[]; busy: number[]; coolUntil: number; retryUntil: number};
 /** Socket-independent (Stage B): a job is (key = Soul or god, class, deadline, `closed()` = "has the asker gone", and the
  *  ticket as its reply handle). The HTTP middleware below is one front end; a worker's MessagePort can be another. */
-export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Refusal>; done: () => void; waitedMs: () => number};
+export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Refusal>; done: (awaitedMs?: number) => void; waitedMs: () => number};
 
 export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>;
   /** The quiet tick ms (default: the monitor's, from the process's shared numbers, S.quietTickMs). */
@@ -171,10 +172,15 @@ export class Admission {
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
       settle('run'); ranAt = now;
-      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
+      return {turn, waitedMs: () => 0, done: (awaited = 0) => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, Math.max(0, this.now() - now - awaited), now); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
-    return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
+    // #1750 A6: a queued job is charged when it answers, its time on the thread (minus any wait on the sequencer, which the
+    // middleware measures): the dispatcher's turn ends before a handler that first awaits its body has done its work, so
+    // charging there missed it. The dispatcher debits the estimate when it starts the job (drain); this settles it.
+    return {turn, waitedMs: () => (ranAt || this.now()) - now, done: (awaited = 0) => { if (isDone) return; isDone = true; this.outstanding.delete(r.key);
+      if (ranAt) { this.credit += this.estimate(r.route.id); this.charge(r.key, r.god, r.route.id, Math.max(0, this.now() - ranAt - awaited), ranAt); }
+      finish(); this.kick(); }};
   }
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
@@ -250,9 +256,9 @@ export class Admission {
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
         const [j] = this.queue.splice(i, 1);
+        this.creditNow(now); this.credit -= this.estimate(j.route.id);   // provisional: the job's done() settles its measured time
         j.settle('run');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
-        this.charge(j.key, j.god, j.route.id, this.now() - now, now);
       }
     } finally { this.draining = false; }
   }
@@ -332,7 +338,8 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (v === 'dropped') return c.body(null, 499 as never);
     if (v !== 'run') return refuse(v);
     const queued = t.waitedMs();
-    try { await next(); } finally { t.done(); }
+    const marked = withSequencerMark(() => next());   // #1750 A6: what the handler awaits on the sequencer is not charged
+    try { await marked.result; } finally { t.done(marked.awaitedMs()); }
     stamp(c, lv, token); timed(c, t0, queued);
   };
 }

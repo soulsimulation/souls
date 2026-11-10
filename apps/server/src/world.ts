@@ -1,4 +1,5 @@
 import {tx} from './edge/comms/store.ts';
+import { sequencerWait } from './load/wait-mark.ts';
 import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
@@ -793,7 +794,7 @@ export class WorldHost {
   /** Queue an input; it is logged and applied at the next tick. Resolves with the logged event. */
   enqueue(kind: EventKind, author: string, payload: unknown): Promise<LogEvent> {
     this.assertClockReady();
-    return new Promise((resolve) => this.queue.push({ kind, author, payload, resolve }));
+    return sequencerWait(new Promise((resolve) => this.queue.push({ kind, author, payload, resolve })));   // #1750 A6: not charged as request work
   }
 
   /** Opt-in live request check at the sequencer, before any durable event/effect.
@@ -803,7 +804,7 @@ export class WorldHost {
   enqueueChecked(kind: EventKind, author: string, payload: unknown, guard: AcceptanceGuard, journal?: AcceptanceJournal): Promise<LogEvent> {
     this.assertClockReady();
     const current:AcceptanceGuard=()=>{checkAcceptanceGuard(guard);if(kind==='decision'){const p=payload as DecisionPayload;if(!this.ownLectureRosterV1(p.soulId,p.steps))throw new StaleIntentAttempt();}return true;};
-    return new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard:current, journal, resolve, reject }));
+    return sequencerWait(new Promise((resolve, reject) => this.queue.push({ kind, author, payload, guard:current, journal, resolve, reject })));
   }
 
   /** #1327: an input whose own records (an edge act's receipt, the receipts it replaces) are written by `journal` in the
