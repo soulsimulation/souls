@@ -748,6 +748,13 @@ title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
 
+### Mosaic composition
+
+`core/mosaic-board@1` contains nine fixed named cell surfaces, `cell-a1` through `cell-c3`. Carry a
+`core/mosaic-tile@1` with `pick-up:<tile-id>`, then choose the exact cell with `put-on:<cell-id>` (empty parameters).
+Each cell accepts one tile. The tile identity, glaze and resting support remain authoritative; pick it up again
+to rearrange the composition. Pieces have no supporting surfaces. The board stays fixed; this does not enable
+loaded carryables or free coordinate placement. Existing pickup/put-on access, occupancy and interruption rules apply.
 
 ### Mending camping canvas
 

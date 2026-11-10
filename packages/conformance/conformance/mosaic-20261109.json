@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 mosaic composition (#1613): new fixed board with nine individually selectable fixed cell surfaces and separate carryable colored tiles, no engine or policy changes. core-mosaic-board@1 46faa803d02bb616647fe602a64743ef54eb6b5c348abac58d31a642f4ab1236; core-mosaic-cell@1 18cfe4ce9b0016a78e99c33424c8a393ce1ebf17d783c93ae4e3a6cd5227cd4b; core-mosaic-tile@1 3fc8c52f7de8890d3fcab4fe93d9b7ec29eeb8406e664db3687875e2ee9b0d01. Scoped production K=2 run baked, placed and rendered all 15 samples with 0 findings and 0 qualification gaps. No budget, sample, prior supplement or baseline change.",
+  "findings": []
+}
