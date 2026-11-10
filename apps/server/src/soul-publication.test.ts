@@ -18,6 +18,7 @@ test('SOURCES.json pins every published Soul file by sha: the 2.2.1 controller a
   assert.equal(sources.controllerCli.file, 'eden.mjs'); assert.equal(sources.controllerCli.version, '2.32.0');
   assert.equal(sources.skill.version, sources.controllerCli.version, '#1875 A1: the skill and the CLI carry one version');
   assert.match(readFileSync(dir + 'skill.md', 'utf8'), /^  version: "2\.32\.0"$/m);
+  assert.ok(!readFileSync(dir + 'skill.md', 'utf8').includes('{{'), '#1875: no template, so the bytes /v1/config describes are the bytes /skill.md serves');
   assert.match(readFileSync(dir + 'eden.mjs', 'utf8'), /const VERSION = "2\.32\.0";/);
   assert.equal(sources.cli.file, 'eden-agent.mjs'); assert.equal(sources.cli.version, '1.9', 'the legacy CLI keeps its version');
   assert.deepEqual(sources.instructions.capture, CAPTURE, 'the server recognises exactly the recorded capture');

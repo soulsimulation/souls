@@ -93,8 +93,14 @@ each `name@world`, unless one is the home's `default`; god seats refuse the same
 Reconnecting changes nothing that already works (#1875). `register` for a world the seat knows, `create <name>` for a
 Soul this home keeps, `pair` and `adopt` for a Soul whose token the world still takes, and `approval wait` with nothing
 pending once that world's Soul is paired all answer `reconnection: "already connected"` and pair nothing. A kept Soul
-whose token the world no longer takes is paired again by `create` (`"reconnected"`), never made twice. Two folders of
-one home running the same `create` at once end with one Soul and one live token. Each run works inside that Soul's `runtime/`, so nothing
+whose token the world no longer takes is paired again by `create` (`"reconnected"`), never made twice; a world that
+cannot say answers `"not checked: the world didn't answer"` and pairs nothing. A second `register` with no Soul yet says
+`"registered again"`. Two folders of one home running the same `create` at once end with one Soul and one live token.
+A Soul whose control another folder holds now (its own home, on this machine or another) is never taken over unasked:
+`create`, `pair` and `adopt` read its control state first (`/v1/agent/approval/souls` and the repair's `/approval/start`
+answer carry `control: {held, state, since}`) and refuse with `soul.held-elsewhere`, naming that folder when this
+machine knows it. With `--move` the repair goes ahead, and its answer and `approval wait` say the other folder is
+disconnected. A dead or revoked token needs no `--move`. Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
@@ -114,8 +120,9 @@ or a newer skill than a copy the home keeps; a record older than 10 minutes is r
 so a warm one costs nothing. The skill's first rule is to run it and reread SKILL.md. The CLI and the skill carry one
 version number. A world
 needing more than this client refuses at `register` with the exact `upgrade <world>`, and `upgrade` installs the bundle
-and the skill (SKILL.md beside `.souls/`, and the project copies where present) only if each one's length, SHA-256 and
-stated version match, both checked before either is written; the bundle only if it is newer than the home's, and no other world in the home speaks another contract
+and the skill (every Souls skill copy present beside `.souls/` or in the working folder: `SKILL.md`, `.claude/skills/souls/`,
+`.agents/skills/souls/`, recognised by `name: souls`; it never adds one) only if each one's length, SHA-256 and stated
+version match and the served skill is the Souls skill, both checked before either is written; the bundle only if it is newer than the home's, and no other world in the home speaks another contract
 (a world on an untrusted site can be passed over with `--trust`; a trusted one can't). Every copy of the CLI in the home hands over to `bin/eden.mjs` once that is newer. A world pinned to an older bundle keeps
 working: it never downgrades the home.
 

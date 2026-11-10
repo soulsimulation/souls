@@ -279,7 +279,9 @@ export function buildApp(d: Deps) {
   mountWelcomeRoutes(app,d);
   // lane OPS2: operator commands for TEST Souls (the launcher only, with the site key: op-souls.ts)
   mountOperatorSouls(app,{db:d.db,worldId:d.host.worldId,souls:d.souls,inbox:ownerInbox,god:d.god,siteKey:process.env.SIM_SITE_KEY,body:()=>d.edge?.bodyRule??null});
-  if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp});
+  // #1875: whether a Soul's control is held now, so an agent in another folder asks before taking it over.
+  const controlOf=(soulId:string)=>{const row=d.db.soul(soulId);if(!row)return null;const l=soulLink(d.souls,ownerInbox,row,null);return {held:!!l.holder,state:l.state,since:l.since};};
+  if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp,control:controlOf});
   mountStationRoutesV2(app,d.stationV2);
   // lane DASH: tickMs = the last ~20 s of ticks (avg/max ms against the 50 ms budget); clockRate < 1 = the clock is dilated (behind)
   // srv-load: O(1) from the load monitor's last 250 ms sample (tick times + the `load` block); the watchdog thread's

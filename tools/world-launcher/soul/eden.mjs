@@ -573,13 +573,11 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   };
   /** The versioned copies older than `version`: what `upgrade` refreshes. */
   const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
-  /** The served skill, verified by the caller, over every copy older than it, never over one as new. With no SKILL.md
-   *  anywhere, it lands in the first of `also` (the folder the agent works in), else beside the home. */
+  /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
+   *  never over one as new, never a new file. */
   function installSkill(bytes, version, also = []) {
-    const fresh = join(also[0] ?? folder(), "SKILL.md"), wrote = [];
-    const none = !skillVersions(also).length && !existsSync(fresh);   // never over a file that isn't ours
-    const targets = [...(none ? [{ file: fresh, rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
-    for (const { file, rel } of targets) {
+    const wrote = [];
+    for (const { file, rel } of skillBehind(version, also)) {
       const tmp = `${file}.${process.pid}.tmp`;
       writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
     }
@@ -2931,7 +2929,7 @@ function registeredBefore(prev, w) {
   if (prev.world !== w || prev.accountAuth === undefined) return null;
   const live = HOME ? HOME.principals().filter((p) => p.state === "active") : [], there = live.filter((p) => HOME.config().worlds[p.world]?.url === w);
   const soul = HOME ? there[0] : prev.soul && prev.token ? { address: "" } : null;
-  return { reconnection: "already connected", ...(soul ? { next: `${CLI}${live.length > 1 ? ` ${soul.address}` : ""} status` } : {}) };
+  return soul ? { reconnection: "already connected", next: `${CLI}${live.length > 1 ? ` ${soul.address}` : ""} status` } : { reconnection: "registered again" };
 }
 async function register(world, { asked = true } = {}) {
   const prev = load();
@@ -2963,11 +2961,14 @@ function noteWorld(url, cfg, accountAuth, asked = true) {
   if (asked) HOME.madeFor(url);   // only a world a person named earns trust: a url out of an imported file never does
 }
 
+/** #1875: `--move` takes control of a Soul another folder holds now, which disconnects that folder. */
+let MOVE = false;
 function forOption(argv) {
   const rest = [];
   let code;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--for") code = argv[++i];
+    if (argv[i] === "--move") MOVE = true;
+    else if (argv[i] === "--for") code = argv[++i];
     else if (argv[i].startsWith("--for=")) code = argv[i].slice(6);
     else rest.push(argv[i]);
   }
@@ -2982,14 +2983,31 @@ function forOption(argv) {
 // Soul or a reconnection. The server mints the Soul's delegated token when approved.
 async function startApproval(input, code) {
   const s = load();
-  const pending = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input })
-    ? s.pendingApproval
-    : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
+  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") }, ...(MOVE ? { move: true } : {}) };
+  // #1875 A6: a Soul another folder holds now is not taken over unasked. A request already started was allowed then.
+  if (!resumed && !MOVE && code && (input.soulId || input.name)) {
+    const list = await call("/v1/agent/approval/souls", { as: "none", body: { for: code } });
+    const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
+    const it = list.status === 200 ? (list.data?.souls ?? []).find((x) => (input.soulId ? x.id === input.soulId : fold(x.name) === fold(input.name))) : null;
+    if (it?.control?.held) throw heldElsewhere(it);
+  }
   const r = ok(await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } }), "approval start");
   const a = r.approval ?? r;
+  if (!resumed && !MOVE && a.mode === "repair" && r.control?.held) {
+    // No code to ask with first: the world said so in its answer. The request is withdrawn before anyone sees it for long.
+    await call("/v1/agent/approval/cancel", { as: "none", body: { approvalId: a.id, pollSecret: pending.input.pollSecret } });
+    throw heldElsewhere({ id: a.soulId, name: a.name });
+  }
   pending.approvalId = a.id;
   save({ pendingApproval: pending });
-  return publicApproval(a, s.world);
+  return { ...publicApproval(a, s.world), ...(pending.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
+}
+/** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. */
+function heldElsewhere(soul) {
+  const where = soulHome.knownHomes(homedir()).filter((r) => !HOME || real(r) !== real(HOME.root)).find((r) => soulHome.soulsIn(r).some((x) => x.id === soul.id));
+  const again = [CLI, ...process.argv.slice(2).map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)), "--move"].join(" ");
+  return new Error(`soul.held-elsewhere: ${soul.name ?? soul.id} is controlled from another folder ${where ? `(${tilde(resolvePath(where, ".."))})` : "on this or another machine"}. Run there, or add --move to take control here, which disconnects the other. Next: ${again}`);
 }
 
 function publicApproval(a, world) {
@@ -3035,7 +3053,9 @@ async function create(...argv) {
   if (HOME && !fresh && !s.pendingCreate && !s.pendingApproval) {
     const owned = await alreadyOwned(name, s);
     // A Soul this home keeps whose token the world no longer takes is paired again, never made twice.
-    if (owned?.code === "already-here" && (await connectedAlready(owned.soul.id)) === false) { const r = await pair(owned.soul.id, ...(code ? ["--for", code] : [])); return r.paired ? { ...r, reconnection: "reconnected" } : r; }
+    const live = owned?.code === "already-here" ? await connectedAlready(owned.soul.id) : undefined;
+    if (live === null) return { ...owned, reconnection: "not checked: the world didn't answer" };
+    if (live === false) { const r = await pair(owned.soul.id, ...(code ? ["--for", code] : [])); return r.paired ? { ...r, reconnection: "reconnected" } : r; }
     if (owned) return owned;
   }
   if (!HOME && !fresh && s.soul && s.token && !s.pendingApproval && (await connectedAlready(s.soul))) {
@@ -3210,7 +3230,7 @@ async function approval(action = "status") {
       if (!token.startsWith(`sim_${a.soulId}_`)) throw new Error("Approval returned a credential for a different Soul; nothing saved.");
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.move ? { moved: "Control moved here; the folder that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
@@ -5376,9 +5396,9 @@ async function batch(json) {
 
 const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.
 
-setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
+setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new] [--move]    pair <soulId> [--for CODE] [--move]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
@@ -5534,7 +5554,7 @@ async function upgradeCommand(...argv) {
   };
   // Both are checked before either is written.
   const bytes = cliNewer ? await verified("/eden.mjs", m, (t) => /^const VERSION = "([0-9.]+)";$/m.exec(t)?.[1]) : null;
-  const skill = m.skill?.version && (skillOld.length || cliNewer) ? await verified("/skill.md", m.skill, soulHome.skillVersionOf) : null;
+  const skill = m.skill?.version && skillOld.length ? await verified("/skill.md", m.skill, (t) => (soulHome.isSoulsSkill(t) ? soulHome.skillVersionOf(t) : "another skill (its frontmatter is not name: souls)")) : null;
   note();
   if (trust) home.trustOrigin(origin);
   const installed = bytes ? home.installBundle(bytes, process.argv[1], m.version) : null, wrote = skill ? home.installSkill(skill, m.skill.version, [INVOKED]) : [];

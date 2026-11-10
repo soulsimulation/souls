@@ -11,7 +11,7 @@ const UNKNOWN_CODE='That window code is unknown or has expired. Ask your person 
 const pollSchema=z.object({approvalId:z.string().regex(/^ap_[a-f0-9]{32}$/),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/)}).strict();
 /** #1274: a name as a person might retype it. The world's own check folds ASCII case only, and a second Soul is what this prevents. */
 const foldName=(name:string)=>name.trim().normalize('NFC').toLowerCase();
-export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Auth;baseOf:(c:Context)=>string;limit:(c:Context,key:string,max:number,ms:number)=>void}){
+export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Auth;baseOf:(c:Context)=>string;limit:(c:Context,key:string,max:number,ms:number)=>void;control?:(soulId:string)=>{held:boolean;state:string;since:number|null}|null}){
  const {accounts,auth}=deps;
  const verified=async(c:Context)=>{const account=await auth.accountFromToken(c.req.header('authorization')?.replace(/^Bearer\s+/i,''));if(!account)throw new ApiError(401,'account-signin-required','Sign in with Google or email.');accounts.verifySession(account.identity);return account;};
  const json=async(c:Context)=>{try{return await c.req.json();}catch{throw new ApiError(400,'invalid','Body must be JSON.');}};
@@ -33,12 +33,14 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
   if(soulId&&(!soul||soul.world_id!==accounts.host.worldId||soul.retired_at!==null))throw new ApiError(404,'soul-not-found',`No Soul ${soulId} lives in this world. Check the ID on the Soul's card (Copy start prompt).`);
   if(!soulId&&!asked)throw new ApiError(400,'invalid','A new Soul needs a name.');
   if(existing&&!soulId){if(accounts.store.codeSouls(forCode)===null)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);throw new ApiError(404,'soul-not-found',`The account behind this code holds no Soul called ${asked} in this world.`);}
+  // #1875: a reconnect says whether someone holds the Soul now (read before this request), so a client can step back.
+  const control=soulId&&deps.control?deps.control(soulId):null;
   const approval=soulId?accounts.store.startRepairRequest(soulId,{...input,name:soul!.name,forCode}):accounts.store.start({...input,name:asked!,forCode});
   // delivery 'window': the person's open, signed-in world page shows the request (lane PUX); the link stays as a backup
-  return {approval,world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${approval.id}`,delivery:approval.inWindow?'window':'link',intervalSeconds:3};}));
+  return {approval,...(control?{control}:{}),world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${approval.id}`,delivery:approval.inWindow?'window':'link',intervalSeconds:3};}));
  // #1274: what a person gets back with a new folder: the Souls their open window's account holds here, ids and names only.
  app.post('/v1/agent/approval/souls',c=>wrap(c,async()=>{deps.limit(c,'account-souls',6,60000);const p=parse(codeSchema,await json(c)),ids=accounts.store.codeSouls(p.for);if(!ids)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);
-  return {souls:heldSouls(ids).map(s=>({id:s.id,name:s.name}))};}));
+  return {souls:heldSouls(ids).map(s=>{const control=deps.control?.(s.id);return {id:s.id,name:s.name,...(control?{control}:{})};})};}));
  app.post('/v1/agent/approval/poll',c=>wrap(c,async()=>{deps.limit(c,'account-poll',60,60000);const p=parse(pollSchema,await json(c));return {...accounts.poll(p.approvalId,p.pollSecret),world:world(c)};}));
  app.post('/v1/agent/approval/cancel',c=>wrap(c,async()=>{const p=parse(pollSchema,await json(c));return {approval:accounts.store.cancel(null,p.approvalId,p.pollSecret),world:world(c)};}));
  app.get('/v1/account/approvals/:id',c=>wrap(c,async()=>{const {identity}=await verified(c);return {approval:shown(accounts.view(identity,c.req.param('id'))),world:world(c)};}));

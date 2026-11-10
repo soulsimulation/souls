@@ -84,7 +84,7 @@ test('A6: every setup command run twice in one folder, then from a second folder
   const runA = runIn(a, home), runB = runIn(b, home), url = `${w.base}/dev`, root = join(a, '.souls');
   assert.equal((await runA('register', url)).code, 0);
   const again = await runA('register', url);
-  assert.equal(again.d.reconnection, 'already connected', again.err); assert.equal(again.d.homeChoice, undefined, 'the home is offered once');
+  assert.equal(again.d.reconnection, 'registered again', 'no Soul yet: never "already connected"'); assert.equal(again.d.homeChoice, undefined, 'the home is offered once');
   const made = await runA('create', 'Mira');
   assert.equal(made.d.created, true, made.err);
   const id = made.d.soul.id, minted = w.mints();
@@ -264,7 +264,7 @@ test('review: a world that cannot say whether the token works never gets a secon
   const w = await world(t), home = tmp(t), run = runIn(home, home), root = join(home, '.souls');
   await run('register', `${w.base}/dev`); const id = (await run('create', 'Ivo')).d.soul.id, minted = w.mints();
   w.flags.busyMe = true;
-  const c = await run('create', 'Ivo'); assert.equal(c.d.created, false, c.out + c.err); assert.equal(c.d.code, 'already-here');
+  const c = await run('create', 'Ivo'); assert.equal(c.d.created, false, c.out + c.err); assert.equal(c.d.code, 'already-here'); assert.equal(c.d.reconnection, "not checked: the world didn't answer");
   const p = await run('pair', id); assert.equal(p.code, 75, p.out + p.err); assert.match(p.err, /nothing was paired again/);
   assert.equal(w.mints(), minted); w.flags.busyMe = false; oneSoul(w, root, 'Ivo');
 });
@@ -279,4 +279,25 @@ test('review: register --global keeps a home it cannot read, or one holding a go
   const creds = JSON.parse(readFileSync(join(a, '.souls', 'credentials.json'), 'utf8')); creds.gods = { dev: { token: 'god' } };
   writeFileSync(join(a, '.souls', 'credentials.json'), JSON.stringify(creds));
   assert.equal((await run('register', url, '--global')).code, 1); assert.ok(existsSync(join(a, '.souls')));
+});
+
+test('review 2: a second register on an account world with no Soul yet never says already connected', async (t) => {
+  const w = await world(t), home = tmp(t), run = runIn(home, home);
+  await run('register', `${w.base}/acct`); const r = await run('register', `${w.base}/acct`);
+  assert.equal(r.d.reconnection, 'registered again'); assert.match(r.d.next, /create/);
+});
+
+test('review 2: upgrade never makes a skill file where none was, and refuses a served skill that is not the Souls skill', async (t) => {
+  const NEWER = '9.9.9', bundle = Buffer.from(`const VERSION = "${NEWER}";\n`), skill = Buffer.from(skillText(NEWER));
+  const client = { contract: 'eden-edge/1', version: NEWER, bytes: bundle.length, sha256: sha(bundle), minVersion: '2.0.0', skill: { version: NEWER, bytes: skill.length, sha256: sha(skill) } };
+  const w = await world(t, { client, bundle, skill }), home = tmp(t), run = runIn(home, home);
+  await run('register', `${w.base}/dev`);
+  const up = await run('upgrade'); assert.equal(up.d.upgraded, true, up.err); assert.equal(up.d.skill, undefined);
+  assert.ok(!existsSync(join(home, 'SKILL.md')), 'no copy, none made');
+  const other = Buffer.from(`---\nname: other\nmetadata:\n  version: "9.9.9"\n---\n`);
+  const w2 = await world(t, { client: { ...client, version: ours, skill: { version: NEWER, bytes: other.length, sha256: sha(other) } }, skill: other }), h2 = tmp(t), r2 = runIn(h2, h2);
+  writeFileSync(join(h2, 'SKILL.md'), skillText('2.12.0'));
+  await r2('register', `${w2.base}/dev`);
+  const refused = await r2('upgrade'); assert.equal(refused.code, 1); assert.match(refused.err, /calls itself another skill/);
+  assert.equal(skillVersionOf(readFileSync(join(h2, 'SKILL.md'), 'utf8')), '2.12.0');
 });

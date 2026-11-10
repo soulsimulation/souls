@@ -550,13 +550,11 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   };
   /** The versioned copies older than `version`: what `upgrade` refreshes. */
   const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
-  /** The served skill, verified by the caller, over every copy older than it, never over one as new. With no SKILL.md
-   *  anywhere, it lands in the first of `also` (the folder the agent works in), else beside the home. */
+  /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
+   *  never over one as new, never a new file. */
   function installSkill(bytes, version, also = []) {
-    const fresh = join(also[0] ?? folder(), "SKILL.md"), wrote = [];
-    const none = !skillVersions(also).length && !existsSync(fresh);   // never over a file that isn't ours
-    const targets = [...(none ? [{ file: fresh, rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
-    for (const { file, rel } of targets) {
+    const wrote = [];
+    for (const { file, rel } of skillBehind(version, also)) {
       const tmp = `${file}.${process.pid}.tmp`;
       writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
     }
