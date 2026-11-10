@@ -97,6 +97,9 @@ import { earlyPosterShown, removeEarlyPoster, takeEarlyLayer, takeEarlyRender } 
 import { WorldWaterDetail, markHeight } from './WorldWaterDetail.ts';
 import { findSeats, surveySeats } from './WorldSeatSurvey.ts';
 import { visitorPreviewHour } from './visitor-hour.ts';
+import { realClockOf, setEquatorSun } from './sun-site.ts';
+import { setWorldZone } from './world-zone.ts';
+import { clockEaser } from './clock-ease.ts';
 import { SunShadowCache } from './rendering/SunShadowCache.ts';
 import { GodWorldLiving, calendarClock, entityWorldState, godTourViews, parseShotHour, shotClockAt, whenShotClock } from './world-env.ts';
 import { setFleeSources, AFLOAT } from './gen-mesh/motion.ts';
@@ -114,7 +117,7 @@ import {WorldEdgeItems} from './WorldEdgeItems.ts';
 import { WorldNavigation, createWorldOrbitControls, type ManualNavigation, type CameraMove } from './WorldNavigation.ts';
 import {WorldPlaceCamera} from './WorldPlaceCamera.ts';
 import { composeVisibleViewport, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
-import { nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
+import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
 import {paintSpeakingDot,speakingNow} from './dialogue-speaking.ts';
 import {WorldGames} from './WorldGames.ts';
@@ -367,6 +370,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // ranges and the slice moves with the camera (ridges seemed to rise and recede). Depth precision is set by near.
     const camera = (adopted?.camera as THREE.PerspectiveCamera|undefined) ?? new THREE.PerspectiveCamera(45, 1, 0.1, 2400);
     const followView=new WorldFollow();
+    // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
+    let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
+    if(new URLSearchParams(location.search).has('camtrace'))void import('./camera-trace.ts').then(m=>{if(abort.signal.aborted)return;const t=m.startCameraTrace(renderer.domElement);camTrace=t.trace;abort.signal.addEventListener('abort',()=>t.stop());});
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,lifecycle:'',
@@ -475,6 +481,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // MARSLAND-FORK: the Mars fork (/worlds/w/mars) draws the mars-two template's drone surroundings and its desert sky (lazy: only the fork loads the kit)
     let forkLand:ForkLand|null=null,forkLandLoad:Promise<void>|null=null;
     const dressForkLand=(camp:THREE.Object3D)=>{if(!marsFork)return;forkLandLoad??=import('./WorldMarsForkLand.ts').then(m=>{if(abort.signal.aborted)return;forkLand=m.createForkLand(0);scene.add(forkLand.group);(window as unknown as {__soulsForkLand?:unknown}).__soulsForkLand=forkLand.stats;},e=>console.warn('mars fork land could not be drawn',e));void forkLandLoad.then(()=>forkLand?.dress(camp));};let atmosphereSeconds=0;const reducedMotionQuery=typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):null;
+    // #1649: a world clock that jumps 20+ minutes (an owner's zone change, a set hour) eases the sky over a few seconds; one easer per drawn clock
+    const lightEase=clockEaser(),skyEase=clockEaser(),cutClock=()=>!!past.current||shotMode||!!reducedMotionQuery?.matches;
     const light = (adopted?.light as Daylight|undefined) ?? new Daylight(scene,{bakedShadow:quality.bakedShadows});if(quality.shadowMapSize!==light.sun.shadow.mapSize.x)light.sun.shadow.mapSize.set(quality.shadowMapSize,quality.shadowMapSize);
     // PERF-BAKED-SHADOWS: still things cast into the sun's cached map (redrawn when the sun turns, the view steps or a still thing changes); the per-frame map draws what moves
     const sunCache=light.baked?new SunShadowCache(renderer,scene,light.sun,light.baked,{enabled:()=>look.enabled&&look.follow&&entityLayer.active&&!expansion&&!eyes&&entityLayer.freezeSettled,statics:()=>{const out=entityLayer.shadowStatics([]);out.push(entityBatches.group,staticBatches.group);return out;},revision:()=>entityLayer.shadowRevision}):null;
@@ -917,11 +925,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }
           // world clock at the moment shown (the sim's clock, moved back by how far behind it we are)
           // a world's `time.calendar` (MM-DD) dates its sky: the sun's path and the dusk follow that season, the hour stays the clock's
-          const clock = calendarClock(take.finalState.env?.datetime ?? null, entityWorldState(entityLayer));
+          const worldState = entityWorldState(entityLayer); setEquatorSun(realClockOf(worldState)); setWorldZone(worldState);
+          const clock = calendarClock(take.finalState.env?.datetime ?? null, worldState);
           const ref = take.startTick + take.ticks;
           const clockOffset=(depictedTick-ref)*(dayTicks?86400/dayTicks:dt);
           const datetime = clock ? shiftIso(clock, clockOffset) : null;
-          light.update(shotClockAt(clock?shiftIso(clock,clockOffset,true):null,shotHour??visitorPreviewHour()));
+          light.update(shotClockAt(lightEase(clock?shiftIso(clock,clockOffset,true):null,{cut:cutClock()}),shotHour??visitorPreviewHour()));
           entityLayer.sites.setWorldClock(datetime,dayTicks?86400/(dayTicks*dt):1);
           // Soul Actions entry 38: posters age by the world day shown (redrawn only when that day changes); #430 chalk fades by it too
           if(dayTicks&&dayOrigin!==null&&setPosterDay(Math.floor(Math.max(0,depictedTick-dayOrigin)/dayTicks))){entityLayer.redrawTagged('posters');entityLayer.redrawTagged('fades');}
@@ -978,10 +987,11 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           const away = past.current ? null : bodyLabel(soul.body);   // LINK: "Asleep" / "Zombie" over a body whose agent is away
           const doing = past.current ? activityWords(activity,soul.id) : away ?? doingText(soul.doing,activity,soul.id);
           const card = cardText(cards.get(soul.id));
-          const text = `${soul.name}|${doing}|${card}|${soul.id === soulId||groupSelection.has(soul.id)}`;
+          const hovered = hover.hoveredSoul === soul.id;   // #1645: hovering shows the doing here, under the body, not in a bubble above
+          const text = `${soul.name}|${doing}|${card}|${soul.id === soulId||groupSelection.has(soul.id)}|${hovered}`;
           if (text !== l.text) {
-            l.text = text; l.name.textContent = soul.name; l.line.textContent = clip(doing, 48); l.card.textContent = clip(card, 48);
-            l.line.style.display = doing && (soul.id===soulId||!!away) ? '' : 'none'; l.card.style.display = card && soul.id===soulId ? '' : 'none';
+            l.text = text; l.name.textContent = soul.name; l.line.textContent = clip(doing, 200); l.line.title = doing; l.card.textContent = clip(card, 48);
+            l.line.style.display = doing && (soul.id===soulId||!!away||hovered) ? DOING_DISPLAY : 'none'; l.card.style.display = card && soul.id===soulId ? '' : 'none';
             (l.obj.element as HTMLElement).style.outline = soul.id === soulId||groupSelection.has(soul.id) ? '2px solid #ffd34d' : 'none';
           }
         }
@@ -1068,11 +1078,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           if(pose.done){soulFlight=null;if(!soulFlightChip||context.current.selected!==flight.soulId)context.current.onSelect(flight.soulId,soulFlightChip?'chip':undefined);context.current.setThing(null);context.current.cameraMode='follow';context.current.follow=true;context.current.setCameraMode('follow');hapticTick();}}  // #893: Follow starts
       }
       atmosphereSeconds+=step;godLiving?.update(now,light.daylight,!!reducedMotionQuery?.matches||(look.enabled&&shotMode));const godSky=godLiving&&entityLayer.active&&!expansion?godLiving.atmosphere(shown.current?.tick??NaN):forkLand&&!expansion?forkLand.atmosphere():null;  // look pass: a still picture shows patterned lamps at their steady level (repeatable shots)
-      if(!holdDraw||warmFrame)try{atmosphere.update({seconds:atmosphereSeconds,dt:step,daylight:light.daylight,camera,eden:(!!expansion||!!godSky)&&!past.current,reducedMotion:!!reducedMotionQuery?.matches,clock:shotClockAt(shown.current?.datetime??adopted?.clock??null,shotHour??visitorPreviewHour()),...(godSky?{profile:'world' as const,weather:godSky.weather,indoors:godSky.indoors}:{})});}catch{}
+      if(!holdDraw||warmFrame)try{atmosphere.update({seconds:atmosphereSeconds,dt:step,daylight:light.daylight,camera,eden:(!!expansion||!!godSky)&&!past.current,reducedMotion:!!reducedMotionQuery?.matches,clock:shotClockAt(skyEase(shown.current?.datetime??adopted?.clock??null,{cut:cutClock()}),shotHour??visitorPreviewHour()),...(godSky?{profile:'world' as const,weather:godSky.weather,indoors:godSky.indoors}:{})});}catch{}
       try{godLightning?.update(shown.current?.tick??NaN,camera,step,!!reducedMotionQuery?.matches);}catch{}
       if(controls.enabled)controls.update();
       rts.afterControls();  // B2: the head offset over the pivot (controls.update aims at the pivot)
       if(context.current.cameraMode==='follow'&&focus){renderer.domElement.dataset.cameraShot='follow:'+(soulId?s.conn.replica.souls.get(soulId)?.entityId??'':thingId??'');const offset=followView.resolve(controls.target,camera.position.clone().sub(controls.target),visualObstructionRoots(),step);camera.position.copy(controls.target).add(offset);camera.lookAt(controls.target);}
+      if(camTrace){const tracing=context.current.cameraMode==='follow'&&!!focus;camTrace.frame({mode:context.current.cameraMode,target:controls.target.toArray(),eye:camera.position.toArray(),desired:tracing?followView.desired?.toArray()??null:null,rule:tracing?followView.rule:null});}  // #1317
       const area = visibleViewport(host.clientWidth, host.clientHeight, context.current.viewportInsets);
       // P7 lever D: an early arrival stays on the near world it drew until the rest is built (a cut to a Soul before that
       // showed hollow ground)
