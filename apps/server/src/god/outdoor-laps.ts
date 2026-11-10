@@ -15,6 +15,8 @@ export type OutdoorLapsHost = {
 };
 const isLaps = (def: StoredDef | undefined) => def?.name === 'core-outdoor-laps' && def.version === 1;
 export function createOutdoorLaps(h: OutdoorLapsHost) {
+  // IDs are opaque. Keep only successful receipts for each marker's current tick.
+  const completedAtTick = new Map<string, { tick: number; ids: Set<string> }>();
   const marker = (id: string) => { const e = h.model.entities.get(id); return e && isLaps(h.model.resolvedDef(e.def)) ? e : null; };
   function plan(soul: EdgeSoul, id: string, action: string) {
     const e = marker(id); if (!['walk-lap','jog-lap'].includes(action) || !e) return null;
@@ -37,9 +39,13 @@ export function createOutdoorLaps(h: OutdoorLapsHost) {
     const match = /^object:(.+):(walk-lap|jog-lap)$/.exec(r.capability); if (!match) return;
     const e = marker(match[1]), soul = h.soul(r.soulId); if (!e || !soul || h.denied(e.id, { soulId: soul.id, entityId: soul.entity_id, name: soul.name })) return;
     const tick = Number(e.state?.lastCompletedTick ?? -1), previous = String(e.state?.lastReceipt ?? '');
-    if (r.endedTick! < tick || (r.endedTick === tick && r.id <= previous)) return;
+    if (r.endedTick! < tick || r.id === previous) return;
+    const current = completedAtTick.get(e.id);
+    const ids = current?.tick === tick ? new Set(current.ids) : new Set(previous ? [previous] : []);
+    if (r.endedTick === tick && ids.has(r.id)) return;
     const done = h.commit([opSchema.parse({ op: 'set', id: e.id, state: { completedLaps: Math.min(1e9, Number(e.state?.completedLaps ?? 0) + 1), lastBy: soul.name.slice(0, 100), lastGait: match[2] === 'jog-lap' ? 'jog' : 'walk', lastCompletedTick: r.endedTick, lastReceipt: r.id } })], `${r.soulId} completed an outdoor lap`);
-    if (!done.accepted) h.log('outdoor-laps: the world refused the completion record');
+    if (!done.accepted) { h.log('outdoor-laps: the world refused the completion record'); return; }
+    completedAtTick.set(e.id, { tick: r.endedTick!, ids: r.endedTick === tick ? ids.add(r.id) : new Set([r.id]) });
   }
   return { plan, onReceipt, facts(id: string) {
     const e = marker(id); if (!e) return null;
