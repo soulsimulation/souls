@@ -1,0 +1,12 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-10 #1703: correct only new unreleased field-map@1 declared bounding-box height from0.04 to0.05m to satisfy the existing public definition admission minimum. All authored mesh shapes, state/actions and native behavior unchanged; original failed baseline boot and earlier supplement preserved. Scoped K2 passed five samples with zero findings/gaps; public God-define and existing full native survey/carry/return regression qualify the correction. No policy, threshold, older released revision or budget change.",
+  "defs": [
+    {
+      "def": "core-field-map@1",
+      "hash": "e75b1f812b0defbf4c10337db225863bdb5fe166c79a84602350950240d094b7"
+    }
+  ],
+  "findings": [],
+  "qualificationGaps": []
+}
