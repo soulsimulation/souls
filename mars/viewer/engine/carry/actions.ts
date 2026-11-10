@@ -12,7 +12,7 @@ import type { ActionDef, CancelResult, Diagnostic, StepResult } from '../actions
 import { DT, type Runtime } from '../runtime/runtime.ts';
 import type { Entity, Pose } from '../world/types.ts';
 import type { Spatial } from '../spatial/service.ts';
-import { makeWay, stairBlocker, traffic, walkTo, takeReplan } from '../locomotion/walk.ts';
+import { makeWay, registerClearOf, stairBlocker, traffic, walkTo, takeReplan } from '../locomotion/walk.ts';
 import { CARRY_CLIMB_SPEED, climbPose, type ClimbPose } from './climb.ts';
 import { entityFootprint } from '../spatial/service.ts';
 import { carriedPose, carrierSpots, entityFrame, formationFor, laidPose, worldDiscs, isCarryLoad, type SE2 } from './formation.ts';
@@ -25,7 +25,9 @@ import { MAX_LEVEL_ID } from '../spatial/types.ts';
 
 export const CARRY_SPEED = 0.9; // m/s of the fastest-moving formation point (centre + load tips under rotation)
 const ACCEL = 0.5; // m/s²
+const RETREAT = 1; // m a refused crew backs along its route before it sets down (#1150)
 const LIFT_S = 1.2;
+const LIFT_REACH = 1.7; // m a walker covers in a lift (PC17)
 const SETDOWN_S = 1.2;
 const RELEASE_S = 0.4;
 const GATHER_TIMEOUT_S = 120;
@@ -50,6 +52,8 @@ export type CarryExec = {
   /** A construction cut with no alternative from here, at that scene epoch: held (blocked) without replanning again
    *  until the scene changes (PC07). */
   cut?: { epoch: number; diagnostic: Diagnostic };
+  /** #1150: the world refused the crew's move. It backs along the route it came by, to this arc length, and sets down there. */
+  retreatTo?: number;
   reachStart?: number;
   waited?: number;
   /** Climb (between levels): traversal parameter, whether the flight's traffic resource is held, done. */
@@ -68,6 +72,10 @@ export const carrySchema = z.strictObject({
    *  diagnostic names the obstacle at the cut and whether the search was exhausted. Only the server's shared carries
    *  ask for it; every other carry is unchanged. */
   holdCutV1: z.literal(true).optional(),
+  /** PC17 (#696): a shared carry does not leave the ground while a body outside the crew stands within the load's cover
+   *  (another crew at work beside it): it waits, asking them to move, as for the grip positions; and it halts short of
+   *  another crew's load on its way, as for a person. */
+  clearLiftV1: z.literal(true).optional(),
 });
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -128,6 +136,37 @@ function applyFormation(rt: Runtime, ex: CarryExec, q: SE2) {
   ex.q = q;
 }
 
+/** #1150: a refused crew's next step back would meet a person or something solid. */
+function retreatBlocked(rt: Runtime, ex: CarryExec, sp: Spatial, u: number): boolean {
+  const i0 = ex.i, g = sp.level(ex.p.level); ex.i = 0;
+  const q = poseAtU(ex, u); ex.i = i0;
+  return !!pathBystander(rt, ex, u) || (!!g && poseHit(g, ex.p.f, q, 0) >= 0);
+}
+
+/** PC17 (#696): a body outside the crew within the load's cover where it lies (the cover `humanLoadClearance` keeps once it is lifted). */
+function liftBystander(rt: Runtime, ex: CarryExec): string | null {
+  const p = ex.p, discs = worldDiscs(p.f, p.pickup);
+  for (const o of Object.values(rt.world.entities)) {
+    if (o.kind !== 'human' || p.crew.includes(o.id) || o.human?.level !== p.level) continue;
+    // the lift takes LIFT_S and nobody stops it: someone on the move could walk into its cover before it is done
+    const closing = (o.human?.speed ?? 0) > 0.05 ? LIFT_REACH : 0;
+    if (discs.some((d) => hypot(d.p[0] - o.pose.p[0], d.p[1] - o.pose.p[2]) < d.d.r + 0.28 + 0.08 + closing)) return o.id;
+  }
+  return null;
+}
+
+/** PC17 (#696): someone of another crew whose load this formation (its load or a carrier) would touch at `u`: a crew
+ *  walking into another's load is the same overlap as a bystander's (`humanLoadClearance`), and halts the same way. */
+function pathOtherLoad(rt: Runtime, ex: CarryExec, u: number): string | null {
+  const p = ex.p, others = activeLoadDiscs(rt).filter((d) => d.actionId !== ex.id && d.level === p.level);
+  if (!others.length) return null;
+  const i0 = ex.i, q = poseAtU(ex, u);
+  ex.i = i0; // poseAtU advances the segment cursor; restore it
+  const mine = [...worldDiscs(p.f, q).map((d) => ({ p: d.p, r: d.d.r })), ...carrierSpots(p.f, q).map((s) => ({ p: s, r: 0.28 }))];
+  const hit = others.find((o) => mine.some((m) => hypot(m.p[0] - o.p[0], m.p[1] - o.p[1]) < m.r + o.r + 0.08));
+  return hit ? hit.crew[0]! : null;
+}
+
 /** A non-crew person inside the formation's footprint (load discs + carrier spots) at arc length u. */
 function pathBystander(rt: Runtime, ex: CarryExec, u: number): string | null {
   const p = ex.p;
@@ -150,8 +189,8 @@ function pathBystander(rt: Runtime, ex: CarryExec, u: number): string | null {
  * carrier spot from the current pose to the end, +0.15 m), or the carry has stopped moving. A walker
  * blocked in the formation's way steps aside to such a spot and walks on once its goal passes it.
  */
-function clearOfRoute(rt: Runtime, ex: CarryExec, q: Vec2): boolean {
-  if (!rt.isActive(ex.id) || ex.phase !== 'move') return true;
+function clearOfRoute(rt: Runtime, ex: CarryExec | undefined, q: Vec2): boolean {
+  if (!ex || ex.phase !== 'move') return true;
   const { traj, f } = ex.p;
   const U = traj.u[traj.u.length - 1];
   const i0 = ex.i;
@@ -163,6 +202,7 @@ function clearOfRoute(rt: Runtime, ex: CarryExec, q: Vec2): boolean {
   ex.i = i0; // poseAtU advances the segment cursor; restore it
   return clear;
 }
+registerClearOf('carry', (rt, ref, q) => clearOfRoute(rt, rt.execOf(ref.action) as CarryExec | undefined, q));
 
 /** A non-crew person standing within a body width of any station, or inside a laid footprint (+0.4 m). */
 export function carryBystanderAt(rt: Runtime, ex: CarryExec, spots: Vec2[], frame: ReturnType<typeof entityFrame> | null): string | null {
@@ -318,6 +358,13 @@ export const carry: ActionDef<CarryParams, CarryProgram, CarryExec> = {
         makeWay(rt, inWay, [p.pickup.x, p.pickup.z]);
         return blockedWait(rt, ex.id, p.item, [inWay], { code: 'carry.pickup-occupied', message: `the crew cannot take up ${p.item}: ${inWay} is standing at a grip position`, subjects: [p.item, inWay], at: [p.pickup.x, p.levelY, p.pickup.z] }, p.crew);
       }
+      if (p.clearLift) {
+        const under = liftBystander(rt, ex);
+        if (under) {
+          makeWay(rt, under, [p.pickup.x, p.pickup.z]);
+          return blockedWait(rt, ex.id, p.item, [under], { code: 'carry.pickup-occupied', message: `the crew cannot lift ${p.item}: ${under} is standing too close to it`, subjects: [p.item, under], at: [p.pickup.x, p.levelY, p.pickup.z] }, p.crew);
+        }
+      }
       if (itemOf(rt, ex).tags?.includes('entity-world-transport')) {
         if (ex.reachStart === undefined) {
           ex.reachStart = rt.tick;
@@ -341,6 +388,19 @@ export const carry: ActionDef<CarryParams, CarryProgram, CarryExec> = {
         applyFormation(rt, ex, p.traj.poses[0]);
       }
       return { status: 'running', phase: ex.phase };
+    }
+    if (ex.phase === 'move' && ex.retreatTo !== undefined) {
+      const sp = rt.services.spatial as Spatial; sp.sync(rt.world);
+      const next = Math.max(ex.retreatTo, ex.u - CARRY_SPEED * dt);
+      // the route was clear when it was planned, not necessarily now: what stands behind ends the backing here
+      if (next < ex.u && !retreatBlocked(rt, ex, sp, next)) {
+        ex.u = next; ex.i = 0; applyFormation(rt, ex, poseAtU(ex, ex.u));
+        if (ex.u > ex.retreatTo) return { status: 'running', phase: 'move' };
+        // not clear to lay it here: further back, where it was. The route's start is as far as it goes.
+        if (ex.u > 0 && laidIssue(sp, p.f, ex.q, p.level, p.levelY, p.item, p.crew)) { ex.retreatTo = Math.max(0, ex.u - RETREAT); return { status: 'running', phase: 'move' }; }
+      }
+      ex.retreatTo = undefined; startSetDown(rt, ex, ex.q);
+      return { status: 'running', phase: 'set-down' };
     }
     if (ex.phase === 'move') {
       // construction changed the scene? the rest of the validated route must still be clear
@@ -391,13 +451,14 @@ export const carry: ActionDef<CarryParams, CarryProgram, CarryExec> = {
       // people in the formation's way: halt (never push through), ask idle bystanders to step aside; a walker blocked
       // in the way (its goal lies on the route) steps off the rest of the route and waits for the load to pass
       // sample the swept footprint from here to 1.2 m ahead (the first primitive may rotate in place)
-      const ahead = [0, 0.3, 0.6, 0.9, 1.2].map((d) => pathBystander(rt, ex, Math.min(U, ex.u + d))).find((x) => x) ?? null;
+      const ahead = [0, 0.3, 0.6, 0.9, 1.2].map((d) => pathBystander(rt, ex, Math.min(U, ex.u + d)) ?? (p.clearLift ? pathOtherLoad(rt, ex, Math.min(U, ex.u + d)) : null)).find((x) => x) ?? null;
       if (ahead) {
-        ex.v = Math.max(0, ex.v - 2 * ACCEL * dt);
+        // PC17 (#696): beside another crew, a person can step into the swing faster than the load brakes: it stops where it is
+        ex.v = p.clearLift ? 0 : Math.max(0, ex.v - 2 * ACCEL * dt);
         ex.u = Math.min(U, ex.u + ex.v * dt);
         applyFormation(rt, ex, poseAtU(ex, ex.u));
         const c = poseAtU(ex, ex.u);
-        makeWay(rt, ahead, [c.x, c.z], { by: `the crew carrying ${p.item}`, subjects: [p.item, ...p.crew], test: (q) => clearOfRoute(rt, ex, q) });
+        makeWay(rt, ahead, [c.x, c.z], { by: `the crew carrying ${p.item}`, subjects: [p.item, ...p.crew], test: { kind: 'carry', action: ex.id } });
         // waited long enough: the people in the way are not going anywhere (another crew, a
         // boxed-in bystander) → replan the rest of the carry treating them as soft obstacles
         ex.waited = (ex.waited ?? 0) + 1;
@@ -478,6 +539,14 @@ export const carry: ActionDef<CarryParams, CarryProgram, CarryExec> = {
     if (ex.phase === 'gather') return ex.walks.every((walk, i) => !!walk && exhausted.has(ex.p.crew[i]) && walkTo.waitQuiescent!(rt, walk, exhausted));
     return ex.phase === 'move' && ex.v < 0.02 && !ex.onStair && exhausted.has(ex.p.item);
   },
+  /** #1150: the crew's last step was not taken. The route behind it is the way it came, so that is the way out, as far as it is still clear. */
+  refused(rt, ex) {
+    if (ex.phase !== 'move') return;
+    // refused while backing: that step was back, so undo it, and go no further that way
+    if (ex.retreatTo !== undefined) { ex.u = Math.min(ex.p.traj.u[ex.p.traj.u.length - 1], ex.u + CARRY_SPEED * DT); ex.i = 0; ex.q = poseAtU(ex, ex.u); ex.retreatTo = ex.u; return; }
+    ex.u = Math.max(0, ex.u - ex.v * DT); ex.v = 0; ex.i = 0; ex.q = poseAtU(ex, ex.u);
+    ex.retreatTo = Math.max(0, ex.u - RETREAT);
+  },
   cancel(rt, ex): CancelResult {
     const p = ex.p;
     if (ex.phase === 'gather' && ex.reachStart !== undefined) {
@@ -523,6 +592,7 @@ export const carry: ActionDef<CarryParams, CarryProgram, CarryExec> = {
         },
       };
     if (ex.phase === 'move') {
+      if (ex.retreatTo !== undefined) { ex.cancelling = true; return { ok: true, deferred: true }; }   // #1150: backing off already; it sets down
       const sp = rt.services.spatial as Spatial;
       sp.sync(rt.world);
       const why = laidIssue(sp, p.f, ex.q, p.level, p.levelY, p.item, p.crew);

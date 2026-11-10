@@ -46,6 +46,7 @@ export function validateScenario(s) {
     if (!ADAPTERS.includes(x.adapter)) errs.push(`seats[${i}].adapter ${x.adapter}`);
     if (x.adapter === 'claude-headless' && !x.model) errs.push(`seats[${i}].model required for a Claude seat`);
     if (!x.soulName) errs.push(`seats[${i}].soulName required`);
+    if (x.briefBytes != null && !(Number.isSafeInteger(x.briefBytes) && x.briefBytes >= 0)) errs.push(`seats[${i}].briefBytes must be a whole number of bytes, 0 for no brief`);
     if (x.adapter === 'scripted-owner') for (const e of validateScript(x.script)) errs.push(`seats[${i}].${e}`);
     if (x.persona && !existsSync(join(PERSONAS, `${x.persona}.md`))) errs.push(`seats[${i}].persona ${x.persona}: no personas/${x.persona}.md`);
   }

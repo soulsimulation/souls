@@ -8,7 +8,7 @@ needs.
 | Unit and typecheck | `node --test` suites per package, `tsc` per package | your machine, CI |
 | Gates | walk, bundle, conformance | your machine (focused), CI, the remote gate |
 | Browser e2e | the local smoke (`node e2e/local-smoke.mjs`) and Markdown scenarios against an isolated client fixture | your machine, CI |
-| Remote gate | the complete suite for a release head, on Modal | the release workflow |
+| Remote gate | the complete suite for a release head: CI's result at the exact commit for the steps CI runs, Modal for the rest | the release workflow |
 | Playtests | coding agents play Souls and gods in a fake-mind world, reviewed by agents | a quiet machine or a cloud session |
 
 All of them use fake minds and isolated data directories. None touches production.
@@ -23,6 +23,10 @@ pnpm test:mars                               # the vendored engine's determinist
 pnpm test:client                             # Soul client and client-eval suites
 pnpm test                                    # everything (slow; prefer the focused forms)
 ```
+
+In CI, every god-skill unit test (each `*.test.mjs` under `tools/god-skill/`, its `lib/`, `scripts/` and `e2e/`, the
+replay corpus among them; none needs a browser or a live server) runs on the `server-0` job (`godSkill` and
+`GOD_SKILL_TESTS` in `.github/scripts/ci-scope.mjs`), which any `apps/server/` or `tools/god-skill/` change selects.
 
 The Pip authoring example's renderer test is manual, not part of CI: it needs pulled media and loads renderer code
 with parameter properties, so run `node --experimental-transform-types --test tools/body-authoring/robot/robot.test.mjs`
@@ -61,6 +65,10 @@ node tools/test-harness/bundle-budget/budget.mjs --build --write     # accept a 
 ```
 
 The gate never writes the baseline; only a reviewed commit does.
+
+The comparison runs in two places: the CI job `types-web`, on the build it already makes, so growth fails `ci-ok` on the
+PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
+`types-web`.
 
 ## Conformance
 
@@ -104,23 +112,23 @@ therefore **windowed**:
   The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
   skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
   tools-only PRs select no heavy jobs and are never deferred.
-- **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci-request.yml` then dispatches `ci.yml`
-  for it, unless the head's newest CI run already passed. By hand: `gh workflow run ci.yml --ref <branch> -f pr=<n>`.
-  A requested run is scoped by the PR's paths against main, not full scope. It queues behind a CI run already going
-  for the same PR, and does no heavy work if that run passes at the same head. Once a PR is in the window, its later
-  pushes run in full as usual.
-- **A branch cut before the window (#914)** carries an old `ci.yml` with no `pr` input, and a dispatch runs the
-  branch's own copy, so GitHub would refuse the request. `ci-request.yml` checks the head's `ci.yml` first. When the
-  input is missing, it dispatches nothing and posts one comment on the PR: merge main forward (merge or rebase main
-  into the branch and push), and that push runs CI in the window. The merge train's strict path also rebases a
-  `merge:ready` PR. Dispatching main's `ci.yml` instead would not help: its checks would attach to main's commit, not
-  the PR head.
+- **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
+  a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
+  doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
+  does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
+  the window, its later pushes run in full as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
+- **Any other label does nothing.** Its run sits in a concurrency group of its own, so it can't cancel a running CI, and
+  every job skips without taking a runner. A skipped required check reads as a pass, so in that run the `ci-ok` job carries
+  another name and can't replace a real result. The merge train ignores a run with every job skipped.
+- **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
+  own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads.
+  which the merge train reads. A merge-group run is path-scoped over everything in the group since `main`, and
+  `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
-`merge:ready` straight from a deferred head still works: the request replaces the deferred run, and the train reads
+`merge:ready` straight from a deferred head still works: the labeled run replaces the deferred one, and the train reads
 the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
@@ -130,9 +138,15 @@ loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server
 `packages/engine-*`) and by every full-scope run, including each push to main, and a failure blocks through `ci-ok`. It
 is not a gate step, so the gate's suite tree and cached baseline don't change.
 
+**Soul runtime and trace tests.** `tools/soul-runtime/*.test.mjs` and `tools/soul-trace/*.test.mjs` run as the CI job
+`soul-tools`, about 17 s measured on a loaded laptop. It is picked by its own paths (`tools/soul-runtime`,
+`tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
+`ci-ok`. Like `soul-actions`, it is not a gate step.
+
 **Self-hosted runners.** The heavy `qualify` legs run on the runners named by the repository variable
-`CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners; the browser `smoke`
-leg always stays GitHub-hosted. One runner instance takes one job at a time, so routing is only worth it with several
+`CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners. The browser `smoke` leg
+and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a loaded shared host misses
+(#1162). One runner instance takes one job at a time, so routing is only worth it with several
 instances online. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
 systemd service under one dedicated unprivileged user, with the label, and Playwright's Chromium system packages when
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
@@ -140,10 +154,13 @@ its header shows the one-line invocation from a workstation. The steward sets an
 
 ## Remote gate
 
-[testing/remote-gate.md](testing/remote-gate.md): `tools/test-harness/release-gate.sh` runs the complete suite for a
-candidate and its baseline on Modal and compares them. Clean means 0 new failures, 0 blockers and 0 unexpected skips.
+[testing/remote-gate.md](testing/remote-gate.md): `tools/test-harness/release-gate.sh` qualifies the complete suite for a
+candidate: the steps CI ran identically at that commit come from CI, the rest run on Modal and are compared with the
+baseline. Clean means 0 new failures, 0 blockers and 0 unexpected skips.
 The release head always takes the full scope; candidates may use `--scope auto`. The baseline comes from a cache, and
-docs/tools-only changes are never gated ([Modal policy](process/modal-policy.md)).
+docs/tools-only changes are never gated ([Modal policy](process/modal-policy.md)). A PR that removes or renames a test
+the gate compares adds its `tools/test-harness/renames.json` entry in the same change, and a newly skipped test its
+`quarantine.json` entry; CI's `repo` job checks both ([renames](testing/remote-gate.md#renames)).
 
 ## Capacity qualification workflow
 

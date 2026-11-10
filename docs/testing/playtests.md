@@ -9,6 +9,22 @@ The method (what to measure, how to compare arms) is in [playtest method](../pro
 replay set on a cloud machine is in [cloud playtests](playtests-cloud.md). Live multi-Soul scenes directed from a
 chat session are in [swarm director](swarm-director.md).
 
+## Reunion
+
+`tools/playtest/runs/specs/reunion.json` measures what a Soul carries across a restart. Two Souls in Souls homes meet: each
+first card names the other, says they both start on the green, and offers two places, `walk:knoll` or `walk:flag-orchard`.
+They name the one they choose by its walk id, then a second card sends each to its own place for the evening
+(`walk:lab-pond-hall`, `walk:cottage`). A last card with `restart` then restarts each resident client, drops what the last
+chat left unread and opens a new chat; they carry on (#1606). `director.worldTime` sets the clock when play starts, not before
+onboarding: 15:00 at 120 to 1 puts the end of the first card at 23:00 and of the evening card at 05:00, and the last card at
+06:40 the next day, past both midnight and the 06:00 turn of the world day. `tools/playtest/runs/questions/reunion-recall.mjs` scores recall beside M2,
+M6 and M7: both Souls finished a walk to the id they each named, using the other's name. `here` shows a near Soul's name to
+anyone, so a name alone passes nothing, and a Soul that never parted from the place, or read the plan back from the world,
+leaves the run unknown, as does a last move by `run` or `jog`, whose ids aren't walk ids. A first day that didn't happen (no
+shared plan, or no walk away) is `unknown` with an uncertainty starting `invalid-day-1:`, so an arm can stop there before
+paying for another run. The baseline arm is `reunion-baseline.json`: the same scenario with `briefBytes: 0` on both seats.
+`reunion-dry.json` plays both seats with scripted owners and no model, and should pass before any paid arm. Its seats are live: it needs the coordinator's go-ahead and the model budget.
+
 ## Commands
 
 ```sh
@@ -114,6 +130,9 @@ after the cutoff are diagnostic only.
 ```
 
 - `world.kind` must be `dev`. Every seat needs an `id`, an `adapter`, a `soulName` and (for Claude) a `model`.
+- A seat may set `briefBytes` (a whole number, `0` for none): the harness writes it into the seat's Souls home
+  `config.json` once the mind has made the home, and again before each turn and restart, so an arm can run without the
+  pre-turn brief. Reunion's baseline arm (`reunion-baseline.json`) uses `0`; `seat.json` records it.
 - `director.mode` is `persona` (every seat needs a persona) or `scripted`, with
   `script: [{ "seat", "atSec", "channel": "chat"|"card", "text", "budgetSec", "expect"? }]`. A seat's scripted
   requests must not overlap their budgets.

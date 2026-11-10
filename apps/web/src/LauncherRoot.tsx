@@ -18,7 +18,12 @@ export default function LauncherRoot({ list }: { list: LauncherList }) {
     return <HomeWith list={list} session={{ mode: 'clerk', ready: true, authed: false, label: null, signInUrl: route.signInUrl ?? undefined, getToken: async () => null, login: () => { if (route.signInUrl) location.assign(route.signInUrl); }, logout: () => {} }} />;
   }
   const name = localStorage.getItem('sim.dev');
-  return <HomeWith list={list} session={{ mode: 'dev', ready: true, authed: !!name, label: name, getToken: async () => name ? 'dev:' + name : null, login: () => {}, logout: () => { localStorage.removeItem('sim.dev'); location.reload(); } }} />;
+  return <HomeWith list={list} session={{ mode: 'dev', ready: true, authed: !!name, label: name, getToken: async () => name ? 'dev:' + name : null, login: devLogin, logout: () => { localStorage.removeItem('sim.dev'); location.reload(); } }} />;
+}
+/** Local test launcher: sign in under a typed name (dev auth accepts any; `admin` is an admin). */
+function devLogin() {
+  const n = (prompt('Sign in locally as (any name):') ?? '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36);
+  if (n) { localStorage.setItem('sim.dev', n); location.reload(); }
 }
 function HomeWith({ list, session }: { list: LauncherList; session: Session }) {
   useEffect(() => { publishSession(session); });

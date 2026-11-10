@@ -73,7 +73,7 @@ export async function openWorldServer({input,dataDir,worldKey,worldId,port,build
   const {worldDefinition}=await load('apps/server/src/world-config.ts'),definition=worldDefinition(worldKey);
   db=new Db(join(dataDir,'sim.db'));
   const selected=worldKey==='littlemartians'?native.LITTLE_MARTIANS_WORLD:{scene:'eden-camp',arrival:[-3,18],arrivalPlace:'arrival',reference:[-1,17],grounds:{id:'grounds',name:'Mars camp'},map:native.MARS_2026_MAP,disassemblyV1:true};
-  const factory=lifecycleEnabled?await (await load('packages/engine-native/src/selected-crew-removal.ts')).selectedNativeCrewRemovalFactoryV1(selected):await native.marsFactory(selected);
+  const factory=native.soulsRepairReaderV1(lifecycleEnabled?await (await load('packages/engine-native/src/selected-crew-removal.ts')).selectedNativeCrewRemovalFactoryV1(selected):await native.marsFactory(selected),{adopt:false});   // #1323: reads an adopted history
   host=new WorldHost(db,factory,db.world(worldId)?.seed??cfg.worldSeed,cfg.snapshotEveryTicks,worldId,{durableClockV1:true});const boot=host.boot();
   if(worldKey==='littlemartians'&&host.engine.world.base.staticHash!==factory.genesis(host.seed).base.staticHash)throw Error('LM persisted physical base differs from selected map; preserve the old reader and database');
   const authored=authoredData?(await load('apps/server/src/worlds/authored-lm-edge.ts')).validateAuthoredLmSidecars(host,authoredData):undefined;

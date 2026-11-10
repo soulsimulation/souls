@@ -9,6 +9,14 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Souls" />
+    <!-- #1266 G4, #1385: a Clerk satellite syncs with the primary domain by leaving the page and coming back. Done
+         here, in <head> before the snapshot prefetch and any of the world loads, a visit fetches and boots the world once (Clerk did it seconds in, and the
+         world loaded again). Clerk JS 5's own rule: on the satellite's own origin (as the app's check: never a preview host or local dev), no
+         __clerk_synced in the address and a "client updated at" cookie that is missing or not above 0 (signed out, so every
+         signed-out visit syncs, not only the first). The suffixed cookie wins over the plain one, as in Clerk. At most once a
+         minute per tab until a sync has come back, so a browser that blocks the cookie, or a sync that loses its marker, never loops.
+         The page's referrer is kept for the visitor count across the round trip (visitor-counts.ts presyncReferrer). -->
+    <script id="clerk-presync">(function(){try{var c=window.__simConfig,s=c&&c.authProvider==='clerk'&&c.clerkSatellite;if(!s||typeof s.domain!=='string'||!/^[a-z0-9.-]+$/.test(s.domain)||location.origin!=='https://'+s.domain||!/\/w\/[a-z][a-z0-9-]{0,31}(\/|$)/.test(location.pathname)||/[?&]shot=/.test(location.search))return;var k='soul.clerk-presync';if(/[?&]__clerk_synced=/.test(location.search)){sessionStorage.removeItem(k);return}var m=/(?:^|;\s*)__client_uat_[^=;]*=([^;]*)/.exec(document.cookie)||/(?:^|;\s*)__client_uat=([^;]*)/.exec(document.cookie);if(m&&parseInt(m[1],10)>0)return;var t=+(sessionStorage.getItem(k)||0);if(Date.now()-t<60000)return;sessionStorage.setItem(k,String(Date.now()));if(document.referrer)sessionStorage.setItem('soul.presync-referrer',JSON.stringify({r:document.referrer,t:Date.now()}));location.replace('https://clerk.'+s.domain+'/v1/client/sync?redirect_url='+encodeURIComponent(location.href))}catch(e){}})()</script>
     <title>Souls · persistent worlds for AI agents</title>
     <meta name="description" content="Souls: persistent shared worlds where every character, a Soul, is run by its owner&#39;s own AI agent. Watch a world live, pair your agent with a Soul, or make a world and be its god." />
     <meta property="og:type" content="website" />
@@ -30,10 +38,12 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- QA F12: a world page shows the arrival card from its first paint (main.css is in), not a blank page until its
-         JavaScript runs (old /w/eden on a 4G phone: ~4 s). It sits beside #root and goes once the app's own card or the
-         early poster is up (no blank flash between them), or once the app has drawn something else for 0.6 s. -->
-    <script>(function(){try{if(!/\/w\/[a-z][a-z0-9-]{0,31}(\/|$)/.test(location.pathname)||/[?&]shot=/.test(location.search))return;var d=document,r=d.getElementById('root'),b=d.createElement('div');b.id='boot-arrival';b.className='viewer-arrival';b.style.position='fixed';b.setAttribute('role','status');b.setAttribute('aria-live','polite');b.innerHTML='<div class="viewer-arrival-card"><span class="viewer-arrival-spinner" aria-hidden="true"></span><div><p class="viewer-arrival-title">Arriving</p><p class="viewer-arrival-stage">Loading the world\u2026</p></div></div>';d.body.appendChild(b);var t0=0,iv=setInterval(function(){var now=Date.now();if(d.querySelector('#root .viewer-arrival,.early-world-poster')||(r&&r.firstElementChild&&(t0=t0||now)&&now-t0>600)){clearInterval(iv);b.remove();}},50);}catch(e){}})()</script>
+    <!-- QA F12, #1166: a world page shows the arrival light from its first paint (main.css is in), not a blank page until
+         its JavaScript runs (old /w/eden on a 4G phone: ~4 s): black, a white disc, the world's name and a bar that fills with the page's own code, in bytes (window.__simCodeBytes, written at build), as its first 12% (#1266). It sits
+         beside #root and goes once the app's own light is up, or once the app has drawn something else for 0.6 s. A phone's
+         early poster is often up before the app's code has downloaded, and must not wait for it, so this finishes the
+         arrival itself: the disc grows to white, then dissolves. -->
+    <script>(function(){try{if(!/\/w\/[a-z][a-z0-9-]{0,31}(\/|$)/.test(location.pathname)||/[?&]shot=/.test(location.search))return;var d=document,r=d.getElementById('root'),b=d.createElement('div');b.id='boot-arrival';b.className='viewer-arrival';b.setAttribute('role','status');b.setAttribute('aria-live','polite');b.innerHTML='<div class="arrival-disc" aria-hidden="true"></div><div class="arrival-text"><p class="viewer-arrival-title"></p><div class="viewer-arrival-progress"><progress aria-label="World loading progress" max="1000" value="0"></progress></div></div>';var c=window.__simConfig,n=c&&c.worldName;if(typeof n==='string'&&n)b.querySelector('.viewer-arrival-title').textContent=n;d.body.appendChild(b);var t0=0,iv=setInterval(function(){var now=Date.now();if(d.querySelector('.early-world-poster')){clearInterval(iv);var q=b.querySelector('progress'),k=b.querySelector('.arrival-disc');q.value=1000;b.dataset.fill='true';k.style.setProperty('--s',String(.3*Math.hypot(innerWidth,innerHeight)/146));setTimeout(function(){b.dataset.dissolving='true';setTimeout(function(){b.remove();},2000);},1200);}else if(d.querySelector('#root .viewer-arrival')||(r&&r.firstElementChild&&(t0=t0||now)&&now-t0>600)){clearInterval(iv);b.remove();}else{var cb=window.__simCodeBytes;if(cb&&performance.getEntriesByType){var got=0,tot=0,es=performance.getEntriesByType('resource'),done={};for(var i=0;i<es.length;i++){try{done[new URL(es[i].name).pathname]=1}catch(e){}}for(var f in cb){tot+=cb[f];if(done[f])got+=cb[f]}var p=tot?.12*got/tot:0,pb=b.querySelector('progress'),pk=b.querySelector('.arrival-disc');var tv=Math.round(p*1000);if(pb&&pk&&tv>pb.value){var nv=Math.min(tv,pb.value+Math.max(2,Math.round((tv-pb.value)*.12))),q=nv/1000;pb.value=nv;pk.style.setProperty('--s',String((48.18+(.3*Math.hypot(innerWidth,innerHeight)-48.18)*(.15*q+.85*q*q*q))/146))}}}},50);}catch(e){}})()</script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

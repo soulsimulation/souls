@@ -62,3 +62,25 @@ test('a mesh that cannot be photographed keeps its full detail', () => {
   standIns.apply(w.scene,w.camera,844);standIns.restore();standIns.apply(w.scene,w.camera,844);
   assert.equal(standIns.stats.cards,0);assert.equal(w.bushes.visible,true);assert.equal(w.bushes.userData.keepDetail,true);
 });
+
+test('near and card buffers carry each instance\'s exact matrix and colour, in order (PERF-CHURN #1476)', () => {
+  const w=world();frame(w,2);
+  const near=w.bushes.parent!.children.find(o=>o.name.endsWith('near')) as THREE.InstancedMesh,cards=w.standIns.group.children[0] as THREE.InstancedMesh;
+  const src=w.bushes.instanceMatrix.array,srcC=w.bushes.instanceColor!.array;
+  // the row is ordered by distance, so the first `near.count` instances are near and the rest are cards, in order
+  for(let i=0;i<near.count;i++){assert.deepEqual([...near.instanceMatrix.array.slice(i*16,i*16+16)],[...src.slice(i*16,i*16+16)]);assert.deepEqual([...near.instanceColor!.array.slice(i*3,i*3+3)],[...srcC.slice(i*3,i*3+3)]);}
+  for(let f=0;f<cards.count;f++){const i=near.count+f;assert.deepEqual([...cards.instanceColor!.array.slice(f*3,f*3+3)],[...srcC.slice(i*3,i*3+3)]);
+    const m=new THREE.Matrix4().fromArray(cards.instanceMatrix.array,f*16),p=new THREE.Vector3().setFromMatrixPosition(m);assert.ok(Math.abs(p.z-(-5-i*5))<1e-4,`card ${f} at ${p.z}`);}
+});
+
+test('P2 churn: a moved parent (world matrix) is re-read without a string key; restore undoes every frame and holds no source', () => {
+  const w=world();frame(w,2);const before=w.standIns.stats.cards;assert.ok(before>0);
+  const view=w.standIns as unknown as {active:unknown[]};
+  w.standIns.restore();assert.ok(view.active.every(s=>s===null),'no source held after restore');assert.equal(w.bushes.visible,true);
+  // Move the whole row 400 m further away through its parent: only the world matrix changes, not the instances.
+  w.bushes.parent!.position.z=-400;w.scene.updateMatrixWorld(true);frame(w);
+  assert.ok(w.standIns.stats.cards>before,'the far row is re-read from its new world matrix');
+  w.bushes.parent!.position.z=0;w.scene.updateMatrixWorld(true);frame(w);assert.equal(w.standIns.stats.cards,before,'and back');
+  for(let i=0;i<3;i++){frame(w);assert.equal(w.standIns.stats.cards,before);}
+  w.standIns.restore();assert.equal(w.bushes.visible,true);
+});

@@ -44,7 +44,7 @@ export class ReadOnlyHost {
   readonly extra: Record<string, unknown> = {};
   private mindsAt = -1; private mindsKey = '';
   private _minds = new Map<string, Mind>(); private _byEntity = new Map<string, Mind>();
-  enqueue = mainOnly('host.enqueue'); enqueueChecked = mainOnly('host.enqueueChecked'); enqueueObjectDecision = mainOnly('host.enqueueObjectDecision');
+  enqueue = mainOnly('host.enqueue'); enqueueChecked = mainOnly('host.enqueueChecked'); enqueueJournaled = mainOnly('host.enqueueJournaled'); enqueueObjectDecision = mainOnly('host.enqueueObjectDecision');
   /** as world.ts: the world is in a quiet renewal (the replicated `living`) */
   get quietBarrier() {return !!(this.living as {quiet?: unknown} | undefined)?.quiet;}
   markSoulDirty = () => {/* a read never dirties a Soul */};

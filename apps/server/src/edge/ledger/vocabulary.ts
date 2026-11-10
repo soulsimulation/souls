@@ -44,6 +44,8 @@ export type VocabContext = {
 export type VocabResult =
   | {kind: 'exact'; cap: EdgeCapability}
   | {kind: 'alias'; cap: EdgeCapability; note: string; params?: Record<string, unknown>;
+    /** #849: words that name exactly one seat: a dry run answers with it, an act asks for its id. */
+    oneSeat?: true;
     /** RESOLVE (2026-10-21): the target words named no offered thing by its own name, only a place whose description lists
      *  them ("go to the horse": a lawn "with ... a horse"): a host may offer a walk to the nearest thing so named instead. */
     seek?: string[];
@@ -60,8 +62,8 @@ export type VocabResult =
      *  offers for them on demand: read:<place> beyond the nearest reading places). */
     verb?: string; places?: string[]};
 
-const STOP = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'at', 'by', 'on', 'into', 'near', 'with', 'my', 'some', 'through', 'thru', 'around', 'across', 'over', 'back', 'please', 'little', 'bit', 'for', 'while', 'and', 'then', 'there']);
-const VERBS: Record<string, string> = {fix: 'repair', mend: 'repair', 'pump-up': 'repair', go: 'walk', goto: 'walk', 'go-to': 'walk', 'walk-to': 'walk', visit: 'walk', 'go-inside': 'walk', 'go-into': 'walk', 'go-in': 'walk', enter: 'walk', 'step-inside': 'walk', 'step-into': 'walk', 'walk-into': 'walk', 'walk-inside': 'walk', move: 'walk', head: 'walk', travel: 'walk', 'come-back': 'walk', return: 'walk', 'go-back': 'walk', 'head-back': 'walk', 'walk-back': 'walk', running: 'run', sprint: 'run', sprinting: 'run', hurry: 'run', jogging: 'jog', 'go-over': 'walk',
+const STOP = new Set(['first', 'the', 'a', 'an', 'to', 'of', 'in', 'at', 'by', 'on', 'into', 'near', 'with', 'my', 'some', 'through', 'thru', 'around', 'across', 'over', 'back', 'please', 'little', 'bit', 'for', 'while', 'and', 'then', 'there']);
+const VERBS: Record<string, string> = {'stop-by': 'walk', 'stop-at': 'walk', 'drop-by': 'walk', 'drop-in': 'walk', 'drop-over': 'walk', 'drop-round': 'walk', 'drop-around': 'walk', 'drop-off-at': 'walk', 'swing-by': 'walk', 'pop-into': 'walk', 'pop-in-to': 'walk', 'pop-over-to': 'walk', 'go-on-to': 'walk', 'carry-on-to': 'walk', fix: 'repair', mend: 'repair', 'pump-up': 'repair', go: 'walk', goto: 'walk', 'go-to': 'walk', 'walk-to': 'walk', visit: 'walk', 'go-inside': 'walk', 'go-into': 'walk', 'go-in': 'walk', enter: 'walk', 'step-inside': 'walk', 'step-into': 'walk', 'walk-into': 'walk', 'walk-inside': 'walk', move: 'walk', head: 'walk', travel: 'walk', 'come-back': 'walk', return: 'walk', 'go-back': 'walk', 'head-back': 'walk', 'walk-back': 'walk', running: 'run', sprint: 'run', sprinting: 'run', hurry: 'run', jogging: 'jog', 'go-over': 'walk',
   hangout: 'hang-out', 'hang-around': 'hang-out', linger: 'hang-out', 'go-near': 'go-near', approach: 'go-near', join: 'go-near',
   'sit-on': 'sit', 'sit-at': 'sit', 'sit-down': 'sit', 'take-a-seat': 'sit', 'have-a-seat': 'sit', 'take-seat': 'sit', 'be-seated': 'sit', seat: 'sit', relax: 'rest',
   stroll: 'stroll', 'take-a-walk': 'stroll', 'take-a-stroll': 'stroll', 'go-for-a-walk': 'stroll', 'go-for-a-stroll': 'stroll', 'walk-through': 'stroll', 'stroll-through': 'stroll', wander: 'stroll', ramble: 'stroll', meander: 'stroll', explore: 'stroll',
@@ -91,6 +93,37 @@ const ACT_ALIASES: Record<string, string> = {'turn-on': 'switch-on', 'turn-off':
   'change-the-station': 'change-station', 'change-the-radio-station': 'change-station', 'change-radio-station': 'change-station', 'switch-the-station': 'change-station', 'switch-station': 'change-station', 'next-station': 'change-station', tune: 'change-station', retune: 'change-station', 'tune-the-radio': 'change-station',
   // #431: a record player's record (only when a put-on-record action is offered; the record itself is the `record` param)
   'put-on-a-record': 'put-on-record', 'put-a-record-on': 'put-on-record', 'put-on-the-record': 'put-on-record', 'play-a-record': 'put-on-record', 'play-the-record': 'put-on-record', 'play-record': 'put-on-record', 'play-records': 'put-on-record', 'spin-a-record': 'put-on-record', 'stop-the-record': 'switch-off'};
+/** #428: a second meaning of an everyday word, used only when its ACT_ALIASES meaning is not on offer and this one is:
+ *  "cross out" a sign-up name (unsign) or a notebook line (the pinboard faculty's unpin). */
+const ACT_ALT: Record<string, string> = {'cross-out': 'unpin', 'cross-off': 'unpin', 'strike-off': 'unpin'};
+/** #1229: words for a kind of writable thing (the kit's notice board, notebook stand and their synonyms), read only as the
+ *  thing a take-down names. Each maps to the word an offer of that kind goes by (books.ts: a notebook stand is also a guest
+ *  book, visitors book, logbook or journal; a pinboard or corkboard is a notice board). Loose nouns ("list", "log", "book",
+ *  "wall") are left out: "the shopping list note", "the log cabin", "the book fair" are what a note or poster is about. */
+const KIND_WORDS: Record<string, string> = {notebook: 'notebook', journal: 'notebook', logbook: 'notebook', diary: 'diary', guestbook: 'notebook', guest: 'notebook', visitors: 'notebook', visitor: 'notebook',
+  board: 'board', noticeboard: 'board', pinboard: 'board', corkboard: 'board', sheet: 'sheet'};
+const BOOK_ONLY = new Set(['guest', 'visitors', 'visitor']), TAKE_DOWN = new Set(['take-down', 'remove']), TARGET_LEAD = new Set(['in', 'from', 'inside', 'off']), TARGET_NOUN = new Set(['note', 'notes', 'line', 'lines', 'entry', 'page']);
+// (the def's own noun, "the notebook stand", or where it is, "the board by the door", also ends the phrase that names it)
+const PHRASE_END = new Set(['now', 'please', 'here', 'then', 'and', 'for', 'too', 'again', 'stand', 'by', 'in', 'on', 'at', 'near', 'next', 'beside', 'inside', 'outside', 'over', 'behind']);
+/** Kind words where the words put a target: the last word of a phrase led by in/from/inside/off, at most two words between
+ *  ("from the wanted board", "in the guest book", not "from the board games corner"), or right before note/line ("my
+ *  journal note"). Each run comes back with the words it is made of ("guest book": guest, book). */
+const targetKindWords = (ws: string[]): string[][] => {
+  // ("guest" and "visitor" name the guest book only with "book": "the note from the guest" names a person)
+  const out: string[][] = [], kind = (w?: string, next?: string) => !!w && Object.hasOwn(KIND_WORDS, w) && (!BOOK_ONLY.has(w) || next === 'book');
+  for (let i = 0; i < ws.length; i++) {
+    if (!kind(ws[i], ws[i + 1]) || (i > 0 && kind(ws[i - 1], ws[i]))) continue;
+    let j = i; while (j + 1 < ws.length && (kind(ws[j + 1], ws[j + 2]) || (ws[j + 1] === 'book' && ['guest', 'visitors', 'visitor'].includes(ws[j]!)))) j++;
+    const next = ws[j + 1], led = ws.slice(Math.max(0, i - 3), i).some(w => TARGET_LEAD.has(w)) && (next === undefined || PHRASE_END.has(next)), before = TARGET_NOUN.has(next ?? '');
+    if (led || before) out.push(ws.slice(i, j + 1));
+    i = j;
+  }
+  return out;
+};
+const LABEL_FILLER = new Set(['from', 'your', 'my', 'out', 'off', 'down', 'take', 'cross', 'in', 'on', 'of']), PLAIN_WORDS = new Set(['the', 'a', 'an', 'this', 'that', 'please']), SAYS_MORE = new Set(['first', 'and', 'then']), ENDS_ONLY = new Set(['and', 'then']), THING_ALIASES: Record<string, string> = {journal: 'notebook', logbook: 'notebook', noticeboard: 'board'};
+/** #428: "write in the notebook" is a notebook's line (the pinboard faculty's `pin`), only where a notebook's line is on
+ *  offer (its label says so), so "write in the study" still reaches a desk beside a pinboard. */
+const NOTEBOOK_WORDS: Record<string, string> = {'write-in': 'pin', 'write-a-line-in': 'pin'};
 // L3 (server reliability): a resolve tokenises every place's and offer's names on every call; the same few thousand names
 // repeat, so their tokens are kept (bounded; callers get their own copy, so an in-place sort never reaches the memo)
 const TOKEN_MEMO = new Map<string, string[]>(), TOKEN_MEMO_MAX = 50_000;
@@ -233,7 +266,7 @@ export function wordsFocusVerbsV1(input: string): Set<string> | null {
   for (let n = 1; n <= Math.min(4, words.length); n++) {const k = words.slice(0, n).join('-').toLowerCase().trim().replace(/[\s_]+/g, '-'); out.add(k); if (VERBS[k]) out.add(VERBS[k]);}
   for (const [re, v] of INTENTS) if (re.test(text)) out.add(v);
   if (LEISURE_LEAD.test(raw)) for (const [re, v] of LEISURE_OBJECTS) if (re.test(text)) out.add(v);
-  for (const v of [...out]) {if (ACT_ALIASES[v]) out.add(ACT_ALIASES[v]); for (const [k, a] of Object.entries(ACT_ALIASES)) if (a === v) out.add(k);}
+  for (const v of [...out]) {if (ACT_ALIASES[v]) out.add(ACT_ALIASES[v]); if (ACT_ALT[v]) out.add(ACT_ALT[v]); for (const [k, a] of Object.entries(ACT_ALIASES)) if (a === v) out.add(k); for (const [k, a] of Object.entries(ACT_ALT)) if (a === v) out.add(k);}
   if (out.has('stroll') || out.has('wander')) {out.add('stroll'); out.add('wander');}
   if (out.has('sit')) {out.add('rest'); out.add('sit-ground'); out.add('warm-by-fire');}
   if (/\b(?:fire|campfire|warm)\b/.test(text)) out.add('warm-by-fire');
@@ -270,6 +303,18 @@ const PLACE_VERBS = new Set(['walk', 'jog', 'run', 'jog-around', 'run-around', '
 const SPOT_PLACE_VERBS = new Set(['read']);
 const GAIT_VERBS = new Set(['jog', 'run', 'jog-around', 'run-around', 'cycle', 'cycle-around']);
 
+// #441 (W107): "juggle", "juggle the balls", "juggle for 30 seconds" while holding a set; otherwise a refusal that says what
+// is missing. Anything else after the verb ("juggling yard", "juggle the knives") is not these words.
+const JUGGLE_WORDS = /^(?:please\s+)?(?:(?:start|go|do\s+some|try)\s+)?juggl(?:e|ing)(?:\s+(?:(?:the|my|your|some|these|those)\s+)?(?:juggling\s+)?(?:balls?|them|set))?(?:\s+for\s+(\d{1,3})\s*(s|secs?|seconds?|mins?|minutes?))?[.!]*$/;
+function juggleWords(input: string, text: string, ctx: VocabContext): VocabResult | null {
+  const m = JUGGLE_WORDS.exec(text.trim()); if (!m) return null;
+  const cap = ctx.caps.find(c => c.verb === 'juggle');
+  if (cap) return {kind: 'alias', cap, note: `${input} is ${cap.id} (${cap.label}).`, ...(m[1] ? {params: {seconds: Number(m[1]) * (m[2].startsWith('m') ? 60 : 1)}} : {})};
+  const near = ctx.caps.find(c => c.verb === 'pick-up' && /\b(?:juggling|balls)\b/i.test([c.label, ...(c.aliases ?? [])].join(' ')));
+  if (near) return {kind: 'unknown', code: 'juggle.no-balls', reason: `You are not holding anything to juggle. ${near.label} first (${near.id}).`, didYouMean: [{id: near.id, label: near.label}]};
+  const held = ctx.caps.some(c => c.verb === 'put-down' || c.verb === 'put-on' || c.verb === 'put-in');
+  return {kind: 'unknown', code: 'juggle.no-balls', reason: held ? 'What you are holding cannot be juggled. Put it down first; to juggle you need a set of juggling balls in your hand.' : 'You are not holding anything to juggle, and there are no juggling balls within reach here.', didYouMean: []};
+}
 // #442: "repair the bench", "fix the cracked slat", "fix it", "pump up the tyre with the pump": the repair offer these words
 // name. "fix dinner" and "pump up the music" are not these words: nothing here is called that, so they fall through. A thing
 // that's here but not broken gets a refusal that says so.
@@ -286,6 +331,7 @@ function repairWords(input: string, text: string, ctx: VocabContext): VocabResul
 }
 
 export function resolveCapability(input: string, ctx: VocabContext): VocabResult {
+  const sign = signWords(input, ctx); if (sign) return sign;
   const r = resolveWords(input, ctx);
   // R2 stroll (longrun 2026-10-16: nobody moved for 70 minutes): a stroll named for the place the Soul is already in, whose
   // own loop is closed right now (a construction site covers one of its stops), is a wander right where it stands; never a
@@ -295,11 +341,34 @@ export function resolveCapability(input: string, ctx: VocabContext): VocabResult
   const name = ctx.places.find(p => p.id === r.cap.target!.id)?.name ?? r.cap.target.id;
   return {kind: 'alias', cap: wander, note: `${input}: you are in ${name} already and its loop (${r.cap.id}) is closed right now (${(r.cap.blocked?.reason ?? 'unavailable').replace(/[.\s]+$/, '')}); wandering around where you are instead (${wander.id}).`};
 }
+// #427: an Open / Closed sign goes by what it will say: "turn the sign to closed", "flip the cafe sign". Only where one is offered,
+// and only with "the sign" or the sign's own name: "turn on sign", "turn to sign" and "turn the sign" keep their meanings.
+const SIGN_WORDS = /^(?:(?:turn|set|change)\s+(?:the|my|our|this)\s+(?:([a-z0-9-]+)\s+)?sign\s+to\s+(?:say\s+)?(open|closed)|flip\s+(?:the|my|our|this)\s+(?:([a-z0-9-]+)\s+)?sign(?:\s+(?:round|around|over))?)$/;
+export function signWords(input: string, ctx: Pick<VocabContext, 'caps'>): VocabResult | null {
+  const offers = ctx.caps.filter(c => c.verb === 'object' && /^Turn the sign to /.test(c.label)); if (!offers.length) return null;
+  const t = input.toLowerCase().replace(/^(?:please\s+)+/, '').replace(/[.!?\s]+$/, '').replace(/[,\s]+please$/, '').trim();
+  const exact = offers.find(c => c.label.toLowerCase() === t); if (exact) return {kind: 'alias', cap: exact, note: `${input} is ${exact.id}.`};
+  const m = SIGN_WORDS.exec(t); if (!m) return null;
+  const name = m[1] ?? m[3], said = m[2] ? {open: 'open', closed: 'close'}[m[2]] : null, nameOf = (c: EdgeCapability) => /\(([^()]*)\)$/.exec(c.label)?.[1]?.toLowerCase();
+  const named = offers.filter(c => !name || nameOf(c) === name || nameOf(c) === `${name}-sign`); if (!named.length) return null;
+  const fit = named.filter(c => said ? c.action === said : c.available), can = fit.filter(c => c.available), pick = can.length ? can : fit.length ? fit : named;
+  if (new Set(named.map(c => c.target?.id)).size > 1 && can.length !== 1) return {kind: 'unknown', code: 'place.ambiguous', reason: 'More than one sign is here: name the one you mean.', didYouMean: []};
+  return {kind: 'alias', cap: pick[0], note: `${input} is ${pick[0].id}.`};
+}
 // VEHICLE-STEER (Gene 2026-10-23, #12): a seated rider's words to its ride. Only when a steer is offered to this Soul now
 // (it is aboard); otherwise the words fall through ("fly the balloon" from the ground is still the join).
 const STEER_DIRS = 'north|northeast|north-east|east|southeast|south-east|south|southwest|south-west|west|northwest|north-west|n|ne|e|se|s|sw|w|nw';
 const STEER_VEHICLE = String.raw`(?:(?:the|our|this|my)\s+)?(?:hot[- ]air\s+|red\s+|rowing\s+)?(?:balloon|punt|boat|basket|ride|it|us)`;
 const STEER_GO = String.raw`(?:fly|flying|steer|drive|sail|float|row|rowing|pilot|navigate|head|take|move|go|bring)`;
+// #1051: "stop the record" is the record player's own stop, and "turn on the record player" its record: there is no switch to
+// turn on, so the offer's schema asks which record. Only while such an offer exists.
+const RECORD_STOP = /^(?:please\s+)?stop\s+(?:the\s+)?record[.!]*$/, RECORD_START = /^(?:please\s+)?(?:turn|switch)\s+on\s+(?:the\s+)?record\s+player[.!]*$/;
+function recordWords(input: string, text: string, ctx: VocabContext): VocabResult | null {
+  const t = text.trim(), action = RECORD_STOP.test(t) ? 'switch-off' : RECORD_START.test(t) ? 'put-on-record' : null; if (!action) return null;
+  // only a record player's own offer that can happen now, and only one: anything else goes the ordinary way
+  const players = new Set(ctx.caps.filter(c => c.action === 'put-on-record').map(c => c.object)), found = ctx.caps.filter(c => c.verb === 'object' && c.action === action && c.available && players.has(c.object)), cap = found.length === 1 ? found[0] : null;
+  return cap ? {kind: 'alias', cap, note: `${input} is ${cap.id} (${cap.label}).`} : null;
+}
 function steerWords(input: string, ctx: VocabContext): VocabResult | null {
   const caps = ctx.caps.filter(c => c.verb === 'object' && c.action === 'steer' && c.available); if (!caps.length) return null;
   const t = input.toLowerCase().replace(/^(?:please\s+|let'?s\s+|now\s+|ok(?:ay)?,?\s+)+/, '').replace(/[.!?\s]+$/, '').trim(); if (!t || t.includes(':')) return null;
@@ -316,6 +385,25 @@ function steerWords(input: string, ctx: VocabContext): VocabResult | null {
     const place = to[1].replace(/^(?:the\s+)/, '').trim(); if (place) return say({to: place, ...(to[2] ? {land: true} : {})}, `steer toward ${place}${to[2] ? ', land there' : ''}`);
   }
   return null;
+}
+// #438 W085/W086: "pick the tomatoes" (harvest them, pick the fruit, pick tomatoes into the basket) is the harvest of the
+// nearest offered basket; "pick flowers for the vase" (pick some flowers, pick the flowers) that of the nearest offered vase.
+// The vessel's offer names what it picks ("Pick the ripe tomatoes into the basket", "Pick flowers for the vase"); an
+// available one first. Only while such an offer exists; other words, and "pick up", resolve as before. A planter named after
+// "from" is passed on as the act's `from`.
+const HARVEST_WORDS = /^(?:please\s+)?(?:(?:go\s+and\s+|go\s+)?(?:pick|harvest|gather|collect|cut))\s+(?:(?:the|some|a\s+few|a\s+bunch\s+of|a\s+handful\s+of|my|our)\s+)?(?:ripe\s+)?(tomatoes|tomato|fruit|flowers|flower|blooms|cosmos)(?:\s+(?:in|into|for|to\s+put\s+in)\s+(?:the|a|my)\s+(basket|vase))?(?:\s+from\s+(?:(?:the|my|our|a|this|that)\s+)?(?!basket\b|vase\b)([a-z][\w-]*(?:\s+(?!and\b|then\b|basket\b|vase\b)[a-z][\w-]*)?))?$/;
+const GENERIC_PLANTER = /^(?:(?:garden|raised|vegetable|veg|flower)\s+)?(?:planters?|beds?|garden|plants?|vines?|patch|plot)$/;
+function harvestWords(input: string, ctx: VocabContext): VocabResult | null {
+  const m = HARVEST_WORDS.exec(input.toLowerCase().replace(/[.!?\s]+$/, '').trim()); if (!m) return null;
+  const fruit = /^(?:tomato|fruit)/.test(m[1]), word = fruit ? /\btomato/i : /\bflowers?\b/i;
+  // "pick tomatoes for the vase" or "flowers into the basket" names a vessel that does not pick them: not these words
+  if (m[2] && (m[2] === 'basket') !== fruit) return null;
+  const caps = ctx.caps.filter(c => c.verb === 'object' && c.action === 'harvest' && word.test(c.label.replace(/\s*\(.*\)$/, ''))); if (!caps.length) return null;
+  const cap = [...caps].sort((a, b) => Number(b.available) - Number(a.available) || dist(ctx.target(a).at, ctx.me) - dist(ctx.target(b).at, ctx.me) || a.id.localeCompare(b.id))[0]!;
+  // "... from the rose bed" names the planter: the act picks from that one (harvest.ts), never the nearest instead
+  // ("from the bed", "from the garden", "from the plants" name no planter in particular: the nearest ripe one, as before)
+  const from = m[3] && !GENERIC_PLANTER.test(m[3]) ? m[3].slice(0, 48) : undefined;
+  return {kind: 'alias', cap, note: `${input} is ${cap.id} (${cap.label})${from ? `, from ${from}` : ''}.`, ...(from ? {params: {from}} : {})};
 }
 // #439 W093: a checkers move named by its two squares ("move c3 to d4", "jump from c3 to e5", "c3 to d4", "c3-d4") is the
 // move with those squares on the board where it can be played. Only while a checkers move is offered; the board's rules judge
@@ -380,6 +468,7 @@ function searchWords(input: string, text: string, ctx: VocabContext): VocabResul
 function resolveWords(input: string, ctx: VocabContext): VocabResult {
   const exact = ctx.caps.find(c => c.id === input); if (exact) return {kind: 'exact', cap: exact};
   const checkers = checkersWords(input, ctx); if (checkers) return checkers;
+  const picked = harvestWords(input, ctx); if (picked) return picked;
   // CN5 (acceptance): "A, then B" is two things. Walks and strolls chain (the earlier ones become `via` legs of the last);
   // anything else does the first and says to act again for the rest (never a mix-up of the two).
   // r3 quality case 35: "pick up a book and give it to X" is two steps too (the give is offered only once holding it).
@@ -400,7 +489,9 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   }
   const text = input.toLowerCase(), colon = text.indexOf(':'), head = colon >= 0 ? text.slice(0, colon) : '';
   const stow = colon < 0 ? storeWords(input, text, ctx) : null; if (stow) return stow;
+  const juggling = colon < 0 ? juggleWords(input, text, ctx) : null; if (juggling) return juggling;
   const mend = colon < 0 ? repairWords(input, text, ctx) : null; if (mend) return mend;
+  const record = colon < 0 ? recordWords(input, text, ctx) : null; if (record) return record;
   const searching = colon < 0 ? searchWords(input, text, ctx) : null; if (searching) return searching;
   // RESOLVE (SOULSIM-E "find a boat": no "find" capability): find / look for / search for X is a walk to the nearest X you
   // can reach, unless the words name an activity offered here ("find somewhere quiet to read", "find a seat" keep theirs)
@@ -505,19 +596,28 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   const acts = ctx.caps.filter(c => c.verb === 'object' && c.action && /^e_/.test(c.object ?? ''));
   for (const c of acts) verbs.add(c.action!);
   for (const [k, v] of Object.entries(ACT_ALIASES)) if (verbs.has(v) && !verbs.has(k)) verbs.add(k);
+  for (const [k, v] of Object.entries(ACT_ALT)) if (verbs.has(v) && !verbs.has(k)) verbs.add(k);
+  const notebookOffered = acts.some(c => c.action === 'pin' && /\bnotebook\b/i.test(c.label));
+  if (notebookOffered) for (const k of Object.keys(NOTEBOOK_WORDS)) if (!verbs.has(k)) verbs.add(k);
   // Entry 43: a kettle's and a cup's everyday words, only where such an action is offered: "put the kettle on" (or switch /
   // turn it on, boil it) is the kettle's `boil`; "make a cup of tea" is the nearest offered cup's `brew` (an available one first)
   if (colon < 0) {
     const want = /^(?:please\s+)?(?:(?:put|switch|turn)\s+(?:the\s+|my\s+)?kettle\s+on|(?:switch|turn)\s+on\s+(?:the\s+)?kettle|boil\s+(?:the\s+)?(?:kettle|water))[.!]?$/.test(text) ? 'boil'
-      : /^(?:please\s+)?(?:make|brew)\s+(?:me\s+|us\s+)?(?:a\s+|some\s+|another\s+)?(?:(?:cup|mug)\s+of\s+)?tea[.!]?$/.test(text) ? 'brew'
+      : /^(?:please\s+)?(?:make|brew)\s+(?:me\s+|us\s+)?(?:a\s+|some\s+|another\s+)?(?:(?:cup|mug)\s+of\s+)?(?:tea|coffee)[.!]?$/.test(text) ? 'brew'
       // entry 44: "drink the tea" (drink it, finish the tea, drink up); "have a sip"; "wash the cup" (wash up, rinse the mug)
-      : /^(?:please\s+)?(?:(?:drink|finish)\s+(?:up\s+)?(?:(?:the|my|your|this|that)\s+)?(?:(?:cup|mug)\s+of\s+tea|tea|cup|mug|it)?|drink\s+up)[.!]?$/.test(text) ? 'drink'
-      : /^(?:please\s+)?(?:(?:have|take)\s+(?:a\s+)?sip(?:\s+of\s+(?:(?:the|my|your)\s+)?(?:tea|it))?|sip\s+(?:(?:the|my|your)\s+)?(?:tea|it))[.!]?$/.test(text) ? 'sip'
-      : /^(?:please\s+)?(?:(?:wash|rinse|clean)\s+(?:up|out)?\s*(?:(?:the|my|your|this|that)\s+)?(?:(?:tea\s*)?cup|mug|it)?(?:\s+(?:up|out))?|do\s+the\s+washing[- ]up|wash\s+up)[.!]?$/.test(text) ? 'wash' : null;
-    const pool = want ? acts.filter(c => c.action === want).sort((a, b) => Number(b.available) - Number(a.available) || dist(ctx.target(a).at, ctx.me) - dist(ctx.target(b).at, ctx.me) || a.id.localeCompare(b.id)) : [];
+      : /^(?:please\s+)?(?:(?:drink|finish)\s+(?:up\s+)?(?:(?:the|my|your|this|that)\s+)?(?:(?:cup|mug)\s+of\s+(?:tea|coffee)|tea|coffee|cup|mug|it)?|drink\s+up)[.!]?$/.test(text) ? 'drink'
+      : /^(?:please\s+)?(?:(?:have|take)\s+(?:a\s+)?sip(?:\s+of\s+(?:(?:the|my|your)\s+)?(?:tea|coffee|it))?|sip\s+(?:(?:the|my|your)\s+)?(?:tea|coffee|it))[.!]?$/.test(text) ? 'sip'
+      : /^(?:please\s+)?(?:(?:wash|rinse|clean)\s+(?:up|out)?\s*(?:(?:the|my|your|this|that)\s+)?(?:(?:tea\s*|coffee\s*)?cup|(?:coffee\s+)?mug|it)?(?:\s+(?:up|out))?|do\s+the\s+washing[- ]up|wash\s+up)[.!]?$/.test(text) ? 'wash' : null;
+    // #437 W078: words that name the drink ("make a cup of coffee", "wash the coffee mug") take only a mug whose offer names
+    // it (its def's labels, before the thing's name in brackets: "Make a cup of coffee", "Wash the coffee mug"); a tea mug's
+    // "Wash the cup" names no drink and is tea's. "drink it", "wash the mug" take the nearest mug of either. "the teacup"
+    // (one word) names tea as "the tea cup" does
+    const drink = /\b(tea|coffee)(?:cups?|mugs?)?\b/.exec(text)?.[1];
+    const names = (c: {label: string}, d: string) => new RegExp(`\\b${d}\\b`, 'i').test(c.label.replace(/\s*\(.*\)$/, ''));
+    const pool = want ? acts.filter(c => c.action === want && (!drink || names(c, drink) || (want === 'wash' && drink === 'tea' && !names(c, 'coffee')))).sort((a, b) => Number(b.available) - Number(a.available) || dist(ctx.target(a).at, ctx.me) - dist(ctx.target(b).at, ctx.me) || a.id.localeCompare(b.id)) : [];
     // entry 44: a bare "drink" or "wash up" near a mug nobody can use now keeps its old meaning; naming the tea or the cup
     // gets the mug's own answer (pick it up first, drink it first)
-    if (pool.length && (want === 'drink' || want === 'sip' || want === 'wash') && !pool[0].available && !/\b(?:tea|cup|mug)\b/.test(text)) pool.length = 0;
+    if (pool.length && (want === 'drink' || want === 'sip' || want === 'wash') && !pool[0].available && !/\b(?:tea|coffee|cup|mug)\b/.test(text)) pool.length = 0;
     if (pool.length) return {kind: 'alias', cap: pool[0], note: `${input} is ${pool[0].id} (${pool[0].label}).`};
     // #435: "eat the apple", "finish the apple", "have the bun", "take a bite of the bun" name a food wherever it is; "eat it"
     // and "have a bite" mean the food in her hand. Nothing in the hand and no food named keeps the word's old meaning (a table's
@@ -530,15 +630,23 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     }
     // entry 44: "offer Ben the tea", "give the cup of tea to Ben": the hand-over of the held mug to that Soul (entry 41's
     // give:<soul>, offered only while a world thing is held and the Soul is in sight)
-    const serve = /^(?:please\s+)?(?:offer|give|hand|pass|serve|bring)\s+(?:(?!the\b|my\b|this\b|that\b|your\b)([a-z][\w' -]*?)\s+(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+tea|tea|cup|mug|it)|(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+tea|tea|cup|mug|it)\s+to\s+([a-z][\w' -]*?))[.!]?$/.exec(text);
+    const serve = /^(?:please\s+)?(?:offer|give|hand|pass|serve|bring)\s+(?:(?!the\b|my\b|this\b|that\b|your\b)([a-z][\w' -]*?)\s+(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+(?:tea|coffee)|tea|coffee|cup|mug|it)|(?:(?:the|my|this|that|your|a)\s+)?(?:(?:cup|mug)\s+of\s+(?:tea|coffee)|tea|coffee|cup|mug|it)\s+to\s+([a-z][\w' -]*?))[.!]?$/.exec(text);
     const to = serve ? (serve[1] ?? serve[2]).trim() : '';
     const give = to ? ctx.caps.filter(c => c.verb === 'give' && c.id.startsWith('give:') && c.label.toLowerCase().startsWith(`give ${to} `)) : [];
     if (give.length) return {kind: 'alias', cap: give[0], note: `${input} is ${give[0].id} (${give[0].label}).`};
     // "put the cup on the table", "set it down on the counter": while something is held, that is put-on <the surface>
-    const put = /^(?:please\s+)?(?:put|set|place|stand)\s+(?:(?:the|my|this|that|your)\s+)?(?:it|[a-z][a-z-]*(?:\s+of\s+tea)?)\s+(?:down\s+|back\s+)?(?:on|onto)\s+(?:to\s+)?(.+?)[.!]?$/.exec(text);
+    const put = /^(?:please\s+)?(?:put|set|place|stand)\s+(?:(?:the|my|this|that|your)\s+)?(?:it|[a-z][a-z-]*(?:\s+of\s+(?:tea|coffee))?)\s+(?:down\s+|back\s+)?(?:on|onto)\s+(?:to\s+)?(.+?)[.!]?$/.exec(text);
     if (put && ctx.caps.some(c => c.verb === 'put-on')) return resolveCapability(`put-on ${put[1]}`, ctx);
   }
   let {verb, rest} = parseCapability(input, verbs);
+  // #428: "write in <words>" is the notebook's line only when the words name an offered notebook ("write in the study"
+  // beside a notebook stand still means the desk): otherwise the words are read again without the notebook's words
+  if (notebookOffered && NOTEBOOK_WORDS[verb]) {
+    const said = tokens(rest), nb = acts.filter(c => c.action === 'pin' && /\bnotebook\b/i.test(c.label));
+    if (!nb.some(c => {const t = ctx.target(c); return said.some(w => tokenHit(w, [...tokens(c.label), ...(t.names ?? []).flatMap(tokens)]));})) {
+      const plain = new Set([...verbs].filter(v => !NOTEBOOK_WORDS[v])); ({verb, rest} = parseCapability(input, plain));
+    }
+  }
   const nearestRequested = /\b(?:nearest|closest|nearby|anywhere|somewhere)\b|^(?:find|look for|search for)\b|\b(?:a|an)\s/.test(input.toLowerCase());
   const nearestBuilding=verb==='walk'&&/\b(?:nearest|closest)\b/i.test(rest)&&norm(rest.replace(/\bbehind(?:\s+(?:you|me|us))?\b/ig,' ').replace(/\b(?:nearest|closest)\b/ig,' '))==='building';
   const behind = /\bbehind(?:\s+(?:you|me|us))?\b/i.test(rest);
@@ -567,7 +675,50 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
     if(offered)return {kind:'alias',cap:offered,note:`${input} is ${offered.id} (${place.name}), the nearest building by its edge within the requested direction.`};
     return {kind:'unknown',code:'place.unreachable',place:place.id,verb:'walk',places:[place.id],reason:`The nearest building is ${place.name}; its exact entry must be checked on demand. No farther building was substituted.`,didYouMean:[]};
   }
-  if (ACT_ALIASES[verb] && !ctx.caps.some(c => c.verb === verb)) verb = ACT_ALIASES[verb];
+  if (notebookOffered && NOTEBOOK_WORDS[verb] && !ctx.caps.some(c => c.verb === verb)) verb = NOTEBOOK_WORDS[verb];
+  else if (ACT_ALIASES[verb] && !ctx.caps.some(c => c.verb === verb)) {
+    // the second meaning when it can happen and the first can't, or when the words name its target
+    const primary = ACT_ALIASES[verb]!, alt = ACT_ALT[verb], can = (a: string) => ctx.caps.filter(c => c.action === a && c.available), said = tokens(rest).filter(w => !LABEL_FILLER.has(w)), ws = said.map(w => THING_ALIASES[w] ?? w);
+    // what the words name decides (#990): the thing first (its names, the "in the notebook" and "(notebook)" of its label),
+    // then a label's noun ("your line"), never its "from" or "your". Words for a thing that isn't here do nothing at all. Words naming nothing take what there is to cross out, and a blocked
+    // offer answers for itself.
+    const hits = (text: string) => {const all = tokens(text).filter(w => !LABEL_FILLER.has(w)); return ws.some(w => tokenHit(w, all));};
+    const thing = (c: EdgeCapability) => [...ctx.target(c).names, ...[...c.label.matchAll(/\b(?:in|on|off|from)\s+the\s+([^()]+)|\(([^)]*)\)/g)].map(m => m[1] ?? m[2])].join(' ');
+    const name = (c: EdgeCapability) => hits(thing(c)), noun = (c: EdgeCapability) => hits(c.label);
+    const first = ctx.caps.filter(c => c.action === primary), second = alt ? ctx.caps.filter(c => c.action === alt) : [];
+    const crossing = !!alt, here = crossing ? tokens([...first, ...second].map(thing).join(' ')) : [];
+    // words about something that isn't offered do nothing: "my journal note" with only a board is not that board's note. Any
+    // word that is neither an offered name nor a label's noun stops it. Only these verbs: "take down" and "remove" are as they were.
+    // Both sides are raw words: "lost-and-found" and "first-aid-log" are names, and of the words tokens() drops only "first", "and" and "then" say something;
+    // "and" or "then" says more only when a word follows it: "cross out my note, then" is the note.
+    const rawWords = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const known = crossing ? rawWords([...first, ...second].flatMap(c => [c.label, thing(c)]).join(' ')) : [], fits = (w: string) => tokenHit(w, known) || tokenHit(THING_ALIASES[w] ?? w, known), words = rawWords(rest), stray = words.find((w, i) => !(ENDS_ONLY.has(w) && words.slice(i + 1).every(x => ENDS_ONLY.has(x))) && !PLAIN_WORDS.has(w) && !LABEL_FILLER.has(w) && !(STOP.has(w) && !SAYS_MORE.has(w)) && !fits(w));
+    if (crossing && first.length + second.length && stray) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to cross out or take down goes by "${stray}", so nothing was done.`, didYouMean: []};
+    // #1229: "take down" and "remove" keep their free words ("the old poster", "the board games poster", "Ben's note": a
+    // title's or note's words), so a stray word can't stop them; a word for a kind of writable thing where the words put
+    // their target ("from the notebook", "my journal note") that no offer here goes by does: nothing of hers is lost. With
+    // a board and a notebook both here, that word keeps only the one it names ("my journal note" is never the board's note)
+    const named = !crossing && TAKE_DOWN.has(verb) && first.length ? targetKindWords(rawWords(rest)) : [];
+    if (named.length) {
+      const fit = (ws: string[], c: EdgeCapability) => {const own = rawWords([c.label, thing(c)].join(' ')); return ws.some(w => tokenHit(w, own) || tokenHit((Object.hasOwn(KIND_WORDS, w) ? KIND_WORDS[w] : undefined) ?? w, own));};
+      const kept = first.filter(c => named.every(ws => fit(ws, c)));
+      if (!kept.length) {
+        const offered = first.slice(0, 5).map(c => ({id: c.id, label: c.label})), absent = named.find(ws => !first.some(c => fit(ws, c)));
+        if (absent) return {kind: 'unknown', code: 'capability.unknown', reason: `Nothing here to take down or remove goes by "${absent.join(' ')}", so nothing was done. What can be taken down here is listed.`, didYouMean: offered};
+        // (each word names an offer here, but different ones: "my journal note from the board")
+        const each = first.filter(c => named.some(ws => fit(ws, c))).slice(0, 5);
+        return {kind: 'unknown', code: 'capability.choose', reason: `${named.map(ws => `"${ws.join(' ')}"`).join(' and ')} name different things here, so nothing was done; choose one by its id.`, didYouMean: each.map(c => ({id: c.id, label: c.label}))};
+      }
+      // (the words name exactly one take-down, which takes no words of its own: that one, as its id would)
+      if (kept.length === 1 && !kept[0]!.params && kept.length < first.length) return {kind: 'alias', cap: kept[0]!, note: `${input} is ${kept[0]!.id} (${kept[0]!.label}).`};
+      if (kept.length < first.length) {const drop = new Set(first.filter(c => !kept.includes(c)).map(c => c.id)); ctx = {...ctx, caps: ctx.caps.filter(c => !drop.has(c.id))};}
+    }
+    const altFits = !!alt && (second.length
+      ? first.some(name) ? false : second.some(name) ? true : !first.length && ws.includes('name') ? false : first.some(noun) ? false : second.some(noun) ? true : !first.length
+      : !verbs.has(primary) && verbs.has(alt));
+    verb = altFits ? alt : primary;
+    if (crossing) rest = said.map(w => tokenHit(w, here) ? w : THING_ALIASES[w] ?? w).join(' ');   // no filler in the match below; a thing's own word kept
+  }
   // A real fire is a qualifier of the existing fire request, not a new seat name.
   // Keep explicit/named IDs intact and require an offered actual fire before dropping it.
   const realFire = colon < 0 && ['sit', 'warm-by-fire'].includes(verb) ? /^(?:by|near|beside)\s+(?:a|the)\s+real\s+(fire|campfire)[.!]?$/i.exec(rest) : null;
@@ -623,6 +774,8 @@ function resolveWords(input: string, ctx: VocabContext): VocabResult {
   const placeIdOf = (c: EdgeCapability) => c.target?.kind === 'place' ? c.target.id : info.get(c.id)?.t.around[0];
   const one0 = (cs: EdgeCapability[], note: (c: EdgeCapability) => string): VocabResult | null => {
     cs=[...new Map(cs.map(c=>[c.id,c])).values()];
+    // #428: `<verb>:here` at a spot and that spot's own `<verb>:<spot>` are one destination ("read the book on the lectern")
+    cs=cs.filter(c=>!(c.id===`${c.verb}:here`&&c.target?.kind==='spot'&&cs.some(o=>o!==c&&o.id===`${c.verb}:${c.target!.id}`)));
     if (!cs.length) return null;
     const live = cs.filter(c => c.available), list = live.length ? live : cs;
     if (list.length === 1) return {kind: 'alias', cap: list[0], note: note(list[0])};

@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-// WorldMeshLod's simplifier, off the main thread (release 3.1 speed): a phone used to stall 100–400 ms per big mesh
+// WorldMeshLod's simplifier, off the main thread (release 0.6 speed): a phone used to stall 100–400 ms per big mesh
 // while meshoptimizer simplified it, about 5 s of jank in the first seconds after arrival on Mars.
 // Messages: {id, input, ratios, maxError} -> {id, levels} (index buffers transferred) or {id, error}; {id:0} -> ready.
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';

@@ -72,7 +72,7 @@ export async function openEdgeServerV1({input,dataDir,worldId,port=4959,webDir,m
     const finiteFoodReader=!!foodDeliveryId||header?.rules_version.includes('+fd/1');
     const socialReader=social||!!header?.rules_version.includes('+social-eden/1');
     const {edenHistoryFactory}=await load('apps/server/src/eden-bootstrap.ts');
-    const factory=await edenHistoryFactory(db,worldId,{lifeV1:true,newcomerResourcesV1:true,sleepSnapshotV1:true,groundV1:true,lectureV1:true});
+    const factory=(await load('packages/engine-mars/src/index.ts')).soulsRepairReaderV1(await edenHistoryFactory(db,worldId,{lifeV1:true,newcomerResourcesV1:true,sleepSnapshotV1:true,groundV1:true,lectureV1:true}),{adopt:false});   // #1323: reads an adopted history
     host=new WorldHost(db,factory,header?.seed??cfg.worldSeed,cfg.snapshotEveryTicks,worldId,{durableClockV1:true});
     const boot=host.boot();
     if(authoredBoundaryDeclaration){if(!host.engine.previewAuthoredBoundariesV1)throw Error('selected runtime lacks authored boundary preview');const issue=host.engine.previewAuthoredBoundariesV1(authoredBoundaryDeclaration);if(issue)throw Error(issue.code+': '+issue.message);}
@@ -114,6 +114,7 @@ export async function openEdgeServerV1({input,dataDir,worldId,port=4959,webDir,m
     if(host.enableYieldTimeoutV1)await drive(host.enableYieldTimeoutV1());
     if(host.enableSpreadV2)await drive(host.enableSpreadV2());
     if(host.enableSpreadClearV1)await drive(host.enableSpreadClearV1());
+    if(host.enableRouteReachV1)await drive(host.enableRouteReachV1());
     if(host.enableStairMakeWayV1)await drive(host.enableStairMakeWayV1());
     if(host.enableReflexTimeoutV1)await drive(host.enableReflexTimeoutV1());
     if(host.enableContinuousDayV1)await drive(host.enableContinuousDayV1());
