@@ -1,0 +1,18 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1693,
+  "reason": "New immutable lantern@4 and finite oil station. Two productionK2 sweeps of five placed/baked/rendered samples each, zero findings/gaps; actual registered empty/charged/lit geometry and existing raw400tri gate pass. One session charge/refill, no combustion clock. Old lantern@1/@2/@3 and older supplements/budgets/baselines unchanged.",
+  "definitions": [
+    {
+      "ref": "core-lantern@4",
+      "hash": "d6ae121e20f34f2fb8e9323ce994d105f84641d70cf2932d95c549fca448b243"
+    },
+    {
+      "ref": "core-lantern-oil-station@1",
+      "hash": "9805b7d9897be513e6b025ac9c58cc5dc88aa28e1cc68147622b70f1d495eab3"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}
