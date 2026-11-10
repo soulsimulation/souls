@@ -106,3 +106,24 @@ test('over the event stream: `live=1` adds the picture to the Soul\'s own stream
     assert.equal(w.hub.subscribers(), 0, 'a closed stream leaves the push');
   } finally { w.hub.close(); f.destroy(); }
 });
+
+test('a client coming back after a place was made secret takes the whole picture as it is now, never the kept changes', async () => {
+  const w = fakeWorld(), first = follow(w.hub), at = `${first.got[0]!.data.epoch}:${first.got[0]!.data.seq}`;
+  first.stop();
+  w.say('s_a', 'sp_k', 'the key is under the mat'); w.advance(); await w.get();   // said in the yard (s_a stands there)
+  w.secret('g-yard', true); await w.get();
+  const back = follow(w.hub, at);
+  assert.deepEqual(back.got.map(g => g.event), ['live.full']);
+  assert.ok(!JSON.stringify(back.got).includes('under the mat'), 'a kept change from before the place was made secret is not replayed');
+  back.stop(); w.hub.close();
+});
+
+test('more changes missed than a replay holds are sent as the whole picture', async () => {
+  const {LIVE_REPLAY_MAX} = await import('./live.ts');
+  const w = fakeWorld(), first = follow(w.hub), at = `${first.got[0]!.data.epoch}:${first.got[0]!.data.seq}`;
+  first.stop();
+  for (let i = 0; i <= LIVE_REPLAY_MAX; i++) { w.entities.h_b!.pose.p = [60 + (i % 2), 0, 60 + i / 10]; w.advance(); await w.get(); }
+  const back = follow(w.hub, at);
+  assert.deepEqual(back.got.map(g => g.event), ['live.full']);
+  back.stop(); w.hub.close();
+});

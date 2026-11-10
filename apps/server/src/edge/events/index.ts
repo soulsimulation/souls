@@ -32,8 +32,8 @@ export type EventsOptions = {
   /** #1755: the live picture's changes, pushed on the SSE stream to a client that asks (`live=1`). */
   live?: LiveHub | null;
 };
-/** #1755: frames a slow client may have unwritten before its changes are dropped (it then gets the whole picture once it drains). */
-export const LIVE_BACKLOG = 32;
+/** #1755: frames a slow client may have unwritten (more than a full replay, LIVE_REPLAY_MAX) before its changes are dropped (it then gets the whole picture once it drains). */
+export const LIVE_BACKLOG = 160;
 
 type Conn = {soulId: string; since: number; close(reason: string): void};
 const timeLabel = (phase: number) => phase < .2 ? 'morning' : phase < .45 ? 'day' : phase < .55 ? 'evening' : phase < .75 ? 'dusk' : 'night';
@@ -177,12 +177,19 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
         // nothing more until it has caught up, then the whole picture once.
         if (live) {
           let backlog = 0, behind = false;
-          const write = (event: string, data: string) => { backlog++; void stream.write(`event: ${event}\ndata: ${data}\n\n`).catch(() => ac.abort()).finally(() => { if (--backlog === 0 && behind && !ac.signal.aborted) { behind = false; write('live.full', live.full()); } }); };
-          unsubscribe = live.subscribe(c.req.header('x-live-after') ?? q('liveAfter') ?? null, (event, data) => {
-            if (ac.signal.aborted) return;
-            if (backlog >= LIVE_BACKLOG) { behind = true; return; }
-            if (!behind) write(event, data);
-          });
+          const write = (sse: Uint8Array) => { backlog++; void stream.write(sse).finally(() => {
+            if (--backlog !== 0 || !behind || ac.signal.aborted) return;
+            behind = false;
+            try { write(live.sse('live.full', live.full())); } catch { /* the live picture failed: this stream goes on without it */ }
+          }); };
+          // a fault in the live picture drops the push, never the Soul's own stream
+          try {
+            unsubscribe = live.subscribe(c.req.header('x-live-after') ?? q('liveAfter') ?? null, (_event, _data, sse) => {
+              if (ac.signal.aborted) return;
+              if (backlog >= LIVE_BACKLOG) { behind = true; return; }
+              if (!behind) write(sse);
+            });
+          } catch (error) { console.error('[live-push] subscribe fault', error instanceof Error ? error.message : String(error)); }
           ac.signal.addEventListener('abort', () => unsubscribe?.(), {once: true});
         }
         await pump(soul.soulId, start, () => filter, raw, {

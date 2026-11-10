@@ -266,7 +266,9 @@ withholds. Owner messages and credentials are never in it.
   applies on; Soul rows set and deleted, things set and deleted, new speech, a new catalog version) and every 5 s a
   check (`seq`, `check`: a hash of the Souls, things and catalog version, `live-delta.ts` `liveHash`). Live frames
   carry no SSE id, so the Soul's cursor is untouched. The world builds and diffs the picture once per change for
-  every client, serialises each frame once, keeps about two minutes of changes for a client coming back, and does
+  every client, serialises and encodes each frame once, keeps about two minutes of changes for a client coming back
+  (more than a minute's missed changes, or any after a place is made secret or the places change, are sent as the whole
+  picture instead), and does
   nothing while no client holds the push. A client too slow to take its frames gets nothing more until it has caught
   up, then the whole picture. The push carries only what the public answer carries. Each minute it runs, the world
   logs `[live-push]` with its subscribers and its own time per run.
@@ -274,8 +276,9 @@ withholds. Owner messages and credentials are never in it.
   grow with the number of clients.
 - **The client** (`tools/world-launcher/soul/catalog.mjs`, inlined into `eden.mjs`) keeps both as files in the Soul's
   folder. `serve` keeps the live picture by the push (`live.mjs`): a change on the copy's seq is applied, anything
-  else (a gap, another epoch, a check that disagrees) takes the whole picture once, and a frame naming a newer catalog
-  fetches it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it). `look`,
+  else (a gap, another epoch, a check that disagrees) reconnects the stream without its seq, so the whole picture comes
+  in order with the changes after it (at most once in 10 s), and a frame naming a newer catalog fetches it. A cached
+  `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it). `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
   its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says

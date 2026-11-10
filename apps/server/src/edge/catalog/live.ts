@@ -19,24 +19,29 @@ const KEEP_TICKS = 10;
 /** #1755: changes kept for a client that comes back (about two minutes at two a second), how often the push looks for a
  *  change, and how often it sends the picture's hash (the client's check, and the stream's sign of life). */
 export const LIVE_RING = 240, PUSH_EVERY_MS = 250, CHECK_EVERY_MS = 5_000;
+/** More changes missed than this (a minute at two a second) are sent as the whole picture instead. */
+export const LIVE_REPLAY_MAX = 120;
 
 type Line = {id: string; tick: number; at: number; soul: string; name: string; text: string; place: string | null; untrusted: true};
 type Spectated = {kind: string; tick: number; at: number; id?: unknown; from?: {soulId?: unknown; name?: unknown}; channel?: {placeId?: unknown; base?: {placeId?: unknown}}; text?: unknown};
 type Body = {pose?: {p: number[]}; human?: {activity?: string}};
 
-/** What a push subscriber is handed: an SSE event name and its data, already serialised. */
-export type LiveSend = (event: 'live' | 'live.full', data: string) => void;
+/** What a push subscriber is handed: an SSE event name, its data, and the whole SSE frame as bytes, encoded once for every client. */
+export type LiveSend = (event: 'live' | 'live.full', data: string, sse: Uint8Array) => void;
 export type LiveHub = {
   /** Subscribe from `after` (`<epoch>:<seq>` the client holds, or null): the changes since then, or the whole picture. */
   subscribe(after: string | null, send: LiveSend): () => void;
   /** The whole picture, serialised (what GET /v1/edge/live answers). */
   full(): string;
+  /** An SSE frame's bytes. */
+  sse(event: 'live' | 'live.full', data: string): Uint8Array;
   subscribers(): number;
   close(): void;
 };
 
 export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {onSpectator(l: (m: Spectated) => void): unknown}, catalogVersion: () => string | null): LiveHub {
-  const L = deps.ledger, speech: Line[] = [], secret = (id: string | null | undefined) => !!id && !!L.knowledge?.isSecret(id);
+  // each line with where it was said (its speaker's place path and position then), so a place made secret later withholds it
+  const L = deps.ledger, speech: Line[] = [], saidAt = new WeakMap<Line, {path: string[]; x: number | null; z: number | null}>(), secret = (id: string | null | undefined) => !!id && !!L.knowledge?.isSecret(id);
   // The catalog's rule (knowledge.hidesPoint for a Soul that knows no secret place): a point inside a secret place's
   // outline is hidden on any floor, so a secret room upstairs hides who stands under it too. The outlines are kept.
   let outlines: {key: string; polys: (readonly (readonly [number, number])[])[]} | null = null;
@@ -51,7 +56,9 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     // what is said in a place kept off the map (or by someone standing in one, or inside one's outline) stays there
     if ((typeof place === 'string' && secret(place)) || L.placePathOf(from).some(p => secret(p.id))) return;
     const pose = L.poseOf?.(from); if (pose && hidden(pose.x, pose.z)) return;
-    speech.push({id: m.id, tick: m.tick, at: m.at, soul: from, name: String(m.from?.name ?? ''), text: m.text, place: typeof place === 'string' ? place : null, untrusted: true});
+    const line: Line = {id: m.id, tick: m.tick, at: m.at, soul: from, name: String(m.from?.name ?? ''), text: m.text, place: typeof place === 'string' ? place : null, untrusted: true};
+    saidAt.set(line, {path: [...(typeof place === 'string' ? [place] : []), ...L.placePathOf(from).map(p => p.id)], x: pose?.x ?? null, z: pose?.z ?? null});
+    speech.push(line);
     if (speech.length > LIVE_SPEECH) speech.shift();
   });
   const build = (tick: number): LivePicture => {
@@ -64,17 +71,24 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
       if (path.some(x => secret(x.id)) || hidden(p[0]!, p[2]!)) return [{id: m.soulId, name: m.name, at: null, place: null, doing: null}];
       return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
     }).sort((a, b) => a.id < b.id ? -1 : 1);
-    // a line said before its place was made secret is withheld from then on too
-    return {contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(l => !secret(l.place))};
+    // a line said before its place was made secret is withheld from then on too (where its speaker stood, on any floor)
+    const open = (l: Line) => { const w = saidAt.get(l); return !secret(l.place) && !w?.path.some(secret) && !(w && w.x !== null && hidden(w.x, w.z!)); };
+    return {contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(open)};
   };
 
   // ---- one picture at a time, numbered: every build that changes something a client keeps is the next seq
   // (an epoch per process: a restarted world's seq starts again, and a client holding the old one takes the whole picture)
   const epoch = Date.now().toString(36);
   let kept: {key: string; pic: LivePicture; seq: number; body: string | null; hash: string | null} | null = null;
-  const ring: {seq: number; frame: string}[] = [], subs = new Set<LiveSend>();
-  const fanout = (event: 'live' | 'live.full', data: string) => { for (const s of [...subs]) try { s(event, data); } catch { subs.delete(s); } };
+  const ring: {seq: number; frame: string; sse: Uint8Array}[] = [], subs = new Set<LiveSend>(), enc = new TextEncoder();
+  const sseOf = (event: string, data: string) => enc.encode(`event: ${event}\ndata: ${data}\n\n`);
+  const fanout = (event: 'live' | 'live.full', data: string, sse = sseOf(event, data)) => { for (const s of [...subs]) try { s(event, data, sse); } catch { subs.delete(s); } };
+  // A change kept for a client coming back was public when it was made. A place made secret (or the places changed) since
+  // may have made it not so: the kept changes are dropped, and a client coming back takes the whole picture as it is now.
+  let shown = '';
   const current = () => {
+    const nowShown = `${L.knowledge?.version ?? 0}|${L.places.version}`;
+    if (nowShown !== shown) { shown = nowShown; ring.length = 0; }
     const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${L.knowledge?.version ?? 0}`;
     if (kept?.key === key) return kept;
     const pic = build(tick);
@@ -82,9 +96,9 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     const d = liveDelta(kept.pic, pic, kept.seq + 1);
     if (!d) { kept = {...kept, key, pic}; kept.body = null; return kept; }   // the clock alone moved: same seq, no frame
     kept = {key, pic, seq: d.seq, body: null, hash: null};
-    const frame = JSON.stringify({epoch, ...d});
-    ring.push({seq: d.seq, frame}); if (ring.length > LIVE_RING) ring.shift();
-    fanout('live', frame);
+    const frame = JSON.stringify({epoch, ...d}), sse = sseOf('live', frame);
+    ring.push({seq: d.seq, frame, sse}); if (ring.length > LIVE_RING) ring.shift();
+    fanout('live', frame, sse);
     return kept;
   };
   const full = () => { const k = current(); return k.body ??= JSON.stringify({...k.pic, epoch, seq: k.seq}); };
@@ -107,8 +121,8 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
   const subscribe = (after: string | null, send: LiveSend) => {
     const k = current(), [e, n] = (after ?? '').split(':'), have = Number(n);
     // the changes since the client's seq while the ring still has every one of them, else the whole picture
-    if (e === epoch && Number.isSafeInteger(have) && have <= k.seq && (have === k.seq || (ring[0] && ring[0].seq <= have + 1))) { for (const r of ring) if (r.seq > have) send('live', r.frame); }
-    else send('live.full', full());
+    if (e === epoch && Number.isSafeInteger(have) && have <= k.seq && k.seq - have <= LIVE_REPLAY_MAX && (have === k.seq || (ring[0] && ring[0].seq <= have + 1))) { for (const r of ring) if (r.seq > have) send('live', r.frame, r.sse); }
+    else { const body = full(); send('live.full', body, sseOf('live.full', body)); }
     subs.add(send);
     if (!timer) { timer = setInterval(step, PUSH_EVERY_MS); timer.unref?.(); cost.since = Date.now(); }
     return () => { subs.delete(send); if (!subs.size && timer) { clearInterval(timer); timer = null; } };
@@ -118,5 +132,5 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     c.header('Cache-Control', 'no-store'); c.header('Content-Type', 'application/json; charset=utf-8');
     return c.body(full(), 200);
   });
-  return {subscribe, full, subscribers: () => subs.size, close() { if (timer) clearInterval(timer); timer = null; subs.clear(); }};
+  return {subscribe, full: () => full(), sse: (event: 'live' | 'live.full', data: string) => sseOf(event, data), subscribers: () => subs.size, close() { if (timer) clearInterval(timer); timer = null; subs.clear(); }};
 }

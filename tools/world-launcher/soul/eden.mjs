@@ -3105,7 +3105,10 @@ async function syncLive({ force = false } = {}) {
   if (mine && !force && Date.now() - mine.receivedAt < (mine.pushed ? soulLive.PUSHED_FRESH_MS : LIVE_FRESH_MS)) return mine;
   try {
     const t0 = performance.now(), r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); publicReadReported(world + "/v1/edge/live", t0, r); if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const next = soulLive.wholeCopy(world, mine, await r.json(), Date.now());
+    const got = await r.json();
+    // a cached answer older than the copy the push keeps is not written over it (#1755)
+    if (mine?.live?.epoch && got.epoch === mine.live.epoch && Number(got.seq) < Number(mine.live.seq)) return mine;
+    const next = soulLive.wholeCopy(world, mine, got, Date.now());
     if (mine?.push) next.push = mine.push;
     writeJsonFile(LIVE_FILE, next); return next;
   } catch { return mine ? { ...mine, stale: true } : null; }
@@ -3135,27 +3138,30 @@ async function followWorld() {
     if (catalogOld(readJsonFile(CATALOG_FILE), load().world, live)) { const c = await syncCatalog(); if (c.stale) { FOLLOW_FAILS = 1; FOLLOW_SKIP = 1; } }
   } finally { FOLLOWING = false; }
 }
-// #1755: one frame of the world's push on the copy on disk. A change not on the copy's seq, or a hash that disagrees, takes
-// the whole picture (one GET), so nothing is lost or applied twice. A frame that names a newer catalog fetches it.
-let WHOLE_ASKED = null;
+// #1755: one frame of the world's push on the copy on disk. A change not on the copy's seq, another epoch, or a hash that
+// disagrees asks for the whole picture on the stream itself (the caller reconnects without its seq), so the whole picture
+// arrives in order with the changes after it, never an older cached one. A frame that names a newer catalog fetches it.
+// Returns the reason the copy needs the whole picture, or null.
+let LIVE_RESYNC = null, LIVE_RESYNC_AT = 0;
 function onLiveFrame(event, data) {
-  const world = load().world; if (!world) return;
-  let frame; try { frame = JSON.parse(data); } catch { return; }
+  const world = load().world; if (!world) return null;
+  let frame; try { frame = JSON.parse(data); } catch { return null; }
   const have = readJsonFile(LIVE_FILE), r = soulLive.applyFrame(have, world, event, frame, Date.now());
   PUSHED_AT = Date.now();
-  const push = { since: have?.push?.since ?? now(), frames: (have?.push?.frames ?? 0) + 1, bytes: (have?.push?.bytes ?? 0) + data.length + event.length + 16, wholes: have?.push?.wholes ?? 0, last: event };
+  const resynced = event === "live.full" && LIVE_RESYNC;
+  const push = { since: have?.push?.since ?? now(), frames: (have?.push?.frames ?? 0) + 1, bytes: (have?.push?.bytes ?? 0) + data.length + event.length + 16, wholes: (have?.push?.wholes ?? 0) + (resynced ? 1 : 0), last: event, ...(resynced ? { lastWhole: LIVE_RESYNC } : have?.push?.lastWhole ? { lastWhole: have.push.lastWhole } : {}) };
+  if (resynced) LIVE_RESYNC = null;
   if (r.whole) {
-    if (WHOLE_ASKED) return;
-    WHOLE_ASKED = syncLive({ force: true }).then((c) => {
-      if (c && !c.stale) { const k = readJsonFile(LIVE_FILE); if (k) writeJsonFile(LIVE_FILE, { ...k, pushed: true, push: { ...push, wholes: push.wholes + 1, lastWhole: r.whole } }); }
-    }).catch(() => {}).finally(() => { WHOLE_ASKED = null; });
-    return;
+    // at most once in 10 s: a world that keeps disagreeing is not asked in a loop; its frames wait for the next one
+    if (Date.now() - LIVE_RESYNC_AT < 10_000) return null;
+    LIVE_RESYNC_AT = Date.now(); LIVE_RESYNC = r.whole; return r.whole;
   }
-  if (!r.copy) return;
+  if (!r.copy) return null;
   writeJsonFile(LIVE_FILE, { ...r.copy, push });
   if (frame.catalog !== undefined || event === "live.full") {
     if (catalogOld(readJsonFile(CATALOG_FILE), world, r.copy)) syncCatalog().catch(() => {});
   }
+  return null;
 }
 
 async function catalogCommand(...args) {
@@ -4688,12 +4694,12 @@ async function serveForeground() {
     let attempt = 0, code;
     while (!stopping && !terminal) {
       const ac = new AbortController();
-      let idle, gone = false, ms = null;
+      let idle, gone = false, ms = null, resync = false;
       const beat = () => { clearTimeout(idle); idle = setTimeout(() => ac.abort(), ADDRESSED_IDLE_MS); };
       try {
         beat();
         // #1755: the world's live picture rides this stream too, resumed from the copy's seq; a world without it says nothing of it
-        const liveAfter = soulLive.resumeFrom(readJsonFile(LIVE_FILE), world);
+        const liveAfter = LIVE_RESYNC ? null : soulLive.resumeFrom(readJsonFile(LIVE_FILE), world);
         const q = new URLSearchParams({ kinds: "speech.to-me", live: "1", ...(liveAfter ? { liveAfter } : {}), ...(st.addressedCursor ? { after: st.addressedCursor } : {}) });
         const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
         if (r.status === 404) { log("addressed speech: this world has no classified stream; speech still reaches pending"); return; }
@@ -4708,7 +4714,7 @@ async function serveForeground() {
           let woke = false;
           for (const f of frames) {
             if (f.event === "bye") { gone = true; continue; }
-            if (f.event === "live" || f.event === "live.full") { onLiveFrame(f.event, f.data); continue; }
+            if (f.event === "live" || f.event === "live.full") { if (onLiveFrame(f.event, f.data)) { resync = true; ac.abort(); break; } continue; }
             if (f.event === "hello" && !st.addressedCursor) { try { st.addressedCursor = JSON.parse(f.data).cursor ?? null; persist(); } catch { /* the next id does */ } continue; }
             if (f.id) st.addressedCursor = f.id;
             if (f.event !== "speech.to-me") continue;
@@ -4720,6 +4726,7 @@ async function serveForeground() {
       } catch (e) { if (!code && !ac.signal.aborted) log(`addressed speech: ${e?.message ?? e}`); }
       finally { clearTimeout(idle); }
       if (stopping || terminal) return;
+      if (resync) continue;   // #1755: straight back, without the copy's seq: the world sends the whole picture
       attempt = Math.min(attempt + 1, 6);
       await pause(gone ? ADDRESSED_BYE_MS : ms != null ? statedJitter(ms) : fullJitter(attempt));
     }
