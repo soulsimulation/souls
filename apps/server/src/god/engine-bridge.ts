@@ -341,6 +341,16 @@ export class EngineBridge {
       moreFacts:id=>this.crankLamp?.facts(id)??this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
+    // This family has both ordinary light facts and its completed native-work record.
+    // Keep generic contact policy untouched; overlay only this exact family's public facts.
+    if (this.edge?.contactActuator) {
+      const contactFacts = this.edge.contactActuator.facts.bind(this.edge.contactActuator);
+      this.edge.contactActuator.facts = (id, soul) => {
+        const ordinary = contactFacts(id, soul), own = this.crankLamp?.facts(id);
+        if (!own || (soul && (this.layers.refusal(id, soul) || this.claimRefusal(id, soul)))) return ordinary;
+        return {...ordinary, ...own};
+      };
+    }
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
     // #442: repair with a tool in hand (mending.ts): the world changes when the receipt completes, no tick work
     this.mending = createMending({ model: this.god.model, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), occupied: (id) => this.seatTakers(id).length > 0, denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never),
