@@ -64,7 +64,7 @@ test('a secret place, what stands in it and what is done in it are left out', ()
 test('everything published is public, and the counts match', () => {
   const {payload} = buildCatalog(input());
   assert.equal(payload.scope, 'public');
-  assert.deepEqual(payload.counts, {places: 3, things: 1, acts: 3, kinds: 1});
+  assert.deepEqual(payload.counts, {places: 3, things: 1, acts: 3, kinds: 1, handKinds: 0, handThings: 0});
 });
 
 test('what can be done on the spot is published as <verb>:here, and every such verb is one the world acts on', () => {
@@ -72,6 +72,28 @@ test('what can be done on the spot is published as <verb>:here, and every such v
   assert.ok(payload.anywhere.some(a => a.id === 'sit-ground:here' && /floor/.test(a.label)));
   assert.equal(payload.anywhere.length, ANYWHERE.length);
   for (const [verb] of ANYWHERE) assert.ok((EDGE_ACT_VERBS as readonly string[]).includes(verb), verb);
+});
+
+// #1751: what a kind of thing takes by hand, from the def's own action list (the engine bridge's thingActs)
+const switchable = {acts: [{verb: 'switch-on', label: 'Switch on', when: [{field: 'on', is: false}]}, {verb: 'switch-off', label: 'Switch off', when: [{field: 'on', is: true}]}], state: {on: true}};
+test('a kind worked by hand is published once with its acts and the state they read; a revision without them says so', () => {
+  const base = input(), {payload} = buildCatalog({...base, things: [...base.things,
+    {id: 'e_l1', kind: 'core-desk-lamp@1', name: 'desk-lamp-1', at: [3, 3], place: 'g-library', hand: switchable},
+    {id: 'e_l2', kind: 'ew:core-desk-lamp@1:abc', name: 'desk-lamp-2', at: [4, 4], place: 'g-library', hand: switchable},
+    {id: 'e_l0', kind: 'core-desk-lamp@0', name: 'old-lamp', at: [5, 5], place: 'g-library', hand: null},
+    {id: 'e_l3', kind: 'core-desk-lamp@3', name: 'dim-lamp', at: [6, 6], place: 'g-library', hand: {acts: [...switchable.acts, {verb: 'dim', label: 'Dim'}], state: {on: false}}},
+    {id: 'e_l9', kind: 'core-desk-lamp@1', name: 'grove-lamp', at: [45, 45], place: 'g-grove', hand: switchable},
+    {id: 'e_bk', kind: 'core-ash-bucket@1', name: 'bucket', at: [7, 7], place: 'g-library', hand: {acts: [], state: {ash: 0}}}]});
+  assert.deepEqual(Object.keys(payload.kinds), ['core-ash-bucket', 'core-desk-lamp', 'core-desk-lamp@3'], 'a revision with other acts or defaults has its own entry');
+  assert.deepEqual(payload.kinds['core-ash-bucket'], {acts: [], state: {ash: 0}}, 'a kind that only has state (a bucket another thing fills) is published too');
+  assert.equal(payload.things.find(t => t.id === 'e_l3')!.hands, 'core-desk-lamp@3');
+  assert.deepEqual(payload.kinds['core-desk-lamp@3']!.state, {on: false});
+  assert.deepEqual(payload.kinds['core-desk-lamp']!.acts.map(a => a.verb), ['switch-on', 'switch-off']);
+  assert.deepEqual(payload.kinds['core-desk-lamp']!.state, {on: true});
+  assert.equal(payload.things.find(t => t.id === 'e_l0')!.byHand, false);
+  assert.equal(payload.things.find(t => t.id === 'e_l1')!.byHand, undefined);
+  assert.equal(payload.things.some(t => t.id === 'e_l9'), false, 'nothing in a secret place');
+  assert.equal(payload.counts.handKinds, 3); assert.equal(payload.counts.handThings, 4);
 });
 
 test('a ref two places share is published for neither: walk:<id> names its place, walk:<ref> would name none (#1737)', () => {
