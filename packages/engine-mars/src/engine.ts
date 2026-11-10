@@ -732,7 +732,11 @@ export class MarsEngine implements Engine {
     const fin = (n: unknown) => typeof n === 'number' && Number.isFinite(n), whole = Array.isArray(e.pose?.p) && e.pose.p.length === 3 && e.pose.p.every(fin) && fin(e.pose.yaw ?? 0);
     let to = pose;
     if (!whole && !to) {
-      const radius = e.body?.radius ?? HUMAN_RADIUS, [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0], spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius) ?? [ax, az]; } catch { return [ax, az] as [number, number]; } finally { this.ents[id] = e; this.tableCacheV1 = null; } })();   // the search reads every other body, not this one
+      const radius = e.body?.radius ?? HUMAN_RADIUS, [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0];
+      // #1523 review: the held body stays in the table during the search, and the spatial sync reads every level-0 body's pose.p, so a
+      // body with no pose or no position array gets a provisional pose at the arrival point first (skipped by id; the real pose is written right after)
+      if (!Array.isArray(e.pose?.p) || e.pose.p.length !== 3) e.pose = { ...(e.pose ?? {}), p: [ax, 0, az], yaw: 0 };
+      const spot = (() => { try { return this.freeStandingNearV1([ax, az], radius, undefined, { skip: id }) ?? [ax, az]; } catch { return [ax, az] as [number, number]; } })();   // the search reads every other body, not this one: skipped by id, never taken out of the table (#1523: that reorders the live table, and its replay never searches)
       const spatial = this.rt.services.spatial as Spatial, y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, spot[0], spot[1])) : 0;
       to = { p: [spot[0], y, spot[1]], yaw: 0, level: 0 };
     }
@@ -799,7 +803,7 @@ export class MarsEngine implements Engine {
     if (was?.pose && finiteDeepV1(was.pose) && Array.isArray(was.pose.p) && was.pose.p.length === 3 && stableStringify(was.support ?? null) === stableStringify(e.support ?? null) && clear(was.pose.p))
       return { root: 'world', path: ['entities', id, 'pose'], from: 'baseline', pose: structuredClone(was.pose) };
     const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0];
-    const spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius); } catch { return null; } finally { this.ents[id] = e; this.tableCacheV1 = null; } })();   // the search reads everything but this
+    const spot = (() => { delete this.ents[id]; this.tableCacheV1 = null; try { return this.freeStandingNearV1([ax, az], radius); } catch { return null; } finally { this.ents[id] = e; this.m.canonicalEntityOrder(this.rt.world); this.tableCacheV1 = null; } })();   // the search reads everything but this; the restore re-sorts the table (#1523: a live-only re-add moved the component to the end, and its replay never searches)
     if (!spot) return null;
     const spatial = this.rt.services.spatial as Spatial, y = this.rt.world.groundV1 && spatial?.ground ? r3(standOn(spatial.ground, spot[0], spot[1])) : 0;
     const held = ['held', 'in-hand'].includes(e.support?.kind) ? [e.support.by].flat().filter((b: unknown): b is string => typeof b === 'string').sort() : [];
