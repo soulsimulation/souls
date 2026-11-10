@@ -1622,9 +1622,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (me && activityMayOffer(focus)) try {
       // S2: the listing only reads the world; its clearance reads (clear spots, shelves, courts) share one planner sync
       // (engine readPassV1) instead of each walking every static to ask "did anything change" (~15% of a busy world)
-      const spots = this.spots, aw = this.activityWorld(soul, me, caps, plans), list = () => activityCapabilities(spots, aw);
+      // #1737: a spot asked for by its id (one offer, bindOne) is built wherever the Soul stands
+      const asked = focus?.ids.size ? new Set([...focus.ids].map(id => id.slice(id.indexOf(':') + 1))) : undefined;
+      const spots = this.spots, aw = this.activityWorld(soul, me, caps, plans), list = () => activityCapabilities(spots, aw, asked);
       const eng = this.mw as unknown as {readPassV1?: <T>(f: () => T) => T};
       const act = eng.readPassV1 ? eng.readPassV1(list) : list();
+      if (asked) {for (const id of asked) {const k = `${soul.soulId}|${id}`, y = act.why.get(id); if (y) this.spotWhy.set(k, y); else this.spotWhy.delete(k);} if (this.spotWhy.size > 500) this.spotWhy.delete(this.spotWhy.keys().next().value!);}
       // Activities lead the list (agents and the CLI read the first entries first).
       for (const c of [...act.caps].reverse()) {const i = caps.findIndex(x => x.id === c.id); if (i >= 0) caps.splice(i, 1); caps.unshift(c); plans.set(c.id, act.plans.get(c.id)!);}
     } catch (e) {if (this.activityErrors++ < 20) console.error('[edge] activity capabilities', soul.soulId, e instanceof Error ? e.stack?.split('\n').slice(0, 3).join(' | ') : e);/* activities never hide the rest */}
@@ -2014,8 +2017,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (this.actKeys.size > 2000) this.actKeys.delete(this.actKeys.keys().next().value!);
   }
   /** CTRL-1 (#1093): a strict client's act: null when it is an offered id with fitting params, else the refusal. */
+  /** #1737: why a spot asked for by id was not offered to this Soul (`<soul>|<spot id>`), from its last focused build. */
+  private spotWhy = new Map<string, {code: string; reason: string}>();
   offerGate(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; verb?: unknown; target?: unknown; clientRef?: unknown}): OfferRefusal | null {
-    const no = offerCheck(this, soul, input); if (!no) return null;
+    let no = offerCheck(this, soul, input); if (!no) return null;
+    const spot = no.code === 'capability.unknown' && typeof input.capability === 'string' ? this.spotWhy.get(`${soul.soulId}|${input.capability.slice(input.capability.indexOf(':') + 1).trim()}`) : undefined;
+    if (spot) no = {...no, code: spot.code, reason: spot.reason};
     this.recordRefusal(soul.soulId, 'act', no.capability, no.code, no.reason);
     return no.code === 'capability.unknown' ? this.withAlternatives(soul, no.capability, no, this.wordsMenu(soul).caps) : no;
   }

@@ -16,7 +16,7 @@ export type Refusal = {status: 429 | 503; code: 'soul.busy' | 'soul.slow-down' |
 const C1_MS = 20_000, GOD_C1_MS = 30_000, C2_MS = 8_000;
 const EDGE_READ = /^\/v1\/edge\/(here|observe|capabilities|view|objects(?:\/[^/]+)?)$/;
 const EDGE_WRITE = /^\/v1\/edge\/(act|say|converse|objects\/[^/]+\/act|plan(?:\/[^/]+)?)$/;
-const PUBLIC = /^\/v1\/(?:edge\/(?:map|rides|items|platforms)|world\/snapshot)$/;
+const PUBLIC = /^\/v1\/(?:edge\/(?:map|rides|items|platforms|catalog|live)|world\/snapshot)$/;
 const GOD_READ = /^\/v1\/god\/(mirror|doctor|trace|recommend|layers|layers\/zone-suggest|defs\/unused)$/;
 const GOD_FREE = /^\/v1\/god\/(?:pair\/|claim$|answer$|inbox\/|pray$|assets$|visitors$)/;   // auth flows, uploads, Souls' prayers
 /** The request class of a route (§2); null = not admitted here (passes straight through). Paths are world-relative. */
