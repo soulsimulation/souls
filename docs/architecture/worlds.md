@@ -99,6 +99,13 @@ switch independent. A previously saved master mute migrates to both switches off
   released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
   (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
   (`apps/server/src/clock-catchup.ts`) without simulating the gap.
+- **Real time (#1649, behind `SIM_REAL_TIME=1` while it rolls out).** A god world's clock is the real time in the world's
+  own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
+  local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
+  whose origin makes the engine read local time (`apps/server/src/god/real-clock.ts`), and logs a new one only at boot,
+  on a zone change, or when a watched world has drifted a minute from the wall. A world without a zone is given one at
+  its first real-time boot, recorded as one engine edit: `mars-college-2026` and `mars-college-2027` America/Los_Angeles,
+  `rna-studio` Europe/Lisbon, every other world America/New_York.
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,
