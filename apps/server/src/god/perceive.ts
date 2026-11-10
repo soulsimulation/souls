@@ -19,7 +19,7 @@ import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { readOnlyObjectAdvance, refreshOnlyObjectAdvance } from '../edge/comms/objects/framework.ts';
 import type { NearFilter, Objects } from '../edge/comms/objects/framework.ts';
 import { canonicalJson, stateDigest } from '../edge/comms/objects/table.ts';
-import { actionsOf, actuatedState, keptShut, kindActions, wrapAct, type Thing } from './actuators.ts';
+import { actionsOf, actuatedState, farOutcome, keptShut, kindActions, wrapAct, type FarAct, type Thing } from './actuators.ts';
 import { heldGodThing } from './held.ts';
 import { waterRole, wordOf } from './water.ts';
 import { economyOn } from './layers.ts';
@@ -143,6 +143,16 @@ export class GodPerceive {
     return o;
   }
   private objs: { kindOf(k: string): unknown; register(k: unknown): void } | null = null;
+  /** #1751: acts taken from beyond sight, held per body until their receipt ends (farOutcome). */
+  private farActs = new Map<string, { soul: EdgeSoul; far: FarAct }>();
+  /** #1751: the ledger's actOutcome for a held far act: null when this body holds none for this capability. */
+  farOutcome(capability: string, entityId: string, finished: boolean): 'done' | { code: string; reason: string } | null {
+    const held = this.farActs.get(entityId); if (!held || held.far.capability !== capability) return null;
+    this.farActs.delete(entityId);
+    return farOutcome(held.far, finished, held.soul, (id) => { const e = this.h.model.entities.get(id), def = e && this.h.model.resolvedDef(e.def); return e && def ? { def, state: actuatedState(e, def), name: e.name ? this.h.model.pathOf(e.id) : shortDef(def) } : null; }, this.actHost());
+  }
+  /** #1751: set while the object framework builds a whole menu (see wrapCapabilities). */
+  private wholeMenu = false;
   /** R4-INFO: each built object's place (innermost god-built or world place holding it) and standing level. */
   private placed = new Map<string, { place: string | null; level: number }>();
   private kinds = new Set<string>();
@@ -194,6 +204,10 @@ export class GodPerceive {
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
       policy:(id:string,soul:EdgeSoul,action:string)=>this.h.edge?.contactActuator?.policy(soul,id,action)??null,
+      wholeMenu: () => this.wholeMenu,
+      thingAt: (id: string) => this.entries.get(id)?.at ?? null,
+      deferFar: (soul: EdgeSoul, far: FarAct | null) => { if (far) this.farActs.set(soul.entityId, { soul, far }); else this.farActs.delete(soul.entityId); },
+      hidden: (soul: EdgeSoul, at: Vec2) => !!this.h.edge?.knowledge?.hidesPoint(soul.soulId, at),
       bodyAt: (soul: EdgeSoul): Vec2 | null => { const b = this.h.engine.world.entities[soul.entityId]; return b?.pose?.p ? [b.pose.p[0], b.pose.p[2]] : null; },
       commit: (id: string, patch: Record<string, unknown>, note: string) => this.h.commit!([{ op: 'set', id, state: patch }], note),
       stateOf: (id: string) => { const e = this.h.model.entities.get(id), def = e && this.h.model.resolvedDef(e.def); return e && def ? actuatedState(e, def) : null; },
@@ -476,7 +490,15 @@ export class GodPerceive {
   private wrapCapabilities(o: Pick<Objects, 'capabilities'> & { __godCaps?: boolean }) {
     if (o.__godCaps) return; o.__godCaps = true;
     const original = o.capabilities.bind(o);
-    o.capabilities = (...args) => original(...args).filter(cap =>
+    // #1751: a whole menu (no objects named) lists things within sight only; a focused build or an act takes one from anywhere
+    o.capabilities = (...args) => {
+      // #1751: a thing named by id that has no object yet (made a moment ago, the catch-up still running) gets it now
+      const only = args[1] as ReadonlySet<string> | undefined;
+      if (only && this.pending() && [...only].some(id => !this.sigs.has(id) && this.h.model.entities.has(id))) this.sync();
+      const outer = this.wholeMenu; this.wholeMenu = !only; try { return original(...args); } finally { this.wholeMenu = outer; }
+    };
+    const listed = o.capabilities;
+    o.capabilities = (...args) => listed(...args).filter(cap =>
       // #442: a whole thing has nothing to repair (its row may lag a sync behind the state)
       !(cap.object && this.desired.has(cap.object) && (cap.blocked?.code === 'object.out-of-reach' || cap.blocked?.code === 'repair.not-broken')));
   }
