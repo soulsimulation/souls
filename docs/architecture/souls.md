@@ -86,7 +86,9 @@ two share a name, `@eden create "Ivo"` to pick the world. Each run works inside 
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
-A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and with
+A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and once it
+holds a token the home's guide (`CLAUDE.md`, `AGENTS.md`) lists it beside the Souls, so the next chat finds it; only the
+guide's head is rewritten, and a guide this home didn't write is left alone. With
 several seats `node eden-god.mjs <world> <command>` picks one (`@<world>` when a command has that name). Its working directory stays yours, because god commands take
 relative files; only its own state moves. A folder with no home keeps `.eden-god.json` as ever, and that file wins until
 `node eden.mjs import` moves it in. Acting as a god reads nothing under `souls/`, and acting as a Soul nothing under

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PIANO_FADE, PIANO_STEP, drumHands, pianoHands, pianoLanes, voiceAt, type Accompanist } from './piano-score.ts';
+import { FLUTE_FADE, PIANO_FADE, PIANO_STEP, drumHands, pianoHands, pianoLanes, voiceAt, type Accompanist } from './piano-score.ts';
 import {gameContact,type RecordedGame} from './recorded-games.ts';
 import {rowingStroke} from './rowing-motion.ts';
 import {seesawAngle, swingAngle} from './play-motion.ts';
@@ -57,6 +57,7 @@ export type ActivityFrame = {
   handWeights?:[number,number];
   /** Piano contact plane and per-hand lift above it, from the shared audible score. */
   piano?:{height:number;lift:[number,number];weight:number};
+  flute?:{weight:number};
   hands: [HandGoal | null, HandGoal | null] | null;
   /** Feet apart (metres each side) and pelvis lift (metres, a hop) for standing cycles. */
   feetOut: number; hop: number;
@@ -190,7 +191,10 @@ export function activityFrame(activity: string, base: string, seconds: number, i
       else if(opts.instrument==='keyboard'||opts.instrument==='piano')return activityFrame('play-piano',base,seconds,id,opts);
       else if(['violin','viola'].includes(opts.instrument??'')){f.hands=[[.24,.1,.12],[.25,.2+s*2,-.05]];f.look=.14;}
       else if(opts.instrument==='cello'){f.hands=[[.3,-.02,-.14],[.38,.12+s*2,-.4]];f.look=.2;}
-      else if(opts.instrument==='flute'){f.hands=[[.18,-.08,.15],[.15,.26,.13]];f.look=.03;}
+      else if(opts.instrument==='flute'){
+        const k=S(Math.max(0,Math.min(1,(opts.released??opts.since??FLUTE_FADE)/FLUTE_FADE))),weight=opts.released===undefined?k:S(Math.max(0,Math.min(1,(opts.priorAge??FLUTE_FADE)/FLUTE_FADE)))*(1-k);
+        f.flute={weight};f.hands=[[.18,0,.15],[.18,.2,.15]];f.handWeights=[weight,weight];f.curl=[.35+.08*Math.sin(seconds*6),.4+.08*Math.cos(seconds*6)];f.look=0;
+      }
       else {f.hands=[[.3,-.02,-.18],[.22,-.16,-.36+s]];f.look=.2;}return f; }
     case 'paint': { const k = tri(t * 0.7), s = Math.sin(t * 3.1) * 0.06;
       f.hands = [[0.22, 0.06, -0.42], [0.5, 0.06 + s, -0.08 + 0.12 * k]]; f.look = 0.05; return f; }
