@@ -296,7 +296,9 @@ withholds. Owner messages and credentials are never in it.
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
   made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a
   hand contact (a lamp, a door) changes at the contact; any other (a chest, a candle) sent from beyond 30 m changes when
-  the act's walk ends at it, and not at all if the act is stopped or replaced first (`object.not-reached`); within 30 m it
+  the act's walk ends at it, and not at all if the act is stopped or replaced first (`object.not-reached`), or if on arrival it is someone
+  else's and private, locked, in another Soul's hand or no longer takes the act (the named refusal a near act gets, such
+  as `container.in-use`, #1859); within 30 m it
   behaves as before. A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
   has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
   "the lamp is already on").
