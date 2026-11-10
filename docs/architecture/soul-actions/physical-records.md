@@ -1,0 +1,5 @@
+# Physical records
+
+A fixed `core/physical-record-player@1` takes exact `choose-record`, `load-record`, `play-record`, `stop-record` and `eject-record` IDs. Choose uses text containing the actual ID of `core/media-record@1` on a stable table beside it. Both objects/supports require access, same owner/access, empty hands and ordinary native walking and handwork. Loading consumes exactly that one portable media unit into integral loaded state; the existing jukebox score clock/audio plays its declared track.
+
+Stop before ejection. The admitted batch places one new portable record on clear ground to the player's left and clears loaded state atomically. Track, original material origin and authority persist; the removed and ejected IDs differ. Failed or interrupted work preserves the existing material. Compact media can normally be picked up, carried and placed. The player is fixed; no held loading, loaded carry, record-child custody, new song/composition, needle-contact precision, audio engine or movement authority is claimed. Existing record scores are reused unchanged.
