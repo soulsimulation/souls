@@ -1792,7 +1792,11 @@ function passBackDecide(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: Lin
   if (!xe || xe.phase !== 'climb' || xl?.kind !== 'link' || xl.link.id === leg.link.id || xe.cancelTo || (xe.passBack && xe.passBack.stage !== 'done')) return false;
   const other = rt.world.entities[who]; if (!other) return false;
   const backClear = (e: Exec, body: Entity, l: LinkLeg) => { const g = linkGeometry(l), at = Math.max(0, e.climbT - 2 * CLIMB_SPEED * dt); return !stairBlocker(rt, body, body.pose.p, pointOnLink(g, at), e.profile.radius); };
-  const mine = backClear(ex, a, leg), theirs = backClear(xe, other, xl);
+  // #1723 cand-4: a body yields only where the other can then pass it. When the other's route goes on along the yielder's
+  // own flight, it will step off at the very end the yielder holds on: that end needs a spot clear of the flight to stand
+  // aside on (the landing courtesy then moves it there), or the hold only blocks the one it yields to until its bound
+  const canYield = (e: Exec, body: Entity, l: LinkLeg, by: Exec) => backClear(e, body, l) && (!routeGoesOn(by, l.link.id) || endHasRoom(rt, body, l, e.profile.radius, by.profile.radius));
+  const mine = canYield(ex, a, leg, xe), theirs = canYield(xe, other, xl, ex);
   if (!mine) return false;
   if (theirs && (xe.climbT < ex.climbT - 1e-9 || (Math.abs(xe.climbT - ex.climbT) <= 1e-9 && who > a.id))) return false;
   ex.passBack = { by: who, other: xl.link.id, mine: leg.link.id, stage: 'back', since: rt.tick };
@@ -1810,8 +1814,37 @@ function passBackForWaiter(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: 
   // for each other, then trade pass-backs; `a` keeps the flight, and with no room on either landing both wait for the bound
   if (xe.passBack?.by === a.id) return false;
   if (stairBlocker(rt, a, a.pose.p, pointOnLink(geo, Math.max(0, ex.climbT - 2 * CLIMB_SPEED * dt)), ex.profile.radius)) return false;
+  // #1723 cand-4: the waiter climbs this flight next and steps off where `a` would hold: with no spot there to stand aside
+  // on, a pass-back only blocks the waiter until the hold's bound, so `a` keeps the flight and both wait for the walk bound
+  if (!endHasRoom(rt, a, leg, ex.profile.radius, xe.profile.radius)) return false;
   ex.passBack = { by: who, other: leg.link.id, mine: leg.link.id, stage: 'back', since: rt.tick };
   return true;
+}
+/** #1722 / #1723: does `e`'s route go on along link `id` after its current leg? */
+const routeGoesOn = (e: Exec, id: string) => e.route.legs.slice(e.leg + 1).some(l => l.kind === 'link' && l.link.id === id);
+/** Clear of a flight's walking path by `need` (m) for a body standing at `q` on a floor at `floorY`: the same vertically
+ *  weighted separation as the stair-person test (the landing courtesy's spot test). */
+function clearOfFlightPath(path: number[][], q: Vec2, floorY: number, need: number): boolean {
+  return path.slice(1).every((p, i) => {
+    const start = path[i], dx = p[0] - start[0], dy = (p[1] - start[1]) * .5, dz = p[2] - start[2], n = dx * dx + dy * dy + dz * dz;
+    const qx = q[0] - start[0], qy = (floorY - start[1]) * .5, qz = q[1] - start[2], t = n ? clamp((qx * dx + qy * dy + qz * dz) / n, 0, 1) : 0;
+    return hypot(qx - t * dx, qy - t * dy, qz - t * dz) >= need;
+  });
+}
+/** #1723 cand-4: at the entry end of `body`'s flight `leg` (where a pass-back holds), is there a standing spot clear of the
+ *  flight for `body` to step aside onto when another climber comes off the flight there? The landing courtesy's candidates
+ *  (rings 0.4-1.6 m, 16 directions) on the entry's floor; free of other bodies; read-only. */
+function endHasRoom(rt: Runtime, body: Entity, leg: LinkLeg, radius: number, otherRadius: number): boolean {
+  const geo = linkGeometry(leg), entry = geo.entry, sp = spatial(rt, body.id), from: Vec2 = [entry.p[0], entry.p[1]], level = entry.level;
+  const floorY = level === 0 && sp.ground ? sp.ground.standY(...from) : sp.levelAt(level, from)?.y ?? entry.y, need = radius + otherRadius + .1;
+  const step = geo.path[1] ?? geo.path[0], away = norm2(sub2(from, [step[0], step[2]])), base = len2(away) > 0 ? away : [1, 0] as Vec2;
+  for (const distance of [.4, .6, .8, 1, 1.2, 1.6]) for (let k = 0; k < 16; k++) {
+    const q = add2(from, scale2(rot2(base, k * Math.PI / 8), distance)), floor = sp.levelAt(level, q);
+    const y = level === 0 && sp.ground ? sp.ground.standY(...q) : floor?.y;
+    if (!floor || y === undefined || Math.abs(y - floorY) > .03 || clearanceAt(floor, q) < radius + PLAN_MARGIN || occupant(rt, body, q, radius + .1, false, level) || !clearOfFlightPath(geo.path, q, floorY, need)) continue;
+    return true;
+  }
+  return false;
 }
 /** #1722 stair-pass/1: back down this flight to its entry at climbing speed, waiting (never passing) for anyone behind; at the
  *  entry stand on its floor, give the flight back, and hold in `align` until the other climber has passed. */
@@ -1863,11 +1896,7 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   const radius=walker.profile.radius,need=radius+ex.profile.radius+.1,geo=linkGeometry(leg);
   // Clear the whole flight, not only the climber's present centre. Vertical
   // weighting matches the existing stair-person separation; no level snap.
-  const clearOfPath=(path:number[][],q:Vec2)=>path.slice(1).every((p,i)=>{
-    const start=path[i],dx=p[0]-start[0],dy=(p[1]-start[1])*.5,dz=p[2]-start[2],n=dx*dx+dy*dy+dz*dz;
-    const qx=q[0]-start[0],qy=(floorY-start[1])*.5,qz=q[1]-start[2],t=n?clamp((qx*dx+qy*dy+qz*dz)/n,0,1):0;
-    return hypot(qx-t*dx,qy-t*dy,qz-t*dz)>=need;
-  });
+  const clearOfPath=(path:number[][],q:Vec2)=>clearOfFlightPath(path,q,floorY,need);
   // #1722 stair-pass/1: the spot also keeps clear of the climber's next flight (its following link leg), so a body that steps
   // aside on a switchback landing does not stand on the entry the climber needs next
   const nextLink=rt.services.stairPassV1===true?ex.route.legs.slice(ex.leg+1).find((l):l is LinkLeg=>l.kind==='link'):undefined;

@@ -119,13 +119,16 @@ other at the landing between them (published waits naming each other). In the se
 no spot clear of both flights. In both, one climber backs down its own flight to its entry at climbing speed (`passBack`).
 It never passes anyone behind it; it waits for them. At the entry it stands on that floor and gives the flight back. It
 then holds in `align`, waiting `traffic.yield` for the other, while the other is still on its flight or on this one (at
-most 1200 ticks), and climbs again after. The climber whose way back is clear yields; when both are clear, the one nearer
-its own entry yields, and on a tie the later id. The landing courtesy the other way then usually has room. The step
+most 1200 ticks), and climbs again after. A climber can yield only when its way back is clear and, if the other's route
+goes on along its flight, that flight's end has a spot clear of the flight to stand aside on (#1723). Otherwise the other
+would step off onto the holder with nowhere for it to go, and both would wait for the hold's bound. Of two that can yield,
+the one nearer its own entry yields, and on a tie the later id. The landing courtesy the other way then has room. The step
 that reaches the entry is still a climb; the hold says `wait` from the next tick, so the engine never sees a `wait` moving
 at climbing speed. A walk yields to the same body at most once, and a climber never backs down for a waiter that has
 already backed down for it. When neither end of a flight has room to pass (tight landings at both ends of a middle
-flight), the pass-back cannot let the other through, so the blocked-walk bound still ends both walks. Getting them both
-through would need a retreat over more than one flight.
+flight), the pass-back cannot let the other through, so the blocked-walk bound still ends both walks. The same holds for a
+waiter on a tight landing at the foot of a flight whose top is tight too: nobody passes back, and the bound ends both walks.
+Getting them both through would need a retreat over more than one flight.
 
 ## Approximations
 
