@@ -715,3 +715,6 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Irreversible woodcarving (#1704)
+`core-wood-carving-bench@1` accepts the SAME portable `core-wooden-blank@1`. Choose leaf/bird/totem; completed ten-second native craft+generic mallet-shaped performance tool sets its permanent form, removed-material flag and maker. No knife simulation, separable offcut items or new output birth. The original block contains all finished geometry. Actual native support, first-start identity, access/body/clearance and completion/idempotence/order are checked; interruption preserves blank/history. Already-carved items cannot be recarved. Normal native pickup/place displays the artifact; exact current artifact facts expose form/material/maker, bench facts ONLY own completed history. No generic reader/engine/registry change. Separate additive God hooks require steward serial integration.
