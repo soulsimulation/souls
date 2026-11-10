@@ -51,15 +51,16 @@ const markerTable = (sql: DatabaseSync) => sql.exec('CREATE TABLE IF NOT EXISTS 
 const marked = (sql: DatabaseSync, worldId: string, c: CutOver, part: string) => !!sql.prepare('SELECT 1 FROM edge_clock_cutover_v1 WHERE world_id=? AND cut_tick=? AND part=?').get(worldId, c.tick, part);
 const mark = (sql: DatabaseSync, worldId: string, c: CutOver, part: string, moved: number) => sql.prepare('INSERT OR IGNORE INTO edge_clock_cutover_v1(world_id,cut_tick,part,moved,at) VALUES(?,?,?,?,?)').run(worldId, c.tick, part, moved, Date.now());
 
-/** Pending world-clock reminders of `worldId`, moved to the new count once per cut-over: the rows and a marker row change in
+/** Pending world-clock reminders of `worldId` made before the cut-over (later ones are already in the new count), moved
+ *  to the new count once per cut-over: the rows and a marker row change in
  *  one transaction, so a second call (a retry, a restart) moves nothing. Returns how many moved (0 when already done). */
 export function cutOverReminders(sql: DatabaseSync, worldId: string, c: CutOver): number {
   const table = sql.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='edge_personal_reminders_v1'").get();
   markerTable(sql);
-  sql.exec('BEGIN IMMEDIATE');
+  sql.exec('BEGIN IMMEDIATE');   // a failure here leaves no transaction of ours to roll back
   try {
     if (marked(sql, worldId, c, 'reminders')) { sql.exec('COMMIT'); return 0; }
-    const rows = !table ? [] : sql.prepare("SELECT soul_id,id,request,due_world_minute FROM edge_personal_reminders_v1 WHERE world_id=? AND state='active' AND kind='world' AND due_world_minute IS NOT NULL").all(worldId) as { soul_id: string; id: string; request: string; due_world_minute: number }[];
+    const rows = !table ? [] : sql.prepare("SELECT soul_id,id,request,due_world_minute FROM edge_personal_reminders_v1 WHERE world_id=? AND state='active' AND kind='world' AND due_world_minute IS NOT NULL AND created_tick<=?").all(worldId, c.tick) as { soul_id: string; id: string; request: string; due_world_minute: number }[];
     const update = table ? sql.prepare('UPDATE edge_personal_reminders_v1 SET due_world_minute=?,request=? WHERE world_id=? AND soul_id=? AND id=?') : null;
     for (const r of rows) {
       const due = mapWorldMinute(r.due_world_minute, c);
@@ -71,7 +72,7 @@ export function cutOverReminders(sql: DatabaseSync, worldId: string, c: CutOver)
     mark(sql, worldId, c, 'reminders', rows.length);
     sql.exec('COMMIT');
     return rows.length;
-  } catch (e) { try { sql.exec('ROLLBACK'); } catch { /* already rolled back */ } throw e; }
+  } catch (e) { if (sql.isTransaction) sql.exec('ROLLBACK'); throw e; }
 }
 
 /** The god edits that move every age-counting day stamp in the world to the new count: posters on a poster wall (each

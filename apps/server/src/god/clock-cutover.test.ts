@@ -131,7 +131,7 @@ test('a cut-over whose mapping failed is finished by the next keeper (a restart)
   const reminders = new PersonalReminders(f.db.db, f.host.worldId, { publish: () => {} } as any, () => freshBootClock(f.host as any));
   const today = Math.floor(freshBootClock(f.host as any).absoluteWorldMinutes! / 1440);
   reminders.create('soul-a', { clientRef: 'r', text: 'r', at: { clock: 'world', worldDayIndex: today + 2, time: '08:15' } });
-  const due = () => (f.db.db.prepare('SELECT due_world_minute d FROM edge_personal_reminders_v1').get() as any).d as number;
+  const due = () => (f.db.db.prepare("SELECT due_world_minute d FROM edge_personal_reminders_v1 WHERE client_ref='r'").get() as any).d as number;
   const d0 = due();
   // the first keeper's mapping throws (a locked database, say): the clock still comes onto real time
   const logs: string[] = [];
@@ -140,11 +140,18 @@ test('a cut-over whose mapping failed is finished by the next keeper (a restart)
   assert.equal(f.host.living?.dayTicks, REAL_DAY_TICKS);
   assert.equal(due(), d0, 'not mapped yet');
   assert.ok(logs.some((m) => /tried again later/.test(m)));
+  // a reminder made after the cut-over is already in the new count: the late mapping leaves it alone
+  await settle(2);
+  const nowToday = Math.floor(freshBootClock(f.host as any).absoluteWorldMinutes! / 1440);
+  reminders.create('soul-a', { clientRef: 'late', text: 'late', at: { clock: 'world', worldDayIndex: nowToday + 1, time: '09:00' } });
+  const late = () => (f.db.db.prepare("SELECT due_world_minute d FROM edge_personal_reminders_v1 WHERE client_ref='late'").get() as any).d as number;
+  const late0 = late();
   // the next boot's keeper finds the cut-over named by the clock and finishes it, once
   const second = installRealClock(f.host as any, { zone: () => 'America/New_York', now: () => wall, checkMs: 3_600_000, onCutOver: (c) => cutOverWorld(f.host, god, c) });
   await second.sync(); await second.sync(); second.stop();
   const newToday = Math.floor(freshBootClock(f.host as any).absoluteWorldMinutes! / 1440);
   assert.equal(due(), (newToday + 2) * 1440 + 8 * 60 + 15, 'mapped by the next keeper: two days ahead at 08:15');
+  assert.equal(late(), late0, 'a reminder made after the cut-over is not moved');
 });
 
 function posterListOf(e: any) { return JSON.parse(e.state.textBy || '[]'); }

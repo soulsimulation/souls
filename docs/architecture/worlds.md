@@ -131,6 +131,9 @@ switch independent. A previously saved master mute migrates to both switches off
   world paused on the accelerated clock keeps that day count (and its needs keep the accelerated day) until it runs
   again, and the cut-over happens then. A dev world switched back to the accelerated clock is not mapped back.
   Schedules a Soul's own agent keeps on its side (world minutes in its own files) are not the server's to map.
+  Reminders made after the cut-over are already in the new count and are left alone (by their creation tick); a poster
+  or chalk drawing made between the cut-over and a retried stamp move is moved too and may read as old. A dev world
+  switched to the accelerated clock before a failed mapping was retried drops that cut-over.
 - **Choosing and changing the zone (#1649 part 3).** The New world dialog has a time zone field, prefilled with the
   creator's browser zone; the launcher refuses an invalid one (`time.zone-invalid`), keeps it on the registry row and
   passes it to the world as `WORLD_TIME_ZONE`, which the first real-time boot records as `time.timeZone` (before the slug
