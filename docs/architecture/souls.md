@@ -86,7 +86,9 @@ two share a name, `@eden create "Ivo"` to pick the world. Each run works inside 
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
-A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and with
+A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and once it
+holds a token the home's guide (`CLAUDE.md`, `AGENTS.md`) lists it beside the Souls, so the next chat finds it; only the
+guide's head is rewritten, and a guide this home didn't write is left alone. With
 several seats `node eden-god.mjs <world> <command>` picks one (`@<world>` when a command has that name). Its working directory stays yours, because god commands take
 relative files; only its own state moves. A folder with no home keeps `.eden-god.json` as ever, and that file wins until
 `node eden.mjs import` moves it in. Acting as a god reads nothing under `souls/`, and acting as a Soul nothing under
@@ -144,7 +146,16 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from. A legacy folder has no memory, so a Soul run by
+`memory <words>` searches the projections and says where each line came from.
+
+The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
+`ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/edge-skill/memory-folder.mjs`). Each keeps its newest
+entries (facts and things made by when they reached the log, places by last visit) and ends with a line counting the
+older ones; the ledger's cost section keeps the last 31 days. `memory` also searches the log for the learned facts, things
+made and places a projection dropped, marked `log` and untrusted, and for the Soul's own note on a place that left
+`places.md`, marked as its own; `more` counts every match once. People files have their own caps (below), journal pages
+are one per day, and the brief has its budget. Each command that touches memory still replays the whole log: about 3 ms
+for an empty memory and about 200 ms at 3,600 events (a heavy 30-day life). A 1.9 folder's projections have no budget. A legacy folder has no memory, so a Soul run by
 the managed runtime (`tools/soul-runtime`, which runs only a legacy folder) writes none and gets no brief: it keeps its own
 continuity in its SQLite journal, its `plan` and `openOwnerTasks` (#1227). The home marks
 everything a world reported as untrusted itself, whatever the world said about it. `memory/` and `MEMORY.md` are in the
@@ -224,6 +235,58 @@ admitted the Soul. Rows are written as things happen, and one index read serves 
 Soul's rows from its last 500 completed receipts on the first read; those rows, and an older arrival or journey, show the real
 clock alone, because the world clock of that moment is gone. The route answers with an ETag and `no-cache`. A visitor reads it on
 the Soul's card, and `inspect <soul>` shows its first five.
+
+## The world on the agent's machine
+
+An agent decides from a copy of the world it keeps locally, and sends one act by id
+([#1737](https://github.com/soulsimulation/souls/issues/1737)). For now everyone knows everything: the copy is the
+whole world, wherever the Soul's body is. Each answer carries `scope: "public"`, which is where a later privacy model
+withholds. Owner messages and credentials are never in it.
+
+- **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
+  kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
+  sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
+  is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
+  stands in it (on its own floor: a thing upstairs is located on its level, and nothing standing in a secret room's
+  outline is published, on any floor) and what is done in it are left out. A `ref` two places share (a lake and its bank) is left off both, so
+  `walk:<ref>` always names one place. A thing a body sits on is marked `seat: true`; `sit:<its id>` is taken from
+  anywhere. The version follows the god's edits too: a thing moved, renamed or removed, or a place added, renamed or
+  removed, is a new catalog, and a spot whose thing is gone leaves it. Until the world first has its places and activity spots laid out
+  (a few seconds after it starts listening) the route answers `503 world.starting` with `Retry-After: 2` rather than
+  publish a world with no acts; `live` names no version until then. Eden 2026: 1,510 places, 4,518 things, 1,365 acts,
+  1.4 MB.
+- **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
+  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
+  place is never named: a Soul inside one is listed without position or place, and what is said there is left out,
+  including lines said there before it was made secret.
+- Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
+  grow with the number of clients.
+- **The client** (`tools/world-launcher/soul/catalog.mjs`, inlined into `eden.mjs`) keeps both as files in the Soul's
+  folder. `serve` refreshes the live picture every 2 s and refetches the catalog when its version changes. `look`,
+  `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
+  and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
+  its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
+  what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
+  narrow nothing; an act that needs others ranks after one done alone. A fresh folder's first `find` fetches both itself,
+  and waits out `world.starting`.
+- **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
+  is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
+  One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
+  a spot whose thing a god removed. A spot or seat in a secret place the Soul has not been to or found is
+  `capability.unknown`, with no reason that names the place. Such an id is
+  built afresh each time it is asked for: a far spot is never answered from a kept menu.
+- **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those
+  are still read with `here` and `inspect <id>`. A movable thing is listed where it stood at the last rebuild: a Soul
+  carrying or putting one down changes no version, so its position in the copy can be old until the next god edit or
+  restart (#1751).
+
+The served skill is look, find the id, act in one call. `POST /v1/edge/resolve` still answers for older clients; the
+current client uses it only when `act` or a `plan` step is given words where an id belongs.
+
+Answers on `/v1/edge`, `/v1/god` and `/v1/world` carry `Server-Timing: world;dur=<ms>, queue;dur=<ms>`, a `world.crowded` refusal too (a dropped request has no answer to carry it; an answer the launcher serves from its cache carries none, since it cost the world nothing): the
+world's own time from arrival to answer, and how much of it was waiting for admission
+([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
+time.
 
 ## The edge API
 

@@ -123,3 +123,12 @@ test('a seat that never had a second card, or no transcript, is unknown, never a
   assert.equal(question.score({ ...one, requests: one.requests.filter((r) => !(r.seat === 'bo' && r.sentAt === new Date(T).toISOString())) }).verdict, 'unknown');
   assert.equal(question.score({ ...one, hasTranscript: () => false }).verdict, 'unknown');
 });
+test('#1736: a walk in a chained call whose output could not be told apart is a move this question can\'t place', () => {
+  const lost = { verb: 'act', args: ['walk:flag-orchard', '--wait', '60'], atMs: T + 2000, out: null, unplaced: true };
+  assert.equal(verdict([plan(), parted(), say('Bo!'), lost]), 'unknown');
+});
+test('#1736: a second day with no words still cites what the Soul did, so a fail is not dropped for want of evidence', () => {
+  const quiet = [plan(), parted(), { verb: 'result', args: ['msg_3', 'done', 'Carrying on'], atMs: T + 1000, line: 7, out: { closed: true } }];
+  const r = question.score(ctxOf(quiet, quiet));
+  assert.equal(r.verdict, 'fail'); assert.ok(r.evidence.length > 0);
+});
