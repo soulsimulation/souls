@@ -53,7 +53,8 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `{ok, service, build, auth, worlds, running, maxWorlds, maxRunning, hostOk, hostCodes?, clientErrorsNew}`. `hostOk`
   and short `hostCodes` are public; the numbers behind them are for loopback requests only.
 - `GET /__sim/health`: a health page for site owners (accounts listed in `SIM_SITE_OWNERS`) or loopback; build,
-  host, every world, backups, arrivals, new client errors and alerts (`tools/world-launcher/health-dash.mjs`).
+  host, every world, backups, arrivals, new client errors and alerts (`tools/world-launcher/health-dash.mjs`). A signed-in
+  site owner can set any world's list picture with the Picture button on its row; the audit log records it as `site-admin`.
 - `GET /w/<slug>/healthz` carries `halted` and `glitches`: `{total, byRule: {rule: {rung: n}}}`, every refusal, recovery and halt
   the world has had. It is public, so rule names and counts only. Each glitch also writes one `[world] glitch` line to
   the world's log and one row to its store, with the bodies, the tick and the evidence: `op.mjs glitches --port <port>
@@ -104,6 +105,10 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   --from-pid <the world's process>` (or `--env-file`/`--env` with the world's settings) boots an online-backup copy with
   this tree's code, adopts, runs `--ticks` (default 1200) and prints one JSON line: adopted or refused and why, running or
   halted, the hashes before and after. The original is opened read-only and the copy is deleted afterwards.
+- `GET /w/<slug>/healthz` also carries `api`: per-route server time (queue and handler p50/p99/p99.9, the last 5–10 min and
+  since start) for the Soul and god API, by a closed list of route ids. `live.json` carries the same. Each API answer's
+  `Server-Timing` adds `launcher;dur` and `upstream;dur` at the launcher. A main-thread stall over 1 s is a timestamped
+  `[stall]` line in the world's log. To place a slow answer, see `docs/architecture/load.md` §4 (#1750).
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor

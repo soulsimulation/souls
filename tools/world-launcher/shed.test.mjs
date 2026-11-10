@@ -131,7 +131,20 @@ test('through the launcher: 20 polite Souls at green are never refused nor slowe
   try {
     const { slug } = await (await fetch(`${base}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Shedder' }) })).json();
     await (await fetch(`${base}/w/${slug}/v1/config`)).arrayBuffer();
-    const setLevel = async (l) => { await (await fetch(`${base}/w/${slug}/level?l=${l}`)).arrayBuffer(); await (await fetch(`${base}/w/${slug}/healthz`)).arrayBuffer(); };
+    // The level is the world's own (x-sim-load on its answers); the launcher learns it from them. Set it until the world's
+    // own answer says so, and never go on unset: a CI run (#1618, 2026-11-09) saw 0 of 114 amber reads hinted and 0 red
+    // refusals, so the world never answered amber or red (the set was refused or lost) and the test read that as no shedding.
+    const setLevel = async (l) => {
+      let last = null;
+      for (let i = 0; i < 50; i++) {
+        const r = await fetch(`${base}/w/${slug}/level?l=${l}`); await r.arrayBuffer();
+        const h = await fetch(`${base}/w/${slug}/healthz`); await h.arrayBuffer();
+        last = { level: r.status, healthz: h.status, load: h.headers.get('x-sim-load') };
+        if (r.status === 200 && last.load === l) return;
+        await sleep(200);
+      }
+      assert.fail(`the world never answered at ${l}: ${JSON.stringify(last)}; world ${JSON.stringify(L.pool.status(slug))}`);
+    };
     const call = (i, path, method = 'GET') => fetch(`${base}/w/${slug}${path}`, { method, headers: { authorization: `Bearer sim_s_soul${i}_secret`, 'x-forwarded-for': `198.51.${i >> 8}.${i & 255}` } })
       .then(async (r) => ({ path, status: r.status, hint: r.headers.get('x-sim-hint'), body: r.status >= 400 && r.status !== 404 ? await r.json().catch(() => null) : (await r.arrayBuffer(), null) }));
     /** n Souls, each with one listener, then the Stage B mix (a read every 3–5 s, an act every 15–30 s) for `ms`. */
@@ -165,7 +178,7 @@ test('through the launcher: 20 polite Souls at green are never refused nor slowe
     console.log(`# launcher stageb: polite 20 -> ${polite.length} calls, 0 refused; N=100 green ${green.length} (${refused(green).length} refused), amber ${amber.length} (${refused(amber).length} refused, ${reads(amber).filter((r) => r.hint).length}/${reads(amber).length} reads hinted), red ${red.length} (${refused(red).length} refused: ${[...new Set(refused(red).map((r) => `${r.body?.code}/${r.body?.limit?.scope}`))]})`);
     assert.equal(refused(green).length, 0); assert.ok(green.every((r) => !r.hint));
     assert.equal(refused(amber).length, 0, 'amber: served');
-    assert.ok(reads(amber).length > 0 && reads(amber).every((r) => r.hint === 'soul.slow-down'), 'amber: every C2 read carries the hint');
+    assert.ok(reads(amber).length > 0 && reads(amber).every((r) => r.hint === 'soul.slow-down'), `amber: every C2 read carries the hint (${reads(amber).filter((r) => r.hint).length}/${reads(amber).length}; world ${JSON.stringify(L.pool.status(slug))})`);
     assert.ok(acts(amber).every((r) => !r.hint), 'amber: acts carry no hint');
     assert.ok(reads(red).length > 0 && reads(red).every((r) => r.status === 503 && r.body?.code === 'world.busy' && r.body.limit?.scope === 'load:red'), `red: C2 refused by the level: ${JSON.stringify(reads(red).filter((r) => r.body?.limit?.scope !== 'load:red'))}`);
     assert.ok(reads(red).every((r) => /^The world is very busy \(red\)/.test(r.body.message) && r.body.retryAfterMs === 2000));

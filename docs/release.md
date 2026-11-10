@@ -431,6 +431,9 @@ switch it on (one last restart).
 
 **What a viewer sees.** The page and API never get a refused connection. Each world's viewer socket drops once while
 that world moves and reconnects by itself; "Reconnecting…" appears only after 3 s (`apps/web/src/viewer-arrival.ts`).
+The page tries again 50 to 150 ms after the 1001 close, and the launcher holds that upgrade until the new world
+answers, so the pause is the world's boot: 3.6 to 5.1 s on 0.123, 4.17 and 4.18 (#1583). The release probe's bar is
+6500 ms. Each drop carries both parts (`retryMs`, `heldMs`), and the probe's report keeps the probe machine's load.
 A page running the previous bundle reloads at once only if the protocol changed; otherwise it swaps bundles after
 the tab has been hidden for a minute (`useSouls.ts`).
 

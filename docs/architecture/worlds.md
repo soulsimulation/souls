@@ -35,6 +35,12 @@ view of the Soul, coming in close or following it into a house, on eased glides 
 a new Follow). A zoom out or a drag round decouples it: it keeps the viewer's angle and distance, carried along with the
 Soul, and occlusion never pulls it back in, also around a balloon basket or other ride. Zooming in stays coupled. A
 short cue says so, and Follow again (the chevron menu or the Soul's card) couples it.
+`?camtrace` on a world page (#1317, `camera-trace.ts`, its own chunk, loaded only then) records what the camera did and
+why: per changed frame the mode, target, the pose asked for and the pose drawn, and while following the rule that moved
+it (`held`, `user`, `collision`, `opening`, `search`, `glide`, `speed-cap`) with its parameters, plus the viewer's
+wheel, drag, touch and movement keys. Times are `performance.now()` ms. A small panel lists each automatic move that
+overrode the viewer's input in the last 2 s (more than 0.25 m or 3° off what they asked) and downloads the trace as
+JSONL. Nothing leaves the page unless the viewer downloads it.
 Free has no wall near the map's edge: a lost-camera guard (`WorldRtsCamera.keepPivotInBounds`) keeps the eye within one
 far-zoom limit (320–1,400 m) of the world's ground rectangle, far beyond the map; where the pivot sits does not matter.
 On a touch screen in Free (`apps/web/src/touch/WorldTouchFree.ts`), a touch that starts in the lower-left 45 % of the
@@ -93,10 +99,67 @@ switch independent. A previously saved master mute migrates to both switches off
   released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
   (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
   (`apps/server/src/clock-catchup.ts`) without simulating the gap.
+- **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
+  own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
+  local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
+  whose origin makes the engine read local time (`apps/server/src/god/real-clock.ts`), and logs a new one only at boot,
+  on a zone change, or when a watched world has drifted a minute from the wall. A world without a zone is given one at
+  its first real-time boot, recorded as one engine edit: `mars-college-2026` and `mars-college-2027` America/Los_Angeles,
+  `rna-studio` Europe/Lisbon, every other world America/New_York. The same edit sets `time.clock: 'real'`.
+  Everything that reads the world day follows the one clock: the engine's `env.datetime` (perception, light labels,
+  schedules and the calendar, mandates, the ledger's clock), needs (a real day long), weather durations (real minutes)
+  and the viewer's sun, which on real time is an equator sun on the local clock (daylight about 06:00 to 18:00, all
+  year; `apps/web/src/sun-site.ts`). Authored worlds without a god (eden, mars, littlemartians run by `main.ts`) keep
+  the local time of their migration zone through the same keeper. Old-world forks served by `tools/core` are out of scope.
+  A re-alignment only moves the clock's origin (`realign`), so the day's state (last day turn, event, quiet) is kept.
+  When daylight saving ends, the local clock, and so the world's, goes back an hour once.
+- **Time setter on real time.** `POST /v1/god/env` on a production world (the deploy's marker `SIM_STAGE`: the keeper
+  takes it from its unit, `sim-worlds@<stage>`, or its stage link's name, and the launcher passes it to every world;
+  `production` and `legacy` are production. It fails closed: with no stage known, as under an older keeper that
+  `activate.sh --reload` keeps running, the launcher marks a world without dev auth `production`, and a world with no
+  `SIM_STAGE` is production unless `DEV_AUTH=1` or its `PUBLIC_URL` is local or unset) refuses `timeOfDay`
+  (`time.real-clock`: preview another hour in the viewer or with `look --hour`) and a speed (`timeScale` > 0,
+  `time.accelerated-production`); pausing (`timeScale: 0`) and resuming (`realTime: true`) stay allowed. On a dev world
+  a set hour or speed puts the world on the dev-only accelerated clock (`time.clock: 'accelerated'`, as playtests need);
+  `realTime: true` puts it back. `POST /v1/god/act` holds the same rule for a `world` op's time (`clock: 'accelerated'`,
+  `set` or `dayTicks` on a production world: `time.accelerated-production`). With the flag off again, a migrated world's
+  `time.clock` is cleared at boot so nothing reads a clock it does not run.
+- **The cut-over: existing data (#1649 part 4).** A world that ran on the accelerated clock (one world day per real
+  hour) is hundreds of world days in; on real time its day and date are the local ones, so the day number goes back once,
+  when its clock first comes onto real time (`apps/server/src/god/clock-cutover.ts`, run by the clock keeper after that
+  clock event applies). The mapping: history (timeline rows, receipts, journals, the ledger's recorded `worldDay`) keeps
+  the clock reading it was recorded with; pending world-clock reminders keep their time of day and their distance in
+  world days (due tomorrow at 18:00 stays due tomorrow at 18:00, local); age-counting day stamps (poster records' `day`,
+  a fading chalk drawing's `state.day`) move back with the day number, so each keeps its age (never below day 0), as one
+  recorded engine edit; calendar items are scheduled by tick, so an upcoming one starts at the same real moment;
+  real-clock and delivered reminders are untouched; nothing is deleted. The clock event names the cut-over
+  (`dayConfig.cutOver`, carried on by later clock events), and each part records that it ran (the reminder rows with a
+  marker row in one transaction, `edge_clock_cutover_v1`; the stamps as an engine edit whose note names the cut-over
+  tick), so a mapping that failed or was cut short by a restart is finished at the next boot, and never runs twice. A
+  world paused on the accelerated clock keeps that day count (and its needs keep the accelerated day) until it runs
+  again, and the cut-over happens then. A dev world switched back to the accelerated clock is not mapped back.
+  Schedules a Soul's own agent keeps on its side (world minutes in its own files) are not the server's to map.
+  Rollback (`SIM_REAL_TIME=0` and a restart): a god world goes back to the accelerated clock at boot, with the date and
+  time of day continuous, but mapped reminders and stamps keep their new values. An authored world without a god
+  (`main.ts` with no world engine) that already has the real-time day clock keeps it: `LivingWorld.install` leaves an
+  existing clock alone and no keeper re-aligns it, so it runs real-length days from its last origin. Launcher worlds all
+  run with the world engine and a god, so this exception is for authored worlds served by `main.ts` directly.
+  Reminders made after the cut-over are already in the new count and are left alone (by their creation tick); a poster
+  or chalk drawing made between the cut-over and a retried stamp move is moved too and may read as old. A dev world
+  switched to the accelerated clock before a failed mapping was retried drops that cut-over.
+- **Choosing and changing the zone (#1649 part 3).** The New world dialog has a time zone field, prefilled with the
+  creator's browser zone; the launcher refuses an invalid one (`time.zone-invalid`), keeps it on the registry row and
+  passes it to the world as `WORLD_TIME_ZONE`, which the first real-time boot records as `time.timeZone` (before the slug
+  defaults). The owner changes it with `POST /v1/god/env {timeZone}`: one `world` op, in the ledger and undoable; an
+  invalid zone is `time.zone-invalid`, a co-builder token `cobuilder.scope` (or `cobuilder.disabled`), a helper token
+  `helper.scope`. The clock re-aligns to the new local time at once. `GET /v1/god/status` reports the zone, so the
+  launcher's list (`worlds.json` `timeZone`) follows an owner's change, and the viewer's time panel names it. When the
+  shown clock jumps 20 world minutes or more while live, the viewer eases the sky and lights to the new time over about
+  4 s (`apps/web/src/clock-ease.ts`); scrubbing history, reduced motion and `?shot` pages cut instead.
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,
-  `template` or `null`). The owner sets the picture with a 16:9 JPEG
+  `template` or `null`). The owner, or a site owner from the Picture button on `/__sim/health`, sets the picture with a 16:9 JPEG
   ([API](api.md#world-owner-api-served-by-the-launcher)). It is checked and stripped by the upload gate in
   `apps/server/src/moderation/` (including the site admin's vetoes, which also stop a stored or default picture from
   being listed or served) and stored as `<data>/worlds/<slug>/thumbs/<sha>.jpg`, so it moves with the world on
