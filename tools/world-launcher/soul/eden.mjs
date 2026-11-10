@@ -3258,7 +3258,7 @@ async function status() {
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
-    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
   }
