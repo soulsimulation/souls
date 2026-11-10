@@ -24,6 +24,7 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
+import { commitSoulCompletion } from './soul-completion.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
@@ -1589,6 +1590,12 @@ export class EngineBridge {
   }
 
   // ------------------------------------------------------------------ engine → entity world
+
+  /** Completed server-owned Soul work: engine history, current context and derived output geometry.
+   * The family must validate its started receipt/authority and deduplicate before calling this. */
+  commitSoulWork(ops: Op[], note: string): Result {
+    return commitSoulCompletion(this.god, diff => this.onCommit(diff), ops, note);
+  }
 
   /** Trusted engine edit: journaled (by 'engine', never undone by the god), published to viewers, not echoed back. */
   engineAct(ops: Op[], note: string): Result {
