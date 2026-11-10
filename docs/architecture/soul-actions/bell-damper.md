@@ -15,3 +15,5 @@ A covered bell refuses a NEW rope pull usefully; rings and the one-shot sound tr
 damper restores the same native bell pull and existing audio. This does not silence an already-playing tail,
 simulate felt acoustics or add scores, audio nodes, new rigging, loose felt custody or a general mute framework.
 No new world idle scan is added. Basic coarse work is acceptable; required actual evidence remains separate.
+
+Issue #1896; PR #1898 holds the current proof, qualification and remaining acceptance evidence.
