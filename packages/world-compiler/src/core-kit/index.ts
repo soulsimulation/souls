@@ -12,6 +12,7 @@ import { LAND_ART_MATERIALS } from './land-art.ts';
 import { INSTRUMENTS } from './instruments.ts';
 import { HAND_OPENINGS, LOCKABLE_DOOR } from './hand-openings.ts';
 import { TEA_DEFS } from './tea.ts';
+import { GARDEN_PRODUCE_DEFS } from './garden-produce.ts';
 import { HARVEST_DEFS } from './harvest.ts';
 import { WRITABLE_BOARDS } from './writable-boards.ts';
 import { BOOK_DEFS } from './books.ts';
@@ -66,7 +67,7 @@ import figures from './figures.json' with { type: 'json' };
 import meshLods from '../core-mesh-lods.json' with { type: 'json' };
 import type { DefInput } from '../schemas.ts';
 
-export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
+export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS, ...GARDEN_PRODUCE_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
   const lod = def.make.kind === 'mesh' ? (meshLods as Record<string, { lod1: string }>)[def.make.asset] : undefined;
   return lod ? { ...def, make: { ...def.make, ...lod } } as DefInput : def;
 });

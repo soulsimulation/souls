@@ -715,3 +715,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Harvested produce
+
+`core/harvest-basket@2` preserves native tomato picking and adds `take-tomato`: on a fixed admitted work surface, three seconds of native craft atomically removes one stored fruit and places `core/tomato@1` beside the basket on the same surface. Output is a sibling, never a child carried by the basket. Clear 30 cm to the right, same floor and empty hands are required. Current full menu/inspect exposes finite stock and requirements; the real tomato uses existing carry and bite/eat faculties, with preparation provenance on its own entity. Native started/completed binding rechecks actual basket, stock, support, poses, body, access and output room. Old basket revisions, growth and ingestion contracts are unchanged.
