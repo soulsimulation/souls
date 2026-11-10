@@ -102,6 +102,7 @@ export type ActuatorHost = {
   wateringBegun?(soul: EdgeSoul): void;
   /** Entry 43 (tea.ts): "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea" as acts of native steps. */
   tea?(soul: EdgeSoul, thing: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
+  abacus?(soul:EdgeSoul,thing:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   teaBegun?(soul: EdgeSoul): void;
   /** #438 (harvest.ts): "pick the tomatoes", "pick flowers for the vase" as acts of native steps. */
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
@@ -350,6 +351,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
+      const count=s.key?host.abacus?.(ctx.soul,s.key,a.name):null;if(count)return 'code' in count?count:null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
@@ -370,6 +372,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
+        const count=s.key?host.abacus?.(ctx.soul,s.key,a.name):null;if(count&&!('code'in count))return{state:s,result:{action:a.name,summary:count.summary},bodies:[{label:a.label,steps:count.steps}]};
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;

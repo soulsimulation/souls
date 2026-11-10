@@ -1,0 +1,18 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1714,
+  "reason": "New working same-item two-digit abacus and counting desk. Two exact production K2 sweeps: ten placed/baked/rendered samples, zero findings/gaps. Registered builder verifies seven genuine bead states, raw family400tri budgets unchanged. No older definitions, supplements or budgets changed.",
+  "definitions": [
+    {
+      "ref": "core-counting-desk@1",
+      "hash": "72155c6b454fe2d7460b7b46b058c17ca97d802350490bf7bff52ed9c326f172"
+    },
+    {
+      "ref": "core-abacus@1",
+      "hash": "e715cee5726c91e9d075b5d5b18defe83191580a6325b0303dc6fa76b1993d5f"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}
