@@ -1,5 +1,9 @@
 # Voluntary physical coordination and reusable construction
 
+For current Soul Actions product priorities, acceptance and action budgets, read [Soul Actions direction](soul-actions-direction.md).
+This plan preserves shared authority, consent and engine contracts; complex dependencies go through the Claude
+steward with full T3 coordination and any higher applicable tier. Continue independent breadth work meanwhile.
+
 **Design intent and planning baseline, not implemented API documentation.**
 The outcome is tracked in [#560](https://github.com/soulsimulation/souls/issues/560), a workstream of the
 [controllability umbrella #623](https://github.com/soulsimulation/souls/issues/623) and its

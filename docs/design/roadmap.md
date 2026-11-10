@@ -9,7 +9,7 @@ selects a small ready queue with the maintainer's priorities using [planning and
 | Fluid agent–Soul control and expressive collaboration | Owners direct short and long intentions responsively; the agent sends only offered commands, perceives the world by layers, and keeps one resident client per Soul; every change is scored on the same specs | [Agency quality design](agency-quality.md), [umbrella #623](https://github.com/soulsimulation/souls/issues/623); investigate before adopting candidate changes |
 | Souls that accumulate and remember | A person's Souls and god seats live in one home found from any chat and addressed by name; each Soul keeps one memory across worlds, points at world evidence rather than copying it, and forms relationships from episodes | [Soul context design](soul-context.md), [tranche #1133](https://github.com/soulsimulation/souls/issues/1133); orthogonal to #623 except the resident client's pre-turn brief |
 | Reliable, responsive worlds | Visitors arrive smoothly; Souls receive timely, honest outcomes; idle worlds are cheap and faults recover safely | [Server scalability #443](https://github.com/soulsimulation/souls/issues/443), [continuity #464](https://github.com/soulsimulation/souls/issues/464), [playtest findings #28](https://github.com/soulsimulation/souls/issues/28), [client performance #556](https://github.com/soulsimulation/souls/issues/556) |
-| Richer everyday life | Objects have usable actions, lasting outcomes and credible motion without bloating distant Souls' context | [Soul Actions #26](https://github.com/soulsimulation/souls/issues/26), [future planning #426](https://github.com/soulsimulation/souls/issues/426) and its family issues |
+| Richer everyday life | Broaden Soul–object, Soul–Soul and Soul–world actions with basic coherence, lasting outcomes and agent discovery | **[Soul Actions direction](soul-actions-direction.md)**, [current tranche #903](https://github.com/soulsimulation/souls/issues/903), [Soul Actions #26](https://github.com/soulsimulation/souls/issues/26) and [planning #426](https://github.com/soulsimulation/souls/issues/426) |
 | Cooperative physical activities | The major application workstream inside controllability: independently owned Souls carry, build, perform, use tools and play; Mars College 2027 is the first construction destination | [Physical coordination design](physical-coordination.md), [workstream #560](https://github.com/soulsimulation/souls/issues/560) under [#623](https://github.com/soulsimulation/souls/issues/623) |
 | One engine, many authored worlds | General capabilities and building kits support Mars and other worlds as content rather than separate code paths | [Generalization #29](https://github.com/soulsimulation/souls/issues/29); inventory before moves or deletion |
 | Reusable Soul bodies | Owners and agents author validated bodies with honest physical capabilities; humanoids and rigid bodies work across compatible worlds | [Custom body design](custom-bodies.md), [#589](https://github.com/soulsimulation/souls/issues/589) |
@@ -20,6 +20,12 @@ selects a small ready queue with the maintainer's priorities using [planning and
 [Repository standards #577](https://github.com/soulsimulation/souls/issues/577) makes the existing monorepo easier to use
 through staged ownership/boundary changes. The [layout guide](../development/repository-layout.md) distinguishes
 current structure from intended destinations; retiring `/old` does not retire the capabilities of its worlds.
+
+## Soul Actions priorities
+
+The [current direction](soul-actions-direction.md) prioritizes exercise, meditation/quiet rituals, camping, music,
+artmaking and open-ended land art. Use its basic coherence bar and bounded action budgets when selecting slices.
+Salvage and precision investigations do not automatically precede independent new capabilities.
 
 ## Expressivity beyond the current tranche
 
@@ -32,7 +38,9 @@ Roadmap packet numbers and completed journal entry numbers are different sequenc
 Books and writing, making, music, storage, food, gardening, games and shared activities can be selected as specific
 outcomes when their prerequisites and acceptance are known. Photos, computers/displays, rides and physical
 throwing/catching retain their [design check #425](https://github.com/soulsimulation/souls/issues/425).
-[Vocabulary expansion #360](https://github.com/soulsimulation/souls/issues/360) remains planning-only until unlocked.
+The historical planning-only lock on [vocabulary expansion #360](https://github.com/soulsimulation/souls/issues/360)
+is superseded for the explicitly authorized current Soul Actions implementation portfolio. It does not authorize
+every wishlist item or bypass unresolved engine/controllability dependencies.
 Do not turn the whole wishlist into assigned work or infer approval from inclusion here.
 
 The [physical coordination and construction plan](physical-coordination.md) joins these families by shared

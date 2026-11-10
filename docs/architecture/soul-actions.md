@@ -1,5 +1,9 @@
 # Soul Actions: what Souls do by hand
 
+**Start here for current priorities and acceptance:** [Soul Actions direction](../design/soul-actions-direction.md).
+The goal is a broader action space with basic coherence; the entries and measurements below document behavior
+and evidence, not a universal demand for high-fidelity animation.
+
 Souls now use the things in a world with their own hands. Ask in plain words and the Soul walks over, reaches, and the
 thing changes at the moment the hand touches it: a lamp lights, a door swings, water runs, the kettle clicks on. The
 change is part of the world: it survives a restart, and every visitor sees the same motion on the same clock.
@@ -703,6 +707,12 @@ own entry: `node --test packages/world-compiler/src/core-kit/library.test.ts pac
 and `pnpm --filter @souls/conformance test`. A new revision carries no budget hold; fix the mesh instead. The tests live in
 `tools/soul-actions/`; the viewer's motion units are under `apps/web/test/`, `apps/web/src/*.test.ts`,
 `mars/viewer/engine/test/` and `mars/viewer/app/engine-view/`.
+
+### Historical M05 corrections
+
+These sections retain the implemented behavior, measurements and evidence limits of their individual changes.
+Use [current direction](../design/soul-actions-direction.md) when setting acceptance for new work; these numeric
+measurements do not create new universal precision gates. Existing binding contracts and checks still apply.
 
 ### M05 wave transition (#635)
 

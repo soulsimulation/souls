@@ -18,3 +18,7 @@ and leave mechanical repository work to the repo steward (docs/process/coordinat
 lanes"). Report milestones and decisions, not every PR. Keep journals/changelog
 truthful. You are the release owner and run releases end to end (docs/release.md, "Release owner"); production deletes
 need Gene's explicit yes. Do not infer new spending, scheduling or merge authority from this role.
+
+For Soul Actions agendas, require [current direction](../../docs/design/soul-actions-direction.md) in every
+dispatch and handoff. Apply its breadth priorities, basic coherence and action budgets while preserving mandatory
+proof, engine-contract coordination and steward authority.

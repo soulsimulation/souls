@@ -36,6 +36,14 @@ only the relevant sanitized outcome in the coordination issue. The latest explic
 it supersedes. Put enduring project conventions in reviewed repo docs, not a growing worker prompt. New sessions
 read the small manifest/current state and relevant issue evidence, not the entire conversation history.
 
+## Soul Actions assignments
+
+Soul Actions planning, review and dispatch require [current direction](../design/soul-actions-direction.md).
+Include that required read in every assignment and handoff, together with the new capability, action budget,
+basic-coherence acceptance, optional polish and any binding-check conflict. Prioritize independent breadth; park
+substantial prerequisites separately and route multi-Soul/engine contracts to the Claude steward with full T3
+coordination and any higher applicable tier. Existing proof and approval rules remain binding.
+
 ## Intake and dispatch
 
 1. Translate new requests into outcomes and acceptance; search related issues, actual code and existing PRs first.

@@ -10,6 +10,11 @@ First launch remains orientation-only: inspect/report the current project, proce
 for Gene's agenda/capacity and instruction to begin. Do not activate an old agenda or take over its writer merely
 because state files exist. An explicit migration instruction may authorize resuming a named agenda after recovery.
 
+Soul Actions dispatch and provider handoffs must carry the required read
+[docs/design/soul-actions-direction.md](../design/soul-actions-direction.md), the new capability, time budget,
+basic-coherence acceptance, optional polish and any unresolved mandatory-check conflict. Recover those alongside
+authority and evidence; older salvage/precision priorities do not silently replace current product direction.
+
 ## Native entry paths
 
 | Harness | How to enter and delegate |

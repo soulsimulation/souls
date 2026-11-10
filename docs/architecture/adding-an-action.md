@@ -5,6 +5,19 @@ exists. Since strict offers (#1093), layered perception (#1094), same-intent alt
 skill (#1099), an action is usable only if it ships an offer id, a parameter schema, its refusal codes and its
 alternatives. English words are only advisory `resolve` vocabulary.
 
+## Current product acceptance
+
+Read [Soul Actions direction](../design/soul-actions-direction.md) first: broaden usable actions, use basic
+coherence for rigging/animation and check an actual visual result early. Permission, ownership, persistence,
+authoritative timing and useful agent context remain part of the action. Approximate contact and crude transitions
+are acceptable when understandable; finer animation is optional polish. Mandatory engineering checks below remain
+binding; escalate any conflict to the steward rather than changing the proof policy.
+
+Budget an ordinary existing-capability action at 30–60 minutes including focused verification, with the current
+portfolio average at or below two lane-hours per action. Ordinary slices normally fit within two hours; complex
+slices get an explicit few-hour budget at dispatch. At the assigned limit, return reviewable work or park with a concrete reason
+and continue an independent action. A substantial prerequisite is a separate bounded issue.
+
 ## The four shapes
 
 Every action is one of these, cheapest first. Pick the cheapest that works.
@@ -116,13 +129,16 @@ Run 2×2 and an uncut clip of the action in a world. [Agent lifecycle](../proces
 Each long-tail item is filed with these fields (#903):
 
 ```markdown
+**Direction:** read docs/design/soul-actions-direction.md; new capability and applicable five outcomes
+**Time budget:** ordinary 30–60 minutes; assigned limit; portfolio average ≤ two lane-hours/action; parking condition
 **Entry:** what a person asks for, in their words
 **Faculty:** existing or new, and which shape, (a) to (d)
 **Offer ids and schemas:** each offer, with its parameters
 **Perceived facts:** what a Soul reads, and what others perceive
 **Persistence:** where the state lives and how it survives a restart
 **Budget:** triangles, draw calls, `here` bytes; #1033's check for a family
-**Proof:** Soul Run 2×2 plus a clip
+**Acceptance:** basic coherence; optional polish separated; any binding-check conflict named
+**Proof:** applicable tier requirements; early actual visual check, then required final evidence
 ```
 
 The lane owner files these as it reaches them, not all at once.

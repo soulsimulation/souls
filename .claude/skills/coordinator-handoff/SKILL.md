@@ -16,6 +16,11 @@ Private folder (ignored, never published): `.local/project/coordinator/` with `S
 `STATE.json` (currently #755). Public text never carries local paths, usernames, host names or session handles
 ([publication privacy](../../../docs/process/publication-privacy.md)).
 
+For any Soul Actions queue, briefs and takeover prompts must require
+[the canonical direction](../../../docs/design/soul-actions-direction.md), identify new capabilities and time
+budgets, and distinguish basic-coherence acceptance, optional polish and unresolved binding-check conflicts.
+Preserve existing proof and failed evidence; do not revive superseded precision-first or salvage-first ordering.
+
 ## Keep it cheap: always-current records
 
 A handoff is fast only if these are kept current during normal work, not written at the end:
@@ -76,6 +81,8 @@ Run the Resume preflight (step 0) first. Reply with a short read-back: the state
 check as pass, fail or refused. Then resume: relaunch the lanes from their brief files, re-arm
 the PR watch and your heartbeat, and continue with next step #1: <one line>.
 Standing directives: <the 3-4 that matter most, verbatim>.
+For Soul Actions: read docs/design/soul-actions-direction.md; carry each action's new capability, time budget,
+basic-coherence acceptance, optional polish and unresolved binding-check conflicts.
 The previous workers are gone; their branches, worktrees and issue checkpoints are the record.
 ```
 
