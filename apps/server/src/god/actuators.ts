@@ -107,6 +107,7 @@ export type ActuatorHost = {
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, as native steps; the world changes when the receipt completes. */
+  rainwater?(soul:EdgeSoul,id:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   repair?(soul: EdgeSoul, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
 };
 export type Thing = { id: string; name: string; def: StoredDef; state: Record<string, unknown>; params: Record<string, unknown> };
@@ -352,6 +353,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
+      const rain=s.key?host.rainwater?.(ctx.soul,s.key,a.name):null;if(rain)return 'code'in rain?rain:null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
       return whenRefusal(a, state, nameOf(s)) ?? (isListAction(def, a) ? listProblem(def, a, state, ctx.soul) : isGameAction(def, a) ? gameProblem(def, a, state, ctx.soul) : null);
@@ -374,6 +376,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
         if (pick && !('code' in pick)) return { state: s, result: { action: a.name, summary: pick.summary }, bodies: [{ label: a.label, steps: pick.steps }] };
+        const rain=s.key?host.rainwater?.(ctx.soul,s.key,a.name):null;if(rain&&!('code'in rain))return{state:s,result:{action:a.name,summary:rain.summary},bodies:[{label:a.label,steps:rain.steps}]};
         const contact = host.deferContacts && isContactActuator(def, a);
         const motion=contact&&s.key?host.contactPlan?.(ctx.soul,s.key,a.name,params):null;
         if(motion){const me=host.bodyAt(ctx.soul)!,far=(motion.level??0)>0||Math.hypot(me[0]-motion.root[0],me[1]-motion.root[2])>.1;
@@ -406,6 +409,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     if (!out?.accepted) return out;
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
+    if (host.rainwater?.(soul,id,a.name))return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }

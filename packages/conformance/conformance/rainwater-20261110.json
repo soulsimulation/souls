@@ -1,0 +1,6 @@
+{
+ "schema":"catalog-conformance-supplement/1",
+ "note":"2026-11-10 #1735: new opt-in rainwater collector, finite four-litre source with covered/open parked lid and four actual water-level layers. Scoped K2 seven samples place/bake/render with zero findings or gaps. Real registered-builder test proves one lid remains in each state and actual water-layer visibility, within existing raw/render budgets. No older revision, threshold or baseline changed.",
+ "defs":[{"def":"core-rainwater-collector@1","hash":"2a3da121ec6e4399a7914ee43d8bf9cd908ae5d379d1ba771000698b8c115b8c"}],
+ "findings":[],"qualificationGaps":[]
+}

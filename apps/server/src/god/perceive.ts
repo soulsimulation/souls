@@ -1,3 +1,4 @@
+import type {Rainwater} from './rainwater.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -88,6 +89,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  rainwater?:Rainwater;
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -184,6 +186,7 @@ export class GodPerceive {
         const busy = ins.slots.some((s) => rt.holder(`surface-slot:${id}#${s.id}`).length) || [...(m.children.get(id) ?? [])].some((c) => slots.has(m.entities.get(c)?.in.slot ?? '') && rt.holder(`entity:${c}`).length);
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
+      rainwater:(soul:EdgeSoul,id:string,action:string)=>{const e=this.h.model.entities.get(id),d=e&&this.h.model.resolvedDef(e.def);return d?.name==='core-rainwater-collector'&&d.version===1&&['uncover','cover','collect-rain'].includes(action)?this.h.rainwater?.plan(soul,id,action,this.actHost().approach(id,soul,null,.95))??null:null;},
       deferContacts: !!this.h.edge?.contactActuator,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
