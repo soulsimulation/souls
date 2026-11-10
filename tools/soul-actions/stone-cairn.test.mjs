@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture,invite,accept,factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {coreLibrary,WorldModel} from '../../packages/world-compiler/src/index.ts';
+
+test('native cairn construction independently arranges finite tiers and recovers stones',{timeout:60000},async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});t.after(()=>{comms.close();f.host.stop();f.db.close();});const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};await tick(5);await invite(f,'ana');const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Build a cairn'}));soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};const ana=soul;await tick(5);const[x,,z]=f.host.engine.world.entities[soul.entityId].pose.p,here=async()=>await(await app.request('/v1/edge/here?include=doHere')).json(),bytes=h=>JSON.stringify(h.here).length;const absent=await here();ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/stone-cairn@1',name:'far-'+i,p:[x+120+i%10*3,z+120+Math.floor(i/10)*3]}))}));await setImmediate();f.host.drainInputs();const far=await here();assert.equal(bytes(absent),bytes(far));ok(god.act({ops:[{op:'place',def:'core/stone-cairn@1',name:'stone-cairn',p:[x,z-1.3]},{op:'place',def:'core/stone-cairn@1',name:'private-stone-cairn',p:[x-3,z],access:'private'}]}));await tick(40);const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=ent('stone-cairn').id,act=(c,p={})=>accept(f.host,edge.act(soul,{capability:c,params:p})),finish=async r=>{ok(r);for(let n=0;n<1200;n++){const end=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(end.phase))return end;await tick();}assert.fail('native action did not finish')},cap=n=>'object:'+id+':'+n,inspect=async()=>await(await app.request('/v1/edge/inspect/'+id)).json();
+ assert.equal((await act('object:'+ent('private-stone-cairn').id+':tier-1-flat')).accepted,false);
+ const initial=structuredClone(ent('stone-cairn').state),r=ok(await act(cap('tier-1-flat')));await tick(8);assert.deepEqual(ent('stone-cairn').state,initial);await finish(await act('stand:here'));assert.deepEqual(ent('stone-cairn').state,initial);
+ for(const a of ['tier-1-flat','tier-2-upright','tier-3-flat'])assert.equal((await finish(await act(cap(a)))).phase,'completed');
+ assert.deepEqual(['lower','middle','upper'].map(k=>ent('stone-cairn').state[k]),['flat','upright','flat']);assert.match((await inspect()).inspect.state.cairn,/remaining: 0\/3/);
+ assert.equal((await finish(await act(cap('tier-1-upright')))).phase,'completed');assert.equal(ent('stone-cairn').state.upper,'flat');
+ assert.equal((await finish(await act(cap('undo')))).phase,'completed');assert.equal(ent('stone-cairn').state.upper,'loose');assert.equal(ent('stone-cairn').state.middle,'upright');
+ assert.equal((await finish(await act(cap('tier-3-upright')))).phase,'completed');
+ const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.deepEqual(restored.entities.get(id),JSON.parse(JSON.stringify(ent('stone-cairn'))));
+ assert.equal((await finish(await act(cap('dismantle')))).phase,'completed');assert.deepEqual(['lower','middle','upper'].map(k=>ent('stone-cairn').state[k]),['loose','loose','loose']);assert.equal(ent('stone-cairn').state.maker,'Ana');assert.match((await inspect()).inspect.state.cairn,/remaining: 3\/3/);assert.deepEqual(f.host.engine.runtime.violations,[]);console.log(JSON.stringify({status:'pass',independentTiers:true,undoRebuildDismantle:true,interruption:true,snapshot:true,contextBytes:{absent:bytes(absent),distant100:bytes(far)}}));
+});
