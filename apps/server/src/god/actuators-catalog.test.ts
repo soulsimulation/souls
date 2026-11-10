@@ -2,7 +2,7 @@
 // taken by id from far away (the act's own walk takes the body there; it is no longer refused as out of sight).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { catalogActs, kindActions, stateDefaults, stateDiff, STATE_TEXT_MAX } from './actuators.ts';
+import { catalogActs, farOutcome, kindActions, stateDefaults, stateDiff, STATE_TEXT_MAX } from './actuators.ts';
 
 const bucket = { name: 'core-ash-bucket', version: 1, tags: [], components: {}, state: { ash: { type: 'number', default: 0 }, note: { type: 'string', default: '' } }, actions: [] } as never;
 const lamp = { name: 'core-desk-lamp', version: 1, tags: ['hand-operated'], components: {}, state: { on: { type: 'boolean', default: true } },
@@ -39,5 +39,17 @@ test('a hand act on a thing 300 m away is taken by id (the act walks there); a w
   assert.equal(acts['switch-on'].available(s, ctx)?.code, 'object.state', 'a state the act does not take is still refused, with its reason');
   whole = true; assert.equal(acts['switch-off'].available(s, ctx)?.code, 'object.out-of-reach', 'a whole menu lists things within sight only');
   assert.equal(kindActions(lamp, { ...(host as object), bodyAt: () => [10, 0] } as never, () => 'the desk lamp')['switch-off'].available(s, ctx), null, 'near: listed');
-  whole = false; secret = true; assert.match(acts['switch-off'].validate(s, {}, ctx)!.reason, /do not know the way/);
+  whole = false; secret = true; assert.match(acts['switch-off'].validate(s, {}, ctx)!.reason, /do not know where that is/);
+});
+
+test('a far act held for its body: made on arrival if the thing still takes it; nothing changes when stopped, short or refused', () => {
+  const commits: unknown[] = [], far = { id: 'e_l', action: 'switch-off', params: {}, capability: 'object:e_l:switch-off' }, soul = { soulId: 's_a' } as never;
+  const host = (body: [number, number]) => ({ bodyAt: () => body, thingAt: () => [0, 0], commit: (_id: string, patch: unknown) => { commits.push(patch); return { accepted: true }; } }) as never;
+  const find = (on: boolean) => () => ({ def: lamp, state: { on }, name: 'the desk lamp' });
+  assert.equal((farOutcome(far, false, soul, find(true), host([0.5, 0])) as { code: string }).code, 'object.not-reached', 'stopped on the way');
+  assert.equal((farOutcome(far, true, soul, find(true), host([40, 0])) as { code: string }).code, 'object.not-reached', 'ended far from it');
+  assert.equal((farOutcome(far, true, soul, find(false), host([0.5, 0])) as { code: string }).code, 'object.state', 'someone switched it off first');
+  assert.equal(commits.length, 0, 'none of those changed the world');
+  assert.equal(farOutcome(far, true, soul, find(true), host([0.5, 0])), 'done');
+  assert.deepEqual(commits, [{ on: false }]);
 });

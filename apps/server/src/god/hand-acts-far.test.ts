@@ -29,6 +29,7 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
     {op: 'place', def: coreRef('desk-lamp'), name: 'far-lamp', p: [90, 0]},
     {op: 'place', def: coreRef('zone'), name: 'hollow', shape: {area: [[-100, 80], [-80, 80], [-80, 100], [-100, 100]]}, params: {use: 'park'}},
     {op: 'place', def: coreRef('desk-lamp'), name: 'hidden-lamp', p: [-90, 90]},
+    {op: 'place', def: coreRef('chest'), name: 'far-chest', p: [0, 70]},
   ]} as never);
   assert.equal(built.accepted, true, JSON.stringify(built)); await tick(8);
   await invite(f, 'ana'); const row = await accept(f.host, f.souls.create('dev:ana', {name: 'Ana', description: 'M5 far hand acts'}));
@@ -50,6 +51,18 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
   await tick(40);
   const body = f.host.engine.world.entities[soul.entityId]!.pose.p;
   assert.ok(Math.hypot(body[0]! - me[0]!, body[2]! - me[2]!) > 0.5, 'the body is on its way to the far lamp');
+
+  // a thing that is not worked by a hand contact (a chest): from beyond sight, its change waits for the body to arrive
+  const chest = id('far-chest'), open = () => god.model.entities.get(chest)!.state?.open === true, pos = () => f.host.engine.world.entities[soul.entityId]!.pose.p;
+  assert.equal(open(), false);
+  const went = await act(`object:${chest}:open`);
+  assert.equal(went.accepted, true, JSON.stringify(went).slice(0, 300));
+  await tick(20);
+  assert.equal(open(), false, 'not open while the body is still far away');
+  assert.ok(Math.hypot(pos()[0]!, pos()[2]! - 70) > 30, 'the body is still far from the chest');
+  for (let i = 0; i < 200 && !open(); i++) await tick(20);
+  assert.equal(open(), true, 'open once the body is there');
+  assert.ok(Math.hypot(pos()[0]!, pos()[2]! - 70) < 3, 'opened by a body standing at the chest');
 
   // a thing made a moment ago, before the world's own catch-up has given it an object: taken by id at once
   const made = god.act({ops: [{op: 'place', def: coreRef('desk-lamp'), name: 'new-lamp', p: [-60, -10]}]} as never); assert.equal(made.accepted, true);

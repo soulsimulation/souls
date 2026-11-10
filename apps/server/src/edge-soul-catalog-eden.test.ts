@@ -268,4 +268,19 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     } finally { L.concealedThing = was; }
     assert.equal(catalog.version(), v1, 'shown again: the first version');
   });
+
+  await t.test('a thing in a secret room upstairs leaves the live picture with its state (#1751, the catalog\'s outline rule)', async () => {
+    const cat = (await get('/v1/edge/catalog')).body;
+    const up = cat.things.find((x: any) => x.kind === 'core-floor-lamp' && x.place && (L.places.byId.get(x.place)?.level ?? 0) > 0 && !L.placePathOf(soul.soulId).some((q: any) => q.id === x.place));
+    assert.ok(up, 'a floor lamp in a room above the ground floor');
+    w.god.engineAct([{op: 'set', id: up.id, state: {on: false}}] as never, 'test: switch upstairs');
+    await run(12);
+    assert.deepEqual((await get('/v1/edge/live')).body.things[up.id], {on: false});
+    L.knowledge.setSecret(up.place, true);
+    try {
+      await run(12);
+      assert.equal((await get('/v1/edge/live')).body.things[up.id], undefined, 'not in live once its room is secret');
+      assert.equal((await get('/v1/edge/catalog')).body.things.some((x: any) => x.id === up.id), false, 'nor in the catalog');
+    } finally { L.knowledge.setSecret(up.place, false); }
+  });
 });
