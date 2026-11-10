@@ -216,3 +216,39 @@ test('#1499 review: a held re-warm lets go when the waiting Soul leaves, and the
   const late = w.calls.filter(c => c.tick >= 110 && c.budget > 0);
   assert.ok(late.every(c => c.budget === 10), 'back-off budget'); assert.ok(late.length <= 110, `one slice a poll: ${late.length} over 990 ticks`);
 });
+
+/** #1548: a waiting Soul under a static world that changes every tick (`churn`), with labels a slice never finishes. */
+function stuck(t: TestContext, { churn, forcedWarms = true }: { churn: boolean; forcedWarms?: boolean }) {
+  let epoch = 0, warm = true;
+  const w = fixture(t, budget => warm || (forcedWarms && budget >= 250 ? (warm = true) : false));
+  (w.host.engine as unknown as { navEpochV1: () => number }).navEpochV1 = () => (churn ? ++epoch : epoch);
+  const minds = w.host.minds as unknown as Map<string, { entityId: string }>;
+  minds.set('s_waiting', { entityId: 'no-such-body' }); t.after(() => minds.delete('s_waiting'));
+  const upTo = (n: number) => { while (w.host.engine.world.tick < n) w.tick(); };
+  upTo(4); warm = false; w.state.navWaiting.add('s_waiting');
+  return { w, upTo, forced: () => w.calls.filter(c => c.budget === 250).map(c => c.tick), coldAgain: () => { warm = false; } };
+}
+
+test('#1548: a Soul waiting under a churning static world gets one whole relabel after 200 ticks, logged, then is stepped out', t => {
+  const { w, upTo, forced } = stuck(t, { churn: true });
+  upTo(200); assert.deepEqual(forced(), [], 'not before it has waited 200 ticks');
+  const before = w.rescues(); upTo(244);
+  assert.deepEqual(forced(), [243], 'the first rescue read past 200 ticks of waiting (first cold read at 43)');
+  assert.match(w.logs.find(l => l.startsWith('nav rescue: forced'))!, /^nav rescue: forced relabel \d+ ms, warm, 1 waiting$/);
+  assert.equal(w.rescues(), before + 1, 'and the waiting Soul is asked at once'); assert.equal(w.state.navCold, false);
+});
+
+test('#1548: at most one forced relabel per 200 ticks while it stays cold', t => {
+  const { w, upTo, forced } = stuck(t, { churn: true, forcedWarms: false });
+  upTo(1000);
+  assert.deepEqual(forced(), [243, 443, 643, 843]);
+  assert.equal(w.logs.filter(l => /forced relabel \d+ ms, still cold, 1 waiting/.test(l)).length, 4);
+  assert.ok(w.calls.filter(c => c.tick > 4 && c.budget !== 250).every(c => c.budget <= 20), 'the rest: re-warm slices, at most the first build\'s 20 ms while the Soul waits');
+});
+
+test('#1548: a quiet world with a waiting Soul never takes the forced relabel', t => {
+  const { w, upTo, forced } = stuck(t, { churn: false });
+  upTo(1500);
+  assert.deepEqual(forced(), [], 'no static change while it waited: the re-warm is left to finish');
+  assert.equal(w.logs.filter(l => l.includes('forced')).length, 0);
+});
