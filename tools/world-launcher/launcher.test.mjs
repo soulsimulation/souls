@@ -117,7 +117,7 @@ test('#1141: the read cache keeps whole answers and answers a matching tag itsel
   assert.equal(cold.status, 304); assert.equal(cold.headers.get('etag'), '"t1"'); assert.equal(cold.headers.get('x-sim-cache'), 'miss'); assert.equal(await cold.text(), '');
   assert.match(cold.headers.get('server-timing') ?? '', /world;dur=3\.0/, 'the answer the world made says what it cost');
   const plain = await api(A); assert.equal(plain.status, 200); assert.equal(await plain.text(), '{"soul":"s_tagged"}', 'the next caller reads the whole answer');
-  assert.equal(plain.headers.get('x-sim-cache'), 'hit'); assert.equal(plain.headers.get('server-timing'), null, '#1737: a kept answer does not repeat the world\'s time');
+  assert.equal(plain.headers.get('x-sim-cache'), 'hit'); assert.match(plain.headers.get('server-timing') ?? '', /^launcher;dur=[\d.]+;desc=cache$/, '#1737/#1750: a kept answer does not repeat the world\'s time; it says the launcher gave it');
   const hit = await asked('W/"t1"'); assert.equal(hit.status, 304, 'a weak form matches'); assert.equal(hit.headers.get('etag'), '"t1"'); assert.ok(hit.headers.get('x-sim-cache'));
   const stale = await asked('"old"'); assert.equal(stale.status, 200); assert.equal(await stale.text(), '{"soul":"s_tagged"}', 'a tag that does not match reads it all');
   // callers sharing one flight, the first of them with a tag: the others still read the whole answer
