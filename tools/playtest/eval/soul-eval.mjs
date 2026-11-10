@@ -100,7 +100,7 @@ function cleanEnvReport() {
 /** result.json, or one rebuilt from the episodes a stopped run left (episodes/<n>/episode.json and run.json). */
 export function loadResult(dir) {
   const d = resolve(dir), r = readJson(join(d, 'result.json'));
-  if (r) return r;
+  if (r) return { ...r, summary: summarize((r.episodes ?? []).filter((e) => !e.error)) };   // totals are always refolded from the episodes
   const meta = readJson(join(d, 'run.json'));
   if (!meta) return null;
   const eps = existsSync(join(d, 'episodes')) ? readdirSync(join(d, 'episodes')).sort().map((e) => readJson(join(d, 'episodes', e, 'episode.json'))).filter(Boolean) : [];

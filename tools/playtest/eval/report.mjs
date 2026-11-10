@@ -25,6 +25,8 @@ export function renderReport(a, b = null) {
   const head = (x) => `${x.battery} on ${x.world}; seat ${x.seat.adapter}${x.seat.model ? ` (${x.seat.model})` : ''}; client ${x.episodes?.find((e) => e.client)?.client?.cli ?? '?'} / skill ${x.episodes?.find((e) => e.client)?.client?.skill ?? '?'}; server ${x.serverCommit ?? '?'}; ${x.repeats} repeat(s); ${x.warmSec ? `instructions sent at least ${x.warmSec} s after create` : 'instructions sent as soon as the agent is listening (cold)'}${med(x.episodes) != null ? `, median ${Math.round(med(x.episodes) / 1000)} s after create` : ''}; spent $${(x.spentUsd ?? 0).toFixed(3)}`;
   L.push(`# Soul Client eval`, '', `- **Run:** ${head(a)}`);
   if (b) L.push(`- **Against:** ${head(b)}`);
+  const kick = (a.episodes ?? []).reduce((s, e) => s + (e.kickoff?.costUsd ?? 0), 0);
+  if (kick) L.push(`- **Kickoff turns** (read the guide, start listening; not in the per-instruction numbers): $${kick.toFixed(3)} in all`);
   if (a.stoppedBy) L.push(`- **Stopped early:** ${a.stoppedBy}`);
   const errs = (a.episodes ?? []).filter((e) => e.error);
   if (errs.length) L.push(`- **Episodes that could not run:** ${errs.map((e) => `${e.item} r${e.repeat}: ${e.error}`).join('; ')}`);

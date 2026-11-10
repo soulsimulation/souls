@@ -26,7 +26,7 @@ export function quantile(xs, q) {
   if (!a.length) return null;
   return a[Math.min(a.length - 1, Math.max(0, Math.ceil(q * a.length) - 1))];
 }
-const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
+const r1 = (x) => (x == null ? null : Math.abs(x) < 1 ? Math.round(x * 10000) / 10000 : Math.round(x * 10) / 10);
 export const spread = (xs) => {
   const a = xs.filter((x) => Number.isFinite(x));
   return a.length ? { median: r1(quantile(a, 0.5)), min: r1(Math.min(...a)), max: r1(Math.max(...a)), n: a.length } : { median: null, min: null, max: null, n: 0 };
