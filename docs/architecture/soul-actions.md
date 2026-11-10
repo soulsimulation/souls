@@ -7,6 +7,10 @@ change is part of the world: it survives a restart, and every visitor sees the s
 This page covers Soul Actions entries 1–44 and the everyday-life families that follow them (books and notebooks, #428; openings: a tent flap and a field gate; public writing: a guestbook). Each entry was accepted with a deterministic native test (including the
 context-size checks below), regression runs, and an uncut real-client recording driven by plain words.
 
+New family documentation belongs in a separate `docs/architecture/soul-actions/<family>.md` file; see the
+[family documentation guide](soul-actions/README.md). Keep the historical sections and plain-word tables on this page
+until the Soul Client cutover; new families do not append another section here.
+
 ## How it works
 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,

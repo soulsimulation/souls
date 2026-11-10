@@ -23,6 +23,7 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
+import { commitSoulCompletion } from './soul-completion.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
@@ -38,7 +39,7 @@ import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
-import { actuatedState, keepsLeftBy, leftByOf } from './actuators.ts';
+import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -319,6 +320,15 @@ export class EngineBridge {
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
+      // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
+      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
+      this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
+        for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}
+        states={v:this.model.editSeq,m};return m;};
+      this.edge.thingsVersion=()=>`${this.godEdits}:${this.completedEdits}`;
+      // #1737: the catalog waits for the first whole picture: places published and activity spots derived (sliced after listen)
+      this.edge.structureReady=()=>{try{return this.contextReady()&&!this.activitySpots.pendingFirst();}catch{return false;}};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
     if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),
@@ -1571,6 +1581,12 @@ export class EngineBridge {
   }
 
   // ------------------------------------------------------------------ engine → entity world
+
+  /** Completed server-owned Soul work: engine history, current context and derived output geometry.
+   * The family must validate its started receipt/authority and deduplicate before calling this. */
+  commitSoulWork(ops: Op[], note: string): Result {
+    return commitSoulCompletion(this.god, diff => this.onCommit(diff), ops, note);
+  }
 
   /** Trusted engine edit: journaled (by 'engine', never undone by the god), published to viewers, not echoed back. */
   engineAct(ops: Op[], note: string): Result {

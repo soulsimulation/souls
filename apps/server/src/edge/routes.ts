@@ -15,6 +15,8 @@ import {mountIdempotency} from './events/idempotency.ts';
 import {mountOperationLookup} from './events/operations.ts';
 import {mountSchema,EDGE_ACT_VERBS} from './events/schema.ts';
 import {mountBootRoutes} from './boot/routes.ts';
+import {mountCatalogRoute} from './catalog/routes.ts';
+import {mountLiveRoute} from './catalog/live.ts';
 import {INTENT_VERBS} from './intents/intents.ts';
 import {mountOutcomeRoutes} from './outcomes/routes.ts';
 import {mountPersonalReminders} from './reminders/routes.ts';
@@ -53,6 +55,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // shortens the hold limit (15 minutes) for tests and proof worlds.
   if (loop) L.onTick(tick => loop.sweep(tick));
   mountBootRoutes(app,deps,[...EDGE_ACT_VERBS,...INTENT_VERBS]);
+  // #1737: the world's structure as one public file a Soul's client keeps on disk
+  const catalog = mountCatalogRoute(app,deps);
   mountOutcomeRoutes(app,deps);
   mountBodyRoutes(app,deps);
   mountOwnerDay(app,{ledger:L,db:deps.db,ownerSoul:deps.ownerSoul});
@@ -133,6 +137,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const eyes = mountEdgeEyes(app, deps);
   const comms = registerEdgeComms(app, deps, {stewardToken: process.env.EDGE_STEWARD_TOKEN || undefined, fading: process.env.EDGE_FADING === '1'});
   L.attachComms(comms);
+  // #1737: who is where and what was said, world-wide, for a Soul's client to follow
+  mountLiveRoute(app, deps, comms as never, catalog.version);
   // LINK BODY: the body follows the agent's listen presence (edge/ledger/body-rule.ts)
   const presence = deps.ownerInbox;
   if (presence?.soulPresence) L.attachPresence({soulPresence: id => presence.soulPresence!(id), onSoulListen: l => presence.onSoulListen?.(l), onSoulSend: l => presence.onSoulSend(l)});
