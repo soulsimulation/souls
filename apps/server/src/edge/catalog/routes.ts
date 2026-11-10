@@ -16,17 +16,20 @@ export function ledgerCatalog(L: EdgeLedger) {
     const place = locate(x, z, 0);
     things.push({id, kind: e.def, name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null});
   }
-  return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots: L.spots.spots, things});
+  // a spot of a thing the world no longer has (a god removed it; a world's authored spots outlive it) is not an act
+  const spots = L.spots.spots.filter(s => !L.spotThingGone(s.id));
+  return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots, things});
 }
 
 export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
   const L = deps.ledger;
   let kept: {key: string; value: ReturnType<typeof buildCatalog>} | null = null;
   const current = () => {
-    // the static world (places, spots, navigation), which places are secret, and how many things there are. Bodies are not
-    // structure: a Soul arriving or leaving rebuilds nothing.
+    // the static world (places, spots, navigation), which places are secret, how many things there are, and the god's edits
+    // (a thing moved or renamed changes neither count nor navigation). Bodies are not structure: a Soul arriving or leaving
+    // rebuilds nothing.
     let things = 0; for (const e of Object.values((L.host.engine.world as unknown as {entities: Record<string, WorldEntity>}).entities)) if (e.def && !e.human) things++;
-    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}`;
+    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}|${L.thingsVersion?.() ?? ''}`;
     if (kept?.key !== key) kept = {key, value: ledgerCatalog(L)};
     return kept.value;
   };

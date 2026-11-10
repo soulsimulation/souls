@@ -35,7 +35,7 @@ const centre = (poly: readonly V2[]): [number, number] => [r1(poly.reduce((s, v)
 export const kindOf = (def: string) => def.replace(/^ew:/, '').replace(/@\d+(?::[0-9a-f]+)?$/, '');
 const byId = (a: {id: string}, b: {id: string}) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 /** The entity a spot belongs to: spot ids are `<activity>.<entity id>[.<n>]`. */
-const spotThing = (id: string) => /(?:^|\.)(e_[0-9a-z]+)(?:\.|$)/.exec(id)?.[1];
+export const spotThing = (id: string) => /(?:^|\.)(e_[0-9a-z]+)(?:\.|$)/.exec(id)?.[1];
 
 /** The catalog and its canonical bytes. Same input, same bytes, same tag. Every fact here is `public`: the scope field is
  *  where a later privacy model withholds, entry by entry, without a new contract. */

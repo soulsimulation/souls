@@ -1,5 +1,5 @@
 // #1737 on the real Eden 2026 template (fake minds, in memory): a far spot named by its id stays on offer whatever menu
-// is cached, and the two public routes never name a secret place.
+// is cached, the two public routes never name a secret place, and a god's edit to a thing is a new catalog.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
@@ -63,6 +63,40 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.equal(second.body.things.some((x: any) => x.place === hide.id), false);
     assert.equal(second.body.acts.some((a: any) => a.place === hide.id), false);
     assert.equal((await get('/v1/edge/catalog', {'if-none-match': first.etag!})).status, 200, 'the old tag no longer matches');
+  });
+
+  await t.test('a god moves, renames and removes a thing: each is a new catalog, and an act on the removed id is refused with a reason', async () => {
+    const before = await get('/v1/edge/catalog');
+    assert.equal((L.spots.spots as Spot[]).filter(s => L.spotThingGone(s.id)).length, 0, 'every spot of a thing names a thing the world has (a pond is the god\'s)');
+    // a thing with acts of its own, away from the Soul, that the world offers by id now
+    const pick = before.body.things.find((x: any) => w.god.model.entities.has(x.id) && before.body.acts.some((a: any) => a.thing === x.id && !a.with && gate(a.id) === 'ok'));
+    assert.ok(pick, 'a god thing with an act on offer by id');
+    const act = before.body.acts.find((a: any) => a.thing === pick.id && !a.with && gate(a.id) === 'ok').id as string;
+    const edit = async (op: object) => {const r = w.god.act({ops: [op]} as never); assert.equal(r.accepted, true, JSON.stringify(r)); await run(4); return get('/v1/edge/catalog');};
+
+    const p0 = (w.god.model.entities.get(pick.id) as any).p as number[];   // in its slot's frame when it has one
+    const dx = p0[0]! > 0 ? -1 : 1;   // a metre toward its slot's origin, so it stays inside
+    const moved = await edit({op: 'move', id: pick.id, p: [p0[0]! + dx, ...p0.slice(1)]});
+    assert.notEqual(moved.etag, before.etag, 'a move is a new version');
+    const at = moved.body.things.find((x: any) => x.id === pick.id).at;
+    assert.ok(Math.abs(Math.hypot(at[0] - pick.at[0], at[1] - pick.at[1]) - 1) < 0.2 , `the thing moved a metre, where the god put it: ${JSON.stringify([pick.at, at])}`);
+
+    const name = 'catalog-test-renamed';
+    const renamed = await edit({op: 'set', id: pick.id, name});
+    assert.notEqual(renamed.etag, moved.etag, 'a rename is a new version');
+    assert.match(renamed.body.things.find((x: any) => x.id === pick.id).name, new RegExp(name));
+
+    const removed = await edit({op: 'remove', id: pick.id});
+    assert.notEqual(removed.etag, renamed.etag, 'a removal is a new version');
+    assert.equal(removed.body.things.some((x: any) => x.id === pick.id), false, 'the thing left the catalog');
+    assert.equal(removed.body.acts.some((a: any) => a.thing === pick.id), false, 'and so did its acts');
+    L.invalidateBodies();
+    const no = L.offerGate(soul, {capability: act});
+    assert.ok(no, `an act on the removed thing is refused: ${act}`);
+    assert.equal(no.code, 'thing.gone'); assert.match(no.reason, /no longer in the world/);
+    // (a strict client's act is answered by that gate, edge/routes.ts; a loose one is still not done)
+    const sent = await w.edge.act(soul, {capability: act}) as any;
+    assert.equal(sent.accepted, false, 'the act itself is not done');
   });
 
   await t.test('the live picture names where a Soul is, and never a secret place', async () => {

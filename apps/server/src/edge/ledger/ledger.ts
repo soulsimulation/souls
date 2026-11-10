@@ -1,5 +1,6 @@
 import {NONFINITE_HELD,STOOD_ON_FLOOR,QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
+import {spotThing} from '../catalog/catalog.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
 import {holdsSecret,withoutSecrets,withoutSecretsBut} from '../perception/public-scrub.ts';
@@ -220,6 +221,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
   thingAbout?: (id: string) => {title?: string; what?: string; aliases?: string[]} | null;
   /** CTRL-2 (#1094): a built thing's own name, as offers call it; set by the engine bridge. */
   thingName?: (id: string) => string | null;
+  /** #1737: the god's authored edits, as made and as folded into the engine; set by the engine bridge. A move, rename or
+   *  removal of a thing changes it, so the catalog that names things is rebuilt. */
+  thingsVersion?: () => string;
+  /** #1737: the thing a spot belongs to (`<activity>.<entity id>[.<n>]`) is in neither the engine nor the god's world: a
+   *  god removed it, and the world's authored spots outlive it. (A pond or a pitch is the god's, not an engine body.) */
+  spotThingGone(spotId: string): boolean {
+    const thing = spotThing(spotId); if (!thing || (this.host.engine.world.entities as Record<string, unknown>)[thing]) return false;
+    return this.thingName ? this.thingName(thing) === null : true;
+  }
   /** #442 (mending.ts): what a completed repair did, read when its receipt ends, before the state changes. */
   repairEffects?: (r: EdgeReceipt) => ConfirmedEffects;
   /** Soul Actions entry 31 (god worlds, god/door-passage.ts): a plain walk a closed, permitted door walls off goes through it. */
@@ -2967,6 +2977,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const enclosingBuilding = (place: string | undefined) => {let out: string | null = null; for (let p = place ? this.places.byId.get(place) : undefined; p; p = p.parent ? this.places.byId.get(p.parent) : undefined) if (p.enclosed && (p.level ?? 0) === 0) out = p.id; return out;};
     const level = me.human?.level ?? 0, h = me.human;
     return {me: here, level, seated: !!h && (h.activity === 'sit' || h.baseActivity === 'sit'),
+      gone: (spotId: string) => this.spotThingGone(spotId),
       // read only against standing-room thresholds (≤ 0.95 m): capped at 1 m, answered without building far nav tiles (L1)
       clearance: (x: number, z: number) => level === 0 && engine.clearanceAtV1 ? (engine.clearanceUpToV1 ? engine.clearanceUpToV1(x, z, 1) : engine.clearanceAtV1(x, z)) : 0,
       open: (at: [number, number], min: number, rings: number) => level === 0 && engine.nearestStandableV1 ? engine.nearestStandableV1(at, soul.entityId, min, rings) : null,
