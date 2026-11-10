@@ -1,0 +1,7 @@
+# Garden rabbit feeding
+
+`core/rabbit-feed@1` supplies three portions. `object:<feed-id>:feed-rabbit` takes `text`: the exact ID or ordinary reference of an unfed `core/garden-rabbit@1` within six metres on the same floor. Use normal catalog/find to choose real IDs; the cold ID plans ordinary native walks. Completed three-second native feeding atomically consumes one portion and changes that SAME rabbit to fed with feeder/source history. Interruptions and changed authority preserve both objects. The existing bread prop approximates feed; it is not borrowed item custody.
+
+Inspect either actual object for `rabbitCare` current facts; catalog/live carries finite stock and the rabbit's `fed` boolean. A fed rabbit refuses another portion. This opt-in rabbit stays at its authored feeding place, using existing kit geometry and idle/sleep presentation. There is no new autonomous animal body/locomotion, hunger clock, animal carrying or physiological claim. Current facts store completed historical feeder/source snapshots. Shared engine-authored completion preserves unrelated God Undo/redo.
+
+[Canonical direction](https://github.com/soulsimulation/souls/blob/647d04a5ce5621717c2fad78c153d082e3dffcb2/docs/design/soul-actions-direction.md): breadth and understandable basic coherence; precise mouth contact and lifelike animal response are optional polish. Named service hooks require serial Claude integration. No protected client/ledger/engine changes or release authority.
