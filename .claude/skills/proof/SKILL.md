@@ -97,6 +97,39 @@ node .claude/skills/proof/record.mjs --url '...' --steps .e2e/proof/<slug>/steps
   --out .e2e/proof/<slug>/phone.mp4 --viewport phone
 ```
 
+### Presets: what the clip is for
+
+`--preset` picks the output; `pr-proof` is the default and is what every PR proof uses. Each preset is still one
+uncut, real-speed take with the timecode, so any of them counts as proof.
+
+| Preset | Output | Use it for |
+|---|---|---|
+| `pr-proof` (default) | `--viewport desktop` 1280x720 or `phone` 390x844, the recording's own frame rate | PR proofs: small, quick to upload and load |
+| `social-landscape` | 1920x1080, 30 fps | posts and videos in 16:9 |
+| `social-portrait` | 1080x1920, 30 fps, phone layout | reels, stories and shorts in 9:16 |
+| `highlight` | 1280x720, 30 fps | clips embedded in a highlights page (light enough to autoplay) |
+
+Overrides sit on top of any preset: `--fps 15|30|60` (repeats or drops frames, never changes speed), `--quality low`
+(720 short edge) or `high` (1080), `--size WxH`, `--aspect landscape|portrait`. The page is recorded at the output's own
+aspect, a landscape page at desktop size and a portrait page at phone size, with the browser's scale factor making
+the pixels, so nothing is cropped or upscaled afterwards. The sidecar records `preset` and the resolved `plan`.
+The table lives in `tools/proof/clip-presets.mjs`.
+
+```bash
+node .claude/skills/proof/record.mjs --url '...' --steps .e2e/proof/<slug>/steps.mjs \
+  --out .e2e/proof/<slug>/portrait.mp4 --preset social-portrait --panel on
+```
+
+**Debug panel** (`--panel on`, off by default and off for PR proofs unless a reviewer needs the exchange): a live view
+of what the Soul's agent sent and what the world answered, in time order with clip timestamps: commands `→`, replies
+`←`, receipt phases `•`, notes `·`. It sits beside the world in landscape and below it in portrait. The steps feed it:
+`await ctx.eden(soulDir, ['act', id, params])` runs a Soul CLI command, logs it and its reply, and follows the receipt
+until it ends; `ctx.panel('text')` logs a note; `--panel-log <file.jsonl>` adds lines another process appends
+(`{"at": <epoch ms>, "dir": "cmd|reply|receipt|note", "text": "..."}`). Entries are redacted (URLs, paths, tokens,
+emails, addresses; Soul, receipt and other ids become `soul-1`, `receipt-1`), then the publication checker runs on
+them; a hit fails the take (exit 4, privacy kind `panel-text`) before anything is drawn. The text goes to
+`<clip>.panel.json`, which `upload.mjs` checks like any payload; attach it with the clip.
+
 - Browsers: uses `PLAYWRIGHT_BROWSERS_PATH`, else `/opt/pw-browsers` when present. If Chromium is missing:
   `PLAYWRIGHT_BROWSERS_PATH="$PWD/.e2e/browsers" pnpm --filter mars-campus-viewer exec playwright install chromium`.
 - Playwright is resolved the same way the playtest harness does (`tools/playtest/lib/platform.mjs`: a global
