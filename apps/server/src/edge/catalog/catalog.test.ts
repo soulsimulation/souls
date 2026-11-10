@@ -82,8 +82,10 @@ test('a kind worked by hand is published once with its acts and the state they r
     {id: 'e_l2', kind: 'ew:core-desk-lamp@1:abc', name: 'desk-lamp-2', at: [4, 4], place: 'g-library', hand: switchable},
     {id: 'e_l0', kind: 'core-desk-lamp@0', name: 'old-lamp', at: [5, 5], place: 'g-library', hand: null},
     {id: 'e_l3', kind: 'core-desk-lamp@3', name: 'dim-lamp', at: [6, 6], place: 'g-library', hand: {acts: [...switchable.acts, {verb: 'dim', label: 'Dim'}], state: {on: false}}},
-    {id: 'e_l9', kind: 'core-desk-lamp@1', name: 'grove-lamp', at: [45, 45], place: 'g-grove', hand: switchable}]});
-  assert.deepEqual(Object.keys(payload.kinds), ['core-desk-lamp', 'core-desk-lamp@3'], 'a revision with other acts or defaults has its own entry');
+    {id: 'e_l9', kind: 'core-desk-lamp@1', name: 'grove-lamp', at: [45, 45], place: 'g-grove', hand: switchable},
+    {id: 'e_bk', kind: 'core-ash-bucket@1', name: 'bucket', at: [7, 7], place: 'g-library', hand: {acts: [], state: {ash: 0}}}]});
+  assert.deepEqual(Object.keys(payload.kinds), ['core-ash-bucket', 'core-desk-lamp', 'core-desk-lamp@3'], 'a revision with other acts or defaults has its own entry');
+  assert.deepEqual(payload.kinds['core-ash-bucket'], {acts: [], state: {ash: 0}}, 'a kind that only has state (a bucket another thing fills) is published too');
   assert.equal(payload.things.find(t => t.id === 'e_l3')!.hands, 'core-desk-lamp@3');
   assert.deepEqual(payload.kinds['core-desk-lamp@3']!.state, {on: false});
   assert.deepEqual(payload.kinds['core-desk-lamp']!.acts.map(a => a.verb), ['switch-on', 'switch-off']);
@@ -91,5 +93,13 @@ test('a kind worked by hand is published once with its acts and the state they r
   assert.equal(payload.things.find(t => t.id === 'e_l0')!.byHand, false);
   assert.equal(payload.things.find(t => t.id === 'e_l1')!.byHand, undefined);
   assert.equal(payload.things.some(t => t.id === 'e_l9'), false, 'nothing in a secret place');
-  assert.equal(payload.counts.handKinds, 2); assert.equal(payload.counts.handThings, 3);
+  assert.equal(payload.counts.handKinds, 3); assert.equal(payload.counts.handThings, 4);
+});
+
+test('a ref two places share is published for neither: walk:<id> names its place, walk:<ref> would name none (#1737)', () => {
+  const lake = {id: 'g-lake', ref: 'lake', name: 'Lake', kind: 'water', parent: 'world', level: 0, polygon: square(0, 0)};
+  const bank = {id: 'g-lake.bank', ref: 'lake', name: 'Lake bank', kind: 'shore', parent: 'world', level: 0, polygon: square(0, 0)};
+  const jetty = {id: 'g-jetty', ref: 'jetty', name: 'Jetty', kind: 'pier', parent: 'world', level: 0, polygon: square(0, 0)};
+  const {payload} = buildCatalog({worldId: 'w', places: [lake, bank, jetty], spots: [], things: []});
+  assert.deepEqual(payload.places.map(p => [p.id, p.ref ?? null]), [['g-jetty', 'jetty'], ['g-lake', null], ['g-lake.bank', null]]);
 });

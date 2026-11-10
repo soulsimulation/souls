@@ -305,7 +305,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); timed(c, t0); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
-    if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
+    if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); timed(c, t0); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
       return c.json({contract: 'eden-edge/1', error: {code: 'world.crowded', message: crowdedNote(line), position: line.position, eta_s: line.eta_s}, world: worldBlock(lv, Math.max(1, Math.min(line.eta_s, 60)))}, 503); }
     // the body is NOT pre-read here: god/ingestion.ts and edge/body/routes.ts measure/stream the raw body with their own
     // reader, and a stream Hono has already consumed is locked (R2 integration: every POST /v1/god/* answered 500). Body

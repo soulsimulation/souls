@@ -485,7 +485,12 @@ export class GodPerceive {
     if (o.__godCaps) return; o.__godCaps = true;
     const original = o.capabilities.bind(o);
     // #1751: a whole menu (no objects named) lists things within sight only; a focused build or an act takes one from anywhere
-    o.capabilities = (...args) => { const outer = this.wholeMenu; this.wholeMenu = !args[1]; try { return original(...args); } finally { this.wholeMenu = outer; } };
+    o.capabilities = (...args) => {
+      // #1751: a thing named by id that has no object yet (made a moment ago, the catch-up still running) gets it now
+      const only = args[1] as ReadonlySet<string> | undefined;
+      if (only && this.pending() && [...only].some(id => !this.sigs.has(id) && this.h.model.entities.has(id))) this.sync();
+      const outer = this.wholeMenu; this.wholeMenu = !only; try { return original(...args); } finally { this.wholeMenu = outer; }
+    };
     const listed = o.capabilities;
     o.capabilities = (...args) => listed(...args).filter(cap =>
       // #442: a whole thing has nothing to repair (its row may lag a sync behind the state)
