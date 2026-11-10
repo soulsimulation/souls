@@ -100,10 +100,10 @@ test('request looks up an escaped receipt ref without writing', async (t) => {
 });
 
 test('status exposes the local skill and server version tuple', async (t) => {
-  fixture(t, { you: 'god', entities: 3, seq: 8, versions: { protocol: 'god/1', schema: 'god-schema/1', skill: '1.7', source: 'abc123' } });
-  assert.equal(SKILL_VERSION, '1.7');
+  fixture(t, { you: 'god', entities: 3, seq: 8, versions: { protocol: 'god/1', schema: 'god-schema/1', skill: '1.8', source: 'abc123' } });
+  assert.equal(SKILL_VERSION, '1.8');
   const text = await status();
-  for (const part of ['skill 1.7', 'protocol god/1', 'schema god-schema/1', 'source abc123']) assert.ok(text.includes(part), part);
+  for (const part of ['skill 1.8', 'protocol god/1', 'schema god-schema/1', 'source abc123']) assert.ok(text.includes(part), part);
 });
 
 test('answer and layer commands use receipt-protected acts with fresh refs', async (t) => {
@@ -1276,7 +1276,7 @@ test('measure dryruns for a first-choice place and blocked candidate search', as
   console.log('H1 place measurement: first choice 1 dryrun; blocked near search 6 (four candidates + suggestion + nudge); command loop hard cap 12.');
 });
 
-// R2F: the release 1.1 walk's describe of a 4-floor lighthouse (r11-walk/diag.txt) said "no way in/out"; the room ends
+// R2F: the release 0.1 walk's describe of a 4-floor lighthouse (r11-walk/diag.txt) said "no way in/out"; the room ends
 // were the problem (reach.bad-to in, reach.bad-from out): no floor the engine could stand on.
 test('describe walk says "no floor to stand on in room X (floor n)" for missing standing room, and keeps route wording', async () => {
   const { walkLine } = await import('./cli.mjs');

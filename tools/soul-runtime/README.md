@@ -35,6 +35,10 @@ retention gaps, a blocked notification and a backlog larger than one page.
 
 Before production use, complete real-agent recovery/retention acceptance and the
 four-activity evaluation and long soak.
+This runtime runs a legacy paired folder, not a Soul in a Souls home, so it
+writes no home memory and gives the model no pre-turn brief: its continuity is
+the journal, the saved plan and `openOwnerTasks` (#1227). A Soul that should
+remember across worlds runs through the Soul CLI from its home.
 A filesystem path is private runtime storage; never put a credential or raw
 host transcript into the event journal. OS sleep stops local execution; a
 durable record does not make a sleeping host available.
@@ -131,6 +135,14 @@ not the frozen four-activity A/B evaluation. During those probes the local CLI
 advertised `gpt-5.6-sol`; an unavailable `gpt-6.1-sol` request was refused. The
 adapter now queries the host default when no model is explicitly selected; comparison arms
 must pin the same successfully verified model and effort.
+
+An act that serves an owner message names it (`for`, #789), as the thin CLI's default link does (D3b/D3c), so the
+world writes the message's result or progress line when the act ends and soul-trace links the act to its episode. The
+message is the newest owner message a retained decision incorporated, kept in the checkpoint (`ownerLinkV1`) because
+the act usually follows a decision later, after the `ack`; the act's pending record keeps its copy, so a replayed write
+sends the same body. No time window: the first accepted act uses the link up unless the world answers `open` (a later
+step remains); a `wait` decision, the agent's `result` for that message, or a world refusal of the link also ends it.
+Object writes (`POST /v1/edge/objects/:id/act`) carry no link: the world's object route has none.
 
 A read-only operation lookup now recovers retained HTTP outcomes and accepted
 action receipts; a missing result remains unknown and cannot authorize replay.

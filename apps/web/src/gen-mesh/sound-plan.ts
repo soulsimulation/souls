@@ -8,7 +8,7 @@
 //     40 m grid so walking changes who you hear), and water/waves near the world's lakes, rivers and sea.
 //   - residents: distant chatter where residents stand together, footsteps where they walk, and the visitor's own
 //     footsteps when the camera walks at eye height.
-//   - implied (release 3.1): things whose def carries no sound still sound like what they are, from their tags — trees
+//   - implied (release 0.6): things whose def carries no sound still sound like what they are, from their tags — trees
 //     rustle (clustered, so a wood is one voice), flags flap, flower beds hum with bees by day, reeds croak at night, ducks
 //     and gulls call, fridges hum; and some sounding things gain a second sound (a fountain also drips and draws pigeons,
 //     a watermill also runs, a windmill also catches the wind). Birds sing from the world's trees, wind rises on open and
@@ -184,7 +184,9 @@ export function exposureAt(x: number, z: number, ground: number, typicalGround: 
   return Math.max(0, Math.min(1, 0.55 * high + 0.45 * open * (0.4 + 0.6 * high) + 0.25 * open));
 }
 function placeOf(model: WorldModel, e: Entity, def: StoredDef): Pick<Emitter, 'pts' | 'area'> {
-  const g = (x: number, z: number) => { try { return model.terrain.sample(x, z); } catch { return 0; } };
+  // PERF-ARRIVAL: peek is sample's bit-identical height without baking the tile (Terrain.peek, #1481): these points lie all
+  // over the world, and baking a tile for each was the longest task of a 4x phone's arrival.
+  const g = (x: number, z: number) => { try { return model.terrain.peek(x, z); } catch { return 0; } };
   if (def.form !== 'point' && e.in.parent === 'world' && e.shape) {
     const raw = 'path' in e.shape ? e.shape.path : e.shape.area;
     const step = Math.max(1, Math.floor(raw.length / 64));

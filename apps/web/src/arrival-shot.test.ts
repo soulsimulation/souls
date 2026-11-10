@@ -53,3 +53,14 @@ test('P7f: the broadcast\'s first shot starts exactly at the opening view, also 
   assert.deepEqual([shot?.pose?.position, shot?.pose?.target, shot?.shot], [a.eye, a.target, 'tour:push:god:e_big'], 'the poster = the broadcast\'s first frame, lifted once');
   assert.equal(b.opening, null, 'used once');
 });
+
+test('PERF-ARRIVAL (#1481): the landmark scan reads the same views through groundPeek and bakes no terrain tile', async () => {
+  const { Terrain, emptyGround, groundSchema } = await import('@souls/ground');
+  const g = emptyGround(200, 0); g.landforms.push({ id: 'hill', kind: 'bump', c: [10, 12], r: 30, h: 6, peak: 1 } as never, { id: 'dip', kind: 'bump', c: [-35, 5], r: 14, h: -2, peak: 1 } as never);
+  const ground = groundSchema.parse(g), baked = new Terrain(ground), peeked = new Terrain(ground);
+  // two models (godTourViews caches per model) over the same things
+  let seq = 100; const model = () => ({ ...layer.model, editSeq: ++seq, entities: new Map(layer.model.entities) });  // a fresh cache key each
+  const a = godTourViews({ model: model() }, (x, z) => baked.sample(x, z)), b = godTourViews({ model: model() }, (x, z) => peeked.peek(x, z));
+  assert.deepEqual(b, a);
+  assert.ok(baked.cachedTiles > 0, 'the scan touches terrain'); assert.equal(peeked.cachedTiles, 0, 'peek baked nothing');
+});

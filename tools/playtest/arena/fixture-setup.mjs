@@ -16,7 +16,7 @@ export function checkStart(me, expected = {}) {
 async function offered(cli, intent, left) {
   const text = typeof intent === 'string' ? intent : JSON.stringify(intent);
   if (/^[a-z][\w-]*:\S+$/i.test(text)) return [text];
-  const c = (await cli(['resolve', text], left)).data?.candidates?.find((x) => x.available);
+  const r = (await cli(['resolve', text], left)).data, c = (r?.candidates ?? r?.did_you_mean)?.find((x) => x.available !== false);
   return c ? [c.id, ...(c.args ? [JSON.stringify(c.args)] : [])] : [text];
 }
 export async function runFixtureSetup({ seat, setup, runDir, requestKey, now = Date.now }) {

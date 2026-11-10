@@ -1,16 +1,22 @@
 import type {Context, Hono} from 'hono';
+import {stalledNow, whenStalled} from './load/clock-source.ts';
 import {bodyLimit} from 'hono/body-limit';
 import type {Db, UserRow} from './db.ts';
 import type {GodMode} from './god/god.ts';
 import {ApiError, type Souls} from './souls.ts';
-import {AgentInbox, type InboxScope, type TicketFocus} from './inbox.ts';
+import {AgentInbox, type InboxScope, type InboxView, type TicketFocus} from './inbox.ts';
 import {soulLink} from './soul-link.ts';
 import type {WorldModel} from '@souls/world-compiler';
 
-type Deps = {db: Db; worldId: string; souls: Souls; god?: GodMode; edge?: boolean; requireUser(c: Context): Promise<UserRow>; ownerSoul(c: Context, id: string): Promise<{id: string; owner: string}>; now?: () => number};
+/** Who answers POST /v1/souls/<id>/command in a world (#982): one route, one handler per world mode. An edge world
+ *  delivers the owner's text to the Soul's agent inbox (this file); a central-mind world translates it (http.ts). */
+export type OwnerCommandRoute = 'edge-inbox' | 'central-translator';
+export const ownerCommandRoute = (edge: boolean): OwnerCommandRoute => (edge ? 'edge-inbox' : 'central-translator');
+type Deps = {db: Db; worldId: string; souls: Souls; god?: GodMode; edge?: boolean; command?: OwnerCommandRoute; requireUser(c: Context): Promise<UserRow>; ownerSoul(c: Context, id: string): Promise<{id: string; owner: string}>; now?: () => number};
 type Agent = {kind: 'god' | 'soul'; scope: InboxScope};
 export function mountAgentInbox(app: Hono, d: Deps) {
   const inbox = new AgentInbox(d.db, d.worldId, d.now);
+  const ownsCommand = (d.command ?? ownerCommandRoute(!!d.edge)) === 'edge-inbox';
   if (d.god) {
     const god = d.god;
     // G4: the edits that commit while the god holds a command are that command's; its ack records where they are.
@@ -59,7 +65,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
     // MSG: a Soul's messages have one consumer, its listen (which hands over the whole backlog). Other answers carry a
     // private notice of the oldest waiting message but do not mark it received, so a listen never misses its wake-up.
     const soulListen = current.kind === 'soul' && c.res.status === 200 && c.req.path.endsWith('/v1/edge/inbox/listen');
-    const carry = (own?: unknown) => (acked || soulListen) && own ? own : current.kind === 'god' ? inbox.deliver(current.scope) : inbox.view(current.scope);
+    const carry = (own?: unknown) => (acked || soulListen) && own ? own : current.kind === 'god' ? inbox.deliver(current.scope) : c.req.path.endsWith('/v1/agent/me') ? {...inbox.view(current.scope), unfinished: inbox.unfinished(current.scope)} : inbox.view(current.scope);
     if (contract || !c.res.headers.get('content-type')?.includes('application/json')) {
       if (c.res.status < 200 || c.res.status >= 300) return;
       inbox.touch(current.scope);
@@ -76,7 +82,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
     const headers = new Headers(c.res.headers); headers.set('Cache-Control', 'no-store'); headers.delete('ETag'); headers.delete('Content-Length');
     c.res = new Response(JSON.stringify({...payload, inbox: carry((payload as {inbox?: unknown}).inbox)}), {status: c.res.status, headers});
   });
-  for (const path of ['/v1/god/inbox', '/v1/god/inbox/*', '/v1/edge/inbox/*', '/v1/edge/owner/:soulId/inbox', ...(d.edge ? ['/v1/souls/:soulId/command'] : [])]) {
+  for (const path of ['/v1/god/inbox', '/v1/god/inbox/*', '/v1/edge/inbox/*', '/v1/edge/owner/:soulId/inbox', ...(ownsCommand ? ['/v1/souls/:soulId/command'] : [])]) {
     app.use(path, async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
     app.use(path, bodyLimit({maxSize: 8192, onError: c => c.json({ok: false, code: 'too-large', message: 'message is too large'}, 413)}));
   }
@@ -92,14 +98,17 @@ export function mountAgentInbox(app: Hono, d: Deps) {
     return {scope: `soul:${soul.id}`, owner: soul.owner};
   };
   /** LINK (COMMON-LINK §2): a Soul owner's view also carries the one link state and the agent's public `now` line. */
-  const linkFields = async (c: Context, s: InboxScope) => {
+  const linkFields = async (c: Context, s: InboxScope, v: InboxView) => {
     if (!s.scope.startsWith('soul:')) return {};
     const row = d.db.soul(s.scope.slice(5)); if (!row) return {};
     const u = await d.requireUser(c);
-    return {link: soulLink(d.souls, inbox, row, u.id), now: d.souls.host.nowOf(row.id)};
+    // #1313: the act under way for the newest message, or thinking; never a guess (a fault shows nothing)
+    let doing: unknown = null;
+    try {doing = inbox.doingOf?.(row.id, v.latest, v.presence === 'away') ?? null;} catch {/* nothing on record */}
+    return {link: soulLink(d.souls, inbox, row, u.id), now: d.souls.host.nowOf(row.id), ...(doing ? {doing} : {})};
   };
   const ownerRoutes = (path: string, owner: (c: Context) => Promise<InboxScope>, bucket: 'god-inbox' | 'cmd', command = false) => {
-    if (!command) app.get(path, async c => { const s = await owner(c); return c.json({inbox: {...inbox.ownerView(s), ...await linkFields(c, s)}}); });
+    if (!command) app.get(path, async c => { const s = await owner(c), v = inbox.ownerView(s); return c.json({inbox: {...v, ...await linkFields(c, s, v)}}); });
     app.post(path, async c => {
       const s = await owner(c), b = await json(c);
       if (command && (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 280)) throw new ApiError(400, 'invalid', 'text is required (1–280 characters)');
@@ -108,7 +117,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
       const current = await owner(c);
       if (current.owner !== s.owner || current.scope !== s.scope) throw new ApiError(403, 'forbidden', 'owner authority changed');
       const sent = inbox.send(s, b.text);
-      return c.json({ok: true, inbox: command ? sent : {...sent, ...await linkFields(c, s)}});
+      return c.json({ok: true, inbox: command ? sent : {...sent, ...await linkFields(c, s, sent)}});
     });
   };
   if (d.god) {
@@ -118,9 +127,9 @@ export function mountAgentInbox(app: Hono, d: Deps) {
   }
   ownerRoutes('/v1/edge/owner/:soulId/inbox', soulOwner, 'cmd');
   // Edge Souls use the existing owner command channel; the new box endpoint is
-  // an alias over its same latest record and 20/min owner bucket. Central minds
-  // keep their existing translator route in http.ts.
-  if (d.edge) ownerRoutes('/v1/souls/:soulId/command', soulOwner, 'cmd', true);
+  // an alias over its same latest record and 20/min owner bucket. On a central-mind
+  // world http.ts mounts the translator instead (ownerCommandRoute, #982).
+  if (ownsCommand) ownerRoutes('/v1/souls/:soulId/command', soulOwner, 'cmd', true);
   const agentRoutes = (path: string, kind: Agent['kind']) => {
     app.get(`${path}/listen`, async c => {
       const s = requireAgent(c, kind), raw = c.req.query('timeoutMs'), timeout = raw === undefined ? 25_000 : Number(raw), after = c.req.query('after');
@@ -131,8 +140,12 @@ export function mountAgentInbox(app: Hono, d: Deps) {
       const claim = timeout > 0 ? inbox.claimListen(s) : {signal: new AbortController().signal, release: () => {}};
       const end = inbox.listening(s);   // G4: the owner's "connected" is a listener waiting now
       let handed = false;               // MSG: an empty answer means the CLI re-polls at once (presence keeps 'listening')
+      // #1326: a Soul's listen also ends when the world's clock stalls (the frame then carries world.stalled); one already
+      // stalled holds at most 5 s, so a client listening in a loop doesn't spin
+      const stalledAtStart = kind === 'soul' && stalledNow(), stall = new AbortController();
+      const unstall = kind === 'soul' && !stalledAtStart ? whenStalled(() => stall.abort()) : () => {};
       try {
-        await inbox.listen(s, after, timeout, AbortSignal.any([c.req.raw.signal, claim.signal]));
+        await inbox.listen(s, after, stalledAtStart ? Math.min(timeout, 5000) : timeout, AbortSignal.any([c.req.raw.signal, claim.signal, stall.signal]));
         // Superseded (or the caller hung up): hand over nothing; the newer listen takes every waiting message.
         if (claim.signal.aborted) throw new ApiError(409, 'superseded', 'superseded by a newer listen for this agent; this listen has ended, do not restart it');
         if (c.req.raw.signal.aborted) throw new ApiError(499, 'closed', 'the listener hung up');
@@ -142,7 +155,7 @@ export function mountAgentInbox(app: Hono, d: Deps) {
         // An older CLI reads `latest`: the first one after its cursor, so its listen/follow loop walks the queue in order.
         if (kind === 'soul') { const backlog = inbox.takeBacklog(s, after), v = inbox.view(s); handed = backlog.length > 0; return c.json({inbox: {...v, latest: backlog[0] ?? v.latest}, backlog}); }
         return c.json({inbox: inbox.view(s)});
-      } finally { claim.release(); end(handed); }
+      } finally { unstall(); claim.release(); end(handed); }
     });
     app.post(`${path}/:id/ack`, async c => {
       const s = requireAgent(c, kind), b = await json(c); limit(`inbox-ack:${kind}:${JSON.stringify(s)}`, 120);

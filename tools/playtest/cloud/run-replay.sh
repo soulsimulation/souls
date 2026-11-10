@@ -4,6 +4,7 @@
 #   PLAYTEST_SCENARIO=tools/playtest/scenarios/<x>.json … runs that one scenario instead of the frozen set.
 #   PLAYTEST_DIRECT=tools/playtest/scenarios/casts/<x>.json … runs that cast as a headless swarm-directed session
 #   (`playtest.mjs direct --headless`; the cast's console script plays the console) instead of the frozen set.
+#   PLAYTEST_SPECS="<spec.json> …" runs a live arm of Soul Runs specs, one at a time, with its spend stops (run-specs.sh).
 # Run from a clone of the playtest branch (lane/playtest-20261024). Idempotent: rerunning resumes every step
 # (worktree, install, web build stamp, asset overlay, replay-set receipts, PNG compression, commit). See README.md.
 # Layout beside the clone: ../server (fix branch worktree), ../mars-web (overlay), ../results/<out-name>, ../results-branch.
@@ -88,6 +89,10 @@ elif [ -n "${PLAYTEST_SCENARIO:-}" ]; then
   for i in $(seq 1 "$REPEATS"); do
     step "run-$(basename "$PLAYTEST_SCENARIO" .json)-r$i" node tools/playtest/playtest.mjs run "$PLAYTEST_SCENARIO" --server-root "$SERVER" --out "$OUT/$(basename "$PLAYTEST_SCENARIO" .json)-r$i" || RS_RC=$?
   done
+elif [ -n "${PLAYTEST_SPECS:-}" ]; then
+  # a live arm of Soul Runs specs (PLAYTEST_SPECS="a.json b.json", all of them per repeat): tools/playtest/cloud/run-specs.sh (#1098)
+  read -r -a SPECS <<< "$PLAYTEST_SPECS"
+  step run-specs bash tools/playtest/cloud/run-specs.sh "$SERVER" "$OUT" "$REPEATS" "${SPECS[@]}" || RS_RC=$?
 elif [ -n "${PLAYTEST_DIRECT:-}" ]; then
   # one directed session per repeat (PLAYTEST_DIRECT=<cast.json>, -r1, -r2 …): verdict in <run>/director/VERDICT.md
   for i in $(seq 1 "$REPEATS"); do
@@ -123,12 +128,6 @@ OVERLAY_FACT="$(node -e 'try{const m=JSON.parse(require("fs").readFileSync(proce
   awk '{printf "| %s | %s | %s |\n", $1, $2, $3}' "$TIMES"
 } > "$OUT/CLOUD.md"
 
-# --- secret guard: refuse to publish token-shaped strings
-if grep -rIlE 'sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gho_[A-Za-z0-9]{30,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' "$OUT" > "$PARENT/.secret-hits" 2>/dev/null; then
-  say "token-shaped strings found in $(wc -l < "$PARENT/.secret-hits") files (names in $PARENT/.secret-hits); NOT committing"; exit 3
-fi
-rm -f "$PARENT/.secret-hits"
-
 # --- commit to playtest-results (existing remote branch, else orphan) and push with backoff
 if [ ! -e "$RB/.git" ]; then
   git worktree prune
@@ -147,11 +146,15 @@ else
 fi
 git -C "$RB" config user.email >/dev/null 2>&1 || git -C "$RB" config user.email "playtest-cloud@agent.invalid"
 git -C "$RB" config user.name >/dev/null 2>&1 || git -C "$RB" config user.name "playtest cloud runner"
-mkdir -p "$RB/results/$NAME"
-rsync -a --delete --exclude '.cloud-times' "$OUT/" "$RB/results/$NAME/" 2>/dev/null || { rm -rf "$RB/results/$NAME"; mkdir -p "$RB/results/$NAME"; cp -a "$OUT/." "$RB/results/$NAME/"; rm -f "$RB/results/$NAME/.cloud-times"; }
-# GitHub refuses files over 100 MB: leave those out and list them
-find "$RB/results/$NAME" -type f -size +95M -print -delete | sed "s#^$RB/##" > "$RB/results/$NAME/OMITTED-LARGE-FILES.txt" || true
-[ -s "$RB/results/$NAME/OMITTED-LARGE-FILES.txt" ] || rm -f "$RB/results/$NAME/OMITTED-LARGE-FILES.txt"
+# --- copy the results for the branch, then scrub (a spec arm's carry this machine's details, #1131) and guard the copy only:
+# the run's own folder keeps what retention says it keeps (#1311). Not a `step`: PLAYTEST_CLOUD_SKIP can't turn it off.
+mkdir -p "$RB/results"
+PC=0; bash tools/playtest/cloud/publish-copy.sh "$OUT" "$RB/results/$NAME" ${PLAYTEST_SPECS:+--scrub} > "$PARENT/.secret-hits" 2>>"$LOG" || PC=$?
+case "$PC" in
+  0) rm -f "$PARENT/.secret-hits" ;;
+  7) say "publish-scrub failed: NOT committing; results stay in $OUT"; exit 7 ;;
+  *) say "token-shaped strings found in $(grep -c . "$PARENT/.secret-hits") files, or the scan failed (names in $PARENT/.secret-hits); NOT committing; results stay in $OUT"; exit 3 ;;
+esac
 git -C "$RB" add -A
 if git -C "$RB" diff --cached --quiet; then say "results unchanged; nothing to commit"
 else git -C "$RB" commit -q -m "playtest results $NAME: $FIX @ ${FIX_SHA:0:12}, repeats $REPEATS, replay exit $RS_RC" && say "committed $(git -C "$RB" rev-parse --short HEAD)"; fi

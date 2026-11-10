@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, JOBS, MERGE_FORWARD_COMMENT, MERGE_FORWARD_MARKER, WINDOW_LABELS, acceptsPrInput, changedFiles, greenAtHead, hasMergeForwardComment, jobsFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -11,6 +11,14 @@ const names = files => jobsFor(files).include.map(j => j.name);
 test('docs and plain tools changes run no job', () => {
   assert.deepEqual(names(['README.md', 'docs/TESTING.md', 'tools/playtest/x.mjs']), []);
   assert.equal(jobsFor(['docs/a.md']).scope, 'none');
+});
+
+test('the reference pages\' generator: checked when the server, packages, generator or the pages change; not for other docs', () => {
+  for (const f of ['apps/server/src/mcp.ts', 'packages/engine-mars/src/engine.ts', 'tools/docs/generate.mjs', 'tools/docs/reference/collect.mjs', 'docs/site/api.md'])
+    assert.ok(names([f]).includes('docs-reference'), f);
+  assert.deepEqual(names(['tools/docs/generate.mjs']), ['docs-reference']);
+  for (const f of ['docs/site/concepts.md', 'docs/README.md', 'apps/web/src/main.ts']) assert.ok(!names([f]).includes('docs-reference'), f);
+  assert.ok(!('paths' in jobsFor(['tools/docs/generate.mjs']).include[0]));
 });
 
 test('web changes run the typecheck/build and the web unit suite', () => {
@@ -42,6 +50,23 @@ test('server changes run server shards and latency, not native', () => {
   assert.ok(!picked.includes('native'));
 });
 
+// tools/body-authoring builds the pinned shared presets the server serves (D028): the server legs, including the
+// renderer step on server-0, latency, and docs-reference, which every V5-server-full change selects since #898 because it
+// runs the reference pages' generator against the server; nothing else, and no browser smoke.
+test('body-authoring changes run every server shard, latency and docs-reference, and nothing else', () => {
+  const files = ['tools/body-authoring/pip/robot.mjs'], server = JOBS.filter(j => j.kind === 'server').map(j => j.name);
+  assert.ok(server.includes('server-0') && server.length > 1, server.join());
+  assert.deepEqual(names(files).sort(), ['docs-reference', 'latency', ...server].sort());
+  assert.equal(jobsFor(files).scope, 'scoped');
+  assert.equal(smokeFor(files), false);
+});
+
+test('the types-web job, which runs the bundle comparison, covers what can move the bundle (#1117)', () => {
+  for (const f of ['apps/web/src/App.tsx', 'packages/world-compiler/src/joints.ts', 'tools/test-harness/bundle-budget/baseline.json', 'tools/test-harness/bundle-budget/budget.mjs']) assert.ok(names([f]).includes('types-web'), f);
+  assert.ok(!names(['docs/testing.md']).includes('types-web'));
+  assert.match(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'), /types-web\)[^;]*@souls\/web build\n[^;]*budget\.mjs --check/);
+});
+
 test('the native leg stays hosted whatever CI_HEAVY_RUNNER says, and only it (#1162)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const runsOn = /^  qualify:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1] ?? '';
@@ -55,6 +80,13 @@ test('the soul-actions job runs on its own paths, full scope included, and on no
   for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!names([f]).includes('soul-actions'), f);
   assert.ok(names(['pnpm-lock.yaml']).includes('soul-actions'));
   assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === 'soul-actions')));
+});
+
+test('the soul-tools job runs on its own paths, full scope included, and on nothing else (#1111)', () => {
+  for (const f of ['tools/soul-runtime/run.test.mjs', 'tools/soul-trace/tap.mjs', 'tools/world-launcher/soul/eden.mjs', 'apps/server/src/edge/comms/testing.ts']) assert.ok(names([f]).includes('soul-tools'), f);
+  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'tools/edge-skill/client.mjs', 'tools/soul-actions/shared-crew.test.mjs']) assert.ok(!names([f]).includes('soul-tools'), f);
+  assert.ok(names(['pnpm-lock.yaml']).includes('soul-tools'));
+  assert.ok(!('paths' in jobsFor(['tools/soul-trace/x.test.mjs']).include.find(j => j.name === 'soul-tools')));
 });
 
 test('unmapped paths (lockfile, .github, mars) run every job', () => {
@@ -106,6 +138,25 @@ test('pushes to main and manual runs check everything; pull request runs stay sc
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   assert.match(workflow, /ci-scope\.mjs --base "\$BASE" --head "\$HEAD_SHA" --event "\$EVENT"/);
   assert.match(workflow, /push:\n\s+branches: \[main\]/);
+});
+
+// #918: the god-skill unit tests (replay corpus included) run on the one job carrying godSkill.
+test('god-skill unit tests: one job runs them, and god or god-skill changes select it', async () => {
+  assert.deepEqual(JOBS.filter(j => j.godSkill).map(j => j.name), ['server-0']);
+  assert.equal(JOBS.find(j => j.godSkill).assets, true, 'glb and upload tests read pulled media');
+  const god = files => jobsFor(files).include.filter(j => j.godSkill).map(j => j.name);
+  for (const f of ['tools/god-skill/lib/upload.mjs', 'tools/god-skill/replay-corpus.test.mjs', 'apps/server/src/god/buildsafe-rule.ts']) assert.deepEqual(god([f]), ['server-0'], f);
+  assert.deepEqual(god(['docs/testing.md']), []);
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /GOD_SKILL: \$\{\{ matrix\.godSkill \|\| false \}\}/);
+  assert.ok(workflow.includes(`if [ "$GOD_SKILL" = true ]; then node --test --test-concurrency=1 ${GOD_SKILL_TESTS} || god=$?; fi`));
+  assert.match(workflow, /exit \$\(\( server \|\| god \)\)/);
+  // every god-skill *.test.mjs is covered by the globs (the e2e/*.test.mjs are fixture unit tests: no browser)
+  const { readdirSync } = await import('node:fs');
+  const root = fileURLToPath(new URL('../../tools/god-skill/', import.meta.url));
+  const all = readdirSync(root, { recursive: true }).filter(f => /\.test\.mjs$/.test(f) && !f.includes('node_modules')).map(f => `tools/god-skill/${f}`);
+  const covered = f => GOD_SKILL_TESTS.split(' ').some(g => new RegExp(`^${g.replace(/\./g, '\\.').replace('*', '[^/]*')}$`).test(f));
+  assert.deepEqual(all.filter(f => !covered(f)), [], 'god-skill tests outside GOD_SKILL_TESTS');
 });
 
 // The CI window (#913, docs/testing.md#ci-window).
@@ -161,61 +212,44 @@ test('greenAtHead: the newest uncancelled ci run at the head passed, and none ne
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'in_progress')], 2), true, 'a run never counts itself');
 });
 
+test('ci.yml: a window label starts a pull_request run, and no other label touches CI', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const job = name => workflow.slice(workflow.indexOf(`\n  ${name}:\n`) + 1).split(/\n  [a-z-]+:\n/)[0];
+  const asked = WINDOW_LABELS.map(l => `github.event.label.name == '${l}'`).join(' || ').split(' || ').sort();
+  const wanted = text => { const m = /github\.event\.action != 'labeled' \|\| ([^)\n]*?)(?:\)|$)/m.exec(text); assert.ok(m, text.slice(0, 60)); return m[1].split(' || ').sort(); };
+  for (const name of ['scope', 'repo']) assert.deepEqual(wanted(job(name).match(/^    if: (.*)$/m)[1]), asked, name);
+  // qualify and smoke need scope, so they skip with it; ci-ok alone runs always(), and must not on another label
+  for (const name of ['qualify', 'smoke']) assert.match(job(name), /needs: scope|needs: \[scope/, name);
+  const ok = job('ci-ok'), okIf = ok.match(/^    if: (.*)$/m)[1];
+  assert.match(okIf, /^always\(\) && \(/); assert.deepEqual(wanted(okIf), asked);
+  // a skipped required check reads as a pass, so on another label this job must not be `ci-ok`
+  const name = ok.match(/^    name: (.*)$/m)[1]; assert.deepEqual(wanted(name), asked); assert.match(name, /&& 'ci-ok' \|\| 'other-label' \}\}$/);
+  // another label's run has a group of its own, so it can't cancel or displace a running CI; a window label queues, never cancels
+  const group = workflow.match(/^  group: (.*)$/m)[1];
+  assert.equal(group, "ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}");
+  for (const l of WINDOW_LABELS) assert.ok(group.includes(`github.event.label.name != '${l}'`), l);
+  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' && github\.event\.action != 'labeled' \}\}/);
+  // a window label on a green head does no heavy work, and the head is the PR's, not the merge commit
+  assert.match(job('scope'), /if: github\.event\.action == 'labeled' \|\| \(github\.event_name == 'workflow_dispatch'/);
+  assert.match(job('scope'), /green --repo "\$GITHUB_REPOSITORY" --sha "\$HEAD_SHA" --self/);
+});
+
+test('a window label opens the window on its own pull_request run, and green at the head does no heavy work', () => {
+  const heavy = { include: [{ name: 'server-0' }], smoke: true };
+  const win = windowFor({ event: 'pull_request', labels: ['ci:run'] });
+  assert.equal(win.open, true);
+  assert.deepEqual(windowed(heavy, win, { greenAtHead: true }), { include: [], smoke: false, deferred: false, why: 'a ci run at this head already passed' });
+  assert.deepEqual(windowed(heavy, win).include, heavy.include);
+  assert.equal(windowed(heavy, windowFor({ event: 'pull_request', draft: true, labels: ['ci:run'] })).deferred, true, 'a draft stays deferred');
+});
+
 test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   assert.match(workflow, /--draft "\$DRAFT" --labels "\$LABELS" --green-at-head "\$GREEN"/);
-  assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
-  assert.match(workflow, /group: ci-\$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr \|\| github\.ref \}\}/);
+  assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review, labeled\]/);
   const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
   assert.match(ok, /if: needs\.scope\.outputs\.deferred == 'true'[\s\S]*?exit 1/);
-  const request = readFileSync(fileURLToPath(new URL('../workflows/ci-request.yml', import.meta.url)), 'utf8');
-  assert.match(request, /label\.name == 'ci:run' \|\| github\.event\.label\.name == 'merge:ready'/);
-  assert.match(request, /gh workflow run ci\.yml --repo "\$REPO" --ref "\$HEAD_REF" -f pr="\$PR"/);
-  const [beforeDispatch] = request.split('gh workflow run');
-  assert.match(beforeDispatch, /dispatchable="\$\(node \.github\/scripts\/ci-scope\.mjs dispatchable --repo "\$REPO" --sha "\$HEAD_SHA"\)"\n\s+if \[ "\$dispatchable" != true \][\s\S]*merge-forward --repo "\$REPO" --pr "\$PR"\n\s+exit 0/, 'a branch without the pr input is never dispatched');
-  assert.doesNotMatch(request, /\[ "\$\(node/, 'a helper runs outside [ ], so bash -e fails the step when it fails');
-  assert.doesNotMatch(request, /pull_request\.head\.sha \}\}\n\s+ref:|ref: \$\{\{ github\.event\.pull_request/, 'never checks out the PR');
   const labels = readFileSync(fileURLToPath(new URL('../labels.yml', import.meta.url)), 'utf8');
   for (const l of WINDOW_LABELS) assert.match(labels, new RegExp(`name: "${l}"`));
 });
 
-// A branch cut before #914 still has this ci.yml: dispatching it with `pr` is refused with HTTP 422.
-const PRE_WINDOW = `name: ci
-on:
-  pull_request:
-  merge_group:
-  push:
-    branches: [main]
-  workflow_dispatch:
-permissions:
-  contents: read
-jobs:
-  scope:
-    steps:
-      - uses: actions/checkout@v7
-        with: { inputs: pr }
-`;
-
-test('acceptsPrInput: main\'s ci.yml takes the pr input, a pre-window branch\'s does not', () => {
-  assert.equal(acceptsPrInput(readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8')), true);
-  assert.equal(acceptsPrInput(PRE_WINDOW), false);
-  assert.equal(acceptsPrInput(''), false, 'no ci.yml at the head');
-  assert.equal(acceptsPrInput(undefined), false);
-  const dispatch = inputs => `on:\n  push:\n  workflow_dispatch:\n${inputs}permissions:\n  contents: read\n`;
-  assert.equal(acceptsPrInput(dispatch('    inputs:\n      # the PR\n      pr:\n        required: false\n')), true);
-  assert.equal(acceptsPrInput(dispatch('    inputs:\n      "pr":\n        required: false\n')), true, 'a quoted key');
-  assert.equal(acceptsPrInput(dispatch('    inputs:\n      other:\n        description: pr\n')), false, 'another input only');
-  assert.equal(acceptsPrInput(dispatch('    inputs:\n      other:\n        pr:\n          x: 1\n')), false, 'pr nested under another input');
-  assert.equal(acceptsPrInput(dispatch('    branches: [main]\n') + 'jobs:\n  inputs:\n    pr:\n'), false, 'inputs outside workflow_dispatch');
-  assert.equal(acceptsPrInput(dispatch('    inputs:\n      prefix:\n        required: false\n')), false, 'a key that only starts with pr');
-});
-
-test('merge-forward: one comment per PR, naming the fix', () => {
-  assert.ok(MERGE_FORWARD_COMMENT.startsWith(MERGE_FORWARD_MARKER));
-  assert.match(MERGE_FORWARD_COMMENT, /Merge main forward to enable `ci:run`/);
-  assert.match(MERGE_FORWARD_COMMENT, /docs\/testing\.md#ci-window/);
-  assert.equal(hasMergeForwardComment([]), false);
-  assert.equal(hasMergeForwardComment(undefined), false);
-  assert.equal(hasMergeForwardComment([{ body: 'lgtm' }, { body: null }]), false);
-  assert.equal(hasMergeForwardComment([{ body: 'lgtm' }, { body: MERGE_FORWARD_COMMENT }]), true);
-});

@@ -1,5 +1,7 @@
 export function eyesBrowserModes(env?: NodeJS.ProcessEnv, platform?: string): string[];
-export function eyesBrowserLaunch(mode: string, env?: NodeJS.ProcessEnv, platform?: string, home?: string | null): {headless: boolean; channel?: string; env?: NodeJS.ProcessEnv; args: string[]};
+export function eyesBrowserLaunch(mode: string, env?: NodeJS.ProcessEnv, platform?: string, home?: string | null, executablePath?: string | null): {headless: boolean; channel?: string; executablePath?: string; env?: NodeJS.ProcessEnv; args: string[]};
+export const EYES_EXIT_NO_BROWSER: number;
+export function eyesExecutable(expected: string | null | undefined, env?: Record<string, string | undefined>, io?: {exists?: (p: string) => boolean; list?: (d: string) => string[]}): {path: string | null; source?: string; note?: string; problem?: string; log: string};
 export function eyesWorkerProblem(platform?: string): string | null;
 export const EYES_UA_TAG: string;
 export function isEyesAgent(ua: unknown): boolean;
