@@ -1,3 +1,4 @@
+import type {Sgraffito}from'./sgraffito.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -88,6 +89,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  sgraffito?:Sgraffito;
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -196,6 +198,7 @@ export class GodPerceive {
       },
       deferContacts: !!this.h.edge?.contactActuator,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
+      sgraffito:(soul:EdgeSoul,id:string,action:string)=>this.h.sgraffito?.plan(soul,id,action,(i,s,f,r)=>this.actHost().approach!(i,s,f,r))??null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
