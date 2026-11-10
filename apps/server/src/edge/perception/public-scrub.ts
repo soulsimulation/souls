@@ -44,3 +44,13 @@ export function withoutSecrets<T>(value: T, s: Secrets | null): T {
   };
   return clean(value) as T;
 }
+
+/** A list of what the world says of a Soul, each entry through `withoutSecrets` but for `own`, the Soul's own words: scrubbing those
+ *  would let any owner test a guessed name, as with its name and `now`. Everything else, today's fields and any added later, is scrubbed. */
+export function withoutSecretsBut<T extends object>(list: T[], own: keyof T, s: Secrets | null): T[] {
+  if (!s) return list;
+  return list.flatMap((entry) => {
+    const {[own]: words, ...rest} = entry, [kept] = withoutSecrets([rest], s);
+    return kept ? [{...kept, ...(words === undefined ? {} : {[own]: words})} as T] : [];
+  });
+}

@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
-import { arrivalProgress, assetDownloadProgress, heldLabel, initialPending } from './viewer-arrival.ts';
+import { arrivalFraction, heldLabel, initialPending } from './viewer-arrival.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
@@ -67,6 +67,15 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const previewHour = useSyncExternalStore(subscribeVisitorHour, visitorPreviewHour, visitorPreviewHour);
   const [hourOpen, setHourOpen] = useState(false);
   const hourButton = useRef<HTMLButtonElement>(null);
+  const hourPanel = useRef<HTMLDivElement>(null);
+  // like the music and camera menus: a click anywhere else, or Escape, puts the time panel away
+  useEffect(() => {
+    if (!hourOpen) return;
+    const away = (e: PointerEvent) => { const t = e.target as Node; if (!hourPanel.current?.contains(t) && !hourButton.current?.contains(t)) setHourOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setHourOpen(false); hourButton.current?.focus(); } };
+    document.addEventListener('pointerdown', away); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
+  }, [hourOpen]);
   // DLG3 (Gene): the history scrub ("Back 1 min") is hidden for now; `?rewind` keeps it reachable for tests.
   const [rewind] = useState(() => { try { return new URLSearchParams(location.search).has('rewind'); } catch { return false; } });
   const help = useRef<HTMLDivElement>(null);
@@ -107,9 +116,8 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // and is full once the world is ready. Without a byte total yet, the older measures stand in.
   const bytes = useSyncExternalStore(assetBytes.subscribe.bind(assetBytes), () => assetBytes.snapshot());
   // new worlds learn their total from the snapshot a moment after the first downloads start: no bar until then
-  const inBytes = bytes.known && bytes.total > 0, byByte = card && inBytes;
-  const measured = !card ? (arrivalShown ? 1 : null) : initial && (initial.stage === 'preparing' || initial.stage === 'first-frame') ? 1
-    : byByte ? bytes.loaded / bytes.total : bytes.total > 0 && !bytes.known ? null : initial ? arrivalProgress(initial) : arriving ? assetDownloadProgress(state?.assetDownloads) : null;
+  // #1266: one progress for the bar and the light: bytes, then preparation, and 100% only once the world is drawn
+  const measured = !card ? (arrivalShown ? 1 : null) : arrivalFraction({ card, bytes, initial, downloads: state?.assetDownloads, arriving });
   const peak = useRef(0);  // a file fetched again after an abort restarts its count: the bar (and its MB) hold, never step back
   if (!card) peak.current = 0;
   const progress = measured === null ? null : card ? (peak.current = Math.max(peak.current, Math.min(1, measured))) : measured;
@@ -120,6 +128,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     : lost ? 'Reconnecting…'
     : settledReason ? heldLabel(settledReason)
     : state!.presentation === 'history' ? 'Recorded' : 'Live';
+  const pill = !!live && !settledReason && !arriving && !!worldTime;
   const statusClass = arriving || state?.loading ? 'loading' : !lost && !settledReason && current && connected ? 'ok' : 'warn';
   // #892: a glide to a Soul (flyToSoul) is Follow on its way, not your camera (no "Free" flash between two Souls)
   const kind = state?.cameraMode === 'follow' || state?.flyingTo ? 'follow' : state?.cameraMode === 'manual' ? 'yours' : 'broadcast';
@@ -128,15 +137,17 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const close = () => { onNavigationChange(false); setCameraNote(''); document.querySelector<HTMLElement>('.camera-menu .navbar-menu-trigger')?.focus(); };
   // VF6 (Gene: "if you touch WASD you break out of that mode so it's intuitive"): a short cue when Follow starts,
   // and a shorter one when a move key (or ×) hands the camera back to you.
-  const [followCue, setFollowCue] = useState<'' | 'follow' | 'free'>('');
-  const lastKind = useRef(kind);
+  const [followCue, setFollowCue] = useState<'' | 'follow' | 'free' | 'held'>('');
+  // #1316: a pull out (zoom out, drag round) keeps the viewer's view; a cue says so once, and how to hand it back.
+  const held = kind === 'follow' && !!state?.followHeld;
+  const lastKind = useRef(kind), lastHeld = useRef(held);
   useEffect(() => {
-    const was = lastKind.current; lastKind.current = kind;
-    if (kind === was) return;
-    const cue = kind === 'follow' ? 'follow' : was === 'follow' && kind === 'yours' ? 'free' : '';
+    const was = lastKind.current, wasHeld = lastHeld.current; lastKind.current = kind; lastHeld.current = held;
+    if (kind === was && held === wasHeld) return;
+    const cue = held && !wasHeld ? 'held' : kind === was ? '' : kind === 'follow' ? 'follow' : was === 'follow' && kind === 'yours' ? 'free' : '';
     setFollowCue(cue); if (!cue) return;
-    const id = setTimeout(() => setFollowCue(''), cue === 'follow' ? 5000 : 2500); return () => clearTimeout(id);
-  }, [kind]);
+    const id = setTimeout(() => setFollowCue(''), cue === 'free' ? 2500 : 5000); return () => clearTimeout(id);
+  }, [kind, held]);
   const coarse = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
   useEffect(() => {
     if (!navigationOpen) return;
@@ -150,13 +161,24 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // (Shell's slots); nothing sits at the bottom of the screen.
   const statusBlock = <div className="viewer-history" data-viewer-navigation={state?.manualNavigation ?? ''} data-viewer-input={state?.inputOwned ?? false} data-viewer-mode={state?.cameraMode ?? ''} data-viewer-presentation={state?.presentation ?? ''} data-viewer-tick={state?.shownTick ?? ''} data-viewer-selection={state?.selection.soulId ?? state?.selection.entityId ?? ''} data-viewer-ready={!!handle}>
       <div className="row viewer-status">
-        <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>
-        {state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
-        {hourOpen && !arriving && createPortal(<div className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 12) }; })()}>
-          <label>Time of day <b>{previewHour != null ? hourLabel(previewHour) : 'now'}</b>
-            <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} /></label>
-          <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>
-          <span className="dim">Only you see this; the world's clock does not change.</span>
+        {/* #1392 (Gene): at the present time the element is one "● Live" pill; the day and time are in the panel it opens.
+            A previewed hour turns the circle orange and the pill shows that hour; Back to now restores Live. */}
+        {pill ? <button ref={hourButton} type="button" className="world-time-button live-pill" aria-expanded={hourOpen} aria-label={previewHour != null ? `Previewing ${hourLabel(previewHour)}: change the time of day` : `Live, ${worldTime}: preview the time of day`} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>
+          <span className={previewHour != null ? 'preview' : statusClass} data-viewer-status data-viewer-live={live} data-viewer-preview={previewHour != null || undefined}>{previewHour != null ? hourLabel(previewHour) : status}</span>
+        </button> : <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>}
+        {!pill && state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
+        {hourOpen && !arriving && createPortal(<div ref={hourPanel} className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 4) }; })()}>
+          <div className="time-preview-head">
+            <span className="time-preview-value">{previewHour != null ? hourLabel(previewHour) : worldTime?.split(' · ').slice(-1)[0]}</span>
+            <span className={previewHour != null ? 'time-preview-tag preview' : 'time-preview-tag'}>{previewHour != null ? 'Preview' : 'Now'}</span>
+          </div>
+          {worldTime && <span className="time-preview-now" data-world-time>{previewHour != null ? `In the world: ${worldTime}` : worldTime.split(' · ')[0]}</span>}
+          <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} />
+          <div className="time-preview-ticks" aria-hidden="true"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
+          <div className="time-preview-foot">
+            <span>Only you see this</span>
+            {previewHour != null && <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>}
+          </div>
         </div>, document.body)}
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}
@@ -180,14 +202,17 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
       {dismiss=><><button type="button" aria-pressed={kind==='broadcast'} disabled={!handle||arriving} onClick={()=>{toBroadcast();dismiss();}}>Broadcast</button>
       <button type="button" aria-pressed={kind==='yours'} disabled={!handle||arriving} onClick={()=>{yourCamera();dismiss();}}>Free</button>
       {phoneSheet&&kind!=='follow'&&followable&&state?.flyingTo!==followable&&<button type="button" disabled={!handle||arriving||state?.presentation==='history'} onClick={()=>{handle?.flyToSoul?.(followable,{chip:coarse});dismiss();}}>Follow {selectedName ?? 'this Soul'}</button>}
+      {held&&followable&&<button type="button" disabled={!handle||arriving||state?.presentation==='history'} onClick={()=>{handle?.flyToSoul?.(followable,{chip:coarse});dismiss();}}>Follow {followName ?? 'this Soul'} again</button>}
       {kind==='follow'&&<button type="button" onClick={()=>{yourCamera();dismiss();}}>Stop following</button>}
       <button type="button" onClick={()=>{dismiss();onNavigationChange(true);}}>Camera controls</button><FullscreenToggle/></>}
     </NavbarMenu>
   </div>;
   return <>
     {!arriving && <TouchHints />}
-    {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={`Loading ${worldName ?? 'the world'}`} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
-    {followCue && !arriving && <div className="viewer-follow-hint" role="status" aria-live="polite" data-cue={followCue}>{followCue === 'follow'
+    {arrivalShown && !blocked && initial?.stage !== 'failed' && <ArrivalLight title={worldName ?? ''} progress={progress} done={!card} card={card} instant={shot} onGone={arrivalGone} />}
+    {followCue && !arriving && <div className="viewer-follow-hint" role="status" aria-live="polite" data-cue={followCue}>{followCue === 'held'
+      ? <>Your view of <b>{followName ?? 'the Soul'}</b> stays put · <b>Follow</b> again to let the camera frame them</>
+      : followCue === 'follow'
       ? coarse ? <>Following <b>{followName ?? 'a Soul'}</b> · swipe for the next Soul · tap the ground to take over</> : <>Following <b>{followName ?? 'a Soul'}</b> · drag to look around, scroll to zoom · press <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to look around freely</>
       : <>Your camera · <b>Return to Broadcast</b> is top left</>}</div>}
     {navigationOpen && <div className="camera-help-scrim" onPointerDown={e => { if (e.target === e.currentTarget) close(); }}>

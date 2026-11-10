@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
+import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
 export type RouteClass = {cls: Cls; id: string; god: boolean; deadlineMs: number};
@@ -124,6 +125,13 @@ export class Admission {
     return false;
   }
 
+  /** #456: told of each refusal answered to a Soul (key `soul:<token>`), by the HTTP middleware and the read workers' port
+   *  alike, for the public Soul's `slowed`. Never the god's, never `soul.busy` (the Soul overlapping itself). */
+  onRefused?: (token: string, code: SlowedReason, retryAfterS: number) => void;
+  refused(key: string, god: boolean, code: string, retryAfterS: number) {
+    if (god || code === 'soul.busy' || !key.startsWith('soul:') || !this.onRefused) return;
+    try { this.onRefused(key.slice(5), code as SlowedReason, retryAfterS); } catch { /* the answer goes out regardless */ }
+  }
   request(r: {key: string; god: boolean; route: RouteClass; hintMs?: number; closed?: () => boolean}): Ticket {
     const now = this.now(), read = r.route.cls === 'C2';
     const cool = this.cooling(r.key, now);
@@ -293,7 +301,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
-    if (line) { stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
+    if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
       return c.json({contract: 'eden-edge/1', error: {code: 'world.crowded', message: crowdedNote(line), position: line.position, eta_s: line.eta_s}, world: worldBlock(lv, Math.max(1, Math.min(line.eta_s, 60)))}, 503); }
     // the body is NOT pre-read here: god/ingestion.ts and edge/body/routes.ts measure/stream the raw body with their own
     // reader, and a stream Hono has already consumed is locked (R2 integration: every POST /v1/god/* answered 500). Body
@@ -301,7 +309,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     // the client went away = its socket closed (not `incoming.destroyed`: a fully read request body is destroyed too)
     const env = c.env as {incoming?: {socket?: {destroyed?: boolean}}} | undefined, hint = Number(c.req.header('x-sim-timeout-ms'));
     const t = adm.request({key: r.god ? 'god' : 'soul:' + token, god: r.god, route: r, hintMs: Number.isFinite(hint) ? hint : undefined, closed: () => env?.incoming ? env.incoming.socket?.destroyed === true : c.req.raw.signal?.aborted === true});
-    const refuse = (x: Refusal) => { c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
+    const refuse = (x: Refusal) => { adm.refused(r.god ? 'god' : 'soul:' + token, r.god, x.code, x.retryAfterS); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
       return c.json({contract: 'eden-edge/1', error: {code: x.code, message: x.message}, world: worldBlock(lv, x.retryAfterS)}, x.status); };
     if ('refusal' in t) return refuse(t.refusal);
     const v = await t.turn;
@@ -337,11 +345,11 @@ export function admissionPort(adm: Admission | undefined, port: PortLike, run: (
     stats.jobs++;
     if (!adm || !m.route || (m.route.cls !== 'C1' && m.route.cls !== 'C2')) { void go(m); return; }
     const t = adm.request({key: m.key, god: m.god, route: m.route, hintMs: m.hintMs, closed: () => closed.has(m.id)});
-    if ('refusal' in t) { stats.refused++; reply({t: 'done', id: m.id, refusal: t.refusal}); return; }
+    if ('refusal' in t) { stats.refused++; adm.refused(m.key, m.god, t.refusal.code, t.refusal.retryAfterS); reply({t: 'done', id: m.id, refusal: t.refusal}); return; }
     // (a dropped or refused job is already out of `outstanding`: done() is not called, as in the middleware)
     void t.turn.then((v) => {
       if (v === 'dropped') { stats.dropped++; reply({t: 'done', id: m.id, dropped: true}); return; }
-      if (v !== 'run') { stats.refused++; reply({t: 'done', id: m.id, refusal: v}); return; }
+      if (v !== 'run') { stats.refused++; adm.refused(m.key, m.god, v.code, v.retryAfterS); reply({t: 'done', id: m.id, refusal: v}); return; }
       void go(m, t.done);
     });
   });

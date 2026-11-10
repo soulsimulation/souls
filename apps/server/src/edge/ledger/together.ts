@@ -47,7 +47,9 @@ type Tag =
   | {kind: 'unfollow'; follower: string}
   | {kind: 'item'; op: 'pick-up' | 'put-down' | 'consume'; item?: string; source?: string; itemKind?: string}
   /** PC04 (#683): propose one shared physical operation; the first template carries a loose `shared-carry` load */
-  | {kind: 'shared'; load: string; def: string; name: string; crew: [number, number]; mass?: {kg: number; each: number}; template?: 'raise-hold' | 'connect-beam' | DeckTemplate; bays?: BeamBayTag[]; choices?: SeatChoiceTag[]};
+  | {kind: 'shared'; load: string; def: string; name: string; crew: [number, number]; mass?: {kg: number; each: number}; template?: 'raise-hold' | 'connect-beam' | DeckTemplate; bays?: BeamBayTag[]; choices?: SeatChoiceTag[]}
+  /** PC17 (#696): organize, volunteer, leave-project, revise-project: answered by the world's projects, moving no body. */
+  | {kind: 'project'; op: 'organize' | 'volunteer' | 'leave' | 'revise'; procedure?: string; project?: string};
 /** PC14 (#693): a seat pair a beam lying here can go into (engine-mars beamBays), with the two uprights' names. */
 export type BeamBayTag = {a: string; b: string; seats: [string, string]; column: 'l' | 'r'; height: number; names: [string, string]};
 /** PC15 (#694): the deck templates: a joist set across a bay onto its beams, a sheet laid across five joists. */
@@ -125,6 +127,13 @@ const SHARED_RAISE_REFUSED = new Set(['raise.arc-blocked', 'raise.station-blocke
 /** PC14 (#693): what the native beam plan refuses before anyone is asked (not bodies: someone busy waits for the commit). */
 const SHARED_BEAM_REFUSED = new Set(['beam.misaligned', 'beam.seat-taken', 'beam.no-seat', 'beam.not-staged', 'beam.not-beam', 'beam.not-upright', 'beam.upright-not-standing', 'beam.upright-unsupported', 'beam.station-unreachable', 'reach.too-high', 'lift.path-blocked']);
 const SHARED_ROUTE_REFUSED = new Set(['carry.no-route', 'carry.clearance', 'carry.target-blocked', 'carry.pickup-blocked']);
+/** #1261 review: what a put-down while riding says, naming the next step: the ride's own leave as the menu offers it
+ *  (its object id, not the carrier's engine id), as rideStandRefusal names it; aloft, the ride lands by itself first. */
+export const rideDownReason = (phase: string, caps: readonly {id: string; available: boolean}[]): string => {
+  if (phase === 'aloft') return 'Not while riding: it lands by itself and you step out then; put it down after that.';
+  const leave = caps.find(c => /^object:[^:]+:leave$/.test(c.id) && c.available);
+  return `Not while riding: disembark first${leave ? ` (${leave.id} while it is on the ground)` : ''}, then put it down.`;
+};
 /** PC07 (#686): a native hold-up shorter than this is part of ordinary motion; one that lasts this long is reported as
  *  `lasting` (the crew still holds the load: nobody lets go on a timeout, PC02 §3). Ticks at 20 Hz. */
 const SHARED_BLOCK_TICKS = 10, SHARED_LASTING_TICKS = 600;
@@ -173,13 +182,18 @@ export type Invite = {id: string; what: string; host: {soulId: string; name: str
 /** PC04 (#683, docs/design/shared-execution.md §1): a shared physical operation, held in its together invitation's body.
  *  `revision` bumps on any material change (load, destination, crew); each member accepts their own role against it, and
  *  a bump clears every acceptance. `op` stays null until a commit (PC05). */
+export type SharedDestination = {place: string; name: string;
+  /** PC17 (#696): a project's spot rather than a place: where the load lies and at what yaw, and whose it is. */
+  spot?: {x: number; z: number; yaw: number}; project?: string};
 export type SharedSession = {template: {id: 'carry' | 'raise-hold' | 'connect-beam' | DeckTemplate; version: 1}; revision: number; load: {entity: string; def: string; name: string};
-  destination: {place: string; name: string}; roles: {role: 'carrier'; slot: number; soulId: string | null}[]; crew: [number, number];
+  destination: SharedDestination; roles: {role: 'carrier'; slot: number; soulId: string | null}[]; crew: [number, number];
   cleanup: 'set-down-here' | 'lower-here'; op: SharedOp | null; changed?: string;
   /** PC14 (#693): the two uprights and their seats a `connect-beam` session seats its beam in. */
   beam?: {a: string; b: string; seats: [string, string]};
   /** PC15 (#694): the engine step a deck session commits (`install_joist_v1` / `lay_sheet_v1` and its params, crew added). */
-  seat?: {verb: string; params: Record<string, unknown>; at?: number}};
+  seat?: {verb: string; params: Record<string, unknown>; at?: number};
+  /** PC17 (#696): a raise for a project names the point its base must stand on (`raise_hold_v1` baseV1). */
+  base?: [number, number]};
 /** PC05 (#684, PC02 §2): the running operation. Its id is a pure function of invitation and revision; `programId` is the
  *  host's engine programme and `eventSeq` the decision event that started it. Claims name what each member holds. */
 export type SharedOp = {id: string; programId: string; eventSeq: number; committedTick: number; phase: 'started' | 'stopping' | 'blocked' | 'ended';
@@ -209,7 +223,7 @@ export type SharedReceiptV1 = {invite: string; revision: number; role: 'carrier'
 export type CarryIssue = {code: string; message?: string; subjects?: string[]; details?: Record<string, unknown>};
 /** PC05: why a member (or the load) is not ready to commit yet. */
 export type SharedBlocker = {soulId: string | null; name: string; why: string};
-type Prepared = {steps: Steps; label?: string; commit?: (receipt: string) => void; noBody?: boolean;
+export type Prepared = {steps: Steps; label?: string; commit?: (receipt: string) => void; noBody?: boolean; result?: unknown;
   /** PC04: a shared proposal opens a `waiting` receipt with no body steps; `existing` answers a repeat with its receipt. */
   wait?: boolean; existing?: string; detail?: Record<string, unknown>};
 export type Item = {id: string; kind: ItemKind; name: string; holder: string | null; placeId: string | null; at: V2 | null; state: 'held' | 'placed' | 'gone'; claimedBy: string | null; by: string | null; createdAt: number; placedAt: number | null};
@@ -251,7 +265,7 @@ export type TogetherPort = {
   /** PC06 (#685): the native carry planner's answer for a crew carry, alone (no actor, programme or admission checks,
    *  nothing submitted): the refusal with its subjects, or null. Main only (the act path). */
   /** PC13 (#692): the native raise's own plan for this crew and load, nothing submitted. */
-  previewRaise?(params: {crew: string[]; item: string}): {code: string; message?: string; subjects?: string[]} | null;
+  previewRaise?(params: {crew: string[]; item: string; baseV1?: [number, number]}): {code: string; message?: string; subjects?: string[]} | null;
   /** PC14 (#693): the native beam plan for a crew and a seat pair, nothing submitted. */
   previewBeam?(params: {crew: string[]; beam: string; a: string; b: string; seats: [string, string]}): {code: string; message?: string; subjects?: string[]} | null;
   previewCarry?(params: {crew: string[]; item: string; to: {x: number; z: number; yaw: number}}): CarryIssue | null;
@@ -264,8 +278,15 @@ export type TogetherPort = {
   stopOp?(hostEntity: string, programId: string, op: string, why: string): boolean;
   /** PC05: stop a Soul's running programme (best effort; the native carry sets its load down). */
   stopBody?(soul: EdgeSoul): void;
+  /** PC17 (#696): the world's projects answer their own verbs. */
+  project?(soul: EdgeSoul, tag: Extract<Tag, {kind: 'project'}>, params: Record<string, unknown>): {code: string; reason: string} | Prepared;
+  /** PC17 (#696): where this frame's base stands in that project; null when it is not a frame of it. */
+  projectBase?(project: string, load: string): [number, number] | null;
 };
 
+/** Where a proposal goes, as `prepareShared` holds it. */
+type SharedDestinationTo = {id: string; name: string; spot?: {x: number; z: number; yaw: number}; project?: string};
+const destinationOf = (to: SharedDestinationTo): SharedDestination => ({place: to.id, name: to.name, ...(to.spot ? {spot: to.spot} : {}), ...(to.project ? {project: to.project} : {})});
 const pose = (activity: string, seconds: number, extra: Record<string, unknown> = {}) => ({verb: 'mars:pose_v1', params: {activity, seconds, ...extra}});
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
@@ -487,7 +508,7 @@ export class Together {
     }
     // items: what is in my hand, or what I can pick up
     if (held) {
-      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: 'Not while riding.'}} : {})},
+      add({id: 'put-down:here', verb: 'put-down', label: `Put ${held.name} down here (it stays for others to pick up)`, available: !aloft, ...(aloft ? {blocked: {code: 'ride.aboard', reason: rideDownReason(aloft.phase, [])}} : {})},
         {label: `Put down ${held.name}`, steps: [pose('put-down', 1.5, {prop: held.kind, release: true})], together: {kind: 'item', op: 'put-down', item: held.id}});
       if (held.kind === 'food' || held.kind === 'cup') {
         const verb = held.kind === 'food' ? 'eat' : 'drink';
@@ -639,6 +660,7 @@ export class Together {
   prepare(soul: EdgeSoul, cap: EdgeCapability, plan: TogetherPlan, params: Record<string, unknown>, steps: Steps): {code: string; reason: string; did_you_mean?: {id: string; label: string}[]} | Prepared {
     const tag = plan.together;
     if (tag?.kind === 'shared') return this.prepareShared(soul, cap, tag, params);
+    if (tag?.kind === 'project') return this.p.project?.(soul, tag, params) ?? {code: 'capability.unknown', reason: 'That capability is not offered to this Soul right now; read capabilities again.'};
     // entry 41: a hand-over of a held world thing: walk to stand facing them, hold it out, wait for their answer
     if (tag?.kind === 'hand-over') return this.prepareHandOver(soul, cap, plan, params, steps, tag);
     // an earlier invitation of mine that this act replaces is withdrawn when its receipt ends (onReceipt)
@@ -831,8 +853,15 @@ export class Together {
     // the free seat in that column nearest the height asked, within 8 cm (the native snapSeat's hole tolerance)
     const bay = beaming && Number.isFinite(h) ? bays.filter(b => b.column === params.column && Math.abs(b.height - h) <= 0.08).sort((x, y) => Math.abs(x.height - h) - Math.abs(y.height - h))[0] : undefined;
     if (beaming && !bay) return {code: 'capability.params', reason: `Choose a column and a seat height for ${tag.name}: ${[...new Set(bays.map(b => b.column))].map(c => `column ${c} at ${bays.filter(b => b.column === c).map(b => b.height.toFixed(2)).join(', ')} m`).join('; ')} (column, height).`};
-    const to = raising ? {id: '', name: 'where it lies'} : choice ? {id: '', name: choice.name} : bay ? {id: '', name: `between ${bay.names[0]} and ${bay.names[1]}, in column ${bay.column} at ${bay.height.toFixed(2)} m`} : params.toPlace as {id: string; name: string} | undefined;
+    const to = raising ? {id: '', name: 'where it lies'} : choice ? {id: '', name: choice.name} : bay ? {id: '', name: `between ${bay.names[0]} and ${bay.names[1]}, in column ${bay.column} at ${bay.height.toFixed(2)} m`} : params.toPlace as SharedDestinationTo | undefined;
     if (!to) return {code: 'capability.params', reason: 'Choose a named place to carry it to (to).'};
+    // PC17 (#696): a raise for a project stands where the blueprint says, whichever way the part came to lie
+    let base: [number, number] | undefined;
+    if (raising && params.project !== undefined) {
+      const named = typeof params.project === 'string' ? this.p.projectBase?.(params.project, tag.load) : null;
+      if (!named) return {code: 'project.not-a-part', reason: `${tag.name} is not a frame of that project.`};
+      base = named;
+    }
     if (params.with === undefined) return {code: 'capability.params', reason: `Name who ${raising ? 'raises' : deck ? (deck === 'lay-sheet' ? 'lays' : 'sets') : beaming ? 'seats' : 'carries'} ${tag.name} with you (with: Soul names or ids).`};
     const w = this.withSouls(soul, params.with); if (!w.ok) return {code: w.code, reason: w.reason};
     const guests = w.souls.filter(g => g.soulId !== soul.soulId).map(g => ({soulId: g.soulId, name: g.name}));
@@ -850,32 +879,34 @@ export class Together {
       const inv = typeof params.invite === 'string' ? this.invite(params.invite) : null;
       if (!inv?.shared || inv.state !== 'pending' || inv.host.soulId !== soul.soulId) return {code: 'invite.gone', reason: 'That proposal is no longer open.'};
       const s = inv.shared, changes: string[] = [];
+      if (raising && params.project === undefined) base = s.base;   // an amend of a project's raise is still that raise
       if (s.load.entity !== tag.load) changes.push(`the load is now ${tag.name}`);
-      if (s.destination.place !== to.id || s.destination.name !== to.name) changes.push(`the destination is now ${to.name}`);
+      if (s.destination.place !== to.id || s.destination.name !== to.name || JSON.stringify(s.destination.spot ?? null) !== JSON.stringify(to.spot ?? null)) changes.push(`the destination is now ${to.name}`);
+      if (JSON.stringify(s.base ?? null) !== JSON.stringify(base ?? null)) changes.push('where it stands has changed');
       if (inv.guests.map(g => g.soulId).sort().join() !== guests.map(g => g.soulId).sort().join()) changes.push(`the crew is now ${soul.name} with ${names}`);
       // the same proposal again changes nothing: its host's receipt answers
       if (!changes.length) return {steps: [], existing: inv.hostReceipt ?? undefined};
-      const route = raising ? this.sharedRaisePreview(soul, guests, tag) : choice ? this.sharedSeatPreview(soul, guests, tag, choice) : bay ? this.sharedBeamPreview(soul, guests, tag, bay) : this.sharedRoute(soul, guests, tag, to); if (route) return route;
+      const route = raising ? this.sharedRaisePreview(soul, guests, tag, base) : choice ? this.sharedSeatPreview(soul, guests, tag, choice) : bay ? this.sharedBeamPreview(soul, guests, tag, bay) : this.sharedRoute(soul, guests, tag, to); if (route) return route;
       // the amend answers with the host's one shared receipt, never a new "carry-with completed" one (PC02 §2)
-      return {steps: [], existing: inv.hostReceipt ?? undefined, label, commit: () => this.amendShared(inv.id, soul, cap.id, tag, to, guests, changes, bay, choice)};
+      return {steps: [], existing: inv.hostReceipt ?? undefined, label, commit: () => this.amendShared(inv.id, soul, cap.id, tag, to, guests, changes, bay, choice, base)};
     }
-    const route = raising ? this.sharedRaisePreview(soul, guests, tag) : choice ? this.sharedSeatPreview(soul, guests, tag, choice) : bay ? this.sharedBeamPreview(soul, guests, tag, bay) : this.sharedRoute(soul, guests, tag, to); if (route) return route;
+    const route = raising ? this.sharedRaisePreview(soul, guests, tag, base) : choice ? this.sharedSeatPreview(soul, guests, tag, choice) : bay ? this.sharedBeamPreview(soul, guests, tag, bay) : this.sharedRoute(soul, guests, tag, to); if (route) return route;
     const id = 'inv_' + randomUUID().slice(0, 12);
     return {steps: [], wait: true, label, detail: {sharedV1: {invite: id, revision: 1}}, commit: receipt => {
       const inv: Invite = {id, what: 'carry', kind: 'shared', host: {soulId: soul.soulId, name: soul.name}, guests, capability: cap.id, label: raising ? `asks you to raise ${tag.name} together and hold it` : deck ? `asks you to ${DECK_WORDS[deck].verb} ${tag.name} ${to.name} together` : beaming ? `asks you to seat ${tag.name} ${to.name} together` : `asks you to carry ${tag.name} to ${to.name} together`,
         createdTick: this.tick, expiresTick: this.tick + SHARED_LAPSE * 20, state: 'pending', responses: {}, hostReceipt: receipt, guestReceipts: {},
-        shared: {template: {id: raising ? 'raise-hold' : deck ?? (beaming ? 'connect-beam' : 'carry'), version: 1}, ...(bay ? {beam: {a: bay.a, b: bay.b, seats: bay.seats}} : {}), ...(choice ? {seat: {verb: choice.verb, params: choice.params, ...(choice.at !== undefined ? {at: choice.at} : {})}} : {}), revision: 1, load: {entity: tag.load, def: tag.def, name: tag.name}, destination: {place: to.id, name: to.name},
+        shared: {template: {id: raising ? 'raise-hold' : deck ?? (beaming ? 'connect-beam' : 'carry'), version: 1}, ...(bay ? {beam: {a: bay.a, b: bay.b, seats: bay.seats}} : {}), ...(choice ? {seat: {verb: choice.verb, params: choice.params, ...(choice.at !== undefined ? {at: choice.at} : {})}} : {}), revision: 1, load: {entity: tag.load, def: tag.def, name: tag.name}, destination: destinationOf(to), ...(base ? {base} : {}),
           roles: [{role: 'carrier', slot: 0, soulId: soul.soulId}, ...guests.map((_, i) => ({role: 'carrier' as const, slot: i + 1, soulId: null}))], crew: tag.crew, cleanup: raising ? 'lower-here' : 'set-down-here', op: null}};
       this.saveInvite(inv); this.announce(inv);
     }};
   }
   /** PC13 (#692): before anyone is asked, the native raise's own plan for this crew: an arc or stations with no room, a part
    *  that is not lying free. What is about bodies (someone busy) is left to the commit, which waits on it. */
-  private sharedRaisePreview(soul: EdgeSoul, guests: {soulId: string; name: string}[], tag: Extract<Tag, {kind: 'shared'}>): {code: string; reason: string} | null {
+  private sharedRaisePreview(soul: EdgeSoul, guests: {soulId: string; name: string}[], tag: Extract<Tag, {kind: 'shared'}>, base?: [number, number]): {code: string; reason: string} | null {
     if (!this.p.previewRaise) return null;
     const crew = [soul.entityId, ...guests.map(g => this.mindOf(g.soulId)?.entityId)]; if (!crew.every((e): e is string => !!e)) return null;
     let issue: ReturnType<NonNullable<typeof this.p.previewRaise>>;
-    try {issue = this.p.previewRaise({crew, item: tag.load});} catch {return null;}
+    try {issue = this.p.previewRaise({crew, item: tag.load, ...(base ? {baseV1: base} : {})});} catch {return null;}
     if (!issue || !SHARED_RAISE_REFUSED.has(issue.code)) return null;
     return {code: issue.code, reason: `${tag.name} cannot be raised here: ${this.raiseWhy(issue)}. Nobody was asked.`};
   }
@@ -926,10 +957,10 @@ export class Together {
    *  planner) and a loose thing lying on the ground where the load would go (it can be moved; the commit waits on it,
    *  PC05). The planner names only its first overlap, so a loose thing reported before a wall leaves both to the commit. The crew's
    *  positions only choose between `clearance` and `no-route`. Nothing is submitted and nothing moves. */
-  private sharedRoute(soul: EdgeSoul, guests: {soulId: string; name: string}[], tag: Extract<Tag, {kind: 'shared'}>, to: {id: string; name: string}): {code: string; reason: string} | null {
+  private sharedRoute(soul: EdgeSoul, guests: {soulId: string; name: string}[], tag: Extract<Tag, {kind: 'shared'}>, to: SharedDestinationTo): {code: string; reason: string} | null {
     const members = [{entityId: soul.entityId, name: soul.name}, ...guests.map(g => ({entityId: this.mindOf(g.soulId)?.entityId, name: g.name}))];
     if (!members.every((m): m is {entityId: string; name: string} => !!m.entityId) || !this.p.previewCarry) return null;
-    const step = this.sharedCarryStep(members.map(m => m.entityId), tag.load, to.id); if (!step) return null;
+    const step = this.sharedCarryStep(members.map(m => m.entityId), tag.load, to.id, to.spot); if (!step) return null;
     let issue: ReturnType<NonNullable<typeof this.p.previewCarry>>;
     try {issue = this.p.previewCarry(step.params as {crew: string[]; item: string; to: {x: number; z: number; yaw: number}});} catch {return null;}   // the commit's own check stays the authority
     if (!issue || !SHARED_ROUTE_REFUSED.has(issue.code)) return null;
@@ -947,23 +978,23 @@ export class Together {
     return {code: issue.code, reason: `${why}. Nobody was asked; ${issue.code === 'carry.pickup-blocked' ? 'choose another load' : 'choose another place'}.`};
   }
   /** The native crew `carry` of a shared operation: the crew in slot order lay the load down at the place's centre. */
-  private sharedCarryStep(crew: string[], load: string, placeId: string): Steps[number] | null {
-    const place = this.p.places.byId.get(placeId), x = this.w.entities[load]; if (!place?.polygon?.length || !x) return null;
-    const at = centroid(place.polygon);
+  private sharedCarryStep(crew: string[], load: string, placeId: string, spot?: {x: number; z: number; yaw: number}): Steps[number] | null {
+    const place = this.p.places.byId.get(placeId), x = this.w.entities[load]; if (!(spot || place?.polygon?.length) || !x) return null;
+    const at: V2 = spot ? [spot.x, spot.z] : centroid(place!.polygon);
     // PC11 (#690): the load lies down along its own axis, either way round (a loose box turned half a turn has the same
     // footprint), whichever is nearer the way it travels, so the crew never turns it half a turn while setting it down; the
     // yaw is wrapped (the native carry takes one within ±7 rad) for a load placed at any turn
-    const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a)), yaw = wrap(x.pose.yaw ?? 0), way = Math.atan2(at[1] - x.pose.p[2], at[0] - x.pose.p[0]);
+    const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a)), yaw = wrap(spot?.yaw ?? x.pose.yaw ?? 0), way = Math.atan2(at[1] - x.pose.p[2], at[0] - x.pose.p[0]);
     const flip = wrap(yaw + Math.PI), near = Math.abs(wrap(flip - way)) < Math.abs(wrap(yaw - way)) ? flip : yaw;
     // PC07 (#686): a shared carry opts in to the held, named route cut (actions.ts holdCutV1)
-    return {verb: 'mars:carry', params: {crew, item: load, to: {x: at[0], z: at[1], yaw: near}, holdCutV1: true}};
+    return {verb: 'mars:carry', params: {crew, item: load, to: {x: at[0], z: at[1], yaw: near}, holdCutV1: true, clearLiftV1: true}};
   }
   /** PC02 §1 amend: a new revision clears every acceptance; whoever had accepted is told by their own receipt. */
-  private amendShared(id: string, soul: EdgeSoul, capability: string, tag: Extract<Tag, {kind: 'shared'}>, to: {id: string; name: string}, guests: {soulId: string; name: string}[], changes: string[], bay?: BeamBayTag, choice?: SeatChoiceTag) {
+  private amendShared(id: string, soul: EdgeSoul, capability: string, tag: Extract<Tag, {kind: 'shared'}>, to: SharedDestinationTo, guests: {soulId: string; name: string}[], changes: string[], bay?: BeamBayTag, choice?: SeatChoiceTag, base?: [number, number]) {
     const inv = this.invite(id); if (!inv?.shared || inv.state !== 'pending') return;
     const s = inv.shared, raising = raises(s), accepted = Object.entries(inv.guestReceipts).filter(([g]) => inv.responses[g] === 'accepted');
     const dropped = inv.guests.filter(g => !guests.some(x => x.soulId === g.soulId));
-    s.revision++; s.changed = changes.join('; '); s.load = {entity: tag.load, def: tag.def, name: tag.name}; s.destination = {place: to.id, name: to.name}; s.crew = tag.crew; if (bay) s.beam = {a: bay.a, b: bay.b, seats: bay.seats}; if (choice) s.seat = {verb: choice.verb, params: choice.params, ...(choice.at !== undefined ? {at: choice.at} : {})};
+    s.revision++; s.changed = changes.join('; '); s.load = {entity: tag.load, def: tag.def, name: tag.name}; s.destination = destinationOf(to); s.crew = tag.crew; if (base) s.base = base; else delete s.base; if (bay) s.beam = {a: bay.a, b: bay.b, seats: bay.seats}; if (choice) s.seat = {verb: choice.verb, params: choice.params, ...(choice.at !== undefined ? {at: choice.at} : {})};
     s.roles = [{role: 'carrier', slot: 0, soulId: soul.soulId}, ...guests.map((_, i) => ({role: 'carrier' as const, slot: i + 1, soulId: null}))];
     Object.assign(inv, {guests, responses: {}, guestReceipts: {}, capability, label: `asks you to ${doing(s)} together`, expiresTick: this.tick + SHARED_LAPSE * 20});
     this.saveInvite(inv);
@@ -1114,7 +1145,7 @@ export class Together {
       if (r?.phase !== 'waiting') continue;
       const how = m.soulId === inv.host.soulId
         ? raises(s) || seats(s) ? `To ${raises(s) ? 'raise' : deckOf(s) ? DECK_WORDS[deckOf(s)!].verb : 'seat'} it with ${restNames}, amend this proposal: act ${inv.capability.split(':')[0]}:${s.load.entity} with ${JSON.stringify({...(s.seat?.at !== undefined ? {at: s.seat.at} : {}), with: restNames, invite: inv.id})} (a new revision they accept again); or ask someone else in their place the same way.`
-        : `To carry it with ${restNames}, amend this proposal: act carry-with:${s.load.entity} with ${JSON.stringify({to: s.destination.name, with: restNames, invite: inv.id})} (a new revision they accept again); or ask someone else in their place the same way.`
+        : `To carry it with ${restNames}, amend this proposal: act carry-with:${s.load.entity} with ${JSON.stringify({to: s.destination.project ? `project:${s.destination.project}` : s.destination.name, with: restNames, invite: inv.id})} (a new revision they accept again); or ask someone else in their place the same way.`
         : `${inv.host.name} can ask again without them (a new revision you would accept again); until then nothing moves.`;
       const why = `Not started: ${gone}, so this revision of the ${opWord(inv)} of ${s.load.name} cannot start as asked. ${how}`;
       if (r.code !== 'shared.not-ready' || r.reason !== why) this.p.note?.(r.id, 'shared.not-ready', why);
@@ -1132,7 +1163,7 @@ export class Together {
   sharedCommitPlan(id: string): {host: EdgeSoul; capability: string; label: string; steps: Steps; revision: number; opId: string} | null {
     const inv = this.invite(id), s = inv?.shared, m = inv ? this.mindOf(inv.host.soulId) : undefined;
     if (!inv || !s || s.op || inv.state !== 'pending' || !m) return null;
-    const crew = this.sharedMembers(inv).map(x => this.mindOf(x.soulId)?.entityId).filter((e): e is string => !!e), step = raises(s) ? {verb: 'mars:raise_hold_v1', params: {crew, item: s.load.entity}} : deckOf(s) && s.seat ? {verb: `mars:${s.seat.verb}`, params: {crew, ...s.seat.params}} : seats(s) && s.beam ? {verb: 'mars:connect_beam_v1', params: {crew, beam: s.load.entity, a: s.beam.a, b: s.beam.b, seats: s.beam.seats}} : this.sharedCarryStep(crew, s.load.entity, s.destination.place);
+    const crew = this.sharedMembers(inv).map(x => this.mindOf(x.soulId)?.entityId).filter((e): e is string => !!e), step = raises(s) ? {verb: 'mars:raise_hold_v1', params: {crew, item: s.load.entity, ...(s.base ? {baseV1: s.base} : {})}} : deckOf(s) && s.seat ? {verb: `mars:${s.seat.verb}`, params: {crew, ...s.seat.params}} : seats(s) && s.beam ? {verb: 'mars:connect_beam_v1', params: {crew, beam: s.load.entity, a: s.beam.a, b: s.beam.b, seats: s.beam.seats}} : this.sharedCarryStep(crew, s.load.entity, s.destination.place, s.destination.spot);
     if (!step) return null;
     const others = listed(this.sharedMembers(inv).filter(x => x.soulId !== inv.host.soulId).map(x => x.name));
     return {host: {soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner}, capability: inv.capability, revision: s.revision, opId: `op_${inv.id}_r${s.revision}`,
@@ -1190,7 +1221,7 @@ export class Together {
   /** PC14 (#693): a raised upright joined by beams is never lowered; its crew lets go once its frame stands on its own. */
   private holdStopLabel(inv: Invite): string {
     const s = inv.shared!, x = this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined;
-    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
+    return x?.connections?.length ? `Stop holding ${s.load.name} (beams join it into a frame: the crew lets go once the frame stands on its own, and until then keeps holding, unless nothing on the frame changes for five minutes)` : `Stop holding ${s.load.name} (the crew lowers it safely first, back where it lay)`;
   }
   /** Who stopped the operation, in words: a member's own stop, or (PC09) a member who went away. */
   stopWords(st: {name: string; away?: true}): string {return st.away ? `${st.name} went away (their mind left the world)` : `${st.name} asked to stop`;}
@@ -1241,7 +1272,7 @@ export class Together {
     if (raises(s)) {
       const before = !st.phase || st.phase === 'approach' || st.phase === 'grip';
       const joined = !!(this.w.entities[s.load.entity] as {connections?: unknown[]} | undefined)?.connections?.length;
-      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, and it is never lowered`
+      const how = st.unsafe !== undefined && joined ? `${crew} keep holding ${load}: ${st.unsafe}; they let go as soon as it does, or if nothing on the frame changes for five minutes, and it is never lowered`
         : joined ? `beams join ${load} into a frame that stands on its own, so ${crew} let go and it stands there`
         : st.unsafe !== undefined ? `${load} cannot come down yet (${st.unsafe}), so ${crew} keep holding it and lower it as soon as it is clear` : before ? `${load} has not been lifted, so ${crew} let go of it where it lies` : `${crew} lower ${load} back where it lay, along the way it came up`;
       return `${this.stopWords(st)} (${op.id}): ${how}. Your hands and walking stay committed until ${joined ? 'it stands on its own' : 'it is down'}; you can still talk and look around.`;
@@ -1273,17 +1304,19 @@ export class Together {
   private sharedStopped(inv: Invite) {
     const s = inv.shared!, op = s.op!, st = op.stop!, x = this.w.entities[s.load.entity], crew = listed(this.sharedMembers(inv).map(m => m.name));
     if (raises(s)) {
-      const installed = (x as {phase?: string} | undefined)?.phase === 'installed';
-      const where = installed ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
+      const installed = (x as {phase?: string} | undefined)?.phase === 'installed', alone = (x as {support?: {kind: string}} | undefined)?.support?.kind === 'connected';
+      const where = installed ? alone ? `${s.load.name} stands on its own in the frame its beams join it into; nobody holds it` : `${s.load.name} stands where it was, though its frame isn't finished; nobody holds it` : !st.phase || st.phase === 'approach' || st.phase === 'grip' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
       this.sharedEnd(inv, 'stopped', 'shared.stopped', `${st.away ? `Stopped because ${st.name} went away` : `Stopped at ${st.name}'s request`} (${op.id}): ${where}. ${crew} have let go and are free again; nothing is resumed on its own.`);
       return;
     }
     if (seats(s)) {
-      const where = !st.phase || st.phase === 'approach' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
+      // a stop in the last moments, once it is in place, finds it set
+      const installed = (x as {phase?: string} | undefined)?.phase === 'installed';
+      const where = installed ? `${s.load.name} is in place; it was set before the stop reached it` : !st.phase || st.phase === 'approach' ? `${s.load.name} was never lifted; it lies where it was` : `${s.load.name} was lowered back where it lay`;
       this.sharedEnd(inv, 'stopped', 'shared.stopped', `${st.away ? `Stopped because ${st.name} went away` : `Stopped at ${st.name}'s request`} (${op.id}): ${where}. ${crew} have let go and are free again; nothing is resumed on its own.`);
       return;
     }
-    const atDestination = !!x && this.p.places.containing(x.pose.p[0], x.pose.p[2], (x as {level?: number}).level ?? 0).some(p => p.id === s.destination.place);
+    const spot = s.destination.spot, atDestination = !!x && (spot ? Math.hypot(x.pose.p[0] - spot.x, x.pose.p[2] - spot.z) <= 0.2 : this.p.places.containing(x.pose.p[0], x.pose.p[2], (x as {level?: number}).level ?? 0).some(p => p.id === s.destination.place));
     const lifted = !(st.phase === 'gather' || st.phase === 'reach' || st.phase === 'gather-cancel');
     const where = !lifted ? `${s.load.name} was never lifted; it lies where it was`
       : st.phase === 'lift' ? `${s.load.name} was lowered back where it lay`
@@ -1306,6 +1339,8 @@ export class Together {
     this.sharedEnd(inv, arrived ? 'arrived' : 'ended', ev.code ?? 'action.failed', raises(s) ? `The shared raise of ${s.load.name} ended${ev.message ? ` (${ev.message})` : ''}.` : deckOf(s) ? `The shared ${DECK_WORDS[deckOf(s)!].op} of ${s.load.name} ended before it was in place${ev.message ? ` (${this.beamWhy({code: ev.code ?? '', message: ev.message})})` : ''}; it lies where it was.` : seats(s) ? `The shared beam seating of ${s.load.name} ended before it was seated${ev.message ? ` (${this.beamWhy({code: ev.code ?? '', message: ev.message})})` : ''}; it lies where it was.` : `The shared carry of ${s.load.name} ended before ${s.destination.name}${ev.message ? ` (${ev.message})` : ''}.`);
     return true;
   }
+  /** #1150 rung 3: the world went back, so every committed shared operation is over and its claims go with it. */
+  rewound(code: string, reason: string) {for (const inv of this.committed()) if (inv.shared?.op) this.sharedEnd(inv, 'ended', code, reason);}
   /** PC02 §3 release, in one transaction: the operation ends, the claims go and every member's still-open receipt ends
    *  (`completed` on arrival; `completed` with `shared.stopped` and its reason after a stop's cleanup, PC02 §2; else
    *  `failed` with the code). */
@@ -1412,6 +1447,20 @@ export class Together {
       }
     }
   }
+  /** PC17 (#696): what the world's projects read and do here. A project's own change is a new menu. */
+  touch() {this.bump();}
+  tell(soulId: string, text: string) {this.p.deliver(soulId, 'world', {text, untrusted: true});}
+  soulsNamed(soul: EdgeSoul, raw: unknown) {return this.withSouls(soul, raw);}
+  /** Every open proposal. */
+  openShared(): Invite[] {return this.pending().filter(i => i.shared);}
+  /** The loads an open proposal or a running operation has claimed. */
+  sharedLoads(): Set<string> {return new Set([...this.pending(), ...this.committed()].filter(i => i.shared && i.shared.op?.phase !== 'ended').map(i => i.shared!.load.entity));}
+  /** The loads a crew is carrying somewhere now. */
+  sharedCarrying(): Set<string> {return new Set(this.committed().filter(i => i.shared?.template.id === 'carry' && i.shared.op?.phase !== 'ended').map(i => i.shared!.load.entity));}
+  /** The running hold on this load, if any. */
+  holdOn(load: string): string | null {for (const i of this.committed()) {const s = i.shared; if (s && raises(s) && s.load.entity === load && s.op && s.op.phase !== 'ended') return s.op.id;} return null;}
+  /** Why this guest could not take up this proposal now, as `accept` would say. */
+  sharedAcceptProblem(soul: EdgeSoul, inv: Invite): {code: string; reason: string} | null {return this.sharedBodyProblem(soul) ?? this.sharedTooFar(soul, inv.shared!.load.entity, inv.shared!.load.name);}
   /** PC13 (#692): once, when the raised load first stands: every member's receipt and stream say it is held and how to end that. */
   private sharedHolding(id: string) {
     let text = '';
@@ -2034,6 +2083,9 @@ export class Together {
       if (!target) return {capability: verb + ':here', note: `${raw} is ${verb}:here`};
       return {capability: verb + ':here', params: verb === 'point' ? {at: target} : {to: target}, note: `${raw} is ${verb}:here (${verb === 'point' ? 'at' : 'to'} ${target})`};
     }
+    // #1381: while an act is open, "stop", "pause", "cancel", "stop what you are doing" are the explicit stop of it
+    if (/^(?:stop|halt|pause|cancel|wait,?\s+(?:stop|pause))(?:,?\s+(?:stop|pause|that|it|now|what\s+(?:i\s+am|i'm|you\s+are|you're)\s+doing))?$/.test(t) && caps.some(c => c.id === 'stop:current' && c.available))
+      return {capability: 'stop:current', note: `${raw} is stop:current (stops the act under way where you are)`};
     // stop / unfollow: stand:here ends whatever the body is doing, a follow or walk-with included
     if (/^(?:stop|halt|stand still|unfollow(?:\s+.+)?|stop\s+(?:that|it|everything|moving|walking|what\s+(?:i\s+am|i'm|you\s+are|you're)\s+doing)|(?:stop|quit)\s+(?:following|walking\s+with|tagging\s+along\s+with|going\s+with|accompanying)(?:\s+.+)?)$/.test(t) && caps.some(c => c.id === 'stand:here'))
       return {capability: 'stand:here', note: `${raw} is stand:here (stops what you are doing, a follow included)`};
@@ -2067,8 +2119,13 @@ export class Together {
       const c = capFor('give', o); if (!c) return tooFar('give', o);
       return {capability: c.id, note: `${raw} is ${c.id}${held ? ` (${held.name})` : ''}`};
     }
-    if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
-      if (!held) return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+    if (/^(?:put\s+(?:it|this|that|the\s+\w+|my\s+\w+)\s+down|put\s+down(?:\s+.*)?|drop(?!\s+(?:by|in|over|round|around)\b|\s+off\s+at\b)(?:\s+.*)?|set\s+(?:it|.+)\s+down|leave\s+(?:it|the\s+\w+)\s+here|put\s+(?:it|the\s+\w+)\s+back)$/.test(t)) {
+      // #1261: a world may offer its own put-down for what is in the hand (a god-built thing: god/held.ts), as for give
+      if (!held) {
+        const own = caps.find(c => c.id === 'put-down:here'), id = own?.target?.id;
+        if (own) return {capability: own.id, note: `${raw} is put-down:here (${id ? this.thingName?.(id) ?? id : own.label})`};
+        return {code: 'hands.empty', reason: 'You are not holding anything.', did_you_mean: []};
+      }
       return {capability: 'put-down:here', note: `${raw} is put-down:here (${held.name})`};
     }
     if (held && ((held.kind === 'food' && /^(?:eat|have|finish)\b/.test(t) && (/\b(?:it|this|that|food|snack|bread|apple|cake)\b/.test(t) || t === 'eat')) || (held.kind === 'cup' && /^(?:drink|sip|have|finish)\b/.test(t) && (/\b(?:it|this|that|tea|coffee|cup|drink)\b/.test(t) || t === 'drink'))))
@@ -2086,14 +2143,18 @@ export class Together {
       if (kind) {
         if (held) return {code: 'hands.full', reason: `You are holding ${held.name}; put it down or give it away first.`, did_you_mean: caps.filter(c => c.id === 'put-down:here' || c.verb === 'give').slice(0, 4).map(c => ({id: c.id, label: c.label}))};
         const lying = caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && this.item(c.target.id)?.kind === kind)[0];
-        const c = lying ?? caps.find(c => c.id === 'pick-up:' + kind);
-        // entry 43: a world thing of that word lying near (a god-built mug) when no prop of the kind is: the one called
-        // exactly that first, then one whose name has the word, nearest first (labels end "(N m)"). #435: a real thing called
-        // that, free to take and within REAL_THING_NEAR, also comes before a place's prop of the kind ("pick up the apple" is
-        // the apple on the table); one further off or not hers does not take a Soul away from the prop beside her
-        const named = !lying ? caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && /^e_/.test(c.target.id)).map(c => {const n = (c.label.replace(/^Pick up\s+/, '').replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() ?? '').toLowerCase(), d = Number(/\(([\d.]+) m/.exec(c.label)?.[1] ?? 99);
-          const w = what.replace(/^(?:the|a|an|my|that|this)\s+/, '').trim(); return {c, rank: n === w ? 0 : new RegExp(`(^|[^a-z])${w.replace(/[^a-z ]/g, '')}([^a-z]|$)`).test(n) ? 1 : 9, d};}).filter(x => x.rank < 9 && (!c || (x.c.available && x.d <= REAL_THING_NEAR))).sort((a, b) => a.rank - b.rank || a.d - b.d)[0]?.c : undefined;
+        // entry 43: a world thing of that word lying near (a god-built mug): the one called exactly that first, then one whose
+        // name has the words, nearest first (labels end "(N m)"); a space in the words matches a name's hyphen or underscore.
+        // With a place's prop of the kind on offer, a real thing must be free to take, and then: #435: one word wins within
+        // REAL_THING_NEAR ("pick up the apple" is the apple on the table; one further off does not take a Soul away from the prop
+        // beside her). #437: a name of more than one word wins wherever it is ("the coffee mug" by a tea room is the god-built
+        // coffee-mug). A lying prop still comes first.
+        const source = caps.find(c => c.id === 'pick-up:' + kind);
+        const w = what.replace(/^(?:the|a|an|my|that|this)\s+/, '').trim(), wre = w.replace(/[-_]+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim().split(/\s+/).join('[^a-z0-9]+'), wordEnd = /\d$/.test(wre) ? '[^a-z0-9]' : '[^a-z]';
+        const named = !lying ? caps.filter(c => c.verb === 'pick-up' && c.target?.kind === 'item' && /^e_/.test(c.target.id)).map(c => {const n = (c.label.replace(/^(?:Pick up|Take)\s+/, '').replace(/(?:\s+\([^)]*\))?\s+out of\s.*$/, '').replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() ?? '').toLowerCase(), d = Number(/\(([\d.]+) m/.exec(c.label)?.[1] ?? 99);
+          return {c, rank: n === w || n.replace(/[-_]+/g, ' ') === w ? 0 : wre && new RegExp(`(^|[^a-z])${wre}(${wordEnd}|$)`).test(n) ? 1 : 9, d};}).filter(x => x.rank < 9 && (!source || (x.c.available && (/[\s_-]/.test(w) || x.d <= REAL_THING_NEAR)))).sort((a, b) => a.rank - b.rank || a.d - b.d)[0]?.c : undefined;
         if (named) return {capability: named.id, note: `${raw} is ${named.id} (${named.label})`};
+        const c = lying ?? source;
         if (!c) {
           const me = this.posOf(soul.soulId), far = me ? this.sources().filter(s => s.kind === kind && s.place).map(s => ({s, d: Math.hypot(s.at[0] - me[0], s.at[1] - me[1])})).sort((a, b) => a.d - b.d) : [];
           const hit = far.map(f => ({f, w: caps.find(c => c.verb === 'walk' && c.target && (c.target.id === f.s.place || this.p.places.byId.get(f.s.place!)?.parent === c.target.id))})).find(x => x.w), walk = hit?.w;

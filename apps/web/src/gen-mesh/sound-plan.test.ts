@@ -3,7 +3,7 @@
 //   node --test apps/web/src/gen-mesh/sound-plan.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { componentsSchema } from '@souls/world-compiler';
+import { componentsSchema, coreLibrary } from '@souls/world-compiler';
 import { ambienceAt, condition, DEFAULT_SETTINGS, distanceTo, emittersOf, exposureAt, impliedSpecs, treeIndex, treesOf, loadSettings, Movement, saveSettings, SETTINGS_KEY, specsOf, variantOf, VARIANTS, KINDS, MASTER_DEFAULT, QueuedNotes } from './sound-plan.ts';
 
 test('a def may carry one sound or a list; unknown kinds are dropped; the schema accepts both', () => {
@@ -27,7 +27,7 @@ test('emittersOf: each spec of a multi-sound def is its own emitter with its own
   const def = { components: { sound: { kind: 'water', radius: 10, volume: 0.5, also: [{ kind: 'birds', radius: 20, volume: 0.3 }] } }, state: { on: { default: true } }, form: 'point', size: { box: [1, 2, 1] } };
   const model = {
     entities: new Map([['f1', { id: 'f1', def: 'd', in: { parent: 'world' }, params: { soundVariant: 2 } }], ['f2', { id: 'f2', def: 'd', in: { parent: 'world' }, params: {} }]]),
-    resolvedDef: () => def, worldPose: () => ({ x: 1, y: 0, z: 2, s: 1 }), terrain: { sample: () => 0 },
+    resolvedDef: () => def, worldPose: () => ({ x: 1, y: 0, z: 2, s: 1 }), terrain: { sample: () => 0, peek: () => 0 },
   };
   const em = emittersOf(model as never);
   assert.deepEqual(em.map((e) => e.id), ['f1#0', 'f1#1', 'f2#0', 'f2#1']);
@@ -72,10 +72,10 @@ test('settings: quiet by default, music on (the playlist, lane S3), remembered, 
   saveSettings({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, DEFAULT_SETTINGS);   // must not throw
 });
 
-// ---- release 3.1: a fuller soundscape
+// ---- release 0.6: a fuller soundscape
 const fakeModel = (ents: [string, string, [number, number]][], defs: Record<string, unknown>) => ({
   entities: new Map(ents.map(([id, def, p]) => [id, { id, def, in: { parent: 'world' }, params: {}, p }])),
-  resolvedDef: (d: string) => defs[d], worldPose: (e: { p: [number, number] }) => ({ x: e.p[0], y: 0, z: e.p[1], s: 1 }), terrain: { sample: () => 0 },
+  resolvedDef: (d: string) => defs[d], worldPose: (e: { p: [number, number] }) => ({ x: e.p[0], y: 0, z: e.p[1], s: 1 }), terrain: { sample: () => 0, peek: () => 0 },
 });
 
 test('implied sounds: things sound like what they are; sounding things gain a second sound; no phantom work', () => {
@@ -153,4 +153,31 @@ test('queued notes: a stopped player loses only the notes that have not begun', 
   assert.deepEqual(q.settle(10.15, new Set(['b'])), ['a-next', 'a-next-octave'], 'a stopped: its not-yet-begun note is silenced');
   assert.deepEqual(q.settle(10.35, new Set()), [], 'b had begun before it stopped');
   assert.equal(q.size, 0);
+});
+
+test('a switched-off record player is silent, whatever record is set (#1051)', () => {
+  const def = coreLibrary().get('core/record-player@1')!, spec = (def.components as { sound: { when: string } }).sound;
+  const model = fakeModel([['p', 'rp', [0, 0]]], { rp: def }), [em] = emittersOf(model as never);
+  assert.equal(em.spec.when, 'on');
+  assert.equal(condition(spec.when, { on: false, record: 'Low Tide' }), false, 'off: no emitter sounds and no note is scheduled (playJukeboxes reads this gate first)');
+  assert.equal(condition(spec.when, { on: true, record: 'Low Tide' }), true);
+});
+
+test('PERF-ARRIVAL: emitters and trees on areas and paths read the ground through peek, with sample\'s heights, and bake no tile', async () => {
+  const { Terrain, emptyGround, groundSchema } = await import('@souls/ground');
+  const g = emptyGround(400, 0); g.landforms.push({ id: 'hill', kind: 'bump', c: [40, 60], r: 80, h: 9, peak: 1 } as never, { id: 'dip', kind: 'bump', c: [-120, -30], r: 40, h: -3, peak: 1 } as never);
+  const ground = groundSchema.parse(g);
+  // woods and a stream across the world: their outline points fall in many different terrain tiles
+  const wood = { name: 'core-woodland', form: 'area', tags: ['cover', 'forest', 'plant'] }, reeds = { name: 'core-reedbed', form: 'area', tags: ['cover', 'water', 'plant'] };
+  const ents = [] as { id: string; def: string; in: { parent: string }; params: object; shape: object }[];
+  for (let i = 0; i < 12; i++) { const x = -180 + i * 32, z = -150 + (i % 4) * 90; ents.push({ id: 'w' + i, def: i % 3 ? 'wood' : 'reeds', in: { parent: 'world' }, params: {}, shape: { area: [[x, z], [x + 20, z], [x + 20, z + 25], [x, z + 25]] } }); }
+  const modelOn = (terrain: unknown) => ({ entities: new Map(ents.map((e) => [e.id, e])), resolvedDef: (d: string) => (d === 'wood' ? wood : reeds), worldPose: () => ({ x: 0, y: 0, z: 0, s: 1 }), terrain });
+  const baked = new Terrain(ground), peeked = new Terrain(ground);
+  const sampledOnly = { sample: (x: number, z: number) => baked.sample(x, z), peek: (x: number, z: number) => baked.sample(x, z) };
+  const a = emittersOf(modelOn(sampledOnly) as never), b = emittersOf(modelOn(peeked) as never);
+  assert.ok(a.length > 0 && a.some((e) => e.pts.some((p) => p[1] > 1)), 'the woods sit on the hill');
+  assert.deepEqual(b, a, 'the same emitters and heights');
+  assert.deepEqual(treesOf(modelOn(peeked) as never), treesOf(modelOn(sampledOnly) as never));
+  assert.ok(baked.cachedTiles > 4, 'sampling bakes a tile for each part of the world it reads');
+  assert.equal(peeked.cachedTiles, 0, 'peek bakes none');
 });

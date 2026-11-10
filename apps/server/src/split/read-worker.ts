@@ -15,7 +15,7 @@ import {createServer, type IncomingMessage, type ServerResponse} from 'node:http
 import {threadCpuUsage} from 'node:process';
 import {ReadModel, type WorldDelta, type WorldInit} from './read-model.ts';
 import {classify, worldBlock, type PortDone, type Refusal} from '../load/admission.ts';
-import {LEVELS, S, type Level} from '../load/shared.ts';
+import {clockBlockOf, clockOf, LEVELS, S, type Level} from '../load/shared.ts';
 import {stripWorldRequestPath} from '../world-request-path.ts';
 import {readFileSync} from 'node:fs';
 import type {ReplicaWorld as RWT} from './replica-world.ts';
@@ -124,6 +124,8 @@ function body2(kind: Read2, soul: EdgeSoul, q: URLSearchParams): {body: object; 
     return {body: {tick: RW!.mw.world.tick, here: M2.hereFrame(L, soul, {doHere: modern}), ...(modern ? {apiContract: 'eden-edge/1.1'} : {}), ...(read2.debug ? {_debug: read2.debug.fireFacts(L, soul)} : {})}, world: true};
   }
   if (kind === 'observe') return {body: L.observe(soul, new Set((q.get('include') ?? '').split(',').filter(Boolean))) as object, world: true};
+  // #1329 part 4: a search builds far walks on demand (main's navigation): main answers it
+  if (kind === 'capabilities' && q.has('search')) return 'capabilities-search';
   if (kind === 'capabilities') return {body: {tick: RW!.mw.world.tick, ...L.capabilitiesPage(soul, {all: q.get('all') === '1'})}, world: true};
   // view: the caption (?alt=only) only; a picture is drawn by main's one render worker and served from main's memory,
   // and a gaze is an attention write (intents.attend): both main's
@@ -224,6 +226,14 @@ function soulOf(token: string): Promise<{soulId: string | null; account?: string
 }
 
 const level = (): Level => (load ? LEVELS[load[S.level]] : undefined) ?? 'green';
+/** #1326: as main's edge frames: a stalled clock (`stalled`, the tick's age) or a dilated one (`slowed`, its speed), from the
+ *  shared numbers main publishes; `own` is a `world` block the frame already has, which the clock block joins. */
+const withClock = (w: {world?: object}, own?: unknown): {world?: object} => {
+  const clk = clockBlockOf(load ? clockOf(load, Date.now()) : null);
+  if (!clk) return w;
+  const base = w.world ?? (own && typeof own === 'object' ? own : ('slowed' in clk ? {load: 'slowed'} : {}));
+  return {world: {...base, ...clk}};
+};
 const bearer = (req: IncomingMessage) => req.headers.authorization?.replace(/^Bearer\s+/i, '');
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   if (res.headersSent || res.destroyed) return;
@@ -284,7 +294,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         cost.served++;
         // as main's wrap: the load block at amber and above unless the frame has its own `world` (observe does); main
         // adds it at the level its admission admitted the read at, so a world without admission (SIM_ADMISSION=0) never
-        const world = r.world && ADMISSION && lv !== 'green' && !('world' in r.body) ? {world: worldBlock(lv)} : {};
+        const world = withClock(r.world && ADMISSION && lv !== 'green' && !('world' in r.body) ? {world: worldBlock(lv)} : {}, 'world' in r.body ? r.body.world : undefined);
         return send(res, 200, {contract: CONTRACT, ...r.body, ...world, ...(inbox ? {inbox} : {})}, {...acct, 'x-sim-read-cpu-ms': r.cpuMs.toFixed(3), 'x-sim-read-kind': kind});
       }
     }
@@ -293,7 +303,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   if (wd.mode === 1 && req.method === 'GET' && q < 0 && SUBSET.has(path) && token?.startsWith('sim_') && M.tick >= 0) {
     const who = await soulOf(token);
     if (who.soulId && knows(who.soulId)) {
-      const lv = level(), world = lv !== 'green' ? {world: worldBlock(lv)} : {}, acct: Record<string, string> = who.account ? {'x-sim-account': who.account} : {};
+      const lv = level(), world = withClock(lv !== 'green' ? {world: worldBlock(lv)} : {}), acct: Record<string, string> = who.account ? {'x-sim-account': who.account} : {};
       cost.served++;
       if (path === '/v1/edge/here') {const h = answer('here', who.soulId) as ReturnType<ReadModel['here']>; return send(res, 200, {contract: CONTRACT, tick: h.tick, here: {me: h.me, near: h.near, things: h.things}, subset: true, ...world}, acct);}
       const c = answer('caps', who.soulId) as {tick: number; ids: string[]};

@@ -43,7 +43,7 @@ import { checkStations, childrenState, walkCrew, type Children } from './childre
 import { levelFor, sweepPoses } from './access.ts';
 import { CLIMB_SPEED, frameAccessOk } from './frame.ts';
 import { BODY_MODEL } from '../body/model.ts';
-import { makeWay } from '../locomotion/walk.ts';
+import { makeWay, registerClearOf } from '../locomotion/walk.ts';
 
 export const STANCE_IN = 0.3, STANCE_OFF = 0.36, FOOT_OUT = 0.35, FOOT_BACK = 0.25;
 export const HELD_STANCE_MAX = 1.0;
@@ -373,6 +373,14 @@ type BE = {
 export const WALK_IN = 0.6; // m/s: lifters walking a beam in along an aisle, in single file
 export const WALK_IN_MAX = 25; // m along the aisle axis
 const WALK_AHEAD = 1.2, WALK_GAP = 2 * HUMAN_RADIUS + 0.08; // W38: bystanders on the walk-in
+/** W38: z is clear of the lifters' stations for the rest of the walk in (makeWay's clearOf), or the hang has ended. */
+registerClearOf('hang-walk', (rt, ref, z) => {
+  const ex = rt.execOf(ref.action) as BE | undefined;
+  if (!ex) return true;
+  const g = ex.g, st0 = g.mode === 'ground' ? g.hookSt : g.giveSt;
+  for (let m = 0; m <= 12; m++) { const s2 = ex.s + (0 - ex.s) * m / 12; for (const t of st0) if (dist([t[0] + g.axis[0] * (s2 - g.s0), t[1] + g.axis[1] * (s2 - g.s0)], z) < WALK_GAP + 0.1) return false; }
+  return true;
+});
 
 /** Beam pose: centre height `yc`, lateral offset `off` from the seat line, `s` along it from the bay (m). */
 function beamPose(g: Geo, yc: number, off: number, s = 0): Pose {
@@ -623,8 +631,7 @@ export const hangBeam: ActionDef<BP, Geo, BE> = {
               const q: Vec2 = [st0[i][0] + g.axis[0] * (s1 - g.s0), st0[i][1] + g.axis[1] * (s1 - g.s0)];
               const o = others.find((y) => dist(xz(y), q) < WALK_GAP && dist(xz(y), q) < dist(xz(y), now) - 1e-9);
               if (o) {
-                const way = (z: Vec2) => { for (let m = 0; m <= 12; m++) { const s2 = ex.s + (0 - ex.s) * m / 12; for (const t of st0) if (dist([t[0] + g.axis[0] * (s2 - g.s0), t[1] + g.axis[1] * (s2 - g.s0)], z) < WALK_GAP + 0.1) return false; } return true; };
-                makeWay(rt, o.id, q, { by: `the crew walking ${beam.id} in`, subjects: [beam.id, ...crew], test: way });
+                makeWay(rt, o.id, q, { by: `the crew walking ${beam.id} in`, subjects: [beam.id, ...crew], test: { kind: 'hang-walk', action: ex.id } });
                 return { status: 'blocked', diagnostic: { code: 'hang.path-occupied', message: `${x.id} holds ${beam.id} and waits for ${o.id} to move out of the aisle`, subjects: [beam.id, o.id, x.id], at: [q[0], g.groundY, q[1]] } };
               }
             }

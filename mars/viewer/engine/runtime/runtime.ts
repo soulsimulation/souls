@@ -236,6 +236,8 @@ export class Runtime {
     return rec;
   }
 
+  /** #1150: set under the repair rules, and told of an action whose step threw. It must end that action. */
+  actionThrewV1?: (action: string, error: unknown) => void;
   /** `reason` (optional) is recorded as the cancelled action's diagnostic and on its events (e.g. `social.pre-empted`). */
   cancel(id: string, reason?: Diagnostic): ActionRecord {
     const l = this.live.get(id);
@@ -303,7 +305,15 @@ export class Runtime {
       const t0 = prof ? prof.now() : 0;
       this.focus(l.rec.params);
       if (l.def.navPure) navTrustOpen(); else navTrustClose();
-      const r = l.def.step(this, l.exec, DT);
+      let r: StepResult;
+      try { r = l.def.step(this, l.exec, DT); }
+      catch (error) {
+        // #1150: a local failure never stops unrelated actors. Where the owner asks, a step that throws ends its own action alone.
+        if (!this.actionThrewV1) throw error;
+        navTrustClose(); this.actionThrewV1(l.rec.id, error);
+        if (prof) prof.add(`${l.rec.verb}.step`, prof.now() - t0);
+        continue;
+      }
       // finishing (or failing) runs other code (parents, follow-ups): nothing after it is trusted
       if (r.status !== 'running' && r.status !== 'blocked') navTrustClose();
       if (prof) prof.add(`${l.rec.verb}.step`, prof.now() - t0);
@@ -401,6 +411,10 @@ export class Runtime {
   }
   isActive(id: string) {
     return this.live.has(id) || this.waiting.has(id);
+  }
+  /** The exec of a live action (undefined once it ends or while it waits): a module reads its own action's state by id. */
+  execOf(id: string): unknown {
+    return this.live.get(id)?.exec;
   }
   /** stall-guard/1: true while a live action is in a deferred (controlled) stop. */
   isCancelling(id: string) {

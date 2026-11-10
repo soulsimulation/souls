@@ -109,6 +109,8 @@ jobs:
           modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "${profile:-default}" --activate --no-verify
       - name: Release gate
         env:
+          # reads the candidate's ci.yml run and jobs: the CI evidence for the steps CI runs (#1463)
+          GH_TOKEN: ${{ github.token }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           SIM_GATE_CACHE: ${{ runner.temp }}/gate-cache

@@ -153,13 +153,14 @@ export function fullScope(run, jobs) {
  * Folds check runs and commit statuses into one verdict over the required names (latest run per name wins).
  * `workflowRuns` (the Actions runs at the same head) drop stale results first: a check run whose workflow run was
  * cancelled, or was replaced by a newer run of the same workflow at this head, or that predates the attempt now
- * re-running, says nothing about the head. A name left with only stale results is pending, as is a `cancelled`
+ * re-running, says nothing about the head. A run with every job skipped (an unrelated label's event) replaces nothing.
+ * A name left with only stale results is pending, as is a `cancelled`
  * conclusion; the callers' bounded waits turn a pending that never resolves into a timeout.
  */
 export function summarizeChecks({ runs = [], statuses = [], required = DEFAULT_CHECKS, workflowRuns = [] }) {
   const bySuite = new Map(workflowRuns.filter(w => w.check_suite_id != null).map(w => [w.check_suite_id, w]));
-  const newest = new Map(); // workflow_id -> its newest run at this head
-  for (const w of workflowRuns) { const prev = newest.get(w.workflow_id); if (!prev || w.id > prev.id) newest.set(w.workflow_id, w); }
+  const newest = new Map(); // workflow_id -> its newest run at this head that did anything
+  for (const w of workflowRuns) { if (w.conclusion === 'skipped') continue; const prev = newest.get(w.workflow_id); if (!prev || w.id > prev.id) newest.set(w.workflow_id, w); }
   const stale = r => {
     const w = r.check_suite?.id != null && bySuite.get(r.check_suite.id);
     if (!w) return false; // not an Actions run we know of: judged on its own
