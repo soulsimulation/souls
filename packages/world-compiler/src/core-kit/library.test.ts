@@ -4,7 +4,7 @@
 import { triBudget } from '../vocab/index.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { kitArgs, kitPhysics } from '@souls/generators';
+import { kitArgs, kitPhysics, expandKitProgram } from '@souls/generators';
 import { CORE_KIT, WorldModel, applyBatch, defSchema, type Refused } from '../index.ts';
 import { FAMILY_KITS } from './index.ts';
 import { readFileSync } from 'node:fs';
@@ -22,7 +22,7 @@ test('family defs parse, are unique, described, tagged, and within the Eden budg
     assert.ok(!identities.has(identity), `duplicate ${identity}`); identities.add(identity);
     assert.ok(def.description.length > 20, `${def.name}: one-line description`);
     assert.ok(def.tags.length >= 2, `${def.name}: tags`);
-    const tris = kitPhysics(kitArgs.parse((def.make as { args: unknown }).args), Object.fromEntries(Object.entries(def.params).map(([key, parameter]) => [key, parameter.default]))).tris;
+    const tris = kitPhysics(expandKitProgram(kitArgs.parse((def.make as { args: unknown }).args), Object.fromEntries(Object.entries(def.params).map(([key, parameter]) => [key, parameter.default])))).tris;
     // VOCAB-MECH: catalogue types are budgeted by their category (vocab.triBudget)
     const budget = def.category ? triBudget(def.category) : def.tags.includes('creature') ? 600 : def.tags.includes('structure') || def.tags.includes('ride') || def.tags.includes('large') ? 6000 : def.tags.includes('vehicle') ? 1200 : 400;
     const hold = HOLDS[identity];
