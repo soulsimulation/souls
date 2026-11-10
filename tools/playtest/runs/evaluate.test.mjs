@@ -2,10 +2,10 @@
 // transcripts with every CLI call), scored offline. No world, controller, network or model.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { evaluateRun, compareRunSet, cliArgs, joinRequests, loadSoulRun, answerQuestion, questionSteps, renderIndex, indexSources, directionsMeasure } from './evaluate.mjs';
+import { evaluateRun, compareRunSet, cliArgs, cliCalls, jsonDocs, seatSteps, actOutcome, joinRequests, loadSoulRun, answerQuestion, questionSteps, renderIndex, indexSources, directionsMeasure } from './evaluate.mjs';
 import { validateSpec } from './spec.mjs';
 
 const Q = (f) => new URL(`./questions/${f}`, import.meta.url).pathname;
@@ -83,6 +83,26 @@ const M = (e, id) => e.measures.find((m) => m.id === id);
 test('cliArgs reads the served CLI calls the transcript records', () => {
   assert.deepEqual(cliArgs('node eden.mjs result msg_1 failed "My owner \\"changed\\" it"'), ['result', 'msg_1', 'failed', 'My owner "changed" it']);
   assert.deepEqual(cliArgs('curl -fsSo eden.mjs http://x'), []);
+});
+
+test('#1736: a chained shell call is one step per eden.mjs command, its output split per JSON document', (t) => {
+  const cmd = 'node eden.mjs ack msg_8 "Got it: walk to walk:cottage and stay there."; node eden.mjs act walk:cottage --wait 90';
+  assert.deepEqual(cliCalls(cmd), [['ack', 'msg_8', 'Got it: walk to walk:cottage and stay there.'], ['act', 'walk:cottage', '--wait', '90']]);
+  assert.deepEqual(cliCalls('node eden.mjs say "a; b && c" --to Ada && node eden.mjs wait 30 --json | head -40; cat x'), [['say', 'a; b && c', '--to', 'Ada'], ['wait', '30', '--json']]);
+  assert.deepEqual(cliCalls('node eden.mjs ack m "ok"; node eden.mjs --help 2>&1 | head -30'), [['ack', 'm', 'ok'], ['--help']]);
+  assert.deepEqual(jsonDocs('{\n "acked": "m"\n}\n{ "a": "}{", "b": [1] }\n'), [{ acked: 'm' }, { a: '}{', b: [1] }]);
+  assert.equal(jsonDocs('{ "a": 1 }\nhelp text'), null);
+  const dir = mkdtempSync(join(tmpdir(), 'chain-1736-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const out = JSON.stringify({ acked: 'msg_8', reply: 'Got it' }, null, 1) + '\n' + JSON.stringify({ accepted: true, receipt: { id: 'r_1', capability: 'walk:cottage', phase: 'completed' } }, null, 1);
+  const line = (content) => JSON.stringify({ type: content[0].type === 'tool_use' ? 'assistant' : 'user', _rx: 5, message: { content } });
+  writeFileSync(join(dir, 't.jsonl'), [line([{ type: 'tool_use', id: 'u1', input: { command: cmd } }]), line([{ type: 'tool_result', tool_use_id: 'u1', content: out }]),
+    line([{ type: 'tool_use', id: 'u2', input: { command: 'node eden.mjs ack m2 "ok"; node eden.mjs act walk:knoll --wait 60; echo done' } }]), line([{ type: 'tool_result', tool_use_id: 'u2', content: '{"acked":"m2"}\n{"accepted":true}\ndone' }])].join('\n'));
+  const steps = seatSteps(join(dir, 't.jsonl'), 'bo');
+  assert.deepEqual(steps.map((s) => s.verb), ['ack', 'act', 'ack', 'act'], 'never dropped');
+  assert.equal(steps[1].out.receipt.phase, 'completed'); assert.equal(actOutcome(steps[1]).outcome, 'completed', 'the walk is seen');
+  assert.equal(steps[0].out.acked, 'msg_8');
+  assert.ok(steps[2].unplaced && steps[3].unplaced && steps[3].out === null, 'output that can\'t be told apart: unplaced');
+  assert.equal(actOutcome(steps[3]).outcome, 'started', 'not a failure');
 });
 
 test('a question reads a close without `result` as the result it replaced, just after the command that made it (#1269)', () => {
