@@ -3,7 +3,7 @@ import type {DefInput} from '../schemas.ts';
 const number = (max: number, initial = 0) => ({type: 'number' as const, min: 0, max, default: initial});
 export const CRANK_LAMP: DefInput = {
   schema: 'def/1', name: 'core-crank-inspection-lamp', version: 1, form: 'point', category: 'object.tool',
-  description: 'A portable hand-crank inspection lamp. Four completed seconds crank two coarse charge units, up to six. Activate after one second of native handwork: choose seconds as string5,10 or15, spending one charge per five seconds, then actual world light starts. It goes dark at the native tick deadline; stop early or restart never refunds spent charge. Empty hands, accessible supported tabletop required. Coarse charge batches, no scientific energy model or precise crank grip.',
+  description: 'A portable hand-crank inspection lamp. Four completed seconds crank two coarse charge units, up to six. Activate after one second of native handwork: choose seconds as string5,10 or15, spending one charge per five seconds, then actual world light starts. It goes dark at the native tick deadline; stop early or restart never refunds spent charge. Empty hands, accessible ground-level supported tabletop (world height0.65–1.35m) required. Coarse charge batches, no scientific energy model or precise crank grip.',
   tags: ['tool', 'lighting', 'item', 'recorded-item', 'local-fixture'],
   make: {kind: 'gen', gen: 'kit/2', args: {round: 0, shapes: [
     {kind: 'box', at: [0, .11, 0], size: [.3, .22, .2], tint: 'body'},

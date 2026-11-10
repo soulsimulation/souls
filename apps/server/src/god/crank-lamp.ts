@@ -34,7 +34,7 @@ export function createCrankLamp(h: CrankLampHost) {
     if (!validLampState(e.state ?? {})) return fail('Ask the creator to restore whole charge0–6 and valid lamp records before using this lamp.');
     const p = physical(e), table = parent(e);
     if (h.engine.world.entities[e.id]?.support?.kind !== 'resting-on' || !table || p.y < .65 || p.y > 1.35)
-      return fail('Place this same lamp on an ordinary supported tabletop0.65–1.35m high before working its crank or switch.');
+      return fail('Place this same lamp on an ordinary ground-level supported tabletop with world height0.65–1.35m before working its crank or switch.');
     const no = h.denied(table.id, s); if (no) return no;
     const b = h.engine.world.entities[s.entityId];
     if (!b?.human || !b.pose?.p) return {code: 'body.unavailable', reason: 'Your native body is unavailable.'};
