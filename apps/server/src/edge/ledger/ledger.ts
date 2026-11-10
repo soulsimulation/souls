@@ -167,8 +167,9 @@ const SERVING_SLICE_MS = 40;
  *  a development machine and ~4 s on the former production host in one go; slices also allow other requests to run.
  *  #1750: 1 s, was 15 s. The wait comes before admission and answers nothing, so 15 s of it plus a cold build reached the
  *  client's 25 s limit with no word from the world (#1724 candidate A); after 1 s the read goes through admission, whose
- *  frame budget and deadlines bound it and answer `world.busy` by name. */
-export const SERVING_WAIT_MS = 1_000;
+ *  frame budget and deadlines bound it and answer `world.busy` by name.
+ *  SIM_SERVING_WAIT_MS overrides it (ms; for a measured comparison). */
+export const SERVING_WAIT_MS = Number(process.env.SIM_SERVING_WAIT_MS) > 0 ? Number(process.env.SIM_SERVING_WAIT_MS) : 1_000;
 const nextTurn = () => new Promise<void>(r => setImmediate(r));
 
 /** #824: how many offers a "nothing matches" refusal names as `alternatives`, and verbs never offered as one. */
@@ -1812,6 +1813,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     let timer: ReturnType<typeof setTimeout> | undefined;
     return Promise.race([gate, new Promise<void>(r => { timer = setTimeout(r, ceilingMs); })]).finally(() => clearTimeout(timer));
   }
+  /** A serving warm is running (rich reads would wait for it). */
+  get warming(): boolean { return this.servingGate !== null; }
   private servingGate: Promise<void> | null = null;
   private async runServingWarm({sliceMs = SERVING_SLICE_MS, pre, stop, turn = nextTurn}: {sliceMs?: number; pre?: (soul: EdgeSoul) => Generator<void, void, void>; stop?: () => boolean; turn?: () => Promise<void>}): Promise<ServingWarm> {
     const t0 = performance.now(), out: ServingWarm = {souls: 0, failed: 0, ms: 0, wallMs: 0, slices: 0, maxStepMs: 0, listingMs: 0, stopped: false};

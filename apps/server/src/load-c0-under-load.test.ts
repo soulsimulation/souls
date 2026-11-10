@@ -51,3 +51,17 @@ test('A4: a rich read waits at most 1 s for a running serving warm, then goes th
   const ms = performance.now() - t0;
   assert.ok(ms >= 950 && ms < 1500, `waited ${Math.round(ms)} ms`);
 });
+
+test('A4: a warm still running after the 1 s wait is answered world.busy by name (Retry-After 2, warm;dur), not built cold', async () => {
+  const {Hono} = await import('hono');
+  const {servingWait} = await import('./http.ts');
+  let warming = true; const app = new Hono();
+  app.use('/v1/edge/*', servingWait(() => warming ? new Promise<void>(r => setTimeout(r, 50)) : null, () => warming));
+  app.get('/v1/edge/here', c => c.json({here: 1}));
+  const r = await app.request('/v1/edge/here', {headers: {authorization: 'Bearer sim_x'}});
+  assert.equal(r.status, 503); assert.equal(r.headers.get('retry-after'), '2');
+  assert.match(r.headers.get('server-timing') ?? '', /warm;dur=\d/);
+  const b = await r.json() as {error: {code: string; message: string}}; assert.equal(b.error.code, 'world.busy'); assert.match(b.error.message, /warming up/);
+  warming = false;
+  assert.equal((await app.request('/v1/edge/here', {headers: {authorization: 'Bearer sim_x'}})).status, 200);
+});

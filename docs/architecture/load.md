@@ -46,7 +46,9 @@ The world opens its HTTP port before warming Soul capability caches. The ledger 
 40 ms slices, yielding between slices so lightweight requests can continue. Rich `here` (excluding `view=body`),
 `observe`, `capabilities`, `around`, `resolve`, `act` and `converse` wait for an active warm before admission, for
 at most 1 second (it was 15 s until #1750: a silent wait that, with a cold build after it, reached the client's limit).
-The wait shows as `warm;dur` in `Server-Timing`. This waiting time is neither a request in flight nor charged to the Soul's handler budget.
+The wait shows as `warm;dur` in `Server-Timing`. A warm still running when that second is up is answered
+`503 world.busy` (Retry-After 2, "still warming up after a restart") rather than built cold: a cold build made each read
+after a restart cost seconds and taught admission's estimate to refuse reads for half a minute (#1766's playtest). This waiting time is neither a request in flight nor charged to the Soul's handler budget.
 A warm failure falls back to building menus on demand; shutdown stops the warm, and a later activity warm queues
 behind an existing one. The final capability listing is still synchronous, so the slice duration is not a bound
 on every event-loop pause during startup.
