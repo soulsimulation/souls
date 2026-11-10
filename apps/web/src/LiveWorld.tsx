@@ -97,6 +97,7 @@ import { earlyPosterShown, removeEarlyPoster, takeEarlyLayer, takeEarlyRender } 
 import { WorldWaterDetail, markHeight } from './WorldWaterDetail.ts';
 import { findSeats, surveySeats } from './WorldSeatSurvey.ts';
 import { visitorPreviewHour } from './visitor-hour.ts';
+import { realClockOf, setEquatorSun } from './sun-site.ts';
 import { SunShadowCache } from './rendering/SunShadowCache.ts';
 import { GodWorldLiving, calendarClock, entityWorldState, godTourViews, parseShotHour, shotClockAt, whenShotClock } from './world-env.ts';
 import { setFleeSources, AFLOAT } from './gen-mesh/motion.ts';
@@ -367,6 +368,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // ranges and the slice moves with the camera (ridges seemed to rise and recede). Depth precision is set by near.
     const camera = (adopted?.camera as THREE.PerspectiveCamera|undefined) ?? new THREE.PerspectiveCamera(45, 1, 0.1, 2400);
     const followView=new WorldFollow();
+    // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
+    let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
+    if(new URLSearchParams(location.search).has('camtrace'))void import('./camera-trace.ts').then(m=>{if(abort.signal.aborted)return;const t=m.startCameraTrace(renderer.domElement);camTrace=t.trace;abort.signal.addEventListener('abort',()=>t.stop());});
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
       mode:context.current.cameraMode,navigation:context.current.manualNavigation,lifecycle:'',
@@ -917,7 +921,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }
           // world clock at the moment shown (the sim's clock, moved back by how far behind it we are)
           // a world's `time.calendar` (MM-DD) dates its sky: the sun's path and the dusk follow that season, the hour stays the clock's
-          const clock = calendarClock(take.finalState.env?.datetime ?? null, entityWorldState(entityLayer));
+          const worldState = entityWorldState(entityLayer); setEquatorSun(realClockOf(worldState));
+          const clock = calendarClock(take.finalState.env?.datetime ?? null, worldState);
           const ref = take.startTick + take.ticks;
           const clockOffset=(depictedTick-ref)*(dayTicks?86400/dayTicks:dt);
           const datetime = clock ? shiftIso(clock, clockOffset) : null;
@@ -1074,6 +1079,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(controls.enabled)controls.update();
       rts.afterControls();  // B2: the head offset over the pivot (controls.update aims at the pivot)
       if(context.current.cameraMode==='follow'&&focus){renderer.domElement.dataset.cameraShot='follow:'+(soulId?s.conn.replica.souls.get(soulId)?.entityId??'':thingId??'');const offset=followView.resolve(controls.target,camera.position.clone().sub(controls.target),visualObstructionRoots(),step);camera.position.copy(controls.target).add(offset);camera.lookAt(controls.target);}
+      if(camTrace){const tracing=context.current.cameraMode==='follow'&&!!focus;camTrace.frame({mode:context.current.cameraMode,target:controls.target.toArray(),eye:camera.position.toArray(),desired:tracing?followView.desired?.toArray()??null:null,rule:tracing?followView.rule:null});}  // #1317
       const area = visibleViewport(host.clientWidth, host.clientHeight, context.current.viewportInsets);
       // P7 lever D: an early arrival stays on the near world it drew until the rest is built (a cut to a Soul before that
       // showed hollow ground)

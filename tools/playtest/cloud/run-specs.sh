@@ -3,7 +3,7 @@
 #   run-specs.sh <server-root> <out-dir> <repeats> <spec.json>...
 # Order: every spec, then every spec again (1, 3, 4, 1, 3, 4). Before each run it waits for the 5-minute load to drop under 8 (PLAYTEST_LOAD_MAX).
 # Stops: SIGINT to a run whose world reaches $1; no further run once the arm reaches $4; the arm stops if the first card isn't
-# predeclared. PLAYTEST_WORLD_MAX_USD can lower the $1, and a value above it is refused (exit 2). A world's own cap is its cast's rails.worldBudgetUsd. Everything lands in <out-dir>/arm.log.
+# predeclared, and if a seat fails its first-call context check (#1687). PLAYTEST_WORLD_MAX_USD can lower the $1, and a value above it is refused (exit 2). A world's own cap is its cast's rails.worldBudgetUsd. Everything lands in <out-dir>/arm.log.
 set -uo pipefail
 SERVER="$1"; OUT="$2"; REPEATS="$3"; shift 3
 WORLD_MAX="${PLAYTEST_WORLD_MAX_USD:-1}"; ARM_MAX="${PLAYTEST_ARM_MAX_USD:-4}"; LOAD_MAX="${PLAYTEST_LOAD_MAX:-8}"
@@ -35,6 +35,8 @@ for ((rep = 1; rep <= REPEATS; rep++)); do
     pre="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1]+"scorecard.json","utf8")).scorer?.predeclared)}catch{console.log("none")}' "$card")"
     note "end $name rc=$rc spend=$c arm=$arm dollarHit=$hit predeclared=$pre"
     if [ "$first" = 1 ] && [ "$pre" != true ]; then note "first card isn't predeclared: stopped"; exit 5; fi
+    # #1687: a seat whose first call carried more fixed context than PLAYTEST_SEAT_CTX_MAX means the seat environment isn't the declared one
+    if grep -qs '"seatCheck":{"ok":false' "$run"/playtest/seats/*/turns.jsonl; then note "seat check failed in $name (first-call context past the limit): stopped"; exit 8; fi
     first=0
   done
 done

@@ -12,12 +12,33 @@ context-size checks below), regression runs, and an uncut real-client recording 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
   `upright-carry`, containers with an `inside`, the tea defs, and so on). Older revisions of a def keep their old,
   hand-free behaviour, so existing worlds do not change until a god places the new revision.
+- **Land-art materials ([#1541](https://github.com/soulsimulation/souls/issues/1541)).** `core-smooth-stone@1`,
+  `core-flat-stone@1` and `core-driftwood-piece@1` are separate small items, using the same native pickup and
+  ground placement as a lantern. Pick up a piece, walk to a chosen clear place (or stop along a route), and use
+  `put-down:here`; pick it up again to rearrange it. The ground placement is in front of the body and may turn toward clear ground,
+  rather than setting an arbitrary coordinate. Each entity keeps its actual saved position. There is no preset
+  composition, stacking rule, special land-art action or new placement authority.
+- **Campsite table setup ([#1605](https://github.com/soulsimulation/souls/issues/1605)).** `core-table@2` is a solo,
+  two-hand carry revision of the fixed table. Carry it empty to a named clear place, then use the existing `put-on`
+  and `pick-up` offers to stage and retrieve real bowls, lanterns and other fitting items on its relocated surface.
+  Native support and persistent parent/slot placement follow the same table identity. Unload before moving it again:
+  the native fixture mover refuses a loaded table (`move_fixture.contents`). It does not fold, and the fixed `@1`
+  table and the heavier crew work table are unchanged.
 - **Storage with and without a door ([#435](https://github.com/soulsimulation/souls/issues/435)).** A container with an
   `inside` (entry 42) is open only while its door or drawer is, if its def declares an `open` state. One that declares
   none has no door: `core-swap-shelf@1` is always open, so what is on it is seen nearby and taken without an open step,
   and the viewer draws it as an ordinary thing. A container whose def declares a `leftBy` state field records who left
   each thing in it (item id = Soul id, set when the thing comes to rest from a Soul's hand, pruned to what is still
   inside). Nearby perception and the take offer name the leaver; god-placed things have none.
+- **Real fridge contents ([#1566](https://github.com/soulsimulation/souls/issues/1566)).** `core-drinks-fridge@3` is an
+  insulated, opaque-door revision with one waist-height shelf for a real carried item. Open it, put the item inside,
+  close it, then reopen and take the same item out. Contents and custody persist; the closed door conceals them.
+  The older glass display revisions keep their decorative bottles. This revision supports new, worn and damaged finishes;
+  construction scaffolding is unsupported. It makes no cooling or preservation claim.
+- **Actual bookcase stock ([#1578](https://github.com/soulsimulation/souls/issues/1578)).** `core-bookcase@2` removes the
+  decorative books and provides three places on its waist-height shelf for real books or small items. Souls shelve and
+  retrieve each entity by hand; nearby context names the actual contents. Item identity, appearance and existing metadata
+  persist. This adds no authored-passage reading contract. Other shelves remain empty; the old decorative revision is unchanged.
 - **Litter and bins ([#1088](https://github.com/soulsimulation/souls/issues/1088), W065).** `core-bin@2` and `core-wheelie-bin@2`
   are the street bins, open at the top, on the same container faculty with data only: three places down inside at the
   level of the rubbish already in them, reached over the rim. `core-wrapper@1` is a small thing to pick up. "put the
@@ -455,6 +476,23 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
 | Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
 
+`core/chalkboard@3` also offers existing two-hand upright carrying: write an attributed message, carry the same board
+with `{"to": "display spot"}`, then read, rewrite or erase it at its new position. Its text, author and placement
+persist together. Earlier chalkboard revisions remain fixed; writing still requires contact and access.
+`core/bench@3` combines the repairable bench with existing two-hand upright carrying. Carry the damaged bench to a
+chosen campsite, fetch a hammer and repair it there, then use its native seats at that new position. Damage, repair
+receipt and placement persist. Occupied benches and full hands retain existing carry refusals; earlier revisions stay fixed.
+`core/arranging-vase@1` holds up to three real `core/cut-flower@1` stems in distinct native slots. Pick a chosen stem,
+put it in the vase, or retrieve that particular stem; nearby contents name the actual items. Individual identities,
+petal colors and placement persist. The stationary vase has an open mouth on a pedestal; heads remain above its rim.
+This is separate from the existing harvested preset bunch and adds no growth or wilting.
+`core/candle-stand@2` adds existing two-hand upright carrying to the hand-lit floor candle. Carry real stands to
+chosen clear places, arrange them, then light or put out each at its relocated wick. Their identities, positions
+and independent on/off states persist. The authored candle/flame/light and old fixed revision remain unchanged.
+### Hand-rung chime
+
+`core-wind-chime@2` reuses the finite bell pull: a Soul pulls its wooden pendant once, rings a short two-tone chime and returns to rest. Each completed pull increments the persistent `rings` count; cancellation before the peal leaves it unchanged. It is silent at rest. The original `@1` retains its ambient wind sound.
+
 ## Making: paintings and chalk
 
 - **Painting at an easel.** `core-easel@2` is a painting workstation. The `paint:` offer at its spot takes an optional
@@ -709,3 +747,56 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Mosaic composition
+
+`core/mosaic-board@1` contains nine fixed named cell surfaces, `cell-a1` through `cell-c3`. Carry a
+`core/mosaic-tile@1` with `pick-up:<tile-id>`, then choose the exact cell with `put-on:<cell-id>` (empty parameters).
+Each cell accepts one tile. The tile identity, glaze and resting support remain authoritative; pick it up again
+to rearrange the composition. Pieces have no supporting surfaces. The board stays fixed; this does not enable
+loaded carryables or free coordinate placement. Existing pickup/put-on access, occupancy and interruption rules apply.
+
+### Mending camping canvas
+
+`core/tent@3` adds a torn-canvas repair to the existing hand-operated tent; older revisions stay unchanged.
+A nearby Soul sees the damage and `object:<tent>:repair` offer. With a `core/sewing-awl@1` nearby, the existing
+repair faculty fetches the tool and works at the tear; only successful completion mends the canvas and records
+who repaired it. Interruption leaves it torn and the awl stays in hand. The awl can be put down and carried again.
+The original flap actions and mat declaration remain. The interior mat is not currently an admitted adult berth,
+so this addition does not enable sleeping inside tents. There is no automatic wear or cloth/weather simulation;
+the world creator can place or mark a tent with `broken: true`.
+## Portable area irrigation (#1651)
+
+`core/garden-sprinkler@2` adds opt-in two-hand upright carry to the unchanged sprinkler. Carry it to a chosen clear place, set it down, then switch it on by hand. At that contact, the existing irrigation faculty wets the actual planters in its forward arc within reach, from its current world pose. Turn it off and move the same entity to tend another patch. Moisture and sprinkler placement/state persist; this is contact-time watering, not continuous irrigation or a new water-supply simulation. Existing @1 remains fixed. No new contact, placement, ownership or native movement path is introduced.
+### Expanded record repertoire (content)
+
+`core/record-player@2` retains the existing record-selection action and four original choices, adding two original eight-second scores: `Paper Lanterns` and `Open Window`. Select with `put-on-record` and its `record` parameter; normal hand contact starts the chosen shared-clock piece. Stop at the existing power knob. The selected title persists. The new console uses simpler geometry while retaining the original tonearm/knob locations; the first revision stays unchanged. This is new playable music content, not a new Soul action or arbitrary user-authored notation. Original seeded piano behavior is unchanged.
+### Botanical flower press
+
+`core/flower-press@1` is a fixed hinged press with authored botanical material on its backing paper.
+`object:<press-id>:close` preserves the material at native close contact (`pressed=true`);
+`object:<press-id>:open` reveals the flattened artwork again; `read:<press-id>` reads its lasting status label.
+These actions use empty parameters and existing access, state and interruption rules. An approach interrupted before contact leaves raw material.
+The preserved state survives reopening and persistence. This is a compact art-making interaction, with no
+botanical drying-time simulation or removable output item.
+A fixed **gold-seam restoration stand** (`core-gold-seam-station@1`) holds one supplied cracked ceramic
+bowl. Its existing `repair` offer fetches a real `core-lacquer-brush@1`, then native tool repair performs six
+short dabs. The artwork stays cracked until the receipt completes; interruption leaves it unrepaired.
+Completion preserves the artwork identity and replaces dark crack geometry with golden seams. Existing
+`repairedBy` stores the repair receipt provenance, not a display author name. The whole artwork loses its
+repair offer; the completed receipt reports the outcome and the brush stays in hand. This is an authored
+restoration, with no curing simulation or removable bowl. No new contact or repair mechanism is introduced.
+### Intention paper ritual (#1655)
+
+`core-intention-burner@1` combines existing native hand writing and action-specific fire contact on one fixed
+stand. A permitted Soul supplies words, reads them, then lights the paper's lower edge. Contact commits `on`
+and irreversible `spent` state with a released status; conditional kit geometry replaces the supplied paper with
+charred material. Putting out the tray removes the flame and preserves that material/status. Spent paper cannot
+be rewritten or relit. Existing sign read exposes words/status; rendered glyphs, refill, a removable output,
+progressive combustion, fire spread and mental-state effects are not claimed. Earlier words may remain in world history;
+this is not secure erasure. No contact or reader registry changes.
+### Finished poetry folio (#1577)
+
+`core-poetry-folio@1` is a blank open folio on a display stand. Its `object:<id>:write` offer takes `text`, up to 100 characters and three lines. The existing hand-writing stroke commits the words and writer's Soul id together; interrupted approach or writing before contact leaves it blank. The write action requires empty text and there is no erase action, so a completed folio is a finished artifact rather than a rewritable notice. A god can place another blank folio for another poem.
+
+Nearby Souls discover the write schema while blank and use `read:<id>` after completion. Reading returns the exact poem with its writer and labels it as authored words, not world facts. The words and `textBy` credit persist in entity state. Existing access rules and `capability.params` / `object.state` refusals apply. This is one short displayed poem, not a multi-page publishing or portable-book system; #1033's family scale applicability remains separate.
