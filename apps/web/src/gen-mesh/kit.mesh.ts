@@ -1,4 +1,4 @@
-import {addEmbroidery,embroideryKey} from './embroidery.ts';
+import {addEmbroidery,isEmbroidery} from './embroidery.ts';
 // kit/2 mesh half: rounded low-poly primitives merged into few draws; parts with a `role` stay
 // separate under pivot groups so creature gaits and spinning wheels can move them. Owner: L1.
 // Geometry is cached per (def hash, palette) so many instances share one BufferGeometry.
@@ -245,13 +245,13 @@ registerMesh({
     let proto = cache.get(key);
     if (!proto) {
       proto = buildKit(parsed.data, { ...ctx, state: ctx.entity.state ?? {}, flameHint: flameHint(ctx.def), plant: isPlantDef(ctx.def), smokeFx: !ctx.def.components.route && !ctx.def.tags.includes('moving') });
-      addEmbroidery(proto,ctx);
       // lane PERF-MATERIALS: a kit of several static casters casts as one proxy (shadow-proxy.ts); role parts keep their own
       try { addShadowProxy(proto, { generated: true }); } catch (e) { console.warn('kit shadow proxy skipped', e); }
       cache.set(key, proto);
     }
     // clone shares geometry and materials; pivots are cloned so each instance animates on its own
     const obj = proto.clone(true); obj.userData = { ...proto.userData };
+    addEmbroidery(obj,ctx);
     // W2: flame parts burn (fx/flames.ts); not on a building site. A fire lit by hand catches (entry 22); entry 33: only
     // when this viewer saw it out before (a fire already burning when a viewer arrives burns at full); a torch smokes.
     const hand = ctx.def.tags.includes('hand-operated'), lit = ctx.entity.state?.on === true, catchUp = hand && lit && wasOut.get(ctx.entity.id) === true;
@@ -259,10 +259,10 @@ registerMesh({
     if (ctx.params.condition !== 'construction') mountFlames(obj, ctx.entity.id, catchUp, ctx.def.tags.includes('torch'));
     return obj;
   },
-  instanceKey(ctx) { const a = parseKitArgs(ctx.args); return a.success ? kitCacheKey(ctx, a.data) : null; },
+  instanceKey(ctx) { if(isEmbroidery(ctx))return null; const a = parseKitArgs(ctx.args); return a.success ? kitCacheKey(ctx, a.data) : null; },
 });
 
 // K2: $params can change geometry; both prototype and instance identity include numeric values.
 function kitCacheKey(ctx: MeshCtx, args: KitProgramArgs): string {
-  return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state) + ':' + embroideryKey(ctx);
+  return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state);
 }
