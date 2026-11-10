@@ -319,7 +319,9 @@ export const worldStateSchema = z.object({
     /** Presentation season: the sky dates the clock to this month-day ("06-05"); the hour and every schedule stay the clock's. */
     calendar: z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/).optional(),
     /** #1649: the world's time zone (IANA). On real time the clock is the local wall time there; null/absent: the migration default. */
-    timeZone: timeZoneSchema.nullable().optional() }).prefault({}),
+    timeZone: timeZoneSchema.nullable().optional(),
+    /** #1649: 'real' (real time in timeZone) or the dev-only 'accelerated' clock (dayTicks); absent: as before (the server's flag decides). */
+    clock: z.enum(['real', 'accelerated']).nullable().optional() }).prefault({}),
   /** `kind` 'auto' = the scheduled weather of the live worlds (a kind per 2 h slot, seeded by the day, as on /w/eden); any
    *  other kind shows these channels as set (`setEnv` writes them from kind × intensity). 'storm' adds lightning and thunder. */
   weather: z.object({ clouds: num.min(0).max(1).default(0.1), wind: num.min(0).max(1).default(0.1), rain: num.min(0).max(1).default(0),
@@ -339,7 +341,7 @@ export type WorldState = z.infer<typeof worldStateSchema>;
 export const worldPatchSchema = z.object({
   about: worldAboutSchema.nullable(),
   sky: z.object({ palette: z.string(), sun: num.min(0).max(1) }).partial(),
-  time: z.object({ dayTicks: z.number().int(), startTick: z.number().int(), set: z.object({ hour: num.min(0).max(24), n: z.number().int().min(1) }).nullable(), paused: z.boolean(), calendar: z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/), timeZone: timeZoneSchema.nullable() }).partial(),
+  time: z.object({ dayTicks: z.number().int(), startTick: z.number().int(), set: z.object({ hour: num.min(0).max(24), n: z.number().int().min(1) }).nullable(), paused: z.boolean(), calendar: z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/), timeZone: timeZoneSchema.nullable(), clock: z.enum(['real', 'accelerated']).nullable() }).partial(),
   weather: z.object({ clouds: num.min(0).max(1), wind: num.min(0).max(1), rain: num.min(0).max(1), fog: num.min(0).max(1), kind: z.enum(WEATHER_KINDS), intensity: num.min(0).max(1), strike: strikeSchema.nullable(), minutes: num.min(5).max(360).nullable() }).partial(),
   constitution: z.string().max(20000),
   ground: z.object({ palette: worldStateSchema.shape.ground.unwrap().shape.palette.unwrap() }).partial(),

@@ -97,6 +97,7 @@ import { earlyPosterShown, removeEarlyPoster, takeEarlyLayer, takeEarlyRender } 
 import { WorldWaterDetail, markHeight } from './WorldWaterDetail.ts';
 import { findSeats, surveySeats } from './WorldSeatSurvey.ts';
 import { visitorPreviewHour } from './visitor-hour.ts';
+import { realClockOf, setEquatorSun } from './sun-site.ts';
 import { SunShadowCache } from './rendering/SunShadowCache.ts';
 import { GodWorldLiving, calendarClock, entityWorldState, godTourViews, parseShotHour, shotClockAt, whenShotClock } from './world-env.ts';
 import { setFleeSources, AFLOAT } from './gen-mesh/motion.ts';
@@ -920,7 +921,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }
           // world clock at the moment shown (the sim's clock, moved back by how far behind it we are)
           // a world's `time.calendar` (MM-DD) dates its sky: the sun's path and the dusk follow that season, the hour stays the clock's
-          const clock = calendarClock(take.finalState.env?.datetime ?? null, entityWorldState(entityLayer));
+          const worldState = entityWorldState(entityLayer); setEquatorSun(realClockOf(worldState));
+          const clock = calendarClock(take.finalState.env?.datetime ?? null, worldState);
           const ref = take.startTick + take.ticks;
           const clockOffset=(depictedTick-ref)*(dayTicks?86400/dayTicks:dt);
           const datetime = clock ? shiftIso(clock, clockOffset) : null;

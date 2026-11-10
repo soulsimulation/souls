@@ -4,13 +4,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
-import { clockAt } from '@souls/brain';
+import { advanceNeeds, clockAt, newLife } from '@souls/brain';
 import { fixture, factory } from '../../test/native-owner-fixture.ts';
 import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { installWorldClock, syncWorldClock, worldTimeZone } from './world-clock.ts';
-import { CLOCK_BASE_MS, REAL_DAY_TICKS, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
+import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, productionWorld, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 test('world time is the local wall time of a UTC instant in the world zone', () => {
@@ -55,6 +55,8 @@ test('zones: validity and the migration defaults', () => {
 
 test('a god world on real time: migrated once, reads the wall, re-aligns after drift, refuses a bad zone', { timeout: 600000 }, async (t) => {
   let wall = Date.UTC(2026, 10, 9, 17, 30); // noon in New York, 09:30 in Los Angeles
+  const rtWas = process.env.SIM_REAL_TIME; process.env.SIM_REAL_TIME = '1';   // the server's flag (god act reads it)
+  t.after(() => { if (rtWas === undefined) delete process.env.SIM_REAL_TIME; else process.env.SIM_REAL_TIME = rtWas; });
   const f = fixture(':memory:', factory, { durableClockV1: true });
   const god = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {} });
   const edge = new EdgeLedger(f.host, f.db);
@@ -84,10 +86,13 @@ test('a god world on real time: migrated once, reads the wall, re-aligns after d
   assert.equal(clockRules(), n0, 'in step with the wall: no new clock event');
   assert.equal(env().slice(0, 16), '2026-11-09T09:31');
 
-  // the tick loop fell 10 minutes behind (a restart, a stall): one re-alignment
+  // the tick loop fell 10 minutes behind (a restart, a stall): one re-alignment, which keeps the day's state
+  (f.host as any).extra.living.lastDay = 5; (f.host as any).extra.living.event = 'the market opens';
   wall += 600_000;
   await synced(2);
   assert.equal(clockRules(), n0 + 1, 'one logged re-alignment');
+  assert.equal((f.host.living as any).lastDay, 5, 'a re-alignment keeps the last day turn');
+  assert.equal((f.host.living as any).event, 'the market opens', 'and the day\'s event');
   assert.equal(env().slice(0, 16), '2026-11-09T09:41');
 
   // the owner moves the world to Lisbon (a world op, recorded): the clock follows the zone
@@ -99,8 +104,102 @@ test('a god world on real time: migrated once, reads the wall, re-aligns after d
   assert.equal(bad.accepted, false);
   assert.match(JSON.stringify(bad.failures), /time\.zone-invalid/);
 
+  assert.equal((god.model.state.time as any).clock, 'real', 'the migration put the world on the real clock');
+
+  // a dev world's god chooses the accelerated clock (the dev-only option), then real time again
+  assert.equal((god.act({ ops: [{ op: 'world', state: { time: { clock: 'accelerated', dayTicks: 72000 } } }] }, 'fast days') as any).accepted, true);
+  await synced(3);
+  assert.equal(f.host.living?.dayTicks, 72000, 'accelerated: one world day per real hour');
+  assert.equal(env().slice(11, 16), '17:41', 'the time of day carries over');
+  assert.equal((god.act({ ops: [{ op: 'world', state: { time: { clock: 'real' } } }] }, 'real time') as any).accepted, true);
+  await synced(3);
+  assert.equal(f.host.living?.dayTicks, REAL_DAY_TICKS);
+  assert.equal(env().slice(0, 16), '2026-11-09T17:41', 'back on the wall in Lisbon');
+
+  // production (#1649 review): the act route holds the same rules as the env route
+  const saved = { stage: process.env.SIM_STAGE, rt: process.env.SIM_REAL_TIME };
+  try {
+    process.env.SIM_STAGE = 'production'; process.env.SIM_REAL_TIME = '1';
+    for (const time of [{ clock: 'accelerated' }, { set: { hour: 19, n: 99 } }, { dayTicks: 1200 }]) {
+      const r = god.act({ ops: [{ op: 'world', state: { time } }] }, 'sneak') as any;
+      assert.equal(r.accepted, false, JSON.stringify(time)); assert.equal(r.failures[0].code, 'time.accelerated-production');
+    }
+    assert.equal((god.act({ ops: [{ op: 'world', state: { time: { paused: true } } }] }, 'pause') as any).accepted, true, 'pausing is allowed');
+    assert.equal((god.act({ ops: [{ op: 'world', state: { time: { paused: false } } }] }, 'resume') as any).accepted, true);
+    process.env.SIM_REAL_TIME = '0';
+    assert.equal((god.act({ ops: [{ op: 'world', state: { time: { clock: 'real' } } }] }, 'real') as any).failures[0].code, 'time.real-clock-off');
+  } finally { if (saved.stage === undefined) delete process.env.SIM_STAGE; else process.env.SIM_STAGE = saved.stage; process.env.SIM_REAL_TIME = saved.rt; }
+
   // a second boot over the same database writes no second migration
   const god2 = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {} });
   assert.equal((god2.model.state.time as any).timeZone, 'Europe/Lisbon');
   assert.equal(migrations().n, 1, 'idempotent');
+  // real time turned off again (a rollback): the world drops `clock: 'real'` so nothing reads a clock it does not run
+  installWorldClock(f.host, god2, () => {}, { realTime: false, slug: 'mars-college-2027' });
+  assert.equal((god2.model.state.time as any).clock ?? null, null);
+});
+
+test('an authored world (no god) keeps real time through the same keeper; customs carry over; slowed worlds wait', async () => {
+  let wall = Date.UTC(2026, 10, 9, 23, 0), tick = 5000;
+  const events: any[] = [];
+  const host: any = { engine: { world: { get tick() { return tick; } } }, living: { origin: 0, dayTicks: 72000, customs: ['supper at the long table'] }, pace: 1, paused: false, running: true,
+    enqueue(_k: string, _a: string, p: any) { events.push(p); host.living = { ...p.dayConfig }; return Promise.resolve(); } };
+  const keeper = installRealClock(host, { zone: () => 'America/New_York', now: () => wall, checkMs: 3_600_000 });
+  await keeper.sync();
+  assert.equal(hasRealClock(host), true);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].realign, undefined, 'from the accelerated clock: a fresh day state, not a re-alignment');
+  assert.deepEqual(host.living.customs, ['supper at the long table'], 'customs carry over');
+  assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(0, 16), '2026-11-09T18:00', '18:00 in New York');
+  tick += 20 * 30; wall += 30_000; await keeper.sync();
+  assert.equal(events.length, 1, 'in step: nothing logged');
+  wall += 3_600_000; host.pace = 0.25;   // nobody watching; the periodic check skips a slowed world (sync on demand still works)
+  await keeper.sync();
+  assert.equal(events.length, 2, 'an explicit sync re-aligns');
+  assert.equal(events[1].realign, true, 'already on real time: a re-alignment');
+  assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(11, 16), '19:00');
+  keeper.stop();
+});
+
+test('the periodic check re-aligns a watched, running world and leaves slowed, paused or stopped ones alone', async () => {
+  let wall = Date.UTC(2026, 10, 9, 12, 0), tick = 0;
+  const events: any[] = [];
+  const host: any = { engine: { world: { get tick() { return tick; } } }, living: undefined, pace: 1, paused: false, running: true,
+    enqueue(_k: string, _a: string, p: any) { events.push(p); host.living = { ...p.dayConfig }; return Promise.resolve(); } };
+  const keeper = installRealClock(host, { zone: () => 'UTC', now: () => wall, checkMs: 20, customs: ['tea at four'] });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  await wait(60);
+  assert.equal(events.length, 1, 'started once'); assert.deepEqual(host.living.customs, ['tea at four']); assert.equal(events[0].realign, undefined);
+  for (const [k, v] of [['pace', 0.25], ['paused', true], ['running', false]] as const) {
+    const n: number = events.length; host[k] = v; wall += 120_000; await wait(80);
+    assert.equal(events.length, n, `${k}: no re-alignment`);
+    host[k] = k === 'pace' ? 1 : !v; await wait(80);
+    assert.equal(events.at(-1).realign, true);
+  }
+  assert.equal(events.length, 4, 'one re-alignment each time it runs at full pace again');
+  keeper.stop();
+});
+
+test('needs move over the clock day: a real day is 24 times slower than the accelerated one', () => {
+  const a = newLife(0), b = newLife(0);
+  advanceNeeds(a, 72000, 'idle', false);                       // one accelerated day
+  advanceNeeds(b, 72000, 'idle', false, false, false, REAL_DAY_TICKS); // one real hour
+  assert.ok(a.needs.hunger > b.needs.hunger + 50, `accelerated ${a.needs.hunger} vs real ${b.needs.hunger}`);
+  const c = newLife(0); advanceNeeds(c, REAL_DAY_TICKS, 'idle', false, false, false, REAL_DAY_TICKS);
+  assert.equal(c.needs.hunger, a.needs.hunger, 'one real day of a real clock = one accelerated day of the old one');
+});
+
+test('#1649 review: the production marker fails closed when no stage is set', () => {
+  // a named stage decides
+  assert.equal(productionWorld({ SIM_STAGE: 'production' }), true);
+  assert.equal(productionWorld({ SIM_STAGE: 'legacy', DEV_AUTH: '1' }), true);
+  assert.equal(productionWorld({ SIM_STAGE: 'staging', PUBLIC_URL: 'https://sim.eden.art' }), false);
+  // no stage (an older keeper kept by activate.sh --reload): production unless an explicit dev signal is present
+  assert.equal(productionWorld({ PUBLIC_URL: 'https://soul.game', DEV_AUTH: '0' }), true);
+  assert.equal(productionWorld({ PUBLIC_URL: 'https://sim.eden.art' }), true);
+  assert.equal(productionWorld({ PUBLIC_URL: 'not a url' }), true);
+  assert.equal(productionWorld({ PUBLIC_URL: 'https://soul.game', DEV_AUTH: '1' }), false);
+  assert.equal(productionWorld({}), false, 'unset PUBLIC_URL reads http://localhost');
+  for (const u of ['http://localhost:4500', 'http://127.0.0.1:4980', 'http://[::1]:4500', 'http://app.localhost:3000', 'http://sim.test'])
+    assert.equal(productionWorld({ PUBLIC_URL: u, DEV_AUTH: '0' }), false, u);
 });
