@@ -33,8 +33,10 @@ export function normalizeReminder(input:unknown):{request:ReminderRequest;dueWor
 }
 export class PersonalReminders{
  private db:Sql;readonly worldId:string;private streams:EventStreams;private clock:()=>ReminderClock;
- constructor(db:Sql,worldId:string,streams:EventStreams,clock:()=>ReminderClock){
-  this.db=db;this.worldId=worldId;this.streams=streams;this.clock=clock;
+ /** #1649: world reminders created at or before this tick are held (an unmapped clock cut-over); null holds none. */
+ private holdWorldThrough:()=>number|null;
+ constructor(db:Sql,worldId:string,streams:EventStreams,clock:()=>ReminderClock,holdWorldThrough:()=>number|null=()=>null){
+  this.db=db;this.worldId=worldId;this.streams=streams;this.clock=clock;this.holdWorldThrough=holdWorldThrough;
   db.exec(`CREATE TABLE IF NOT EXISTS edge_personal_reminders_v1(world_id TEXT NOT NULL,soul_id TEXT NOT NULL,id TEXT NOT NULL,client_ref TEXT NOT NULL,request_hash TEXT NOT NULL,request TEXT NOT NULL,kind TEXT NOT NULL,due_world_minute INTEGER,due_real_ms INTEGER,state TEXT NOT NULL,created_at INTEGER NOT NULL,created_tick INTEGER NOT NULL,event_cursor TEXT,delivered_at INTEGER,PRIMARY KEY(world_id,id),UNIQUE(world_id,soul_id,client_ref)) WITHOUT ROWID;
    CREATE INDEX IF NOT EXISTS edge_personal_reminders_due ON edge_personal_reminders_v1(world_id,state,kind,due_world_minute,due_real_ms);
    CREATE TABLE IF NOT EXISTS edge_personal_reminder_outbox_v1(world_id TEXT NOT NULL,reminder_id TEXT NOT NULL,soul_id TEXT NOT NULL,body TEXT NOT NULL,event_cursor TEXT,PRIMARY KEY(world_id,reminder_id)) WITHOUT ROWID;`);
@@ -80,7 +82,8 @@ export class PersonalReminders{
  collectDue(){
   const clock=this.clock();
   return tx(this.db,()=>{
-   const rows=this.db.prepare("SELECT * FROM edge_personal_reminders_v1 WHERE world_id=? AND state='active' AND ((kind='real' AND due_real_ms<=?) OR(kind='world' AND due_world_minute<=? AND ?=0)) ORDER BY id LIMIT 128").all(this.worldId,clock.sampledAtRealMs,clock.absoluteWorldMinutes??-1,clock.paused?1:0) as Row[];
+   // #1649: world reminders made up to an unmapped clock cut-over are held (their due minutes are in the old day count)
+   const rows=this.db.prepare("SELECT * FROM edge_personal_reminders_v1 WHERE world_id=? AND state='active' AND ((kind='real' AND due_real_ms<=?) OR(kind='world' AND due_world_minute<=? AND ?=0 AND created_tick>?)) ORDER BY id LIMIT 128").all(this.worldId,clock.sampledAtRealMs,clock.absoluteWorldMinutes??-1,clock.paused?1:0,this.holdWorldThrough()??-1) as Row[];
    for(const row of rows){const request=JSON.parse(row.request) as ReminderRequest;
     const body={text:request.text,untrusted:true,source:'personal-reminder',reminder:{id:row.id,at:request.at,clientRef:request.clientRef},dueClocks:{...clock,realTime:new Date(clock.sampledAtRealMs).toISOString()}};
     this.db.prepare('INSERT OR IGNORE INTO edge_personal_reminder_outbox_v1(world_id,reminder_id,soul_id,body) VALUES(?,?,?,?)').run(this.worldId,row.id,row.soul_id,JSON.stringify(body));

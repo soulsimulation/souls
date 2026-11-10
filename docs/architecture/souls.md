@@ -270,7 +270,8 @@ withholds. Owner messages and credentials are never in it.
   `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ
   (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest). Only booleans, numbers and an enum
   field's own values are published (a light on, a level, the record on); free text (a board's words, who wrote or
-  voted) never is: it comes with a read of the thing. Nothing kept out of sight or in a secret place is in it. Eden 2026: 0.3 KB as it
+  voted) never is: it comes with a read of the thing. Nothing kept out of sight, and nothing inside a secret place's outline on any floor, is in it; both are checked
+  where the thing stands at each build. Eden 2026: 0.3 KB as it
   starts, 23 KB with all 873 things changed.
 - Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
   grow with the number of clients.
@@ -293,7 +294,10 @@ withholds. Owner messages and credentials are never in it.
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
-  made at once rather than at the end of the world's catch-up). A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
+  made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a
+  hand contact (a lamp, a door) changes at the contact; any other (a chest, a candle) sent from beyond 30 m changes when
+  the act's walk ends at it, and not at all if the act is stopped or replaced first (`object.not-reached`); within 30 m it
+  behaves as before. A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
   has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
   "the lamp is already on").
 - **Not in the copy yet:** what a thing's text says in full (a board's notes, a notebook) and the objects of the edge

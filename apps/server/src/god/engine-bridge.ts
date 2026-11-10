@@ -1987,7 +1987,7 @@ export class EngineBridge {
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
     L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
-    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? null;
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply
