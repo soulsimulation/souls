@@ -217,6 +217,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
   contactActuator?: ContactActuatorService;
   /** CTRL-2 (#1094): a thing its container keeps out of sight (shut, or a hiding place); set by the engine bridge. */
   concealedThing?: (id: string) => boolean;
+  /** #1751: a built thing's acts as the catalog publishes them (its def's own action list), or null; set by the engine bridge. */
+  thingActs?: (id: string) => {acts: import('../../god/actuators.ts').CatalogKindAct[]; state: Record<string, unknown>} | null;
+  /** #1751: every built thing whose acted-on state differs from its def's defaults, with only the fields that differ. */
+  thingStates?: () => ReadonlyMap<string, Record<string, unknown>>;
   /** #1095 A5: what a built thing's author said about it; set by the engine bridge. */
   thingAbout?: (id: string) => {title?: string; what?: string; aliases?: string[]} | null;
   /** CTRL-2 (#1094): a built thing's own name, as offers call it; set by the engine bridge. */
@@ -1299,9 +1303,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // #1737: a spot asked for by its id may lie beyond what the whole menu lists (its reach, its nearest few). A whole menu
     // that does not hold it cannot answer for it, and a kept build cannot either: what makes a far spot taken or free
     // happens outside the cells this Soul's menus are keyed on. Such an id is always built now.
-    const spot = this.asksSpot(focus), has = (b: {caps: EdgeCapability[]}) => [...focus.ids].every(id => b.caps.some(c => c.id === id));
-    if (hit?.last?.tick === tick && hit.last.sig === this.sameTickSig()) {const v = only(hit.last.value); if (!spot || has(v)) {menuStats.one.sameTick++; return v;}}
-    else if (hit && hit.key === this.menuKey(soul, tick) && tick - hit.tick < MENU_MAX_AGE_TICKS && this.readsHold(soul, hit.reads)) {const v = only(this.bindsTail(soul, only(hit.value), focus)); if (!spot || has(v)) {menuStats.one.kept++; return v;}}
+    // #1751: so may a thing worked by hand: a whole menu lists only those within sight, so one it does not hold is built by id
+    const spot = this.asksSpot(focus), far = spot || [...focus.ids].some(id => id.startsWith('object:')), has = (b: {caps: EdgeCapability[]}) => [...focus.ids].every(id => b.caps.some(c => c.id === id));
+    if (hit?.last?.tick === tick && hit.last.sig === this.sameTickSig()) {const v = only(hit.last.value); if (!far || has(v)) {menuStats.one.sameTick++; return v;}}
+    else if (hit && hit.key === this.menuKey(soul, tick) && tick - hit.tick < MENU_MAX_AGE_TICKS && this.readsHold(soul, hit.reads)) {const v = only(this.bindsTail(soul, only(hit.value), focus)); if (!far || has(v)) {menuStats.one.kept++; return v;}}
     if (spot) {menuStats.one.built++; return only(this.bindsTail(soul, only(this.bindsCore(soul, focus)), focus));}
     // a focused build is kept like a whole menu (same key, same reads), per focus: `here` asks the same one every frame
     const sig = focusSig(focus), mine = this.focusCache.get(soul.soulId), kept = mine?.get(sig), key = this.menuKey(soul, tick, focus);
