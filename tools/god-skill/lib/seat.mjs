@@ -10,7 +10,8 @@ let seat = null, registering = null, registerAs = null;   // seat: {home, key, d
 export const godFile = (name) => (seat ? join(seat.dir, name) : name);
 export const seatDir = () => seat?.dir ?? null;
 export const seatSecrets = () => seat?.home.godSecrets(seat.key) ?? null;
-export const keepSecrets = (patch) => seat?.home.saveGodSecrets(seat.key, patch);
+/** A seat that gets its token is announced in the home's guide, so the next chat finds the god as it finds the Souls (#1536). */
+export const keepSecrets = (patch) => { const out = seat?.home.saveGodSecrets(seat.key, patch); if (seat && patch?.token) try { seat.home.refreshGuide(); } catch { /* the guide is a convenience; the seat is saved */ } return out; };
 function sit(home, key) {
   seat = { home, key, dir: home.godSeat(key) };
   // the look keeper and the shot helper are this same CLI in a child: they sit in the same seat

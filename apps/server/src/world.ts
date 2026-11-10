@@ -36,7 +36,8 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
-import { advanceNeeds, newLife, type Life } from '@souls/brain';
+import { advanceNeeds, DAY_TICKS, newLife, type Life } from '@souls/brain';
+import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
 import { frontier, stepIndex, belongsTo } from './deck.ts';
 import {mandateOf,MANDATE_STATE} from './mandate.ts';
@@ -1245,7 +1246,9 @@ export class WorldHost {
           m.nextEvalTick=Math.min(m.nextEvalTick,tick+1+hash32(m.soulId)%20);
           m.evalTrigger='world-event';m.lastFingerprint='';
         }
-        if (p?.dayConfig) { this.extra.living = { ...p.dayConfig, lastDay: -1, event: 'a new place', quiet: false }; for (const m of this.minds.values()) m.life ??= newLife(tick); }
+        // #1649: a real-time re-alignment (`realign`) moves the origin only and keeps the day's state
+        if (p?.dayConfig && p.realign === true && this.extra.living) { const was = this.extra.living as Record<string, unknown>; this.extra.living = { ...p.dayConfig, lastDay: was.lastDay, event: was.event, quiet: was.quiet, ...(was.quietDay !== undefined ? { quietDay: was.quietDay } : {}) }; }
+        else if (p?.dayConfig) { this.extra.living = { ...p.dayConfig, lastDay: -1, event: 'a new place', quiet: false }; for (const m of this.minds.values()) m.life ??= newLife(tick); }
         if(p?.runtimePolicy)this.extra.runtimePolicy=structuredClone(p.runtimePolicy);
         const day = this.living;
         if (p?.quiet && day) { day.quiet = true; day.quietDay = p.day; }
@@ -1332,6 +1335,15 @@ export class WorldHost {
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
+  /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
+   *  Its adoption also stands, once, any free body already left more than a step above its floor (the plan is read when the event
+   *  is accepted and logged in it, with each body's Soul, so a replay stands the same bodies in the same places). */
+  enableStandHeightV2(author='operator:stand-height'){
+    if((this.extra.runtimePolicy as {standHeightV2?:boolean}|undefined)?.standHeightV2)return Promise.resolve();
+    const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV2:true},why:'stand-height/2 (#1521): a body the engine sets down on the ground floor of a world without a ground field stands at its floor height, never in the air at the height it had; any body already left in the air is stood on its floor once; retain historical replay before this event'};
+    const guard:AcceptanceGuard=()=>{const bodies=this.engine.planAboveFloorV2?.()??[];if(bodies.length)payload.standHeightRepairV2={bodies:bodies.map(b=>({...b,...(this.mindByEntity.get(b.id)?{soul:this.mindByEntity.get(b.id)!.soulId}:{})}))};return true;};
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
+  }
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
   /** #1496 nonfinite-hold/1 (prospective, needs quarantine/1): a non-finite number the frontier hash meets that quarantine/1 doesn't hold is put back to its last good value by a logged event, never a halt. */
   enableNonFiniteHoldV1(author='operator:nonfinite-hold'){if((this.extra.runtimePolicy as {nonFiniteHoldV1?:boolean}|undefined)?.nonFiniteHoldV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteHoldV1:true},why:'nonfinite-hold/1 (#1496): a number in the hashed head that is no number is put back to its value in the last good snapshot by a logged patch, and what it touched stops; retain historical replay before this event'});}
@@ -1504,11 +1516,13 @@ export class WorldHost {
     for (const m of this.minds.values()) {
       if (!m.life) continue;
       const e = this.engine.world.entities[m.entityId]; if (!e?.human) continue;
+      // #1649: needs move over a real day on a real-time clock (its dayConfig names a zone); other clocks keep the accelerated day
+      const needsDay = (this.living as {zone?: string} | undefined)?.zone ? REAL_DAY_TICKS : DAY_TICKS;   // also while a real-time clock is paused
       const floater=(e as unknown as {body?:{family:string}}).body?.family==='floater';
       const nearby = [...this.mindByEntity.values()].some(other => { const b = this.engine.world.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; });
       const humanRest=(this.extra.runtimePolicy as {humanRestNeedsV1?:boolean}|undefined)?.humanRestNeedsV1===true;
       const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
-      advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater); m.energy = m.life.needs.energy;
+      advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater, needsDay); m.energy = m.life.needs.energy;
     }
   }
 

@@ -22,7 +22,7 @@ const walked = (steps) => steps.flatMap(receiptsIn).filter((r) => WALK.test(r.re
 /** One record per receipt, its end if any step saw it: `act` prints it started and a later `wait` prints it done. */
 const lastOf = (steps) => { const seen = new Map(), loose = []; for (const r of steps.flatMap(receiptsIn)) { const id = r.receipt?.id; if (!id) loose.push(r); else if (!seen.has(id) || (['completed', 'failed'].includes(r.outcome) && !['completed', 'failed'].includes(seen.get(id).outcome))) seen.set(id, r); } return [...seen.values(), ...loose]; };
 /** Some move this question can't place: a walk with no observed end, any other move, or a plan with steps still unseen. */
-const unplaced = (steps) => steps.some((s) => (s.verb === 'plan' && s.out?.accepted === true)) || lastOf(steps).some((r) => { const cap = r.receipt?.capability ?? ''; return r.outcome !== 'failed' && (OTHER_MOVE.test(cap) || (WALK.test(cap) && r.outcome !== 'completed')); });
+const unplaced = (steps) => steps.some((s) => (s.verb === 'plan' && s.out?.accepted === true) || (s.unplaced && s.verb === 'act' && (WALK.test(s.args[0] ?? '') || OTHER_MOVE.test(s.args[0] ?? '')))) || lastOf(steps).some((r) => { const cap = r.receipt?.capability ?? ''; return r.outcome !== 'failed' && (OTHER_MOVE.test(cap) || (WALK.test(cap) && r.outcome !== 'completed')); });
 /** Anything but the Soul's own memory that showed it day one's words before it set off. */
 function toldBefore(steps, id) {
   const leaf = id.split(/[-/]/).at(-1), set = steps.findIndex((s) => receiptsIn(s).some((r) => idOf(r.receipt?.capability ?? '') === id) || (s.verb === 'plan' && s.args.join(' ').includes(id)));
@@ -36,7 +36,7 @@ function toldBefore(steps, id) {
 
 export default {
   id: 'reunion-recall',
-  version: 6,
+  version: 7,
   question: 'On the second day, in a new chat, did both Souls finish a walk to the place they named on the first day, each using the other\'s name in what it said?',
   assumptions: [
     'Each seat\'s last card is the second day and names neither the other Soul nor a place; every earlier card is the first day.',
@@ -66,7 +66,7 @@ export default {
         kept: !!id && walked(after).includes(id), open: unplaced(after),
         briefAtWake: (ctx.listens?.(seat) ?? []).some((l) => Date.parse(l.t) >= from && /"brief"/.test(l.stdout ?? '')),
         days: { first: days[0] ?? null, last: days.at(-1) ?? null, next: after.map(dayOf).find((d) => d !== null) ?? null },
-        refs: talk.slice(0, 2).map((s) => ctx.stepRef(s)),
+        refs: (talk.length ? talk : after).slice(0, 2).map((s) => ctx.stepRef(s)),   // #1736: a silent second day still cites what the Soul did
       };
     });
     const evidence = rows.flatMap((r) => r.refs ?? []), detail = rows.map(({ after, refs, ...rest }) => rest), unknown = (uncertainty) => ({ verdict: 'unknown', evidence, detail, uncertainty });

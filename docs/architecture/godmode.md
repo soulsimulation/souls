@@ -51,7 +51,7 @@ modules they mount):
 | Status and pairing | `GET /v1/god/status` (public; says whether the caller is god, owner or visitor), `/welcome`, `/pairings`, `pair/*`, `claim`, `mint` |
 | Edits | `POST /v1/god/act`, `/dryrun`, `/preview`; `POST /v1/god/undo[?group=]`, `/redo`; `GET /v1/god/edits`, `/requests/:clientRef`, `/snapshot`, `/stream` (SSE), `POST /v1/god/query` |
 | Builds and districts | `/v1/god/builds…`, `/v1/god/districts…` |
-| Environment | `POST /v1/god/env` (time, sky, weather), `/strike` (lightning), `/land` (terrain and water); public `GET /v1/world/env` |
+| Environment | `POST /v1/god/env` (time, sky, weather; on real time the hour is a viewer preview and the accelerated clock dev-only, [worlds](worlds.md)), `/strike` (lightning), `/land` (terrain and water); public `GET /v1/world/env` |
 | Objects | `POST`/`GET /v1/god/assets` (uploads, moderated), `GET /v1/god/defs`, `/catalog`, `/catalog/taxonomy`, `/recommend`, `/layers`; public `GET /assets/<sha256>.<ext>`, `/thumbs/<hash>.png` |
 | Seeing | `POST /v1/god/look` (PNG) |
 | People | `GET /v1/god/prayers`, `POST /v1/god/answer`; Souls pray with `POST /v1/god/pray`; `POST /v1/god/visitors {open}` |
