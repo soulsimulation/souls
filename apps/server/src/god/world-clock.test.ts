@@ -18,6 +18,9 @@ test('clockConfig keeps the phase when dayTicks changes', () => {
 });
 
 test('a god world\'s clock runs, and follows the god\'s time.dayTicks', { timeout: 600000 }, async (t) => {
+  // the accelerated clock (#1649: real time is the default; SIM_REAL_TIME=0 keeps the clock this test pins)
+  const rtWas = process.env.SIM_REAL_TIME; process.env.SIM_REAL_TIME = '0';
+  t.after(() => { if (rtWas === undefined) delete process.env.SIM_REAL_TIME; else process.env.SIM_REAL_TIME = rtWas; });
   const f = fixture(':memory:', factory, { durableClockV1: true });
   const god = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {} });
   const edge = new EdgeLedger(f.host, f.db);

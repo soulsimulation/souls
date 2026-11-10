@@ -55,6 +55,9 @@ async function world(t) {
       req.socket.on('close', () => w.listeners.delete(send));
       return undefined;
     }
+    // #1737: the world's public structure and live picture are not admitted requests (C3, answered from the launcher's
+    // cache); this fake world publishes neither, so serve runs without a local copy, as on a world that predates them
+    if (p === '/v1/edge/live' || p === '/v1/edge/catalog') return json(404, { error: { code: 'not-found', message: 'not published here' } });
     // Everything else is heavy: at most one at a time per Soul, or soul.busy.
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
     await sleep(10); w.heavyNow--;
@@ -397,7 +400,7 @@ test('the harness listen keeps working through serve: same output, by cursor, an
   const r = await held;
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.json.messages.map((m) => [m.id, m.text]), [['msg_2', 'Say hello']]);
-  assert.match(r.json.next, /ack each/);
+  assert.match(r.json.next, /act <id> --for <message id> --wait/);
   w.owner('msg_3', 'And wave');
   const next = await w.cli('listen', '--after', 'msg_2');
   assert.deepEqual(next.json.messages.map((m) => m.id), ['msg_3'], 'the next listen gets only the new one');
