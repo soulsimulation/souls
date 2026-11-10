@@ -1547,10 +1547,17 @@ export class MarsEngine implements Engine {
     const ends=flight.t<=flight.total-flight.t?[flight.link.from,flight.link.to]:[flight.link.to,flight.link.from];
     let spot:{p:[number,number,number];level:number}|null=null;
     let moved=0;
+    // #1453 A5 v3: a body set down on a flight's end point (where every climber steps on and off) blocks that flight and waits
+    // there itself; the first pass keeps clear of every usable flight end on the landing's level (by 2r), the second takes any
+    // clear spot as before
+    const flightEnds=sp.scene.links.filter(l=>l.usable).flatMap(l=>[l.from,l.to]);
+    const onFlightEnd=(x:number,z:number,level:number)=>flightEnds.some(q=>q.level===level&&hypot(q.p[0]-x,q.p[1]-z)<2*r);
+    for(const keepOffEnds of [true,false]){
     for(const end of ends){
       const along=end===flight.link.from?flight.t:flight.total-flight.t;
       for(let ring=0;ring<=5&&!spot&&along+ring*.4<=FLIGHT_RELEASE_MAX_V1+1e-9;ring++){const n=Math.max(1,ring*8);for(let k=0;k<n;k++){
         const ang=(k/n)*Math.PI*2,x=r3(end.p[0]+dcos(ang)*ring*.4),z=r3(end.p[1]+dsin(ang)*ring*.4),g=sp.levelAt(end.level,[x,z]);
+        if(keepOffEnds&&onFlightEnd(x,z,end.level))continue;
         if(!g||!bodyStandsClear(this.rt,a,[x,z],end.level)||(end.level===0&&f&&f.medium(x,z)>1))continue;
         const y=r3(g.level===0&&sp.ground?sp.ground.standY(x,z):g.y);if(!Number.isFinite(y))continue;
         // #1453 review: the cap is on the body's real one-tick move, from where it stands (off the centre line too) to the spot
@@ -1559,6 +1566,8 @@ export class MarsEngine implements Engine {
         spot={p:[x,y,z],level:end.level};moved=d;break;
       }}
       if(spot)break;
+    }
+    if(spot)break;
     }
     const id=this.byActor.get(actor),pp=id?this.programs.get(id):undefined,own=!!pp?.action&&p.holders.some(x=>x.id===pp!.action);
     const why={...reason,message:spot?`${reason.message} Moved off the flight to the landing (${moved.toFixed(1)} m).`:`${reason.message} Left standing on the flight: no clear landing within ${FLIGHT_RELEASE_MAX_V1} m; the next walk resumes the flight from here.`};
