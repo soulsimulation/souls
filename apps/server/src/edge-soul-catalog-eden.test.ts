@@ -52,7 +52,7 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
 
   const app = new Hono(); let hear: (m: object) => void = () => {};
   const catalog = mountCatalogRoute(app, {ledger: L});
-  mountLiveRoute(app, {ledger: L}, {onSpectator: (l: (m: object) => void) => {hear = l;}} as never, catalog.version);
+  const live = mountLiveRoute(app, {ledger: L}, {onSpectator: (l: (m: object) => void) => {hear = l;}} as never, catalog.version);
   const get = async (path: string, headers: Record<string, string> = {}) => {const r = await app.request(path, {headers}); return {status: r.status, etag: r.headers.get('etag'), body: r.status === 200 ? await r.json() as any : null};};
 
   await t.test('until the world first has its whole structure, the catalog asks again shortly rather than publish no acts', async () => {
@@ -224,12 +224,18 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
 
   await t.test('the live picture names where a Soul is, and never a secret place', async () => {
     const place = L.placePathOf(soul.soulId).find((p: any) => p.kind !== 'occupier').id as string;
+    // #1755: the push, held from here: what it carries is the same picture's changes
+    const frames: {event: string; data: string}[] = [], stop = live.subscribe(null, (event, data) => frames.push({event, data}));
+    t.after(() => {stop(); live.close();});
     hear({kind: 'speech', id: 'sp_open', tick: host.engine.world.tick, at: 1, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'hello out here'});
     await run(10);
     const open = await get('/v1/edge/live'), row = open.body.souls.find((s: any) => s.id === soul.soulId);
     assert.equal(open.body.contract, 'soul-live/1'); assert.equal(open.body.catalog, catalog.version());
     assert.equal(row.place, place); assert.equal(row.at.length, 2);
     assert.deepEqual(open.body.speech.map((s: any) => [s.id, s.place, s.untrusted]), [['sp_open', place, true]]);
+    await get('/v1/edge/live');
+    assert.ok(frames.some(f => f.data.includes('hello out here')), 'a line said in the open is pushed');
+    const pushedBefore = frames.length;
     L.knowledge.setSecret(place, true);
     hear({kind: 'speech', id: 'sp_hidden', tick: host.engine.world.tick, at: 2, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'said in the secret place'});
     await run(10);
@@ -239,5 +245,9 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.equal(shut.body.speech.some((s: any) => s.id === 'sp_open'), false, 'nor what was said there before it was made secret');
     assert.equal(JSON.stringify(shut.body).includes('said in the secret place'), false);
     assert.equal(JSON.stringify(shut.body).includes(place), false, 'the secret place is not named');
+    const after = frames.slice(pushedBefore).map(f => f.data).join('\n');
+    assert.ok(after.includes(`"id":"${soul.soulId}"`) && after.includes('"at":null'), 'the push says the Soul is somewhere not said');
+    assert.equal(after.includes(place), false, 'the push never names the secret place');
+    assert.equal(after.includes('said in the secret place'), false, 'nor what is said there');
   });
 });
