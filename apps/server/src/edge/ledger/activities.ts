@@ -157,6 +157,22 @@ const secondsParam = (def: number, max = 1800) => ({seconds: {type: 'integer', m
 const seatSeconds = () => ({seconds: {type: 'integer', min: 1, max: 600, default: 60}});
 export const ACTIVITY_SECONDS_MAX = 1800;
 
+/** #628: how much nearer to or farther from the thing than its spot a standing point beside it may be (m). */
+export const SIDE_STEP = 0.5;
+/** #628: the clear standing point nearest `at` on rings around the thing it faces (`f`, at distance `L`), from L - SIDE_STEP
+ *  (at least 0.1 m) to L + SIDE_STEP, every 15°, within 0.9 m of `at`; null when none has standing room. Ties keep the ring
+ *  and angle order. Standing room (STAND_CLEAR) keeps the point out of the thing itself. */
+export function besideAt(at: V2, f: V2, L: number, w: Pick<ActivityWorld, 'clearance'>): V2 | null {
+  const a0 = Math.atan2(at[1] - f[1], at[0] - f[0]), pts: {p: V2; d: number}[] = [];
+  for (let r = Math.max(0.1, L - SIDE_STEP); r <= L + SIDE_STEP + 1e-9; r += 0.1) for (let k = 0; k < 24; k++) {
+    const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * Math.PI / 12, p: V2 = [Math.round((f[0] + Math.cos(a) * r) * 100) / 100, Math.round((f[1] + Math.sin(a) * r) * 100) / 100];
+    const d = d2(p, at); if (d <= 0.9 + 1e-9) pts.push({p, d});
+  }
+  pts.sort((x, y) => x.d - y.d);   // stable: equal distances keep their ring and angle order
+  for (const {p} of pts) if (w.clearance(p[0], p[1]) >= STAND_CLEAR) return p;
+  return null;
+}
+
 /** The activity capabilities and plans for one Soul right now. */
 /** `want` (#1737): spot ids asked for by id. A spot named by its id is offered wherever the Soul stands, past the listing's
  *  reach and its nearest-few cap: the catalog publishes every spot, and an act on one walks there. Still refused when it is
@@ -178,6 +194,9 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
         const f = s.faceTo ?? s.at, L = Math.hypot(s.at[0] - f[0], s.at[1] - f[1]), back: V2 = L > 1e-6 ? [(s.at[0] - f[0]) / L, (s.at[1] - f[1]) / L] : [0, 0];
         at = null; let seen = here > 0 || w.clearance(w.me[0], w.me[1]) > 0;
         for (let t = 0.1; t <= 0.9 + 1e-9 && L > 1e-6; t += 0.1) {const p: V2 = [Math.round((s.at[0] + back[0] * t) * 100) / 100, Math.round((s.at[1] + back[1] * t) * 100) / 100], c = w.clearance(p[0], p[1]); if (c > 0) seen = true; if (c >= STAND_CLEAR) {at = p; break;}}
+        // #628: a standing spot whose line back is blocked too (a kitchen counter's own chair stands where its user would): the nearest
+        // clear point beside it, within SIDE_STEP of the spot's own distance from the thing, so the Soul still works at it
+        if (!at && s.base === 'idle' && L > 1e-6) at = besideAt(s.at, f, L, w);
         if (!at && (here >= 0.05 || !seen)) at = s.at;   // nothing clearer behind it: as before (ground with room enough, or no ground data)
       }
       standAt.set(s.id, at);
@@ -197,7 +216,12 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
     if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
     else if (w.taken(s.at, s.id)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
-    else if (!ok(s)) why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}, so nothing was done.`});
+    else if (!ok(s)) {
+      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead
+      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.taken(o.at, o.id))
+        .sort((x, y) => d2(x.at, s.at) - d2(y.at, s.at) || x.id.localeCompare(y.id)).find(ok);
+      why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}: something stands everywhere a step around it, and waiting will not change that, so nothing was done.${alt ? ` The nearest other one is ${alt.label ?? 'another spot'} (${s.activity}:${alt.id}).` : ''}`});
+    }
   }
   const spotSteps = (s: Spot, seconds?: number, activity = s.activity, fromLevel = w.level): Program['steps'] => {
     const def = SPOT_ACTIVITIES[activity], body = (activity === s.activity && s.pose) || def.pose || activity, lying = s.base === 'lie', act = lying && !LYING_SPOT.has(body) ? 'lie' : body, prop = s.prop ?? def.prop;
