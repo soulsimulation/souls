@@ -25,7 +25,7 @@ export function indexCatalog(cat) {
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
   /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a known thing.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
-  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && things.has(rest)); };
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && things.has(rest)); };
   return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows };
 }
 
@@ -33,6 +33,10 @@ const WORDS = new WeakMap();
 const wordsOf = (row, make) => { let w = WORDS.get(row); if (!w) WORDS.set(row, (w = make(row))); return w; };
 const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: (p.aliases ?? []).flatMap(tokensOf), kind: tokensOf(p.kind), what: tokensOf(p.what) }));
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
+/** Kinds a body sits on: a thing of one of these names its own seat (`sit:<thing id>`). */
+const SEAT_KIND = /bench|chair|stool|sofa|couch|armchair|seat|log\b/;
+/** Where a row is, as a person would say it: the room and what it is in. */
+const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
 const thingWords = (t) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind) }));
 const RELATION = /^(.*?)\s+(near|by|beside|next to|close to|around|in|inside|at)\s+(?:the\s+)?(.+)$/i;
 /** How far "near <somewhere>" reaches, in metres. */
@@ -71,21 +75,32 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8 } = {
     const here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
     out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
+  const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
     if (!inScope(a.place, a.at)) continue;
     let s = 0;
     if (verbs.size) { const v = verbs.get(a.verb); if (v && rest.every((w) => hit(w, [...actWords(a).name, ...tokensOf(ix.pathOf(a.place).join(" "))]))) s = v; }
     else s = score(q, actWords(a));
     if (!s) continue;
-    out.push({ s, d: dist(ref, a.at), row: { type: "act", id: a.id, verb: a.verb, label: a.label, place: a.place, ...metres(a.at), ...(a.with ? { needsOthers: a.with } : {}), ...(a.needs ? { needs: a.needs } : {}) } });
+    // one row per thing: a table's four seats are one way to eat there, the nearest seat's id standing for it
+    const key = `${a.verb}|${a.thing ?? a.id}`, d = dist(ref, a.at), seen = grouped.get(key);
+    if (seen) { seen.n++; if ((d ?? 0) < (seen.d ?? 0)) Object.assign(seen, { d, a }); continue; }
+    grouped.set(key, { s, d, a, n: 1 });
+  }
+  for (const g of grouped.values()) out.push({ s: g.s, d: g.d, row: { type: "act", act: g.a.id, verb: g.a.verb, label: g.a.label, in: whereOf(ix, g.a.place), place: g.a.place, ...metres(g.a.at), ...(g.n > 1 ? { places: g.n } : {}), ...(g.a.with ? { needsOthers: g.a.with } : {}), ...(g.a.needs ? { needs: g.a.needs } : {}) } });
+  // what a body does right where it stands: found by its words like anything else, and nearest of all
+  if (!kind && !inPlace && !around) for (const a of ix.cat.anywhere ?? []) {
+    const w = wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
+    const s = verbs.size ? (verbs.get(a.verb) && !rest.length ? verbs.get(a.verb) : 0) : score(q, w);
+    if (s) out.push({ s, d: 0, row: { type: "act", act: a.id, verb: a.verb, label: a.label, in: "right here" } });
   }
   if (!verbs.size) for (const t of ix.cat.things) {
     if (!inScope(t.place, t.at)) continue;
     if (kind && !hit(stem(kind.toLowerCase()), thingWords(t).kind)) continue;
     const s = q.length ? score(q, thingWords(t)) : kind ? 1 : 0; if (!s) continue;
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, place: t.place, ...metres(t.at) } });
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...(SEAT_KIND.test(t.kind) ? { act: `sit:${t.id}` } : {}) } });
   }
-  out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || (a.row.id < b.row.id ? -1 : 1));
+  out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
   return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 

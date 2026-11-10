@@ -4,6 +4,7 @@ import { indexCatalog, find, query, placeView, bestPlace } from "./catalog.mjs";
 
 const cat = {
   contract: "soul-catalog/1", worldId: "w-1", scope: "public", placeVerbs: ["walk", "hang-out"],
+  anywhere: [{ id: "sit-ground:here", verb: "sit-ground", label: "Sit down on the ground or floor, right here" }, { id: "wave:here", verb: "wave", label: "Wave" }, { id: "nap:here", verb: "nap", label: "Take a nap right here" }],
   places: [
     { id: "world", name: "World", kind: "region", parent: null, at: [0, 0] },
     { id: "g-village", name: "Eden Village", kind: "district", parent: "world", at: [50, 0] },
@@ -23,7 +24,9 @@ const cat = {
   acts: [
     { id: "read:read.e_t1", verb: "read", place: "g-library.reading", thing: "e_t1", at: [71, 1], label: "read (reading table west in Reading Room)" },
     { id: "book-club:book-club.e_t1", verb: "book-club", place: "g-library.reading", thing: "e_t1", at: [71, 1], label: "book club (reading table west in Reading Room)", with: 1 },
-    { id: "eat:eat.e_d1", verb: "eat", place: "g-village", at: [52, 2], label: "eat (dining table in Eden Village)" },
+    { id: "eat:eat.e_d1", verb: "eat", place: "g-village", thing: "e_d1", at: [52, 2], label: "eat (dining table in Eden Village)" },
+    { id: "eat:eat.e_d1.2", verb: "eat", place: "g-village", thing: "e_d1", at: [53, 2], label: "eat (dining table in Eden Village)" },
+    { id: "eat:eat.e_d1.3", verb: "eat", place: "g-village", thing: "e_d1", at: [54, 2], label: "eat (dining table in Eden Village)" },
     { id: "eat:eat.e_d2", verb: "eat", place: "g-annex", at: [300, 2], label: "eat (cafe table in Campus Library Annex)" },
     { id: "cook:cook.e_k1", verb: "cook", place: "g-village", at: [51, 1], label: "cook (the cooking pot in Eden Village)" },
   ],
@@ -47,20 +50,32 @@ test("two places of one name are both listed, nearest first: the agent chooses",
 
 test("a verb, or words that mean one, find where it can be done, the asked verb before its neighbours", () => {
   for (const r of [find(ix, "", { verb: "eat", at }), find(ix, "somewhere to eat", { at })]) {
-    assert.deepEqual(r.found.map((x) => x.id), ["eat:eat.e_d1", "eat:eat.e_d2", "cook:cook.e_k1"]);
+    assert.deepEqual(r.found.map((x) => x.act), ["eat:eat.e_d1", "eat:eat.e_d2", "cook:cook.e_k1"]);
     assert.equal(r.found[0].metres, 3);
+    assert.equal(r.found[0].places, 3, "a table's three seats are one row, its nearest seat standing for it");
+    assert.equal(r.found[0].in, "Eden Village, World");
+    assert.equal(r.found[1].places, undefined);
   }
 });
 
 test('"near" and "in" read the thing and its anchor', () => {
   const near = find(ix, "bench near the pond", { at });
   assert.deepEqual(near.found.map((x) => x.id), ["e_b1"]);
+  assert.equal(near.found[0].act, "sit:e_b1", "a seat names its own sit");
+  assert.equal(near.found[0].in, "Commons Pond, World");
   assert.equal(near.near.id, "g-pond");
   const inside = find(ix, "chair in the library", { at, limit: 3 });
   assert.equal(inside.found.length, 3);
   assert.equal(inside.more, 9);
   assert.ok(inside.found.every((x) => x.place === "g-library.reading"));
   assert.equal(find(ix, "bench", { inPlace: "nowhere-at-all", at }).note, 'No place called "nowhere-at-all" in the catalog.');
+});
+
+test("what a body does on the spot is found by its words, and comes before anything a walk away", () => {
+  for (const words of ["sit floor", "sit down on the floor", "sit on the ground"]) assert.equal(find(ix, words, { at }).found[0].act, "sit-ground:here", words);
+  assert.equal(find(ix, "wave", { at }).found[0].act, "wave:here");
+  assert.equal(find(ix, "", { verb: "sleep", at }).found[0].act, "nap:here", "a word that means a verb reaches its neighbours on the spot too");
+  assert.equal(find(ix, "wave", { inPlace: "eden-library", at }).found.length, 0, "the spot is not somewhere else");
 });
 
 test("a place a Soul cannot walk to names no walk", () => {
@@ -93,6 +108,6 @@ test("the anchor of a relation is the best-named place, nearest on a tie", () =>
 });
 
 test("the catalog vouches for the ids it publishes and says nothing about the rest", () => {
-  for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1"]) assert.equal(ix.knows(id), true, id);
-  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "wave:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
+  for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1", "sit-ground:here"]) assert.equal(ix.knows(id), true, id);
+  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
 });

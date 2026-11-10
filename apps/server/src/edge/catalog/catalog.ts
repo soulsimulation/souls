@@ -7,6 +7,16 @@ export const CATALOG_CONTRACT = 'soul-catalog/1';
 /** Verbs every walkable place takes by its id (`walk:<place>`). Offered on demand by id wherever the Soul stands. */
 export const PLACE_VERBS = ['walk', 'jog', 'run', 'hang-out', 'stroll', 'gather'] as const;
 
+/** What a body can do right where it stands, sent as `<verb>:here`. These need no place or thing, so no search by
+ *  place finds them; the catalog names them so that "sit down on the floor" is found like anything else. Whether one is
+ *  open to a Soul this minute (a ride's rider, a body that cannot dance) is the world's to say when it is sent. */
+export const ANYWHERE: readonly (readonly [string, string])[] = [
+  ['sit-ground', 'Sit down on the ground or floor, right here'], ['lie', 'Lie down right here'], ['nap', 'Take a nap right here'],
+  ['rest', 'Rest here'], ['stand', 'Stand up and stop what you are doing'], ['wander', 'Stroll around nearby'], ['wave', 'Wave'],
+  ['dance', 'Dance here'], ['jump', 'Jump on the spot'], ['stretch', 'Stretch'], ['jumping-jacks', 'Do jumping jacks'], ['yoga', 'Do yoga'],
+  ['pushups', 'Do push-ups'], ['situps', 'Do sit-ups'], ['bow', 'Bow'], ['clap', 'Clap or applaud'], ['nod', 'Nod'],
+  ['shake-head', 'Shake your head'], ['cheer', 'Cheer'], ['point', 'Point at someone or something']];
+
 type V2 = readonly [number, number];
 export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: string | null; level: number; polygon: readonly V2[]; aliases?: readonly string[]; description?: string; ref?: string; secret?: boolean; carrier?: unknown};
 export type CatalogSpotIn = {id: string; place?: string; activity: string; also?: readonly string[]; at: V2; label?: string; title?: string; together?: {need: number}; requires?: string};
@@ -16,7 +26,7 @@ export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; 
 export type CatalogPlace = {id: string; ref?: string; name: string; kind: string; parent: string | null; at: [number, number]; level?: number; aliases?: string[]; what?: string; fixed?: true};
 export type CatalogThing = {id: string; name: string; kind: string; place: string | null; at: [number, number]};
 export type CatalogAct = {id: string; verb: string; place: string | null; thing?: string; at: [number, number]; label: string; with?: number; needs?: string};
-export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope: 'public'; placeVerbs: readonly string[];
+export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope: 'public'; placeVerbs: readonly string[]; anywhere: {id: string; verb: string; label: string}[];
   places: CatalogPlace[]; things: CatalogThing[]; acts: CatalogAct[]; counts: {places: number; things: number; acts: number; kinds: number}};
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -44,7 +54,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
       label: verb === s.activity && s.title ? `${s.title} (${where})` : `${verb.replace(/-/g, ' ')} (${where})`, ...(s.together ? {with: s.together.need} : {}), ...(s.requires ? {needs: s.requires} : {})});
   }
   acts.sort(byId);
-  const payload: Catalog = {contract: CATALOG_CONTRACT, worldId: input.worldId, scope: 'public', placeVerbs: PLACE_VERBS, places, things, acts,
+  const payload: Catalog = {contract: CATALOG_CONTRACT, worldId: input.worldId, scope: 'public', placeVerbs: PLACE_VERBS, anywhere: ANYWHERE.map(([verb, label]) => ({id: `${verb}:here`, verb, label})), places, things, acts,
     counts: {places: places.length, things: things.length, acts: acts.length, kinds: new Set(things.map(t => t.kind)).size}};
   const serialized = stableStringify(payload), version = hashOf(payload);
   return {payload, serialized, etag: `"${version}"`, version};

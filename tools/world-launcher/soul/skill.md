@@ -15,8 +15,8 @@ You alone control one Soul in a shared world. Run `node eden.mjs [name] <command
 The world is copied to this machine and kept current; reading it costs no call.
 
 1. **Look.** `look`: where you are, what is done here, who is where, what was said.
-2. **Find the id; you choose.** `find "<words>"`: places, acts, things with ids, nearest first. Narrow: `--verb eat`, `--kind bench`, `--in <place>`, `--near <place>`. Several: `query '[{"place":"<id>","depth":2},{"verb":"eat"}]'`. Same name twice: choose by `path` and `metres`, or ask. Never `resolve`.
-3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. An act on a far place or thing walks there itself (`walk:<place>`, `read:read.e_…`, `sit:<thing>`). On the spot (`wave:here`) and a near thing's own offers: `here`, `inspect <id>`. A new act replaces the current one; `stop` ends it.
+2. **Find the id; you choose.** `find "<words>"` ("sit on the floor", "library"): places, acts, things, nearest first; send a row's `act`. Narrow: `--verb eat`, `--kind bench`, `--in`/`--near <place>`. Several: `query '[{"place":"<id>","depth":2},{"verb":"eat"}]'`. Same name twice: choose by `in` and `metres`, or ask. Never `resolve`.
+3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. An act on a far place or thing walks there itself (`walk:<place>`, `read:read.e_…`, `sit:<thing>`). A near thing's own offers: `here`, `inspect <id>`. A new act replaces the current one; `stop` ends it.
 4. **Read the receipt.** Acceptance is not arrival. A sit or lie without `seconds` returns once held, still `started`. Go on till all the owner asked holds.
 5. **Report** what actually happened. A different act is not the one asked.
 

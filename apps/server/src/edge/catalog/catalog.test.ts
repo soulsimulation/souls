@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {buildCatalog, kindOf, type CatalogInput} from './catalog.ts';
+import {ANYWHERE, buildCatalog, kindOf, type CatalogInput} from './catalog.ts';
+import {EDGE_ACT_VERBS} from '../events/schema.ts';
 
 const square = (x: number, z: number): [number, number][] => [[x, z], [x + 10, z], [x + 10, z + 10], [x, z + 10]];
 const input = (): CatalogInput => ({worldId: 'w-1',
@@ -64,4 +65,11 @@ test('everything published is public, and the counts match', () => {
   const {payload} = buildCatalog(input());
   assert.equal(payload.scope, 'public');
   assert.deepEqual(payload.counts, {places: 3, things: 1, acts: 3, kinds: 1});
+});
+
+test('what can be done on the spot is published as <verb>:here, and every such verb is one the world acts on', () => {
+  const {payload} = buildCatalog(input());
+  assert.ok(payload.anywhere.some(a => a.id === 'sit-ground:here' && /floor/.test(a.label)));
+  assert.equal(payload.anywhere.length, ANYWHERE.length);
+  for (const [verb] of ANYWHERE) assert.ok((EDGE_ACT_VERBS as readonly string[]).includes(verb), verb);
 });
