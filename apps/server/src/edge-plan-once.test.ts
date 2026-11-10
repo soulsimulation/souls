@@ -33,5 +33,14 @@ test('one bind per strict act: the gate\'s offer is the act\'s, in the same turn
   const turn1 = menuStats.one.turn, r2 = await accept(w.host, Promise.resolve(L.act(soul, {capability: offered[1]}))) as any;
   assert.equal(r2.accepted, true, JSON.stringify(r2));
   assert.equal(menuStats.one.turn, turn1, 'no reuse across an await');
+  await w.settle(10);
+  // a change the menu signature sees between the gate and the act (bodies moved) also ends the reuse, in the same turn
+  L.invalidateBodies();
+  assert.equal(L.offerGate(soul, {capability: offered[0]}), null);
+  L.invalidateBodies();
+  const turn2 = menuStats.one.turn, built2 = menuStats.one.n, r3 = await accept(w.host, Promise.resolve(L.act(soul, {capability: offered[0]}))) as any;
+  assert.equal(r3.accepted, true, JSON.stringify(r3));
+  assert.equal(menuStats.one.turn, turn2, 'no reuse once the signature changed');
+  assert.ok(menuStats.one.n > built2, 'the act bound afresh');
   assert.equal(menuStats.one.oracleMiss, missesBefore, 'no reuse differed from a fresh bind');
 });
