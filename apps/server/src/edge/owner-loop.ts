@@ -34,6 +34,8 @@ export type OwnerLoopInbox = {
   serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed', open?: boolean): boolean;
   messageText?(s: {scope: string; owner: string}, id: string): string | null;
   serverProgress?(s: {scope: string; owner: string}, id: string, text: string): boolean;
+  /** #1753: an act linked to a message acknowledges it (no separate `ack`); false when it was already. */
+  serverAck?(s: {scope: string; owner: string}, id: string): boolean;
   /** #1295: set by the loop; the inbox refuses a close while it answers a receipt. */
   closeHold?: ((s: {scope: string; owner: string}, id: string) => {receipt: string; capability: string} | null) | null;
 };
@@ -149,6 +151,7 @@ export class OwnerLoop {
    *  `seconds`: the duration the act asked for (#1295: a held pose still runs until it ends, and the hold limit allows it). */
   link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, seconds?: number): {open: boolean} {
     const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
+    this.inbox.serverAck?.(scope, message);   // #1753: the act is the acknowledgement; the owner's card reads "Acknowledged"
     const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
     const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
     const rideId = RIDE_JOIN.exec(receipt.capability)?.[1], rideName = rideId && world?.aboard ? world.rideName?.(rideId) ?? null : null;
