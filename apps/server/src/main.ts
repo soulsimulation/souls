@@ -253,9 +253,16 @@ const listener = getRequestListener(app.fetch);
 // opens the database only after this one has exited.
 const writesInFlight = new Set<Promise<void>>();
 const WRITE_DRAIN_MS = Number(process.env.WRITE_DRAIN_MS ?? 2000);
+// Tests only (write-drain.test.ts): one stdout line as each write is counted in flight and as it closes, so a test can stop
+// the world exactly while one is in flight (#1778: a client-side signal such as 100 Continue did not prove the count).
+const WRITE_DRAIN_TRACE = process.env.WRITE_DRAIN_TRACE === '1';
 server.on('request', (req, res) => {
   if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') { const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done); void done.then(() => writesInFlight.delete(done)); }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+    const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
+    if (WRITE_DRAIN_TRACE) console.log(`[world] write in flight: ${writesInFlight.size}`);
+    void done.then(() => { writesInFlight.delete(done); if (WRITE_DRAIN_TRACE) console.log(`[world] write closed: ${writesInFlight.size} in flight`); });
+  }
   req.url = stripWorldPath(req.url);
   if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
   void listener(req, res);
