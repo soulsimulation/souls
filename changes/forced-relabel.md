@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-A Soul walled in by a god's edit where the world keeps changing (a god's running edits, a ride) is no longer left stuck: at worst about 12 seconds after its walk ends, it is stepped out to open ground.
+A Soul walled in while a ride or another engine-side change keeps changing the world is no longer left stuck: when the relabel fits the forced call, it is stepped out to open ground about 10-13 seconds after its walk ends.

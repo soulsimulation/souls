@@ -1112,7 +1112,7 @@ export class EngineBridge {
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
     if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
-    else if (this.navHeld && tick % 10 === 3) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }   // #1548: held, the rescue still reads, so a forced relabel can fire
+    else if (this.navHeld && tick % 10 === 3) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }   // held, the rescue still reads: a Soul that left lets the hold go, and #1548's forced relabel can fire
     else if ((this.navCold && (this.navColdSlices < NAV_REWARM_BURST || this.navHeld)) || tick % NAV_REWARM_POLL_TICKS === NAV_REWARM_POLL_AT) { this.navRewarmStep(startedAtMs); if (S) t = S.add('navRewarm', t); }
     else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
