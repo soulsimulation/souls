@@ -3005,6 +3005,8 @@ const writeJsonFile = (f, v) => { const tmp = `${f}.${process.pid}.tmp`; writeFi
 /** Is this copy of the catalog not the one the world has now? Without a tag to compare, a copy is trusted for ten minutes. */
 const catalogOld = (have, world, live) => !have || have.world !== world || (live?.live?.catalog ? (have.etag ? have.etag !== `"${live.live.catalog}"` : Date.now() - Date.parse(have.fetchedAt) > 600_000) : false);
 let CATALOG_IX = null;
+/** The two public reads go in the request record too (route, status, the world's own time), as every Soul API call does. */
+const publicReadReported = (url, t0, r) => reportRequest(url, "GET", t0, { status: r.status, server: serverTiming(r.headers.get("server-timing")), load: r.headers.get("x-sim-load") });
 /** Fetch the world's catalog if this copy is missing or old. The world answers 304 when the copy is current. */
 async function syncCatalog({ force = false } = {}) {
   const world = need(load(), "world", `Register this folder first: ${CLI} register <world url>`);
@@ -3012,7 +3014,9 @@ async function syncCatalog({ force = false } = {}) {
   // a world that has just started answers world.starting with a short Retry-After until its places and acts are laid out
   let r = null;
   for (let tries = 0; tries < 6; tries++) {
+    const t0 = performance.now();
     try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; break; /* no answer: use the copy */ }
+    publicReadReported(world + "/v1/edge/catalog", t0, r);
     const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
     if (wait == null || wait > 10_000) break;
     await new Promise((ok) => setTimeout(ok, statedJitter(wait)));
@@ -3033,7 +3037,7 @@ async function syncLive({ force = false } = {}) {
   const have = readJsonFile(LIVE_FILE), mine = have?.world === world ? have : null;
   if (mine && !force && Date.now() - mine.receivedAt < LIVE_FRESH_MS) return mine;
   try {
-    const r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const t0 = performance.now(), r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); publicReadReported(world + "/v1/edge/live", t0, r); if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const live = await r.json(), seen = new Map((mine?.speech ?? []).map((x) => [x.id, x]));
     for (const line of live.speech ?? []) seen.set(line.id, line);
     const next = { world, receivedAt: Date.now(), live: { ...live, speech: undefined }, speech: [...seen.values()].sort((a, b) => a.at - b.at).slice(-200) };
