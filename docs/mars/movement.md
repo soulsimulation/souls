@@ -114,8 +114,13 @@ climber). Without it the two wait for each other until the blocked-walk bound en
 a supported spot that is clear of the climber's flight and of the climber's next flight, then enters after the climber
 has stepped off. Because that walker already stands inside the arriving climber's disc, its short route there is planned
 around the other people only. The first step is checked to move it apart, and every actual step keeps its static and
-body checks. When the landing has no such spot (a landing barely wider than the two flight ends), the walkers still wait
-for the blocked-walk bound. Two climbers meeting head-on from adjacent flights are not covered yet (#1722 A1).
+body checks. Two cases have no room on the landing to pass. In the first, two climbers on adjacent flights each wait for the
+other at the landing between them (published waits naming each other). In the second, the waiter at the flight end has
+no spot clear of both flights. In both, one climber backs down its own flight to its entry at climbing speed (`passBack`).
+It never passes anyone behind it; it waits for them. At the entry it stands on that floor and gives the flight back. It
+then holds in `align`, waiting `traffic.yield` for the other, while the other is still on its flight or on this one (at
+most 1200 ticks), and climbs again after. The climber whose way back is clear yields; when both are clear, the one nearer
+its own entry yields, and on a tie the later id. The landing courtesy the other way then usually has room.
 
 ## Approximations
 
