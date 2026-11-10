@@ -9,7 +9,7 @@ import {createRequire} from 'node:module';
 import {build} from 'esbuild';
 const here=new URL('.',import.meta.url).pathname,outfile=join(await mkdtemp(join(tmpdir(),'souls-world-labels-')),'labels.cjs');
 await build({entryPoints:[join(here,'WorldLabels.ts')],outfile,bundle:true,format:'cjs',platform:'node',logLevel:'silent'});
-const {placeWorldLabels,plateAnchor,nameTag}=createRequire(import.meta.url)(outfile);
+const {placeWorldLabels,plateAnchor,nameTag,DOING_DISPLAY,DOING_LINES}=createRequire(import.meta.url)(outfile);
 const area={left:0,top:0,width:390,height:700,aspect:390/700};
 const box=(id,x,y,o={})=>({id,x,y,width:80,height:18,selected:false,...o});
 const overlap=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
@@ -68,4 +68,19 @@ test('LiveWorld hangs the plate below its anchor and reads the radius from the d
  const src=await readFile(join(here,'LiveWorld.tsx'),'utf8');
  assert.match(src,/obj\.center\.set\(0\.5, 0\)/);assert.match(src,/ring\.geometry\.parameters\.outerRadius/);
  assert.doesNotMatch(src,/leader/);assert.match(src,/plateAnchor\(pos, eye, down, ringR\)/);
+});
+test('#1645: the doing line wraps within a max width and stops at two lines with an ellipsis',()=>{
+ const make=tag=>({tagName:tag.toUpperCase(),style:{},dataset:{},className:'',children:[],append(...c){this.children.push(...c);}});
+ const {line}=nameTag({createElement:make}),css=line.style.cssText;
+ assert.equal(DOING_LINES,2);assert.equal(DOING_DISPLAY,'-webkit-box');
+ assert.match(css,/-webkit-line-clamp:2/);assert.match(css,/-webkit-box-orient:vertical/);assert.match(css,/overflow:hidden/);
+ assert.match(css,/white-space:normal/);assert.match(css,/max-width:\d+px/);assert.match(css,/display:none/,'hidden until LiveWorld shows it');
+});
+test('#1645: a hovered Soul shows its doing on its tag, and the hover bubble never repeats it',async()=>{
+ const live=await readFile(join(here,'LiveWorld.tsx'),'utf8'),hover=await readFile(join(here,'WorldHover.ts'),'utf8');
+ assert.match(live,/const hovered = hover\.hoveredSoul === soul\.id/);
+ assert.match(live,/\|\|hovered\) \? DOING_DISPLAY : 'none'/,'the line is shown with the clamp display, never an empty display');
+ assert.doesNotMatch(live,/l\.line\.style\.display = [^;]*\? '' :/);
+ assert.match(hover,/if\(t\.kind==='soul'\)\{this\.tooltip\.hidden=true;return;\}/,'a Soul gets the ring, not a tooltip');
+ assert.match(hover,/get hoveredSoul\(\)/);
 });

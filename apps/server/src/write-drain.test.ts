@@ -1,6 +1,9 @@
 // G9 (lane Z1): a write in flight when the world is told to stop (a release handover) is answered before the process
 // exits. The real main.ts on the Toy engine: a POST whose body is still arriving when SIGTERM lands gets its answer once
 // the body is complete; with WRITE_DRAIN_MS=0 (no drain, as before) its connection simply closes with no answer.
+// The POST asks `Expect: 100-continue`: Node answers 100 Continue as it hands the request to the server, so SIGTERM lands
+// only once the write is in flight. A fixed 200 ms was not enough on a busy runner (the watchdog's debugger start held the
+// main thread): the request was not yet received and nothing was in flight to drain (CI server-3, 2026-11-10).
 import test from 'node:test';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {connect} from 'node:net';
 import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -17,13 +20,14 @@ async function stopWithWriteInFlight(t:import('node:test').TestContext,port:numb
  const sock=connect(port,'127.0.0.1');let answer='';sock.on('data',d=>{answer+=d;});sock.on('error',()=>{});
  const closed=new Promise<void>(r=>sock.once('close',()=>r()));
  await new Promise<void>(r=>sock.once('connect',()=>r()));
- sock.write(`POST /v1/feedback HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body.slice(0,half)}`);
- await delay(200);                       // the request is in flight: headers and half the body received
+ sock.write(`POST /v1/feedback HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nExpect: 100-continue\r\n\r\n${body.slice(0,half)}`);
+ for(let i=0;i<500&&!/^HTTP\/1\.1 100 /.test(answer);i++)await delay(20);   // the server has the request: it is in flight
+ assert.match(answer,/^HTTP\/1\.1 100 /,`the world took the request before SIGTERM: ${logs.join('')}`);
  child.kill('SIGTERM');
  await delay(300);                       // the world is stopping; the rest of the body arrives late
  sock.write(body.slice(half));
  await Promise.race([closed,delay(5000)]);sock.destroy();
- return {answer,code:await exited,logs:logs.join('')};
+ return {answer:answer.replace(/^HTTP\/1\.1 100 [^\r]*\r\n\r\n/,''),code:await exited,logs:logs.join('')};
 }
 
 test('a write in flight at SIGTERM is answered before the world exits',async t=>{

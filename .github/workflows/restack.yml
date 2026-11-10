@@ -4,15 +4,17 @@
 # merge here is 3-way against the child's fork point from the old base. Pushes are fast-forwards, never forced.
 # A real conflict pushes nothing: the child gets needs:rebase and a comment naming the files.
 #
-# Triggers: a merged PR (pull_request_target closed; the merge train and people merge with tokens that start
-# workflows), or workflow_dispatch with the merged PR's number to redo one by hand. Like the merge train, this always
-# runs the default branch's copy and never executes PR code: it only fetches, merges and pushes git objects.
+# Triggers: a merged PR (pull_request closed; the merge train and people merge with tokens that start workflows), whose
+# relay job only dispatches the default branch's copy with the PR's number (#1597: pull_request_target is blocked by
+# GitHub's default policy from 2026-12-02), or workflow_dispatch with the merged PR's number to redo one by hand. The
+# work always runs the default branch's copy and never executes PR code: it only fetches, merges and pushes git
+# objects. A fork PR's token can't dispatch, so its children are restacked by hand (gh workflow run restack.yml -f pr=<n>).
 #
 # Secrets
 #   MERGE_TRAIN_TOKEN  pushes made with it start CI on the child; with the default token they would not
 name: restack
 on:
-  pull_request_target:
+  pull_request:
     types: [closed]
   workflow_dispatch:
     inputs:
@@ -22,8 +24,22 @@ on:
 permissions:
   contents: read
 jobs:
+  relay:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh workflow run restack.yml --repo "$REPO" --ref "$DEFAULT_BRANCH" -f pr="$PR"
+
   restack:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -36,7 +52,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
       REPO: ${{ github.repository }}
-      PR: ${{ inputs.pr || github.event.pull_request.number }}
+      PR: ${{ inputs.pr }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
