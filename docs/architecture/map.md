@@ -138,7 +138,8 @@ A listener's `enqueue` during `afterTick` lands in the next tick, except under `
 `drainInputs()` runs a second time before the frontier is persisted (`world.ts:497`).
 
 **Replay.** `fold.ts` is the single fold used live, at restart and in tests: `boot()` loads the latest row of `snapshots`
-(engine runtime + minds + kernel + `extra`, `SnapshotBody`) and re-applies later `events` rows. `replayKernel` rebuilds
+(engine runtime + minds + kernel + `extra`, `SnapshotBody`) and re-applies later `events` rows. A snapshot that won't
+restore is skipped for the next older one, then genesis, each as a `recovery` glitch `boot.snapshot-unrestorable` (#1379). `replayKernel` rebuilds
 `KState` from the log alone with the world's *pinned* vocabulary (the first `rules` event carrying `vocabulary`), never
 the code's current one (`fold.ts:20-33`). The engine replays because every body movement started from a logged
 `decision` and continues deterministically inside `Engine.step()`.
@@ -303,7 +304,7 @@ the ≤ 140-character `now` line (`soul_now_v1`, outside the log) and receipts. 
 feed only the *central* `Brain`. A continuity runtime would plug in at the CLI (`client-memory.mjs`, `client-living.mjs`)
 and read `boot` + `here`, not into the world process.
 
-**CLI.** `eden-agent.mjs` (v1.9.19) maps about forty commands (now, look, listen, here, observe, capabilities, act,
+**CLI.** `eden-agent.mjs` (v1.9.21) maps about forty commands (now, look, listen, here, observe, capabilities, act,
 resolve, say, converse, object, wait, receipt, plan, events, view, travel, live, register, approval, pair-soul, …) onto
 the `EDGE` route table (`eden-agent.mjs:45`); `live` spawns the `claude` CLI (codex or ollama as alternatives). It is
 dependency-free and does not import `@souls/protocol`.
@@ -453,7 +454,7 @@ synchronous handler that delays the next frame.
 | H3 | `hereFrame` / `Perception` | request | rebuilt per `here`, `around`, `boot`; `things()` scans all `w.entities`, `solids()` maps all `navV1.solids` | `edge/perception/here.ts:27,211` |
 | H4 | `buildLedgerBoot` | request | static boot pack rebuilt per request (ETag, no stored cache) | `edge/boot/routes.ts`, `boot-pack.ts` |
 | H5 | `EdgeLedger.afterTick` | tick, every 20 | `ambientLife` (a `db.soul()` read per mind + all open conversations), `BodyRule.sweep`, `together.sweep`; `unstick` every 100 | `ledger.ts:501-520` |
-| H6 | `EngineBridge.afterTick` | tick | `flush`, `writeBack` slices every 10 ticks, `perceiveStep`, `spotsStep`, `layersStep`, `navStep` while nav is cold | `god/engine-bridge.ts:217` |
+| H6 | `EngineBridge.afterTick` | tick | `flush`, `writeBack` slices every 10 ticks, `perceiveStep`, `spotsStep`, `layersStep`, `navStep` until the first nav build is done, then `navRewarmStep` (a poll every 10 ticks; 10 ms relabel slices while a ride or other static change left the labels cold, #901) | `god/engine-bridge.ts:217` |
 | H7 | `viewHash()` + `kernelView()` | tick, every 100 / 40 | hashes every human's pose; clones the whole kernel for broadcast | `world.ts:1594-1631` |
 | H8 | Hub join / resync | request | `snapshotView()` clones all entities + `JSON.stringify`; `holdClock` parks the frame while a join set goes out | `hub.ts:206-242`, `world.ts:429` |
 | H9 | Periodic snapshot | tick + slices | synchronous capture, then encode/serialize/write in 4 ms `setImmediate` slices; a failed checkpoint stops the clock | `world.ts:1700-1760` |

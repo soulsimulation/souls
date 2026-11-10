@@ -108,3 +108,16 @@ export function bodiesFromEvents(messages:readonly {kind?:string;[k:string]:unkn
  for(const m of messages){if(m.kind!=='body'||typeof m.soulId!=='string')continue;const b=readBody(m);if(b)out.set(m.soulId,b);}
  return out;
 }
+
+/** #456: the public Soul's `slowed` (present only while the world slows or refuses that Soul's own requests). */
+export type Slowed={reason:'soul.slow-down'|'world.busy'|'world.crowded';until:number};
+const SLOWED:readonly Slowed['reason'][]=['soul.slow-down','world.busy','world.crowded'];
+export function readSlowed(raw:unknown):Slowed|null{
+ const d=obj(raw);if(!d||!SLOWED.includes(d.reason as Slowed['reason']))return null;
+ const until=time(d.until);return until?{reason:d.reason as Slowed['reason'],until}:null;
+}
+/** The short line the chip and card show while it lasts, else null: it clears at `until` with no event. */
+export function slowedText(s:Slowed|null,now=Date.now()):string|null{
+ if(!s||s.until<=now)return null;
+ return s.reason==='soul.slow-down'?'waiting: asked a lot, the world slowed it down':s.reason==='world.crowded'?'waiting: the world is crowded':'waiting: the world is busy';
+}

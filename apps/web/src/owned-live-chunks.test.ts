@@ -28,7 +28,8 @@ test('decoded shared tables: owned entities are made once and reused; output is 
  assert.equal(owned[0].take.finalState.entities.e7,owned[1].take.finalState.entities.e7);
  assert.equal(owned[0].take.finalState.entities.e7,owned[2].take.finalState.entities.e7,'unchanged entity in a patched table is reused');
  assert.notEqual(owned[0].take.finalState.entities.e1,owned[2].take.finalState.entities.e1);
- assert.notEqual(owned[0].take.finalState.entities.e7,(out.chunks[0] as any).take.finalState.entities.e7,'the owned copy is not the wire object');
+ // P2 phones (arrival): a deeply frozen, checked wire entity cannot change, so it is its own owned copy (no second copy)
+ assert.equal(owned[0].take.finalState.entities.e7,(out.chunks[0] as any).take.finalState.entities.e7,'the frozen wire entity is reused, not copied');
  for(const o of owned){assert.ok(Object.isFrozen(o.take.finalState.entities));assert.ok(Object.isFrozen(o.take.finalState.entities.e2.state.inv[0]));}
 });
 
@@ -46,4 +47,25 @@ test('a 4,900-entity shared table costs far less on the second chunk',t=>{
  const cold=time(out.chunks[0]),warm=time(out.chunks[1]),patched=time(out.chunks[2]);
  t.diagnostic(`cold ${cold.toFixed(1)} ms, shared ${warm.toFixed(1)} ms, patched ${patched.toFixed(1)} ms`);
  assert.ok(warm<cold/3,`shared ${warm} vs cold ${cold}`);
+});
+
+test('P2 arrival: a frozen wire entity is checked like a copy would be; anything not wholly frozen and plain is still copied or refused',()=>{
+ const {out}=decoded(3),c:any=out.chunks[0];
+ const swap=(e:unknown)=>({...c,take:{...c.take,finalState:{...c.take.finalState,entities:Object.freeze({...c.take.finalState.entities,e0:e})}}});
+ // a frozen entity with an unfrozen part: copied (not the wire object), and that copy is frozen and detached
+ const inner={p:[1,2,3]},partly=Object.freeze({id:'e0',pose:inner}),a:any=ownLiveChunk(swap(partly));
+ assert.notEqual(a.take.finalState.entities.e0,partly);assert.ok(Object.isFrozen(a.take.finalState.entities.e0.pose.p));inner.p[0]=9;assert.equal(a.take.finalState.entities.e0.pose.p[0],1);
+ // frozen but not plain data: refused exactly as the copying path refuses it
+ assert.equal(ownLiveChunk(swap(Object.freeze({id:'e0',hp:Number.NaN}))),null,'non-finite');
+ assert.equal(ownLiveChunk(swap(Object.freeze(Object.defineProperty({id:'e0'},'hp',{get:()=>1,enumerable:true})))),null,'accessor');
+ assert.equal(ownLiveChunk(swap(Object.freeze(Object.assign(Object.create({inherited:1}),{id:'e0'})))),null,'non-plain prototype');
+ // the wire table itself is reused (no rebuilt 4,900-key object per chunk, no schema copy), and shared by chunks that share it
+ const {raw,out:o2}=decoded(30),w:any=o2.chunks,own0:any=ownLiveChunk(w[0]),own1:any=ownLiveChunk(w[1]);
+ assert.equal(own0.take.finalState.entities,w[0].take.finalState.entities);assert.equal(own1.take.finalState.entities,own0.take.finalState.entities);
+ assert.equal(JSON.stringify(own0),JSON.stringify(ownLiveChunk(JSON.parse(JSON.stringify(raw.chunks[0])))),'exactly what the copying path makes');
+ assert.ok(Object.isFrozen(own0)&&Object.isFrozen(own0.take.finalState));
+ // the node budget counts a reused entity exactly as a copied one
+ const frozenBudget={nodes:0},copiedBudget={nodes:0},e=c.take.finalState.entities;
+ detachedData(c,undefined,frozenBudget,0,e);detachedData(JSON.parse(JSON.stringify(c)),undefined,copiedBudget,0);
+ assert.equal(frozenBudget.nodes,copiedBudget.nodes);
 });

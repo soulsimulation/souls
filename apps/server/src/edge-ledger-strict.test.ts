@@ -47,7 +47,7 @@ test('strict: every terminal receipt carries endedAt (completed, replaced, faile
   const e = done.endedAt as any; assert.equal(e.place, 'shore-bank'); assert.ok(e.placePath.length >= 2 && e.placePath.includes('Eden'), JSON.stringify(e));
   assert.equal(e.posture, 'standing'); assert.ok(Number.isInteger(e.heading) && e.heading >= 0 && e.heading < 360); assert.ok(Math.hypot(e.pos[0] - w.pos(a)[0], e.pos[1] - w.pos(a)[1]) < 0.2);
   // replaced by the Soul's own newer act; then failed (interrupted by the world)
-  const r1: any = await w.act(b, 'rest:here', {seconds: 600}), r2: any = await w.act(b, 'rest:here', {seconds: 600});
+  const r1: any = await w.act(b, 'rest:here', {seconds: 600}), r2: any = await w.act(b, 'rest:here', {seconds: 300});   // other params: the same rest again would be a repeat (#1272)
   assert.equal(w.receipt(b, r1.receipt.id).phase, 'replaced'); assert.ok((w.receipt(b, r1.receipt.id).endedAt as any)?.posture, 'replaced has endedAt');
   await w.ticks(60);
   await accept(w.f.host, w.f.host.enqueue('edge-stop', 'test:interrupt', {soulId: b.soulId, entityId: b.entityId})); await w.ticks(60);

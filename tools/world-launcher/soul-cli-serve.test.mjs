@@ -6,8 +6,8 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { foldAddressed, foldEvents, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -64,6 +64,7 @@ async function world(t) {
       w.bodies.push(b);
       if (b.clientRef && w.byRef.has(b.clientRef)) return json(200, w.byRef.get(b.clientRef));   // a retry returns the first result
       if (w.refuse[cap]) return json(200, { accepted: false, code: w.refuse[cap], reason: `${cap} refused`, alternatives: [{ id: 'walk:pond', label: 'Walk to the pond' }] });
+      if (w.repeats === cap) return json(200, { accepted: true, repeat: true, receipt: { id: `r_${w.acts}`, capability: cap, phase: 'started' }, ...(b.for ? { for: b.for } : {}) });
       w.acts++; w.keys.push(req.headers['idempotency-key']);
       // As the real route answers (swept on hello-hamlet): a body act names no channel at all, a look says attention, and a prayer's receipt says none.
       const out = /^(look|turn):/.test(cap) ? { accepted: true, channel: 'attention', receipt: { id: `r_${w.acts}`, capability: cap, phase: 'completed', channel: 'attention' } }
@@ -83,6 +84,8 @@ async function world(t) {
       if (id.includes('taken')) return json(200, { resolve: { ok: false, code: 'seat.taken', reason: 'someone is there' } });
       return json(200, { resolve: { ok: true, would: { capability: id, available: true }, candidates: [{ id, params: w.offers[id] }] } });
     }
+    if (p === '/v1/edge/say') return json(200, { said: { id: 'sp_1', heardBy: 0 } });
+    if (/^\/v1\/edge\/inbox\/msg_[^/]+$/.test(p) && req.method === 'GET') return json(200, { message: { id: decodeURIComponent(p.split('/').at(-1)), ...(w.results.some((r) => r.id === decodeURIComponent(p.split('/').at(-1))) ? { result: 'x', outcome: 'done' } : {}) } });
     if (/\/result$/.test(p) && w.resultDown) return json(500, { error: { code: 'down', message: 'down' } });
     if (/\/result$/.test(p)) { const m = w.inbox.find((x) => x.id === decodeURIComponent(p.split('/').at(-2))); if (m) m.acked = true; w.results.push({ id: m?.id, ...JSON.parse(body) }); return json(200, { inbox: {} }); }
     if (/\/ack$|\/result$/.test(p)) { const m = w.inbox.find((x) => x.id === decodeURIComponent(p.split('/').at(-2))); if (m) m.acked = true; return json(200, { inbox: {} }); }
@@ -94,11 +97,12 @@ async function world(t) {
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({ world: `http://127.0.0.1:${server.address().port}/w/test`, soul: 's', token: 'synthetic-serve-token' }), { mode: 0o600 });
-  w.cli = (...args) => new Promise((done) => {
-    const child = spawn(process.execPath, [cli, ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  w.cliEnv = (env, ...args) => new Promise((done) => {
+    const child = spawn(process.execPath, [cli, ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], ...(env ? { env: { ...process.env, ...env } } : {}) });
     let out = '', err = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { err += c; });
     child.on('exit', (code) => { let json = null; try { json = JSON.parse(out); } catch { /* text */ } done({ code, out, err, json }); });
   });
+  w.cli = (...args) => w.cliEnv(null, ...args);
   t.after(async () => { await w.cli('serve', '--stop'); await sleep(50); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
   return w;
 }
@@ -127,6 +131,50 @@ test('A1: one serve per folder: a second start finds the first, and the listen t
   assert.equal(stopped.json.stopping, true);
   assert.ok(await until(() => !existsSync(join(w.dir, '.eden-serve.sock'))), 'the socket goes with it');
   assert.equal((await w.cli('here')).json.place, 'green', 'and commands go straight to the world again');
+});
+
+// #1244: the start waits on the child, not a fixed 5 s. The issue's preload, blocking only in the serve child (its
+// `--foreground` argument), so the command's own wait is what is measured.
+const preload = (w, body) => { const f = join(w.dir, 'slow.mjs'); writeFileSync(f, `if (process.argv.includes('--foreground')) { ${body} }\n`); return { NODE_OPTIONS: `--import ${pathToFileURL(f).href}` }; };
+const SLOW = 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);';
+
+test('#1244 A1: a child that is slow but alive is waited for: serve answers serving, not "did not start"', async (t) => {
+  const w = await world(t);
+  const t0 = Date.now(), r = await w.cliEnv(preload(w, SLOW), 'serve');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json.serving, true);
+  assert.ok(Date.now() - t0 >= 5_500, 'it really was slower than the old 5 s wait');
+  assert.equal((await w.cli('serve', '--status')).json.pid, r.json.pid);
+});
+
+test('#1244 A2: a child that exits fails at once and names the log', async (t) => {
+  const w = await world(t);
+  const t0 = Date.now(), r = await w.cliEnv(preload(w, 'process.exit(3);'), 'serve');
+  assert.equal(r.code, 1);
+  assert.match(r.err, /serve did not start: it exited \(code 3\); see .*\.eden-serve\.log/);
+  assert.ok(Date.now() - t0 < 4_500, `at once, not after main's 5 s or the limit (${Date.now() - t0} ms)`);
+  assert.equal((await w.cli('serve', '--status')).json.serving, false);
+});
+
+test('#1244 A3: two serves started at once in one folder both answer the one that came up, slow to listen or not', async (t) => {
+  const w = await world(t);
+  // The child that wins the lock is slow between taking it and answering; the one that loses exits at once.
+  const env = preload(w, "const net = await import('node:net'); const l = net.Server.prototype.listen; net.Server.prototype.listen = function (...a) { setTimeout(() => l.apply(this, a), 2000); return this; };");
+  const [a, b] = await Promise.all([w.cliEnv(env, 'serve'), w.cliEnv(env, 'serve')]);
+  assert.equal(a.code, 0, a.err); assert.equal(b.code, 0, b.err);
+  assert.equal(a.json.serving && b.json.serving, true);
+  assert.equal(a.json.pid, b.json.pid, 'one serve, named by both');
+});
+
+test('#1244 A3: at the limit the child it started is stopped, and the answer says nothing is serving', async (t) => {
+  const w = await world(t);
+  const r = await w.cliEnv({ ...preload(w, SLOW), EDEN_TIME_SCALE: '0.05' }, 'serve');   // the 60 s limit becomes 3 s
+  assert.equal(r.code, 1);
+  assert.match(r.err, /serve did not start within 3 s, so it was stopped and nothing is serving; see .*\.eden-serve\.log/);
+  await sleep(4_000);   // past the 6 s the child would have needed
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.serving, false, 'no serve came up after the command said it did not start');
+  assert.equal(existsSync(join(w.dir, '.eden-serve.sock')), false);
 });
 
 test('A2: batch returns several reads in one call, each standing on its own; a write is refused', async (t) => {
@@ -467,6 +515,62 @@ test('plan A1: serve runs the steps in order with no CLI call between them, link
   assert.equal((await w.cli('pending')).json.planEnded, undefined, 'reported once');
 });
 
+test('plan #1289: a repeat of the step under way leaves the plan running, and its message open', async (t) => {
+  for (const flags of [['--for', 'none'], ['--for', 'msg_1']]) {
+    const w = await world(t);
+    await w.cli('serve');
+    w.owner('msg_1', 'Mill, bench, pond');
+    await w.cli('plan', steps3, '--for', 'msg_1');
+    assert.ok(await until(() => w.acts === 1));
+    w.repeats = 'walk:mill';
+    assert.equal((await w.cli('act', 'walk:mill', ...flags)).json.repeat, true);
+    assert.equal((await w.cli('plan', '--status')).json.plan?.state, 'running', flags.join(' '));
+    w.repeats = null; ended(w, 'r_1');
+    assert.ok(await until(() => w.acts === 2), 'step 2 still runs');
+    ended(w, 'r_2'); assert.ok(await until(() => w.acts === 3)); ended(w, 'r_3');
+    assert.ok(await until(() => w.results.length === 1), 'the plan closes the message itself');
+  }
+});
+
+test('plan #1289: a repeat of the step under way for the plan\'s own message goes to the world without that message', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  w.repeats = 'walk:mill';
+  await w.cli('act', 'walk:mill', '--for', 'msg_1');
+  assert.equal(w.bodies.at(-1).capability, 'walk:mill'); assert.equal(w.bodies.at(-1).for, undefined, 'linked, the world would close it when the step ends');
+  assert.equal((await w.cli('plan', '--status')).json.plan?.state, 'running');
+});
+
+test('plan #1289: a plan on disk still guards its message when serve is gone', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  await w.cli('serve', '--stop');
+  assert.ok(await until(async () => !(await w.cli('serve', '--status')).json?.serving));
+  const said = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(said.json.closed, false, said.err); assert.match(said.json.why, /plan is still going/);
+  assert.deepEqual(w.results, []);
+});
+
+test('plan #1289: nothing closes a message while its plan runs', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Mill, bench, pond');
+  await w.cli('plan', steps3, '--for', 'msg_1');
+  assert.ok(await until(() => w.acts === 1));
+  const said = await w.cli('say', 'On my way', '--for', 'msg_1');
+  assert.equal(said.json.closed, false, said.err); assert.match(said.json.why, /plan is still going/);
+  assert.equal((await w.cli('ack', 'msg_1', 'Nearly', '--close', 'done')).json.closed, false);
+  assert.deepEqual(w.results, []);
+  const other = await w.cli('say', 'Hello', '--for', 'msg_2');
+  assert.equal(other.json.closed, true, 'another message is not the plan\'s');
+});
+
 test('plan: a held sit has done its work, and the next step goes on', async (t) => {
   const w = await world(t);
   await w.cli('serve');
@@ -805,7 +909,7 @@ test('#476 A1: speech said to the Soul ends a held wait within 2 s, the receipt 
   const r = await waiting, took = Date.now() - t0;
   assert.ok(took < 2000 + 300, `ended after ${took} ms: ${r.err}`);
   assert.deepEqual(r.json.addressed.map((a) => [a.from, a.text, a.untrusted]), [['Bo', 'Ada, can you hear me?', true]]);
-  assert.equal(w.acts, acts, 'A2: nothing acted again');
+  assert.equal(w.bodies.filter((b) => !String(b.capability).startsWith('face:')).length, acts, 'A2: nothing acted again (the reflex face is #1345\'s, an attention act)');
   const next = await w.cli('wait', '1');
   assert.equal(next.json.addressed, undefined, 'said once, heard once');
 });
@@ -901,4 +1005,99 @@ test('#476: an ordinary wait still returns the world\'s answer through serve', a
   const r = await w.cli('wait', '1');
   assert.ok(r.json.events.some((e) => e.text === 'hello'), r.out);
   assert.equal(r.json.addressed, undefined);
+});
+
+// #1345 (2.24.4): the reflex face.
+const faces = (w) => w.bodies.filter((b) => String(b.capability).startsWith('face:'));
+
+test('#1345 pure: whom the reflex turns to, and when not', () => {
+  const at = 1_000_000, env = { kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, at: new Date(at).toISOString() };
+  assert.deepEqual(reflexFor({}, env, { me: 's_ada', at }), { soulId: 's_bo', name: 'Bo' });
+  assert.equal(reflexFor({}, env, { me: 's_ada', at, off: true }).skip, 'off');
+  assert.equal(reflexFor({}, env, { me: 's_bo', at }).skip, 'not-a-soul', 'never its own speech');
+  assert.equal(reflexFor({}, { kind: 'speech.to-me', about: { name: 'a sign' } }, { me: 's_ada', at }).skip, 'not-a-soul');
+  assert.equal(reflexFor({}, { ...env, kind: 'speech.ambient' }, { me: 's_ada', at }).skip, 'not-a-soul');
+  assert.equal(reflexFor({}, env, { me: 's_ada', at: at + 11_000 }).skip, 'old', 'speech replayed after a reconnect');
+  assert.equal(reflexFor({}, env, { me: 's_ada', at, inFlight: 1 }).skip, 'own-attention', 'an agent look on its way');
+  const look = { channel: 'attention', receipt: { capability: 'look:s_cy' }, chosen: { holdsFor: '10s' } };
+  const turnTo = { channel: 'attention', receipt: { capability: 'turn:eden-bandstand' }, chosen: {} };
+  let st = {};
+  assert.equal(noteAttention(st, look, at), true); assert.equal(attentionHeld(st, { at: at + 9_000 }), 'own-attention'); assert.equal(attentionHeld(st, { at: at + 10_001 }), null, 'a look holds what the world says');
+  st = {}; noteAttention(st, turnTo, at); assert.equal(attentionHeld(st, { at: at + 20_000 }), 'own-attention', 'a turn to a thing holds 30 s');
+  st = {}; noteAttention(st, { channel: 'attention', receipt: { capability: 'turn:270' }, chosen: {} }, at); assert.equal(attentionHeld(st, { at: at + 10_001 }), null, 'a heading turn holds 10 s');
+  st = {}; noteAttention(st, { channel: 'attention', receipt: { capability: 'look:x' }, chosen: { holdsFor: '5m' } }, at); assert.equal(attentionHeld(st, { at: at + 299_000 }), 'own-attention', 'a long look');
+  assert.equal(noteAttention(st, { channel: 'body', receipt: { capability: 'walk:mill' } }, at), false, 'a body act is not attention');
+  noteAttention(st, { channel: 'none', receipt: { capability: 'auto-face:off' } }, at); assert.equal(attentionHeld(st, { at: at + 400_000 }), 'auto-face-off');
+  noteAttention(st, { channel: 'none', receipt: { capability: 'auto-face:on' } }, at); assert.equal(attentionHeld(st, { at: at + 400_000 }), null);
+  assert.deepEqual([holdMs('30s'), holdMs('5m'), holdMs('1h2m'), holdMs(''), holdMs('soon')], [30_000, 300_000, 3_720_000, null, null]);
+  st = { reflexed: [{ soulId: 's_bo', t: at }] };
+  assert.equal(reflexFor(st, { ...env, at: undefined }, { me: 's_ada', at: at + REFLEX_EVERY_MS - 1 }).skip, 'recent');
+  assert.equal(reflexFor(st, { ...env, at: undefined }, { me: 's_ada', at: at + REFLEX_EVERY_MS }).soulId, 's_bo');
+});
+
+test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, through face:, and the agent still hears it', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  await until(() => w.streams > 0);
+  const acts = w.acts, t0 = Date.now();
+  w.say('Ada, over here!');
+  assert.ok(await until(() => faces(w).length === 1, 2000), 'one reflex');
+  assert.ok(Date.now() - t0 < 1000, `within the second (${Date.now() - t0} ms)`);
+  const f = faces(w)[0];
+  assert.deepEqual([f.capability, f.strict, typeof f.clientRef], ['face:s_bo', true, 'string']);
+  assert.equal(w.acts, acts + 1);
+  const p = await w.cli('pending');
+  assert.deepEqual(p.json.addressed.map((a) => a.text), ['Ada, over here!'], 'heard as before');
+  assert.deepEqual(p.json.faced.map(({ soulId, name, accepted }) => [soulId, name, accepted]), [['s_bo', 'Bo', true]]);
+  assert.equal((await w.cli('pending')).json.faced, undefined, 'said once');
+  w.say('Ada, again');
+  await sleep(600);
+  assert.equal(faces(w).length, 1, 'A3: once per speaker per 30 s');
+});
+
+test('#1345 A2/A3/A5: no reflex over the agent\'s own look, after auto-face:off, or with --no-reflex; a refused one is not retried', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  await until(() => w.streams > 0);
+  await w.cli('act', 'look:s_cy');
+  w.say('Ada?');
+  await sleep(600);
+  assert.equal(faces(w).length, 0, 'the agent\'s own look holds');
+  const w2 = await world(t);
+  await w2.cli('serve', '--no-reflex');
+  await until(() => w2.streams > 0);
+  w2.say('Ada?');
+  await sleep(600);
+  assert.equal(faces(w2).length, 0, 'off for the folder');
+  await w2.cli('serve', '--reflex');
+  w2.refuse['face:s_bo'] = 'soul.not-in-sight';
+  w2.say('Ada, now?');
+  assert.ok(await until(() => faces(w2).length === 1, 2000), 'on again: one try');
+  await sleep(500);
+  assert.equal(faces(w2).length, 1, 'a refused reflex is never retried');
+  const p = await w2.cli('pending');
+  assert.deepEqual(p.json.faced.map(({ accepted, code }) => [accepted, code]), [[false, 'soul.not-in-sight']]);
+});
+
+test('#1345 A2: a reflex queued behind the agent\'s own look is dropped when its turn comes', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  await until(() => w.streams > 0);
+  w.busyNext = 2;   // the look waits out soul.busy inside serve while the speech arrives
+  const looking = w.cli('act', 'look:s_cy');
+  await sleep(20);
+  w.say('Ada?');
+  await looking;
+  await sleep(600);
+  assert.equal(faces(w).length, 0, 'the agent\'s look won');
+});
+
+test('#1345 A5: the flags are checked before anything is saved', async (t) => {
+  const w = await world(t);
+  const bad = await w.cli('serve', '--no-reflex', '--bogus');
+  assert.notEqual(bad.code, 0);
+  assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, undefined, 'nothing saved on a usage error');
+  const st = await w.cli('serve', '--status', '--no-reflex');
+  assert.equal(st.code, 0, st.err);
+  assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, false);
 });

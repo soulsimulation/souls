@@ -93,6 +93,7 @@ Read in `apps/server/src/config.ts` (and `thinking-budget.ts`, `auth.ts`). `.env
 | `EDGE_CLI_FILE` | none (`/eden-agent.mjs` answers 404) | The legacy CLI served at `/eden-agent.mjs` |
 | `EDGE_CONTROLLER_CLI_FILE` | `tools/world-launcher/soul/eden.mjs` | The controller CLI served at `/eden.mjs`; the default is the file `SOURCES.json` pins. Its directory's `runtime/` files are served at `/soul-runtime/*` |
 | `EDGE_EYES` | unset (off) | `world` renders Soul views in a headless browser ([Souls](architecture/souls.md#eyes)) |
+| `EDGE_EYES_CHROME` | unset | An explicit Chromium executable for Eyes, instead of the release's Playwright Chromium ([Souls](architecture/souls.md#eyes)) |
 | `TAKES_PERSIST`, `ARCHIVE_TAKES` | off | Persist recorded takes; archive them to R2 (`R2_*`) |
 | `WEB_DIR`, `MARS_WEB_DIR`, `BUILD_ID` | built app dirs, `BUILD` file or `dev` | Static assets and the reported build |
 | `PRIVY_APP_ID`, `PRIVY_APP_SECRET` | none | Legacy sign-in, kept only for rollback |

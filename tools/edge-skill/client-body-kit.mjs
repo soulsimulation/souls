@@ -5,7 +5,6 @@
 import {existsSync,mkdirSync,writeFileSync,readdirSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
-import {spawnSync} from 'node:child_process';
 
 export const KIT_FILES=['SKILL.md','contract.json','validate.mjs','admission.ts','rig.ts','motion.ts','action-profile.ts','upload-validation.ts','upload.mjs','example.json'];
 export const STARTERS=['rigid','humanoid','rolling'];
@@ -101,10 +100,11 @@ export async function starterSource(starter,{origin,world=origin,info,seed,fetch
   source:'the shared Pip rolling robot (repository source, MIT); rightsConfirmed is left false: set it only after your human confirms the variant is yours to upload'};
 }
 
-/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report. */
-export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaultValidate}){
- const opts=parseKitArgs(args),dir=resolve(opts.dir),state=load();
- if(!state.world)throw Error('Run this from a paired Soul folder (node eden-agent.mjs register <world-url>)');
+/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report.
+ *  validate.mjs is the world's own code, so nothing here runs it unless a caller passes a runValidate that does. */
+export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=()=>({skipped:'validate.mjs is the world\'s code: read it, and run it only for a world you trust'}),cli='node eden-agent.mjs',base=process.cwd()}){
+ const opts=parseKitArgs(args),dir=resolve(base,opts.dir),state=load();
+ if(!state.world)throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
  const r=await call('/v1/edge/body');if(r.status!==200)throw Error(`kit: body discovery answered HTTP ${r.status}`);
  const info=r.data,origin=new URL(state.world).origin;
  if(!info.available||!info.authoring?.skill)throw Error('kit: this world does not admit uploaded bodies');
@@ -121,12 +121,7 @@ export async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=defaul
  writeFileSync(join(dir,'kit.json'),JSON.stringify(kit,null,1)+'\n');
  const validation=runValidate(dir);
  return {kit:opts.dir,starter:opts.starter,source:start.source,files:readdirSync(dir).sort(),validation,
-  recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:'node eden-agent.mjs body set <assetId or preset>'},
-  next:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`,
-   `from the paired folder: node eden-agent.mjs body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,'node eden-agent.mjs body set <returned assetId>']};
-}
-function defaultValidate(dir){
- const r=spawnSync(process.execPath,['validate.mjs','body.glb','manifest.json'],{cwd:dir,encoding:'utf8',timeout:60_000});
- const text=(r.status===0?r.stdout:r.stderr).trim();let out;try{out=JSON.parse(text);}catch{out={valid:false,error:{code:'kit.validate',message:text.slice(0,300)}};}
- return out.valid?{valid:true,assetId:out.admitted.assetId,triangles:out.admitted.triangles,bytes:out.admitted.bytes}:out;
+  recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:`${cli} body set <assetId or preset>`},
+  next:[...(validation.skipped?[]:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`]),
+   `from the paired folder: ${cli} body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,`${cli} body set <returned assetId>`]};
 }

@@ -58,6 +58,10 @@ test('summarizeChecks: a cancelled or replaced workflow run leaves no failure be
   const doneOld = wf(100, 10, 'completed', 'failure');
   assert.equal(summarizeChecks({ runs: [staleFail], workflowRuns: [doneOld, inFlight], required }).state, 'pending');
   assert.equal(summarizeChecks({ runs: [staleFail, cr(2, 11, 'completed', 'success')], workflowRuns: [cancelledOld, { ...inFlight, status: 'completed', conclusion: 'success' }], required }).state, 'pass');
+  // Another label's run (every job skipped, no ci-ok under that name) replaces nothing: a real result stands, either way.
+  const otherLabel = wf(102, 12, 'completed', 'skipped');
+  assert.equal(summarizeChecks({ runs: [cr(2, 11, 'completed', 'success')], workflowRuns: [{ ...inFlight, status: 'completed', conclusion: 'success' }, otherLabel], required }).state, 'pass');
+  assert.equal(summarizeChecks({ runs: [cr(2, 11, 'completed', 'failure')], workflowRuns: [{ ...inFlight, status: 'completed', conclusion: 'failure' }, otherLabel], required }).state, 'fail');
   // ...and its own failure still fails (A5).
   const real = summarizeChecks({ runs: [staleFail, cr(2, 11, 'completed', 'failure')], workflowRuns: [cancelledOld, { ...inFlight, status: 'completed', conclusion: 'failure' }], required });
   assert.deepEqual([real.state, real.failed], ['fail', ['ci-ok (failure)']]);

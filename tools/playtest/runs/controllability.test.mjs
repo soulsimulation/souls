@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { actOutput, classifyRefusal, decisionKind, firstActResult, receiptOutcome, seatDecisions, ownerMessages, SCORER, scoreRun } from './controllability.mjs';
+import { actOutput, classifyRefusal, closureOf, decisionKind, firstActResult, receiptOutcome, seatDecisions, ownerMessages, SCORER, scoreRun, renderScorecard } from './controllability.mjs';
 import { evaluateRun, loadSoulRun, seatSteps } from './evaluate.mjs';
 import { sha256 } from '../lib/hash.mjs';
+import { cardOf, finalCardsDoc } from './final-cards.mjs';
 
 const T0 = Date.parse('2026-11-06T20:00:00.000Z');
 const at = (sec) => T0 + sec * 1000;
@@ -341,6 +342,61 @@ test('M4 is never negative: a message first seen in the output of the act that s
     transcript: events(1, [{ sec: 1, tools: [act('walk to the hall', { accepted: true, for: 'msg_a', receipt: { id: 'r_a', capability: 'walk:hall', phase: 'started' }, ownerMessages: [{ id: 'msg_a', text: 'Walk to the hall', sentAt: at(0) }], events: [{ kind: 'receipt', at: at(0.5), receipt: { id: 'r_a', phase: 'started' } }] })] }]),
   } } });
   assert.equal(scoreRun(loadSoulRun(dir)).metrics.M4.value, 0.5);
+});
+
+test('a close made by the finishing command counts as a result, and one that can\'t be placed counts as nothing (#1269)', () => {
+  const step = (verb, args, out) => ({ verb, args, out });
+  assert.deepEqual(closureOf(step('ack', ['msg_a', 'No', '--close', 'failed'], { closed: true })), { id: 'msg_a', outcome: 'failed' });
+  assert.deepEqual(closureOf(step('say', ['Hi', '--for', 'msg_b'], { closed: true })), { id: 'msg_b', outcome: 'done' });
+  assert.deepEqual(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })), { id: 'msg_c', outcome: 'done' });
+  assert.deepEqual(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'failed' } })), { id: 'msg_c', outcome: 'failed' });
+  assert.deepEqual(closureOf(step('wait', ['60', 'r'], { closed: true, receipt: { id: 'r', phase: 'completed' } }), new Map([['r', 'msg_d']])), { id: 'msg_d', outcome: 'done' });
+  assert.equal(closureOf(step('wait', ['60'], { closed: true, receipt: { id: 'r9', phase: 'completed' } })), null, 'no act took this receipt');
+  assert.deepEqual(closureOf(step('wait', ['60'], { closed: true, for: 'msg_e', done: 'walk completed.' })), { id: 'msg_e', outcome: 'done' }, 'the brief output dropped the receipt');
+  assert.deepEqual(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_e', failed: 'route lost.' })), { id: 'msg_e', outcome: 'failed' });
+  assert.equal(closureOf(step('act', ['walk:x'], { closed: true, for: 'msg_e' })), null, 'no outcome to read');
+  assert.equal(closureOf(step('say', ['Hi', '--for', 'msg_b'], { closed: false, why: 'refused' })), null, 'the speech worked and the close did not');
+  assert.equal(closureOf(step('act', ['walk:x'], { for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })), null, 'the world left it open');
+  const card = scoreRun(loadSoulRun(run({ seats: { ada: {
+    turns: [{ turn: 1, reason: 'wake' }, { turn: 2, reason: 'wake' }],
+    listen: [listen(0, 'msg_w', 'walk to the mill'), listen(30, 'msg_s', 'say hello')],
+    transcript: [...events(1, [
+      { sec: 1, tools: [ack('msg_w')] },
+      { sec: 2, tools: [act('walk:mill', ok('r1', 'walk:mill', 'completed', 'msg_w', { closed: true }))] },
+    ]), ...events(2, [
+      { sec: 31, tools: [['node eden.mjs say "Hello" --for msg_s', { said: { id: 'sp_1' }, closed: true }]] },
+    ])],
+  } } })));
+  const by = Object.fromEntries(card.intentions.map((i) => [i.id, i]));
+  assert.equal(by.msg_w.result, 'done'); assert.equal(by.msg_s.result, 'done');
+  assert.equal(card.metrics.M2.value, 2, 'one ack and one act, with no result turn');
+});
+
+test('scorer 5: a result the world refused closes nothing; the world\'s record at run end says what did (#1309)', () => {
+  const dir = run({ seats: { ada: {
+    turns: [{ turn: 1, reason: 'wake' }, { turn: 2, reason: 'wake' }],
+    listen: [listen(0, 'msg_a', 'walk to the mill'), listen(20, 'msg_b', 'change of plan: the pond instead')],
+    transcript: [...events(1, [{ sec: 1, tools: [ack('msg_a')] }, { sec: 2, tools: [act('walk:mill', ok('r1', 'walk:mill', 'started', 'msg_a'))] }]),
+      ...events(2, [{ sec: 21, tools: [ack('msg_b')] },
+        { sec: 22, tools: [['node eden.mjs result msg_a failed "Replaced"', { reported: false, closed: false, why: 'its act is still going: the world closes it with that act\'s outcome when it ends; nothing to send' }]] },
+        { sec: 23, tools: [act('walk:pond', ok('r2', 'walk:pond', 'completed', 'msg_b', { closed: true }))] }])],
+  } } });
+  let card = scoreRun(loadSoulRun(dir)), by = Object.fromEntries(card.intentions.map((i) => [i.id, i]));
+  assert.equal(SCORER.version, '5');
+  assert.equal(by.msg_a.result, null, 'the refused result is no close'); assert.equal(by.msg_b.result, 'done');
+  assert.equal(card.messages.status, 'unknown'); assert.match(card.messages.reason, /predates #1309/); assert.equal(by.msg_a.final, null);
+  const row = (seat, messageId) => ({ seat, requestId: null, messageId });
+  w(join(dir, 'playtest', 'final-cards.json'), finalCardsDoc('test', [
+    cardOf(row('ada', 'msg_a'), { state: 'acknowledged', outcome: 'failed', result: 'walk:mill was replaced', resultAt: 50, resultBy: 'server' }),
+    cardOf(row('ada', 'msg_b'), { state: 'acknowledged', outcome: 'done', result: 'At the pond', resultAt: 40 }),
+    cardOf(row('ada', 'msg_c'), { state: 'acknowledged' }),
+    { ...row('bo', 'msg_d'), found: false, why: 'http 404' }], null));
+  card = scoreRun(loadSoulRun(dir)); by = Object.fromEntries(card.intentions.map((i) => [i.id, i]));
+  assert.equal(card.messages.status, 'measured');
+  assert.deepEqual([card.messages.delivered, card.messages.read, card.messages.closed, card.messages.open, card.messages.unread], [4, 3, 2, 1, 1]);
+  assert.deepEqual(card.messages.closedBy, { agent: 1, server: 1 }); assert.deepEqual(card.messages.outcome, { done: 1, failed: 1, other: 0 });
+  assert.deepEqual(by.msg_a.final, { closed: true, outcome: 'failed', closedBy: 'server' });
+  assert.match(renderScorecard(card), /2 closed \(agent 1, server 1; done 1, failed 1\), 1 open, 1 not read/);
 });
 
 test('a traced run says why its turns come from the seat log', () => {
