@@ -56,6 +56,8 @@ SEAT_CONFIG_DIR=<isolated config> tools/playtest/eval/live.sh --server-root <che
   --seat tools/playtest/eval/seats/claude-sonnet.json --max-usd 1.30 --out .local/eval/live
 
 node tools/playtest/eval/soul-eval.mjs report .local/eval/live --against .local/eval/dry
+# one arm run as several invocations (one repeat each): join them with commas
+node tools/playtest/eval/soul-eval.mjs report .local/eval/new-r1,.local/eval/new-r2 --against .local/eval/old-r1,.local/eval/old-r2
 node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,24 --repeats 2 --out .local/eval/load
 ```
 

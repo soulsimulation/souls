@@ -99,6 +99,13 @@ function cleanEnvReport() {
 
 /** result.json, or one rebuilt from the episodes a stopped run left (episodes/<n>/episode.json and run.json). */
 export function loadResult(dir) {
+  // a,b,…: one arm run in several invocations (one repeat each); its episodes are joined, repeat k from the k-th run
+  if (String(dir).includes(',')) {
+    const parts = String(dir).split(',').map((p) => loadResult(p));
+    if (parts.some((p) => !p)) return null;
+    const episodes = parts.flatMap((p, k) => p.episodes.map((e) => ({ ...e, repeat: k + 1 })));
+    return { ...parts[0], repeats: parts.length, spentUsd: parts.reduce((s, p) => s + (p.spentUsd ?? 0), 0), stoppedBy: parts.map((p) => p.stoppedBy).filter(Boolean).join('; ') || null, episodes, summary: summarize(episodes.filter((e) => !e.error)) };
+  }
   const d = resolve(dir), r = readJson(join(d, 'result.json'));
   if (r) return { ...r, summary: summarize((r.episodes ?? []).filter((e) => !e.error)) };   // totals are always refolded from the episodes
   const meta = readJson(join(d, 'run.json'));
