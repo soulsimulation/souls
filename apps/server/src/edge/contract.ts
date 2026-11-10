@@ -1,5 +1,6 @@
 // EDGE-CONTRACT-v1 shared surface (team/CONTRACTS/EDGE-CONTRACT-v1.md).
 // Owned by Core-Ledger; Core-Comms reads it and proposes changes via INBOX-core.
+import {AsyncLocalStorage} from 'node:async_hooks';
 import type {Context} from 'hono';
 import type {WorldHost} from '../world.ts';
 import type {Db} from '../db.ts';
@@ -10,10 +11,16 @@ export const EDGE_CONTRACT = 'eden-edge/1' as const;
 export type ObjectBodyAdmission={guard:()=>true;commit:(receiptId:string)=>Record<string,unknown>|void};
 export type PlaceRef = {id: string; name: string; kind: string};
 export type EdgeSoul = {soulId: string; entityId: string; name: string; owner: string};
-export type ReceiptPhase = 'waiting' | 'started' | 'completed' | 'failed' | 'replaced';
+/** `pending` (#1327) is never stored: an act handed to the world whose row isn't written yet (HTTP 202, its receipt route). */
+export type ReceiptPhase = 'pending' | 'waiting' | 'started' | 'completed' | 'failed' | 'replaced';
 export type EdgeReceipt = {id: string; soulId: string; capability: string; phase: ReceiptPhase; acceptedTick: number; startedTick: number | null; endedTick: number | null; code: string | null; reason: string | null; programId: string | null;
   /** Core-A (EDGE-CONTRACT-v1 §8): body | attention | none; what an intent chose; where the body ended (terminal receipts). */
   channel?: string; chosen?: unknown; endedAt?: unknown;outcome?:EdgeOutcomeV1;
+  /** #790 (D021): `startedTick` is when the body program started; this is the first tick at or after it at which the body
+   *  visibly began (its activity changed or it moved more than 5 cm). Absent until then, and on receipts with no body program. */
+  firstMotionTick?: number;
+  /** #1381: a stop:current receipt names the receipt it stopped. */
+  stopped?: string;
   /** An open paired gesture/give nobody has accepted yet: the receipt reads `waiting` until a guest accepts. */
   awaitingAnswer?: {invite: string; what: string; waitingFor: {soulId: string; name: string}[]; expiresInSeconds: number; note: string}};
 export type NearbyBody = {soulId: string; entityId: string; name: string; distance: number; placeId: string; state: string; activity: string};
@@ -41,7 +48,9 @@ export interface EdgeLedgerHooks {
   /** VEHICLE-STEER: a steer destination (a known place or compass direction + distance) as ground (x, z). */
   steerTarget?(soulId: string, entityId: string, spec: {to?: string; direction?: string; distance?: number}): {ok: true; x: number; z: number; label: string} | {ok: false; code: string; reason: string; did_you_mean?: unknown};
   /** VEHICLE-STEER: the engine's refusal for a steer step now, or null. */
-  steerCheck?(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean}): {code: string; reason: string} | null;
+  steerCheck?(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {code: string; reason: string} | null;
+  /** landing/1 (#1324): where the engine would set a steered ride down now (the nearest clear outdoor spot), or null. */
+  steerLanding?(entityId: string, carrier: string, step: {x?: number; z?: number; land?: boolean; stop?: boolean; landing?: 'clear/1'}): {requested: [number, number]; at: [number, number]; adjustedM: number; reason?: string} | null;
   /** OBJECT-CONTRACT §7: perform an object action's body steps as a logged decision with a normal receipt. */
   /** EVENTS-v1: a Soul's body position and heading yaw (facing = (cos yaw, sin yaw)), for bearings in event envelopes. */
   poseOf?(soulId: string): {x: number; z: number; yaw: number} | null;
@@ -60,5 +69,22 @@ export type EdgeDeps = {host: WorldHost; db: Db; souls: Souls; build?: string; s
     soulPresence?(soulId: string): {listening: boolean; at: number | null}; onSoulListen?(listener: (soulId: string) => void): void}};
 export class EdgeError extends Error {readonly status: number; readonly code: string; readonly extra?: Record<string, unknown>; constructor(status: number, code: string, message: string, extra?: Record<string, unknown>) {super(message); this.status = status; this.code = code; if (extra) this.extra = extra;}}
 /** The `error` object of an eden-edge/1 refusal: code, message and any structured detail (e.g. `control.revoked`). */
+/** #485: a sit that a newer act took over from the seat itself: it did what it was asked, so it ends completed, and a plan
+ *  still pauses on it as on a replaced step. */
+export const SEAT_KEPT = 'seat.kept';
 export const edgeErrorOf = (e: EdgeError) => ({code: e.code, message: e.message, ...e.extra});
 export const edgeBody = <T extends object>(body: T) => ({contract: EDGE_CONTRACT, ...body});
+
+/** #1327: the receipt an act request committed, per request (the act route runs `L.act` inside it). A fault after this
+ *  point answers with that receipt, never a 503 that reads as "not done". Set only where the request itself commits. */
+export const actCommitScope = new AsyncLocalStorage<{receipt?: string}>();
+/** #1327: an act the world was handed and has not recorded yet (its clock stopped). Answered as HTTP 202 with the
+ *  receipt id it will have; a same-key retry gets the same answer, never a second act. */
+export class ActPending extends Error {
+  readonly body: {accepted: true; pending: true; receipt: {id: string; capability: string; phase: 'pending'}; reason: string};
+  constructor(id: string, capability: string) {
+    super('act.pending');
+    this.body = {accepted: true, pending: true, receipt: {id, capability, phase: 'pending'},
+      reason: 'The world has this act but has not recorded it yet: its clock is not moving. Read its receipt by id, or send the same request with the same key; it is done at most once.'};
+  }
+}

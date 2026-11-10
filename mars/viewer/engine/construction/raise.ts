@@ -26,7 +26,7 @@ import { holdingDiagnostic, holdStations, isUpright } from './rules.ts';
 import { checkStations, childrenState, walkCrew, type Children } from './children.ts';
 import { canonicalLying, isLying } from './lying.ts';
 import { entityCorners } from '../spatial/service.ts';
-import { makeWay } from '../locomotion/walk.ts';
+import { makeWay, registerClearOf } from '../locomotion/walk.ts';
 import { CodecError } from '../runtime/codec.ts';
 import { loweringIssue, putRaiseFrame, raiseFrame, recordRaise, type RaiseTrail } from './raise-lower.ts';
 
@@ -171,8 +171,8 @@ function raiseBystander(rt: Runtime, ex: Exec, moves: [string, Vec2, number][]):
   return null;
 }
 /** True when a person standing at q is clear of every lifter's remaining path (makeWay's clearOf test). */
-function clearOfRaise(rt: Runtime, ex: Exec, q: Vec2): boolean {
-  if (!rt.isActive(ex.id)) return true;
+function clearOfRaise(rt: Runtime, ex: Exec | undefined, q: Vec2): boolean {
+  if (!ex) return true;
   const th = rt.world.entities[ex.p.item].pose.pitch ?? 0;
   for (const r of ex.roles) {
     if (!r.lifter) continue;
@@ -183,11 +183,12 @@ function clearOfRaise(rt: Runtime, ex: Exec, q: Vec2): boolean {
   }
   return true;
 }
+registerClearOf('raise', (rt, ref, q) => clearOfRaise(rt, rt.execOf(ref.action) as Exec | undefined, q));
 /** Hold the frame and ask the bystander to step aside (null = nobody in the way). */
 function raiseWait(rt: Runtime, ex: Exec, u: Entity, moves: [string, Vec2, number][]): { status: 'blocked'; diagnostic: Diagnostic } | null {
   const by = raiseBystander(rt, ex, moves);
   if (!by) return null;
-  makeWay(rt, by.who, by.at, { by: `the crew raising ${u.id}`, subjects: [u.id, ...ex.p.crew], test: (q) => clearOfRaise(rt, ex, q) });
+  makeWay(rt, by.who, by.at, { by: `the crew raising ${u.id}`, subjects: [u.id, ...ex.p.crew], test: { kind: 'raise', action: ex.id } });
   return { status: 'blocked', diagnostic: { code: 'raise.path-occupied', message: `the crew raising ${u.id} holds it and waits for ${by.who} to move out of its way (${ex.phase})`, subjects: [u.id, by.who, ...ex.p.crew], at: [by.at[0], u.pose.p[1], by.at[1]] } };
 }
 

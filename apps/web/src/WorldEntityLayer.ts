@@ -545,6 +545,7 @@ export class WorldEntityLayer {
     this.seq = delta.seq;
     this.sites.reset((delta.builds ?? []) as PublicSite[], delta.buildsRev ?? 0, delta.now);
     // entities: a record that differs from ours is replaced and drawn again (eased only when it is new to the picture)
+    const existingParents = new Set(delta.upserts.map(e => e.in.parent).filter(id => m.entities.has(id)));
     const queue: { id: string; ease: boolean }[] = [], upserted = new Set<string>();
     for (const e of delta.upserts as unknown as Entity[]) {
       const cur = m.entities.get(e.id);
@@ -565,7 +566,7 @@ export class WorldEntityLayer {
     const seen = new Set<string>();
     for (let i = 0; i < queue.length;) {
       const until = performance.now() + RESYNC_SLICE_MS;
-      m.readPass(() => { while (i < queue.length) { const { id, ease } = queue[i++]; if (seen.has(id)) continue; seen.add(id); const e = m.entities.get(id); if (e) { this.draw(e, ease); last.drawn++; } if (performance.now() >= until) break; } });
+      m.readPass(() => { while (i < queue.length) { const { id, ease } = queue[i++]; if (seen.has(id)) continue; seen.add(id); const e = m.entities.get(id); if (e) { this.draw(e, ease, false, existingParents.has(e.in.parent)); last.drawn++; } if (performance.now() >= until) break; } });
       if (i < queue.length) { await nextTask('user-visible'); if (signal.aborted || this.model !== m) return; }
     }
     this.stats.resyncs++;
@@ -732,6 +733,7 @@ export class WorldEntityLayer {
       if(contextChanged&&(d as DiffMsg&{by?:string}).by!=='engine')this.onContextChanged?.();
       for (const def of [...(d.defs ?? []), ...d.diff.defs]) { this.model.defs.set('sha:' + def.hash, def); this.model.defs.set(def.ref, def); if (def.ref.startsWith('core-')) this.model.defs.set('core/' + def.ref.slice(5), def); }
       for (const id of d.diff.removes) { this.touched.add(id); this.model.delete(id); this.undraw(id, held.has(id) ? SITE_REFINEMENT.removalDelaySeconds : 0); }
+      const existingParents = new Set(d.diff.upserts.map(e => e.in.parent).filter(id => this.model!.entities.has(id)));
       for (const e of d.diff.upserts) this.touched.add(e.id);
       if (d.ground || d.diff.world) this.groundTouched = true;
       for (const e of d.diff.upserts) { if (this.model.entities.has(e.id)) this.model.delete(e.id); this.model.insert(e); }
@@ -743,7 +745,7 @@ export class WorldEntityLayer {
       if (d.ground) { const grew = JSON.stringify(d.ground.extent) !== JSON.stringify(this.model.ground().extent); this.model.terrain = sameBase(this.model.ground(), d.ground) ? this.model.terrain.retile(d.ground, d.diff.tiles) : new Terrain(d.ground); this.rebuildTerrain(new Set(d.diff.tiles)); this.rebuildWater(); if (grew) this.buildHorizon(); }
       if (d.diff.world) { const before = JSON.stringify((this.model.state as { ground?: unknown }).ground ?? null); this.model.state = { ...this.model.state, ...d.diff.world } as WorldModel['state']; if (JSON.stringify((this.model.state as { ground?: unknown }).ground ?? null) !== before) this.rebuildTerrain(); }
       if (d.ground) this.sites.refreshAll(true); else this.sites.refitDiff(d);
-      for (const e of d.diff.upserts) this.draw(e, true);
+      for (const e of d.diff.upserts) this.draw(e, true, false, existingParents.has(e.in.parent));
       // children ride with a moved parent: refresh their targets without easing
       const upserted = new Set(d.diff.upserts.map(e => e.id));
       for (const e of d.diff.upserts) for (const cid of this.model.subtree(e.id).slice(1)) { const c = this.model.entities.get(cid); if (c && !upserted.has(cid)) this.draw(c, false); }
@@ -933,7 +935,7 @@ export class WorldEntityLayer {
       const ride = cupHand ? undefined : this.overrides.get(id); if (ride) { d.obj.position.copy(ride); const yaw = this.overrideYaw.get(id); if (yaw !== undefined) d.obj.rotation.y = -yaw; const roll = this.overrideRoll.get(id); if (roll !== undefined) d.obj.rotation.z = roll; }
       const s = d.from.s + (d.to.s - d.from.s) * t;
       d.obj.scale.setScalar(s);
-      const shown = this.interiorVisible(id, d);
+      const shown = this.interiorVisible(id, d) && !this.juggled?.has(id);
       const inHand = cupHand || (!ride && !d.removing && this.held.has(id) && (d.obj.userData.handleGrip ? this.handleHeld(id, d) : this.handPoint(this.held.get(id)!, d.obj.position)));
       if (!inHand || !d.obj.userData.cupShown) this.cupWater(id, null);
       if (!inHand && this.pours.has(id)) this.pours.get(id)!.visible = false;
@@ -1003,6 +1005,9 @@ export class WorldEntityLayer {
     for (const id of this.glowAnim) { const d = this.drawn.get(id)!; if (d.obj.visible && ((d.k! + frame) & (d.offscreen ? 15 : 3)) === 0) this.syncGlow(d, nowMs); }
   }
   private syncGlow(d: Drawn, nowMs: number) { animate(d.obj, d.motion!.entity, d.motion!.def, nowMs / 1000, { y: d.to.p.y, yaw: d.motion!.yaw }); d.glowStale = false; }
+  /** #441: held sets drawn as flying balls this frame (WorldGames): each is drawn whole or as balls, never both. */
+  private juggled?: ReadonlySet<string>;
+  setJuggled(sets: ReadonlySet<string>) { this.juggled = sets; }
   /** Viewer B7: where a body's figure holds a carried thing — the palm of its raised hand (the carrying arm is posed to
    *  the engine's hand point; the free one hangs lower), or between both palms when they are level (two-handed / seated).
    *  The figure is the native people view's rig, found in the scene by its name (= the body's engine id). False when the
@@ -1590,7 +1595,7 @@ export class WorldEntityLayer {
 
   // ---------- things ----------
 
-  private draw(e: Entity, ease: boolean, force = false) {
+  private draw(e: Entity, ease: boolean, force = false, existingParent = false) {
     const m = this.model!; const def = m.resolvedDef(e.def);
     if (!def) return;
     // PERF-STREAM: a thing beyond the ring is not built (its record is kept; it is drawn when the camera comes); one that
@@ -1614,6 +1619,9 @@ export class WorldEntityLayer {
     const inPlace = !!existing && !existing.removing && existing.to.p.distanceTo(target) < 1e-6 && existing.to.s === wp.s && def.tags.includes('hand-operated') && (def.tags.includes('neon') || hasFlames(def));
     if (inPlace) ease = false;
     const refinement = ease && !isWorld ? this.sites.refinement(e, m) : null;
+    // #1664: a newly admitted surface child is already supported, not an airborne God creation.
+    // Preserve construction refinement and all births without a parent that existed before this update.
+    if (!existing && existingParent && !refinement && parent && pdef?.slots.some(slot => slot.id === e.in.slot && slot.kind === 'surface')) ease = false;
     if (existing && existing.defHash === defHash && !existing.removing && !force) {
       if (isWorld) return;
       // The parent or slot can change without changing the world pose. Resolve its host again even when no easing is needed.

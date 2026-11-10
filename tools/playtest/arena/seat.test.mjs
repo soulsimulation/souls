@@ -46,6 +46,21 @@ test('restart: reads what the last chat left, waits out a stopping serve, starts
   assert.deepEqual(calls(), ['serve --status', 'pending', 'serve --stop', 'serve --status', 'serve --status', 'serve']);
 });
 
+test('#1226 briefBytes: the owner setting lands in the Souls home once there is one, keeps the rest, and comes back after a restart', async () => {
+  const { s } = restartable({ home: true, briefBytes: 0 });
+  assert.equal(s.ownerSettings(), null, 'no home yet: nothing is written');
+  const cfg = join(s.folder, '.souls', 'config.json'); mkdirSync(join(s.folder, '.souls'));
+  writeFileSync(cfg, JSON.stringify({ souls: { s_1: { name: 'Ada' } }, currentWorld: 'x' }));
+  assert.equal(s.ownerSettings(), 0);
+  assert.deepEqual(JSON.parse(readFileSync(cfg, 'utf8')), { souls: { s_1: { name: 'Ada' } }, currentWorld: 'x', briefBytes: 0 });
+  assert.equal(JSON.parse(readFileSync(join(s.dir, 'seat.json'), 'utf8')).briefBytes, 0, 'the seat record says which arm it was');
+  writeFileSync(cfg, JSON.stringify({ souls: {}, briefBytes: 1500 }));   // a home rewritten under it
+  await s.restart();
+  assert.equal(JSON.parse(readFileSync(cfg, 'utf8')).briefBytes, 0, 'a restart puts it back before serve starts');
+  const plain = restartable({ home: true }).s; mkdirSync(join(plain.folder, '.souls')); writeFileSync(join(plain.folder, '.souls', 'config.json'), '{"souls":{}}');
+  assert.equal(plain.ownerSettings(), null); assert.equal(readFileSync(join(plain.folder, '.souls', 'config.json'), 'utf8'), '{"souls":{}}', 'a seat that declares nothing leaves the home alone');
+});
+
 test('restart: a step that fails says which, and the seat keeps its chat; a turn in flight ends first', async () => {
   const { s } = restartable();
   writeFileSync(join(s.folder, 'fail'), 'serve');

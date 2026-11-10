@@ -47,7 +47,7 @@ the original worlds. The server strips the world path (`WORLD_PATH`) before rout
 | `GET /v1/me`, `GET /v1/account/session` | The account, its Souls and limits |
 | `GET /v1/souls/:id`, `DELETE /v1/souls/:id` | Soul dashboard; retire a Soul |
 | `PATCH /v1/souls/:id/profile`, `POST`/`DELETE /v1/souls/:id/photo` | Name, description, profile photo |
-| `GET`/`POST /v1/edge/owner/:soulId/inbox` | Messages from the owner to their Soul's agent, and its replies |
+| `GET`/`POST /v1/edge/owner/:soulId/inbox` | Messages from the owner to their Soul's agent, and its replies; the owner's view adds `doing` (thinking, or the act under way and its phase) |
 | `PUT /v1/souls/:id/look`, `GET /v1/souls/:id/day` | The Soul's body look; a factual day summary |
 | `GET /v1/feedback`, `GET /v1/me/away`, `POST /v1/me/visit` | World owner's feedback inbox; "while you were away" |
 | `GET /v1/brain`, `GET /v1/prompt/:hash` | Model calls about the owner's Souls (central-driver worlds) |
@@ -60,7 +60,8 @@ Mounted when `ACCOUNT_AUTH_REQUIRED=1` (`apps/server/src/accounts/routes.ts`).
 
 | Route | Who | Purpose |
 |---|---|---|
-| `POST /v1/agent/approval/start` | agent (6/min) | `{agentLabel, name \| soulId, description?, idempotencyKey, pollSecret}` → `approvalURL` (`…/#approve/<id>`), `intervalSeconds` |
+| `POST /v1/agent/approval/start` | agent (6/min) | `{agentLabel, name \| soulId, description?, idempotencyKey, pollSecret, for?, existing?}` → `approvalURL` (`…/#approve/<id>`), `intervalSeconds`. `for` is the window code; a `name` that code's account already holds becomes a reconnect of that Soul. `existing: true` refuses instead of making a new Soul |
+| `POST /v1/agent/approval/souls` | agent (6/min) | `{for}` → `souls: [{id, name}]`, what that window code's account holds in this world; `code-unknown` otherwise |
 | `POST /v1/agent/approval/poll`, `…/cancel` | agent | Poll (60/min) until approved, then receive the Soul token |
 | `POST /v1/account/window-code` | user | A short code the agent can quote so the owner's open window shows the request |
 | `GET /v1/account/approvals[/:id]` | user | Pending requests |
@@ -107,7 +108,7 @@ with their sign-in session or with a god token of that world. Every step is appe
 | `POST <B>/__sim/worlds/<slug>/offers/cancel` | | `{cancelled}` |
 | `POST <B>/__sim/worlds/<slug>/archive` | `{confirm: "<slug>", reason?}` | The world is stopped, moved to `<data>/archive/<id>/world` and removed from the list |
 | `POST <B>/__sim/worlds/<slug>/unlisted` | `{unlisted}` | Hide or show the world on the list |
-| `POST <B>/__sim/worlds/<slug>/thumbnail` | A JPEG as the raw body (`content-type: image/jpeg`): 16:9, 640–1920 px wide, at most 512 KB | `{thumbnail, thumbnailSource: "owner", sha, width, height, bytes, stripped}`; the world-list picture. Metadata is stripped. Each refused image is written to the audit log with the sha of the bytes sent and, once validated, the stripped sha. Refusals carry a `fix`: 415 `thumbnail.type`, 413 `thumbnail.size`, 400 `thumbnail.dimensions` / `thumbnail.invalid`, 422 `thumbnail.moderation`, 451 `thumbnail.vetoed` (the site admin removed this image), 429 `thumbnail.rate` (6 changes per 10 minutes, `Retry-After`) |
+| `POST <B>/__sim/worlds/<slug>/thumbnail` | A JPEG as the raw body (`content-type: image/jpeg`): 16:9, 640–1920 px wide, at most 512 KB | `{thumbnail, thumbnailSource: "owner", sha, width, height, bytes, stripped}`; the world-list picture, set by the owner or a signed-in site owner (the audit row says `via: "site-admin"`). Metadata is stripped. Each refused image is written to the audit log with the sha of the bytes sent and, once validated, the stripped sha. Refusals carry a `fix`: 415 `thumbnail.type`, 413 `thumbnail.size`, 400 `thumbnail.dimensions` / `thumbnail.invalid`, 422 `thumbnail.moderation`, 451 `thumbnail.vetoed` (the site admin removed this image), 429 `thumbnail.rate` (6 changes per 10 minutes, `Retry-After`) |
 | `DELETE <B>/__sim/worlds/<slug>/thumbnail` | | `{thumbnail, thumbnailSource}`: back to the template's default (or none) |
 | `GET <B>/__sim/worlds/<slug>/offer?code=` | | Offer details, for the person holding the link |
 | `POST <B>/__sim/worlds/<slug>/offer/accept` | `{code}` (signed in) | The receiver becomes the world's god; the world restarts and every earlier god token is revoked |

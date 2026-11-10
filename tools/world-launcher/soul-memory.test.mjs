@@ -20,7 +20,8 @@ const receipt = (id, over = {}) => ({ id, capability: 'read:bench', phase: 'comp
 const open = (dir, over = {}) => openSoulMemory(dir, { world: 'eden', url: 'https://x.test/w/eden', soul: 's_me', ...over });
 
 function lived(t) {
-  const dir = tmp(t), m = open(dir);
+  // the clock is the fixture's day: journal pages are per real day, so a real clock splits them after 2026-11-07 UTC
+  const dir = tmp(t), m = open(dir, { now: () => new Date(T0 + 3000).toISOString() });
   m.sawHere(frame());
   m.sawEvents([{ id: 'c_1', kind: 'receipt', tick: 120, at: T0, clock: '09:20', receipt: receipt('r_1') }]);
   m.sawEvents([{ id: 'c_2', kind: 'approach', tick: 130, at: T0 + 1000, clock: '09:21', from: { soulId: 's_ana', name: 'Ana' }, text: 'Ana is close by.', untrusted: true }]);
