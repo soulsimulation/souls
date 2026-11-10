@@ -48,6 +48,8 @@ test('EF4 small-K gate: every library def places, bakes, furnishes and builds ga
   const looseMaterials = JSON.parse(readFileSync(new URL('../conformance/loose-materials-20261104.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // PC11 2026-11-05: the table-shaped load core-work-table@1; the narrow run found nothing, so this pins no finding.
   const workTable = JSON.parse(readFileSync(new URL('../conformance/work-table-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const blockPrint = JSON.parse(readFileSync(new URL('../conformance/block-print-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  known.findings.push(...blockPrint.findings);
   // 2026-11-05 library budgets (#494): the music family's new in-budget revisions; nothing left to pin (see the record's note).
   const budgetsMusic = JSON.parse(readFileSync(new URL('../conformance/library-budgets-music-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // #441 2026-11-05: core-juggling-balls@1, a carryable set; the narrow run found nothing, so this pins no finding.
