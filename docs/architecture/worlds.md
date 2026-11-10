@@ -35,6 +35,12 @@ view of the Soul, coming in close or following it into a house, on eased glides 
 a new Follow). A zoom out or a drag round decouples it: it keeps the viewer's angle and distance, carried along with the
 Soul, and occlusion never pulls it back in, also around a balloon basket or other ride. Zooming in stays coupled. A
 short cue says so, and Follow again (the chevron menu or the Soul's card) couples it.
+`?camtrace` on a world page (#1317, `camera-trace.ts`, its own chunk, loaded only then) records what the camera did and
+why: per changed frame the mode, target, the pose asked for and the pose drawn, and while following the rule that moved
+it (`held`, `user`, `collision`, `opening`, `search`, `glide`, `speed-cap`) with its parameters, plus the viewer's
+wheel, drag, touch and movement keys. Times are `performance.now()` ms. A small panel lists each automatic move that
+overrode the viewer's input in the last 2 s (more than 0.25 m or 3° off what they asked) and downloads the trace as
+JSONL. Nothing leaves the page unless the viewer downloads it.
 Free has no wall near the map's edge: a lost-camera guard (`WorldRtsCamera.keepPivotInBounds`) keeps the eye within one
 far-zoom limit (320–1,400 m) of the world's ground rectangle, far beyond the map; where the pivot sits does not matter.
 On a touch screen in Free (`apps/web/src/touch/WorldTouchFree.ts`), a touch that starts in the lower-left 45 % of the
@@ -93,10 +99,17 @@ switch independent. A previously saved master mute migrates to both switches off
   released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
   (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
   (`apps/server/src/clock-catchup.ts`) without simulating the gap.
+- **Real time (#1649, behind `SIM_REAL_TIME=1` while it rolls out).** A god world's clock is the real time in the world's
+  own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
+  local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
+  whose origin makes the engine read local time (`apps/server/src/god/real-clock.ts`), and logs a new one only at boot,
+  on a zone change, or when a watched world has drifted a minute from the wall. A world without a zone is given one at
+  its first real-time boot, recorded as one engine edit: `mars-college-2026` and `mars-college-2027` America/Los_Angeles,
+  `rna-studio` Europe/Lisbon, every other world America/New_York.
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,
-  `template` or `null`). The owner sets the picture with a 16:9 JPEG
+  `template` or `null`). The owner, or a site owner from the Picture button on `/__sim/health`, sets the picture with a 16:9 JPEG
   ([API](api.md#world-owner-api-served-by-the-launcher)). It is checked and stripped by the upload gate in
   `apps/server/src/moderation/` (including the site admin's vetoes, which also stop a stored or default picture from
   being listed or served) and stored as `<data>/worlds/<slug>/thumbs/<sha>.jpg`, so it moves with the world on
