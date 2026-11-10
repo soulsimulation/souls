@@ -113,6 +113,27 @@
       "pr": "#1464"
     },
     {
+      "step": "V4-web",
+      "from": "the radius eases toward the bar: a clump of progress is a swell, not a jump, and it arrives",
+      "to": "a lumpy progress bar gives one continuous bloom: no steps, the speed only bends gently",
+      "reason": "The light is now a clock paced by the expected load time instead of a meter eased toward the bar; the test checks the same smoothness on the new model (#1631)",
+      "pr": "#1632"
+    },
+    {
+      "step": "V4-web",
+      "from": "the radius never shrinks, whatever the target does",
+      "to": "a lumpy progress bar gives one continuous bloom: no steps, the speed only bends gently",
+      "reason": "Never shrinking is asserted inside the new continuous-bloom test, on the clock that replaced the eased meter (#1631)",
+      "pr": "#1632"
+    },
+    {
+      "step": "V4-web",
+      "from": "\\#1318: it runs from 55% of just covering the text to 60% of the way to the corners, on any aspect ratio",
+      "to": "\\#1318: it runs from 33% of just covering the text to 60% of the way to the corners, on any aspect ratio",
+      "reason": "Same test; the light now starts at 60% of its old size, as Gene asked (#1631)",
+      "pr": "#1632"
+    },
+    {
       "step": "V5-server-full",
       "from": "routes the coarse search already finds are byte-identical to 3.59.4 (paged ground)",
       "to": "routes the coarse search already finds are byte-identical to 0.64.4 (paged ground)",

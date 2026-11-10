@@ -73,7 +73,7 @@ test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, a
   for (let i = 0; i < 4000 && !E.navWarmV1(0); i++) host.tickOnce();
   offers(souls[0]!);
   assert.ok(kept.connMemo && kept.connMemo.m.size > 0, 'warm again, the listing asked main-ground verdicts');
-  const priv = host as unknown as {captureBody(): unknown; restoreBody(b: unknown): void}, before = priv.captureBody();
+  const priv = host as unknown as {captureBody(): unknown; restoreBody(b: unknown): void; seq: number}, before = priv.captureBody();
   const ep0 = E.staticEpochV1(), bodies = souls.map(s => host.engine.world.entities[s.entityId]!.pose.p);
   const under = [...kept.connMemo!.m].map(([k, ok]) => ({k, ok, p: k.split('|')[1]!.split(',').map(Number) as [number, number]}))
     .find(x => x.ok && x.k.startsWith('0|') && bodies.every(b => Math.hypot(b[0] - x.p[0], b[2] - x.p[1]) > 15));
@@ -115,7 +115,11 @@ test('Eden 2026: walk offers built from kept verdicts equal ones built afresh, a
   const connOk = (id: string, g: {p: [number, number]; level: number}) => (nav as unknown as {connOk(id: string, g: {p: [number, number]; level: number}): boolean | undefined}).connOk(id, g);
   connOk('oracle', {p: under.p, level: 0});
   const swap = async (body: unknown, what: string) => {
-    priv.restoreBody(body); E = host.engine as unknown as Eng;
+    // WorldHost restores bodies at the log's head: a rolled-back decision's baseline is taken just before its write (and
+    // the write rolls back with it), and a recovery sets seq back to the head after its replay (originalSeq). These bodies
+    // are older than events the store has since written, so do the same: keep the head's seq, or the next event reuses a
+    // written seq (UNIQUE events.world_id, seq; it failed whenever an input landed during the swap's ticks).
+    const head = priv.seq; priv.restoreBody(body); priv.seq = head; E = host.engine as unknown as Eng;
     for (let i = 0; i < 4000 && !E.navWarmV1(0); i++) host.tickOnce();
     const fresh = E.navCheckV1([{id: 'oracle', p: under.p, level: 0}])[0]?.ok;
     assert.equal(connOk('oracle', {p: under.p, level: 0}), fresh, `${what}: the kept verdict is this engine's`);

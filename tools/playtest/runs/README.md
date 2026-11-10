@@ -13,13 +13,13 @@ node tools/playtest/runs/run.mjs start    --scenario tools/playtest/scenarios/un
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio.json   # three scripted-owner Souls, one redirection
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/garden-setup.json  # another world, a setup batch, another cast
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio-direct.json  # a directed cast: swarm director, scripted-owner seats
-node tools/playtest/runs/run.mjs cleanup  .local/soul-runs/<run> --world-data --controller-state
-node tools/playtest/runs/run.mjs evaluate .local/soul-runs/<run> --question tools/playtest/runs/questions/redirect-honoured.mjs
+node tools/playtest/runs/run.mjs cleanup  ../souls-runs/<run> --world-data --controller-state
+node tools/playtest/runs/run.mjs evaluate ../souls-runs/<run> --question tools/playtest/runs/questions/redirect-honoured.mjs
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio-recorded.json   # the trio, recorded: wide, free and follow cameras
-node tools/playtest/runs/run.mjs preview  .local/soul-runs/<run> --camera bo --from 10 --to 40   # a labelled excerpt, never full proof
-node tools/playtest/runs/run.mjs preview  .local/soul-runs/<run> --camera bo --auto              # the same, starting at the run's first act
-node tools/playtest/runs/run.mjs package  .local/soul-runs/<run> --select wide --select bo      # local index + selected projection
-node tools/playtest/runs/run.mjs compare  .local/soul-runs/<run-a> .local/soul-runs/<run-b> [--out dir] [--md]
+node tools/playtest/runs/run.mjs preview  ../souls-runs/<run> --camera bo --from 10 --to 40   # a labelled excerpt, never full proof
+node tools/playtest/runs/run.mjs preview  ../souls-runs/<run> --camera bo --auto              # the same, starting at the run's first act
+node tools/playtest/runs/run.mjs package  ../souls-runs/<run> --select wide --select bo      # local index + selected projection
+node tools/playtest/runs/run.mjs compare  ../souls-runs/<run-a> ../souls-runs/<run-b> [--out dir] [--md]
 ```
 
 Exit codes: 0 completed (or valid), 1 failed, 2 refused, 124 stopped at `limits.maxWallSec`, 130 cancelled.
@@ -56,7 +56,7 @@ applies the same preflight as `start`; `start` runs it once and hands the result
 
 ## What a run writes
 
-`.local/soul-runs/<stamp>-<name>/` (or `--out`; `SIM_SCRATCH` moves `.local`):
+`souls-runs/<stamp>-<name>/` beside the checkout, outside every project above it (or `--out`; `SOULS_RUNS_DIR`, or `SIM_SCRATCH`'s `soul-runs`). A live seat's folder is refused inside a repository checkout or under a `CLAUDE.md`/`AGENTS.md`: its Claude Code session would load that project's settings and skills (`arena/seat-home.mjs`, #1098 arm B2):
 
 - `run-receipt.json`: the terminal receipt. `status` is `running` until the end, so a crash never reads as success.
   It records the effective spec and its hash, the scenario path and hash, the source (`source.serverRoot` and
