@@ -70,6 +70,9 @@ test('checks read the world, never the agent', () => {
   const lake = { any: [{ card: 'failed' }, { place: ['g-land-west-lake-jetty'] }] };
   assert.ok(judge(lake, { obs, card: { state: 'acknowledged', outcome: 'failed', resultAt: 1 }, catalog: cat }).ok);
   assert.ok(!judge(lake, { obs, card: { state: 'acknowledged', outcome: 'done', resultAt: 1 }, catalog: cat }).ok);
+  // typed in chat there is no card: a card check is unknown, never a pass
+  const u = judge({ card: 'failed' }, { obs, card: null, catalog: cat, noCard: true });
+  assert.equal(u.ok, false); assert.equal(u.unknown, true);
 });
 
 test('the m4-v1 battery is valid, and fails fast on a world without its places', () => {

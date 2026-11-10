@@ -4,15 +4,16 @@
 // the owner inbox, the way the Soul's web card does. An observer reads the public Soul view (never the seat) until the item's
 // check holds, the card closes, or the item's timeout. The seat keeps Claude Code's background `listen` (the arena wake loop).
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { run } from '../lib/proc.mjs';
 import { readJsonl, writeJson } from '../lib/jsonl.mjs';
 import { sleep } from '../lib/clock.mjs';
-import { createSeat } from '../arena/seat.mjs';
+import { createSeat, Seat } from '../arena/seat.mjs';
+import { worldBudgetFor } from '../arena/world-budget.mjs';
 import { sendCard, cardView, publicSoul, cardSummary } from '../arena/owner.mjs';
 import { observe, judge, cardClosed, httpSince, routeStats, refusalCounts, seatStats, catalogIndex, isLongPoll, validateBattery } from './measure.mjs';
 
-export const kickoffText = (name) => `Your Soul ${name} lives in this folder; it is already set up and \`serve\` is running. Your guide is skill.md in this folder: read it, then start listening for my messages as it says.`;
+export const kickoffText = (name, skillFile = 'skill.md') => `Your Soul ${name} lives in this folder; it is already set up and \`serve\` is running. Your guide is ${skillFile} in this folder: read it, then start listening for my messages as it says.`;
 
 const cli = async (folder, args, maxWallMs = 60000) => {
   const r = await run('node', ['eden.mjs', ...args], { cwd: folder, maxWallMs });
@@ -57,11 +58,41 @@ export function readCatalog(folder, soulId) {
   try { return JSON.parse(readFileSync(join(runtimeDir(folder, soulId), 'world-catalog.json'), 'utf8')).catalog ?? null; } catch { return null; }
 }
 
-/** runEpisode({dir, base, item, seatCfg, rails, sampleMs, hold}) → the episode record (also written to dir/episode.json). */
-export async function runEpisode({ dir, base, item, seatCfg, rails = {}, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
-  const seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails });
-  const name = seatCfg.soulName ?? 'Wren';
-  const setup = await prepareFolder(seat, { name });
+/** A fresh seat (new agent session, own records) on a folder an owner already paired, e.g. a production test Soul.
+ *  The harness never registers, creates or pairs here: it reads `status`, turns the client's trace on and starts `serve`. */
+export async function attachFolder({ dir, folder, base, seatCfg, rails, refreshClient = false }) {
+  const seatDir = join(dir, 'seats', 'soul'); mkdirSync(seatDir, { recursive: true });
+  const seat = new Seat({ dir: seatDir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails, budget: worldBudgetFor(dir, { capUsd: rails?.worldBudgetUsd, turnCapUsd: rails?.turnBudgetUsd }) });
+  const generated = seat.folder; seat.folder = folder;
+  seat.allowedTools = seat.allowedTools.map((t) => t.split(generated).join(folder));
+  seat.info.folder = null; seat.save();
+  const st = await cli(folder, ['status']);
+  const soulId = st.data?.soul?.id;
+  if (!st.data?.paired || !soulId) throw new Error(`--folder is not a paired Soul folder (status: ${st.stdout.slice(0, 200)})`);
+  seat.info.soulId = soulId; seat.info.soulName = st.data.soul.name ?? null; seat.save();
+  // The owner's own files stay as they are, unless the run asks to refresh them from the world (as an owner updates a client)
+  const skillFile = readdirSync(folder).find((f) => /^skill\.md$/i.test(f)) ?? 'skill.md';
+  if (refreshClient) { await fetchServed(base, 'eden.mjs', join(folder, 'eden.mjs')); await fetchServed(base, 'skill.md', join(folder, skillFile)); }
+  if (!existsSync(join(folder, skillFile))) throw new Error(`no ${skillFile} in --folder (use --refresh-client to fetch the served one)`);
+  const skill = readFileSync(join(folder, skillFile), 'utf8');
+  writeFileSync(join(runtimeDir(folder, soulId), '.eden-report-on'), '');
+  await cli(folder, ['serve', '--stop']).catch(() => {});
+  const sv = await cli(folder, ['serve']);
+  if (!sv.data?.serving) throw new Error(`serve did not start: ${sv.stdout.slice(0, 300)}`);
+  await cli(folder, ['look']);
+  const cliText = readFileSync(join(folder, 'eden.mjs'), 'utf8');
+  return { seat, setup: { soulId, skillFile, name: seat.info.soulName, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null } };
+}
+
+/** runEpisode({dir, base, item, seatCfg, rails, folder?, deliver?, resetTo?}) → the episode record (also written to dir/episode.json).
+ *  deliver "inbox" (default): the instruction is an owner message (local dev worlds: the dev owner identity). "chat": it is
+ *  typed into the agent's chat, as a person at their own agent does; there is no card, so card checks read as unknown. */
+export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder = null, refreshClient = false, deliver = 'inbox', resetTo = null, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
+  let seat, setup;
+  if (folder) ({ seat, setup } = await attachFolder({ dir, folder, base, seatCfg, rails, refreshClient }));
+  else { seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails }); setup = await prepareFolder(seat, { name: seatCfg.soulName ?? 'Wren' }); }
+  const name = seat.info.soulName ?? 'Wren';
+  if (resetTo) { const r = await cli(seat.folder, ['act', `walk:${resetTo}`, '--wait', '60'], 120000); log(`${item.id}: reset to ${resetTo}: ${r.data?.receipt?.phase ?? r.data?.code ?? r.code}`); await cli(seat.folder, ['stop']).catch(() => {}); }
   const catalog = catalogIndex(readCatalog(seat.folder, setup.soulId));
   const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
   if (bad.length) { await cli(seat.folder, ['serve', '--stop']).catch(() => {}); throw new Error(bad.join('; ')); }
@@ -72,11 +103,13 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, sampleM
   const before = observe(pub0), seen = new Set(before.receipts.map((r) => `${r.id}|${r.phase}`));
   if (item.start && !before.placeIds.includes(item.start)) throw new Error(`${item.id}: the Soul starts at ${before.place}, not ${item.start}`);
 
-  const kick = await seat.chat(kickoffText(name), { reason: 'kickoff' });
+  const kick = await seat.chat(kickoffText(name, setup.skillFile), { reason: 'kickoff' });
   seat.wakeLoop();
   const sentLocal = Date.now();
-  const sent = await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
-  log(`${item.id}: sent ${sent.messageId}`);
+  const chatMode = deliver === 'chat';
+  const sent = chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
+  if (chatMode) seat.chat(item.instruction, { reason: 'chat' }).catch(() => {});
+  log(`${item.id}: sent ${chatMode ? 'as chat' : sent.messageId}`);
 
   const samples = [], deadline = sentLocal + (item.timeoutSec ?? 240) * 1000;
   let firstMotionMs = null, successAt = null, closedAt = null, verdict = { ok: false, why: 'timeout' }, card = null, endedBy = 'timeout';
@@ -84,16 +117,16 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, sampleM
   while (Date.now() < deadline) {
     await sleep(sampleMs);
     let pub, view;
-    try { [pub, view] = await Promise.all([publicSoul({ base, soulId }), cardView({ base, soulId, identity: ownerId })]); } catch (e) { samples.push({ t: Date.now() - sentLocal, error: String(e.message ?? e).slice(0, 120) }); continue; }
+    try { [pub, view] = await Promise.all([publicSoul({ base, soulId }), chatMode ? null : cardView({ base, soulId, identity: ownerId })]); } catch (e) { samples.push({ t: Date.now() - sentLocal, error: String(e.message ?? e).slice(0, 120) }); continue; }
     const obs = observe(pub), t = Date.now() - sentLocal;
     card = cardSummary(view);
     if (card.messageId && card.messageId !== sent.messageId) card = { ...card, other: true };
     const newReceipts = obs.receipts.filter((r) => !priorIds.has(r.id) || !seen.has(`${r.id}|${r.phase}`));
     const moved = obs.place !== before.place || obs.posture !== before.posture || newReceipts.some((r) => r.firstMotionTick != null);
     if (firstMotionMs == null && moved) firstMotionMs = t;
-    verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog });
+    verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog, noCard: chatMode });
     samples.push({ t, place: obs.place, posture: obs.posture, activity: obs.activity, card: card.state, ok: verdict.ok });
-    const closed = !card.other && cardClosed(card);
+    const closed = !chatMode && !card.other && cardClosed(card);
     if (closed && closedAt == null) closedAt = t;
     if (verdict.ok && successAt == null) successAt = t;
     if (!verdict.ok) successAt = null;   // a check must still hold at the end

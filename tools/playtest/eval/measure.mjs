@@ -140,6 +140,7 @@ export function judge(check, ctx) {
     return hit ? { ok: true, why: `${hit.capability} ${hit.phase}` } : { ok: false, why: `no ${verb}${thingKind ? ` on a ${thingKind}` : ''} receipt ${phases.join('|')}` };
   }
   if (check.card) {
+    if (ctx.noCard) return { ok: false, unknown: true, why: 'no card (instruction typed in chat)' };
     const ok = check.card === 'closed' ? cardClosed(card) : cardOutcome(card) === check.card;
     return ok ? { ok: true, why: `card ${cardOutcome(card) ?? card?.state}` } : { ok: false, why: `card ${cardOutcome(card) ?? card?.state ?? 'none'}, not ${check.card}` };
   }

@@ -47,15 +47,20 @@ export async function runEval(o) {
   const maxUsd = Number(o['max-usd'] ?? 0);
   if (live && !(maxUsd > 0)) throw new Error('a live seat needs --max-usd (the run\'s paid cap)');
   const world = String(o.world ?? `local:${battery.world ?? 'eden-2026'}`);
-  if (!world.startsWith('local:')) throw new Error('only local:<template> worlds are wired in this version; production mode takes a paired folder (see docs/testing/soul-eval.md)');
-  const template = world.slice('local:'.length), genesis = GENESIS[template];
-  if (!genesis) throw new Error(`unknown local world ${template}`);
+  const local = world.startsWith('local:'), folder = o.folder ? resolve(o.folder) : null;
+  if (!local && !/^(?:https:\/\/|http:\/\/(?:127\.0\.0\.1|localhost)[:/])/.test(world)) throw new Error('--world is local:<template> or an https world URL');
+  if (!local && !folder) throw new Error('a remote world needs --folder: a Soul folder its owner already paired (the eval never creates or pairs)');
+  const deliver = String(o.deliver ?? (local ? 'inbox' : 'chat'));
+  if (!['inbox', 'chat'].includes(deliver)) throw new Error('--deliver inbox|chat');
+  if (!local && deliver === 'inbox') throw new Error('owner messages on a remote world need the owner\'s own sign-in; use --deliver chat');
+  const template = local ? world.slice('local:'.length) : null, genesis = local ? GENESIS[template] : null;
+  if (local && !genesis) throw new Error(`unknown local world ${template}`);
   const serverRoot = resolve(o['server-root'] ?? REPO), port = Number(o.port ?? 18760), repeats = Number(o.repeats ?? 1);
   const pick = o.items ? new Set(String(o.items).split(',')) : null;
   const items = battery.items.filter((it) => !pick || pick.has(it.id));
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `${battery.battery}-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
-  const meta = { schema: RESULT_SCHEMA, battery: battery.battery, world: world, serverCommit: gitHead(serverRoot), evalCommit: gitHead(REPO),
+  const meta = { schema: RESULT_SCHEMA, battery: battery.battery, world: local ? world : /^http:/.test(world) ? 'local-url' : world.replace(/\/$/, ''), deliver, serverCommit: local ? gitHead(serverRoot) : null, evalCommit: gitHead(REPO),
     seat: { adapter: seatCfg.adapter ?? 'claude-headless', model: seatCfg.model ?? null, effort: seatCfg.effort ?? null, clean: live ? cleanEnvReport() : null },
     repeats, items: items.map((i) => i.id), maxUsd: live ? maxUsd : 0, startedAt: new Date().toISOString() };
   writeJson(join(out, 'run.json'), meta);
@@ -65,8 +70,9 @@ export async function runEval(o) {
     const dir = join(out, 'episodes', `${String(++n).padStart(3, '0')}-${item.id}-r${rep}`);
     let w = null;
     try {
-      w = await startWorld({ serverRoot, slug: 'eden-eval', port, genesis, dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
-      const rec = await runEpisode({ dir, base: w.base, item, seatCfg, rails: { ...(seatCfg.rails ?? {}) }, log });
+      if (local) w = await startWorld({ serverRoot, slug: 'eden-eval', port, genesis, dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
+      const rec = await runEpisode({ dir, base: local ? w.base : world.replace(/\/$/, ''), item, seatCfg, rails: { ...(seatCfg.rails ?? {}) }, folder, deliver, refreshClient: !!o['refresh-client'] && rep === 1 && n === 1,
+        resetTo: local ? null : (o['reset-to'] === true ? null : o['reset-to'] ?? null), log });
       rec.repeat = rep; episodes.push(rec);
       spent += (rec.seat.costUsd ?? 0) + (rec.kickoff.costUsd ?? 0);
       log(`${item.id} r${rep}: ${rec.succeeded ? 'PASS' : 'FAIL'} (${rec.why}) turns=${rec.seat.modelTurns} calls=${rec.worldCalls} motion=${rec.firstMotionMs}ms spent=$${spent.toFixed(3)}`);
