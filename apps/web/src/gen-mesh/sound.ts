@@ -1,3 +1,4 @@
+import { rhythmBoxHits } from './rhythm-box-score.ts';
 import {FluteAudio} from './flute-audio.ts';
 // VOCAB-W2 + W7: the soundscape. Procedural WebAudio only (no audio files, nothing to license or download).
 //
@@ -108,15 +109,20 @@ function playPianos(host: Host, x: number, y: number, z: number) {
 // jukebox), with a soft beat, heard where it stands. Jukeboxes are picked out of the emitter scan (`objects`, rebuilt on
 // an edit or every 2 s), never by a per-tick world scan; their generic music loop never plays.
 const JUKEBOX_AHEAD = 0.35, jukeboxDone = new Map<string, number>();
-let jukeboxIds = new Set<string>(), jukeboxNear = false;
+let jukeboxIds = new Set<string>(), rhythmBoxIds = new Set<string>(), jukeboxNear = false;
+const rhythmBoxQueued = new QueuedNotes<GainNode>();
+function settleRhythmBoxes(playing = new Set<string>()) {
+  if (ctx) for (const gain of rhythmBoxQueued.settle(ctx.currentTime, playing)) gain.disconnect();
+}
 function jukeboxesOf(model: WorldModel, list: Emitter[]) {
-  const ids = new Set<string>();
-  for (const e of list) if (e.spec.kind === 'music' && !e.cloud) { const ent = model.entities.get(e.id), def = ent && model.resolvedDef(ent.def); if (def?.tags?.includes('jukebox')) ids.add(e.id); }
+  const ids = new Set<string>(); rhythmBoxIds = new Set<string>();
+  for (const e of list) if (e.spec.kind === 'music' && !e.cloud) { const ent = model.entities.get(e.id), def = ent && model.resolvedDef(ent.def); if (def?.name === 'core-rhythm-box' && def.version === 1) { rhythmBoxIds.add(e.id); ids.add(e.id); } else if (def?.tags?.includes('jukebox')) ids.add(e.id); }
   return ids;
 }
 function playJukeboxes(host: Host, x: number, y: number, z: number) {
   jukeboxNear = false;
-  const now = host.worldSeconds, model = host.layer.model; if (typeof now !== 'number' || !ctx || !master || !model || !jukeboxIds.size) return;
+  const now = host.worldSeconds, model = host.layer.model; if (typeof now !== 'number' || !ctx || !master || !model || !jukeboxIds.size) { settleRhythmBoxes(); return; }
+  const playingRhythms = new Set<string>();
   for (const e of objects) {
     // the switch is read live (a map lookup per jukebox): the emitter scan can be up to 2 s old after a state change
     if (!jukeboxIds.has(e.id) || !condition(e.spec.when, { ...e.state, ...model.entities.get(e.id)?.state }, night)) continue;
@@ -124,6 +130,20 @@ function playJukeboxes(host: Host, x: number, y: number, z: number) {
     jukeboxNear = true;
     // #431: a record player plays the record on its platter (the sleeve's song); a jukebox its own song
     const st = { ...e.state, ...model.entities.get(e.id)?.state }, ent = model.entities.get(e.id), def = ent && model.resolvedDef(ent.def);
+    if (rhythmBoxIds.has(e.id)) {
+      if (!ent || def?.name !== 'core-rhythm-box' || def.version !== 1) continue;
+      const program = `${e.id}:${st.starts}:${st.kick}:${st.snare}:${st.hat}:${st.tempo}`;
+      playingRhythms.add(program);
+      for (const hit of rhythmBoxHits(st, now - 0.05, now + JUKEBOX_AHEAD)) {
+        const key = `${program}:${hit.t}:${hit.kind}`;
+        if (jukeboxDone.has(key)) continue;
+        jukeboxDone.set(key, hit.t);
+        const at = ctx.currentTime + Math.max(0, hit.t - now), gain = ctx.createGain();
+        gain.connect(master); rhythmBoxQueued.add(program, at, [gain]);
+        drumSound(ctx, gain, at, hit.kind, g);
+      }
+      continue;
+    }
     const sleeves = (def?.state as Record<string, { values?: unknown[] }> | undefined)?.record?.values, record = typeof st.record === 'string' && Array.isArray(sleeves) ? st.record : null;
     const notes = record !== null ? recordNotes(sleeves!.map(String), record, now - 0.05, now + JUKEBOX_AHEAD) : pianoNotes('jukebox:' + e.id, now - 0.05, now + JUKEBOX_AHEAD);
     for (const n of notes) {
@@ -143,6 +163,7 @@ function playJukeboxes(host: Host, x: number, y: number, z: number) {
       if (crackle(k)) burst(ctx, master, ctx.currentTime + Math.max(0, k * 0.125 - now), 0.006, g * 0.05, 3200);
     }
   }
+  settleRhythmBoxes(playingRhythms);
   for (const [k, t] of jukeboxDone) if (t < now - 2) jukeboxDone.delete(k);
 }
 // Entry 26: a Soul at the drums is heard from the drum part on the piano's own clock (piano-score.ts), so a pianist and a
@@ -551,7 +572,7 @@ function step(host: Host) {
   // steps while the tick runs: read per instrument, the voice landed up to one step (2.9 ms) off the piano's note)
   audioNow = ctx?.currentTime ?? 0;
   if(ctx&&master&&typeof host.worldSeconds==='number')fluteAudio.update(ctx,master,host.worldSeconds,audioNow,host.residents?.()??[],[x,y,z],settings.muted);
-  if (!settings.muted) { playPianos(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { pianoNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
+  if (!settings.muted) { playPianos(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { settleRhythmBoxes(); pianoNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
   const heard: Heard[] = [], playlist = musicPlaying();
   for (const e of [...objects, ...ambient, ...people]) {
     if (e.spec.kind === 'music' && (jukeboxIds.has(e.id) || radioIds.has(e.id))) continue;   // a jukebox plays its song (playJukeboxes), a radio its station (playRadios)

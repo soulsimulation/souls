@@ -1,0 +1,1 @@
+Add a portable rhythm box with independently programmed kick, snare and hat step lanes, selectable tempo and native start/stop of cyclic percussion. Completed edits preserve the same box, pattern and history through handling and restart.
