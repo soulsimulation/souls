@@ -1297,8 +1297,9 @@ export class EngineBridge {
       const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
       this.navHeld = false;
       if (!souls.length) return;
-      // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them. Marked cold, not unwarmed:
-      // navWarm=false would put the first-build path back on 20 ms a tick and undo the re-warm's back-off (#1499). After a
+      // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them, held at the first build's
+      // budget every tick while they wait (navHeld). Marked cold, not unwarmed: navWarm=false would restart the first build
+      // and its completion would sweep every mind (#1499). After a
       // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
       // waiting Souls out and re-arms the re-warm.
       if (!E.navWarmV1?.(0)) { if (this.navCold === null) { this.navWarm = false; this.navPending = true; } else { this.navCold = true; this.navHeld = true; } return; }
