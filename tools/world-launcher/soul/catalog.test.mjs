@@ -120,3 +120,10 @@ test("words that only say the verb narrow nothing: \"play music\" --verb play-mu
   assert.equal(find(ix, "violin", { verb: "play-music" }).found[0]?.act, "play-music:play-music.e_v1");
   assert.equal(find(ix, "play music in the library", { verb: "play-music" }).found.length, 0, "a place word still narrows");
 });
+
+test("a word that is a verb of the world asks for it first; an act that needs others comes after one done alone (#1737)", () => {
+  const ix = indexCatalog({ ...cat, acts: [...cat.acts, { id: "read:read.e_c0", verb: "read", place: "g-library.reading", thing: "e_c0", at: [71, 1], label: "read (library chair in Reading Room)" }] });
+  const rows = find(ix, "read a book in the library").found;
+  assert.equal(rows[0]?.verb, "read", JSON.stringify(rows.map((r) => r.act)));
+  assert.ok(rows.findIndex((r) => r.verb === "book-club") > rows.findIndex((r) => r.verb === "read"));
+});
