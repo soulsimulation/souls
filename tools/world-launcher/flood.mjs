@@ -95,7 +95,7 @@ export function requestClass(rest, method = 'GET') {
   // `around` explores (it records the places found and invalidates menus): a write, as in-world admission classes it
   if (/^around\/?$/.test(r)) return 'C1';
   // public/souls/:id is the visitor page's Soul chip (apps/web PublicSoulRecord): a public read, served without a token
-  if (read && /^(map|rides|items|platforms)\/?$|^public\//.test(r)) return 'C3';
+  if (read && /^(map|rides|items|platforms|catalog|live)\/?$|^public\//.test(r)) return 'C3';
   return read ? 'C2' : 'C1';
 }
 
