@@ -87,3 +87,9 @@ test('a spot used from beside it is taken by a body standing on that point, and 
   assert.equal(out.caps.some(c => c.id === 'craft:craft.e_counter'), false, 'not offered');
   assert.equal(out.why.get('craft.e_counter')?.code, 'spot.taken');
 });
+
+test('a spot asked for by id in a secret place the Soul does not know gets no reason: not spot.no-room, not spot.taken', () => {
+  const hidden = (w: object) => ({...w, hidden: (id: string) => id === 'craft.e_counter'});
+  assert.equal(activityCapabilities(data, hidden(world(walled)) as never, new Set(['craft.e_counter'])).why.size, 0, 'no room: nothing said');
+  assert.equal(activityCapabilities(data, hidden({...world(kitchen), taken: () => true}) as never, new Set(['craft.e_counter'])).why.size, 0, 'taken: nothing said');
+});

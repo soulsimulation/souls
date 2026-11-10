@@ -65,6 +65,18 @@ test('Eden 2026: catalog acts by id are offered cold; a kitchen counter is craft
     L.knowledge.setSecret(place, false);
   }
 
+  // delta review of #1832: a refused spot in a secret place the Soul does not know names neither itself nor its place, on the
+  // strict act path too: the act is capability.unknown, as the non-strict path answers
+  {
+    const own = L.spotPlace('paint.e_9ae05996') as string, ownName = L.places.byId.get(own)?.name as string;
+    assert.ok(own && ownName, `the easel's place (${own})`);
+    assert.equal(L.knowledge.setSecret(own, true), true);
+    L.invalidateBodies(); const g = L.offerGate(w.soul, {capability: 'paint:paint.e_9ae05996'});
+    assert.equal(g?.code, 'capability.unknown', JSON.stringify(g));
+    assert.ok(!/easel/i.test(g.reason ?? '') && !(g.reason ?? '').includes(ownName), `nothing names the secret spot or its place: ${g.reason}`);
+    L.knowledge.setSecret(own, false);
+  }
+
   // a ground-floor kitchen counter whose chair stands on its standing point (Canal Village), asked for by id from afar
   const id = 'craft:craft.e_07d35dd0', counter = host.engine.world.entities.e_07d35dd0!;
   const out = await accept(host, Promise.resolve(L.act(w.soul, {capability: id, clientRef: 'counter-1'}))) as Act;

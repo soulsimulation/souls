@@ -196,8 +196,6 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
         const f = s.faceTo ?? s.at, L = Math.hypot(s.at[0] - f[0], s.at[1] - f[1]), back: V2 = L > 1e-6 ? [(s.at[0] - f[0]) / L, (s.at[1] - f[1]) / L] : [0, 0];
         at = null; let seen = here > 0 || w.clearance(w.me[0], w.me[1]) > 0;
         for (let t = 0.1; t <= 0.9 + 1e-9 && L > 1e-6; t += 0.1) {const p: V2 = [Math.round((s.at[0] + back[0] * t) * 100) / 100, Math.round((s.at[1] + back[1] * t) * 100) / 100], c = w.clearance(p[0], p[1]); if (c > 0) seen = true; if (c >= STAND_CLEAR) {at = p; break;}}
-        // #628: a standing spot whose line back is blocked too (a kitchen counter's own chair stands where its user would): the nearest
-        // clear point beside it, within SIDE_STEP of the spot's own distance from the thing, so the Soul still works at it
         if (!at && (here >= 0.05 || !seen)) at = s.at;   // nothing clearer behind it: as before (ground with room enough, or no ground data)
         // #628: only a spot refused before (no room where it is, nor straight back: a kitchen counter's own chair stands where its user
         // would) uses the nearest clear point beside it, within SIDE_STEP of the spot's own distance from the thing; a spot used before keeps its point
@@ -218,6 +216,9 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
   const why = new Map<string, {code: string; reason: string}>();
   if (want?.size) for (const s of data.spots) {
     if (!want.has(s.id)) continue;
+    // knowledge/1: a spot in a secret place this Soul does not know gets no reason at all (no name, no place, not taken or no-room):
+    // the act answers capability.unknown, as the non-strict path does
+    if (w.hidden?.(s.id, s.at)) continue;
     const name = s.label ?? 'that spot';
     if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
