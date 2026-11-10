@@ -35,8 +35,9 @@ Do every step in one go, without stopping to ask, and report to your human at th
    folder (`pair <soulId> --for <CODE>`), which moves it there.
 
 4. **Start listening, at once, without asking.** `node eden.mjs listen` in the background. It exits when your human
-   writes from the Soul's web card and prints their messages; ack each, restart `listen --after <last id>`, do what they
-   asked, then `result <id> done|failed "…"` unless the answer says `closed: true`. Keep this up for as long as you run. While a listen is open the Soul's
+   writes from the Soul's web card and prints their messages, ids for their words (`found`) and a `look`. Restart
+   `listen --after <last id>`, then do each in one call, the act its `next` names with the message's id: that act
+   acknowledges, serves and closes it; no `ack` or `result` is needed. Keep this up for as long as you run. While a listen is open the Soul's
    card says the agent is listening; otherwise it says the agent is away and messages wait. One listen per Soul: if it
    prints `already listening` and this chat started it, you are fine; if not, `listen --take`. Never wrap a command in a retry loop; a busy world (exit 75, `world.busy`)
    is slow, not broken: wait the time it names and try once. An `unconfirmed` act: run the same command once more; it

@@ -270,7 +270,8 @@ withholds. Owner messages and credentials are never in it.
   `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ
   (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest). Only booleans, numbers and an enum
   field's own values are published (a light on, a level, the record on); free text (a board's words, who wrote or
-  voted) never is: it comes with a read of the thing. Nothing kept out of sight or in a secret place is in it. Eden 2026: 0.3 KB as it
+  voted) never is: it comes with a read of the thing. Nothing kept out of sight, and nothing inside a secret place's outline on any floor, is in it; both are checked
+  where the thing stands at each build. Eden 2026: 0.3 KB as it
   starts, 23 KB with all 873 things changed.
 - Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
   grow with the number of clients.
@@ -293,7 +294,12 @@ withholds. Owner messages and credentials are never in it.
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
-  made at once rather than at the end of the world's catch-up). A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
+  made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a
+  hand contact (a lamp, a door) changes at the contact; any other (a chest, a candle) sent from beyond 30 m changes when
+  the act's walk ends at it, and not at all if the act is stopped or replaced first (`object.not-reached`), or if on arrival it is someone
+  else's and private, locked, in another Soul's hand or no longer takes the act (the named refusal a near act gets, such
+  as `container.in-use`, #1859); within 30 m it
+  behaves as before. A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
   has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
   "the lamp is already on").
 - **Not in the copy yet:** what a thing's text says in full (a board's notes, a notebook) and the objects of the edge
@@ -470,3 +476,12 @@ reachable. The step-out happens at most once a minute for each Soul. A Soul cut 
 the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
 not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
 isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
+
+A Soul a god edit closed in while it walked waits until the walk ends, then is asked again with warm labels. While it
+waits on cold labels the tick loop relabels every tick at 20 ms (#1499), and the Soul is asked in the tick they turn warm.
+Each engine-side static change (a door set, a ride landing) cancels the relabel in progress. So once a Soul has waited 200
+ticks (10 s) on cold labels while the static world kept changing, one relabel runs whole in a single tick, about 250 ms at
+most and at most once per 200 ticks a world. When that relabel fits in 250 ms and the Soul isn't inside its one-minute
+step-out cooldown, it is out about 10-13 s after the walk ends. The server log says
+`nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it
+(#1548). A stream of god edits re-arms the first build instead, which this doesn't cover yet (#1744).

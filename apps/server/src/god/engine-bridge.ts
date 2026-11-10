@@ -230,8 +230,12 @@ const WRITE_BACK_SLICE_MS = 8;
 /** #901: after the first nav build, the tick loop polls the labels this often (ticks, off the writeBack tick) and relabels
  *  cold ones in slices of at most this many ms a tick (a moving ride invalidates them; the relabel takes ~70-150 ms on Eden
  *  2026). Past NAV_REWARM_BURST cold slices in a row (the static world keeps moving under the relabel, as under a flying
- *  carrier, so each build is cancelled), it slices only on poll ticks until warm. */
-const NAV_REWARM_POLL_TICKS = 10, NAV_REWARM_POLL_AT = 5, NAV_REWARM_SLICE_MS = 10, NAV_REWARM_BURST = 30;
+ *  carrier, so each build is cancelled), it slices only on poll ticks until warm. That back-off holds only while no Soul
+ *  waits: with a Soul waiting on the relabel (#1499 review), it slices every tick at NAV_WAIT_SLICE_MS, the first build's
+ *  budget, with no burst cap, so a waiting Soul is never left cut off longer than the first-build path would leave it. */
+const NAV_REWARM_POLL_TICKS = 10, NAV_REWARM_POLL_AT = 5, NAV_REWARM_SLICE_MS = 10, NAV_REWARM_BURST = 30, NAV_WAIT_SLICE_MS = 20;
+/** #1548: a Soul waiting this long on cold labels under a changing static world gets one whole relabel, of at most this many ms. */
+const NAV_STUCK_TICKS = 200, NAV_FORCED_MS = 250;
 /** `atomic` (PC14): the ops are one engine edit (moves and the joints they make), never applied one by one. */
 type WriteBackUnit = { key: string; ops: Op[]; body?: string; atomic?: true };
 type WriteBackBody = { pose: string; entity: Entity | undefined };
@@ -1124,7 +1128,8 @@ export class EngineBridge {
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
     if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
-    else if ((this.navCold && this.navColdSlices < NAV_REWARM_BURST) || tick % NAV_REWARM_POLL_TICKS === NAV_REWARM_POLL_AT) { this.navRewarmStep(startedAtMs); if (S) t = S.add('navRewarm', t); }
+    else if (this.navHeld && tick % 10 === 3) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }   // held, the rescue still reads: a Soul that left lets the hold go, and #1548's forced relabel can fire
+    else if ((this.navCold && (this.navColdSlices < NAV_REWARM_BURST || this.navHeld)) || tick % NAV_REWARM_POLL_TICKS === NAV_REWARM_POLL_AT) { this.navRewarmStep(startedAtMs); if (S) t = S.add('navRewarm', t); }
     else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
     if (this.rescued !== this.editTick && tick - this.editTick >= 10 && (tick - this.editTick >= 20 || tick - this.rescuedAt >= 40)) { this.rescuedAt = tick; this.rescueTrapped(); if (S) t = S.add('rescue', t); }
@@ -1264,12 +1269,13 @@ export class EngineBridge {
     try {
       const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
       if (!E.navWarmV1) { this.navCold = null; return; }
-      const budgetMs = tickStartedAtMs === undefined ? NAV_REWARM_SLICE_MS
-        : Math.min(NAV_REWARM_SLICE_MS, Math.max(0, 40 - (performance.now() - tickStartedAtMs)));
+      const sliceMs = this.navHeld ? NAV_WAIT_SLICE_MS : NAV_REWARM_SLICE_MS;
+      const budgetMs = tickStartedAtMs === undefined ? sliceMs : Math.min(sliceMs, Math.max(0, 40 - (performance.now() - tickStartedAtMs)));
       const warm = E.navWarmV1(budgetMs);
       // the per-tick warm memos that may have read cold earlier in this tick read again (a reset; a warm poll did no work)
       if (warm) { this.nav.forgetWarm(); this.edge?.navRelabelled(); this.navColdSlices = 0; } else this.navColdSlices++;
       this.navCold = !warm;
+      if (warm && this.navHeld) this.navRescueWaiting();   // the waiting Souls are asked in the tick the labels turn warm
     } catch (e) { this.navCold = null; this.log(`nav re-warm: ${(e as Error).message}`); }
   }
   private navStep(tickStartedAtMs?: number) {
@@ -1285,7 +1291,7 @@ export class EngineBridge {
       this.navWarm = E.navWarmV1(budgetMs);
       if (st) { const ms = performance.now() - t0; if (ms > 50) { const now = this.navProbe(); this.log(`[l4] nav warm slice ${Math.round(ms)} ms: spatial paged ${Math.round(now.paged - st.paged)} grids ${Math.round(now.grids - st.grids)} scan ${Math.round(now.scan - st.scan)} ms; largest unit ${Math.round(now.unit)} ms (${now.phase})`); } }
       if (this.navWarm && this.navPending) {
-        this.navPending = false; if (this.navCold === null) this.navCold = false;   // #901: a completed build re-arms the re-warm
+        this.navPending = false; if (this.navCold === null) { this.navCold = false; this.navColdSlices = 0; }   // #901: a completed build re-arms the re-warm, with a fresh burst
         const spots = this.navDeferred; this.navDeferred = [];
         const lines = this.navLines(spots, this.navRescueSouls()); if (lines.length) this.navLater = [...this.navLater, ...lines].slice(-4);
       }
@@ -1301,14 +1307,51 @@ export class EngineBridge {
   private navRescuedAt = new Map<string, number>();
   /** #1287: Souls a rescue passed over, cut off, because a program was running: asked again once it has ended. */
   private navWaiting = new Set<string>();
+  /** #1548: since when a rescue has found the labels cold with a Soul waiting, and the navigation epoch then. */
+  private navStuckSince: { tick: number; epoch: number } | null = null;
+  private navForcedAt = -Infinity;
+  /** #1499 review: a rescue read found the labels cold with a Soul waiting; until it is asked again, the re-warm slices every
+   *  tick at the first build's budget (no back-off), so the wait is never longer than the first-build path's. */
+  private navHeld = false;
   private navRescueWaiting() {
     try {
-      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number };
       const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
-      if (!souls.length) return;
-      if (!E.navWarmV1?.(0)) { this.navWarm = false; return; }   // stale labels answer "not cut off": navStep warms them, and they stay queued
+      this.navHeld = false;
+      if (!souls.length) { this.navStuckSince = null; return; }
+      // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them, held at the first build's
+      // budget every tick while they wait (navHeld). Marked cold, not unwarmed: navWarm=false would restart the first build
+      // and its completion would sweep every mind (#1499). After a
+      // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
+      // waiting Souls out and re-arms the re-warm.
+      if (!E.navWarmV1?.(0)) {
+        if (this.navCold === null) { this.navWarm = false; this.navPending = true; return; }
+        this.navCold = true; this.navHeld = true;
+        if (!this.navForceRelabel(E, souls.length)) return;
+        this.navHeld = false;
+      }
+      this.navStuckSince = null;
       this.navRescueSouls(0, souls);
     } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
+  }
+  /** #1548: a relabel spread over ticks is cancelled by each static change, so while the static world keeps changing (Souls
+   *  through a busy door) a waiting Soul could stay cut off for good. Once Souls have waited NAV_STUCK_TICKS with the labels
+   *  cold and the static world has changed in that time, one relabel runs whole in this tick (nothing moves inside one call),
+   *  with a budget of NAV_FORCED_MS (about 250 ms: a slice can run a little past its budget), at most once per NAV_STUCK_TICKS a world, and is logged with its ms. A quiet world never takes it:
+   *  there the re-warm finishes on its own. True when the labels are warm after it. */
+  private navForceRelabel(E: { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number }, waiting: number): boolean {
+    const tick = this.engine.world.tick, epoch = E.navEpochV1?.() ?? 0;
+    if (!this.navStuckSince) { this.navStuckSince = { tick, epoch }; return false; }
+    // Two rate limits, both needed: the window (waited NAV_STUCK_TICKS since it was opened or last reset) keeps a forced call from
+    // following a fresh cold read, and navForcedAt caps the world at one forced call per NAV_STUCK_TICKS even when several Souls'
+    // waits overlap or a warm read in between reopens the window early.
+    if (tick - this.navStuckSince.tick < NAV_STUCK_TICKS || epoch === this.navStuckSince.epoch || tick - this.navForcedAt < NAV_STUCK_TICKS) return false;
+    const t0 = performance.now(), warm = !!E.navWarmV1?.(NAV_FORCED_MS), ms = Math.round(performance.now() - t0);
+    // the window restarts here, so a call that left the labels cold is not repeated until another NAV_STUCK_TICKS of churn
+    this.navForcedAt = tick; this.navStuckSince = { tick, epoch: E.navEpochV1?.() ?? epoch };
+    this.log(`nav rescue: forced relabel ${ms} ms, ${warm ? 'warm' : 'still cold'}, ${waiting} waiting`);
+    if (warm) { this.nav.forgetWarm(); this.edge?.navRelabelled(); this.navCold = false; this.navColdSlices = 0; }
+    return warm;
   }
   /** Is this body off the main walkable area where it stands now? Asked with the labels warm. */
   private navCutOff(id: string) {
@@ -1987,7 +2030,7 @@ export class EngineBridge {
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
     L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
-    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? null;
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply

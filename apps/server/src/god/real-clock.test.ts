@@ -11,7 +11,7 @@ import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { installWorldClock, syncWorldClock, worldTimeZone } from './world-clock.ts';
 import { setEnv } from './world-env.ts';
-import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, productionWorld, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
+import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, productionWorld, realTimeEnabled, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 test('world time is the local wall time of a UTC instant in the world zone', () => {
@@ -218,4 +218,9 @@ test('#1649 review: the production marker fails closed when no stage is set', ()
   assert.equal(productionWorld({}), false, 'unset PUBLIC_URL reads http://localhost');
   for (const u of ['http://localhost:4500', 'http://127.0.0.1:4980', 'http://[::1]:4500', 'http://app.localhost:3000', 'http://sim.test'])
     assert.equal(productionWorld({ PUBLIC_URL: u, DEV_AUTH: '0' }), false, u);
+});
+
+test('#1649 review: the SIM_REAL_TIME rollback switch accepts 0, false and off', () => {
+  for (const v of ['0', 'false', 'off', 'OFF', ' False ', 'no']) assert.equal(realTimeEnabled({ SIM_REAL_TIME: v }), false, v);
+  for (const v of [undefined, '', '1', 'true', 'on']) assert.equal(realTimeEnabled({ SIM_REAL_TIME: v }), true, String(v));
 });
