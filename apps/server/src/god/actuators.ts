@@ -78,6 +78,7 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  pitcherDecanting?(soul:EdgeSoul,id:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
@@ -393,7 +394,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
-      if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
+      if (s.removed || !s.at) { const pitcher=s.key?host.pitcherDecanting?.(ctx.soul,s.key,a.name):null;if(pitcher&&'code'in pitcher)return pitcher;return { code: 'object.gone', reason: 'It is not there any more.' }; }
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
       // #1751: a thing's act is taken by id from anywhere and walks there as part of the act (the plan's own walk). A whole
@@ -408,6 +409,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
+      const pitcher=s.key?host.pitcherDecanting?.(ctx.soul,s.key,a.name):null;if(pitcher)return 'code'in pitcher?pitcher:null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
@@ -428,6 +430,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
+        const pitcher=s.key?host.pitcherDecanting?.(ctx.soul,s.key,a.name):null;if(pitcher&&!('code'in pitcher))return{state:s,result:{action:a.name,summary:pitcher.summary},bodies:[{label:a.label,steps:pitcher.steps}]};
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
@@ -487,6 +490,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
+    if(a.name==='pour'&&host.pitcherDecanting?.(soul,id,a.name))return out;
     if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
     // #438: and a picking act (harvest.ts)
     const pick = host.harvest?.(soul, id, a.name, (input.params ?? {}) as Record<string, unknown>);
