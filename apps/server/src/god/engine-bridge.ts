@@ -1,3 +1,4 @@
+import{createReedBasket,type ReedBasket}from'./reed-basket.ts';
 // The engine bridge (spec eden4/31 B2/B3, plan 33 §3.5, lane L9): Souls live among god-built things.
 //
 //  entity world ──GodMode.onCommit──▶ derive physics per changed entity ──host.enqueue('world-edit')──▶ engine fold
@@ -354,7 +355,10 @@ export class EngineBridge {
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.reedBasket=createReedBasket({model:this.god.model,get engine(){return o.host.engine as never;},levelAt:(x,z,y)=>this.levelAt(x,z,y),soul:id=>this.god.db.soul(id)??undefined,denied:(id,soul)=>this.layers.takeRefusal(id,soul)??this.claimRefusal(id,soul as never),commit:(ops,note)=>this.commitSoulWork(ops,note),log:m=>this.log(m)});
+    this.edge?.onReceipt(r=>{try{this.reedBasket?.onReceipt(r);}catch(e){this.log(`reed basket: ${(e as Error).message}`);}});
+    if(this.edge?.contactActuator){const facts=this.edge.contactActuator.facts.bind(this.edge.contactActuator);this.edge.contactActuator.facts=(id,soul)=>{const own=this.reedBasket?.facts(id);return own?{...facts(id,soul),...own}:facts(id,soul);};}
+    this.perceive = new GodPerceive({reedBasket:this.reedBasket, mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -484,6 +488,7 @@ export class EngineBridge {
     });
   }
   private watering?: Watering;
+  private reedBasket?:ReedBasket;
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
@@ -2524,6 +2529,7 @@ export class EngineBridge {
   /** Entry 42: why a Soul cannot put into or take out of a container now (whose it is, closed, being opened or shut). */
   private storageRefusal(box: NonNullable<ReturnType<EngineBridge['storage']>>, soul: EdgeSoul): { code: string; reason: string } | null {
     const denied = this.layers.refusal(box.id, soul); if (denied) return denied;
+    const basket=this.reedBasket?.storageRefusal(soul,box.id);if(basket)return basket;
     if (!box.open) return { code: 'container.closed', reason: `${box.label} is closed; open it first (object:${box.id}:open).` };
     if (box.hidden) return null;   // #435: no door to wait for, and another Soul's reach into it (an empty search) must not show
     for (const b of Object.values(this.engine.world.entities) as any[]) if (b.human?.handActuator?.target === box.id) return { code: 'container.moving', reason: `${box.label} is being opened or closed; wait a moment.` };
