@@ -1,3 +1,6 @@
+import {FLUTE_STAND} from './flute-stand.ts';
+import {PORTABLE_SPRINKLER} from './portable-irrigation.ts';
+import { FLOWER_PRESS } from './flower-press.ts';
 // Core-kit families as data. Owner: L4 (library & creatures) for the JSON files; L5 owns mesh.json
 // (pack imports). Each file is an array of def/1 inputs named `core-<name>` (resolvable as
 // `core/<name>@<version>`). Search them with GET /v1/god/defs?q=…; never author what exists.
@@ -6,6 +9,7 @@ import furniture from './furniture.json' with { type: 'json' };
 import { PAINTING_EASEL_DEF, CHALK_SQUARE_DEF } from './painting-easel.ts';
 import { POWERED_DISPLAYS } from './powered-displays.ts';
 import { HAND_BELL, HAND_BELL_3 } from './hand-bell.ts';
+import { HAND_CHIME } from './hand-chime.ts';
 import { SWITCHABLE_LIGHTS } from './switchable-lights.ts';
 import { PORTABLE_ITEMS } from './portable-items.ts';
 import { LAND_ART_MATERIALS } from './land-art.ts';
@@ -13,19 +17,31 @@ import { INSTRUMENTS } from './instruments.ts';
 import { HAND_OPENINGS, LOCKABLE_DOOR } from './hand-openings.ts';
 import { TEA_DEFS } from './tea.ts';
 import { HARVEST_DEFS } from './harvest.ts';
+import { FLOWER_ARRANGING } from './flower-arranging.ts';
 import { WRITABLE_BOARDS } from './writable-boards.ts';
+import { MOVABLE_CHALKBOARD } from './movable-chalkboard.ts';
 import { BOOK_DEFS } from './books.ts';
+import { POETRY_FOLIO } from './poetry-folio.ts';
 import { HAND_WATER } from './hand-water.ts';
+import { REPERTOIRE_RECORD_PLAYER } from './record-repertoire.ts';
 import { HAND_MUSIC } from './hand-music.ts';
 import { HAND_FIRE } from './hand-fire.ts';
+import { MOVABLE_CANDLE_STAND } from './movable-candles.ts';
 import { HAND_COVERINGS } from './hand-coverings.ts';
 import { HAND_CABINETS } from './hand-cabinets.ts';
 import { HAND_DRAWERS } from './hand-drawers.ts';
 import { WATERING_CAN } from './watering-can.ts';
 import { REPAIR_DEFS } from './repair.ts';
+import { MENDABLE_TENT, SEWING_AWL } from './tent-mending.ts';
+import { CAMP_BENCH } from './camp-bench.ts';
+import { CAMP_TABLE } from './camp-table.ts';
+import { GOLD_SEAM_DEFS } from './gold-seam-repair.ts';
+import { INTENTION_BURNER } from './intention-burning.ts';
 import { MOVABLE_SEATING } from './movable-seating.ts';
 import { UPRIGHT_LOADS } from './upright-loads.ts';
 import { HAND_STORAGE } from './hand-storage.ts';
+import { FRIDGE_STORAGE_DEF } from './hand-fridge-storage.ts';
+import { HAND_BOOKCASE_DEF } from './hand-bookcase.ts';
 import { HAND_LITTER } from './hand-litter.ts';
 import { OFFICE_DESK_DEF } from './office-desk.ts';
 import props from './props.json' with { type: 'json' };
@@ -66,7 +82,7 @@ import figures from './figures.json' with { type: 'json' };
 import meshLods from '../core-mesh-lods.json' with { type: 'json' };
 import type { DefInput } from '../schemas.ts';
 
-export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
+export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [FLUTE_STAND, PORTABLE_SPRINKLER, FLOWER_PRESS, PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, MOVABLE_CHALKBOARD, ...BOOK_DEFS, POETRY_FOLIO, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, MENDABLE_TENT, SEWING_AWL, CAMP_BENCH, ...GOLD_SEAM_DEFS, INTENTION_BURNER, ...HAND_MUSIC, REPERTOIRE_RECORD_PLAYER, ...HAND_FIRE, MOVABLE_CANDLE_STAND, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, CAMP_TABLE, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, HAND_CHIME, ...TEA_DEFS, ...HAND_STORAGE, FRIDGE_STORAGE_DEF, HAND_BOOKCASE_DEF, ...HAND_LITTER, ...HARVEST_DEFS, ...FLOWER_ARRANGING], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
   const lod = def.make.kind === 'mesh' ? (meshLods as Record<string, { lod1: string }>)[def.make.asset] : undefined;
   return lod ? { ...def, make: { ...def.make, ...lod } } as DefInput : def;
 });

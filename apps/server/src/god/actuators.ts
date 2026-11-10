@@ -379,7 +379,9 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if(motion){const me=host.bodyAt(ctx.soul)!,far=(motion.level??0)>0||Math.hypot(me[0]-motion.root[0],me[1]-motion.root[2])>.1;
           return {state:s,result:{action:a.name,...(def.tags?.includes('notebook')?{}:{set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul)}),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
 
-        const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
+        // Solo flute is an access-checked object action, not an unguarded global activity spot.
+        const flute=def.name==='core-flute-stand'&&def.version===1&&a.name==='play-flute';
+        const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = flute ? Math.hypot(to[0]-me[0],to[1]-me[1])>.15 : Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
         const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null;
         const patch = water && !isRefusal(water) ? { litres: water.litres } : actionPatch(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, params, ctx.soul);
         // A door works from either side. Prefer the side the Soul already occupies,
@@ -387,10 +389,10 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         const front=contact&&def.components.opening&&s.front&&s.at
           &&(me[0]-s.at[0])*(s.front[0]-s.at[0])+(me[1]-s.at[1])*(s.front[1]-s.at[1])<0
           ? [2*s.at[0]-s.front[0],2*s.at[1]-s.front[1]] as Vec2 : s.front??null;
-        const ap = far && s.key ? host.approach?.(s.key, ctx.soul, front, contact ? .75 : undefined) : null;
+        const ap = far && s.key ? host.approach?.(s.key, ctx.soul, front, contact || flute ? .75 : undefined) : null;
         const walk = !far ? [] : ap ? [ap.level === 0 ? { verb: 'walk_to', params: { to: ap.p, standoff: 0 } } : { verb: 'mars:walk_to', params: { x: ap.p[0], z: ap.p[1], level: ap.level } }] : [{ verb: 'walk_to', params: { to, standoff: 0.5 } }];
         // #428: a notebook's lines come with a read, not with the answer to writing one
-        return { state: s, result: { action: a.name, ...(def.tags?.includes('notebook') ? {} : { set: patch }), ...(water && !isRefusal(water) ? { summary: water.summary } : {}) }, bodies: [{ label: `${a.label}`, steps: contact ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'operate',seconds:1.2,face:s.at!}}] : [...walk, { verb: 'wave', params: { at: s.key, seconds: 1 } }] }] };
+        return { state: s, result: { action: a.name, ...(def.tags?.includes('notebook') ? {} : { set: patch }), ...(water && !isRefusal(water) ? { summary: water.summary } : {}) }, bodies: [{ label: `${a.label}`, steps: flute ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'play-music',instrument:'flute',seconds:16,face:s.at!}},{verb:'stand',params:{}}] : contact ? [{verb:'stand',params:{}},...walk,{verb:'mars:pose_v1',params:{activity:'operate',seconds:1.2,face:s.at!}}] : [...walk, { verb: 'wave', params: { at: s.key, seconds: 1 } }] }] };
       },
     };
   }

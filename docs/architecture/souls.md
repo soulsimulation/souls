@@ -86,7 +86,9 @@ two share a name, `@eden create "Ivo"` to pick the world. Each run works inside 
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
-A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and with
+A god is a second principal. `eden-god.mjs` joins a home that already exists: `register` makes the world's seat, and once it
+holds a token the home's guide (`CLAUDE.md`, `AGENTS.md`) lists it beside the Souls, so the next chat finds it; only the
+guide's head is rewritten, and a guide this home didn't write is left alone. With
 several seats `node eden-god.mjs <world> <command>` picks one (`@<world>` when a command has that name). Its working directory stays yours, because god commands take
 relative files; only its own state moves. A folder with no home keeps `.eden-god.json` as ever, and that file wins until
 `node eden.mjs import` moves it in. Acting as a god reads nothing under `souls/`, and acting as a Soul nothing under
@@ -144,7 +146,16 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from. A legacy folder has no memory, so a Soul run by
+`memory <words>` searches the projections and says where each line came from.
+
+The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
+`ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/edge-skill/memory-folder.mjs`). Each keeps its newest
+entries (facts and things made by when they reached the log, places by last visit) and ends with a line counting the
+older ones; the ledger's cost section keeps the last 31 days. `memory` also searches the log for the learned facts, things
+made and places a projection dropped, marked `log` and untrusted, and for the Soul's own note on a place that left
+`places.md`, marked as its own; `more` counts every match once. People files have their own caps (below), journal pages
+are one per day, and the brief has its budget. Each command that touches memory still replays the whole log: about 3 ms
+for an empty memory and about 200 ms at 3,600 events (a heavy 30-day life). A 1.9 folder's projections have no budget. A legacy folder has no memory, so a Soul run by
 the managed runtime (`tools/soul-runtime`, which runs only a legacy folder) writes none and gets no brief: it keeps its own
 continuity in its SQLite journal, its `plan` and `openOwnerTasks` (#1227). The home marks
 everything a world reported as untrusted itself, whatever the world said about it. `memory/` and `MEMORY.md` are in the

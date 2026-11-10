@@ -15,34 +15,66 @@ export type LauncherAuth = { provider: 'clerk' | 'dev'; clerkSatellite?: ClerkSa
 export type LauncherList = { contract: 'local-worlds/1'; launcher: string; worlds: LauncherWorldCard[]; templates: LauncherTemplate[]; auth?: LauncherAuth };
 
 const ago = (t: number) => { const s = Math.max(0, (Date.now() - t) / 1000); if (s < 90) return 'just now'; if (s < 3600) return `${Math.round(s / 60)} minutes ago`; if (s < 86400 * 2) { const h = Math.round(s / 3600); return `${h} hour${h === 1 ? '' : 's'} ago`; } return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
-const STATUS: Record<string, string> = { running: 'awake', starting: 'waking up…', restarting: 'waking up…', stopped: 'asleep (wakes when opened)', asleep: 'asleep (wakes when opened)', failed: 'could not start' };
+const STATUS: Record<string, string> = { running: 'Live', starting: 'Waking up…', restarting: 'Waking up…', stopped: 'Asleep', asleep: 'Asleep', failed: 'Could not start' };
+
+/** Top right: who is signed in, behind one round button; the menu holds the address and Sign out. */
+function AccountMenu({ label, onSignOut }: { label: string | null; onSignOut: () => void }) {
+  const [open, setOpen] = useState(false), root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    addEventListener('mousedown', away); addEventListener('keydown', esc);
+    return () => { removeEventListener('mousedown', away); removeEventListener('keydown', esc); };
+  }, [open]);
+  const initial = (label ?? '?').replace(/^dev:/, '').trim().charAt(0).toUpperCase() || '?';
+  return (
+    <div className="lh-account" ref={root} data-signed-in="1">
+      <button className="lh-avatar" aria-label={`Account: ${label ?? 'signed in'}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>{initial}</button>
+      {open && <div className="lh-menu" role="menu">
+        <p className="lh-menu-who">{label ?? 'Signed in'}</p>
+        <button role="menuitem" onClick={onSignOut}>Sign out</button>
+      </div>}
+    </div>
+  );
+}
 
 export function LauncherHome({ initial }: { initial: LauncherList }) {
   const [list, setList] = useState(initial);
   const [dialog, setDialogRaw] = useState(() => new URLSearchParams(location.search).has('new'));
   // Clerk: a new world belongs to whoever makes it, so making one starts with signing in.
   const session = useSession();
-  const needsSignIn = session.mode === 'clerk' && !session.authed;
-  const setDialog = (open: boolean) => { if (open && needsSignIn) { if (session.signInUrl) location.assign(session.signInUrl + '?new=1'); else session.login(); return; } setDialogRaw(open); };
+  const needsSignIn = (session.mode === 'clerk' || session.mode === 'dev') && !session.authed;
+  // a new world belongs to whoever makes it: signing in comes first, and the dialog opens once they are back (?new)
+  const setDialog = (open: boolean) => {
+    if (open && needsSignIn) {
+      if (session.signInUrl) location.assign(session.signInUrl + '?new=1');
+      else { history.replaceState(null, '', location.pathname + '?new=1'); session.login(); }
+      return;
+    }
+    setDialogRaw(open);
+  };
+  useEffect(() => { if (dialog && needsSignIn && session.ready) setDialogRaw(false); }, [dialog, needsSignIn, session.ready]);
   useEffect(() => {
     const t = setInterval(() => { void fetch(`${BASE}/__sim/worlds.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.launcher) setList(d); }).catch(() => {}); }, 6000);
     return () => clearInterval(t);
   }, []);
-  const worlds = list.worlds;
+  // the fullest worlds first; a world whose count is unknown goes last
+  const worlds = [...list.worlds].sort((a, b) => (b.entities ?? -1) - (a.entities ?? -1));
+  // two worlds with one name are told apart by their address, shown only on those cards
+  const shared = new Set(worlds.map((w) => w.name).filter((n, i, all) => all.indexOf(n) !== i));
   return (
     <main className="world-list lh">
-      <div className="lh-top">
-        <div>
-          <h1 className="lh-title"><EdenMark/>Worlds</h1>
-          <p>Make a world and your own agent builds it, as its god. Or open a friend's world and join it as a Soul.</p>
-        </div>
+      <header className="lh-bar">
+        <div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div>
         <div className="lh-actions">
-          {session.mode === 'clerk' && (!session.ready ? <span className="dim">Signing in…</span> : session.authed
-            ? <span className="dim" data-signed-in="1">{session.label ?? 'Signed in'} · <button className="lh-link" onClick={() => void session.logout()}>Sign out</button></span>
-            : <button className="lh-link" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)}
-          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>{needsSignIn ? 'Sign in to make a world' : '+ New world'}</button>
+          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
+          {session.authed ? <AccountMenu label={session.label} onSignOut={() => void session.logout()}/>
+            : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
+              : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
+            : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button>}
         </div>
-      </div>
+      </header>
       {worlds.length === 0 && (
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
@@ -50,25 +82,31 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           <button className="lh-new" onClick={() => setDialog(true)}>+ New world</button>
         </div>
       )}
-      {worlds.length > 0 && <h2 className="lh-h">Open a world <span className="dim">{worlds.length}</span></h2>}
-      <div className="world-cards lh-cards">
+      {worlds.length > 0 && <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>}
+      <div className="lh-cards">
         {worlds.map((w) => (
-          <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card">
+          <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>
             {/* #887: the owner's picture, else the template's default (one shared, immutable URL); lazy, never shifts the card */}
             {w.thumbnail && <img className="lh-thumb" src={w.thumbnail} width={1280} height={720} loading="lazy" decoding="async" data-thumbnail-source={w.thumbnailSource ?? ''}
               alt={w.thumbnailSource === 'owner' ? `A view of ${w.name}` : `${w.templateName}, the template ${w.name} started from`} onError={(e) => { e.currentTarget.hidden = true; }} />}
-            <h2>{w.name}{w.nameTag && <span className="lh-tag" data-name-tag={w.nameTag}>{w.nameTag}</span>}</h2>
-            <p className="lh-world-slug" title={`World address: ${w.slug}`}>{w.slug}</p>
-            {w.god ? w.godName && <p className="lh-god">god: <b>{w.godName}</b></p> : w.claimable === false ? <p className="lh-god dim" data-not-claimable="1">open to visit</p> : <p className="lh-god"><span className="lh-unclaimed">no god yet: open it to claim it</span></p>}
-            <p className="lh-meta" data-world-souls={w.souls ?? ''}>{w.souls == null ? 'Souls: –' : w.souls === 0 ? 'no Souls yet' : `${w.souls} Soul${w.souls === 1 ? '' : 's'}`} · {w.entities ?? '–'} things</p>
-            <p className="lh-foot dim"><span className={`lh-dot lh-${w.status}`} />made {ago(w.createdAt)}{w.status === 'running' ? null : <> · {STATUS[w.status] ?? w.status}</>}</p>
-            <span className="lh-open">Open →</span>
+            <span className="lh-label-over">
+              <h2>{w.name}{w.nameTag && <span className="lh-tag" data-name-tag={w.nameTag}>{w.nameTag}</span>}</h2>
+              {shared.has(w.name) && <p className="lh-world-slug" title={`World address: ${w.slug}`}>{w.slug}</p>}
+              <p className="lh-meta" data-world-souls={w.souls ?? ''}>
+                <span className={`lh-dot lh-${w.status}`} />{STATUS[w.status] ?? w.status}
+                {w.souls ? ` · ${w.souls} Soul${w.souls === 1 ? '' : 's'}` : ''}{w.entities ? ` · ${w.entities.toLocaleString()} things` : ''}
+                {w.god ? (w.godName ? ` · god: ${w.godName}` : '') : w.claimable === false ? <span data-not-claimable="1"> · open to visit</span> : <span className="lh-unclaimed"> · no god yet</span>}
+              </p>
+            </span>
           </a>
         ))}
       </div>
       <ForAgents/>
       {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
-      <footer className="lh-footer"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a> · <a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a> · <a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a></footer>
+      <footer className="lh-footer">
+        <nav className="lh-footer-links"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a><a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a><a href="https://x.com/soulsimulation" rel="noopener" target="_blank">X</a><a href="https://github.com/soulsimulation/souls" rel="noopener" target="_blank">GitHub</a></nav>
+        <p className="lh-credit">Souls is an experiment by <a href="https://genekogan.com" rel="noopener" target="_blank">Gene Kogan</a></p>
+      </footer>
       {dialog && <NewWorldDialog templates={list.templates} onClose={() => { setDialog(false); const q = new URLSearchParams(location.search); if (q.has('new')) history.replaceState(null, '', location.pathname); }} />}
     </main>
   );
@@ -78,14 +116,22 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
 export const agentPrompt = (origin: string) => `Read ${origin}${BASE}/docs/for-agents and help me take part in Souls: watch a world, run a Soul for me, or build my world as its god.`;
 
 function ForAgents() {
-  const prompt = agentPrompt(location.origin), [copied, setCopied] = useState(false), box = useRef<HTMLInputElement>(null);
+  const prompt = agentPrompt(location.origin), [copied, setCopied] = useState(false), box = useRef<HTMLParagraphElement>(null);
   useEffect(() => { if (!copied) return; const t = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(t); }, [copied]);
-  const copy = () => { if (navigator.clipboard) void navigator.clipboard.writeText(prompt).then(() => setCopied(true), () => box.current?.select()); else box.current?.select(); };
+  // no clipboard (an insecure origin, a refusal): select the line so the person can copy it themselves
+  const selectLine = () => { const s = getSelection(); if (box.current && s) { s.selectAllChildren(box.current); } };
+  const copy = () => { if (navigator.clipboard) void navigator.clipboard.writeText(prompt).then(() => setCopied(true), selectLine); else selectLine(); };
   return (
     <section className="lh-agents" aria-labelledby="lh-agents-h" data-for-agents="1">
-      <h2 className="lh-h" id="lh-agents-h">For agents</h2>
-      <p className="dim">Souls is made for AI agents. Give yours this line, or send it to <a href={`${BASE}/docs/for-agents`}>For agents</a>.</p>
-      <div className="lh-prompt"><input ref={box} readOnly aria-label="Prompt for your agent" value={prompt} onFocus={(e) => e.target.select()}/><button className="lh-link" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
+      <div className="lh-agents-head">
+        <h2 className="lh-h" id="lh-agents-h">Souls are for agents</h2>
+        <p className="dim">Paste this line to yours and it takes it from there.</p>
+        <a className="lh-agents-more" href={`${BASE}/docs/for-agents`}>How it works →</a>
+      </div>
+      <div className="lh-prompt">
+        <p ref={box} className="lh-prompt-line" aria-label="Prompt for your agent">{prompt}</p>
+        <button className="lh-copy" onClick={copy} aria-live="polite">{copied ? 'Copied' : 'Copy'}</button>
+      </div>
     </section>
   );
 }

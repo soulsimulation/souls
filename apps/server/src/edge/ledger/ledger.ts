@@ -1,4 +1,4 @@
-import {NONFINITE_HELD,QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
+import {NONFINITE_HELD,STOOD_ON_FLOOR,QUARANTINED,RELOCATED,REWOUND,STEP_FAILING} from '@souls/engine-contract';
 import {handActuatorFrame} from '../../../../../mars/viewer/engine/social/hand-actuator.ts';
 // Core-Ledger: capabilities v2, direct act with durable receipts, Tier 1 observe, map,
 // and the read-only hooks Core-Comms routes events and speech with. No model calls.
@@ -458,7 +458,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     souls: () => [...this.host.minds.values()].filter(m => !!m.owner).map(m => ({soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner})),
     probe: id => this.host.engine.stallProbeV1?.(id) ?? null,
     release: (soul, reason) => this.host.enqueue('edge-stop', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, stallReleaseV1: reason}),
-    record: (soul, reason, detail) => {const r = this.insert(soul, 'stall:released', 'started', undefined, true, detail); this.update(r.id, {phase: 'completed', code: 'stall.released', reason});},
+    record: (soul, reason, detail, held) => {const r = this.insert(soul, 'stall:released', 'started', undefined, true, detail); this.update(r.id, held ? {phase: 'failed', code: 'stall.no-floor-spot', reason} : {phase: 'completed', code: 'stall.released', reason});},
   });
   readonly spotsRefused: string[];
   /** Stage B (split/read-host.ts): a read worker's ledger over a read-only host. The read code runs unchanged; the
@@ -747,6 +747,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (e.kind === 'rules' && fact?.lastRungInPlace && !fact.lastRungInPlace.stopped) return this.onRelocated(fact.lastRungInPlace.relocated ?? []);   // nothing ended, so there is nothing to tell
     if (e.kind === 'rules' && (fact?.recovery?.lastRung || fact?.lastRungInPlace)) return this.onRewound((fact.recovery?.lastRung ?? fact.lastRungInPlace)!.relocated ?? []);
     if (e.kind === 'rules' && fact?.refusal?.relocated) return this.onRelocated(fact.refusal.bodies);
+    // #1521 stand-height/2's one-time repair: each Soul stood on its floor is told, and an open act it had ends
+    const stood = (e.payload as {standHeightRepairV2?: {bodies?: {soul?: string}[]}} | null)?.standHeightRepairV2;
+    if (e.kind === 'rules' && stood) for (const soulId of (stood.bodies ?? []).flatMap(b => b.soul ? [b.soul] : [])) {
+      this.pending.delete(soulId);
+      for (const r of this.openReceipts(soulId)) this.update(r.id, {phase: 'failed', code: STOOD_ON_FLOOR.code, reason: STOOD_ON_FLOOR.message});
+      this.comms?.streams.deliver?.(soulId, STOOD_ON_FLOOR.code, this.host.engine.world.tick, {text: STOOD_ON_FLOOR.message});
+    }
     const q = (e.payload as {quarantineV1?: {souls?: string[]; relocated?: string[]}} | null)?.quarantineV1;
     if (e.kind === 'rules' && q) return this.onQuarantined(q.souls ?? [], q.relocated ?? []);
     const nf = (e.payload as {nonFiniteHoldV1?: {souls?: string[]}} | null)?.nonFiniteHoldV1;
@@ -2259,7 +2266,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (plan.stop) {const stepOut = this.stepOutRefusal(soul.entityId); if (stepOut) return {...refuse(stepOut.code, stepOut.reason), ...resolved};}
     if (plan.stop) {const seated = this.rideStandRefusal(soul.entityId, partial && this.aboard(soul.entityId) ? menu().caps : caps); if (seated) return {...refuse(seated.code, seated.reason), ...resolved};}
     if (plan.stop) {
-      await this.stallGuard.ownerStand(soul);   // stall-guard/1 (b): the owner's stand always wins over a stalled holder
+      if (await this.stallGuard.ownerStand(soul) === 'held') return {...refuse('stall.no-floor-spot', 'Nowhere clear on the floor near this body to set it down; it stays where it is.'), ...resolved};   // stall-guard/1 (b): the owner's stand always wins over a stalled holder; #1521: unless the world cannot set it down
       const program = this.host.engine.programOf(soul.entityId), h = this.body(soul.entityId)?.human;
       // A finite sit timer does not own the lasting native seat. Release the real claim,
       // including fixture-param seats, through a strict tracked action rather than edge-stop.

@@ -38,7 +38,7 @@
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
 //   POST /__sim/worlds/<slug>/unlisted the world's owner (signed in, or their own agent's god token): {unlisted: true|false}
-//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token): a 16:9 JPEG as
+//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token) or a signed-in site owner: a 16:9 JPEG as
 //                                the body (thumbnail.mjs), or DELETE to fall back to the template's default; never wakes the world
 //   GET  /__sim/thumbs/<slug>/<sha>.jpg, /__sim/thumbs/_template/<sha>.jpg  the world list's pictures, immutable (#887)
 //   POST /__sim/op/soul-pending|soul-approve|soul-message|soul-inbox|soul-delete, /__sim/op/set-test  operator only: TEST Souls
@@ -531,10 +531,14 @@ export async function openLauncher(cfg = {}) {
   const GONE = [404, { ok: false, code: 'not-found', message: 'this world was archived while the thumbnail was being checked' }];
   async function ownerThumbnail(w, method, readBody, authorization) {
     const gone = () => registry.get(w.slug) !== w || closing.has(w.slug);
-    const a = await quietActorOf(w, authorization);
+    let a = await quietActorOf(w, authorization);
     if (gone()) return GONE;
     if (!a) return [401, { ok: false, code: 'unauthorized', message: "sign in, or use this world's god token", fix: "Run it from the world owner's agent folder (eden-god thumbnail), or send the owner's sign-in." }];
-    if (!isOwner(w, a)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+    // the site admin, by session only (the accounts the health page admits); the audit row tells it from the owner's own change
+    if (!isOwner(w, a)) {
+      if (a.via !== 'session' || !dash.owners().has(a.account)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner or the site admin sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+      a = { ...a, via: 'site-admin' };
+    }
     const wait = thumbRate(w.slug);
     if (wait !== null) return [429, rateRefusal(wait), { 'retry-after': String(wait) }];
     if (method === 'DELETE') {

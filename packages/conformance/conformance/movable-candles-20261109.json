@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 (#1599): core-candle-stand@2 retains all frozen @1 wick/flame/light/contact bytes, adding opt-in two-hand upright transport. Narrow production K=2 across both revisions placed, baked and rendered all 10 samples with zero findings and zero qualification gaps. No budget hold is added; older revisions remain unchanged.",
+  "findings": []
+}

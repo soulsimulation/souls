@@ -15,38 +15,54 @@ import type {DistanceDetailOptions} from './quality-tier.ts';
  * few pixels tall on a phone, yet each of its body parts cost a skinned draw in the shadow pass). The candidate list is rescanned every `rescanFrames` frames. */
 /** PERF-PASSES: a mesh inside a frozen thing (WorldEntityLayer.freeze:
  *  `userData.frozenDrawn` on the thing, with its `frozen` list replaced at every freeze) keeps its world-space centre and
- *  radius in `w` until that list changes: ~5,000 of Eden 2026's 6,000 candidates read and decomposed a matrix a frame. */
-type Ancestor={object:THREE.Object3D;parent?:Ancestor;frame:number;shown:boolean;frozen:unknown};
-type Candidate={mesh:THREE.Mesh;centre:THREE.Vector3;radius:number;ancestor?:Ancestor;w?:{list:unknown;x:number;y:number;z:number;r:number}};
+ *  radius (`wList`, `wx..wr`) until that list changes or the next rescan: ~5,000 of Eden 2026's 6,000 candidates read and decomposed a matrix a frame. */
+type Ancestor={object:THREE.Object3D;parent?:Ancestor;frame:number;scan:number;shown:boolean;frozen:unknown};
+/** `wList` (the freeze list the cached sphere belongs to, else undefined) and `wx..wr` are the cached world sphere, kept
+ *  in the candidate's own fields: a new object per refreeze or per rescan was most of this pass's remaining churn. */
+type Candidate={mesh:THREE.Mesh;centre:THREE.Vector3;radius:number;ancestor?:Ancestor;wList:unknown;wx:number;wy:number;wz:number;wr:number};
 type FrozenMark={frozen?:unknown};
 const tmpBody=new THREE.Vector3();
 export class WorldDistanceDetail{
  private candidates:Candidate[]=[];private bodies:THREE.SkinnedMesh[]=[];private frame=0;private hidden:(THREE.Mesh|null)[]=[];private noShadow:(THREE.Mesh|null)[]=[];private hiddenCount=0;private noShadowCount=0;
- private ancestorTrail:(Ancestor|null)[]=[];
+ private ancestorTrail:(Ancestor|null)[]=[];private scanTrail:(THREE.Object3D|null)[]=[];private scans=0;
+ private known=new WeakMap<THREE.Mesh,Candidate>();private ancestors=new WeakMap<THREE.Object3D,Ancestor>();
  private world=new THREE.Vector3();private sphere=new THREE.Sphere();
  /** Last apply(): meshes not drawn, casters skipped, candidates considered, CPU ms. */
  readonly stats={culled:0,shadowSkipped:0,candidates:0,bodyShadowsSkipped:0,cpuMs:0};
  private o:DistanceDetailOptions;
  constructor(o:DistanceDetailOptions){this.o=o;}
+ /** P2 phones: a rescan reuses each mesh's candidate and each object's ancestry record (weakly keyed, so a removed
+  *  mesh is not held) and refills the same arrays: rebuilding them was ~2.3 MB per rescan at Eden 2026's 6,000 candidates.
+  *  Ancestry is rebuilt each scan as before (a reparented mesh gets its new chain); only the records are reused. */
  private scan(root:THREE.Object3D){
-  this.candidates=[];this.bodies=[];
-  // Keep the scan's ancestry, as before; share its suffixes between sibling meshes. The memo is owned by these
-  // candidates and replaced at the next scan. Visibility and the nearest freeze marker are reread each apply.
-  const ancestors=new Map<THREE.Object3D,Ancestor>(),trail:THREE.Object3D[]=[];
+  const scan=++this.scans,candidates=this.candidates,bodies=this.bodies,known=this.known,ancestors=this.ancestors,trail=this.scanTrail;
+  let n=0,b=0;
   const ancestor=(o:THREE.Object3D|null):Ancestor|undefined=>{
-   while(o&&o!==root&&!ancestors.has(o)){trail.push(o);o=o.parent;}
-   let parent=o&&o!==root?ancestors.get(o):undefined;
-   while(trail.length){const object=trail.pop()!;parent={object,parent,frame:-1,shown:true,frozen:undefined};ancestors.set(object,parent);}return parent;
+   let t=0,a:Ancestor|undefined;
+   while(o&&o!==root&&!((a=ancestors.get(o))&&a.scan===scan)){trail[t++]=o;o=o.parent;}
+   let parent=o&&o!==root?a:undefined;
+   while(t>0){
+    const object=trail[--t]!;trail[t]=null;let rec=ancestors.get(object);
+    if(rec){rec.parent=parent;rec.scan=scan;}else{rec={object,parent,frame:-1,scan,shown:true,frozen:undefined};ancestors.set(object,rec);}
+    parent=rec;
+   }
+   return parent;
   };
   root.traverse(obj=>{
    const m=obj as THREE.Mesh;
-   if(m.isMesh&&(m as THREE.SkinnedMesh).isSkinnedMesh&&!m.userData.keepDetail){this.bodies.push(m as THREE.SkinnedMesh);return;}
+   if(m.isMesh&&(m as THREE.SkinnedMesh).isSkinnedMesh&&!m.userData.keepDetail){bodies[b++]=m as THREE.SkinnedMesh;return;}
    if(!m.isMesh||(m as THREE.SkinnedMesh).isSkinnedMesh||!m.frustumCulled||m.userData.keepDetail)return;
    const im=m as THREE.InstancedMesh;
    if(im.isInstancedMesh){if(!im.boundingSphere)im.computeBoundingSphere();if(!im.boundingSphere)return;this.sphere.copy(im.boundingSphere);}
    else{const g=m.geometry;if(!g)return;if(!g.boundingSphere)g.computeBoundingSphere();if(!g.boundingSphere||!Number.isFinite(g.boundingSphere.radius))return;this.sphere.copy(g.boundingSphere);}
-   this.candidates.push({mesh:m,centre:this.sphere.center.clone(),radius:this.sphere.radius,ancestor:ancestor(m.parent)});
+   let c=known.get(m);
+   if(!c){c={mesh:m,centre:this.sphere.center.clone(),radius:this.sphere.radius,ancestor:undefined,wList:undefined,wx:0,wy:0,wz:0,wr:0};known.set(m,c);}
+   // As a fresh candidate did: the scan's local sphere, and no cached world sphere until the next apply computes it.
+   else{c.centre.copy(this.sphere.center);c.radius=this.sphere.radius;c.wList=undefined;}
+   c.ancestor=ancestor(m.parent);candidates[n++]=c;
   });
+  // Shorten only when the scene shrank (rare); the arrays keep their store otherwise.
+  if(candidates.length!==n)candidates.length=n;if(bodies.length!==b)bodies.length=b;
  }
  private ancestorState(a:Ancestor):Ancestor{
   if(a.frame===this.frame)return a;
@@ -75,14 +91,14 @@ export class WorldDistanceDetail{
    const ancestor=c.ancestor&&this.ancestorState(c.ancestor);if(ancestor&&!ancestor.shown)continue;
    const frozen=ancestor?.frozen;
    let r:number,d:number;
-   if(frozen!==undefined&&c.w&&c.w.list===frozen){const w=c.w;r=w.r;d=Math.sqrt((w.x-cam.x)**2+(w.y-cam.y)**2+(w.z-cam.z)**2)-r;}
+   if(frozen!==undefined&&c.wList===frozen){r=c.wr;d=Math.sqrt((c.wx-cam.x)**2+(c.wy-cam.y)**2+(c.wz-cam.z)**2)-r;}
    else{
     // An instanced pool's sphere moves and resizes between scans (EntityInstancer.updateBounds): its things move, and a pool
     // all at scale 0 (kept in a shut drawer, a cut interior) has radius 0. Read it now: a scan's copy of that radius would cull the pool until the next scan.
     const live=(m as THREE.InstancedMesh).isInstancedMesh?(m as THREE.InstancedMesh).boundingSphere:null;if(live){c.centre.copy(live.center);c.radius=live.radius;}
     const e=m.matrixWorld.elements,scale=Math.sqrt(Math.max(e[0]*e[0]+e[1]*e[1]+e[2]*e[2],e[4]*e[4]+e[5]*e[5]+e[6]*e[6],e[8]*e[8]+e[9]*e[9]+e[10]*e[10]));
     const w=this.world.copy(c.centre).applyMatrix4(m.matrixWorld);r=c.radius*scale;d=w.distanceTo(cam)-r;
-    if(frozen!==undefined)c.w={list:frozen,x:w.x,y:w.y,z:w.z,r};else c.w=undefined;
+    c.wList=frozen;c.wx=w.x;c.wy=w.y;c.wz=w.z;c.wr=r;
    }
    if(d<=0)continue;
    if(r*pxPerUnit/d<this.o.minRadiusPx){m.visible=false;this.hidden[this.hiddenCount++]=m;culled++;continue;}
@@ -103,5 +119,5 @@ export class WorldDistanceDetail{
   for(let i=0;i<this.noShadowCount;i++){noShadow[i]!.castShadow=true;noShadow[i]=null;}
   this.hiddenCount=0;this.noShadowCount=0;
  }
- dispose(){this.restore();this.candidates=[];this.bodies=[];this.hidden=[];this.noShadow=[];}
+ dispose(){this.restore();this.candidates=[];this.bodies=[];this.hidden=[];this.noShadow=[];this.known=new WeakMap();this.ancestors=new WeakMap();}
 }
