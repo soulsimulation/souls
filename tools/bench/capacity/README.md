@@ -47,6 +47,9 @@ processes, ~2 GB RSS, outside the slice.
 node tools/bench/capacity/bench.mjs --root "$PWD" --fixture genesis:eden-2026 --out .local/bench/clients/local-<sha> [--short]
 ```
 
+`--world-env K=V[,K=V]` adds env to the world process on a direct boot (for example `SIM_PLAN_ONCE=0` for an arm with
+plan-once off, or `SIM_PLAN_ONCE_ORACLE=1` to check every plan-once reuse under load; see the engine contract).
+
 `genesis:<template>` boots a fresh world from `worlds/templates/<template>.json` (no history, no real Souls), so it is
 lighter than a compact copy of the live world.
 
