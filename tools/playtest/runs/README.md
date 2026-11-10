@@ -38,7 +38,7 @@ flags (`--scenario`, `--cast`, `--port`, `--duration`, `--name`).
 | `name` | scenario name | Run name in the run directory. |
 | `cast` | `scenario` | `scenario` runs its seats; `none` removes seats, god and their script events (world, director, observer and review only); an object `{seats, script}` replaces the scenario's seats and/or scripted direction, each in the scenario's own format (see Composed casts). |
 | `world.port`, `world.slug` | scenario's | Use a free port; a busy port is refused, never taken over. |
-| `world.timeOfDay`, `world.timeScale` | `12`, `0` | The world's time of day (hours 0-24, `"HH:MM"`, `"7pm"`) and clock speed (world hours per real hour; `0` pauses it), set through the god env route (`POST /v1/god/env` as the dev owner) right after provision, before any seat or camera, so every clip of the run is by day. `"keep"` leaves the world's own clock (06:00 at boot, one world day per real hour). The receipt's `worldTime` has what was asked and the clock the world reported; a clock that could not be set is recorded there and the run goes on. |
+| `world.timeOfDay`, `world.timeScale` | `12`, `0` | The world's time of day (hours 0-24, `"HH:MM"`, `"7pm"`) and clock speed (world hours per real hour; `0` pauses it), set through the god env route (`POST /v1/god/env` as the dev owner) right after provision, before any seat or camera, so every clip of the run is by day. `"keep"` leaves the world's own clock (real time in its zone; a set hour or speed puts a dev world on the dev-only accelerated clock, #1649). The receipt's `worldTime` has what was asked and the clock the world reported; a clock that could not be set is recorded there and the run goes on. |
 | `world.genesis` or `world.snapshot` | scenario's | World source: a genesis template or a frozen compiler snapshot (`arena/snapshot-seed.mjs`), a path under the server root. Its sha256 is in the receipt (`spec.effective.world.source`). |
 | `setup` | none | `{batches: [file or {id, ops, note}], maxWallSec: 120}`: god-edit batches applied after provision and before any seat (see Setup). |
 | `durationSec` | scenario's | Play duration override. |
@@ -168,12 +168,25 @@ sha256, never copied; seat working folders (owner identity, credentials) and wor
 - **Standard measures** keep their own family, unit, n, denominator and basis: `request-latency` (owner card to the
   seat's ack and result calls, and the director's own open time), `physical-completion` (receipt phases the world
   returned to the seat's act calls: completed, ongoing such as seated, or started and not observed to end),
-  `seat-claims` (result calls, which are claims), `observed-walking-speed` and the review oracles (only from the
-  observer's evidence packs, through `review/metrics.mjs`), `tick-timing`, `token-cost`, `lifecycle` and, for directed
+  `seat-claims` (result calls, which are claims), `observed-walking-speed`, `observed-physical` and the review oracles
+  (only from the observer's evidence packs, through `review/metrics.mjs`), `tick-timing`, `token-cost`, `lifecycle` and, for directed
   casts, `direction` (the `directions` measure: the journal's commands by command and outcome, and each redirection
   with its target, run-relative time, outcome and whether the target spoke afterwards). Emergence
   numbers are labelled `social-heuristic`. A measure without its source is `unavailable` with the reason, never 0
   (for example no seat transcript after `controllerState: "delete"`, or no evidence packs while the observer failed).
+- **Walk measures read world truth.** `walkArrivalRate` follows each walk request's receipt (the seat's act output,
+  else a receipt accepted in the request window) to its last phase anywhere in the run: completed inside the chosen
+  place is an arrival, failed or replaced is not, and a receipt never seen ending is unknown and left out. It is not
+  the at-cutoff `arrival` oracle (a directed request is cut off by the next direction, usually before a walk ends);
+  that count is kept in the basis. `walkMps` is one speed per distinct walk receipt, over world ticks from
+  `firstMotionTick` (when the receipt has it) or `startedTick` to `endedTick`, using the seat's samples from every pack
+  and the receipt's end point, in world seconds at the world's fixed 50 ms tick (not a rate read off wall time, which
+  drifts when the server falls behind); the basis counts which start tick was used.
+- **Owner requests** come from the persona director's `personas/<seat>/decisions.jsonl`. A directed cast has none: its
+  cards are the lines of `director/directions.jsonl` that carry a `requestId` and `messageId` (gather, prepare, go and
+  console redirects alike), and each request's reference points at its line there. Either way they are joined with
+  the seat's transcript and its `personas/<seat>/requests.jsonl` cutoffs. With no requests to join, the
+  physical-completion measures are unavailable, not 0.
 - **Questions** are small named scorer modules (`questions/*.mjs`, default export `{id, version, question,
   assumptions, score(ctx)}`) answering `pass`, `fail` or `unknown` with evidence references and stated uncertainty.
   `ctx` holds the joined requests (director record plus the seat's ack, act, say and result calls), each seat's CLI
