@@ -28,7 +28,7 @@ test('event sets: a Soul finds the market in the map and whatson, walks to it an
       schedule: { events: [{ name: 'market', label: 'Market morning', at: '09:00', minutes: 240, set: [...stalls, { def: 'core/banner@1', p: [0, -4], state: { text: 'Market morning' } }] }] } },
   ] }, 'a square with a market morning');
   assert.equal(r.accepted, true, JSON.stringify(r));
-  const time = (hour: number, n: number) => { const x: any = god.act({ ops: [{ op: 'world', state: { time: { set: { hour, n } } } }] }, `time ${hour}`); assert.equal(x.accepted, true, JSON.stringify(x)); };
+  const time = (hour: number, n: number) => { const x: any = god.act({ ops: [{ op: 'world', state: { time: { set: { hour, n }, clock: 'accelerated' } }   /* #1649: a set hour is the dev-only accelerated clock */ }] }, `time ${hour}`); assert.equal(x.accepted, true, JSON.stringify(x)); };
   const clock = () => bridge.layers.clock()!;
 
   time(8, 1); await settle(4);

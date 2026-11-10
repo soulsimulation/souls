@@ -46,7 +46,7 @@ const folder = (url, on) => {
   if (on) writeFileSync(join(d, '.eden-record-on'), '');
   return d;
 };
-const recordText = (d) => { const dir = join(d, '.eden-record'); return existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(join(dir, f), 'utf8')).join('') : ''; };
+const recordText = (d) => { const dir = join(d, '.eden-record'); return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.jsonl')).map((f) => readFileSync(join(dir, f), 'utf8')).join('') : ''; };
 const records = (d) => recordText(d).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 const until = async (ok) => { for (let i = 0; i < 50 && !ok(); i++) await new Promise((r) => setTimeout(r, 100)); };
 const SCRIPT = [['help'], ['version'], ['here'], ['status'], ['act', 'walk:yes', '--for', 'none'], ['act', 'walk:no', '--for', 'none'], ['receipt', 'r_1'], ['bogus-command'], ['note', 'a', 'b']];
@@ -78,6 +78,7 @@ test('on: commands and world calls are kept with their content, ids and times, a
     assert.ok(!/bearer/i.test(raw) && !raw.includes('abcdefghijklmnop'), 'no authorization header and no credential by key');
     assert.ok(raw.includes('PLANTEDSPEECH'), 'content is kept');
     assert.ok(rows.every((r) => r.v === 'soul-trace/2'));
+    assert.equal(readFileSync(join(d, '.eden-record', '.gitignore'), 'utf8'), '*\n', 'a Soul folder in a repository never commits its record');
     const starts = rows.filter((r) => r.kind === 'proc.start'), ends = rows.filter((r) => r.kind === 'proc.end');
     assert.equal(starts.length, 3); assert.equal(ends.length, 3);
     assert.deepEqual(starts[2].argv, ['walk:yes', '--for', 'none']); assert.equal(starts[2].command, 'act');

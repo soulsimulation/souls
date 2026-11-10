@@ -68,7 +68,7 @@ test('a session collected: records, serve log, this folder\'s transcripts only, 
   const s = await session();
   try {
     const out = join(s.base, 'bundle');
-    const { out: r, err } = await quiet(() => collect(parseArgs([s.folder, '--out', out, '--claude-dir', s.claude, '--transcript', join(s.base, 'codex-mine.jsonl'), '--transcript', join(s.base, 'codex-other.jsonl')])));
+    const { out: r, err } = await quiet(() => collect(parseArgs([s.folder, '--out', out, '--claude-dir', s.claude, '--transcript', join(s.base, 'codex-mine.jsonl'), '--transcript', join(s.base, 'codex-other.jsonl'), '--transcript', join(s.base, 'missing.jsonl')])));
     assert.equal(r.transcripts, 3, 'this session, its subagent and the named Codex session');
     const m = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'));
     assert.equal(m.private, true); assert.equal(m.schema, 'soul-session-bundle/1');
@@ -83,6 +83,7 @@ test('a session collected: records, serve log, this folder\'s transcripts only, 
     assert.ok(all.includes('walk Ada to the mill') && all.includes('find the mill id'), 'the owner\'s chat and the reasoning');
     assert.ok(m.secrets.replaced >= 2, 'the transcript\'s and the serve log\'s token replaced and counted');
     assert.match(err, /codex-other\.jsonl: its recorded working directory is not the collected folder/);
+    assert.match(err, /missing\.jsonl: no such file/);
     const ends = JSON.parse(readFileSync(join(out, 'world/end-states.json'), 'utf8'));
     assert.equal(ends.receipts.r_1.body.receipt.phase, 'completed'); assert.equal(ends.receipts.r_1.body.auth, true);
     assert.equal(ends.messages.m_1.body.message.state, 'closed');

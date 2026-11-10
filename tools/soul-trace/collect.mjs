@@ -109,7 +109,7 @@ export function findTranscripts({ cwd, since, until, claudeDirs, named }) {
     found.push({ file, origin, ...f });
     return true;
   };
-  for (const file of named) take(resolve(file), 'named');
+  for (const file of named) { if (existsSync(resolve(file))) take(resolve(file), 'named'); else skipped.push({ file, why: 'no such file (give the path to the harness\'s session .jsonl)' }); }
   for (const dir of claudeDirs) {
     const project = join(dir, 'projects', claudeProject(cwd));
     searched.push(project);
@@ -141,6 +141,8 @@ const README = (m) => `# A recorded Soul session (private)
 This folder holds one Soul session as separate records, each copied untouched apart from any token, which is replaced
 with \`[omitted]\`. It is **private**: it holds the owner's chat, the agent's reasoning and local paths. Do not attach
 it, or anything quoted from it, to an issue, a pull request or a proof. Write findings in your own words.
+A transcript may also hold single-use pairing or window codes the owner typed; they are not replaced. When the folder is
+a Souls home, its transcripts cover every Soul the agent drove there in the window, not only this one.
 
 Soul: ${m.soul.name ?? m.soul.id} in world ${m.soul.world ?? 'unknown'}, collected from the folder the agent ran in
 (\`folder\` in the manifest) at ${m.collectedAt}. Window searched for transcripts: ${new Date(m.window.since).toISOString()}

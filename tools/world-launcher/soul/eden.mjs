@@ -2216,6 +2216,7 @@ function recordInit(cmd, args) {
     rec.proc = randomBytes(8).toString("hex"); rec.start = performance.now(); rec.wall = Date.now();
     rec.dir = resolvePath(RECORD_DIR);   // a command that moves to another folder later still writes here
     mkdirSync(rec.dir, { recursive: true, mode: 0o700 });
+    if (!existsSync(joinPath(rec.dir, ".gitignore"))) writeFileSync(joinPath(rec.dir, ".gitignore"), "*\n", { mode: 0o600 });   // a Soul folder inside a repository never commits its record
     try { const s = load(); recordSecret(s.token); recordSecret(s.identity); recordSecret(s.home?.token); } catch {}
     rec.quiet = !cmd || RECORD_QUIET.has(cmd);
     recordRoll(rec.dir);
@@ -2415,7 +2416,7 @@ export const STALL_CODES = new Set(["unavailable", "world.unavailable", "world-u
 export const isStalled = (status, data) => status >= 500 && STALL_CODES.has(codeOf(data));
 export const stallRetries = (cls, data, once) => cls === "read" || (cls === "keyed" && (once || codeOf(data) === "world-unavailable"));
 // Writes the world deduplicates by Idempotency-Key (apps/server/src/edge/events/idempotency.ts) — the only writes that retry.
-const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+)$/;
+const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+|inbox\/[^/]+\/(ack|result))$/;   // #1753: ack and result are retried with one key until answered: the world does not read the key there, they are safe to repeat because a repeat is answered from the message's state
 const READ_POSTS = /^\/v1\/edge\/resolve$/;
 /** "read" (safe to repeat), "keyed" (a write the world deduplicates by key) or "none" (never repeated). */
 export function retryClass(method, path) {
@@ -3195,10 +3196,13 @@ async function syncLive({ force = false } = {}) {
   } catch { return mine ? { ...mine, stale: true } : null; }
 }
 /** The catalog's lookups, the live picture and this Soul in it. A catalog the world has replaced is fetched first. */
-async function worldCopy() {
-  const s = load(), live = await syncLive();
+/** `local` (#1753, a wake): what is on disk only, never a call; null when there is no copy of this world yet. */
+async function worldCopy({ local = false } = {}) {
+  const s = load(), live = local ? (readJsonFile(LIVE_FILE)?.world === s.world ? readJsonFile(LIVE_FILE) : null) : await syncLive();
   let have = readJsonFile(CATALOG_FILE), note;
-  if (catalogOld(have, s.world, live)) { const c = await syncCatalog(); note = c.stale; have = c; CATALOG_IX = null; }
+  if (local && (!have?.catalog || have.world !== s.world)) return null;
+  if (!local && catalogOld(have, s.world, live)) { const c = await syncCatalog(); note = c.stale; have = c; CATALOG_IX = null; }
+  if (CATALOG_IX && CATALOG_IX.etag !== have.etag) CATALOG_IX = null;   // a long listen --follow sees the copy serve replaced
   CATALOG_IX ??= { etag: have.etag, ix: soulCatalog.indexCatalog(have.catalog) };
   const me = live?.live?.souls?.find((x) => x.id === s.soul) ?? null;
   if (me && !me.at) delete me.at;
@@ -3243,8 +3247,8 @@ async function queryCommand(...args) {
   return { answers: soulCatalog.query(ix, questions, { at: me?.at, ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
 }
 // look: where this Soul is, what can be done there, who is near, who is elsewhere, and what was said lately. From disk.
-async function look() {
-  const { ix, live, me, note } = await worldCopy(), s = load();
+async function look(copy) {
+  const { ix, live, me, note } = copy?.ix ? copy : await worldCopy(), s = load();   // #1753: a wake passes the copy it read
   const far = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1])), souls = (live?.live?.souls ?? []).filter((x) => x.id !== s.soul);
   const placeName = (id) => ix.place(id)?.name ?? id;
   const near = me?.at ? souls.filter((x) => x.at).map((x) => ({ ...x, metres: far(me.at, x.at) })).filter((x) => x.metres <= NEARBY_METRES).sort((a, b) => a.metres - b.metres) : [];
@@ -3497,6 +3501,12 @@ async function act(...argv) {
   const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
   // a stop serves no owner message unless named, so it leaves the implicit link for the next act (#1448 review)
   if (d.accepted && parsed.capability !== STOP_ID) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
+  // #1753: an act sent --for a message is its acknowledgement (the world acks it on the link); an ack sent later changes nothing
+  if (d.accepted && d.for && !implicit) {
+    servedBy(d.for);
+    // a message of several steps this act began stays open (`open`): the next act serves it by default, as after an ack (D3c)
+    if (d.open) save({ lastAcked: d.for, lastAckedAt: now(), lastAckedActed: undefined });
+  }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
@@ -3997,13 +4007,16 @@ async function listen(...args) {
     let d;
     try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
     attempt = 0; lastCode = undefined; superseded = 0;
-    const messages = messagesOf(d).filter((m) => m.id !== after), brief = messages.length || d.addressed?.length || d.plan ? briefNow() : {};
-    heard(messages);
+    const messages0 = messagesOf(d).filter((m) => m.id !== after), brief = messages0.length || d.addressed?.length || d.plan ? briefNow() : {};
+    heard(messages0);
+    // #1753: a wake carries what the agent needs to act at once: where it is, from the local copy, and each message's candidate ids
+    const { messages, look: here } = messages0.length ? await wakeContext(messages0) : { messages: messages0 };
+    const seen = here ? { look: here } : {};
     const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
     if (follow) {
       if (messages.length || d.addressed?.length || d.plan) {
-        emit({ messages, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older,
-          next: messages.length ? `ack each (ack <id> "Got it: …"), then do them in order; result <id> done|failed "…" unless the answer says closed. This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" });
+        emit({ messages, ...seen, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older,
+          next: messages.length ? `${WAKE_NEXT} This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" });
         if (messages.length) after = messages.at(-1).id;
       }
       await sleep(50);
@@ -4012,10 +4025,62 @@ async function listen(...args) {
     if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...brief, ...older, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
+      return { messages, ...seen, ...brief, ...older, next: messages.length ? `Restart listen --after ${messages.at(-1).id} in the background. ${WAKE_NEXT}` : "nothing waiting" };
     }
     await sleep(50);
   }
+}
+
+/** #1753: what a wake says to do: one call per message, which acknowledges, serves and closes it. */
+const WAKE_NEXT = `Do each in order with one call, no ack first: ${CLI} act <id> --for <message id> --wait (a row of its found, or from look) acknowledges, serves and closes it; several steps: plan '["<id>","<id>"]' --for <message id>; speech: say "…" --for <message id>; an answer or a no: ack <message id> "…" --close done|failed.`;
+/** #1753: the wake's look: the local copy only, at most WAKE_LOOK_BYTES of JSON (about 400 tokens); its least needed parts go first. */
+export const WAKE_LOOK_BYTES = 1600, WAKE_FOUND = 4;
+const WAKE_RELATION = new Set(["near", "by", "beside", "around", "in", "inside", "at"]);
+export function wakeLook(full, max = WAKE_LOOK_BYTES) {
+  if (!full?.me?.name) return null;
+  const h = full.here, cut = (t, n) => (String(t ?? "").length > n ? String(t).slice(0, n - 1) + "…" : t);
+  let o = { at: full.me.path?.join(" > ") ?? full.me.place, doing: full.me.doing,
+    ...(h ? { here: { id: h.id, ...(h.canDo ? { canDo: Object.fromEntries(Object.entries(h.canDo).map(([v, c]) => [v, c.nearest ?? c])) } : {}), ...(h.things ? { things: h.things } : {}) } } : {}),
+    ...(full.onTheSpot ? { onTheSpot: full.onTheSpot } : {}),
+    ...(full.near?.length ? { near: full.near.slice(0, 6).map((x) => ({ name: x.name, metres: x.metres, doing: x.doing })) } : {}),
+    ...(full.said?.length ? { said: full.said.slice(-3).map((x) => ({ who: x.who, text: cut(x.text, 120) })), saidNote: full.saidNote } : {}) };
+  if (full.asOf) o.secondsOld = full.asOf.secondsAgo;
+  const size = () => JSON.stringify(o).length;
+  for (const k of ["said", "near", "things", "here"]) if (size() > max) { if (k === "things") { if (o.here) { const { things: _t, ...rest } = o.here; o = { ...o, here: rest }; } } else { const { [k]: _x, ...rest } = o; o = rest; if (k === "said") delete o.saidNote; } }
+  return size() > max ? { at: o.at, doing: o.doing, ...(o.secondsOld !== undefined ? { secondsOld: o.secondsOld } : {}) } : o;
+}
+/** #1753: a message's candidate ids from `find`, read as an owner writes: each clause ("…, then …", "… and …") on its own,
+ *  with the words the catalog knows nothing of ("please", "could you") left out. Rows with an act only, at most WAKE_FOUND. */
+export function wakeFound(find, tokensOf, text) {
+  const known = new Map(), knows = (w) => { if (!known.has(w)) known.set(w, find(w).length > 0); return known.get(w); };
+  const rows = [], seen = new Set(), clauses = String(text ?? "").slice(0, 200).split(/\s*(?:[,;.!?]|\band then\b|\bthen\b|\band\b)\s*/i).filter((c) => c.trim());
+  const each = clauses.length > 1 ? 2 : WAKE_FOUND;
+  let anchor = null;   // "go to the library and read a book": the place an earlier clause named is where a later one happens
+  for (const clause of clauses) {
+    // "by the pond" keeps its relation word, so find reads the thing and its anchor
+    const words = clause.toLowerCase().split(/[^a-z0-9]+/).filter((w) => WAKE_RELATION.has(w) || (tokensOf(w).length && knows(w)));
+    let found = anchor && words.length && !words.some((w) => WAKE_RELATION.has(w)) ? find(`${words.join(" ")} in ${anchor}`) : [];
+    // "sit bench by pond": a word no row carries with the others ("sit") goes, first word first
+    if (!found.length) while (words.length && !WAKE_RELATION.has(words[0]) && !(found = find(words.join(" "))).length) words.shift();
+    if (found[0]?.act?.startsWith("walk:")) anchor = words.filter((w) => !WAKE_RELATION.has(w)).join(" ");
+    let n = 0;
+    for (const r of found) {
+      if (!r.act || seen.has(r.act) || n >= each) continue;
+      seen.add(r.act); n++;
+      rows.push({ act: r.act, ...(r.label ?? r.name ? { what: String(r.label ?? r.name).slice(0, 80) } : {}), ...(r.in ? { in: r.in } : {}), ...(r.metres !== undefined ? { metres: r.metres } : {}) });
+    }
+  }
+  return rows.slice(0, WAKE_FOUND + 2);
+}
+/** Each message with the local `find` rows for its words (candidates the agent chooses from, not a reading of them), and the look. */
+async function wakeContext(messages) {
+  try {
+    const copy = await worldCopy({ local: true });   // serve keeps it current; a wake never waits on the world for it
+    if (!copy) return { messages };
+    const { ix, me } = copy, full = await look(copy);
+    const found = (text) => wakeFound((words) => soulCatalog.find(ix, words, { at: me?.at, limit: WAKE_FOUND }).found, soulCatalog.tokensOf, text);
+    return { messages: messages.map((m) => { const f = found(m.text); return f.length ? { ...m, found: f } : m; }), look: wakeLook(full) };
+  } catch (e) { calm(`wake: ${e.message}`); return { messages }; }
 }
 
 /** #1359: one --follow line fits a notification: at most FOLLOW_MAX characters. A plan is cut to its state and the refused
@@ -4031,8 +4096,10 @@ export function followLine(line, max = FOLLOW_MAX) {
   }
   const drop = (...keys) => { if (size(o) > max && keys.some((k) => o[k] !== undefined)) { const n = { ...o }; for (const k of keys) delete n[k]; o = { ...n, [`${keys[0]}Omitted`]: true }; } };
   drop("brief"); drop("stillOpen", "stillOpenNext");
+  if (size(o) > max && o.messages?.some((m) => m.found)) o = { ...o, messages: o.messages.map(({ found: _f, ...m }) => m), foundOmitted: true };
+  drop("look");
   for (const k of ["addressed", "messages"]) while (size(o) > max && o[k]?.length > 1) o = { ...o, [k]: o[k].slice(1), [`${k}Omitted`]: (o[`${k}Omitted`] ?? 0) + 1 };
-  if (o.messagesOmitted) o = { ...o, next: `${o.messagesOmitted} older message${o.messagesOmitted > 1 ? "s" : ""} did not fit this line: run ${CLI} listen --once for them all, then ack each. ${o.next ?? ""}`.trim() };
+  if (o.messagesOmitted) o = { ...o, next: `${o.messagesOmitted} older message${o.messagesOmitted > 1 ? "s" : ""} did not fit this line: run ${CLI} listen --once for them all. ${o.next ?? ""}`.trim() };
   for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => (String(m.text ?? "").length > 80 ? { ...m, text: String(m.text).slice(0, 80) + "…", textShortened: true } : m)) };
   if (size(o) > max && typeof o.next === "string") o = { ...o, next: o.next.slice(0, Math.max(40, o.next.length - (size(o) - max) - 1)) + "…" };
   return o;
@@ -4052,11 +4119,14 @@ async function ack(id, ...rest) {
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
+  // #1753: an act or plan sent --for this message acknowledged it already: a reply now would reach nothing, so nothing is sent
+  if (!close && ((load().served ?? []).includes(id) || (await planActed(id)))) return { acked: id, already: "an act sent --for this message acknowledged it; nothing more to send", ...(await stillOpen([id])) };
   const before = load().heard, seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
   if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id], { before, closed: true })) };
   if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id], { before, closed: !!shut.already })) };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
-  if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
+  // D3: the next act serves this message (act --for); --close expects none, and #1753: neither does one an act already serves
+  if (!close && !(load().served ?? []).includes(id)) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });
   return { ...said, ...d, ...shut, ...(await stillOpen([id])) };
 }
 
@@ -4076,6 +4146,14 @@ export function heardWith(record, messages, max = HEARD_MAX) {
   for (const m of messages ?? []) if (m?.id && !out.some((h) => h.id === m.id)) out.push({ id: m.id, text: firstWords(m.text), batch });
   return out.slice(-max);
 }
+/** #1753: whether serve's plan for this message has had a step's act accepted (the world acknowledged the message then). */
+async function planActed(id) {
+  if (!existsSync(SERVE_SOCK)) return false;
+  const a = await askServe({ op: "planStatus" }), p = a && !a.lost ? a.plan : null;
+  return p?.for === id && (p.steps ?? []).some((st) => st.receipt);
+}
+/** #1753: the messages an act sent --for already serves (newest last): an ack of one is answered and links nothing. */
+function servedBy(id) { const t = load(); save({ served: [...(t.served ?? []).filter((x) => x !== id), id].slice(-HEARD_MAX), ...(t.lastAcked === id ? { lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined } : {}) }); }
 function heard(messages) { if (messages?.length) save({ heard: heardWith(load().heard, messages) }); }
 function unheard(ids) { const h = load().heard ?? [], keep = h.filter((x) => !ids.includes(x.id)); if (keep.length !== h.length) save({ heard: keep }); }
 const STILL_OPEN_NEXT = 'older, still open, nothing running for them: once each is finished or dropped, result <id> done|failed "…"';
@@ -4300,9 +4378,11 @@ and verify it has exited first, preserving its paired folder and journal. Pairin
 alone does not identify the active controller. If ownership is unclear, establish it before acting.
 
 **Start of every thin-controller chat here (when no managed controller owns this Soul):** run \`${CLI} status\`, then start listening to my messages from the web page in the
-background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits when I write; ack each message
-(\`${CLI} ack <id> "Got it: …"\`), restart \`${CLI} listen --after <last id>\` in the background first, then do what
-I asked, then \`${CLI} result <id> done|failed "<what happened>"\` unless the answer says \`closed: true\`.
+background: \`${CLI} listen\` (Claude Code: Bash run_in_background; under Monitor, one \`${CLI} listen --follow\`). It exits when I write,
+carrying each message, \`found\` ids for its words and a \`look\` at where you are. Restart \`${CLI} listen --after <last id>\` in the
+background first, then do what I asked in one call, with no ack first: \`${CLI} act <id> --for <message id> --wait\` acknowledges,
+serves and closes the message (several steps: \`${CLI} plan '["<id>","<id>"]' --for <message id>\`; an answer or a no:
+\`${CLI} ack <message id> "…" --close done|failed\`).
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
 from \`find "<words>"\` and \`look\`, which read this machine's copy of the world and cost no call (send a row's \`act\`); a nearby thing's own offers are in \`here\` and \`inspect <id>\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
@@ -4812,6 +4892,11 @@ async function serveForeground() {
       if (inboxWrite) {
         const x = st.messages.find((y) => y.id === decodeURIComponent(inboxWrite[1]));
         if (x) { x.acked = true; if (inboxWrite[2] === "result") x.closed = true; persist(); }
+      }
+      // #1753: an accepted act linked to a message is its acknowledgement (the world acked it), so no listen hands it over again
+      if (p === "/v1/edge/act" && r.data?.accepted === true && r.data.for) {
+        const x = st.messages.find((y) => y.id === r.data.for);
+        if (x && !x.acked) { x.acked = true; persist(); }
       }
     }
     return r;
