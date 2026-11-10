@@ -353,6 +353,13 @@ The Mars engine is hard-forked under `mars/viewer/engine`. `load.ts` imports tha
 - **One program per actor.** A program that moves the body first asks whatever holds it (a seat, a circle, a
   conversation) to release it, and fails with `actor.busy` if that takes too long. Feasibility is checked first
   (`canPerform`) because in Mars a refused instruction still disturbs the actor.
+- **Plan once (#1770).** The adapter's engines keep route results per navigation epoch (`Spatial.routeMemo`: bounded,
+  emptied when the epoch moves, never for predicate options), so an act's admission check, the tick's `perform` and the
+  walk's start search each leg once. A route is a pure function of the epoch's grids and its inputs, so a reuse equals a
+  fresh search; anything that changes what a walk may cross moves the epoch first. The edge ledger likewise reuses the
+  strict gate's offer for the act in the same synchronous turn. `SIM_PLAN_ONCE=0` turns both off;
+  `SIM_PLAN_ONCE_ORACLE=1` compares every reuse with a fresh computation and logs `[plan-once-oracle]` on a difference.
+  The viewer's engine does not keep routes.
 - **Broadcast.** Moving bodies send two-point keyframe paths every 5 ticks; activity and seat changes are field changes.
 - **Snapshot** format `sim-mars-snapshot/1`: Mars's own snapshot plus the adapter's programs and world configuration.
   A program whose actions cannot be serialized defers the checkpoint; replay of the logged suffix continues it.

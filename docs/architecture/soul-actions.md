@@ -7,6 +7,10 @@ change is part of the world: it survives a restart, and every visitor sees the s
 This page covers Soul Actions entries 1–44 and the everyday-life families that follow them (books and notebooks, #428; openings: a tent flap and a field gate; public writing: a guestbook). Each entry was accepted with a deterministic native test (including the
 context-size checks below), regression runs, and an uncut real-client recording driven by plain words.
 
+New family documentation belongs in a separate `docs/architecture/soul-actions/<family>.md` file; see the
+[family documentation guide](soul-actions/README.md). Keep the historical sections and plain-word tables on this page
+until the Soul Client cutover; new families do not append another section here.
+
 ## How it works
 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
@@ -645,7 +649,10 @@ Fixes found in review and deferred to after the repository migration:
 - **Noughts and crosses facing.** After a turn a player turns their back to the board; both should keep facing the board
   or each other between turns.
 - **Rock-paper-scissors hand path.** Readying the hand can pass through the body; it needs a path clear of the torso.
-- **Holding hands.** The clasp curls the fingers back and the right hand reads as a left (thumb on the wrong side).
+- **Holding-hands anatomy audit (#421).** Current-main default rigs retain radial thumbs and palmward finger curls on
+  both joined hands, standing and walking, across four headings. A faithful historical run reproduces reversed finger curls on
+  `a7d68230` and passes the same 24 clasp cases on accepted correction `9af18897`; both checkouts use their own
+  runtime, callers, frozen dependencies and hash-pinned rigs. This reconciles an existing fix; no new rig curl-axis change.
 - **Piano hands (#422).** The seated piano overlay fits the actual hand skin to the immutable `core/piano@1` white
   and black key surfaces after a 0.8 s entry blend, with each hand lifting on the shared audible score. Key changes
   ease toward the next pitch before its onset; entry, interruption and return use recorded activity history. The existing arm IK owns reach; roots,
@@ -800,5 +807,3 @@ this is not secure erasure. No contact or reader registry changes.
 `core-poetry-folio@1` is a blank open folio on a display stand. Its `object:<id>:write` offer takes `text`, up to 100 characters and three lines. The existing hand-writing stroke commits the words and writer's Soul id together; interrupted approach or writing before contact leaves it blank. The write action requires empty text and there is no erase action, so a completed folio is a finished artifact rather than a rewritable notice. A god can place another blank folio for another poem.
 
 Nearby Souls discover the write schema while blank and use `read:<id>` after completion. Reading returns the exact poem with its writer and labels it as authored words, not world facts. The words and `textBy` credit persist in entity state. Existing access rules and `capability.params` / `object.state` refusals apply. This is one short displayed poem, not a multi-page publishing or portable-book system; #1033's family scale applicability remains separate.
-
-Sealed camping rations (`core/sealed-ration-tin@1`) keep packed stock separate from accessible food. On an admitted fixed work surface with empty hands, four seconds existing prop-free native `operate` opens the pull-tab tin once; an atomic completed receipt changes packed stock to two accessible native food bites. Existing pickup/bite/eat consumes those contents on the same entity. The tin and attached folded-back lid remain after eating. Exact source state/support/pose/access/body are rebound and rechecked; interrupted or refused work preserves the sealed ration. No new food profile, default drink behavior, ingestion contract or timer. Declared offer IDs are `object:<id>:open-ration`, `object:<id>:bite` and `object:<id>:eat`; ordinary item offers handle pickup and placement. Inspect the actual offered tin for current seal/content/credit/empty-packaging facts; generic compact-context limitations are separate. Cold far-ID publication/binding depends on the shared Soul Client hand-worked catalog and binding cutover; a nearby direct-ID journey does not certify that contract. Mid-work restart conservatively applies no new effect.

@@ -10,7 +10,8 @@ import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { installWorldClock, syncWorldClock, worldTimeZone } from './world-clock.ts';
-import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, productionWorld, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
+import { setEnv } from './world-env.ts';
+import { CLOCK_BASE_MS, REAL_DAY_TICKS, hasRealClock, productionWorld, realTimeEnabled, installRealClock, defaultTimeZone, isTimeZone, localDateTime, realClockConfig, realClockDriftMs } from './real-clock.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 test('world time is the local wall time of a UTC instant in the world zone', () => {
@@ -51,6 +52,10 @@ test('zones: validity and the migration defaults', () => {
   assert.equal(defaultTimeZone('eden'), 'America/New_York');
   assert.equal(defaultTimeZone('some-world'), 'America/New_York');
   assert.equal(defaultTimeZone(undefined), 'America/New_York');
+  // part 3: the zone chosen in the New world dialog (the launcher's WORLD_TIME_ZONE) wins over the slug's default
+  assert.equal(defaultTimeZone('some-world', { WORLD_TIME_ZONE: 'Asia/Tokyo' }), 'Asia/Tokyo');
+  assert.equal(defaultTimeZone('rna-studio', { WORLD_TIME_ZONE: 'Asia/Tokyo' }), 'Asia/Tokyo');
+  assert.equal(defaultTimeZone('rna-studio', { WORLD_TIME_ZONE: 'Mars/Olympus' }), 'Europe/Lisbon', 'an invalid one is ignored');
 });
 
 test('a god world on real time: migrated once, reads the wall, re-aligns after drift, refuses a bad zone', { timeout: 600000 }, async (t) => {
@@ -103,6 +108,17 @@ test('a god world on real time: migrated once, reads the wall, re-aligns after d
   const bad = god.act({ ops: [{ op: 'world', state: { time: { timeZone: 'Mars/Olympus' } } }] }, 'bad zone') as any;
   assert.equal(bad.accepted, false);
   assert.match(JSON.stringify(bad.failures), /time\.zone-invalid/);
+
+  // part 3: the owner's API (POST /v1/god/env {timeZone}) is the same world op: recorded, undoable, a bad zone refused by name
+  const rules = clockRules();
+  assert.equal((setEnv(god, { timeZone: 'Asia/Tokyo' }, 'zone') as any).accepted, true);
+  await synced(2);
+  assert.equal(env().slice(0, 16), '2026-11-10T02:41', 'Tokyo local time: already the next calendar day');
+  assert.equal(clockRules(), rules + 1, 'one clock event for the zone change');
+  assert.throws(() => setEnv(god, { timeZone: 'Mars/Olympus' }), (e: any) => e.code === 'time.zone-invalid');
+  god.undo(); await synced(2);
+  assert.equal((god.model.state.time as any).timeZone, 'Europe/Lisbon', 'undo restores the previous zone');
+  assert.equal(env().slice(0, 16), '2026-11-09T17:41', 'and the clock follows it back');
 
   assert.equal((god.model.state.time as any).clock, 'real', 'the migration put the world on the real clock');
 
@@ -202,4 +218,9 @@ test('#1649 review: the production marker fails closed when no stage is set', ()
   assert.equal(productionWorld({}), false, 'unset PUBLIC_URL reads http://localhost');
   for (const u of ['http://localhost:4500', 'http://127.0.0.1:4980', 'http://[::1]:4500', 'http://app.localhost:3000', 'http://sim.test'])
     assert.equal(productionWorld({ PUBLIC_URL: u, DEV_AUTH: '0' }), false, u);
+});
+
+test('#1649 review: the SIM_REAL_TIME rollback switch accepts 0, false and off', () => {
+  for (const v of ['0', 'false', 'off', 'OFF', ' False ', 'no']) assert.equal(realTimeEnabled({ SIM_REAL_TIME: v }), false, v);
+  for (const v of [undefined, '', '1', 'true', 'on']) assert.equal(realTimeEnabled({ SIM_REAL_TIME: v }), true, String(v));
 });

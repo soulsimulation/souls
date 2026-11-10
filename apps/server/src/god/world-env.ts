@@ -27,7 +27,7 @@ import { WEATHER_RULES, setWeatherInForce, showerMinutes } from '@souls/world-co
 import { godTokenLimiter } from './rate-limit.ts';
 import { syncWorldClock } from './world-clock.ts';
 import { callerOf } from './builds.ts';
-import { clockMode, productionWorld, realTimeEnabled } from './real-clock.ts';
+import { clockMode, isTimeZone, productionWorld, realTimeEnabled } from './real-clock.ts';
 
 export type WeatherKind = (typeof WEATHER_KINDS)[number];
 export type EnvInput = {
@@ -35,6 +35,9 @@ export type EnvInput = {
   timeScale?: number;
   /** #1649: true puts a dev world on the accelerated clock back on real time. */
   realTime?: boolean;
+  /** #1649: the world's time zone (IANA, e.g. "Europe/Lisbon"); the owner's to change. On real time the clock moves to
+   *  the local time there (the viewer eases the sky to it). */
+  timeZone?: string;
   weather?: { kind?: WeatherKind; intensity?: number; wind?: number; fog?: number; clouds?: number; rain?: number; minutes?: number };
 };
 export type Channels = { clouds: number; rain: number; wind: number; fog: number };
@@ -83,6 +86,10 @@ export function envPatch(state: WorldState, env: EnvInput, journalSeq: number, c
     out.time = { ...out.time, clock: 'real', paused: false };
   } else if (real && !ctx.production && (env.timeOfDay !== undefined || (env.timeScale !== undefined && Number(env.timeScale) !== 0))) out.time = { ...out.time, clock: 'accelerated', ...(env.timeOfDay === undefined ? { set: null } : {}) };
   if (env.timeOfDay !== undefined) out.time = { ...out.time, set: { hour: round(parseHour(env.timeOfDay)), n: journalSeq } };
+  if (env.timeZone !== undefined) {
+    if (!isTimeZone(env.timeZone)) throw new ApiError(400, 'time.zone-invalid', `timeZone is an IANA time zone name, e.g. "America/New_York" or "Europe/Lisbon"; got ${JSON.stringify(String(env.timeZone).slice(0, 64))}`);
+    out.time = { ...out.time, timeZone: env.timeZone };
+  }
   if (env.timeScale !== undefined) {
     const s = Number(env.timeScale);
     if (!Number.isFinite(s) || s < 0 || s > 1440) throw new ApiError(400, 'invalid', 'timeScale is world hours per real hour: 0 (paused) … 1440; 24 = one world day per real hour');
@@ -119,7 +126,7 @@ export function envPatch(state: WorldState, env: EnvInput, journalSeq: number, c
 /** Apply an env request as one `world` op (in the ledger, undoable). */
 export function setEnv(god: GodMode, env: EnvInput, note = 'environment') {
   const patch = envPatch(god.model.state, env, god.model.editSeq + 1, clockContext());
-  if (!patch.time && !patch.weather) throw new ApiError(400, 'invalid', 'give timeOfDay, timeScale, realTime and/or weather');
+  if (!patch.time && !patch.weather) throw new ApiError(400, 'invalid', 'give timeOfDay, timeScale, realTime, timeZone and/or weather');
   return god.act({ ops: [{ op: 'world', state: patch }] }, note);
 }
 
@@ -150,7 +157,7 @@ export function envView(host: WorldHost, god: GodMode) {
     undoNote: 'Undo restores environment settings; it does not rewind the world clock.',
     // GOD-ENV: the last lightning strike of the last minute (the storm's or the god's)
     ...(() => { const tick = host.engine.world.tick, l = recentStrikes(god, tick).pop(); return l ? { strike: { x: l.x, z: l.z, tick: l.tick, ago: Math.round((tick - l.tick) / 20), god: !!l.god } } : {}; })(),
-    setter: 'POST /v1/god/env { timeOfDay? (accelerated clock only), timeScale? (accelerated: dev worlds only; 0 pauses), realTime?, weather?: { kind?, intensity?, wind?, fog?, clouds?, rain?, minutes? } } (god token); a rain or storm ends after `minutes` world minutes (default rain 90, storm 45; 5…360)',
+    setter: 'POST /v1/god/env { timeOfDay? (accelerated clock only), timeScale? (accelerated: dev worlds only; 0 pauses), realTime?, timeZone? (IANA; owner only), weather?: { kind?, intensity?, wind?, fog?, clouds?, rain?, minutes? } } (god token); a rain or storm ends after `minutes` world minutes (default rain 90, storm 45; 5…360)',
   };
 }
 

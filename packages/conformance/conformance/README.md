@@ -29,7 +29,7 @@ code and detail) in one of the records in this folder, and the list of rendering
 `known-20261015.json`. Nothing else is accepted.
 
 **A changed def revision gets a new hash, so its known findings no longer match.** Add a new supplement here in the same
-change, with a `note` giving its reason, and load it in `src/conformance.test.ts`. Never edit older supplements; never
+change, with a `note` giving its reason. The gate discovers every `*.json` record here automatically and validates its schema and finding tuples; no test-source registration is needed. Never edit older supplements; never
 relax budgets, samples or gap checks to make a sweep pass.
 
 | record | what it pins |
