@@ -264,7 +264,7 @@ export class GodPerceive {
     const m = this.h.model, def = m.resolvedDef(e.def); if (!def) return null;
     const c = def.components as Record<string, unknown>;
     // #1900: held action-bearing carryables still publish their acts while the native body owns their pose.
-    // On restart the projection is rebuilt from scratch; excluding the held cup marks its saved facade gone.
+    // On restart the projection is rebuilt from scratch; excluding the held object marks its saved facade gone.
     const native = this.h.engine.world.entities[e.id], support = native?.support;
     const heldActionTool = !!c.carryable && actionsOf(def).length > 0 && support?.kind === 'in-hand'
       && e.in.parent === support.by && !!this.h.engine.world.entities[support.by]?.human;
