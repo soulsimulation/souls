@@ -34,6 +34,8 @@ export type OwnerLoopInbox = {
   serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed', open?: boolean): boolean;
   messageText?(s: {scope: string; owner: string}, id: string): string | null;
   serverProgress?(s: {scope: string; owner: string}, id: string, text: string): boolean;
+  /** #1753: an act linked to a message acknowledges it (no separate `ack`); false when it was already. */
+  serverAck?(s: {scope: string; owner: string}, id: string): boolean;
   /** #1295: set by the loop; the inbox refuses a close while it answers a receipt. */
   closeHold?: ((s: {scope: string; owner: string}, id: string) => {receipt: string; capability: string} | null) | null;
 };
@@ -148,13 +150,20 @@ export class OwnerLoop {
    *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open.
    *  `seconds`: the duration the act asked for (#1295: a held pose still runs until it ends, and the hold limit allows it). */
   link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, seconds?: number): {open: boolean} {
-    const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
-    const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
-    const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
+    // #1753: an act linked to a message nobody acknowledged is its acknowledgement (the owner's card reads "Acknowledged").
+    // Such a link is the agent's one call for the whole message, so a message of several steps is judged by its steps, as an
+    // implicit link is (D3c/D3d): "walk to the field, then dance" stays open after the walk. One step closes as before: the
+    // agent chose the act, and the words' vocabulary no longer judges that choice.
+    const scope = this.scope(soul), acked = this.inbox.serverAck?.(scope, message) ?? false;
+    const text = implicit || acked ? this.inbox.messageText?.(scope, message) : null;
+    const world = this.world, read = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
+    // a repeat of the act under way (a new key, `repeat: true`) relinks the same receipt: what the first link judged by stays
+    const prior = this.links.get(receipt.id), same = prior?.message === message ? prior : prior?.also?.find(x => x.message === message);
+    const steps = implicit || read.length > 1 ? read : same?.steps ?? [];
+    const aim = world && steps.length > 1 && steps.at(-1)!.target ? same?.steps === steps && same.act ? same.act[0] : world.actTarget(soul, receipt.capability) : null;
     const rideId = RIDE_JOIN.exec(receipt.capability)?.[1], rideName = rideId && world?.aboard ? world.rideName?.(rideId) ?? null : null;
     const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {}),
       ...(rideId && rideName ? {ride: {object: rideId, name: rideName}} : {})};
-    const prior = this.links.get(receipt.id);
     if (prior) {l.also = [...(prior.message === message ? [] : [{...prior, also: undefined, late: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)]; if (prior.late) l.late = true;}
     this.keep(receipt.id, l);
     if (this.links.size > MAX_LINKS) this.forget(this.links.keys().next().value!);
