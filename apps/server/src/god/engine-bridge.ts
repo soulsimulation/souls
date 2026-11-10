@@ -349,7 +349,7 @@ export class EngineBridge {
     this.edge?.onReceipt((r) => { try { this.mending?.onReceipt(r); } catch (e) { this.log(`mending: ${(e as Error).message}`); } });
     this.folding=createFolding({model:this.god.model,get engine(){return o.host.engine as never;},levelAt:(x,z,y)=>this.levelAt(x,z,y),
       soul:id=>this.god.db.soul(id)??undefined,denied:(id,soul)=>this.layers.takeRefusal(id,soul)??this.claimRefusal(id,soul as never),
-      commit:(ops,note,clientRef)=>this.god.act({ops,clientRef},note),log:m=>this.log(m)});
+      commit:(ops,note,_receiptRef)=>this.commitSoulWork(ops,note),log:m=>this.log(m)});
     this.edge?.onReceipt(r=>{try{this.folding?.onReceipt(r);}catch(error){this.log(`folding: ${(error as Error).message}`);}});
     // Entry 34: the watering-can act (watering.ts): planned for perceive's offers, its moments committed per tick
     this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });

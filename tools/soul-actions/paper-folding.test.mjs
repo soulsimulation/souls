@@ -26,7 +26,7 @@ test('native finite folding work consumes stock and creates one supported persis
  const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};
  await tick(5);await invite(f,'ana');const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Preparing folding'}));
  soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick(5);
- const body=()=>f.host.engine.world.entities[soul.entityId],[x,,z]=body().pose.p;
+ const body=()=>f.host.engine.world.entities[soul.entityId],x=18,z=0;
  const here=async()=>await(await app.request('/v1/edge/here?include=doHere')).json(),bytes=h=>JSON.stringify(h.here).length;
  const absent=await here();for(const key of ['core-folding-desk@1','core-paper-boat@1','core-paper-bird@1'])ok(god.act({ops:[{op:'define',def:coreLibrary().get(key)}]}));ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/folding-desk@1',name:'distant-'+i,p:[x+120+i%10*3,z+120+Math.floor(i/10)*3]}))}));await tick(50);
  const far=await here();assert.equal(bytes(far),bytes(absent));assert.ok(!/distant-/.test(JSON.stringify(far.here)));
@@ -35,19 +35,33 @@ test('native finite folding work consumes stock and creates one supported persis
  {op:'place',def:'core/folding-desk@1',name:'occupied-block',p:[x+4,z]},
  {op:'place',def:'core/paper-boat@1',name:'obstruction',in:{parent:'occupied-block',slot:'out'},p:[0,0]},
  {op:'place',def:'core/table@1',name:'display',p:[x+7,z]}, {op:'place',def:'core/bowl@2',name:'bowl',p:[x+.5,z-.5]}]}));await tick(50);
- const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
+ const ent=n=>[...god.model.entities.values()].find(e=>e.name===n||(n==='block'&&e.name==='fresh-desk')),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
  const sculptures=()=>[...god.model.entities.values()].filter(e=>god.model.resolvedDef(e.def)?.name==='core-paper-boat'&&e.name!=='obstruction');
  const act=(capability,params={})=>accept(f.host,edge.act(soul,{capability,params}));
  const finish=async r=>{ok(r);for(let n=0;n<2000;n++){const end=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(end.phase))return end;await tick();}assert.fail('finite action did not end');};
  const done=async(cap,params)=>{const r=await finish(await act(cap,params));assert.equal(r.phase,'completed',JSON.stringify(r));return r;};
- const cap='object:'+id('block')+':fold-boat';assert.equal(edge.capabilities(soul).find(c=>c.id===cap)?.available,true);
+ let cap='object:'+id('block')+':fold-boat';assert.equal(edge.capabilities(soul).find(c=>c.id===cap)?.available,true);
  for(const [name,reason]of [['private-block',/private|access|owner/],['occupied-block',/output surface/]]){const denied=await act('object:'+id(name)+':fold-boat');assert.equal(denied.accepted,false);assert.match(JSON.stringify(denied),reason);}
  await done('pick-up:'+id('bowl'));const hands=await act(cap);assert.equal(hands.accepted,false);assert.match(JSON.stringify(hands),/holding|hands/);await done('put-down:here');
  const cut=ok(await act(cap));assert.equal(ent('block').state.stock,2);assert.equal(sculptures().length,0);
  for(let n=0;n<800&&body().human?.activity!=='craft';n++)await tick();assert.equal(body().human?.activity,'craft');await tick(100);assert.equal(ent('block').state.stock,2);assert.equal(sculptures().length,0);
  await done('stand:here');await tick(20);assert.notEqual(edge.receipt(soul.soulId,cut.receipt.id).phase,'completed');assert.equal(ent('block').state.stock,2);assert.equal(sculptures().length,0);
- const work=ok(await act(cap));let active=0;
+ ok(god.act({ops:[{op:'place',def:'core/bench@1',name:'unrelated-bench',p:[-8,-8]}]}));
+ const outbound=ok(await accept(f.host,edge.performBodies(soul,'fixture:ordinary-walk','Walk to the far start',[{verb:'mars:walk_to',params:{x:-20,z:0,level:0}}])));
+ assert.equal((await finish(outbound)).phase,'completed');assert.ok(Math.hypot(body().pose.p[0]-20,body().pose.p[2])>30);
+ const previous=id('block');ok(god.act({ops:[{op:'remove',id:previous},{op:'place',def:'core/folding-desk@1',name:'fresh-desk',p:[20,0]},
+ {op:'place',def:'core/folding-desk@1',name:'fresh-blocked-desk',p:[20,4]},
+ {op:'place',def:'core/paper-boat@1',name:'obstruction',in:{parent:'fresh-blocked-desk',slot:'out'},p:[0,0]}]}));
+ const fresh=id('fresh-desk');assert.notEqual(fresh,previous);cap='object:'+fresh+':fold-boat';await tick(20);
+ const birdCap='object:'+id('fresh-blocked-desk')+':fold-bird';
+ const coldBird=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:birdCap,strict:true})}).then(r=>r.json()));
+ assert.equal(coldBird.accepted,false);assert.match(JSON.stringify(coldBird),/output surface/);assert.ok(!JSON.stringify(coldBird).includes('capability.unknown'));assert.equal(ent('fresh-blocked-desk').state.stock,2);
+ ok(god.act({ops:[{op:'move',id:id('unrelated-bench'),p:[-7,-8]}]}));const godEdit=god.store.undoable().seq;
+ const work=ok(await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap,strict:true})}).then(r=>r.json())));
+ assert.equal(work.receipt.capability,cap);let active=0,walked=0;
+
  for(let n=0;n<1200&&edge.receipt(soul.soulId,work.receipt.id).phase!=='completed';n++){
+  if((body().human?.speed??0)>.1)walked++;
   if(body().human?.activity==='craft'){active++;assert.equal(body().human.prop,'pen','paper-creasing stylus during folding');assert.equal(ent('block').state.stock,2);assert.equal(sculptures().length,0);}
   await tick();
  }
@@ -55,7 +69,13 @@ test('native finite folding work consumes stock and creates one supported persis
  assert.equal(ent('block').state.stock,1);assert.equal(ent('block').state.lastBy,'Ana');assert.equal(ent('block').state.lastReceipt,receipt.id);assert.equal(sculptures().length,1);
  const sculpture=sculptures()[0],bid=sculpture.id;assert.equal(sculpture.in.parent,id('block'));assert.equal(sculpture.in.slot,'out');
  assert.equal(f.host.engine.world.entities[bid].support.kind,'resting-on');assert.equal(f.host.engine.world.entities[bid].support.on,id('block'));
- assert.equal(god.model.worldPose(sculpture).y,1.01);
+ assert.equal(god.model.worldPose(sculpture).y,1.01);assert.ok(walked>0,'fresh exact far ID walked normally');assert.equal(god.store.undoable().seq,godEdit);
+ const completedStock=structuredClone(ent('block').state),output=structuredClone(sculpture);
+ const undo=ok(god.undo());assert.equal(undo.reverted,godEdit);await tick(10);assert.equal(god.model.worldPose(ent('unrelated-bench')).x,-8);
+ assert.deepEqual(ent('block').state,completedStock);assert.deepEqual(god.model.entities.get(bid),output);assert.equal(f.host.engine.world.entities[bid].support.on,id('block'));
+ const redoEdit=god.store.redoable().seq;const redo=ok(god.redo());assert.equal(redo.reverted,redoEdit);await tick(10);assert.equal(god.model.worldPose(ent('unrelated-bench')).x,-7);
+ assert.deepEqual(ent('block').state,completedStock);assert.deepEqual(god.model.entities.get(bid),output);
+
  let commits=0;const repeated=createFolding({model:god.model,engine:f.host.engine,levelAt:()=>0,soul:()=>({id:soul.soulId,entity_id:soul.entityId,name:soul.name}),denied:()=>null,commit(){commits++;return{accepted:true};},log(){}});repeated.onReceipt(receipt);assert.equal(commits,0);assert.equal(sculptures().length,1);
  const full=await act(cap);assert.equal(full.accepted,false);assert.match(JSON.stringify(full),/output surface/);
  const inspect=await(await app.request('/v1/edge/inspect/'+id('block')+'?all=1')).json();assert.ok(JSON.stringify(inspect).includes('folding'));assert.ok(JSON.stringify(inspect).includes('read:'));
