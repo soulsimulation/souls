@@ -23,6 +23,10 @@
 //        whole world would refuse most of N >= 50's reads before they reach main or a worker). --cpus (Linux): the world
 //        process and all its threads (tick thread + read workers) pinned with taskset as soon as its pid is known
 //        (the launcher stays outside); --world-user: the launcher (so the world) runs as that user.
+//   Soul Client (#1737): [--load client] each CLI Soul holds `serve` and `listen` and runs the 2.11 skill's minute (look and
+//        find answer from the local copy; act sends a catalog id: a far place's walk, a far spot, or sit-ground:here; say).
+//        Each Soul folder records its requests (.eden-report-on), and result.json adds `serverTiming`: per route, the
+//        world's own time from Server-Timing (n, p50, p99, max) in the active windows.
 // Writes <out>/<arm>-r<k>/{result.json,commands.jsonl,world.log}, <out>/receipt.json and <out>/REPORT.md (report.mjs).
 // The fixture's per-run copy is deleted after each run; the fixture itself is never written.
 import { spawn, execFile, execFileSync } from 'node:child_process';
@@ -52,7 +56,8 @@ const VIEWERS = Number(opt('viewers', 6)), BUDGET = ((b) => (b === 'default' ? '
 // r3 (2026-10-31): the active windows start only once the world has been green for GREEN_HOLD_S (Souls connected and listening,
 // no commands), at most GREEN_GATE_S after the join; eden2 5fed735da ran its windows inside the join storm's red tail
 const GREEN_GATE_S = Number(opt('green-gate-s', LOAD === 'stageb' ? 300 : 0)), GREEN_HOLD_S = Number(opt('green-hold-s', 20));
-if (!['v1', 'stageb'].includes(LOAD)) throw new Error('--load v1|stageb');
+if (!['v1', 'stageb', 'client'].includes(LOAD)) throw new Error('--load v1|stageb|client');
+const CLIENT = LOAD === 'client';
 if ((RW_MODES.length || LOAD === 'stageb' || CPUS) && !VIA) throw new Error('--load stageb, --read-worker and --cpus run through the launcher: add --via-launcher');
 if (RW_MODES.some((m) => m !== 'on' && m !== 'off')) throw new Error('--read-worker off|on|off,on');
 if (CPUS && !sh0('taskset', ['-V'])) throw new Error('--cpus needs Linux taskset');
@@ -224,7 +229,7 @@ async function healthz(timeoutMs = 5000) {
 }
 
 // ------------------------------------------------------------------ scripted Souls
-const CLASS = { here: 'C2', observe: 'C2', caps: 'C2', resolve: 'C2', around: 'C2', act: 'C1', say: 'C1', listen: 'C0' };
+const CLASS = { here: 'C2', observe: 'C2', caps: 'C2', resolve: 'C2', around: 'C2', look: 'C2', find: 'C2', act: 'C1', say: 'C1', listen: 'C0' };
 function runCli(soul, args, deadlineMs, rec) {
   return new Promise((done) => {
     const t = now(), p = spawn(process.execPath, ['eden.mjs', ...args], { cwd: soul.dir, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -243,6 +248,7 @@ async function join_(run, i) {
   const dir = join(run.dir, 'souls', `s${i}`); mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'eden.mjs'), Buffer.from(await (await fetch(`${BASE}/eden.mjs`)).arrayBuffer()));
   writeFileSync(join(dir, '.eden-agent.json'), '{}\n', { mode: 0o600 });   // a one-Soul folder, not a Souls home: the bench reads this file
+  if (CLIENT) writeFileSync(join(dir, '.eden-report-on'), '');   // the client's own request record, with Server-Timing per request
   const soul = { i, dir };
   const a = await runCli(soul, ['register', BASE], 60_000);
   // v3 (srv-cli-lifecycle): the SAME name on every try, until the folder holds a token or 120 s pass. Soul CLI 2.5.3
@@ -271,8 +277,21 @@ async function learnWalkIds(soul) {
   if (!WALK_IDS.length) throw new Error(`no offered id for any of ${TARGETS.join(', ')}: the act load would only measure refusals (${misses.join('; ')})`);
   log(`act load walks to: ${WALK_IDS.join(', ')}${misses.length ? `; no id for ${misses.join('; ')}` : ''}`);
 }
-const MINUTE = ['here', 'observe', 'here', 'observe', 'here', 'observe', 'caps', 'caps', 'resolve', 'resolve', 'around', 'act', 'act', 'say'];
+const MINUTE = CLIENT ? ['look', 'find', 'look', 'find', 'look', 'find', 'look', 'find', 'act', 'act', 'act', 'say'] : ['here', 'observe', 'here', 'observe', 'here', 'observe', 'caps', 'caps', 'resolve', 'resolve', 'around', 'act', 'act', 'say'];
+// --load client: what an agent on the 2.11 skill sends. Ids come from the world's catalog, as `find` gives them (no resolve)
+const FIND = ['library', 'sit on the floor', 'read a book', 'bench', 'kitchen', 'table', 'pond', 'garden'];
+let ACT_IDS = [];
+async function learnCatalogIds() {
+  const cat = await (await fetch(`${BASE}/v1/edge/catalog`, { signal: AbortSignal.timeout(60_000) })).json();
+  const walks = cat.places.filter((p) => p.kind === 'building').map((p) => `walk:${p.id}`), spots = cat.acts.filter((a) => !a.with && !a.needs).map((a) => a.id);
+  const seeded = (a, n) => a.filter((_, i) => i % Math.max(1, Math.floor(a.length / n)) === 0).slice(0, n);   // spread over the world, same every run
+  ACT_IDS = [...seeded(walks, 12), ...seeded(spots, 24)];
+  if (!ACT_IDS.length) throw new Error('the catalog names no act');
+  log(`client load: ${ACT_IDS.length} catalog ids (${Math.min(12, walks.length)} walks, ${Math.min(24, spots.length)} spots), catalog ${cat.counts.places} places, ${cat.counts.acts} acts`);
+}
 function argsFor(op, n) {
+  if (op === 'find') return ['find', pick(FIND)];
+  if (CLIENT && op === 'act') return n % 3 === 2 ? ['act', 'sit-ground:here'] : ['act', pick(ACT_IDS)];
   if (op === 'caps') return ['caps', '--search', pick(SEARCH)];
   if (op === 'resolve') return ['resolve', pick(TARGETS)];
   // CTRL-1 (#1093): the served CLI acts on offered ids only; the ids are read from the world once, before the load starts
@@ -297,6 +316,24 @@ function soulLoop(run, soul, wrap) {
       }
     }
   })();
+}
+function holdServe(run, soul) {   // --load client: the resident client, as the skill starts it; restarted 1 s after it exits
+  const start = () => {
+    if (run.stopped) return;
+    const p = spawn(process.execPath, ['eden.mjs', 'serve', '--foreground'], { cwd: soul.dir, stdio: ['ignore', 'ignore', 'ignore'] });
+    run.procs.add(p); p.on('exit', () => { run.procs.delete(p); setTimeout(start, 1000); });
+  };
+  start();
+}
+/** --load client: the world's own time per route (Server-Timing, as each Soul folder's request record has it) in the windows. */
+function serverTimingOf(souls, windows) {
+  const inAny = (at) => windows.some((w) => w.name !== 'warm' && w.name !== 'idle' && at >= w.from && at <= w.to), by = {};
+  for (const s of souls) {
+    let text = ''; try { text = readFileSync(join(s.dir, '.eden-report.jsonl'), 'utf8'); } catch { continue; }
+    for (const line of text.split('\n')) { let r; try { r = JSON.parse(line); } catch { continue; } if (r.kind !== 'http' || !inAny(r.at)) continue;
+      const k = `${r.method} ${r.route}`; (by[k] ??= { world: [], queue: [], client: [], noHeader: 0 }); if (r.serverMs == null) by[k].noHeader++; else by[k].world.push(r.serverMs); if (r.queuedMs != null) by[k].queue.push(r.queuedMs); by[k].client.push(r.durationMs); }
+  }
+  return Object.fromEntries(Object.entries(by).sort((a, b) => b[1].client.length - a[1].client.length).map(([k, v]) => [k, { n: v.client.length, noHeader: v.noHeader, worldP50: pct(v.world, 0.5), worldP99: pct(v.world, 0.99), worldMax: v.world.length ? Math.max(...v.world) : null, queueP99: pct(v.queue, 0.99), clientP50: pct(v.client, 0.5), clientP99: pct(v.client, 0.99) }]));
 }
 function holdListen(run, soul) {   // the harness keeps one listen per Soul; restarts it 1 s after it exits
   soul.listens = 0;
@@ -486,7 +523,8 @@ async function oneRun(arm, rep, mode = null) {
     for (let i = 0; i < N; i += JOIN_PAR) souls.push(...await Promise.all(Array.from({ length: Math.min(JOIN_PAR, N - i) }, (_, k) => join_(run, i + k))));
     souls.forEach((s) => { s.cli = s.i < cliN; }); run.joinS = (now() - tj) / 1000;
     log(`${key} r${rep}: ${N} Souls joined (${cliN} CLI, ${N - cliN} raw)`);
-    if (cliN) await learnWalkIds(souls.find((s) => s.cli));
+    if (CLIENT) await learnCatalogIds(); else if (cliN) await learnWalkIds(souls.find((s) => s.cli));
+    if (CLIENT) for (const s of souls) holdServe(run, s);
     const relaunch = souls.map((s) => s.cli ? holdListen(run, s) : (rawListen(run, s), () => {}));
     if (SB) for (let v = 0; v < VIEWERS; v++) viewer(run, hello); else for (const s of souls) { waitStream(run, s); viewer(run, hello); }
     run.mode = 'idle'; const loops = souls.map((s) => SB ? sbLoop(run, s, arm === 'incident') : soulLoop(run, s, arm === 'incident'));
@@ -505,6 +543,7 @@ async function oneRun(arm, rep, mode = null) {
     const result = summarize({ arm, rep, N, w, windows, cmds, health, proc, run, calibration, loadBefore, loadAfter: loadavg() });
     if (SB) Object.assign(result, stagebSummary({ key, mode, cliN, windows, cmds, proc, wstats, run, w }));
     if (VIA) result.launcher = await launcherView();
+    if (CLIENT) result.serverTiming = serverTimingOf(souls, windows);
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1));
     log(`${key} r${rep}: ${JSON.stringify(result.headline)}${result.stageb ? ` ${JSON.stringify(result.stageb.headline)}` : ''}`);
     return result;
