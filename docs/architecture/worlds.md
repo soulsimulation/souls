@@ -93,7 +93,7 @@ switch independent. A previously saved master mute migrates to both switches off
   released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
   (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
   (`apps/server/src/clock-catchup.ts`) without simulating the gap.
-- **Real time (#1649; on by default, `SIM_REAL_TIME=0` turns it off as the rollback switch).** A god world's clock is the real time in the world's
+- **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
   whose origin makes the engine read local time (`apps/server/src/god/real-clock.ts`), and logs a new one only at boot,
@@ -133,6 +133,11 @@ switch independent. A previously saved master mute migrates to both switches off
   world paused on the accelerated clock keeps that day count (and its needs keep the accelerated day) until it runs
   again, and the cut-over happens then. A dev world switched back to the accelerated clock is not mapped back.
   Schedules a Soul's own agent keeps on its side (world minutes in its own files) are not the server's to map.
+  Rollback (`SIM_REAL_TIME=0` and a restart): a god world goes back to the accelerated clock at boot, with the date and
+  time of day continuous, but mapped reminders and stamps keep their new values. An authored world without a god
+  (`main.ts` with no world engine) that already has the real-time day clock keeps it: `LivingWorld.install` leaves an
+  existing clock alone and no keeper re-aligns it, so it runs real-length days from its last origin. Launcher worlds all
+  run with the world engine and a god, so this exception is for authored worlds served by `main.ts` directly.
   Reminders made after the cut-over are already in the new count and are left alone (by their creation tick); a poster
   or chalk drawing made between the cut-over and a retried stamp move is moved too and may read as old. A dev world
   switched to the accelerated clock before a failed mapping was retried drops that cut-over.

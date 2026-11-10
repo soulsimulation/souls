@@ -51,6 +51,15 @@ const markerTable = (sql: DatabaseSync) => sql.exec('CREATE TABLE IF NOT EXISTS 
 const marked = (sql: DatabaseSync, worldId: string, c: CutOver, part: string) => !!sql.prepare('SELECT 1 FROM edge_clock_cutover_v1 WHERE world_id=? AND cut_tick=? AND part=?').get(worldId, c.tick, part);
 const mark = (sql: DatabaseSync, worldId: string, c: CutOver, part: string, moved: number) => sql.prepare('INSERT OR IGNORE INTO edge_clock_cutover_v1(world_id,cut_tick,part,moved,at) VALUES(?,?,?,?,?)').run(worldId, c.tick, part, moved, Date.now());
 
+/** The tick of a cut-over the running clock names whose reminder mapping has not run yet, else null. Until it has, the
+ *  reminder pump holds world-clock reminders made before it (their due minutes are still in the old count). */
+export function unmappedCutOver(sql: DatabaseSync, worldId: string, living: { cutOver?: { tick: number } } | undefined): number | null {
+  const c = living?.cutOver;
+  if (!c || !Number.isInteger(c.tick)) return null;
+  if (!sql.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='edge_clock_cutover_v1'").get()) return c.tick;
+  return sql.prepare("SELECT 1 FROM edge_clock_cutover_v1 WHERE world_id=? AND cut_tick=? AND part='reminders'").get(worldId, c.tick) ? null : c.tick;
+}
+
 /** Pending world-clock reminders of `worldId` made before the cut-over (later ones are already in the new count), moved
  *  to the new count once per cut-over: the rows and a marker row change in
  *  one transaction, so a second call (a retry, a restart) moves nothing. Returns how many moved (0 when already done). */
@@ -96,7 +105,7 @@ export function cutOverStampOps(model: WorldModel, c: CutOver): Op[] {
 type StampGod = { model: WorldModel; opts: { worldId: string }; db: { db: DatabaseSync }; engineAct(ops: Op[], note: string): { accepted: boolean; failures?: { op?: number }[] } };
 /** Move the stamps once per cut-over, as one recorded engine edit (its note names the cut-over). An entity the edit refuses
  *  is left out and the rest move. Returns how many entities moved, or null when an earlier call already did it. */
-export function cutOverStamps(god: StampGod, c: CutOver, log: (m: string) => void = () => {}): number | null {
+export function cutOverStamps(god: StampGod, c: CutOver, logError: (m: string) => void = (m) => console.error(m)): number | null {
   const sql = god.db.db, note = stampNote(c), world = god.opts.worldId;
   markerTable(sql);
   // done: marked, or the edit is in the journal (a restart between the edit and its mark)
@@ -106,7 +115,8 @@ export function cutOverStamps(god: StampGod, c: CutOver, log: (m: string) => voi
     const r = god.engineAct(ops, note);
     if (r.accepted) { moved = ops.length; break; }
     const bad = new Set((r.failures ?? []).map((f) => f.op).filter((i): i is number => Number.isInteger(i) && i! >= 0));
-    log(`world clock: cut-over stamps: ${bad.size || 'all'} refused: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+    // error level: a refused stamp stays in the old count and reads as from the future until fixed by hand
+    logError(`world clock: cut-over stamps: ${bad.size || 'all'} refused: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
     if (!bad.size) break;
     ops = ops.filter((_, i) => !bad.has(i));
   }

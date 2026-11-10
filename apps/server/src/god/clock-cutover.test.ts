@@ -14,7 +14,10 @@ import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { cutOverWorld, installWorldClock, syncWorldClock } from './world-clock.ts';
 import { REAL_DAY_TICKS, installRealClock } from './real-clock.ts';
-import { engineDayAt, mapStamp, mapWorldMinute, stampShift, worldMinuteAt, type CutOver } from './clock-cutover.ts';
+import { engineDayAt, mapStamp, mapWorldMinute, stampShift, unmappedCutOver, worldMinuteAt, type CutOver } from './clock-cutover.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 test('the mapping: same distance in world days and time of day; stamps keep their age, never below day 0', () => {
@@ -131,6 +134,11 @@ test('a cut-over whose mapping failed is finished by the next keeper (a restart)
   const reminders = new PersonalReminders(f.db.db, f.host.worldId, { publish: () => {} } as any, () => freshBootClock(f.host as any));
   const today = Math.floor(freshBootClock(f.host as any).absoluteWorldMinutes! / 1440);
   reminders.create('soul-a', { clientRef: 'r', text: 'r', at: { clock: 'world', worldDayIndex: today + 2, time: '08:15' } });
+  // review: a reminder made before the cut-over whose old due minute reads as past in the new count (a young world)
+  reminders.create('soul-a', { clientRef: 'early', text: 'early', at: { clock: 'world', worldDayIndex: today + 1, time: '00:01' } });
+  f.db.db.prepare("UPDATE edge_personal_reminders_v1 SET due_world_minute=1 WHERE client_ref='early'").run();
+  const pump = new PersonalReminders(f.db.db, f.host.worldId, { publish: () => {} } as any, () => freshBootClock(f.host as any), () => unmappedCutOver(f.db.db, f.host.worldId, f.host.living as any));
+  const state = (ref: string) => (f.db.db.prepare('SELECT state FROM edge_personal_reminders_v1 WHERE client_ref=?').get(ref) as any).state as string;
   const due = () => (f.db.db.prepare("SELECT due_world_minute d FROM edge_personal_reminders_v1 WHERE client_ref='r'").get() as any).d as number;
   const d0 = due();
   // the first keeper's mapping throws (a locked database, say): the clock still comes onto real time
@@ -140,6 +148,10 @@ test('a cut-over whose mapping failed is finished by the next keeper (a restart)
   assert.equal(f.host.living?.dayTicks, REAL_DAY_TICKS);
   assert.equal(due(), d0, 'not mapped yet');
   assert.ok(logs.some((m) => /tried again later/.test(m)));
+  // until the mapping has run, the pump holds world reminders made before the cut-over (unmapped rows never fire)
+  assert.equal(unmappedCutOver(f.db.db, f.host.worldId, f.host.living as any), (f.host.living as any).cutOver.tick);
+  assert.equal(pump.collectDue(), 0, 'an unmapped reminder is held');
+  assert.equal(state('early'), 'active');
   // a reminder made after the cut-over is already in the new count: the late mapping leaves it alone
   await settle(2);
   const nowToday = Math.floor(freshBootClock(f.host as any).absoluteWorldMinutes! / 1440);
@@ -152,6 +164,85 @@ test('a cut-over whose mapping failed is finished by the next keeper (a restart)
   const newToday = Math.floor(freshBootClock(f.host as any).absoluteWorldMinutes! / 1440);
   assert.equal(due(), (newToday + 2) * 1440 + 8 * 60 + 15, 'mapped by the next keeper: two days ahead at 08:15');
   assert.equal(late(), late0, 'a reminder made after the cut-over is not moved');
+  // mapped: the hold lifts, and the reminder fires in the new count
+  assert.equal(unmappedCutOver(f.db.db, f.host.worldId, f.host.living as any), null);
+  assert.equal(pump.collectDue(), 1); assert.equal(state('early'), 'due'); assert.equal(state('r'), 'active');
+});
+
+test('backward cut-over survives a restart: a 300-day world cut over, the process restarted from its database', { timeout: 600000 }, async (t) => {
+  // review (#1708, non-blocking 1): every production world takes the backward direction at the first deploy. Boot the
+  // same SQLite file twice: the first boot cuts over, the second replays the clock event (with its cut-over) and maps
+  // nothing again; a crash before the mapping is finished by the next boot, and the pump holds until then.
+  let wall = Date.UTC(2026, 10, 10, 14, 30);   // 09:30 in New York
+  const dir = mkdtempSync(join(tmpdir(), 'souls-1649-restart-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const rtWas = process.env.SIM_REAL_TIME; process.env.SIM_REAL_TIME = '1';
+  t.after(() => { if (rtWas === undefined) delete process.env.SIM_REAL_TIME; else process.env.SIM_REAL_TIME = rtWas; });
+  const boot = async (file: string) => {
+    const f = fixture(join(dir, file), factory, { durableClockV1: true, worldId: 'w-1649-restart' });
+    const god = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {} });
+    const settle = async (n = 4) => { for (let i = 0; i < n; i++) { f.host.tickOnce(); await setImmediate(); f.host.drainInputs(); } };
+    f.brain.quiesce();
+    installEngineBridge({ host: f.host, god, edge: new EdgeLedger(f.host, f.db), log: () => {}, worldClock: false });
+    await settle(2);
+    const pump = new PersonalReminders(f.db.db, f.host.worldId, { publish: () => {} } as any, () => freshBootClock(f.host as any), () => unmappedCutOver(f.db.db, f.host.worldId, f.host.living as any));
+    const close = () => { f.brain.quiesce(); f.host.stop(); f.db.close(); };
+    return { f, god, settle, pump, close };
+  };
+  const seed = async (file: string) => {
+    const b = await boot(file);
+    const tick0 = b.f.host.engine.world.tick;
+    const a = b.f.host.enqueue('rules', 'world', { dayConfig: { origin: tick0 + 2 - (300 * 72_000 + 8 * 3_000), dayTicks: 72_000, customs: [] }, why: 'an old accelerated clock' });
+    await b.settle(3); await a;
+    const today = Math.floor(freshBootClock(b.f.host as any).absoluteWorldMinutes! / 1440);
+    b.pump.create('soul-a', { clientRef: 'tomorrow', text: 'tomorrow', at: { clock: 'world', worldDayIndex: today + 1, time: '18:00' } });
+    return b;
+  };
+  const due = (b: { f: any }) => (b.f.db.db.prepare("SELECT due_world_minute d FROM edge_personal_reminders_v1 WHERE client_ref='tomorrow'").get() as any).d as number;
+  const today = (b: { f: any }) => Math.floor(freshBootClock(b.f.host as any).absoluteWorldMinutes! / 1440);
+  const clockEvents = (b: { f: any }) => (b.f.db.db.prepare("SELECT COUNT(*) n FROM events WHERE kind='rules' AND payload LIKE '%dayConfig%'").get() as any)?.n as number;
+
+  // 1. a clean cut-over, then a restart
+  let b = await seed('clean.db');
+  const oldToday = today(b);
+  installWorldClock(b.f.host, b.god, () => {}, { realTime: true, slug: 'some-world', now: () => wall, checkMs: 3_600_000 });
+  let p = syncWorldClock(b.god); await b.settle(4); await p; await b.settle(2);
+  const cut = (b.f.host.living as any).cutOver, newToday = today(b);
+  assert.ok(cut && newToday < oldToday - 200, `the day count goes back: ${oldToday} -> ${newToday}`);
+  assert.equal(due(b), (newToday + 1) * 1440 + 18 * 60, 'tomorrow at 18:00, local');
+  const events1 = clockEvents(b), edits1 = b.god.model.editSeq;
+  b.close();
+  wall += 120_000;   // the restart takes two minutes
+  b = await boot('clean.db');
+  assert.deepEqual((b.f.host.living as any).cutOver, cut, 'the replayed clock names the same cut-over');
+  assert.equal(b.f.host.living?.dayTicks, REAL_DAY_TICKS);
+  assert.equal(unmappedCutOver(b.f.db.db, b.f.host.worldId, b.f.host.living as any), null, 'already mapped: the pump holds nothing at boot');
+  installWorldClock(b.f.host, b.god, () => {}, { realTime: true, slug: 'some-world', now: () => wall, checkMs: 3_600_000 });
+  p = syncWorldClock(b.god); await b.settle(4); await p; await b.settle(2);
+  assert.equal(today(b), newToday, 'the same local day after the restart');
+  assert.equal(due(b), (newToday + 1) * 1440 + 18 * 60, 'not mapped twice');
+  assert.equal(b.god.model.editSeq, edits1, 'no second stamp or migration edit');
+  assert.ok(clockEvents(b) <= events1 + 1, 'at most one re-alignment for the restart');
+  t.diagnostic(`clean: day ${oldToday} -> ${newToday} at the cut-over (tick ${cut.tick}); after the restart day ${today(b)}, clock events ${events1} -> ${clockEvents(b)}, edits ${edits1} -> ${b.god.model.editSeq}`);
+  assert.equal((b.f.host.living as any).cutOver?.tick, cut.tick);
+  assert.equal(b.pump.collectDue(), 0, 'nothing fires early');
+  b.close();
+
+  // 2. the process dies after the clock event and before the mapping; the next boot holds, then finishes it
+  b = await seed('crash.db');
+  const first = installRealClock(b.f.host as any, { zone: () => 'America/New_York', now: () => wall, checkMs: 3_600_000, onCutOver: () => { throw new Error('killed'); } });
+  p = first.sync(); await b.settle(4); await p; first.stop();
+  const d0 = due(b), cut2 = (b.f.host.living as any).cutOver;
+  b.close();
+  b = await boot('crash.db');
+  assert.equal(unmappedCutOver(b.f.db.db, b.f.host.worldId, b.f.host.living as any), cut2.tick, 'booted with an unmapped cut-over');
+  assert.equal(due(b), d0);
+  assert.equal(b.pump.collectDue(), 0, 'the pump holds the unmapped row');
+  installWorldClock(b.f.host, b.god, () => {}, { realTime: true, slug: 'some-world', now: () => wall, checkMs: 3_600_000 });
+  p = syncWorldClock(b.god); await b.settle(4); await p; await b.settle(2);
+  assert.equal(due(b), (today(b) + 1) * 1440 + 18 * 60, 'mapped at the next boot: tomorrow at 18:00');
+  t.diagnostic(`crash: unmapped due minute ${d0} held across the restart, mapped at the next boot to ${due(b)} (day ${today(b)} + 1, 18:00)`);
+  assert.equal(unmappedCutOver(b.f.db.db, b.f.host.worldId, b.f.host.living as any), null);
+  b.close();
 });
 
 function posterListOf(e: any) { return JSON.parse(e.state.textBy || '[]'); }

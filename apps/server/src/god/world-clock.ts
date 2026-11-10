@@ -117,6 +117,6 @@ export function migrateWorldTime(god: GodMode, slug: string | undefined, log: (m
  *  part records that it ran. A throw is retried by the clock keeper. */
 export function cutOverWorld(host: Pick<WorldHost, 'db' | 'worldId'>, god: GodMode, c: CutOver, log: (m: string) => void = () => {}) {
   const reminders = cutOverReminders(host.db.db, host.worldId, c);
-  const stamps = cutOverStamps(god as never, c, log);
+  const stamps = cutOverStamps(god as never, c);   // a refused stamp edit logs at error level
   if (reminders || stamps) log(`world clock: cut-over to real time (tick ${c.tick}, day count back ${stampShift(c)}): ${reminders} reminder(s) and ${stamps ?? 0} stamped thing(s) mapped`);
 }

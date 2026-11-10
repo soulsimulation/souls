@@ -10,7 +10,7 @@
 // from the wall (a restart, a slowed or stalled tick loop, a daylight-saving change), as an ordinary rules event, so a
 // replay reaches the same state. Nothing is simulated for skipped time, and nothing is stored but the zone.
 //
-// On by default (#1649 part 4); SIM_REAL_TIME=0 turns it off, and the accelerated clock is then unchanged.
+// On by default (#1649 part 4); SIM_REAL_TIME=0 (false, off) turns it off, and the accelerated clock is then unchanged.
 
 /** The engine's clock epoch: elapsed 0 reads 2026-10-03T06:00 (engine-mars updateClock, brain clockAt). */
 export const CLOCK_BASE_MS = Date.UTC(2026, 9, 3, 6);
@@ -21,9 +21,11 @@ export const REAL_DAY_TICKS = (86_400_000 / TICK_MS) as 1_728_000;
 /** A watched world's clock may drift this far from the wall before one re-alignment is logged. */
 export const REALIGN_MS = 60_000;
 
-/** Real time is on: every world's clock is the local time in its zone (#1649). SIM_REAL_TIME=0 turns it off (the
- *  rollback switch, and tests that pin the old accelerated clock). */
-export function realTimeEnabled(env: Record<string, string | undefined> = process.env): boolean { return env.SIM_REAL_TIME !== '0'; }
+/** Real time is on: every world's clock is the local time in its zone (#1649). SIM_REAL_TIME=0 (or false, off, no)
+ *  turns it off (the rollback switch, and tests that pin the old accelerated clock). */
+export function realTimeEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return !['0', 'false', 'off', 'no'].includes((env.SIM_REAL_TIME ?? '').trim().toLowerCase());
+}
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 function formatter(timeZone: string): Intl.DateTimeFormat {
