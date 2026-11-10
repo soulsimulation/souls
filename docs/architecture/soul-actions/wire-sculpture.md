@@ -1,0 +1,9 @@
+# Spatial wire sculpture
+
+A portable copper artwork retains one wooden plinth and four connected 0.11m links, totalling 0.44m of wire. Choose a link with `choose-link` text 0..3 and `choose-direction` text `yaw,pitch` degrees. Three seconds of native operate work complete before `bend` commits the chosen direction; connected downstream points follow the same finite links. `straighten` uses the same work and restores all four links vertically. All links rise from the plinth, and the bounded form stays inside its declared half-metre envelope.
+
+The exact-definition observer draws committed directions using fresh batched geometry under the normal retain/release lifecycle. It never owns authoritative movement or changes collision physics. The real plinth and conservative definition bounds remain fixed; there is no flexible-wire physics, self-contact, changing wire collision or tool-custody claim. Normal pickup/carry/placement keeps the same artwork and maker.
+
+Work requires empty hands and a real fixed surface, binds the actual source/support definitions, state, parameters, ownership, access and world/native poses, and rechecks time/body/reach/support before shared engine-authored commit. Interrupted, premature, duplicate, stale or refused work preserves the shape. Kind data and own inspection publish directions, connected points, finite length and requirements; no foreign object is dereferenced.
+
+The explicit feature-free26787 owner-candidate base retains published catalogue eb6, completion bd and startup3baf. Latest-main integration and unmerged candidate approval remain external Claude obligations. Named God hooks integrate serially with other action families; no client, word rules, ledger or protected engine edits. Claude alone approves, integrates, merges and releases T3 work.

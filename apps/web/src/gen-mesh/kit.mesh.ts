@@ -1,3 +1,4 @@
+import{addWireSculpture,isWireSculpture}from'./wire-sculpture.ts';
 // kit/2 mesh half: rounded low-poly primitives merged into few draws; parts with a `role` stay
 // separate under pivot groups so creature gaits and spinning wheels can move them. Owner: L1.
 // Geometry is cached per (def hash, palette) so many instances share one BufferGeometry.
@@ -250,6 +251,7 @@ registerMesh({
     }
     // clone shares geometry and materials; pivots are cloned so each instance animates on its own
     const obj = proto.clone(true); obj.userData = { ...proto.userData };
+    addWireSculpture(obj,ctx);
     // W2: flame parts burn (fx/flames.ts); not on a building site. A fire lit by hand catches (entry 22); entry 33: only
     // when this viewer saw it out before (a fire already burning when a viewer arrives burns at full); a torch smokes.
     const hand = ctx.def.tags.includes('hand-operated'), lit = ctx.entity.state?.on === true, catchUp = hand && lit && wasOut.get(ctx.entity.id) === true;
@@ -257,7 +259,7 @@ registerMesh({
     if (ctx.params.condition !== 'construction') mountFlames(obj, ctx.entity.id, catchUp, ctx.def.tags.includes('torch'));
     return obj;
   },
-  instanceKey(ctx) { const a = parseKitArgs(ctx.args); return a.success ? kitCacheKey(ctx, a.data) : null; },
+  instanceKey(ctx) { if(isWireSculpture(ctx))return null; const a = parseKitArgs(ctx.args); return a.success ? kitCacheKey(ctx, a.data) : null; },
 });
 
 // K2: $params can change geometry; both prototype and instance identity include numeric values.
