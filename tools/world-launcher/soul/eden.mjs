@@ -2284,7 +2284,7 @@ export const STALL_CODES = new Set(["unavailable", "world.unavailable", "world-u
 export const isStalled = (status, data) => status >= 500 && STALL_CODES.has(codeOf(data));
 export const stallRetries = (cls, data, once) => cls === "read" || (cls === "keyed" && (once || codeOf(data) === "world-unavailable"));
 // Writes the world deduplicates by Idempotency-Key (apps/server/src/edge/events/idempotency.ts) — the only writes that retry.
-const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+|inbox\/[^/]+\/(ack|result))$/;   // #1753: an ack or result is retried by its key until answered
+const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+|inbox\/[^/]+\/(ack|result))$/;   // #1753: ack and result are retried with one key until answered: the world does not read the key there, they are safe to repeat because a repeat is answered from the message's state
 const READ_POSTS = /^\/v1\/edge\/resolve$/;
 /** "read" (safe to repeat), "keyed" (a write the world deduplicates by key) or "none" (never repeated). */
 export function retryClass(method, path) {
@@ -3352,7 +3352,11 @@ async function act(...argv) {
   // a stop serves no owner message unless named, so it leaves the implicit link for the next act (#1448 review)
   if (d.accepted && parsed.capability !== STOP_ID) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
   // #1753: an act sent --for a message is its acknowledgement (the world acks it on the link); an ack sent later changes nothing
-  if (d.accepted && d.for && !implicit) servedBy(d.for);
+  if (d.accepted && d.for && !implicit) {
+    servedBy(d.for);
+    // a message of several steps this act began stays open (`open`): the next act serves it by default, as after an ack (D3c)
+    if (d.open) save({ lastAcked: d.for, lastAckedAt: now(), lastAckedActed: undefined });
+  }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
@@ -3964,7 +3968,7 @@ async function ack(id, ...rest) {
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
   // #1753: an act or plan sent --for this message acknowledged it already: a reply now would reach nothing, so nothing is sent
-  if (!close && (load().served ?? []).includes(id)) return { acked: id, already: "an act sent --for this message acknowledged it; nothing more to send", ...(await stillOpen([id])) };
+  if (!close && ((load().served ?? []).includes(id) || (await planActed(id)))) return { acked: id, already: "an act sent --for this message acknowledged it; nothing more to send", ...(await stillOpen([id])) };
   const before = load().heard, seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
   if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id], { before, closed: true })) };
   if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id], { before, closed: !!shut.already })) };   // acked already: the first reply stands, so this text reached nothing
@@ -3990,7 +3994,13 @@ export function heardWith(record, messages, max = HEARD_MAX) {
   for (const m of messages ?? []) if (m?.id && !out.some((h) => h.id === m.id)) out.push({ id: m.id, text: firstWords(m.text), batch });
   return out.slice(-max);
 }
-/** #1753: the messages an act or plan sent --for already serves (newest last): an ack of one is answered and links nothing. */
+/** #1753: whether serve's plan for this message has had a step's act accepted (the world acknowledged the message then). */
+async function planActed(id) {
+  if (!existsSync(SERVE_SOCK)) return false;
+  const a = await askServe({ op: "planStatus" }), p = a && !a.lost ? a.plan : null;
+  return p?.for === id && (p.steps ?? []).some((st) => st.receipt);
+}
+/** #1753: the messages an act sent --for already serves (newest last): an ack of one is answered and links nothing. */
 function servedBy(id) { const t = load(); save({ served: [...(t.served ?? []).filter((x) => x !== id), id].slice(-HEARD_MAX), ...(t.lastAcked === id ? { lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined } : {}) }); }
 function heard(messages) { if (messages?.length) save({ heard: heardWith(load().heard, messages) }); }
 function unheard(ids) { const h = load().heard ?? [], keep = h.filter((x) => !ids.includes(x.id)); if (keep.length !== h.length) save({ heard: keep }); }
@@ -5054,7 +5064,6 @@ async function plan(...argv) {
   if (!a || a.lost) throw new Error("the serve process stopped before it took the plan");
   if (!a.accepted) process.exitCode = 2;
   else if (implicit) save({ lastAckedActed: true });
-  if (a.accepted && forId && !implicit) servedBy(forId);
   return a;
 }
 

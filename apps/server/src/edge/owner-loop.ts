@@ -150,9 +150,14 @@ export class OwnerLoop {
    *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open.
    *  `seconds`: the duration the act asked for (#1295: a held pose still runs until it ends, and the hold limit allows it). */
   link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, seconds?: number): {open: boolean} {
-    const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
-    this.inbox.serverAck?.(scope, message);   // #1753: the act is the acknowledgement; the owner's card reads "Acknowledged"
-    const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
+    // #1753: an act linked to a message nobody acknowledged is its acknowledgement (the owner's card reads "Acknowledged").
+    // Such a link is the agent's one call for the whole message, so a message of several steps is judged by its steps, as an
+    // implicit link is (D3c/D3d): "walk to the field, then dance" stays open after the walk. One step closes as before: the
+    // agent chose the act, and the words' vocabulary no longer judges that choice.
+    const scope = this.scope(soul), acked = this.inbox.serverAck?.(scope, message) ?? false;
+    const text = implicit || acked ? this.inbox.messageText?.(scope, message) : null;
+    const world = this.world, read = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
+    const steps = implicit || read.length > 1 ? read : [];
     const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
     const rideId = RIDE_JOIN.exec(receipt.capability)?.[1], rideName = rideId && world?.aboard ? world.rideName?.(rideId) ?? null : null;
     const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {}),

@@ -48,7 +48,7 @@ test('a waking listen carries look and found from the disk copy only; act --for 
       const reply = (status, data) => { res.writeHead(status, {'content-type': 'application/json'}); res.end(JSON.stringify(data)); };
       if (req.url.startsWith('/v1/edge/inbox/listen')) return reply(200, {inbox: {}, backlog: [{id: 'm1', text: 'please dance', sentAt: 1}]});
       if (req.url.includes('/ack')) return reply(200, {inbox: {latest: {id: 'm1', state: 'acknowledged'}}});
-      if (req.url === '/v1/edge/act') return reply(200, {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: body.capability, phase: 'started', now: 'dancing'}, ...(body.for ? {for: body.for} : {})});
+      if (req.url === '/v1/edge/act') return reply(200, {accepted: true, channel: 'body', receipt: {id: 'r_1', capability: body.capability, phase: 'started', now: 'dancing'}, ...(body.for ? {for: body.for} : {}), ...(body.for === 'm2' && !body.forDefault ? {open: true} : {})});
       reply(404, {error: {code: 'not-found', message: req.url}});
     });
   });
@@ -73,4 +73,9 @@ test('a waking listen carries look and found from the disk copy only; act --for 
   assert.equal(state.lastAcked, undefined, 'a late ack of a served message links nothing'); assert.deepEqual(state.served, ['m1']);
   await cli('act', 'wave:here');
   assert.equal(seen.filter((x) => x.path === '/v1/edge/act').at(-1).body.for, undefined, 'the next act serves no message by default');
+  // a message of several steps the act began stays open: the next act serves it by default (judged by its steps, D3c)
+  await cli('act', 'walk:field', '--for', 'm2');
+  await cli('act', 'dance:here');
+  const last = seen.filter((x) => x.path === '/v1/edge/act').at(-1).body;
+  assert.equal(last.for, 'm2'); assert.equal(last.forDefault, true);
 });
