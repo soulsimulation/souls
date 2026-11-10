@@ -126,6 +126,8 @@ export type ActivityWorld = {
   taken(at: V2, spotId?: string): boolean;
   /** Admitted interiors (spots in a closed building are not offered). */
   enterable(place: string | undefined): boolean;
+  /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
+  gone?(spotId: string): boolean;
   /** Nearest free native seat within `radius` m: its sit capability id and plan. */
   /** The nearest free seat within `radius` m; `here` (D2, "sit down" means here): only a seat in the Soul's own room or
    *  within HERE_SEAT_M with no enclosure boundary between (EdgeLedger.seatIsHere). */
@@ -185,14 +187,15 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
   // only spots within reach are probed for clear ground (a far spot's probe paged in its nav tile for nothing)
   // E-life (big derived worlds, `nearest`): a spot is probed for clear ground only when it is about to be offered (the
   // nearest few per activity), not every spot within reach (1.5 s of a 4 s first sweep on Eden 2026); old worlds unchanged
-  const reach0 = data.spots.filter(s => (d2(s.at, w.me) <= SPOT_REACH || !!want?.has(s.id)) && w.enterable(s.place)), ok = (s: Spot) => !!clearAt(s);
+  const reach0 = data.spots.filter(s => (d2(s.at, w.me) <= SPOT_REACH || !!want?.has(s.id)) && w.enterable(s.place) && !w.gone?.(s.id)), ok = (s: Spot) => !!clearAt(s);
   const live = data.nearest ? reach0 : reach0.filter(ok);
   // #1737: why a spot asked for by id is not on offer now; said in the refusal, never a bare "not an offer"
   const why = new Map<string, {code: string; reason: string}>();
   if (want?.size) for (const s of data.spots) {
     if (!want.has(s.id)) continue;
     const name = s.label ?? 'that spot';
-    if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
+    if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
+    else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
     else if (w.taken(s.at, s.id)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
     else if (!ok(s)) why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}, so nothing was done.`});
   }
