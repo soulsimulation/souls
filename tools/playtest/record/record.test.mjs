@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { traceFromRecord, lookupStats, lookupEmpty, windowsOf, measureWindow, itemFor, finishRunRecord, recordRows, recordOn } from './record.mjs';
+import { routeOf, traceFromRecord, lookupStats, lookupEmpty, windowsOf, measureWindow, itemFor, finishRunRecord, recordRows, recordOn } from './record.mjs';
 
 const T0 = Date.parse('2026-11-10T12:00:00Z');
 const V = 'soul-trace/2';
@@ -17,7 +17,7 @@ const rows = [
   ...proc('look', T0 + 1000, 300, '{"me":{}}'),
   ...[0, 1, 2, 3, 4, 5].flatMap((i) => proc('find', T0 + 2000 + i * 4000, 200, JSON.stringify({ found: [], next: 'Nothing here is called that.' }))),
   ...proc('act', T0 + 27000, 1200, '{"accepted":false}'),
-  http(T0 + 27000, 'POST', '/v1/edge/act', 200, 900, 850, { accepted: false, error: { code: 'act.not-an-id' } }),
+  http(T0 + 27000, 'POST', '/v1/edge/act', 200, 900, 850, { accepted: false, error: { code: 'act.not-an-id' } }, { key: 'op_1' }),
   http(T0 + 29500, 'POST', '/v1/edge/act', 200, 300, 240, { accepted: true, receipt: { id: 'rcpt_1' } }, { ids: { receipts: ['rcpt_1'] } }),
   http(T0 + 30000, 'GET', '/v1/edge/wait?timeoutMs=30000', 200, 4000, 1, { events: [] }),
   { v: V, kind: 'wire', at: T0 + 30500, wallStart: T0 + 30500, method: 'GET', path: '/v1/edge/inbox/listen', status: 200, ms: 50 },
@@ -30,7 +30,7 @@ const rows = [
 test('the record\'s world calls feed #1752\'s measures in their shape; serve\'s own and proxied calls are not the agent\'s', () => {
   const t = traceFromRecord(rows);
   assert.equal(t.length, 4);
-  assert.deepEqual(t[0], { v: 'soul-trace/1', kind: 'http', at: T0 + 27000, method: 'POST', route: '/v1/edge/act', status: 200, durationMs: 900, serverMs: 850, queueMs: 0, key: null, ids: null, facts: { accepted: false, code: 'act.not-an-id' } });
+  assert.deepEqual(t[0], { v: 'soul-trace/1', kind: 'http', at: T0 + 27000, method: 'POST', route: '/v1/edge/act', status: 200, durationMs: 900, serverMs: 850, queueMs: 0, key: 'op_1', ids: null, facts: { accepted: false, code: 'act.not-an-id' } });
   assert.deepEqual(t[1].facts, { accepted: true });
 });
 
@@ -61,7 +61,8 @@ test('instruction windows run from one owner message to the next; each is judged
   const w = windowsOf(evidence);
   assert.deepEqual(w.map((x) => [x.since - T0, x.until - T0]), [[0, 60000], [60000, 95000], [95000, 99001]]);
   assert.equal(itemFor(battery, ' walk to the Bandstand '), battery.items[1]);
-  const trace = traceFromRecord(rows), server = [{ at: T0 + 27010, worldMs: 850, queueMs: 0 }, { at: T0 + 29510, worldMs: 240, queueMs: 2 }];
+  const trace = traceFromRecord(rows), server = [{ at: T0 + 27010, path: '/w/x/v1/edge/act', key: 'op_1', worldMs: 850, queueMs: 0 }, { at: T0 + 29510, path: '/w/x/v1/edge/act', receipts: ['rcpt_1'], worldMs: 240, queueMs: 2 },
+    { at: T0 + 30000, path: '/w/x/v1/edge/wait', key: 'op_1', worldMs: 4000 }, { at: T0 + 31000, path: '/w/x/v1/edge/public/souls/s_1', worldMs: 3 }];
   const e1 = measureWindow({ win: w[0], trace, server, rows, battery });
   assert.equal(e1.item, 'sit-down'); assert.equal(e1.succeeded, true); assert.equal(e1.judged, true);
   assert.equal(e1.firstMotionMs, 31000); assert.equal(e1.worldCalls, 2); assert.equal(e1.longPolls, 1);
@@ -115,4 +116,10 @@ test('recordOn: the folder itself for a plain Soul folder, .souls/ for a home; r
   writeFileSync(join(d, 'record-1-ab12.jsonl'), JSON.stringify({ v: V, at: 1 }) + '\n');
   writeFileSync(join(d, 'serve.log'), 'x\n');
   assert.deepEqual(recordRows(d).map((r) => r.at), [1, 3]);
+});
+
+test('a route keeps no world prefix and no query values (one route per listen, not one per cursor)', () => {
+  assert.equal(routeOf('/w/pt-x/v1/edge/inbox/listen?timeoutMs=50000&after=msg_1'), '/v1/edge/inbox/listen?timeoutMs&after');
+  assert.equal(routeOf('/v1/edge/act'), '/v1/edge/act');
+  assert.equal(routeOf(undefined), '');
 });

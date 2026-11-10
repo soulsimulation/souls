@@ -23,6 +23,13 @@ export function recordRows(dir) {
   return files.flatMap((f) => readJsonl(join(dir, f))).filter((r) => r?.v === 'soul-trace/2').sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
 }
 
+/** A recorded path as soul-trace/1 keeps a route: no world prefix (`/w/<slug>`), and the query's keys without their values. */
+export function routeOf(path) {
+  const [p, q] = String(path ?? '').split('?');
+  const keys = q ? [...new URLSearchParams(q).keys()] : [];
+  return p.replace(/^\/w\/[a-z0-9-]+(?=\/)/, '') + (keys.length ? `?${keys.join('&')}` : '');
+}
+
 /** A command's world calls in the record (kind http; serve's own `wire` calls are not the agent's) in the shape #1752's
  *  measures read (soul-trace/1 http: route, durationMs, serverMs, facts.accepted/code). */
 export function traceFromRecord(rows) {
@@ -31,7 +38,7 @@ export function traceFromRecord(rows) {
     if (r?.kind !== 'http' || r.proxied) continue;
     const res = r.res && typeof r.res === 'object' && !r.res.cut ? r.res : null;
     const code = res?.error?.code ?? (typeof res?.code === 'string' ? res.code : undefined);
-    out.push({ v: 'soul-trace/1', kind: 'http', at: r.wallStart ?? r.at, method: r.method ?? 'GET', route: r.path ?? '', status: r.status ?? 0, durationMs: r.ms ?? null,
+    out.push({ v: 'soul-trace/1', kind: 'http', at: r.wallStart ?? r.at, method: r.method ?? 'GET', route: routeOf(r.path), status: r.status ?? 0, durationMs: r.ms ?? null,
       serverMs: r.server?.world ?? null, queueMs: r.server?.queue ?? null, key: r.key ?? null, ids: r.ids ?? null,
       facts: { ...(typeof res?.accepted === 'boolean' ? { accepted: res.accepted } : {}), ...(code ? { code } : {}) } });
   }
@@ -100,7 +107,10 @@ export function measureWindow({ win, trace, server = [], rows = [], turns = [], 
   const card = e.channel === 'card' ? { state: e.resultState ?? null, outcome: e.resultState ?? null, resultAt: e.resultAt ?? null } : null;
   let verdict = { ok: null, why: 'no battery item for this message' };
   if (item) verdict = last ? judge(item.check, { obs: obsOf(last), newReceipts, card, catalog, noCard: e.channel !== 'card' }) : { ok: false, why: 'no observer sample in the window' };
-  const sv = server.filter((s) => s.at >= win.since && s.at < win.until);
+  // the world's own lines for this agent's calls: joined by the client's idempotency key or a receipt it named; long polls
+  // (held open by design) and everyone else's reads (the observer, the owner card) left out
+  const keys = new Set(http.map((r) => r.key).filter(Boolean)), rids = new Set(http.flatMap((r) => r.ids?.receipts ?? []));
+  const sv = server.filter((s) => s.at >= win.since && s.at < win.until && !isLongPoll(routeOf(s.path)) && ((s.key && keys.has(s.key)) || (s.receipts ?? []).some((id) => rids.has(id))));
   const q = (xs, p) => { const a = xs.filter(Number.isFinite).sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.ceil(p * a.length) - 1)] : null; };
   return {
     item: item?.id ?? e.requestId, requestId: e.requestId, instruction: e.text, channel: e.channel, repeat: 1, succeeded: verdict.ok === true, judged: verdict.ok !== null && !verdict.unknown, why: verdict.why,
@@ -149,7 +159,8 @@ export async function finishRunRecord({ runDir, seats, scenario = {}, world = {}
     const rows = recordRows(join(out, 'client')), trace = traceFromRecord(rows);
     const catalog = catalogIndex(readJson(join(s.runtime ?? s.folder, 'world-catalog.json'))?.catalog ?? null);
     const turns = readJsonl(join(s.dir, 'turns.jsonl')), transcript = readJsonl(join(s.dir, 'transcript.jsonl'));
-    for (const win of windowsOf(evidence)) episodes.push({ seatId: s.id, ...measureWindow({ win, trace, server, rows, turns, transcript, battery, catalog }) });
+    const v = readJson(join(out, 'versions.json')), client = { cli: v?.client?.file?.version ?? v?.client?.recorded?.[0] ?? null, skill: v?.skill?.[0]?.version ?? null };
+    for (const win of windowsOf(evidence)) episodes.push({ seatId: s.id, ...measureWindow({ win, trace, server, rows, turns, transcript, battery, catalog }), client });
     const personaDir = join(runDir, 'personas', s.id);
     index.seats.push({ id: s.id, soulId: s.soulId ?? null, bundle: c.ok ? relative(runDir, out) : null, bundleError: c.ok ? null : c.error, records: rows.length, worldCalls: trace.length,
       harness: { turns: relative(runDir, join(s.dir, 'turns.jsonl')), transcript: relative(runDir, join(s.dir, 'transcript.jsonl')), listen: existsSync(join(s.dir, 'listen.jsonl')) ? relative(runDir, join(s.dir, 'listen.jsonl')) : null },
@@ -169,8 +180,8 @@ export async function finishRunRecord({ runDir, seats, scenario = {}, world = {}
 
 /** What the run adds beside #1752's numbers: the local lookups that found nothing, and the world's own per-request record. */
 export function runFacts(episodes) {
-  const L = ['', '## Run facts (#1774)', '', 'Local lookups are the agent\'s `find` and `query` commands; a stretch is lookups in a row with at least one empty answer. The server record is the dev world\'s own (world-request/1), beside the client\'s Server-Timing.', '',
-    '| request | item | judged | lookups (empty) | longest empty stretch | server requests | server world ms p50 / max | queue ms max |', '|---|---|---|---|---|---|---|---|'];
+  const L = ['', '## Run facts (#1774)', '', 'Local lookups are the agent\'s `find` and `query` commands; a stretch is lookups in a row with at least one empty answer. The server lines are the dev world\'s own record (world-request/1) of this agent\'s calls, joined by idempotency key or receipt id; long polls left out.', '',
+    '| request | item | judged | lookups (empty) | longest empty stretch | server lines joined | server world ms p50 / max | queue ms max |', '|---|---|---|---|---|---|---|---|'];
   for (const e of episodes) L.push(`| ${e.requestId} | ${e.item} | ${e.judged ? (e.succeeded ? 'yes' : 'no') : 'not judged'} | ${e.lookups.lookups} (${e.lookups.empty}) | ${e.lookups.longestEmptyStretchMs ? `${(e.lookups.longestEmptyStretchMs / 1000).toFixed(1)} s` : '-'} | ${e.serverRecord?.requests ?? '-'} | ${e.serverRecord ? `${e.serverRecord.worldMsP50} / ${e.serverRecord.worldMsMax}` : '-'} | ${e.serverRecord?.queueMsMax ?? '-'} |`);
   return L.join('\n') + '\n';
 }
