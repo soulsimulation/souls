@@ -27,7 +27,7 @@ test('native planting consumes finite tray only after work, then same bed is wat
  const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};
  await tick(5);await invite(f,'ana');const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Preparing seedling'}));
  soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick(5);
- const body=()=>f.host.engine.world.entities[soul.entityId],[x,,z]=body().pose.p;
+ const body=()=>f.host.engine.world.entities[soul.entityId],x=18,z=0;
  const here=async()=>await(await app.request('/v1/edge/here?include=doHere')).json(),bytes=h=>JSON.stringify(h.here).length;
  const absent=await here();ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/garden-planter@3',name:'distant-'+i,p:[x+120+i%10*3,z+120+Math.floor(i/10)*3]}))}));await tick(50);
  const far=await here();assert.equal(bytes(far),bytes(absent));assert.ok(!/distant-/.test(JSON.stringify(far.here)));
@@ -36,23 +36,39 @@ test('native planting consumes finite tray only after work, then same bed is wat
  {op:'place',def:'core/can-hook@1',name:'hook',p:[x-2,z-1]},
  {op:'place',def:'core/watering-can@3',name:'can',in:{parent:'hook',slot:'peg'},p:[HOOK_PEG[0]-CAN_GRIP[0],HOOK_PEG[1]-CAN_GRIP[1],HOOK_PEG[2]-CAN_GRIP[2]],r:Math.PI/2,state:{level:1}},
  {op:'place',def:'core/bowl@2',name:'bowl',p:[x+.5,z-.5]}]}));await tick(50);
- const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
+ const ent=n=>[...god.model.entities.values()].find(e=>e.name===n||(n==='block'&&e.name==='fresh-bed')),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
  const act=(capability,params={})=>accept(f.host,edge.act(soul,{capability,params}));
  const finish=async r=>{ok(r);for(let n=0;n<2000;n++){const end=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(end.phase))return end;await tick();}assert.fail('finite action did not end');};
  const done=async(cap,params)=>{const r=await finish(await act(cap,params));assert.equal(r.phase,'completed',JSON.stringify(r));return r;};
- const cap='object:'+id('block')+':plant-seedlings';assert.equal(edge.capabilities(soul).find(c=>c.id===cap)?.available,true);
+ let cap='object:'+id('block')+':plant-seedlings';assert.equal(edge.capabilities(soul).find(c=>c.id===cap)?.available,true);
  for(const [name,reason]of [['private-block',/private|access|owner/]]){const denied=await act('object:'+id(name)+':plant-seedlings');assert.equal(denied.accepted,false);assert.match(JSON.stringify(denied),reason);}
  await done('pick-up:'+id('bowl'));const hands=await act(cap);assert.equal(hands.accepted,false);assert.match(JSON.stringify(hands),/holding|hands/);await done('put-down:here');
  const cut=ok(await act(cap));assert.equal(ent('block').state.stock,1);assert.equal(ent('block').state.planted,false);
  for(let n=0;n<800&&body().human?.activity!=='craft';n++)await tick();assert.equal(body().human?.activity,'craft');await tick(100);assert.equal(ent('block').state.stock,1);assert.equal(ent('block').state.planted,false);
  await done('stand:here');await tick(20);assert.notEqual(edge.receipt(soul.soulId,cut.receipt.id).phase,'completed');assert.equal(ent('block').state.stock,1);assert.equal(ent('block').state.planted,false);
- const work=ok(await act(cap));let active=0;
+ ok(god.act({ops:[{op:'place',def:'core/bench@1',name:'unrelated-bench',p:[-8,-8]}]}));
+ const outbound=ok(await accept(f.host,edge.performBodies(soul,'fixture:ordinary-walk','Walk to the far start',[{verb:'mars:walk_to',params:{x:-20,z:0,level:0}}])));
+ assert.equal((await finish(outbound)).phase,'completed');assert.ok(Math.hypot(body().pose.p[0]-20,body().pose.p[2])>30);
+ const previous=id('block');ok(god.act({ops:[{op:'remove',id:previous},{op:'place',def:'core/garden-planter@3',name:'fresh-bed',p:[20,0]}]}));
+ const fresh=id('fresh-bed');assert.notEqual(fresh,previous);cap='object:'+fresh+':plant-seedlings';await tick(20);
+ ok(god.act({ops:[{op:'move',id:id('unrelated-bench'),p:[-7,-8]}]}));const godEdit=god.store.undoable().seq;
+ const work=ok(await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap,strict:true})}).then(r=>r.json())));
+ assert.equal(work.receipt.capability,cap);let active=0,walked=0;
+
  for(let n=0;n<1200&&edge.receipt(soul.soulId,work.receipt.id).phase!=='completed';n++){
+  if((body().human?.speed??0)>.1)walked++;
   if(body().human?.activity==='craft'){active++;assert.equal(body().human.prop,'tool');assert.equal(ent('block').state.stock,1);assert.equal(ent('block').state.planted,false);}
   await tick();
  }
  const receipt=await finish(work);assert.equal(receipt.phase,'completed');assert.ok(active>=199,'native ten-second craft duration');await tick(20);
  assert.equal(ent('block').state.stock,0);assert.equal(ent('block').state.planted,true);assert.equal(ent('block').state.growth,1);assert.equal(ent('block').state.lastBy,'Ana');assert.equal(ent('block').state.lastReceipt,receipt.id);
+ assert.ok(walked>0,'fresh exact far ID walked normally');assert.equal(god.store.undoable().seq,godEdit);
+ const planted=structuredClone(ent('block'));
+ const undo=ok(god.undo());assert.equal(undo.reverted,godEdit);await tick(10);
+ assert.equal(god.model.worldPose(ent('unrelated-bench')).x,-8);assert.deepEqual(ent('block'),planted);
+ const redoEdit=god.store.redoable().seq;const redo=ok(god.redo());assert.equal(redo.reverted,redoEdit);await tick(10);
+ assert.equal(god.model.worldPose(ent('unrelated-bench')).x,-7);assert.deepEqual(ent('block'),planted);
+
  let commits=0;const repeated=createPlanting({model:god.model,engine:f.host.engine,levelAt:()=>0,soul:()=>({id:soul.soulId,entity_id:soul.entityId,name:soul.name}),denied:()=>null,commit(){commits++;return{accepted:true};},log(){}});repeated.onReceipt(receipt);assert.equal(commits,0);
  const exhausted=await act(cap);assert.equal(exhausted.accepted,false);assert.match(JSON.stringify(exhausted),/no supplied seedlings/);
  const inspect=await(await app.request('/v1/edge/inspect/'+id('block')+'?all=1')).json();assert.ok(JSON.stringify(inspect).includes('plant'));assert.ok(edge.capabilities(soul).some(c=>c.id==='read:'+id('block')&&c.label.includes('Ana')),'existing read offer exposes planted credit');
