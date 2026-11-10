@@ -11,7 +11,7 @@ import {SPOT_REACH} from './edge/ledger/activities.ts';
 
 type Spot = {id: string; activity: string; at: [number, number]; level?: number; together?: unknown; base: string; place?: string};
 
-test('Eden: far spots by id, and what the catalog and live picture publish', {timeout: 900_000}, async t => {
+test('Eden: far spots by id, and what the catalog and live picture publish (things worked by hand too, #1751)', {timeout: 900_000}, async t => {
   const w = await bootEden(); t.after(() => w.close());
   const L = w.edge as any, host = w.host, soul = w.soul;
   const run = async (n: number) => {for (let i = 0; i < n; i++) {host.tickOnce(); if (i % 10 === 0) {await setImmediate(); host.drainInputs();}} await setImmediate(); host.drainInputs();};
@@ -80,5 +80,32 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.deepEqual([hidden.at, hidden.place, hidden.doing], [null, null, null], 'in the world, but where is not said');
     assert.equal(shut.body.speech.some((s: any) => s.id === 'sp_hidden'), false);
     assert.equal(JSON.stringify(shut.body).includes('said in the secret place'), false);
+  });
+
+  // #1751: things worked by hand, their state, and their acts from anywhere
+  await t.test('a kind worked by hand is in the catalog with its acts, and a thing\'s changed state reaches the live picture', async () => {
+    const cat = (await get('/v1/edge/catalog')).body;
+    const lamp = cat.kinds['core-desk-lamp'];
+    assert.ok(lamp, 'desk lamps are worked by hand on Eden 2026');
+    assert.deepEqual(lamp.acts.map((a: any) => a.verb).sort(), ['switch-off', 'switch-on']);
+    assert.equal(typeof lamp.state.on, 'boolean');
+    const far = cat.things.filter((x: any) => x.kind === 'core-desk-lamp').map((x: any) => ({...x, d: Math.hypot(x.at[0] - me[0], x.at[1] - me[2])})).sort((a: any, b: any) => b.d - a.d)[0];
+    assert.ok(far.d > 40, `a lamp beyond the old 30 m sight (${Math.round(far.d)} m)`);
+    // (a far act by id walks there: actuators-catalog.test.ts; this harness has no object framework)
+    const before = (await get('/v1/edge/live')).body;
+    assert.equal(before.things[far.id], undefined, 'a thing in its default state is not in the live picture');
+    w.god.engineAct([{op: 'set', id: far.id, state: {on: !lamp.state.on}}] as never, 'test: switch');
+    await run(12);
+    assert.deepEqual((await get('/v1/edge/live')).body.things[far.id], {on: !lamp.state.on}, 'only the field that differs');
+    // a thing a shut container keeps out of sight is in neither answer, and the catalog follows it
+    const was = L.concealedThing, v1 = catalog.version(); L.concealedThing = (id: string) => id === far.id || !!was?.(id);
+    try {
+      await run(12);
+      const c2 = (await get('/v1/edge/catalog')).body;
+      assert.notEqual(catalog.version(), v1, 'a new catalog version');
+      assert.equal(c2.things.some((x: any) => x.id === far.id), false);
+      assert.equal((await get('/v1/edge/live')).body.things[far.id], undefined);
+    } finally { L.concealedThing = was; }
+    assert.equal(catalog.version(), v1, 'shown again: the first version');
   });
 });

@@ -14,7 +14,7 @@ export function ledgerCatalog(L: EdgeLedger) {
     if (e.human || !e.def || !e.pose || L.concealedThing?.(id)) continue;
     const x = e.pose.p[0]!, z = e.pose.p[2]!; if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
     const place = locate(x, z, 0);
-    things.push({id, kind: e.def, name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null});
+    things.push({id, kind: e.def, name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null, hand: L.thingActs?.(id)});
   }
   return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots: L.spots.spots, things});
 }
@@ -25,8 +25,10 @@ export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
   const current = () => {
     // the static world (places, spots, navigation), which places are secret, and how many things there are. Bodies are not
     // structure: a Soul arriving or leaving rebuilds nothing.
-    let things = 0; for (const e of Object.values((L.host.engine.world as unknown as {entities: Record<string, WorldEntity>}).entities)) if (e.def && !e.human) things++;
-    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}`;
+    // (#1751: and which things a shut container keeps out of sight: opening a drawer publishes what is in it)
+    let things = 0, hidden = '';
+    for (const [id, e] of Object.entries((L.host.engine.world as unknown as {entities: Record<string, WorldEntity>}).entities)) if (e.def && !e.human) {things++; if (L.concealedThing?.(id)) hidden += id;}
+    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}|${hidden}`;
     if (kept?.key !== key) kept = {key, value: ledgerCatalog(L)};
     return kept.value;
   };

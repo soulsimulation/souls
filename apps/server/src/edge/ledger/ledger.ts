@@ -216,6 +216,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
   contactActuator?: ContactActuatorService;
   /** CTRL-2 (#1094): a thing its container keeps out of sight (shut, or a hiding place); set by the engine bridge. */
   concealedThing?: (id: string) => boolean;
+  /** #1751: a built thing's acts as the catalog publishes them (its def's own action list), or null; set by the engine bridge. */
+  thingActs?: (id: string) => {acts: import('../../god/actuators.ts').CatalogKindAct[]; state: Record<string, unknown>} | null;
+  /** #1751: every built thing whose acted-on state differs from its def's defaults, with only the fields that differ. */
+  thingStates?: () => ReadonlyMap<string, Record<string, unknown>>;
   /** #1095 A5: what a built thing's author said about it; set by the engine bridge. */
   thingAbout?: (id: string) => {title?: string; what?: string; aliases?: string[]} | null;
   /** CTRL-2 (#1094): a built thing's own name, as offers call it; set by the engine bridge. */

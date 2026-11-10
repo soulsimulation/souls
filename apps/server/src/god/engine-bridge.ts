@@ -38,7 +38,7 @@ import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
-import { actuatedState, keepsLeftBy, leftByOf } from './actuators.ts';
+import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -319,6 +319,12 @@ export class EngineBridge {
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
+      // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
+      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);const acts=def?catalogActs(def):[];return def&&acts.length?{acts,state:stateDefaults(def)}:null;};
+      let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
+      this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
+        for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}
+        states={v:this.model.editSeq,m};return m;};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
     if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { indexCatalog, find, query, placeView, bestPlace } from "./catalog.mjs";
+import { indexCatalog, find, query, placeView, bestPlace, handActs } from "./catalog.mjs";
 
 const cat = {
   contract: "soul-catalog/1", worldId: "w-1", scope: "public", placeVerbs: ["walk", "hang-out"],
@@ -111,4 +111,39 @@ test("the anchor of a relation is the best-named place, nearest on a tie", () =>
 test("the catalog vouches for the ids it publishes and says nothing about the rest", () => {
   for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1", "sit-ground:here"]) assert.equal(ix.knows(id), true, id);
   for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "sit:e_tree", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
+});
+
+// #1751: things worked by hand, with their state from the live picture
+const handCat = { ...cat, places: [...cat.places, { id: "g-office", ref: "eden-office", name: "Eden Office", kind: "building", parent: "g-village", at: [60, 10] }, { id: "g-office.reception", name: "Reception", kind: "room", parent: "g-office", at: [61, 10] }],
+  things: [...cat.things, { id: "e_l1", name: "office/desk-lamp", kind: "core-desk-lamp", place: "g-office.reception", at: [61, 11] }, { id: "e_l2", name: "office/old-lamp", kind: "core-desk-lamp", place: "g-office.reception", at: [62, 11], byHand: false },
+    { id: "e_ch", name: "porch-chest", kind: "core-chest", place: "g-village", at: [55, 0] }],
+  kinds: {
+    "core-desk-lamp": { acts: [{ verb: "switch-on", label: "Switch on", when: [{ field: "on", is: false }] }, { verb: "switch-off", label: "Switch off", when: [{ field: "on", is: true }] }], state: { on: true } },
+    "core-chest": { acts: [{ verb: "open", label: "Open", when: [{ field: "open", is: false }, { field: "locked", not: true }] }, { verb: "close", label: "Close", when: [{ field: "open", is: true }] }, { verb: "lock", label: "Lock", when: [{ field: "locked", is: false }, { field: "open", not: true }] }, { verb: "unlock", label: "Unlock", when: [{ field: "locked", is: true }] }], state: { open: false, locked: false } } } };
+const hix = indexCatalog(handCat);
+
+test("a lamp in a place comes with its state and the one act that state allows; the live picture changes both", () => {
+  const on = find(hix, "lamp", { inPlace: "reception", at }).found.find((r) => r.id === "e_l1");
+  assert.deepEqual(on.state, { on: true }); assert.equal(on.act, "object:e_l1:switch-off"); assert.equal(on.also, undefined);
+  const off = find(hix, "lamp", { inPlace: "g-office.reception", at, states: { e_l1: { on: false } } }).found.find((r) => r.id === "e_l1");
+  assert.deepEqual(off.state, { on: false }); assert.equal(off.act, "object:e_l1:switch-on");
+  const old = find(hix, "lamp", { inPlace: "reception", at }).found.find((r) => r.id === "e_l2");
+  assert.equal(old.state, undefined); assert.equal(old.act, undefined, "a revision that takes no acts offers none");
+});
+
+test("the words or the verb pick the act; a verb finds only things that take it now", () => {
+  assert.equal(find(hix, "lock chest", { at }).found[0].act, "object:e_ch:lock");
+  assert.deepEqual(find(hix, "chest", { at }).found[0].also, ["object:e_ch:lock"]);
+  assert.equal(find(hix, "", { verb: "unlock", at }).found.length, 0, "nothing is locked");
+  assert.equal(find(hix, "", { verb: "unlock", at, states: { e_ch: { locked: true } } }).found[0].act, "object:e_ch:unlock");
+  assert.equal(find(hix, "switch on lamp", { at, states: { e_l1: { on: false } } }).found[0].act, "object:e_l1:switch-on");
+});
+
+test("a thing's hand acts are vouched for by the catalog and named by query", () => {
+  assert.equal(hix.knows("object:e_l1:switch-on"), true);
+  assert.equal(hix.knows("object:e_l2:switch-on"), false);
+  assert.equal(hix.knows("object:e_l1:fly"), false);
+  const [t] = query(hix, [{ thing: "e_ch" }], { at, states: { e_ch: { open: true } } });
+  assert.deepEqual(t.state, { open: true, locked: false }); assert.deepEqual(t.acts, ["object:e_ch:close"]);
+  assert.deepEqual(handActs(hix, handCat.things.at(-1), {}).map((a) => a.verb), ["open", "lock"]);
 });
