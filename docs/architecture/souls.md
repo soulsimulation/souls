@@ -247,7 +247,12 @@ withholds. Owner messages and credentials are never in it.
   kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
-  stands in it and what is done in it are left out. Eden 2026: 1,510 places, 4,518 things, 1,365 acts, 1.4 MB.
+  stands in it and what is done in it are left out. A `ref` two places share (a lake and its bank) is left off both, so
+  `walk:<ref>` always names one place. The version follows the god's edits too: a thing moved, renamed or removed is a
+  new catalog, and a spot whose thing is gone leaves it. Until the world first has its places and activity spots laid out
+  (a few seconds after it starts listening) the route answers `503 world.starting` with `Retry-After: 2` rather than
+  publish a world with no acts; `live` names no version until then. Eden 2026: 1,510 places, 4,518 things, 1,365 acts,
+  1.4 MB.
   `kinds` ([#1751](https://github.com/soulsimulation/souls/issues/1751)) lists, per kind of thing worked by hand or
   holding state, its acts (verb, label, Soul-facing params and the state each needs, `when`; `[]` for a thing that only
   has state, such as a bucket another thing fills) and its default state, generated from the def's own action list and
@@ -271,13 +276,16 @@ withholds. Owner messages and credentials are never in it.
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
   its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
-  what it cut. A thing worked by hand comes with its `state` (the kind's defaults with the live picture's changes) and
+  what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
+  narrow nothing; an act that needs others ranks after one done alone. A fresh folder's first `find` fetches both itself,
+  and waits out `world.starting`. A thing worked by hand comes with its `state` (the kind's defaults with the live picture's changes) and
   the `act` that state allows (a lamp that is on: `switch-off`; the act its words name first; others in `also`). A verb
   (`--verb open`) finds the things that take it now. `--in` takes a place's id or its words. The live copy is read
   again once it is 2.5 s old, so a change reaches `find` within 3 s.
 - **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
-  One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`. Such an id is
+  One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
+  a spot whose thing a god removed. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
