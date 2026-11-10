@@ -4,7 +4,7 @@
 import type { ClerkSatellite } from '../clerk-satellite.ts';
 import { EdenMark } from '../EdenMark.tsx';
 import { BASE } from '../base-path.ts';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
 
@@ -142,6 +142,10 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
   // shown on the homepage as this world's god; prefilled from the sign-in name, never from an email address
   const [godName, setGodName] = useState(() => { const l = (session.label ?? localStorage.getItem('sim.dev') ?? '').replace(/^dev:/, ''); return l.includes('@') ? '' : l.slice(0, 32); });
   const [template, setTemplate] = useState(templates.find((t) => t.id === 'hello-hamlet')?.id ?? templates[0]?.id ?? 'empty');
+  // #1649: the world's time zone; its clock is the real local time there. The creator's own zone by default.
+  const [timeZone, setTimeZone] = useState(browserTimeZone);
+  const zones = useMemo(timeZoneNames, []);
+  const zoneOk = isTimeZoneName(timeZone.trim());
   const [state, setState] = useState<{ phase: 'edit' | 'creating' | 'error'; message?: string; started?: number }>({ phase: 'edit' });
   const [now, setNow] = useState(Date.now());
   const input = useRef<HTMLInputElement>(null);
@@ -152,6 +156,7 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { input.current?.focus(); return; }
+    if (!zoneOk) return;
     setState({ phase: 'creating', started: Date.now() });
     try {
       // the creator's sign-in goes along: the launcher has the new world claim them as its god at birth
@@ -162,7 +167,7 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
         const n = godName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36);
         if (n) { localStorage.setItem('sim.dev', n); creator = n; headers = { authorization: `Bearer dev:${n}` }; }
       }
-      const r = await fetch(`${BASE}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name: name.trim(), template, creator, godName: godName.trim() || undefined }) });
+      const r = await fetch(`${BASE}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name: name.trim(), template, creator, godName: godName.trim() || undefined, timeZone: timeZone.trim() }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d.url) throw new Error(d.message ?? `the launcher answered ${r.status}`);
       location.href = d.url;
@@ -178,6 +183,10 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
         <p className="lh-slug dim">{slugPreview ? <>It will live at <code>{BASE}/w/{/^[a-z]/.test(slugPreview) ? slugPreview : 'world-' + slugPreview}</code></> : <>&nbsp;</>}</p>
         <label className="lh-label" htmlFor="lh-god">Your name, as its god <span className="lh-opt">(shown on the world list)</span></label>
         <input id="lh-god" data-god-name="1" value={godName} maxLength={32} placeholder="e.g. Gene" onChange={(e) => setGodName(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" />
+        <label className="lh-label" htmlFor="lh-zone">Time zone <span className="lh-opt">(the world's clock is the local time there)</span></label>
+        <input id="lh-zone" data-time-zone="1" list="lh-zones" value={timeZone} maxLength={64} spellCheck={false} placeholder="e.g. America/New_York" onChange={(e) => setTimeZone(e.target.value)} disabled={state.phase === 'creating'} autoComplete="off" aria-invalid={!zoneOk || undefined} />
+        <datalist id="lh-zones">{zones.map((z) => <option key={z} value={z} />)}</datalist>
+        <p className={'lh-slug ' + (zoneOk ? 'dim' : 'bad')}>{zoneOk ? <>Now {zoneClock(timeZone.trim())} there</> : <>Not a time zone name; pick one from the list</>}</p>
         <fieldset className="lh-templates" disabled={state.phase === 'creating'}>
           <legend className="lh-label">Starts as</legend>
           {templates.map((t) => (
@@ -191,10 +200,20 @@ function NewWorldDialog({ templates, onClose }: { templates: LauncherTemplate[];
         {state.phase === 'error' && <p className="bad" data-create-error="1">Could not create the world: {state.message}</p>}
         <div className="lh-actions">
           <button type="button" className="lh-cancel" onClick={onClose} disabled={state.phase === 'creating'}>Cancel</button>
-          <button type="submit" className="lh-create" data-create="1" disabled={state.phase === 'creating' || !name.trim()}>{state.phase === 'creating' ? `Starting the world… ${secs}s` : 'Create world'}</button>
+          <button type="submit" className="lh-create" data-create="1" disabled={state.phase === 'creating' || !name.trim() || !zoneOk}>{state.phase === 'creating' ? `Starting the world… ${secs}s` : 'Create world'}</button>
         </div>
         {state.phase === 'creating' && <p className="lh-wait dim">A world takes 10–30 seconds to start the first time{template !== 'empty' ? ' (the template is being built through the same validated edits your agent will use)' : ''}.</p>}
       </form>
     </div>
   );
 }
+
+/** #1649: the creator's own time zone (the New world dialog's default). */
+export function browserTimeZone(): string { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'; } catch { return 'America/New_York'; } }
+/** An IANA zone name this browser knows (the server checks it again). */
+export function isTimeZoneName(v: string): boolean {
+  if (!v || v.length > 64 || !/^[A-Za-z][A-Za-z0-9_+\-/]*$/.test(v)) return false;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: v }); return true; } catch { return false; }
+}
+function timeZoneNames(): string[] { try { return (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? []; } catch { return []; } }
+const zoneClock = (timeZone: string) => new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit' }).format(new Date());
