@@ -15,7 +15,7 @@ export function createGardenProduce(h:ProduceHost){
   const denied=h.denied(id,soul);if(denied)return{no:denied};
   const fruit=Number(e.state?.fruit);if(!Number.isSafeInteger(fruit)||fruit<1||fruit>6)return{no:{code:'object.state',reason:'Harvest ripe tomatoes into this basket first.'}};
   const support=h.engine.world.entities[id]?.support,parent=h.model.entities.get(e.in.parent),pd=parent&&h.model.resolvedDef(parent.def);
-  if(!parent||pd?.components?.carryable||support?.kind!=='resting-on'||support.on!==parent.id||!e.in.slot||!pd?.slots.some(s=>s.id===e.in.slot&&s.kind==='surface'))return{no:{code:'object.state',reason:'Put the basket on an admitted fixed work surface with room beside it.'}};
+  if(!parent||pd?.components?.carryable||support?.kind!=='resting-on'||support.on!==parent.id||!e.in.slot||!h.model.slotsOf(parent).some(s=>s.id===e.in.slot&&s.kind==='surface'))return{no:{code:'object.state',reason:'Put the basket on an admitted fixed work surface with room beside it.'}};
   const parentDenied=h.denied(parent.id,soul);if(parentDenied)return{no:parentDenied};
   const body=h.engine.world.entities[soul.entityId],pos=body?.pose?.p,p=h.model.worldPose(e),pp=h.model.worldPose(parent);
   if(!body?.human||!pos)return{no:{code:'body.unavailable',reason:'Your body is unavailable.'}};
@@ -23,7 +23,7 @@ export function createGardenProduce(h:ProduceHost){
   if(h.levelAt(pos[0],pos[2],pos[1])!==h.levelAt(p.x,p.z,p.y))return{no:{code:'object.state',reason:'Reach the same floor as the basket first.'}};
   // World offset along the basket's right; convert once to the actual fixed parent's local surface coordinates.
   const wx=p.x+.30*p.s*Math.cos(p.yaw),wz=p.z-.30*p.s*Math.sin(p.yaw),dx=(wx-pp.x)/pp.s,dz=(wz-pp.z)/pp.s;
-  const slot=pd.slots.find(s=>s.id===e.in.slot)!,out:[number,number]=[dx*Math.cos(pp.yaw)-dz*Math.sin(pp.yaw)-slot.p[0],dx*Math.sin(pp.yaw)+dz*Math.cos(pp.yaw)-slot.p[2]];
+  const slot=h.model.slotsOf(parent).find(s=>s.id===e.in.slot)!,out:[number,number]=[dx*Math.cos(pp.yaw)-dz*Math.sin(pp.yaw)-slot.p[0],dx*Math.sin(pp.yaw)+dz*Math.cos(pp.yaw)-slot.p[2]];
   if([...(h.model.children.get(parent.id)??[])].some(child=>{if(child===id)return false;const e=h.model.entities.get(child);if(!e||e.in.slot!==basket(id)?.in.slot)return false;const q=h.model.worldPose(e);return Math.hypot(q.x-wx,q.z-wz)<.14;}))return{no:{code:'object.state',reason:'Clear the output room 30 cm to the right of the basket first.'}};
   return{e,parent,support,fruit,out};
  }
