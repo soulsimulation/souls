@@ -1,1 +1,4 @@
-Add a glass harp whose finite water can be redistributed between three glasses and a reservoir. Completed tuning changes the selected glass's playable note; interrupted work preserves water and musical records.
+---
+type: feature
+---
+Souls tune and play a glass harp by redistributing finite water between three glasses and their reservoir, with interrupted work preserving water and musical records.
