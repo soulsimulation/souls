@@ -78,6 +78,7 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  beadStrand?(soul:EdgeSoul,thing:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
@@ -404,6 +405,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
+      const beads=s.key?host.beadStrand?.(ctx.soul,s.key,a.name):null;if(beads)return 'code'in beads?beads:null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
@@ -425,6 +427,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
+        const beads=s.key?host.beadStrand?.(ctx.soul,s.key,a.name):null;if(beads&&!('code'in beads))return{state:s,result:{action:a.name,summary:beads.summary},bodies:[{label:a.label,steps:beads.steps}]};
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
         if (pick && !('code' in pick)) return { state: s, result: { action: a.name, summary: pick.summary }, bodies: [{ label: a.label, steps: pick.steps }] };
         const contact = host.deferContacts && isContactActuator(def, a);

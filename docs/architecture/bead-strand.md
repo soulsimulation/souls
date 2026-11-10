@@ -1,0 +1,7 @@
+# Bead-strand artwork
+
+`core/bead-strand@1` is one portable artwork: a cord and six integral coloured beads on a tray. Six ordered positions accept two supplied red, blue and amber beads. Every unused bead remains visible in stock pockets. `object:<id>:thread-slot1-red` illustrates the eighteen slot/colour acts; `object:<id>:unthread-slot1` illustrates six recovery acts. All act and scalar/enum state data is declared on the kind. Current `beadStrand` inspection facts include the full sequence, stocks, maker and work requirements.
+
+Three completed seconds of existing native craft move one bead. The brush is a handwork proxy, with no needle custody or wearing claim. A clear authored standing point uses ordinary native walking; the completed receipt rechecks actual reach/floor, access, empty hands, fixed support, and the exact started composition/transform. Atomic `commitSoulWork` preserves God Undo/redo. Interruption changes no material. Pickup/placement/restart retain the same artwork and composition; work requires normal placement on a fixed work table.
+
+There is no background job or world scan added. Existing request-time custody admission scans are reused. The twenty-four nearby choices and full composition are bounded; no constant-time menu claim is made. Shared completion and catalogue candidates are explicit integration prerequisites, with serial additive God-hook integration by the maintainer.
