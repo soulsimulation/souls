@@ -15,7 +15,7 @@ type Line = {id: string; tick: number; at: number; soul: string; name: string; t
 type Spectated = {kind: string; tick: number; at: number; id?: unknown; from?: {soulId?: unknown; name?: unknown}; channel?: {placeId?: unknown; base?: {placeId?: unknown}}; text?: unknown};
 type Body = {pose?: {p: number[]}; human?: {activity?: string}};
 
-export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {onSpectator(l: (m: Spectated) => void): unknown}, catalogVersion: () => string) {
+export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {onSpectator(l: (m: Spectated) => void): unknown}, catalogVersion: () => string | null) {
   const L = deps.ledger, speech: Line[] = [], secret = (id: string | null | undefined) => !!id && !!L.knowledge?.isSecret(id);
   comms.onSpectator(m => {
     if (m.kind !== 'speech' || typeof m.id !== 'string' || typeof m.text !== 'string') return;
@@ -36,10 +36,11 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
       if (path.some(x => secret(x.id))) return [{id: m.soulId, name: m.name, at: null, place: null, doing: null}];
       return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
     }).sort((a, b) => a.id < b.id ? -1 : 1);
-    return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech});
+    // a line said before its place was made secret is withheld from then on too
+    return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(l => !secret(l.place))});
   };
   app.get('/v1/edge/live', (c: Context) => {
-    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}`;
+    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${L.knowledge?.version ?? 0}`;
     if (kept?.key !== key) kept = {key, body: build(tick)};
     c.header('Cache-Control', 'no-store'); c.header('Content-Type', 'application/json; charset=utf-8');
     return c.body(kept.body, 200);

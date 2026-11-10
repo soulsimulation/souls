@@ -142,3 +142,9 @@ export function cachedTemplates(dir, { everyMs = 2000, now = Date.now } = {}) {
     return memo.get(key);
   };
 }
+
+/** #1649: an IANA time zone name this runtime knows ("America/New_York", "Europe/Lisbon"); same rule as the server's. */
+export function isTimeZone(v) {
+  if (typeof v !== 'string' || v.length < 1 || v.length > 64 || !/^[A-Za-z][A-Za-z0-9_+\-/]*$/.test(v)) return false;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: v }); return true; } catch { return false; }
+}

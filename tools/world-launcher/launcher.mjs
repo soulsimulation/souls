@@ -104,7 +104,7 @@ import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:z
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
+import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, compileCacheDir, defaultCommand, forkCommand } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
@@ -284,14 +284,16 @@ export async function openLauncher(cfg = {}) {
       // who lives here (the public list the world page shows): the homepage's Souls count
       const souls = await fetch(`http://127.0.0.1:${st.port}${wp(w.slug)}/v1/world/souls`, { signal: AbortSignal.timeout(1500) }).then((x) => (x.ok ? x.json() : null)).then((d) => (Array.isArray(d?.souls) ? d.souls.length : null)).catch(() => null);
       stats.set(w.slug, { at: Date.now(), god: !!s.hasOwner, entities: s.entities, seq: s.seq, souls: souls ?? prev?.souls ?? w.souls ?? null });
-      if (w.god !== !!s.hasOwner || w.entities !== s.entities || (souls !== null && w.souls !== souls)) registry.update(w.slug, { god: !!s.hasOwner, entities: s.entities, seq: s.seq, ...(souls !== null ? { souls } : {}) });
+      // #1649: the world's own zone wins (its owner may have changed it); the registry keeps it for the next boot
+      const zone = isTimeZone(s.timeZone) && s.timeZone !== w.timeZone ? { timeZone: s.timeZone } : {};
+      if (w.god !== !!s.hasOwner || w.entities !== s.entities || (souls !== null && w.souls !== souls) || zone.timeZone) registry.update(w.slug, { god: !!s.hasOwner, entities: s.entities, seq: s.seq, ...(souls !== null ? { souls } : {}), ...zone });
     } catch { /* busy; keep the cached numbers */ }
   }
   const describe = (w) => {
     const st = pool.status(w.slug), s = stats.get(w.slug), t = templateList({ all: true }).find((x) => x.id === w.template);
     // two worlds with the same shown name are told apart by their slug (the address people see), e.g. "Mars · my-mars-2"
     const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name));
-    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, restarts: st.restarts ?? 0 };
+    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, restarts: st.restarts ?? 0 };
   };
   async function worldsJson() {
     await Promise.all(registry.worlds.map(refreshStats));
@@ -394,8 +396,12 @@ export async function openLauncher(cfg = {}) {
       return [400, { ok: false, code: 'invalid', message: `slug ${JSON.stringify(chosen)}: lowercase a-z0-9-, starting with a letter, not a reserved name` }];
     if (chosen && (taken.has(chosen) || existsSync(registry.worldDir(chosen))))
       return [409, { ok: false, code: 'exists', message: `slug ${chosen} is in use, archived, or has data on disk` }];
+    // #1649: the world's time zone, chosen in the New world dialog (the creator's browser zone by default); the world
+    // records it at its first real-time boot (WORLD_TIME_ZONE). Absent: the world's migration default.
+    const timeZone = body?.timeZone === undefined || body?.timeZone === null || body?.timeZone === '' ? null : body.timeZone;
+    if (timeZone !== null && !isTimeZone(timeZone)) return [400, { ok: false, code: 'time.zone-invalid', message: `timeZone: an IANA time zone name, e.g. "America/New_York"; got ${JSON.stringify(String(timeZone).slice(0, 64))}` }];
     const slug = chosen ?? slugFor(name, taken);
-    const entry = { slug, name, template: t.id, port: null, createdAt: Date.now(), ...(typeof body?.creator === 'string' && body.creator ? { createdBy: body.creator.slice(0, 40) } : {}), ...(op && typeof body?.unlisted === 'boolean' ? { unlisted: body.unlisted } : {}) };
+    const entry = { slug, name, template: t.id, port: null, createdAt: Date.now(), ...(timeZone ? { timeZone } : {}), ...(typeof body?.creator === 'string' && body.creator ? { createdBy: body.creator.slice(0, 40) } : {}), ...(op && typeof body?.unlisted === 'boolean' ? { unlisted: body.unlisted } : {}) };
     if (creationsClosed) return [503, { ok: false, code: 'handover', message: 'a new release is starting; try again in a minute' }];
     rmSync(registry.worldDir(slug), { recursive: true, force: true });
     mkdirSync(registry.worldDir(slug), { recursive: true });
@@ -789,6 +795,7 @@ export async function openLauncher(cfg = {}) {
       if (opts.worldDeferred) { const no = ceilings.chargeWorld(slug); if (no) { st.fallbackRefused++; json(res, no.refuse.status, no.refuse.body, no.refuse.headers); return; } }
       proxyHttp(req, res, mainPort, opts);
     };
+    const sent = performance.now();   // #1750: for Server-Timing `launcher` and `upstream` (as proxyHttp)
     const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: readPort, path: req.url, method: req.method, headers: { ...hopless(req.headers), 'x-forwarded-for': xff } }, (r) => {
       if (settled) { r.resume(); return; }
       if ((r.statusCode ?? 502) >= 500 && r.statusCode !== 503) { r.resume(); fallback(`status ${r.statusCode}`); return; }
@@ -855,8 +862,11 @@ export async function openLauncher(cfg = {}) {
     } catch { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); return; }
     if (clientGone(req, res)) return;
     const tag = r.status === 200 ? r.headers.etag : undefined;
-    if (tag && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === tag)) { const { 'content-length': _l, 'content-type': _t, ...kept } = r.headers; res.writeHead(304, robotsOf(slug, { ...kept, 'x-sim-cache': r.cache })).end(); return; }
-    res.writeHead(r.status, robotsOf(slug, { ...r.headers, 'x-sim-cache': r.cache, ...(r.cache !== 'miss' ? { 'server-timing': launcherTiming(res, 'cache') } : {}) })).end(req.method === 'HEAD' ? undefined : r.body);
+    // #1737: a kept answer cost the world nothing this time, so it does not repeat the world's time for it (Server-Timing);
+    // #1750: a kept or shared answer says the launcher gave it (`launcher;dur=…;desc=cache`)
+    const { 'server-timing': timing, ...plain } = r.headers, headers = r.cache !== 'miss' ? { ...plain, 'server-timing': launcherTiming(res, 'cache') } : timing === undefined ? plain : { ...plain, 'server-timing': timing };
+    if (tag && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === tag)) { const { 'content-length': _l, 'content-type': _t, ...kept } = headers; res.writeHead(304, robotsOf(slug, { ...kept, 'x-sim-cache': r.cache })).end(); return; }
+    res.writeHead(r.status, robotsOf(slug, { ...headers, 'x-sim-cache': r.cache })).end(req.method === 'HEAD' ? undefined : r.body);
   }
   /** Retired (a newer launcher serves now): anything still arriving here, on a connection opened before the switch,
    *  goes to the keeper's port, i.e. to the newer launcher; the connection closes after this response. */
