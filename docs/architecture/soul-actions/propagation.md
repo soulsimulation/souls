@@ -18,6 +18,7 @@ Catalog/find/live expose both acts, text schema, finite shoots, stage, soil/wate
 inspection includes full origin/participant snapshots. Same-pot handling and state persistence preserve the result.
 Only active receipts are sampled; no idle object scan. Proof measures absent, distant, nearby and in-use context.
 
-The PR journal hosts actual whole movement, focused checks, normal two-repeat-per-arm comparison and independent
+[PR #1843](https://github.com/soulsimulation/souls/pull/1843) hosts
+[whole actual proof](https://github.com/soulsimulation/souls/releases/download/proofs-1843/pr-1843.propagation-performance.mp4), focused checks, normal two-repeat-per-arm comparison and independent
 scoped review. Explicit dependency base and serial additive hooks require Claude integration; Claude alone owns
 T3 sign-off, shared CI allocation, merge and release.
