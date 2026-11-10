@@ -22,7 +22,8 @@ test('family defs parse, are unique, described, tagged, and within the Eden budg
     assert.ok(!identities.has(identity), `duplicate ${identity}`); identities.add(identity);
     assert.ok(def.description.length > 20, `${def.name}: one-line description`);
     assert.ok(def.tags.length >= 2, `${def.name}: tags`);
-    const tris = kitPhysics(kitArgs.parse((def.make as { args: unknown }).args)).tris;
+    const defaults = Object.fromEntries(Object.entries(def.params ?? {}).map(([name, rule]) => [name, rule.default]));
+    const tris = kitPhysics((def.make as { args: unknown }).args, defaults).tris;
     // VOCAB-MECH: catalogue types are budgeted by their category (vocab.triBudget)
     const budget = def.category ? triBudget(def.category) : def.tags.includes('creature') ? 600 : def.tags.includes('structure') || def.tags.includes('ride') || def.tags.includes('large') ? 6000 : def.tags.includes('vehicle') ? 1200 : 400;
     const hold = HOLDS[identity];
