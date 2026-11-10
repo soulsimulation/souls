@@ -34,6 +34,7 @@ export function createRabbitCare(h: RabbitCareHost) {
   }
   function plan(s: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) {
     if (!stock(id) || action !== 'feed-rabbit') return null;
+    if (params !== undefined && params.text === undefined) return fail('Choose the exact ID or ordinary reference of an unfed garden rabbit in text.');
     const c = check(s, id, params?.text); if ('code' in c) return c;
     if (!('target' in c) || !c.target) return { summary: 'Choose an unfed garden rabbit by exact ID or ordinary reference.', steps: [] };
     const steps: { verb: string; params: Record<string, unknown> }[] = [{ verb: 'stand', params: {} }];
@@ -44,7 +45,7 @@ export function createRabbitCare(h: RabbitCareHost) {
       steps.push({ verb: 'mars:walk_to', params: { x, z, level } }, { verb: 'mars:pose_v1', params: { activity: 'feed', seconds, face: [p.x, p.z] } });
     }
     const end = h.model.worldPose(c.target);
-    steps.push({ verb: 'mars:pose_v1', params: { activity: 'nod', seconds: 1, face: [end.x, end.z] } }, { verb: 'stand', params: {} });
+    steps.push({ verb: 'mars:pose_v1', params: { activity: 'stretch', seconds: .5, base: 'idle', release: true, face: [end.x, end.z] } }, { verb: 'stand', params: {} });
     return { summary: 'Offer one supplied portion through completed native feeding; the same rabbit becomes fed and rests.', steps };
   }
   function begin(s: EdgeSoul, id: string, action: string, params: Record<string, unknown>) {
