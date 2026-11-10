@@ -1,3 +1,4 @@
+import{glassHarpAudioPitch}from'./glass-harp-audio.ts';
 import {FluteAudio} from './flute-audio.ts';
 // VOCAB-W2 + W7: the soundscape. Procedural WebAudio only (no audio files, nothing to license or download).
 //
@@ -438,9 +439,10 @@ function makeVoice(c: AudioContext, kind: SoundKind, variant: number, source: So
   return { kind, variant, source, out, loops: nodes.length > 0, gain: 0, quietSince: 0, tick: (t, e) => tick(t, e), stop: () => { for (const n of nodes) { try { n.stop(); } catch { /* stopped */ } } setTimeout(() => out.disconnect(), 200); } };
 }
 /** A one-shot for `mode: 'change'` (a door creak, a bell ringing, a splash). */
-function oneShot(c: AudioContext, kind: SoundKind, gain: number) {
+function oneShot(c: AudioContext, kind: SoundKind, gain: number, glassPitch?: number) {
   const out = c.createGain(); out.gain.value = gain; out.connect(master!); const t = c.currentTime + 0.02;
-  if (kind === 'bell' || kind === 'chime') { bell(c, out, t, kind === 'bell' ? 1180 : 1600, 0.4); bell(c, out, t + 0.45, kind === 'bell' ? 1180 : 1900, 0.3); }
+  if (glassPitch !== undefined) bell(c, out, t, glassPitch, 0.4);
+  else if (kind === 'bell' || kind === 'chime') { bell(c, out, t, kind === 'bell' ? 1180 : 1600, 0.4); bell(c, out, t + 0.45, kind === 'bell' ? 1180 : 1900, 0.3); }
   else if (kind === 'creak') tone(c, out, t, 120, 70, 0.7, 0.3, 'sawtooth');
   else if (kind === 'water' || kind === 'stream' || kind === 'waves') for (let i = 0; i < 6; i++) tone(c, out, t + i * 0.05, 500 + Math.random() * 600, 900 + Math.random() * 700, 0.07, 0.15);
   else if (kind === 'fire') for (let i = 0; i < 8; i++) burst(c, out, t + i * 0.05, 0.04, 0.4, 1500);
@@ -568,7 +570,7 @@ function step(host: Host) {
       if(e.source==='object'){const live=model.entities.get(e.id.replace(/#\d+$/, ''));if(!live)continue;e.state={...e.state,...live.state};}
       const k = (e.spec.when ?? '').replace(/^!/, ''), v = e.state[k], prev = lastValue.get(e.id);
       lastValue.set(e.id, v);
-      if (prev !== undefined && prev !== v && condition(e.spec.when, e.state, night) && ctx) { const g = falloff(d, e.spec.radius, e.spec.volume); if (g > 0.001) oneShot(ctx, e.spec.kind, g); }
+      if (prev !== undefined && prev !== v && condition(e.spec.when, e.state, night) && ctx) { const g = falloff(d, e.spec.radius, e.spec.volume); if (g > 0.001) { const source=e.source==='object'?model.entities.get(e.id.replace(/#\d+$/, '')):undefined, pitch=glassHarpAudioPitch(source?model.resolvedDef(source.def):undefined,e.state); if(pitch!==null)oneShot(ctx,e.spec.kind,g,pitch); } }
       continue;
     }
     if (!condition(e.spec.when, e.state, night)) continue;

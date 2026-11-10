@@ -110,6 +110,7 @@ export type PerceiveHost = {
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
+  glassHarp?:import('./glass-harp.ts').GlassHarp;
   tea?: { plan(soul: { entityId: string }, id: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** #438 (harvest.ts): picking from a planter into a basket or a vase. */
   harvest?: { plan(soul: { entityId: string }, id: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
@@ -190,6 +191,8 @@ export class GodPerceive {
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
+      glassHarp:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.glassHarp?.plan(soul,id,action,params)??null,
+      glassHarpBegun:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.glassHarp?.begin(soul,id,action,params),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
