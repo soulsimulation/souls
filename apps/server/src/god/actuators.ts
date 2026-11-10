@@ -394,7 +394,8 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
-      if (s.removed || !s.at) { const pitcher=s.key?host.pitcherDecanting?.(ctx.soul,s.key,a.name):null;if(pitcher&&'code'in pitcher)return pitcher;return { code: 'object.gone', reason: 'It is not there any more.' }; }
+      if(s.removed)return {code:'object.gone',reason:'It is not there any more.'};
+      if (!s.at) { const pitcher=s.key?host.pitcherDecanting?.(ctx.soul,s.key,a.name):null;if(pitcher&&'code'in pitcher)return pitcher;return { code: 'object.gone', reason: 'It is not there any more.' }; }
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
       // #1751: a thing's act is taken by id from anywhere and walks there as part of the act (the plan's own walk). A whole
