@@ -1,0 +1,5 @@
+# Hand-crank inspection lamp
+
+The same portable lamp stores six coarse charge units. On an accessible supported table, an empty-handed Soul completes four seconds of native operate work to add two units. `object:<lamp-id>:illuminate` takes the declared string parameter `seconds` (`5`, `10`, or `15`, default `5`). Completed activation spends one unit per five seconds and turns on the existing world-light component. The native deadline turns it off. `extinguish` ends the interval without a refund. Interrupted work earns nothing; restart conservatively ends old illumination without refund.
+
+Find the readable lamp name, then send its exact offer ID. The kind declares all three offers, parameter requirements and current state. Current inspection/live facts expose charge, illumination, completed work and the worker. Work needs the same reachable native body, empty hands and an accessible ordinary supported tabletop; custody remains native pickup/put-on. No continuous energy model, precise crank grip or loose battery is claimed.
