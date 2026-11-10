@@ -230,7 +230,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #1737: the thing a spot belongs to (`<activity>.<entity id>[.<n>]`) is in neither the engine nor the god's world: a
    *  god removed it, and the world's authored spots outlive it. (A pond or a pitch is the god's, not an engine body.) */
   spotThingGone(spotId: string): boolean {
-    const thing = spotThing(spotId); if (!thing || (this.host.engine.world.entities as Record<string, unknown>)[thing]) return false;
+    const thing = spotThing(spotId); if (!thing || (this.mw.world.entities as Record<string, unknown>)[thing]) return false;
     return this.thingName ? this.thingName(thing) === null : true;
   }
   /** #442 (mending.ts): what a completed repair did, read when its receipt ends, before the state changes. */
