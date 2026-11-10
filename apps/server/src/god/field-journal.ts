@@ -2,6 +2,7 @@
 import {opSchema,type Op,type StoredDef,type WorldModel} from '@souls/world-compiler';
 import type {EdgeReceipt,EdgeSoul} from '../edge/contract.ts';
 import {ACT_REACH} from './actuators.ts';
+type Approach=(id:string,soul:EdgeSoul,front:[number,number]|null,radius?:number)=>{p:[number,number];level:number}|null;
 type Refusal={code:string;reason:string};
 type Body={pose?:{p:number[]};support?:{kind?:string;on?:string;by?:string};human?:{holding?:unknown;hands?:unknown;handActuator?:unknown}};
 export type JournalHost={model:WorldModel;engine:{world:{entities:Record<string,Body>};clearanceAtV1?(x:number,z:number,level?:number):number};levelAt(x:number,z:number,y:number):number;soul(id:string):{id:string;entity_id:string;name:string}|undefined;denied(id:string,soul:{soulId:string;entityId:string;name:string}):Refusal|null;commit(ops:Op[],note:string,clientRef:string):{accepted:boolean};log(message:string):void};
@@ -34,13 +35,13 @@ export function createFieldJournal(h:JournalHost){
   if(h.levelAt(pos[0],pos[2],pos[1])!==h.levelAt(p.x,p.z,p.y))return{no:{code:'object.state',reason:'Reach the same floor as the writing desk first.'}};
   return{at,book,history,draft};
  }
- function plan(soul:EdgeSoul,id:string,action:string){
+ function plan(soul:EdgeSoul,id:string,action:string,approach:Approach){
   if(action!=='append-entry'||!desk(id))return null;
   const r=ready(soul,id);if(r.no)return r.no;
-  const p=h.model.worldPose(r.at!),d=h.model.resolvedDef(r.at!.def)!,worker=d.slots.find(s=>s.id==='writer')!,slot=d.slots.find(s=>s.id==='journal')!,c=Math.cos(p.yaw),s=Math.sin(p.yaw);
-  const point=(v:number[])=>({x:p.x+(v[0]*c+v[2]*s)*p.s,z:p.z+(-v[0]*s+v[2]*c)*p.s}),stand=point(worker.p),face=point(slot.p),level=h.levelAt(stand.x,stand.z,p.y);
-  if(h.engine.clearanceAtV1&&h.engine.clearanceAtV1(stand.x,stand.z,level)<.4)return{code:'object.state',reason:'There is no clear standing room at this writing desk.'};
-  return{summary:'Completed ten seconds writing the next signed entry; inspect the same journal for its full history and remaining capacity.',steps:[{verb:'stand',params:{}},{verb:'mars:walk_to',params:{x:stand.x,z:stand.z,level}},{verb:'mars:pose_v1',params:{activity:'write',seconds:10,prop:'pen',face:[face.x,face.z]}},{verb:'stand',params:{}}]};
+  const p=h.model.worldPose(r.at!),d=h.model.resolvedDef(r.at!.def)!,worker=d.slots.find(s=>s.id==='writer')!,c=Math.cos(p.yaw),s=Math.sin(p.yaw),book=h.model.worldPose(r.book!);
+  const front:[number,number]=[p.x+(worker.p[0]*c+worker.p[2]*s)*p.s,p.z+(-worker.p[0]*s+worker.p[2]*c)*p.s],stand=approach(r.book!.id,soul,front,1.5);
+  if(!stand)return{code:'object.state',reason:'There is no ordinary reachable standing room beside this journal.'};
+  return{summary:'Completed ten seconds writing the next signed entry; inspect the same journal for its full history and remaining capacity.',steps:[{verb:'stand',params:{}},{verb:'mars:walk_to',params:{x:stand.p[0],z:stand.p[1],level:stand.level}},{verb:'mars:pose_v1',params:{activity:'write',seconds:10,prop:'pen',face:[book.x,book.z]}},{verb:'stand',params:{}}]};
  }
  function onReceipt(r:EdgeReceipt){
   const m=/^object:(.+):append-entry$/.exec(r.capability);if(!m)return;

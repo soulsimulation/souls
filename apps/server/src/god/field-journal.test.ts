@@ -31,9 +31,11 @@ test('five ordered signed entries consume five ink, preserve all earlier words a
   x.service.onReceipt({...r,phase:'started'});assert.equal(x.model.entities.get(original)?.state?.count,i);x.service.onReceipt(r);x.service.onReceipt(r);
   const state=x.model.entities.get(original)!.state!,history=JSON.parse(String(state.history));assert.equal(state.count,i+1);assert.equal(state.draft,'');assert.equal(x.model.entities.get(x.bench.id)?.state?.ink,4-i);assert.deepEqual(history.map((e:{entry:string})=>e.entry),Array.from({length:i+1},(_,j)=>`Observation ${j+1}`));assert.ok(history.every((e:{by:string;writer:string})=>e.by==='Ana'&&e.writer==='s-ana'));
  }
- assert.equal(x.commits(),5);assert.match(JSON.stringify(x.service.plan(soul,x.bench.id,'append-entry')),/full/);assert.match(x.service.facts(original)?.fieldJournal??'',/Observation 1.*Observation 5/);
+ assert.equal(x.commits(),5);assert.match(JSON.stringify(x.service.plan(soul,x.bench.id,'append-entry',()=>({p:[.25,.8],level:0}))),/full/);assert.match(x.service.facts(original)?.fieldJournal??'',/Observation 1.*Observation 5/);
 });
 test('only exact desk append uses native writing/pen; blank draft and occupied hands block',()=>{
- const x=setup(),soul={soulId:'s-ana',entityId:'ana',name:'Ana'}as never,p=x.service.plan(soul,x.bench.id,'append-entry')!;assert.ok('steps'in p);assert.deepEqual(p.steps[2].params,{activity:'write',seconds:10,prop:'pen',face:[.12,0]});
- x.edit([{op:'set',id:x.linen.id,state:{draft:''}}]);assert.match(JSON.stringify(x.service.plan(soul,x.bench.id,'append-entry')),/Draft/);assert.equal(x.service.plan(soul,x.linen.id,'append-entry'),null);assert.equal(x.service.plan(soul,x.bench.id,'draft-entry'),null);
+ const x=setup(),soul={soulId:'s-ana',entityId:'ana',name:'Ana'}as never,p=x.service.plan(soul,x.bench.id,'append-entry',()=>({p:[.25,.8],level:0}))!;assert.ok('steps'in p);assert.deepEqual(p.steps[2].params,{activity:'write',seconds:10,prop:'pen',face:[.12,0]});
+ x.edit([{op:'set',id:x.linen.id,state:{draft:''}}]);assert.match(JSON.stringify(x.service.plan(soul,x.bench.id,'append-entry',()=>({p:[.25,.8],level:0}))),/Draft/);assert.equal(x.service.plan(soul,x.linen.id,'append-entry',()=>null),null);assert.equal(x.service.plan(soul,x.bench.id,'draft-entry',()=>null),null);
 });
+
+test('native approach is bound to the actual journal and retains no-clear-route refusal',()=>{const x=setup(),soul={soulId:'s-ana',entityId:'ana',name:'Ana'}as never;let observed='';const p=x.service.plan(soul,x.bench.id,'append-entry',(id,_soul,_front,radius)=>{observed=id;assert.equal(radius,1.5);return{p:[.9,.8],level:0};})!;assert.equal(observed,x.linen.id);assert.ok('steps'in p);assert.deepEqual(p.steps[1].params,{x:.9,z:.8,level:0});assert.match(JSON.stringify(x.service.plan(soul,x.bench.id,'append-entry',()=>null)),/ordinary reachable/);});
