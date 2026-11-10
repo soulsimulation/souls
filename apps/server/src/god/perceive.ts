@@ -19,6 +19,7 @@ import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { readOnlyObjectAdvance, refreshOnlyObjectAdvance } from '../edge/comms/objects/framework.ts';
 import type { NearFilter, Objects } from '../edge/comms/objects/framework.ts';
 import { canonicalJson, stateDigest } from '../edge/comms/objects/table.ts';
+import type{LoadedCarry}from'./loaded-carry.ts';
 import { actionsOf, actuatedState, keptShut, kindActions, wrapAct, type Thing } from './actuators.ts';
 import { heldGodThing } from './held.ts';
 import { waterRole, wordOf } from './water.ts';
@@ -88,6 +89,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  loadedCarry?:LoadedCarry;
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -188,6 +190,7 @@ export class GodPerceive {
       },
       deferContacts: !!this.h.edge?.contactActuator,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
+      loadedCarry:(soul:EdgeSoul,id:string,action:string)=>this.h.loadedCarry?.plan(soul,id,action)??null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
