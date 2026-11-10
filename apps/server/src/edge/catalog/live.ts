@@ -17,7 +17,7 @@ type Line = {id: string; tick: number; at: number; soul: string; name: string; t
 type Spectated = {kind: string; tick: number; at: number; id?: unknown; from?: {soulId?: unknown; name?: unknown}; channel?: {placeId?: unknown; base?: {placeId?: unknown}}; text?: unknown};
 type Body = {pose?: {p: number[]}; human?: {activity?: string}};
 
-export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {onSpectator(l: (m: Spectated) => void): unknown}, catalogVersion: () => string) {
+export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {onSpectator(l: (m: Spectated) => void): unknown}, catalogVersion: () => string | null) {
   const L = deps.ledger, speech: Line[] = [], secret = (id: string | null | undefined) => !!id && !!L.knowledge?.isSecret(id);
   comms.onSpectator(m => {
     if (m.kind !== 'speech' || typeof m.id !== 'string' || typeof m.text !== 'string') return;
