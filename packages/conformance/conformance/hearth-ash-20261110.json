@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-10 finite hearth ash cleanup (#1757): core-ash-hearth@1 303b73554bdb955bb6b130e1c3cd42a9ef8659f4d6c834f0eadeb6dc5411fb3b; core-ash-bucket@1 c859760e6e895004bf889c3a8daa368e0008aa58c7b0b8f1916f62c51664cb0f. New opt-in definitions retain supplied ash on the same source or actual supported portable bucket; existing native operate and light/put-out own movement and timing. Scoped production K=2 placed/baked/rendered all10samples with0findings/qualificationgaps. No existing definition, supplement, threshold or baseline changed.",
+  "findings": []
+}
