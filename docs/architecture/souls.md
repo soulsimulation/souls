@@ -278,7 +278,7 @@ withholds. Owner messages and credentials are never in it.
   folder. `serve` keeps the live picture by the push (`live.mjs`): a change on the copy's seq is applied, anything
   else (a gap, another epoch, a check that disagrees) reconnects the stream without its seq, so the whole picture comes
   in order with the changes after it (at most once in 10 s), and a frame naming a newer catalog fetches it. A cached
-  `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it). `look`,
+  `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
   its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
