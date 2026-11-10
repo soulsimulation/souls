@@ -267,6 +267,8 @@ function busyRefusal(level: Level): Refusal { return {status: 503, code: 'world.
 export function worldBlock(level: Level, retryAfterS?: number) { const note = NOTE[level]; return {load: level, ...(retryAfterS ? {retry_after_s: retryAfterS} : {}), ...(note ? {note} : {})}; }
 
 const LOAD_KEY = 'simLoad';
+/** Context key: ms this request waited for a running serving warm (http.ts servingWait), before admission. */
+export const WARM_WAIT_KEY = 'simWarmWaitMs';
 /** The level this request was admitted at (routes.ts `wrap` adds the world block from it at amber and above). */
 export const loadOf = (c: Context): Level | undefined => (c.get as (k: string) => unknown)(LOAD_KEY) as Level | undefined;
 
@@ -295,11 +297,13 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   // #1724: every answer says how long this world took over it and how much of that was waiting its turn, so a slow call
   // can be laid beside the client's own clock (Server-Timing: world = arrival to answer, queue = admission wait; ms)
   // #1750 A2: and the same two numbers go into the route's histograms (api-times.ts), for /healthz and live.json
+  // A serving-warm wait (http.ts servingWait, before this middleware) is part of the world's time and of the wait:
+  // `warm;dur`, counted in `world` and in the route's queue time
   const timed = (c: Context, t0: number, queued = 0) => {
-    const ms = performance.now() - t0;
-    c.header('Server-Timing', `world;dur=${ms.toFixed(1)}, queue;dur=${queued.toFixed(1)}`);
+    const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
+    c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}`);
     const route = apiRoute(c.req.method, c.req.path);
-    if (route) { recordApi(route, queued, handlerMsOf(route, ms - queued, k => c.req.query(k))); noteAnswer(route, t0 + queued, t0 + ms); }
+    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k))); noteAnswer(route, t0 + queued, t0 + ms); }
   };
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');

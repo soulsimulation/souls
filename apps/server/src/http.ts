@@ -8,7 +8,7 @@ import {mountAccountRoutes} from './accounts/routes.ts';
 import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
-import {admissionMiddleware, type Admission} from './load/admission.ts';
+import {admissionMiddleware, WARM_WAIT_KEY, type Admission} from './load/admission.ts';
 import {apiOf} from './load/api-times.ts';
 import {slowedFromRefusals} from './load/soul-slowed.ts';
 import type {LoadMonitor} from './load/monitor.ts';
@@ -85,7 +85,9 @@ export function servingRead(method: string, path: string, view?: string): boolea
  *  ceiling) before it goes on. Mounted BEFORE admission, so the wait is never a request in flight (no soul.busy for it)
  *  nor billed as the request's own time; nothing to wait for: no extra turn. */
 export function servingWait(whenServing: () => Promise<void> | null): MiddlewareHandler {
-  return async (c, next) => { const w = servingRead(c.req.method, c.req.path, c.req.query('view')) ? whenServing() : null; if (w) await w; return next(); };
+  // #1750: the wait is said (Server-Timing `warm;dur`, and the route's queue time in /healthz `api`): it happens before
+  // admission, so without this it was invisible on the world's side of an answer
+  return async (c, next) => { const w = servingRead(c.req.method, c.req.path, c.req.query('view')) ? whenServing() : null; if (w) { const t = performance.now(); await w; (c.set as (k: string, v: unknown) => void)(WARM_WAIT_KEY, performance.now() - t); } return next(); };
 }
 /** Hono's bodyLimit, safe after a middleware has read the body (#1013). bodyLimit reads the request's own stream when
  *  there is no Content-Length; once a middleware has read the body through Hono's cache (the edge idempotency keys do),

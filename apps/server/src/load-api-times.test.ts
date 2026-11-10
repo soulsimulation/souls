@@ -103,3 +103,20 @@ test('a real 1.2 s block of the main thread is noticed by the timer', async () =
   await sleep(250); s.stop();
   assert.equal(out.length, 1, out.join('\n')); assert.match(out[0], /^\[stall\] \S+ 1\d\d\d ms: ticks 0, gc \d+ ms, answers none/);
 });
+
+test('a serving-warm wait (before admission) is said: Server-Timing warm;dur, inside world;dur, and in the route\'s queue time', async () => {
+  const {servingWait} = await import('./http.ts');
+  const adm = new Admission(), app = new Hono();
+  let gate: Promise<void> | null = sleep(80).then(() => {});
+  app.use('/v1/edge/*', servingWait(() => gate));
+  app.use('*', admissionMiddleware(adm, () => 'green', c => c.req.header('authorization')?.slice(7)));
+  app.post('/v1/edge/converse', c => c.json({ok: true}));
+  const r = await app.request('/v1/edge/converse', {method: 'POST', headers: {authorization: 'Bearer sim_w'}, body: '{}'});
+  const st = r.headers.get('server-timing') ?? '', warm = Number(/warm;dur=([\d.]+)/.exec(st)?.[1]), world = Number(/world;dur=([\d.]+)/.exec(st)?.[1]);
+  assert.ok(warm >= 70 && world >= warm, st);
+  assert.ok(apiOf(sharedApi).routes['edge:converse']!.queue.max >= 70);
+  gate = null;
+  const r2 = await app.request('/v1/edge/converse', {method: 'POST', headers: {authorization: 'Bearer sim_w'}, body: '{}'});
+  assert.doesNotMatch(r2.headers.get('server-timing') ?? '', /warm/);
+  adm.close();
+});
