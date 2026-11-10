@@ -1113,8 +1113,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (ms > 0 && warm) {this.navSeen = null; this.navWarmed?.();}
     return warm;
   }
-  /** nav-warm-wait/1: while walks wait for navigation, one slice of labelling per tick (after the first build the engine-bridge
-   *  stops warming, and a moving ride invalidates the labels until some read relabels them). */
+  /** nav-warm-wait/1: while walks wait for navigation, one slice of labelling per tick. After the first build the engine-bridge
+   *  only re-warms (#901: a poll every 10 ticks, then a burst of slices, then one per poll while the world keeps moving), so a
+   *  walk waiting on labels a moving ride made cold is not left to that cadence. */
   private navWarmTick(tick: number): boolean {
     if (this.navWarmSeen?.tick === tick) return this.navWarmSeen.warm;
     // #1502: while walks are held by the re-plan budget, relabel in budget-sized slices (a relabel after a ride moved is
