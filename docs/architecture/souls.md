@@ -258,8 +258,9 @@ withholds. Owner messages and credentials are never in it.
   of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
   place is never named: a Soul inside one is listed without position or place, and what is said there is left out.
   `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ
-  (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest), text cut to 80 characters, never a
-  notebook's lines or who left what. Nothing kept out of sight or in a secret place is in it. Eden 2026 with all 93
+  (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest). Only booleans, numbers and an enum
+  field's own values are published (a light on, a level, the record on); free text (a board's words, who wrote or
+  voted) never is: it comes with a read of the thing. Nothing kept out of sight or in a secret place is in it. Eden 2026 with all 93
   hand-worked things changed: 2.9 KB.
 - Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
   grow with the number of clients.
@@ -276,8 +277,10 @@ withholds. Owner messages and credentials are never in it.
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
   One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
-- **A thing's act from anywhere.** `object:<thing>:<verb>` is no longer refused 30 m away; its plan walks there and
-  works the thing. A state it does not take is refused with its reason (`object.state`: "the lamp is already on").
+- **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
+  there and works the thing. A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
+  has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
+  "the lamp is already on").
 - **Not in the copy yet:** what a thing's text says in full (a board's notes, a notebook) and the objects of the edge
   object framework that are not built things (chess, presentations, calendars). Those are read with `inspect <id>`.
 

@@ -24,7 +24,7 @@ export function indexCatalog(cat) {
   const within = (id) => { const root = place(id); if (!root) return new Set(); const out = new Set([root.id]), todo = [root.id]; while (todo.length) for (const k of kids.get(todo.pop()) ?? []) if (!out.has(k.id)) { out.add(k.id); todo.push(k.id); } return out; };
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
   /** #1751: what a thing takes by hand (its kind's acts and the state they read), or null. */
-  const handOf = (t) => (t && t.byHand !== false ? cat.kinds?.[t.kind] ?? null : null);
+  const handOf = (t) => (t && t.byHand !== false ? cat.kinds?.[t.hands ?? t.kind] ?? null : null);
   /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a thing that is one.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
   const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && SEAT_KIND.test(things.get(rest)?.kind ?? "")) || handVouches(id); };
@@ -33,13 +33,14 @@ export function indexCatalog(cat) {
   return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, handOf };
 }
 
-const same = (a, b) => a === b || (a == null && b == null);
+const same = (a, b) => a === b || (a == null && b == null) || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9);
 /** #1751: a thing's state now: its kind's defaults with what the live picture says differs (`states`, by thing id). */
 export function thingState(ix, t, states) { const h = ix.handOf(t); return h ? { ...h.state, ...(states?.[t.id] ?? {}) } : null; }
 /** The acts a thing takes by hand in its state now, as ids to send (`object:<thing>:<verb>`). The world still decides. */
 export function handActs(ix, t, states) {
   const h = ix.handOf(t), st = thingState(ix, t, states); if (!h) return [];
-  return h.acts.filter((a) => (a.when ?? []).every((w) => (!("is" in w) || same(st[w.field], w.is)) && (!("not" in w) || !same(st[w.field], w.not))))
+  // (a field the catalog does not publish, free text, is not judged here: the world decides)
+  return h.acts.filter((a) => (a.when ?? []).every((w) => !(w.field in st) || ((!("is" in w) || same(st[w.field], w.is)) && (!("not" in w) || !same(st[w.field], w.not)))))
     .map((a) => ({ id: `object:${t.id}:${a.verb}`, verb: a.verb, label: a.label, ...(a.params ? { params: a.params } : {}) }));
 }
 

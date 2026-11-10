@@ -26,7 +26,7 @@ export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; pl
 export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]};
 
 export type CatalogPlace = {id: string; ref?: string; name: string; kind: string; parent: string | null; at: [number, number]; level?: number; aliases?: string[]; what?: string; fixed?: true};
-export type CatalogThing = {id: string; name: string; kind: string; place: string | null; at: [number, number]; /** false: this one takes none of its kind's acts */ byHand?: false};
+export type CatalogThing = {id: string; name: string; kind: string; place: string | null; at: [number, number]; /** false: this one takes none of its kind's acts */ byHand?: false; /** #1751: its revision's own entry in `kinds` */ hands?: string};
 export type CatalogAct = {id: string; verb: string; place: string | null; thing?: string; at: [number, number]; label: string; with?: number; needs?: string};
 export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope: 'public'; placeVerbs: readonly string[]; anywhere: {id: string; verb: string; label: string}[];
   places: CatalogPlace[]; things: CatalogThing[]; acts: CatalogAct[];
@@ -52,19 +52,22 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   const known = new Set(input.places.filter(p => !p.secret).map(p => p.id));
   const shown = input.things.filter(t => !t.place || known.has(t.place));
   const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number]})).sort(byId);
-  // one entry per kind: revisions of a kind that differ add their verbs (the world still decides each act when it is sent)
-  // (`state`: what a thing of the kind is in until the live picture says otherwise)
-  const handKinds = new Map<string, {acts: Map<string, CatalogKindAct>; state: Record<string, unknown>}>(); let handThings = 0;
-  for (const t of shown) {
+  // one entry per kind (`state`: what a thing of it is in until the live picture says otherwise). A revision whose acts or
+  // defaults differ from the kind's first (in id order) gets its own entry, `<kind>@<revision>`, named by its things' `hands`.
+  const handKinds = new Map<string, {sig: string; acts: CatalogKindAct[]; state: Record<string, unknown>}>(), handsOf = new Map<string, string>(); let handThings = 0;
+  for (const t of [...shown].sort(byId)) {
     if (!t.hand?.acts.length) continue; handThings++;
-    const k = kindOf(t.kind), m = handKinds.get(k) ?? {acts: new Map<string, CatalogKindAct>(), state: {}}; handKinds.set(k, m);
-    for (const a of t.hand.acts) if (!m.acts.has(a.verb)) m.acts.set(a.verb, a);
-    for (const [f, v] of Object.entries(t.hand.state)) if (!(f in m.state)) m.state[f] = v;
+    const base = kindOf(t.kind), sig = stableStringify(t.hand);
+    let k = base;
+    if (handKinds.has(k) && handKinds.get(k)!.sig !== sig) { k = `${base}@${/@(\d+)/.exec(t.kind)?.[1] ?? '0'}`; if (handKinds.has(k) && handKinds.get(k)!.sig !== sig) k = `${k}:${hashOf(t.hand).slice(0, 8)}`; }
+    if (!handKinds.has(k)) handKinds.set(k, {sig, acts: [...t.hand.acts], state: {...t.hand.state}});
+    if (k !== base) handsOf.set(t.id, k);
   }
+  for (const t of things) {const h = handsOf.get(t.id); if (h) t.hands = h;}
   // a thing of a revision that takes no acts, where another revision of its kind does
   const bare = new Set(shown.filter(t => !t.hand?.acts.length && handKinds.has(kindOf(t.kind))).map(t => t.id));
   for (const t of things) if (bare.has(t.id)) t.byHand = false;
-  const kinds: Catalog['kinds'] = Object.fromEntries([...handKinds].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, m]) => [k, {acts: [...m.acts.values()], state: m.state}]));
+  const kinds: Catalog['kinds'] = Object.fromEntries([...handKinds].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, m]) => [k, {acts: m.acts, state: m.state}]));
   const acts: CatalogAct[] = [];
   for (const s of input.spots) {
     if (s.place && !known.has(s.place)) continue;

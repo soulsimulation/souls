@@ -80,6 +80,10 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 export type ActuatorHost = {
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
+  /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
+  wholeMenu?(): boolean;
+  /** #1751: true when this point is inside a secret place this Soul has not been to or found. */
+  hidden?(soul: EdgeSoul, at: Vec2): boolean;
   deferContacts?: boolean;
   contactPlan?(soul:EdgeSoul,target:string,action:string,params?:Record<string,unknown>):{params:Record<string,unknown>;root:[number,number,number];level?:number;face?:[number,number];/** entry 32: where to step back to afterwards (a knock) */after?:[number,number];/** #1070: a close with nowhere to stand once it is shut */noRoom?:boolean}|null;
   /** Commit a state change of a god thing as an engine edit. */
@@ -346,23 +350,27 @@ export function catalogActs(def: StoredDef): CatalogKindAct[] {
 /** #1751: the defaults of the state a def's acts read or write (what a thing is in until the live picture says otherwise). */
 export function stateDefaults(def: StoredDef): Record<string, unknown> {
   const out: Record<string, unknown> = {}, defaults = def.state as Record<string, { default?: unknown }>;
-  for (const f of Object.keys(actuatedState({ state: {} } as Entity, def))) { const v = defaults[f]?.default; if (!PRIVATE_FIELDS.has(f) && (typeof v === 'boolean' || typeof v === 'number' || (typeof v === 'string' && v.length <= STATE_TEXT_MAX))) out[f] = v; }
+  for (const f of Object.keys(actuatedState({ state: {} } as Entity, def))) { const v = defaults[f]?.default; if (publishable(def, f, v)) out[f] = v; }
   return out;
 }
-/** Fields a published state never carries: who left what (Soul ids). */
-const PRIVATE_FIELDS = new Set(['leftBy']);
-/** Longest text value a published state carries; the rest is a read of the thing. */
+/** Longest enum value a published state carries. */
 export const STATE_TEXT_MAX = 80;
-/** #1751: the fields of a thing's acted-on state that differ from its def's defaults, or null when none do. A notebook's
- *  lines are never published (they come with a read); text is cut to STATE_TEXT_MAX. */
+/** #1751: what a published state may carry: a boolean, a number, or one of an enum field's own values. Free text (a
+ *  board's words, who wrote or voted, players) is never published: it comes with a read of the thing. */
+function publishable(def: StoredDef, field: string, v: unknown): boolean {
+  if (typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) return true;
+  const spec = (def.state as Record<string, { type?: string; values?: readonly unknown[] }>)[field];
+  return typeof v === 'string' && v.length <= STATE_TEXT_MAX && spec?.type === 'enum' && !!spec.values?.includes(v);
+}
+/** #1751: the fields of a thing's acted-on state that differ from its def's defaults, or null when none do: only what
+ *  `publishable` allows, never a notebook's. */
 export function stateDiff(e: Entity, def: StoredDef): Record<string, unknown> | null {
   if (!e.state || def.tags?.includes('notebook')) return null;
   let out: Record<string, unknown> | null = null;
   const defaults = def.state as Record<string, { default?: unknown }>;
   for (const [f, v] of Object.entries(actuatedState(e, def))) {
-    if (PRIVATE_FIELDS.has(f) || e.state[f] === undefined || same(v, defaults[f]?.default)) continue;
-    if (typeof v === 'string') (out ??= {})[f] = v.length > STATE_TEXT_MAX ? v.slice(0, STATE_TEXT_MAX - 1) + '…' : v;
-    else if (typeof v === 'number' || typeof v === 'boolean' || v === null) (out ??= {})[f] = v;
+    if (e.state[f] === undefined || same(v, defaults[f]?.default) || !publishable(def, f, v)) continue;
+    (out ??= {})[f] = v;
   }
   return out;
 }
@@ -376,7 +384,11 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
       if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
-      // #1751: a thing's act is taken by id from anywhere; a far one walks there as part of the act (the plan's own walk)
+      const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
+      // #1751: a thing's act is taken by id from anywhere and walks there as part of the act (the plan's own walk). A whole
+      // menu still lists only things within sight (a far one costs nothing there), and a secret place's things stay unknown.
+      if (host.hidden?.(ctx.soul, s.at)) return { code: 'object.out-of-reach', reason: `You do not know the way to ${nameOf(s)}.` };
+      if (d > ACT_SIGHT && host.wholeMenu?.()) return { code: 'object.out-of-reach', reason: `${nameOf(s)} is ${Math.round(d)} m away; send its id to go and work it.` };
       const denied = s.key ? host.access?.(s.key, ctx.soul) : null; if (denied) return denied;
       const busy = s.key ? host.busy?.(s.key, a.name) : null; if (busy) return busy;
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};

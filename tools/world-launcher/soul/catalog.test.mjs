@@ -116,9 +116,12 @@ test("the catalog vouches for the ids it publishes and says nothing about the re
 // #1751: things worked by hand, with their state from the live picture
 const handCat = { ...cat, places: [...cat.places, { id: "g-office", ref: "eden-office", name: "Eden Office", kind: "building", parent: "g-village", at: [60, 10] }, { id: "g-office.reception", name: "Reception", kind: "room", parent: "g-office", at: [61, 10] }],
   things: [...cat.things, { id: "e_l1", name: "office/desk-lamp", kind: "core-desk-lamp", place: "g-office.reception", at: [61, 11] }, { id: "e_l2", name: "office/old-lamp", kind: "core-desk-lamp", place: "g-office.reception", at: [62, 11], byHand: false },
-    { id: "e_ch", name: "porch-chest", kind: "core-chest", place: "g-village", at: [55, 0] }],
+    { id: "e_ch", name: "porch-chest", kind: "core-chest", place: "g-village", at: [55, 0] }, { id: "e_l3", name: "office/dim-lamp", kind: "core-desk-lamp", hands: "core-desk-lamp@3", place: "g-office.reception", at: [63, 11] },
+    { id: "e_bd", name: "porch-board", kind: "core-chalkboard", place: "g-village", at: [56, 0] }],
   kinds: {
     "core-desk-lamp": { acts: [{ verb: "switch-on", label: "Switch on", when: [{ field: "on", is: false }] }, { verb: "switch-off", label: "Switch off", when: [{ field: "on", is: true }] }], state: { on: true } },
+    "core-desk-lamp@3": { acts: [{ verb: "dim", label: "Dim", when: [{ field: "on", is: true }] }], state: { on: true } },
+    "core-chalkboard": { acts: [{ verb: "write", label: "Write" }, { verb: "erase", label: "Erase", when: [{ field: "text", not: "" }] }], state: {} },
     "core-chest": { acts: [{ verb: "open", label: "Open", when: [{ field: "open", is: false }, { field: "locked", not: true }] }, { verb: "close", label: "Close", when: [{ field: "open", is: true }] }, { verb: "lock", label: "Lock", when: [{ field: "locked", is: false }, { field: "open", not: true }] }, { verb: "unlock", label: "Unlock", when: [{ field: "locked", is: true }] }], state: { open: false, locked: false } } } };
 const hix = indexCatalog(handCat);
 
@@ -145,5 +148,7 @@ test("a thing's hand acts are vouched for by the catalog and named by query", ()
   assert.equal(hix.knows("object:e_l1:fly"), false);
   const [t] = query(hix, [{ thing: "e_ch" }], { at, states: { e_ch: { open: true } } });
   assert.deepEqual(t.state, { open: true, locked: false }); assert.deepEqual(t.acts, ["object:e_ch:close"]);
-  assert.deepEqual(handActs(hix, handCat.things.at(-1), {}).map((a) => a.verb), ["open", "lock"]);
+  assert.deepEqual(handActs(hix, handCat.things.find((t) => t.id === "e_ch"), {}).map((a) => a.verb), ["open", "lock"]);
+  assert.equal(hix.knows("object:e_l3:dim"), true, "a revision's own entry"); assert.equal(hix.knows("object:e_l1:dim"), false);
+  assert.deepEqual(handActs(hix, handCat.things.find((t) => t.id === "e_bd"), {}).map((a) => a.verb), ["write", "erase"], "a field the catalog does not publish is the world's to judge");
 });
