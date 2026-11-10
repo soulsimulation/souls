@@ -17,10 +17,11 @@ const cat = {
     { id: "basket", name: "Balloon basket", kind: "vehicle", parent: "world", at: [0, 0], fixed: true },
   ],
   things: [
-    { id: "e_b1", name: "promenade-bench-1", kind: "core-bench-seat", place: "g-pond", at: [12, 42] },
+    { id: "e_b1", name: "promenade-bench-1", kind: "core-bench-seat", place: "g-pond", at: [12, 42], seat: true },
+    { id: "e_gym", name: "gym-bench-press", kind: "eden-weight-bench", place: "g-annex", at: [305, 5] },
     { id: "e_tree", name: "old-oak", kind: "core-tree", place: "g-annex", at: [310, 5] },
-    { id: "e_b2", name: "market-bench-9", kind: "core-bench-seat", place: "g-annex", at: [300, 5] },
-    ...Array.from({ length: 12 }, (_, i) => ({ id: `e_c${i}`, name: `library/chair-${i}`, kind: "core-chair", place: "g-library.reading", at: [71 + i / 10, 1] })),
+    { id: "e_b2", name: "market-bench-9", kind: "core-bench-seat", place: "g-annex", at: [300, 5], seat: true },
+    ...Array.from({ length: 12 }, (_, i) => ({ id: `e_c${i}`, name: `library/chair-${i}`, kind: "core-chair", place: "g-library.reading", at: [71 + i / 10, 1], seat: true })),
   ],
   acts: [
     { id: "read:read.e_t1", verb: "read", place: "g-library.reading", thing: "e_t1", at: [71, 1], label: "read (reading table west in Reading Room)" },
@@ -63,6 +64,7 @@ test('"near" and "in" read the thing and its anchor', () => {
   const near = find(ix, "bench near the pond", { at });
   assert.deepEqual(near.found.map((x) => x.id), ["e_b1"]);
   assert.equal(near.found[0].act, "sit:e_b1", "a seat names its own sit");
+  assert.equal(find(ix, "gym bench press", { at }).found.find((x) => x.id === "e_gym")?.act, undefined, "a bench a body does not sit on (the world says which) names no sit");
   assert.equal(near.found[0].in, "Commons Pond, World");
   assert.equal(near.near.id, "g-pond");
   const inside = find(ix, "chair in the library", { at, limit: 3 });
@@ -110,7 +112,7 @@ test("the anchor of a relation is the best-named place, nearest on a tie", () =>
 
 test("the catalog vouches for the ids it publishes and says nothing about the rest", () => {
   for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1", "sit-ground:here"]) assert.equal(ix.knows(id), true, id);
-  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "sit:e_tree", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
+  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "sit:e_tree", "sit:e_gym", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
 });
 
 // #1751: things worked by hand, with their state from the live picture
