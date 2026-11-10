@@ -73,3 +73,11 @@ test('what can be done on the spot is published as <verb>:here, and every such v
   assert.equal(payload.anywhere.length, ANYWHERE.length);
   for (const [verb] of ANYWHERE) assert.ok((EDGE_ACT_VERBS as readonly string[]).includes(verb), verb);
 });
+
+test('a ref two places share is published for neither: walk:<id> names its place, walk:<ref> would name none (#1737)', () => {
+  const lake = {id: 'g-lake', ref: 'lake', name: 'Lake', kind: 'water', parent: 'world', level: 0, polygon: square(0, 0)};
+  const bank = {id: 'g-lake.bank', ref: 'lake', name: 'Lake bank', kind: 'shore', parent: 'world', level: 0, polygon: square(0, 0)};
+  const jetty = {id: 'g-jetty', ref: 'jetty', name: 'Jetty', kind: 'pier', parent: 'world', level: 0, polygon: square(0, 0)};
+  const {payload} = buildCatalog({worldId: 'w', places: [lake, bank, jetty], spots: [], things: []});
+  assert.deepEqual(payload.places.map(p => [p.id, p.ref ?? null]), [['g-jetty', 'jetty'], ['g-lake', null], ['g-lake.bank', null]]);
+});
