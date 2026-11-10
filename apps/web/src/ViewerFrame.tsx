@@ -69,6 +69,15 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const zone = useSyncExternalStore(subscribeWorldZone, worldZone, worldZone);   // #1649: a real-time world's own time zone
   const [hourOpen, setHourOpen] = useState(false);
   const hourButton = useRef<HTMLButtonElement>(null);
+  const hourPanel = useRef<HTMLDivElement>(null);
+  // like the music and camera menus: a click anywhere else, or Escape, puts the time panel away
+  useEffect(() => {
+    if (!hourOpen) return;
+    const away = (e: PointerEvent) => { const t = e.target as Node; if (!hourPanel.current?.contains(t) && !hourButton.current?.contains(t)) setHourOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setHourOpen(false); hourButton.current?.focus(); } };
+    document.addEventListener('pointerdown', away); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
+  }, [hourOpen]);
   // DLG3 (Gene): the history scrub ("Back 1 min") is hidden for now; `?rewind` keeps it reachable for tests.
   const [rewind] = useState(() => { try { return new URLSearchParams(location.search).has('rewind'); } catch { return false; } });
   const help = useRef<HTMLDivElement>(null);
@@ -160,13 +169,19 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
           <span className={previewHour != null ? 'preview' : statusClass} data-viewer-status data-viewer-live={live} data-viewer-preview={previewHour != null || undefined}>{previewHour != null ? hourLabel(previewHour) : status}</span>
         </button> : <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>}
         {!pill && state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title={`${zone ? `Local time in ${zone.replace(/_/g, ' ')}. ` : ''}Preview the time of day (only you see it)`} onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
-        {hourOpen && !arriving && createPortal(<div className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 12) }; })()}>
-          {pill && <span className="time-preview-now" data-world-time>{worldTime}</span>}
+        {hourOpen && !arriving && createPortal(<div ref={hourPanel} className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 4) }; })()}>
+          <div className="time-preview-head">
+            <span className="time-preview-value">{previewHour != null ? hourLabel(previewHour) : worldTime?.split(' · ').slice(-1)[0]}</span>
+            <span className={previewHour != null ? 'time-preview-tag preview' : 'time-preview-tag'}>{previewHour != null ? 'Preview' : 'Now'}</span>
+          </div>
+          {worldTime && <span className="time-preview-now" data-world-time>{previewHour != null ? `In the world: ${worldTime}` : worldTime.split(' · ')[0]}</span>}
           {zone && <span className="dim" data-world-zone={zone}>Local time in {zone.replace(/_/g, ' ')}</span>}
-          <label>Time of day <b>{previewHour != null ? hourLabel(previewHour) : 'now'}</b>
-            <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} /></label>
-          <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>
-          <span className="dim">Only you see this; the world's clock does not change.</span>
+          <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} />
+          <div className="time-preview-ticks" aria-hidden="true"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
+          <div className="time-preview-foot">
+            <span>Only you see this</span>
+            {previewHour != null && <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>}
+          </div>
         </div>, document.body)}
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}

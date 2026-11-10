@@ -13,6 +13,7 @@ import * as claude from './adapters/claude-headless.mjs';
 import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
 import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
+import { assertSeatHome } from './seat-home.mjs';
 
 export const ADAPTERS = { 'claude-headless': claude, 'codex-headless': codex, 'scripted-owner': scriptedOwner };
 export const LIVE_ADAPTERS = new Set(['claude-headless', 'codex-headless']);
@@ -41,6 +42,8 @@ export class Seat {
   constructor({ dir, seat, worldBase, rails = {}, cli = SOUL_CLI, allowedTools, kind = 'soul', budget = null }) {
     this.dir = dir; this.folder = join(dir, 'folder'); this.seat = seat; this.base = worldBase; this.kind = kind; this.cli = cli;
     this.adapter = ADAPTERS[seat.adapter ?? 'claude-headless']; if (!this.adapter) throw new Error(`unknown adapter ${seat.adapter}`);
+    // #1098 arm B2: a live seat never runs inside a repository checkout (seat-home.mjs); SOULS_SEAT_HOME_ANY=1 is for tests
+    if (LIVE_ADAPTERS.has(seat.adapter ?? 'claude-headless') && process.env.SOULS_SEAT_HOME_ANY !== '1') assertSeatHome(this.folder);
     this.rails = { maxTurnsPerRequest: 6, maxTurnWallSec: 240, ...rails };
     // 2026-10-26 (round 2): seats sometimes call the CLI by its absolute path and write the skill under .claude/; both were
     // refused by the allowlist and the seat never paired (fix-d3d trio r1, round2 run 1). Allow them for this folder only.
