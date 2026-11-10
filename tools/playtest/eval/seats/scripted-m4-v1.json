@@ -1,0 +1,19 @@
+{
+ "adapter": "scripted-owner",
+ "note": "$0 dry run of battery m4-v1 through the new client's look/find/act, one rule per instruction. It proves the measuring, not an agent.",
+ "script": {
+  "rules": [
+   { "match": "^Walk to the bandstand", "do": [["act", "walk:eden-bandstand", "--wait", "60"]] },
+   { "match": "^Sit down\\.?$", "do": [["act", "sit-ground:here"]] },
+   { "match": "^Go to the windmill, then sit", "do": [["act", "walk:eden-windmill", "--wait", "60"], ["act", "sit-ground:here"]] },
+   { "match": "^(Go|Fly) to the windmill", "do": [["act", "walk:eden-windmill", "--wait", "60"]] },
+   { "match": "^Go somewhere to eat", "do": [["find", "eat", "--verb", "eat"], ["act", "{{prev.found[0].act}}"]] },
+   { "match": "^Go to the library and read", "do": [["find", "read", "--verb", "read", "--in", "eden-library-1"], ["act", "{{prev.found[0].act}}"]] },
+   { "match": "^Sit on a bench", "do": [["find", "bench", "--kind", "core-bench"], ["act", "{{prev.found[0].act}}"]] },
+   { "match": "^Play some music", "do": [["find", "play music", "--verb", "play-music"], ["act", "{{prev.found[0].act}}"]] },
+   { "match": "^Walk to the fire circle", "do": [["act", "walk:place-social-eden-fire-circle", "--wait", "60"]] },
+   { "match": "^Go into the West Lake", "do": [["act", "walk:land-west-lake"]] }
+  ],
+  "unmatched": "No scripted response."
+ }
+}
