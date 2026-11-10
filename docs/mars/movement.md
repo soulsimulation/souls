@@ -107,6 +107,16 @@ whose last stretch runs under that floor (the commons deck's front flight): neit
 sees the climber there until it changes level. Carry climbs keep the direction-only check. The policy is prospective. Edge worlds log it at startup (`operator:stair-landing-clearance`)
 after the other stair-traffic rules, except the Little Martians worlds. History before that event replays the old rule.
 
+Under `stair-pass/1` (`stairPassV1`, #1722, adopted at boot last), the landing courtesy that a climber's wait offers a
+blocked floor walker (`yieldLinkLanding`, under `concurrent-link-egress/1`) also covers a walker waiting at the
+climber's flight end to enter that same flight (in `align`, before its first step, waiting `traffic.yield` for the
+climber). Without it the two wait for each other until the blocked-walk bound ends both walks. The walker steps aside to
+a supported spot that is clear of the climber's flight and of the climber's next flight, then enters after the climber
+has stepped off. Because that walker already stands inside the arriving climber's disc, its short route there is planned
+around the other people only. The first step is checked to move it apart, and every actual step keeps its static and
+body checks. When the landing has no such spot (a landing barely wider than the two flight ends), the walkers still wait
+for the blocked-walk bound. Two climbers meeting head-on from adjacent flights are not covered yet (#1722 A1).
+
 ## Approximations
 
 - The look-ahead predicts the sidestep offset at 0.9 m/s lateral; the hard layer catches the rest (counted in

@@ -98,3 +98,10 @@ test('#1454 stand-height/1 is a state-hash input: a replay that misses its adopt
   on.configureRuntimePolicy({sleepBlockTicks:1200,standHeightV1:true} as never);off.configureRuntimePolicy({sleepBlockTicks:1200} as never);
   assert.notEqual(on.stateHash(),off.stateHash());
 });
+
+test('#1722 stair-pass/1 is a state-hash input: a replay that misses its adoption diverges at once',async()=>{
+  const f=await marsFactory(),off=f.create(f.genesis('stair-pass-hash')) as MarsEngine,on=f.create(f.genesis('stair-pass-hash')) as MarsEngine;
+  assert.equal(on.stateHash(),off.stateHash());
+  on.configureRuntimePolicy({sleepBlockTicks:1200,stairPassV1:true} as never);off.configureRuntimePolicy({sleepBlockTicks:1200} as never);
+  assert.notEqual(on.stateHash(),off.stateHash());
+});

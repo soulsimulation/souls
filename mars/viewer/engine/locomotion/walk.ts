@@ -1761,7 +1761,11 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
 function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   if(ex.cancelTo||ex.detour||!['traffic.yield','traffic.person'].some(code=>publishedWaitsFor(rt,who,a.id,code)))return;
   const other=rt.world.entities[who],task=other?.human?.task,walker=task?walkExecs(rt).get(task):undefined,record=task?rt.records.get(task):undefined;
-  if(!other?.human||other.human.grip||other.human.on||other.human.riding||other.human.sleepPose||!walker||record?.verb!=='walk_to'||record.status!=='blocked'||walker.phase!=='walk'||walker.route.legs[walker.leg]?.kind!=='walk'||walker.detour||walker.cancelTo)return;
+  // #1722 stair-pass/1 (logged policy): a walker waiting at this flight's far end to enter the same flight (align, before its
+  // first step) is a body in the climber's way just as a blocked floor walker is; it steps aside the same way, then enters
+  // after the climber has stepped off. Without the policy only a floor walker is asked, and the two wait for each other.
+  const waitingEntry=rt.services.stairPassV1===true&&walker?.phase==='align'&&walker.climbT<=1e-9&&(walker.route.legs[walker.leg] as LinkLeg|undefined)?.kind==='link'&&(walker.route.legs[walker.leg] as LinkLeg).link.id===leg.link.id;
+  if(!other?.human||other.human.grip||other.human.on||other.human.riding||other.human.sleepPose||!walker||record?.verb!=='walk_to'||record.status!=='blocked'||!(waitingEntry||(walker.phase==='walk'&&walker.route.legs[walker.leg]?.kind==='walk'))||walker.detour||walker.cancelTo)return;
   const sp=spatial(rt,who),from:Vec2=[other.pose.p[0],other.pose.p[2]],level=other.human.level,g=sp.levelAt(level,from);
   const floorY=level===0&&sp.ground?sp.ground.standY(...from):g?.y;
   if(!g||floorY===undefined||Math.abs(other.pose.p[1]-floorY)>.03)return;
@@ -1777,11 +1781,16 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   const radius=walker.profile.radius,need=radius+ex.profile.radius+.1,geo=linkGeometry(leg);
   // Clear the whole flight, not only the climber's present centre. Vertical
   // weighting matches the existing stair-person separation; no level snap.
-  const clearFlight=(q:Vec2)=>geo.path.slice(1).every((p,i)=>{
-    const start=geo.path[i],dx=p[0]-start[0],dy=(p[1]-start[1])*.5,dz=p[2]-start[2],n=dx*dx+dy*dy+dz*dz;
+  const clearOfPath=(path:number[][],q:Vec2)=>path.slice(1).every((p,i)=>{
+    const start=path[i],dx=p[0]-start[0],dy=(p[1]-start[1])*.5,dz=p[2]-start[2],n=dx*dx+dy*dy+dz*dz;
     const qx=q[0]-start[0],qy=(floorY-start[1])*.5,qz=q[1]-start[2],t=n?clamp((qx*dx+qy*dy+qz*dz)/n,0,1):0;
     return hypot(qx-t*dx,qy-t*dy,qz-t*dz)>=need;
   });
+  // #1722 stair-pass/1: the spot also keeps clear of the climber's next flight (its following link leg), so a body that steps
+  // aside on a switchback landing does not stand on the entry the climber needs next
+  const nextLink=rt.services.stairPassV1===true?ex.route.legs.slice(ex.leg+1).find((l):l is LinkLeg=>l.kind==='link'):undefined;
+  const nextPath=nextLink?linkGeometry(nextLink).path:undefined;
+  const clearFlight=(q:Vec2)=>clearOfPath(geo.path,q)&&(!nextPath||clearOfPath(nextPath,q));
   const away=norm2(sub2(from,[a.pose.p[0],a.pose.p[2]])),base=len2(away)>0?away:[1,0] as Vec2;
   let spot:Vec2|undefined;
   // A narrow landing can have a genuine sub-metre pocket while all of the
@@ -1796,7 +1805,11 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
     if(spot)break;
   }
   if(!spot)return;
-  const around=[{id:a.id,p:[a.pose.p[0],a.pose.p[2]] as Vec2}],route=sp.routeAround(rt.world,walker.profile,{level,p:from},{level,p:spot},around);
+  let around=[{id:a.id,p:[a.pose.p[0],a.pose.p[2]] as Vec2}],route=sp.routeAround(rt.world,walker.profile,{level,p:from},{level,p:spot},around);
+  // #1722 stair-pass/1: a walker waiting at the flight's end already stands inside the arriving climber's disc, so a route
+  // around the climber is walled in from its first point. The spot's first step was checked to move apart (stepAwayClear) and
+  // every actual step keeps its static and body checks, so the route is planned around the other people only.
+  if(!route.ok&&waitingEntry){around=[];route=sp.routeAround(rt.world,walker.profile,{level,p:from},{level,p:spot},around);}
   if(!route.ok||route.route.length>3||route.route.legs.some(l=>l.kind!=='walk'||l.level!==level))return;
   // The existing faceoff detour leaves the contended passage without queuing
   // on it; static and body collision checks still apply to every actual step.
