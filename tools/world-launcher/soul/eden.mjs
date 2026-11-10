@@ -1952,7 +1952,7 @@ function indexCatalog(cat) {
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
   /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a thing that is one.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
-  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && SEAT_KIND.test(things.get(rest)?.kind ?? "")); };
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && !!things.get(rest)?.seat); };
   const verbs = new Set(cat.acts.map((a) => a.verb));
   return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, verbs };
 }
@@ -1961,8 +1961,6 @@ const WORDS = new WeakMap();
 const wordsOf = (row, make) => { let w = WORDS.get(row); if (!w) WORDS.set(row, (w = make(row))); return w; };
 const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: (p.aliases ?? []).flatMap(tokensOf), kind: tokensOf(p.kind), what: tokensOf(p.what) }));
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
-/** Kinds a body sits on: a thing of one of these names its own seat (`sit:<thing id>`). */
-const SEAT_KIND = /bench|chair|stool|sofa|couch|armchair|seat|log\b/;
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
 const thingWords = (t) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind) }));
@@ -2029,7 +2027,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8 } = {}) {
     if (!inScope(t.place, t.at)) continue;
     if (kind && !hit(stem(kind.toLowerCase()), thingWords(t).kind)) continue;
     const s = q.length ? score(q, thingWords(t)) : kind ? 1 : 0; if (!s) continue;
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...(SEAT_KIND.test(t.kind) ? { act: `sit:${t.id}` } : {}) } });
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...(t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
   return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
@@ -2079,7 +2077,7 @@ return { tokensOf, indexCatalog, NEAR_METRES, bestPlace, find, placeView, query 
 })();
 // </inline catalog.mjs>
 
-const VERSION = "2.29.0";
+const VERSION = "2.25.0";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2633,7 +2631,7 @@ async function callOnceTo(url, o) {
     const a = await askServe({ op: "http", url, method: o.method, headers: o.headers, body: o.body, timeoutMs: o.timeoutMs }, o.timeoutMs + 5_000);
     // #1724: serve was asked and is still waiting on the world: that is a slow world, not a stopped serve
     if (a?.lost) return { status: 0, data: { error: { code: "unreachable", message: a.slow ? `the world did not answer within ${Math.round(o.timeoutMs / 1000)} s (serve is running and was still waiting)` : "the serve process stopped before it answered" } } };
-    if (a) { if (RECORD) o.via = "serve"; return a; }
+    if (a) return a;
   }
   return worldOnce(url, o);
 }
@@ -2656,7 +2654,7 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
       done.catch(() => {});
       resolve({ status: res.statusCode ?? 0, ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300,
         headers: { get: (k) => { const v = res.headers[String(k).toLowerCase()]; return v === undefined ? null : Array.isArray(v) ? v.join(", ") : String(v); } },
-        text: async () => { ended ??= done; await ended; return Buffer.concat(chunks).toString("utf8"); } });
+        text: async () => { ended ??= done; await ended; return Buffer.concat(chunks).toString("utf8"); }, clone() { return this; } });
     });
     const onAbort = () => req.destroy(signal.reason instanceof Error ? signal.reason : new Error("This operation was aborted"));
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -2665,20 +2663,14 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
     req.end(data ?? undefined);
   });
 }
-// #1773: with the session record on, a call this process makes itself is kept (a command's own call is kept by callOnce)
-async function worldOnce(url, o) {
-  if (!RECORD || o.recorded === true) return worldOnceTo(url, o);
-  const wallStart = Date.now(), t0 = performance.now();
-  let r;
-  try { r = await worldOnceTo(url, o); } catch (e) { recordCall("wire", url, o, wallStart, t0, { status: 0, data: { error: { code: "thrown", message: String(e?.message ?? e) } } }); throw e; }
-  recordCall("wire", url, o, wallStart, t0, r);
-  return r;
-}
-async function worldOnceTo(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
+// tools/soul-trace's tap (node --import tap.mjs) sees fetch; it offers its wrapper here so these calls are traced the same way
+let TRACED = null;
+const tracedWorldFetch = () => (TRACED ??= globalThis[Symbol.for("soul-trace.wrap")]?.(worldFetch) ?? worldFetch);
+async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
   let r;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
-    r = await worldFetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: signal && AbortSignal.any ? AbortSignal.any([timeout, signal]) : signal ?? timeout });
+    r = await tracedWorldFetch()(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: signal && AbortSignal.any ? AbortSignal.any([timeout, signal]) : signal ?? timeout });
   } catch (e) {
     return { status: 0, data: { error: { code: "unreachable", message: String(e.message) } } };
   }
@@ -3149,6 +3141,8 @@ const writeJsonFile = (f, v) => { const tmp = `${f}.${process.pid}.tmp`; writeFi
 /** Is this copy of the catalog not the one the world has now? Without a tag to compare, a copy is trusted for ten minutes. */
 const catalogOld = (have, world, live) => !have || have.world !== world || (live?.live?.catalog ? (have.etag ? have.etag !== `"${live.live.catalog}"` : Date.now() - Date.parse(have.fetchedAt) > 600_000) : false);
 let CATALOG_IX = null;
+/** The two public reads go in the request record too (route, status, the world's own time), as every Soul API call does. */
+const publicReadReported = (url, t0, r) => reportRequest(url, "GET", t0, { status: r.status, server: serverTiming(r.headers.get("server-timing")), load: r.headers.get("x-sim-load") });
 /** Fetch the world's catalog if this copy is missing or old. The world answers 304 when the copy is current. */
 async function syncCatalog({ force = false } = {}) {
   const world = need(load(), "world", `Register this folder first: ${CLI} register <world url>`);
@@ -3156,9 +3150,9 @@ async function syncCatalog({ force = false } = {}) {
   // a world that has just started answers world.starting with a short Retry-After until its places and acts are laid out
   let r = null;
   for (let tries = 0; tries < 6; tries++) {
-    const w0 = Date.now(), t0 = performance.now();
-    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
-    if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, r, { body: "the catalog itself is kept in world-catalog.json" });
+    const t0 = performance.now();
+    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; break; /* no answer: use the copy */ }
+    publicReadReported(world + "/v1/edge/catalog", t0, r);
     const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
     if (wait == null || wait > 10_000) break;
     await new Promise((ok) => setTimeout(ok, statedJitter(wait)));
@@ -3179,10 +3173,7 @@ async function syncLive({ force = false } = {}) {
   const have = readJsonFile(LIVE_FILE), mine = have?.world === world ? have : null;
   if (mine && !force && Date.now() - mine.receivedAt < LIVE_FRESH_MS) return mine;
   try {
-    const w0 = Date.now(), t0 = performance.now();
-    const r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
-    if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, r, { body: "the live picture is kept in world-live.json" });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const t0 = performance.now(), r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); publicReadReported(world + "/v1/edge/live", t0, r); if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const live = await r.json(), seen = new Map((mine?.speech ?? []).map((x) => [x.id, x]));
     for (const line of live.speech ?? []) seen.set(line.id, line);
     const next = { world, receivedAt: Date.now(), live: { ...live, speech: undefined }, speech: [...seen.values()].sort((a, b) => a.at - b.at).slice(-200) };
