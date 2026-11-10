@@ -3,8 +3,12 @@ import {EdgeError,edgeBody,type EdgeDeps, edgeErrorOf} from '../contract.ts';
 import type {CommsRuntime} from '../comms/index.ts';
 import {freshBootClock} from '../boot/clock.ts';
 import {PersonalReminders} from './reminders.ts';
+import {unmappedCutOver} from '../../god/clock-cutover.ts';
 export function mountPersonalReminders(app:Hono,deps:EdgeDeps,comms:CommsRuntime,options:{now?:()=>number;intervalMs?:number}={}){
- const now=options.now??Date.now,clock=()=>freshBootClock(deps.host,now()),service=new PersonalReminders(deps.db.db,deps.host.worldId,comms.streams,clock);
+ // #1649: hold world reminders made before a clock cut-over until its mapping has run (a mapped cut-over is remembered)
+ let mappedCut:number|undefined;
+ const held=()=>{const c=(deps.host as {living?:{cutOver?:{tick:number}}}).living?.cutOver;if(!c||c.tick===mappedCut)return null;const t=unmappedCutOver(deps.db.db,deps.host.worldId,{cutOver:c});if(t===null)mappedCut=c.tick;return t;};
+ const now=options.now??Date.now,clock=()=>freshBootClock(deps.host,now()),service=new PersonalReminders(deps.db.db,deps.host.worldId,comms.streams,clock,held);
  const wrap=(fn:(c:Context)=>unknown|Promise<unknown>)=>async(c:Context)=>{
   c.header('Cache-Control','no-store');
   try{return c.json(edgeBody({apiContract:'eden-edge/1.1',...await fn(c) as object,clocks:{...clock(),realTime:new Date(now()).toISOString()}}));}
