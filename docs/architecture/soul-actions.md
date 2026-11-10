@@ -7,6 +7,10 @@ change is part of the world: it survives a restart, and every visitor sees the s
 This page covers Soul Actions entries 1–44 and the everyday-life families that follow them (books and notebooks, #428; openings: a tent flap and a field gate; public writing: a guestbook). Each entry was accepted with a deterministic native test (including the
 context-size checks below), regression runs, and an uncut real-client recording driven by plain words.
 
+New family documentation belongs in a separate `docs/architecture/soul-actions/<family>.md` file; see the
+[family documentation guide](soul-actions/README.md). Keep the historical sections and plain-word tables on this page
+until the Soul Client cutover; new families do not append another section here.
+
 ## How it works
 
 - **Opt-in things.** Hand contact belongs to library defs tagged for it (`hand-operated`, `hand-writable`, `hand-rung`,
@@ -645,7 +649,10 @@ Fixes found in review and deferred to after the repository migration:
 - **Noughts and crosses facing.** After a turn a player turns their back to the board; both should keep facing the board
   or each other between turns.
 - **Rock-paper-scissors hand path.** Readying the hand can pass through the body; it needs a path clear of the torso.
-- **Holding hands.** The clasp curls the fingers back and the right hand reads as a left (thumb on the wrong side).
+- **Holding-hands anatomy audit (#421).** Current-main default rigs retain radial thumbs and palmward finger curls on
+  both joined hands, standing and walking, across four headings. A faithful historical run reproduces reversed finger curls on
+  `a7d68230` and passes the same 24 clasp cases on accepted correction `9af18897`; both checkouts use their own
+  runtime, callers, frozen dependencies and hash-pinned rigs. This reconciles an existing fix; no new rig curl-axis change.
 - **Piano hands (#422).** The seated piano overlay fits the actual hand skin to the immutable `core/piano@1` white
   and black key surfaces after a 0.8 s entry blend, with each hand lifting on the shared audible score. Key changes
   ease toward the next pitch before its onset; entry, interruption and return use recorded activity history. The existing arm IK owns reach; roots,
@@ -748,6 +755,13 @@ title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
 
+### Mosaic composition
+
+`core/mosaic-board@1` contains nine fixed named cell surfaces, `cell-a1` through `cell-c3`. Carry a
+`core/mosaic-tile@1` with `pick-up:<tile-id>`, then choose the exact cell with `put-on:<cell-id>` (empty parameters).
+Each cell accepts one tile. The tile identity, glaze and resting support remain authoritative; pick it up again
+to rearrange the composition. Pieces have no supporting surfaces. The board stays fixed; this does not enable
+loaded carryables or free coordinate placement. Existing pickup/put-on access, occupancy and interruption rules apply.
 
 ### Mending camping canvas
 

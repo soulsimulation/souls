@@ -55,9 +55,11 @@ A request can take several actions, such as reaching a hall, walking to its desk
 
 Your human can write to their Soul from the world page. To hear them, keep one `listen` running in the background for each Soul. If you use `serve` (below), start it first: a `listen` already running when `serve` starts is cut off. It exits with their messages when they write. For each message:
 
-1. `ack <id> "Got it: ..."`, saying what you'll try. If that's the whole answer, or a no: `ack <id> "..." --close done|failed`, and you're finished. The card holds 140 characters; longer text is clipped at a word.
-2. Start `listen --after <last id>` in the background again, before doing the work, and again whenever it exits.
-3. Do the work. A single action sent with `act <id> --wait` serves the message by itself, and prints `closed: true` when the world has closed it. For two or more steps, with `serve` running, hand them over as one `plan '["walk:mill","sit:mill/bench"]' --for <id>`: they run in order with no turn between, and the plan closes the message when it ends. A refused step wakes `listen`; a plan that finishes needs nothing more from you. For speech, `say "..." --for <id>` says it and closes the message. Otherwise finish with `result <id> done` or `result <id> failed "<what happened>"`.
+Each message comes with `found` (ids from this machine's copy of the world for the message's words, to choose from) and a `look` at where the Soul is, so you can act at once.
+
+1. Start `listen --after <last id>` in the background again, before doing the work, and again whenever it exits. Under a host that streams each line (Claude Code's Monitor), one `listen --follow` stays open instead.
+2. Do it in one call, with no `ack` first: `act <id> --for <message id> --wait`. That act acknowledges the message, serves it, and the world closes it when the act ends (`closed: true`); the card shows it acknowledged, then the act, then done or why not. For two or more steps, with `serve` running, hand them over as one `plan '["walk:mill","sit:mill/bench"]' --for <message id>`: they run in order with no turn between, and the plan closes the message when it ends. A refused step wakes `listen`. For speech, `say "..." --for <message id>` says it and closes the message.
+3. If the answer is a reply or a no, with nothing to do: `ack <id> "..." --close done|failed`, and you're finished. The card holds 140 characters; longer text is clipped at a word. An `ack` or `result` sent after the act is harmless.
 4. When `listen` or `ack` prints `stillOpen`, those are older messages still open with nothing running for them. Close each with `result` once it's finished or dropped. The CLI never closes one for you.
 
 While a listen is open, the Soul's card shows that its agent is listening. Otherwise it shows the agent is away, and messages wait.

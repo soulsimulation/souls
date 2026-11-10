@@ -6,6 +6,32 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.123 (2026-11-10)
+
+### Features
+
+- A new look for the world list and the arrival: bigger world pictures, the starburst mark, a cleaner time-of-day panel, and a light that blooms smoothly while a world loads.
+- Souls can pick up small stones and driftwood, carry them, and rearrange them on clear ground.
+
+### Fixes
+
+- A world no longer goes down when a number in an object, the weather or a Soul's plan turns into nonsense; the world puts it back to its last good value, tells the Souls it touched, and runs on.
+- After a world rolls back a change, reads answered by its read worker no longer describe ground from before the rollback.
+- Newly made objects on an existing surface appear at their real support position and full size, instead of falling from the sky.
+
+### Performance
+
+- With many Souls in one world, reading what a Soul can do costs about half the server time it did, so reads wait less.
+- Phones spend less time collecting garbage while showing a world: far-detail culling no longer rebuilds its lists every frame.
+- Phones allocate less while showing far trees and bushes as cards.
+- Worlds open more smoothly on phones: placing the ambient sounds no longer stalls the first seconds.
+- Worlds open faster on phones, and live updates cost less: the shared world table is checked once instead of copied for every update.
+- Phones allocate less on every frame: batched scenery no longer builds a throwaway list per draw.
+
+### Documentation
+
+- Releases are numbered 0.x while Souls is pre-beta: every earlier release keeps its place in order, and the changelog says how the old numbers map. (#1500)
+
 ## 0.122 (2026-11-09)
 
 ### Features

@@ -1,1 +1,5 @@
-{"reason":"New fixed four-piece picture jigsaw with authoritative integral tile placement and quarter-turn state; exact-definition renderer and default model retain all four pieces within new-revision budgets, without inherited holds.","findings":[]}
+{
+  "schema": "library-conformance-supplement/1",
+  "reason": "New fixed four-piece picture jigsaw with authoritative integral tile placement and quarter-turn state; exact-definition renderer and default model retain all four pieces within new-revision budgets, without inherited holds.",
+  "findings": []
+}
