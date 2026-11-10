@@ -1954,7 +1954,7 @@ function indexCatalog(cat) {
   const handOf = (t) => (t && t.byHand !== false ? cat.kinds?.[t.hands ?? t.kind] ?? null : null);
   /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a thing that is one.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
-  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && SEAT_KIND.test(things.get(rest)?.kind ?? "")) || handVouches(id); };
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && !!things.get(rest)?.seat) || handVouches(id); };
   /** `object:<thing>:<verb>`: a thing of a kind that takes that verb by hand. */
   const handVouches = (id) => { const m = /^object:([^:]+):([^:]+)$/.exec(id); return !!m && !!handOf(things.get(m[1]))?.acts.some((a) => a.verb === m[2]); };
   const verbs = new Set(cat.acts.map((a) => a.verb));
@@ -1976,8 +1976,6 @@ const WORDS = new WeakMap();
 const wordsOf = (row, make) => { let w = WORDS.get(row); if (!w) WORDS.set(row, (w = make(row))); return w; };
 const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: (p.aliases ?? []).flatMap(tokensOf), kind: tokensOf(p.kind), what: tokensOf(p.what) }));
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
-/** Kinds a body sits on: a thing of one of these names its own seat (`sit:<thing id>`). */
-const SEAT_KIND = /bench|chair|stool|sofa|couch|armchair|seat|log\b/;
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
 const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: (h?.acts ?? []).flatMap((a) => tokensOf(a.verb)) }));
@@ -2056,7 +2054,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = 
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...can].sort((a, b) => named(b) - named(a));
     out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at),
-      ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : SEAT_KIND.test(t.kind) ? { act: `sit:${t.id}` } : {}) } });
+      ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
   return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };

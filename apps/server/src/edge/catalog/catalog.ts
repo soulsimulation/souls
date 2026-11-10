@@ -22,11 +22,12 @@ export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: st
 export type CatalogSpotIn = {id: string; place?: string; activity: string; also?: readonly string[]; at: V2; label?: string; title?: string; together?: {need: number}; requires?: string};
 /** #1751: an act a kind of thing takes by hand, sent as `object:<thing>:<verb>`; `when` is the state it needs. */
 export type CatalogKindAct = {verb: string; label: string; params?: Record<string, unknown>; when?: {field: string; is?: unknown; not?: unknown}[]};
-export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null};
+export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; seat?: boolean; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null};
 export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]};
 
 export type CatalogPlace = {id: string; ref?: string; name: string; kind: string; parent: string | null; at: [number, number]; level?: number; aliases?: string[]; what?: string; fixed?: true};
-export type CatalogThing = {id: string; name: string; kind: string; place: string | null; at: [number, number]; /** false: this one takes none of its kind's acts */ byHand?: false; /** #1751: its revision's own entry in `kinds` */ hands?: string};
+/** `seat`: the thing has a seat a body sits on, so `sit:<id>` is an act the world takes from anywhere. */
+export type CatalogThing = {id: string; name: string; kind: string; place: string | null; at: [number, number]; seat?: true; /** false: this one takes none of its kind's acts */ byHand?: false; /** #1751: its revision's own entry in `kinds` */ hands?: string};
 export type CatalogAct = {id: string; verb: string; place: string | null; thing?: string; at: [number, number]; label: string; with?: number; needs?: string};
 export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope: 'public'; placeVerbs: readonly string[]; anywhere: {id: string; verb: string; label: string}[];
   places: CatalogPlace[]; things: CatalogThing[]; acts: CatalogAct[];
@@ -55,7 +56,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
     ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const} : {})})).sort(byId);
   const known = new Set(input.places.filter(p => !p.secret).map(p => p.id));
   const shown = input.things.filter(t => !t.place || known.has(t.place));
-  const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number]})).sort(byId);
+  const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);
   // one entry per kind (`state`: what a thing of it is in until the live picture says otherwise). A revision whose acts or
   // defaults differ from the kind's first (in id order) gets its own entry, `<kind>@<revision>`, named by its things' `hands`.
   const handKinds = new Map<string, {sig: string; acts: CatalogKindAct[]; state: Record<string, unknown>}>(), handsOf = new Map<string, string>(); let handThings = 0;

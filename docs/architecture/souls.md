@@ -247,9 +247,11 @@ withholds. Owner messages and credentials are never in it.
   kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
-  stands in it and what is done in it are left out. A `ref` two places share (a lake and its bank) is left off both, so
-  `walk:<ref>` always names one place. The version follows the god's edits too: a thing moved, renamed or removed is a
-  new catalog, and a spot whose thing is gone leaves it. Until the world first has its places and activity spots laid out
+  stands in it (on its own floor: a thing upstairs is located on its level, and nothing standing in a secret room's
+  outline is published, on any floor) and what is done in it are left out. A `ref` two places share (a lake and its bank) is left off both, so
+  `walk:<ref>` always names one place. A thing a body sits on is marked `seat: true`; `sit:<its id>` is taken from
+  anywhere. The version follows the god's edits too: a thing moved, renamed or removed, or a place added, renamed or
+  removed, is a new catalog, and a spot whose thing is gone leaves it. Until the world first has its places and activity spots laid out
   (a few seconds after it starts listening) the route answers `503 world.starting` with `Retry-After: 2` rather than
   publish a world with no acts; `live` names no version until then. Eden 2026: 1,510 places, 4,518 things, 1,365 acts,
   1.4 MB.
@@ -263,7 +265,8 @@ withholds. Owner messages and credentials are never in it.
   catalog version. Eden 2026: 26 kinds (21 with acts), 873 things, 5.8 KB more; a rebuild costs 43 ms instead of 37.
 - **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
   of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
-  place is never named: a Soul inside one is listed without position or place, and what is said there is left out.
+  place is never named: a Soul inside one is listed without position or place, and what is said there is left out,
+  including lines said there before it was made secret.
   `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ
   (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest). Only booleans, numbers and an enum
   field's own values are published (a light on, a level, the record on); free text (a board's words, who wrote or
@@ -285,7 +288,8 @@ withholds. Owner messages and credentials are never in it.
 - **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
   One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
-  a spot whose thing a god removed. Such an id is
+  a spot whose thing a god removed. A spot or seat in a secret place the Soul has not been to or found is
+  `capability.unknown`, with no reason that names the place. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
@@ -293,12 +297,14 @@ withholds. Owner messages and credentials are never in it.
   has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
   "the lamp is already on").
 - **Not in the copy yet:** what a thing's text says in full (a board's notes, a notebook) and the objects of the edge
-  object framework that are not built things (chess, presentations, calendars). Those are read with `inspect <id>`.
+  object framework that are not built things (chess, presentations, calendars). Those are read with `inspect <id>`. A
+  movable thing is listed where it stood at the last rebuild: a Soul carrying or putting one down changes no version, so
+  its position in the copy can be old until the next god edit or restart.
 
 The served skill is look, find the id, act in one call. `POST /v1/edge/resolve` still answers for older clients; the
 current client uses it only when `act` or a `plan` step is given words where an id belongs.
 
-Answers on `/v1/edge`, `/v1/god` and `/v1/world` carry `Server-Timing: world;dur=<ms>, queue;dur=<ms>` (not a `world.crowded` refusal or a dropped request; an answer the launcher serves from its cache repeats the first one's): the
+Answers on `/v1/edge`, `/v1/god` and `/v1/world` carry `Server-Timing: world;dur=<ms>, queue;dur=<ms>`, a `world.crowded` refusal too (a dropped request has no answer to carry it; an answer the launcher serves from its cache carries none, since it cost the world nothing): the
 world's own time from arrival to answer, and how much of it was waiting for admission
 ([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
 time.

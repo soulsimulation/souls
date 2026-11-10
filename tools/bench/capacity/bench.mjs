@@ -520,7 +520,8 @@ async function oneRun(arm, rep, mode = null) {
   const souls = [];
   try {
     const tj = now();
-    for (let i = 0; i < N; i += JOIN_PAR) souls.push(...await Promise.all(Array.from({ length: Math.min(JOIN_PAR, N - i) }, (_, k) => join_(run, i + k))));
+    // a world pairs at most 20 agents a minute from one address (POST /v1/agent/pair): above that, join at 3.5 s a Soul
+    for (let i = 0; i < N; i += JOIN_PAR) { const tj0 = now(); souls.push(...await Promise.all(Array.from({ length: Math.min(JOIN_PAR, N - i) }, (_, k) => join_(run, i + k)))); if (N > 18 && !VIA) await sleep(Math.max(0, 3500 * JOIN_PAR - (now() - tj0))); }
     souls.forEach((s) => { s.cli = s.i < cliN; }); run.joinS = (now() - tj) / 1000;
     log(`${key} r${rep}: ${N} Souls joined (${cliN} CLI, ${N - cliN} raw)`);
     if (CLIENT) await learnCatalogIds(); else if (cliN) await learnWalkIds(souls.find((s) => s.cli));

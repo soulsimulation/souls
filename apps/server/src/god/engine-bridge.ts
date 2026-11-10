@@ -328,6 +328,8 @@ export class EngineBridge {
       this.edge.thingsVersion=()=>`${this.godEdits}:${this.completedEdits}`;
       // #1737: the catalog waits for the first whole picture: places published and activity spots derived (sliced after listen)
       this.edge.structureReady=()=>{try{return this.contextReady()&&!this.activitySpots.pendingFirst();}catch{return false;}};
+      this.edge.levelAt=(x,z,y)=>this.levelAt(x,z,y);
+      this.edge.seatThing=(id)=>{const x=this.engine.world.entities[id] as {def?:string;tags?:string[]}|undefined;return !!x?.def&&!!x.tags?.includes('entity-world')&&!!(this.physics?.assets[x.def] as {slots?:{kind:string}[]}|undefined)?.slots?.some((s)=>s.kind==='seat');};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
     if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),
@@ -2176,6 +2178,12 @@ export class EngineBridge {
       const seatAsset = (x: any) => !!(this.physics?.assets[x.def] as { slots?: { kind: string }[] } | undefined)?.slots?.some((sl) => sl.kind === 'seat');
       near.push(...(Object.values(ents).filter((x: any) => x.tags?.includes('entity-world') && x.support?.kind !== 'in-hand' && seatAsset(x) && Math.hypot(x.pose.p[0] - here[0], x.pose.p[2] - here[1]) > NEAR && Math.hypot(x.pose.p[0] - here[0], x.pose.p[2] - here[1]) <= FAR_SEAT) as any[])
         .sort((a, b) => Math.hypot(a.pose.p[0] - here[0], a.pose.p[2] - here[1]) - Math.hypot(b.pose.p[0] - here[0], b.pose.p[2] - here[1]) || (a.id < b.id ? -1 : 1)).slice(0, FAR_SEATS));
+      // #1737: a seat asked for by its id (`sit:<thing>`, as the client's catalog names it) is offered wherever it stands:
+      // the act walks there itself, as a far activity spot does
+      if (focus) for (const id of focus.ids) {
+        const x = id.startsWith('sit:') ? ents[id.slice(4)] as any : undefined;
+        if (x?.tags?.includes('entity-world') && x.support?.kind !== 'in-hand' && seatAsset(x) && !near.includes(x)) near.push(x);
+      }
       const approach = (x: any): { verb: string; params: Record<string, unknown> }[] => {
         const level = levelOf(x); if (level === (me.human.level ?? 0) && Math.hypot(x.pose.p[0] - here[0], x.pose.p[2] - here[1]) < 3) return [];
         const at = this.mw.standableNearV1!([x.pose.p[0], x.pose.p[2]], level, soul.entityId, 0.4, 16);

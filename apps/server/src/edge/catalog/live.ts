@@ -60,13 +60,14 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
       if (path.some(x => secret(x.id))) return [{id: m.soulId, name: m.name, at: null, place: null, doing: null}];
       return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
     }).sort((a, b) => a.id < b.id ? -1 : 1);
+    // a line said before its place was made secret is withheld from then on too
     // #1751: things whose acted-on state differs from their kind's default (a lamp on, a door open), only the fields that
     // differ; nothing a shut container keeps out of sight and nothing in a place kept off the map
     const {things, more} = visibleThings();
-    return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech, things, ...(more ? {thingsMore: more} : {})});
+    return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(l => !secret(l.place)), things, ...(more ? {thingsMore: more} : {})});
   };
   app.get('/v1/edge/live', (c: Context) => {
-    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}`;
+    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${L.knowledge?.version ?? 0}`;
     if (kept?.key !== key) kept = {key, body: build(tick)};
     c.header('Cache-Control', 'no-store'); c.header('Content-Type', 'application/json; charset=utf-8');
     return c.body(kept.body, 200);
