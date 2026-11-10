@@ -78,6 +78,8 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  skewerToast?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
+  skewerToastBegun?(soul:EdgeSoul,id:string,action:string,params:Record<string,unknown>):void;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
@@ -113,8 +115,6 @@ export type ActuatorHost = {
   tea?(soul: EdgeSoul, thing: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   teaBegun?(soul: EdgeSoul): void;
   /** #438 (harvest.ts): "pick the tomatoes", "pick flowers for the vase" as acts of native steps. */
-  skewerToast?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
-  skewerToastBegun?(soul:EdgeSoul,id:string,action:string,params:Record<string,unknown>):void;
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, as native steps; the world changes when the receipt completes. */
@@ -410,8 +410,8 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
-      const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const skewer=s.key?host.skewerToast?.(ctx.soul,s.key,a.name,params):null;if(skewer)return 'code'in skewer?skewer:null;
+      const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
@@ -433,7 +433,6 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
-        const skewer=s.key?host.skewerToast?.(ctx.soul,s.key,a.name,params):null;if(skewer&&!('code'in skewer))return{state:s,result:{action:a.name,summary:skewer.summary},bodies:[{label:a.label,steps:skewer.steps}]};
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
         if (pick && !('code' in pick)) return { state: s, result: { action: a.name, summary: pick.summary }, bodies: [{ label: a.label, steps: pick.steps }] };
         const contact = host.deferContacts && isContactActuator(def, a);
@@ -441,6 +440,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if(motion){const me=host.bodyAt(ctx.soul)!,far=(motion.level??0)>0||Math.hypot(me[0]-motion.root[0],me[1]-motion.root[2])>.1;
           return {state:s,result:{action:a.name,...(def.tags?.includes('notebook')?{}:{set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul)}),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
 
+        const skewer=s.key?host.skewerToast?.(ctx.soul,s.key,a.name,params):null;if(skewer&&!('code'in skewer))return{state:s,result:{action:a.name,summary:skewer.summary},bodies:[{label:a.label,steps:skewer.steps}]};
         // Solo flute is an access-checked object action, not an unguarded global activity spot.
         const flute=def.name==='core-flute-stand'&&def.version===1&&a.name==='play-flute';
         const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = flute ? Math.hypot(to[0]-me[0],to[1]-me[1])>.15 : Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
@@ -471,6 +471,9 @@ export function farOutcome(far: FarAct, finished: boolean, soul: EdgeSoul, find:
   if (!finished) return { code: 'object.not-reached', reason: `Stopped before reaching ${t.name}; nothing changed.` };
   const me = host.bodyAt(soul), at = host.thingAt?.(far.id);
   if (!me || !at || Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_REACH + 1) return { code: 'object.not-reached', reason: `Did not reach ${t.name}; nothing changed.` };
+  // the thing may have turned private or locked, or its policy changed, during the walk: the same named refusal a near act gets
+  const denied = host.access?.(far.id, soul); if (denied) return denied;
+  const policy = host.policy?.(far.id, soul, a.name); if (policy) return policy;
   const no = whenRefusal(a, t.state, t.name); if (no) return no;
   const patch = actionPatch(t.def, a, t.state, far.params, soul);
   if (Object.keys(patch).length && !host.commit(far.id, patch, `${soul.soulId} ${a.name} ${t.name}`).accepted) return { code: 'object.refused', reason: `The world refused that change to ${t.name}.` };
@@ -484,16 +487,20 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
   objects.act = (id: string, soul: EdgeSoul, input: Record<string, unknown>) => {
     const out = orig(id, soul, input);
     if (!out?.accepted) return out;
-    host.deferFar?.(soul, null);   // a newer act of this Soul's replaces a far act it held
+    // a held far act is dropped or held only once this act's transaction commits: a newer act whose admission rolls back
+    // leaves the earlier far act held, so its walk still ends in the change or a named refusal
+    const db = (objects as unknown as { core?: { db?: unknown } }).core?.db;
+    const committed = (f: () => void) => { if (!db) return f(); try { afterCommit(db as never, f); } catch { f(); } };
+    if (host.deferFar) committed(() => host.deferFar!(soul, null));   // a newer act of this Soul's replaces a far act it held
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
+    const skewer=host.skewerToast?.(soul,id,a.name,(input.params??{}) as Record<string,unknown>);if(skewer){if(!('code'in skewer))host.skewerToastBegun?.(soul,id,a.name,(input.params??{}) as Record<string,unknown>);return out;}
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
     if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
     // #438: and a picking act (harvest.ts)
-    const skewer=host.skewerToast?.(soul,id,a.name,(input.params??{}) as Record<string,unknown>);if(skewer){if(!('code'in skewer))host.skewerToastBegun?.(soul,id,a.name,(input.params??{}) as Record<string,unknown>);return out;}
     const pick = host.harvest?.(soul, id, a.name, (input.params ?? {}) as Record<string, unknown>);
     if (pick) { if (!('code' in pick)) host.harvestBegun?.(soul); return out; }
     // W5: water moves between two things (tank → can, can → planter) in one commit, planned again at commit time
@@ -501,20 +508,18 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     if (water) {
       if (isRefusal(water)) { log(`water ${a.name} on ${id}: ${water.reason}`); return out; }
       const go = () => { try { const now = waterPlan(a, id, soul, host); if (!now || isRefusal(now)) { log(`water ${a.name} on ${id}: by commit time ${now ? now.reason : 'not water'}`); return; } const r = host.water!.commit(now.set, `${soul.soulId} ${a.name} ${t.name}: ${now.litres} L`); if (!r.accepted) log(`water ${a.name} on ${id}: the world refused ${JSON.stringify(now.set)}`); } catch (e) { log(`water ${a.name} on ${id}: ${(e as Error).message}`); } };
-      const db0 = (objects as unknown as { core?: { db?: unknown } }).core?.db;
-      try { if (db0) afterCommit(db0 as never, go); else setImmediate(go); } catch { setImmediate(go); }
+      try { if (db) afterCommit(db as never, go); else setImmediate(go); } catch { setImmediate(go); }
       return out;
     }
     // #1751: taken by id from beyond sight, the change waits for the body: it is made when the act's walk and reach end
     // at the thing (farOutcome), never from across the world at the moment it is accepted
     const me = host.bodyAt(soul), at = host.thingAt?.(id);
-    if (host.deferFar && me && at && Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_SIGHT) { host.deferFar(soul, { id, action: a.name, params: (input.params ?? {}) as Record<string, unknown>, capability: `object:${id}:${a.name}` }); return out; }
+    if (host.deferFar && me && at && Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_SIGHT) { const far = { id, action: a.name, params: (input.params ?? {}) as Record<string, unknown>, capability: `object:${id}:${a.name}` }; committed(() => host.deferFar!(soul, far)); return out; }
     const patch = actionPatch(t.def, a, t.state, (input.params ?? {}) as Record<string, unknown>, soul);
     if (!Object.keys(patch).length) return out;
     // the object act runs inside the ledger's transaction (and may still roll back with the body's admission): change the
     // world only once that transaction has committed, never inside it (the world store has its own transaction)
     const apply = () => { try { const r = host.commit(id, patch, `${soul.soulId} ${a.name} ${t.name}`); if (!r.accepted) log(`actuator ${a.name} on ${id}: the world refused ${JSON.stringify(patch)}`); } catch (e) { log(`actuator ${a.name} on ${id}: ${(e as Error).message}`); } };
-    const db = (objects as unknown as { core?: { db?: unknown } }).core?.db;
     try { if (db) afterCommit(db as never, apply); else setImmediate(apply); } catch { setImmediate(apply); }
     return out;
   };

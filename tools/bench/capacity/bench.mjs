@@ -6,7 +6,7 @@
 //        [--arms n1,n6,n12,n24,incident,hostile] [--repeats 2] [--port 5151] [--heap-mb 768] [--host-label laptop]
 //        [--slice "systemd-run --scope -p AllowedCPUs=6-7 -p MemoryMax=4G --uid=simworlds --gid=simworlds"]
 //        [--world-user simworlds] [--world-key eden-2026] [--world-id <id; default: read from the fixture>] [--short]
-//        [--cli <eden.mjs the world serves; default the root's own>]
+//        [--cli <eden.mjs the world serves; default the root's own>] [--world-env K=V[,K=V]]
 //        [--via-launcher [--child-range 5154-5155]]   the world runs under the root's own launcher on --port (its proxy and ceilings in
 //        the path); the launcher's data dir is <run>/launcher with one worlds.json row for the fixture; heap from the world's live.json
 //        when it writes one (no --inspect: the launcher builds the child command), else RSS only; hostile Souls each send their own
@@ -48,6 +48,9 @@ const VIA = flag('via-launcher'), CHILD_RANGE = opt('child-range', `${Number(opt
 const PORT = Number(opt('port', 5151)), INSPECT = PORT + 1, HEAP_MB = Number(opt('heap-mb', 768)), HOST_LABEL = opt('host-label', 'laptop');
 const SLICE = opt('slice', ''), WORLD_USER = opt('world-user', ''), SLUG = opt('world-key', 'eden-2026'), SHORT = flag('short'), ENGINE = opt('engine', 'mars');
 const MARS_WEB = opt('mars-web', join(ROOT, 'mars/viewer/dist'));
+// --world-env K=V[,K=V]: extra env for the world process (direct boot only), e.g. SIM_PLAN_ONCE=0 or SIM_PLAN_ONCE_ORACLE=1 (#1770)
+const WORLD_ENV = Object.fromEntries(opt('world-env', '').split(',').filter(Boolean).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
+if (Object.keys(WORLD_ENV).length && flag('via-launcher')) throw new Error('--world-env is for a direct boot only');
 const CLI_FILE = resolve(opt('cli', join(ROOT, 'tools/world-launcher/soul/eden.mjs')));
 if (VIA && CLI_FILE !== resolve(join(ROOT, 'tools/world-launcher/soul/eden.mjs'))) throw new Error('--via-launcher: the launcher serves its own root\'s eden.mjs; drop --cli');
 if (VIA && SLICE) throw new Error('--via-launcher with --slice is not built yet (the slice would wrap the launcher, not the world); use --cpus');
@@ -136,6 +139,7 @@ async function bootDirect(dir, { settle = true } = {}) {
   if (WORLD_ID) env.WORLD_ID = WORLD_ID;
   Object.assign(env, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake' });
   for (const k of Object.keys(env)) if (k.startsWith('EDGE_EYES')) delete env[k];   // no renders in the bench (Eyes off)
+  Object.assign(env, WORLD_ENV);
   const cmd = [...(SLICE ? SLICE.split(/\s+/) : []), node, `--inspect=127.0.0.1:${INSPECT}`, ...args];
   writeFileSync(join(dir, 'world-command.json'), JSON.stringify({ cmd, env: Object.fromEntries(Object.entries(env).filter(([k]) => !/KEY|TOKEN|SECRET/.test(k))) }, null, 1));
   const child = spawn(cmd[0], cmd.slice(1), { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });

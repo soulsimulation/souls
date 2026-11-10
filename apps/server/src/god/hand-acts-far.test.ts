@@ -30,6 +30,7 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
     {op: 'place', def: coreRef('zone'), name: 'hollow', shape: {area: [[-100, 80], [-80, 80], [-80, 100], [-100, 100]]}, params: {use: 'park'}},
     {op: 'place', def: coreRef('desk-lamp'), name: 'hidden-lamp', p: [-90, 90]},
     {op: 'place', def: coreRef('chest'), name: 'far-chest', p: [0, 70]},
+    {op: 'place', def: coreRef('chest'), name: 'kept-chest', p: [0, -10]},
   ]} as never);
   assert.equal(built.accepted, true, JSON.stringify(built)); await tick(8);
   await invite(f, 'ana'); const row = await accept(f.host, f.souls.create('dev:ana', {name: 'Ana', description: 'M5 far hand acts'}));
@@ -63,6 +64,19 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
   for (let i = 0; i < 200 && !open(); i++) await tick(20);
   assert.equal(open(), true, 'open once the body is there');
   assert.ok(Math.hypot(pos()[0]!, pos()[2]! - 70) < 3, 'opened by a body standing at the chest');
+
+  // a far thing made private while the body walks to it: refused on arrival with the near act's named refusal; it stays shut
+  const kept = id('kept-chest'), keptOpen = () => god.model.entities.get(kept)!.state?.open === true;
+  const going = await act(`object:${kept}:open`) as {accepted: boolean; receipt?: {id: string}};
+  assert.equal(going.accepted, true, JSON.stringify(going).slice(0, 300));
+  await tick(20);
+  assert.ok(Math.hypot(pos()[0]!, pos()[2]! + 10) > 30, 'the body is still far from the second chest');
+  const shut = god.act({ops: [{op: 'set', id: kept, owner: 'soul:Other', access: 'private'}]} as never); assert.equal(shut.accepted, true, JSON.stringify(shut));
+  const receipt = () => edge.receipt(soul.soulId, going.receipt!.id)!;
+  for (let i = 0; i < 200 && ['waiting', 'started'].includes(receipt().phase); i++) await tick(20);
+  assert.equal(receipt().phase, 'failed', JSON.stringify(receipt()).slice(0, 300));
+  assert.equal(receipt().code, 'object.private', 'the same refusal a near act gets');
+  assert.equal(keptOpen(), false, 'nothing changed');
 
   // a thing made a moment ago, before the world's own catch-up has given it an object: taken by id at once
   const made = god.act({ops: [{op: 'place', def: coreRef('desk-lamp'), name: 'new-lamp', p: [-60, -10]}]} as never); assert.equal(made.accepted, true);

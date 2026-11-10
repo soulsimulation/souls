@@ -2,7 +2,9 @@
 // taken by id from far away (the act's own walk takes the body there; it is no longer refused as out of sight).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { catalogActs, farOutcome, kindActions, stateDefaults, stateDiff, STATE_TEXT_MAX } from './actuators.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { catalogActs, farOutcome, kindActions, stateDefaults, stateDiff, wrapAct, STATE_TEXT_MAX } from './actuators.ts';
+import { tx } from '../edge/comms/store.ts';
 
 const bucket = { name: 'core-ash-bucket', version: 1, tags: [], components: {}, state: { ash: { type: 'number', default: 0 }, note: { type: 'string', default: '' } }, actions: [] } as never;
 const lamp = { name: 'core-desk-lamp', version: 1, tags: ['hand-operated'], components: {}, state: { on: { type: 'boolean', default: true } },
@@ -52,4 +54,30 @@ test('a far act held for its body: made on arrival if the thing still takes it; 
   assert.equal(commits.length, 0, 'none of those changed the world');
   assert.equal(farOutcome(far, true, soul, find(true), host([0.5, 0])), 'done');
   assert.deepEqual(commits, [{ on: false }]);
+});
+
+test('a far act whose thing turned private or whose policy changed during the walk gets the near act\'s named refusal on arrival, and nothing changes', () => {
+  const commits: unknown[] = [], far = { id: 'e_l', action: 'switch-off', params: {}, capability: 'object:e_l:switch-off' }, soul = { soulId: 's_a' } as never;
+  const find = () => ({ def: lamp, state: { on: true }, name: 'the desk lamp' });
+  const base = { bodyAt: () => [0.5, 0], thingAt: () => [0, 0], commit: (_id: string, patch: unknown) => { commits.push(patch); return { accepted: true }; } };
+  const priv = { code: 'object.private', reason: 'the desk lamp is Ben\'s and private.' }, locked = { code: 'door.locked', reason: 'It is locked.' };
+  assert.deepEqual(farOutcome(far, true, soul, find, { ...base, access: () => priv } as never), priv, 'made private on the way');
+  assert.deepEqual(farOutcome(far, true, soul, find, { ...base, policy: (_id: string, _s: unknown, action: string) => action === 'switch-off' ? locked : null } as never), locked, 'its policy changed on the way');
+  assert.equal(commits.length, 0, 'neither changed the world');
+});
+
+test('a far act is held and a held one dropped only when the act\'s transaction commits: a newer act that rolls back leaves it held', () => {
+  const db = new DatabaseSync(':memory:'), held: unknown[] = [];
+  try {
+    const objects = { act: () => ({ accepted: true }), core: { db } };
+    const host = { bodyAt: () => [300, 0], thingAt: () => [0, 0], deferFar: (_s: unknown, far: unknown) => held.push(far), commit: () => ({ accepted: true }) } as never;
+    wrapAct(objects, () => ({ def: lamp, state: { on: true }, name: 'the desk lamp' }), host, () => {});
+    const soul = { soulId: 's_a', entityId: 'h_a' } as never, act = () => (objects as { act(id: string, s: unknown, i: unknown): unknown }).act('e_l', soul, { action: 'switch-off' });
+    assert.throws(() => tx(db, () => { act(); assert.deepEqual(held, [], 'nothing held inside the transaction'); throw Error('admission rolled back'); }), /rolled back/);
+    assert.deepEqual(held, [], 'an act that rolled back neither holds nor drops');
+    tx(db, () => { act(); });
+    assert.deepEqual(held.map((h) => (h as { capability?: string } | null)?.capability ?? null), [null, 'object:e_l:switch-off'], 'committed: the old one dropped, this one held');
+    assert.throws(() => tx(db, () => { act(); throw Error('newer admission rolled back'); }), /rolled back/);
+    assert.equal(held.length, 2, 'a newer act that rolled back leaves the earlier far act held');
+  } finally { db.close(); }
 });
