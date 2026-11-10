@@ -127,7 +127,8 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     const cat = (await get('/v1/edge/catalog')).body, ix = indexCatalog(cat), me = L.body(soul.entityId).pose.p, at = [me[0], me[2]];
     const ids = new Set<string>();
     for (const words of ['swim', 'lake', 'pond', 'jetty', 'shore', 'library', 'read a book', 'sit on the floor', 'eat', 'bench', 'kitchen', 'garden', 'dance', 'sleep', 'music', 'table', 'bandstand', 'classroom', 'river', 'sea'])
-      for (const row of findLocal(ix, words, {at}).found) if (row.act) ids.add(row.act);
+      // (a thing's hand act, `object:…`, needs the object framework this harness leaves out: god/hand-acts-far.test.ts)
+      for (const row of findLocal(ix, words, {at}).found) if (row.act && !row.act.startsWith('object:')) ids.add(row.act);
     assert.ok(ids.size >= 40, `find names ${ids.size} acts`);
     const unknown: string[] = [], unbound: string[] = [];
     for (const id of ids) {
@@ -249,5 +250,47 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.ok(after.includes(`"id":"${soul.soulId}"`) && after.includes('"at":null'), 'the push says the Soul is somewhere not said');
     assert.equal(after.includes(place), false, 'the push never names the secret place');
     assert.equal(after.includes('said in the secret place'), false, 'nor what is said there');
+  });
+
+  // #1751: things worked by hand, their state, and their acts from anywhere
+  await t.test('a kind worked by hand is in the catalog with its acts, and a thing\'s changed state reaches the live picture', async () => {
+    const cat = (await get('/v1/edge/catalog')).body;
+    const lamp = cat.kinds['core-desk-lamp'];
+    assert.ok(lamp, 'desk lamps are worked by hand on Eden 2026');
+    assert.deepEqual(lamp.acts.map((a: any) => a.verb).sort(), ['switch-off', 'switch-on']);
+    assert.equal(typeof lamp.state.on, 'boolean');
+    const far = cat.things.filter((x: any) => x.kind === 'core-desk-lamp').map((x: any) => ({...x, d: Math.hypot(x.at[0] - me[0], x.at[1] - me[2])})).sort((a: any, b: any) => b.d - a.d)[0];
+    assert.ok(far.d > 40, `a lamp beyond the old 30 m sight (${Math.round(far.d)} m)`);
+    // (a far act by id walks there: actuators-catalog.test.ts; this harness has no object framework)
+    const before = (await get('/v1/edge/live')).body;
+    assert.equal(before.things[far.id], undefined, 'a thing in its default state is not in the live picture');
+    w.god.engineAct([{op: 'set', id: far.id, state: {on: !lamp.state.on}}] as never, 'test: switch');
+    await run(12);
+    assert.deepEqual((await get('/v1/edge/live')).body.things[far.id], {on: !lamp.state.on}, 'only the field that differs');
+    // a thing a shut container keeps out of sight is in neither answer, and the catalog follows it
+    const was = L.concealedThing, v1 = catalog.version(); L.concealedThing = (id: string) => id === far.id || !!was?.(id);
+    try {
+      await run(12);
+      const c2 = (await get('/v1/edge/catalog')).body;
+      assert.notEqual(catalog.version(), v1, 'a new catalog version');
+      assert.equal(c2.things.some((x: any) => x.id === far.id), false);
+      assert.equal((await get('/v1/edge/live')).body.things[far.id], undefined);
+    } finally { L.concealedThing = was; }
+    assert.equal(catalog.version(), v1, 'shown again: the first version');
+  });
+
+  await t.test('a thing in a secret room upstairs leaves the live picture with its state (#1751, the catalog\'s outline rule)', async () => {
+    const cat = (await get('/v1/edge/catalog')).body;
+    const up = cat.things.find((x: any) => x.kind === 'core-floor-lamp' && x.place && (L.places.byId.get(x.place)?.level ?? 0) > 0 && !L.placePathOf(soul.soulId).some((q: any) => q.id === x.place));
+    assert.ok(up, 'a floor lamp in a room above the ground floor');
+    w.god.engineAct([{op: 'set', id: up.id, state: {on: false}}] as never, 'test: switch upstairs');
+    await run(12);
+    assert.deepEqual((await get('/v1/edge/live')).body.things[up.id], {on: false});
+    L.knowledge.setSecret(up.place, true);
+    try {
+      await run(12);
+      assert.equal((await get('/v1/edge/live')).body.things[up.id], undefined, 'not in live once its room is secret');
+      assert.equal((await get('/v1/edge/catalog')).body.things.some((x: any) => x.id === up.id), false, 'nor in the catalog');
+    } finally { L.knowledge.setSecret(up.place, false); }
   });
 });

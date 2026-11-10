@@ -18,7 +18,10 @@ function follow(hub: ReturnType<typeof fakeWorld>['hub'], after: string | null =
     const souls = new Map(copy.souls.map((r: any) => [r.id, r]));
     for (const id of data.souls?.del ?? []) souls.delete(id);
     for (const r of data.souls?.set ?? []) souls.set(r.id, r);
-    copy = {...copy, seq: data.seq, tick: data.tick, ...(data.catalog !== undefined ? {catalog: data.catalog} : {}), souls: [...souls.values()].sort((a: any, b: any) => a.id < b.id ? -1 : 1), speech: [...copy.speech, ...(data.speech ?? [])]};
+    const things = {...copy.things};
+    for (const id of data.things?.del ?? []) delete things[id];
+    Object.assign(things, data.things?.set ?? {});
+    copy = {...copy, seq: data.seq, tick: data.tick, ...(data.catalog !== undefined ? {catalog: data.catalog} : {}), ...(copy.things || data.things ? {things} : {}), ...(data.thingsMore !== undefined ? {thingsMore: data.thingsMore} : {}), souls: [...souls.values()].sort((a: any, b: any) => a.id < b.id ? -1 : 1), speech: [...copy.speech, ...(data.speech ?? [])]};
   };
   const stop = hub.subscribe(after, (event, data) => apply(event, JSON.parse(data)));
   return {got, stop, copy: () => copy};
@@ -64,6 +67,27 @@ test('nothing inside a secret outline is pushed, on any floor: where a Soul is, 
   assert.ok(!JSON.stringify(c.got).includes('g-attic'), 'the secret place is never named');
   assert.ok(!JSON.stringify(await w.get()).includes('under the attic'));
   c.stop(); w.hub.close();
+});
+
+test('a thing\'s state is pushed; one inside a secret outline, on any floor, is deleted and never sent again (A7)', async () => {
+  const w = fakeWorld();
+  w.setThing('e_lamp', {on: true}); w.setThing('e_door', {open: true});
+  const c = follow(w.hub);
+  assert.deepEqual(c.got[0]!.data.things, {e_door: {open: true}, e_lamp: {on: true}}, 'both things in the whole picture');
+  w.secret('g-attic', true); await w.get();
+  const from = c.got.length - 1, at = `${c.got[0]!.data.epoch}:${c.got[from]!.data.seq}`;
+  assert.deepEqual(c.got[from]!.data.things, {set: {}, del: ['e_lamp']}, 'the lamp under the secret room upstairs is deleted');
+  w.setThing('e_lamp', {on: false}); w.advance(); await w.get();
+  assert.equal(c.got.length, from + 1, 'a hidden thing\'s change sends nothing');
+  w.entities.e_door!.pose.p = [22, 0, 22]; w.advance(); await w.get();   // carried under the attic
+  assert.deepEqual(c.got.at(-1)!.data.things, {set: {}, del: ['e_door']});
+  const back = follow(w.hub, at);
+  assert.deepEqual(back.got.map(g => g.event), ['live'], 'a client coming back is replayed the door\'s deletion');
+  const after = JSON.stringify([...c.got.slice(from), ...back.got, follow(w.hub).got, await w.get()]);
+  assert.ok(!after.includes('"e_lamp":') && !after.includes('"e_door":'), 'no frame, replay, whole picture or GET carries a hidden thing\'s state');
+  assert.deepEqual(c.copy().things, {}, 'the copy kept by frames holds neither');
+  assert.equal(liveHash(c.copy()), liveHash(await w.get()));
+  back.stop(); c.stop(); w.hub.close();
 });
 
 test('the push runs only while someone holds it', async () => {

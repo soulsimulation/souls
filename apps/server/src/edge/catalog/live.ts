@@ -14,6 +14,8 @@ import {liveDelta, liveHash, type LivePicture} from './live-delta.ts';
 export const LIVE_CONTRACT = 'soul-live/1';
 /** Lines of speech kept and sent: the newest. A client keeps its own longer history by id. */
 export const LIVE_SPEECH = 40;
+/** #1751: most things whose state is sent (those that differ from their kind's default); `thingsMore` counts the rest. */
+export const LIVE_THINGS = 2000;
 /** World ticks one built answer serves (10 ticks = 0.5 s at clock rate 1). */
 const KEEP_TICKS = 10;
 /** #1755: more changes missed than this (a minute at two a second) are sent as the whole picture instead, so the ring keeps
@@ -61,6 +63,22 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     speech.push(line);
     if (speech.length > LIVE_SPEECH) speech.shift();
   });
+  // #1751: things whose state differs from their kind's default (a lamp on, a door open), only the fields that differ.
+  // Nothing a shut container keeps out of sight, and nothing inside a secret place's outline on any floor (`hidden`, the
+  // catalog's rule). Both are asked on every build, where the thing stands now: a thing carried into a secret room leaves
+  // at once. The states' sort is kept while the ledger's map is the same.
+  let sorted: {states: unknown; ids: [string, Record<string, unknown>][]} | null = null;
+  const visibleThings = () => {
+    const states = L.thingStates?.(); if (!states?.size) return {things: {}, more: 0};
+    if (sorted?.states !== states) sorted = {states, ids: [...states].sort((a, b) => a[0] < b[0] ? -1 : 1)};
+    const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, things: Record<string, Record<string, unknown>> = {};
+    let n = 0, more = 0;
+    for (const [id, st] of sorted.ids) {
+      const p = world.entities[id]?.pose?.p; if (!p || L.concealedThing?.(id) || hidden(p[0]!, p[2]!)) continue;
+      if (n++ < LIVE_THINGS) things[id] = st; else more++;
+    }
+    return {things, more};
+  };
   const build = (tick: number): LivePicture => {
     const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, r1 = (n: number) => Math.round(n * 10) / 10;
     type Row = {id: string; name: string; at: number[] | null; place: string | null; doing: string | null};
@@ -73,7 +91,8 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     }).sort((a, b) => a.id < b.id ? -1 : 1);
     // a line said before its place was made secret is withheld from then on too (where its speaker stood, on any floor)
     const open = (l: Line) => { const w = saidAt.get(l); return !secret(l.place) && !w?.path.some(secret) && !(w && w.x !== null && hidden(w.x, w.z!)); };
-    return {contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(open)};
+    const {things, more} = visibleThings();
+    return {contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(open), things, ...(more ? {thingsMore: more} : {})};
   };
 
   // ---- one picture at a time, numbered: every build that changes something a client keeps is the next seq
