@@ -387,6 +387,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
       // #1751: a thing's act is taken by id from anywhere and walks there as part of the act (the plan's own walk). A whole
       // menu still lists only things within sight (a far one costs nothing there), and a secret place's things stay unknown.
+
       if (host.hidden?.(ctx.soul, s.at)) return { code: 'object.out-of-reach', reason: `You do not know the way to ${nameOf(s)}.` };
       if (d > ACT_SIGHT && host.wholeMenu?.()) return { code: 'object.out-of-reach', reason: `${nameOf(s)} is ${Math.round(d)} m away; send its id to go and work it.` };
       const denied = s.key ? host.access?.(s.key, ctx.soul) : null; if (denied) return denied;
