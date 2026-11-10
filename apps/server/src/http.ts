@@ -9,7 +9,10 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, type Admission} from './load/admission.ts';
+import {slowedFromRefusals} from './load/soul-slowed.ts';
 import type {LoadMonitor} from './load/monitor.ts';
+import {clockNow, setClockSource} from './load/clock-source.ts';
+import {clockBlockOf} from './load/shared.ts';
 /** SEC2: the absolute request-body ceiling for a non-god route (uploads 17 MB, everything else 1 MB). */
 export const bodyCeiling=(path:string)=>/\/v1\/(?:edge\/body\/uploads|art\/media)$/.test(path)?17*1024*1024:1024*1024;
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -41,7 +44,7 @@ import type {CandidateStationV2} from './station-v2.ts';
 import {mountStationRoutesV2} from './station-routes-v2.ts';
 import type {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
-import {EdgeError} from './edge/contract.ts';
+import {EDGE_CONTRACT, EdgeError} from './edge/contract.ts';
 import {mountSecretPlaceRoutes} from './edge/perception/secret-routes.ts';
 import { mountGodRoutes } from './god/routes.ts';
 import { RefusalLog, floodGuard } from './flood.ts';
@@ -61,11 +64,14 @@ import {Travel,TravelError,launcherSite,TRAVEL_CONTRACT} from './travel/travel.t
 import { bodyRefResolvers } from './edge/body/routes.ts';
 import {mountTravelRoutes} from './travel/routes.ts';
 import { intentArrivalReadError,intentHistoryReadError,intentTransportError, intentLookupError, type IntentControlV2, type IntentIdentityV2 } from './intent-control.ts';
-import {mountAgentInbox} from './inbox-routes.ts';
+import {mountAgentInbox, ownerCommandRoute} from './inbox-routes.ts';
 import {mountSoulNow} from './soul-now-routes.ts';
 import {soulLink} from './soul-link.ts';
 import {mountOperatorSouls} from './op-souls.ts';
 import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
+/** #1326: the edge writes that wait on the clock (an act's body, a plan's acts): refused with 503 world.stalled while it is
+ *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
+const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
 
 /** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; resolve; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
@@ -105,8 +111,34 @@ export function buildApp(d: Deps) {
   app.use('*',async(c,next)=>c.req.method==='GET'||c.req.method==='HEAD'||/\/v1\/god\//.test(c.req.path)?next():bodyLimit({maxSize:bodyCeiling(c.req.path),onError:(c)=>{refusals.note('size','too-large',`${c.req.method} ${c.req.path}`);return c.json({ok:false,code:'too-large',message:'request body is too large'},413);}})(c,next));
   // Continuity (warm after listen): right after a restart the menus' caches are built in slices (EdgeLedger.warmForServing);
   // a listing read waits for that (with a ceiling) instead of building them cold in its own turn. Keep it BEFORE admission.
+  // #1326 (registered before the edge routes, which answer and end the chain): a stalled clock (it owes ticks and none has completed past its threshold) is said, never hidden behind a 200
+  // with the old tick. An act that would wait on the clock is refused before it writes anything; an edge read that
+  // answers meanwhile carries `world.stalled` and the tick's age (the long-polls end early: comms wait, inbox listen).
+  if (d.load?.monitor) { const mon = d.load.monitor; setClockSource(() => mon.clock()); }
+  app.use('/v1/edge/*', async (c, next) => {
+    const before = clockNow();
+    if (before?.stalled && c.req.method === 'POST' && STALL_REFUSED.has(c.req.path.replace(/^.*(?=\/v1\/edge\/)/, ''))) {
+      const world = clockBlockOf(before)!;
+      return c.json({contract: EDGE_CONTRACT, error: {code: 'world.stalled', message: 'the world\'s clock has stopped moving; nothing was done, try again shortly'}, world}, 503, {'Retry-After': '5', 'Cache-Control': 'no-store'});
+    }
+    await next();
+    const after = clockNow();
+    if (!after?.stalled || c.res.status !== 200 || !(c.res.headers.get('content-type') ?? '').includes('application/json')) return;
+    // a cacheable answer (an ETag, or a Cache-Control that isn't no-store) is left as it is: a cache must never keep the stall
+    const cache = c.res.headers.get('cache-control');
+    if (c.res.headers.has('etag') || (cache !== null && !cache.includes('no-store'))) return;
+    try {
+      const body = await c.res.clone().json() as Record<string, unknown> | null;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return;
+      const world = {...(body.world && typeof body.world === 'object' ? body.world as object : {}), ...clockBlockOf(after)};
+      const headers = new Headers(c.res.headers); headers.delete('content-length'); headers.set('cache-control', 'no-store');
+      c.res = new Response(JSON.stringify({...body, world}), {status: 200, headers});
+    } catch { /* not a JSON object: left as it is */ }
+  });
   if (d.edge) { const edge = d.edge; app.use('/v1/edge/*', servingWait(() => edge.whenServing())); }
   // srv-load (LOAD-CONTRACT §2): heavy Soul/god requests queue for the admission dispatcher; edge answers carry X-Sim-Load
+  // #456: the public Soul's `slowed`, from the admission's refusals addressed to that Soul (load/soul-slowed.ts)
+  slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
     load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
@@ -115,7 +147,11 @@ export function buildApp(d: Deps) {
   const godForKey = d.god, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version() }) : null;
   if (currentSnapshotKey) mountEdgeSnapshot(app, currentSnapshotKey);
   mountSoulNow(app, {host: d.host, souls: d.souls, inbox: () => ownerInbox}); // LINK: the agent's public `now` line (before the routes it rides on)
-  const ownerInbox = mountAgentInbox(app, {db: d.db, worldId: d.host.worldId, souls: d.souls, god: d.god, edge: !!d.edge, requireUser: c => requireUser(c), ownerSoul: async (c, id) => { const u = await requireUser(c); d.souls.requireInvited(u); const s = ownSoul(u, id); if (!d.souls.owns(u.id, s)) throw new ApiError(403, 'forbidden', 'not your soul'); return s; }}); // invite gate as on the central /v1/souls/:id/command
+  // POST /v1/souls/<id>/command (#982): this one decision picks its handler for the world's mode. An edge world's
+  // inbox handler is mounted here, before the shared middleware below, as it always was; a central-mind world's
+  // translator is mounted with the other owner routes further down. The other one is never registered.
+  const commandRoute = ownerCommandRoute(!!d.edge);
+  const ownerInbox = mountAgentInbox(app, {db: d.db, worldId: d.host.worldId, souls: d.souls, god: d.god, edge: !!d.edge, command: commandRoute, requireUser: c => requireUser(c), ownerSoul: async (c, id) => { const u = await requireUser(c); d.souls.requireInvited(u); const s = ownSoul(u, id); if (!d.souls.owns(u.id, s)) throw new ApiError(403, 'forbidden', 'not your soul'); return s; }}); // invite gate as on the central /v1/souls/:id/command
   (app as unknown as {agentInbox?: unknown}).agentInbox = ownerInbox;   // Stage B mode 2 (main.ts): a read worker's here carries main's inbox block
   // Travel (M3, travel/): a Soul whose body is in another world acts there; here only its travel calls answer.
   let travel: Travel | undefined;
@@ -126,6 +162,8 @@ export function buildApp(d: Deps) {
     travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
       site: launcherSite(process.env.SIM_SITE_URL, process.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
       resolveBodyRef: (ref, owner) => bodyRefResolvers.get(d.host)?.(ref, owner) ?? {ok: false, code: 'body.ref-unsupported', reason: 'This world cannot resolve carried body references'} });
+    d.edge.travelLogOf = (soulId) => { const row = d.db.soul(soulId), t = row ? travel!.identity(row) : null; return t ? t.log.filter((e) => e.kind === 'travel' && e.from === d.cfg.worldKey).map((e) => ({at: e.at, to: e.toName, from: e.fromName})) : []; };
+    travel.onLeave = (soulId, at, world) => d.edge?.noteTravel(soulId, at, world);
     mountTravelRoutes(app, { travel, siteKey: process.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
       tokenSoul: (c) => { const s = d.souls.soulFromToken(bearer(c)); if (!s) { const r = d.souls.controlRefusal(bearer(c)); throw new TravelError(401, r.code, r.message, r.extra); } return s; },
       ownerSoul: async (c, id) => { const u = await requireUser(c); return ownSoul(u, id); },
@@ -214,8 +252,11 @@ export function buildApp(d: Deps) {
   app.get('/healthz', (c) => { const mon = d.load?.monitor; let tickMs: {avg: number; max: number; n: number};
     if (mon) { const t = mon.tickStats; tickMs = {avg: t.avg, max: t.max, n: t.n}; }
     else { const ms = d.host.tickMs, n = ms.length; let sum = 0, max = 0; for (const x of ms) { sum += x; if (x > max) max = x; } tickMs = { avg: n ? Math.round(10 * sum / n) / 10 : 0, max: Math.round(10 * max) / 10, n }; }
+    // #1326: the tick's wall age, and `stalled` once the clock owes ticks and none has completed past its threshold
+    const clock = mon?.clock();
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
-      tickMs, clockRate: d.host.clockRate, ...(mon ? {load: mon.health()} : {}) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
+      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
+      ...(mon ? {load: mon.health()} : {}) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
   const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile); return soulClient ? {soulClient} : {}; };
@@ -446,7 +487,7 @@ export function buildApp(d: Deps) {
   app.get('/v1/souls/:id/talk', async (c) => { const u = await requireUser(c); return c.json({ lines: d.db.recentTalk(60, ownSoul(u, c.req.param('id')).id) }); });
   app.post('/v1/souls/:id/cards', async (c) => { const u = await requireUser(c); d.souls.requireInvited(u);const s=ownSoul(u,c.req.param('id')),input=await body(c),guard=d.souls.ownerControlGuard(s,u.id);return controlReply(c,guard,()=>d.souls.proposeCards(s,input,guard)); });
   app.get('/v1/souls/:id/perceive', async (c) => { const u = await requireUser(c),soul=ownSoul(u,c.req.param('id'));if(!d.host.extra.intentPurposeRecallV1)return c.json(d.souls.perceive(soul));c.header('Cache-Control','no-store');const guard=d.souls.ownerControlGuard(soul,u.id);if(guard)checkAcceptanceGuard(guard);const result=d.souls.perceive(soul);if(guard)checkAcceptanceGuard(guard);return c.json(result); });
-  app.post('/v1/souls/:id/command', async (c) => {
+  if (commandRoute === 'central-translator') app.post('/v1/souls/:id/command', async (c) => { // #982: an edge world's is the inbox's (above)
     const u = await requireUser(c); d.souls.requireInvited(u); const s = ownSoul(u, c.req.param('id'));
     const p = commandSchema.safeParse(await body(c)); if (!p.success) throw new ApiError(400, 'invalid', 'text is required (1–280 characters)');
     const guard=d.souls.ownerControlGuard(s,u.id);return controlReply(c,guard,()=>d.souls.command(s,p.data.text,'web',guard));

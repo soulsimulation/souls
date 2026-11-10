@@ -1,7 +1,7 @@
 import {AudioMenu} from './AudioMenu.tsx';
 import { HudMore } from './HudMore.tsx';
 import {explorePresence} from './explore-data.ts';
-import {bodiesFromEvents} from './soul-state.ts';
+import {bodiesFromEvents,readSlowed} from './soul-state.ts';
 import {exploreAvailable} from './explore-control.ts';
 import {arrivalOver} from './arrival-marks.ts';
 import {MySouls,useMySouls} from './MySouls.tsx';
@@ -221,7 +221,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
         <span className={st.state === 'open' ? 'ok' : 'dim'}>{st.state === 'open' ? '● Connected' : 'Connecting…'}</span>
         </>}
         {!advanced&&<div className="hud-left"><EdenMark/><div className="hud-status" ref={setStatusSlot}/><div className="hud-camera-row"><div className="hud-camera-slot" ref={setCameraSlot}/></div>
-        <div className="hud-explore-group">{exploreOn&&tourHandle?.frameLocation&&<EdenTour bodies={soulBodies} worldName={exploreName} locations={exploreLocations} locationPage={explorePage??undefined} onSearch={explorePage?(query=>viewerHandle?.searchLocations?.(query)):undefined} onMore={explorePage?(()=>viewerHandle?.moreLocations?.()):undefined} onClose={()=>viewerHandle?.cancelLocationPictures?.()} presence={explorePresence(sim.edge??[],r.souls.keys())} room={viewerState?.room} souls={r.souls} present={new Set([...r.souls.values()].filter(s=>r.entities[s.entityId]).map(s=>s.id))} onOpen={()=>{if(!explorePage)viewerHandle?.refreshLocations?.();viewerHandle?.releaseInput?.();setNavigationOpen(false);}} onSoul={id=>requestFollowSoul(id)} preview={placePreview} onView={place=>{const viewed=tourHandle.frameLocation?.(place)??false;if(viewed){setPanelOpen(false);setNavigationOpen(false);}return viewed;}}/>}{launcherWorld&&<GodButton/>}{newSoulAvailable?<BringAgent key={JSON.stringify([cfg.worldId??location.pathname,authIdentity(auth)])} renderEntry={accountSouls} auth={auth} requireAuth={cfg.accountAuthRequired===true} worldName={launcherWorld?worldName:undefined}/>:accountSouls(null)}</div><AudioMenu/><HudMore/></div>}
+        {/* #1392: live, camera, sound, then search, god mode, Souls */}<AudioMenu/><div className="hud-explore-group">{exploreOn&&tourHandle?.frameLocation&&<EdenTour bodies={soulBodies} worldName={exploreName} locations={exploreLocations} locationPage={explorePage??undefined} onSearch={explorePage?(query=>viewerHandle?.searchLocations?.(query)):undefined} onMore={explorePage?(()=>viewerHandle?.moreLocations?.()):undefined} onClose={()=>viewerHandle?.cancelLocationPictures?.()} presence={explorePresence(sim.edge??[],r.souls.keys())} room={viewerState?.room} souls={r.souls} present={new Set([...r.souls.values()].filter(s=>r.entities[s.entityId]).map(s=>s.id))} onOpen={()=>{if(!explorePage)viewerHandle?.refreshLocations?.();viewerHandle?.releaseInput?.();setNavigationOpen(false);}} onSoul={id=>requestFollowSoul(id)} preview={placePreview} onView={place=>{const viewed=tourHandle.frameLocation?.(place)??false;if(viewed){setPanelOpen(false);setNavigationOpen(false);}return viewed;}}/>}{launcherWorld&&<GodButton/>}{newSoulAvailable?<BringAgent key={JSON.stringify([cfg.worldId??location.pathname,authIdentity(auth)])} renderEntry={accountSouls} auth={auth} requireAuth={cfg.accountAuthRequired===true} worldName={launcherWorld?worldName:undefined}/>:accountSouls(null)}</div><HudMore/></div>}
         {!launcherWorld&&<LocalIntegrationNotice source={cfg.localIntegrationMetadataPath}/>}{AUTH_UI&&!launcherWorld&&<LocalConnectionHelp devAuth={cfg.devAuth}/>}
         <div className="hud-actions">
           {advanced&&<a className="world-back" href="#watch" onClick={e => { e.preventDefault(); setAdvanced(false); setPairCode(null); setTab('watch'); history.replaceState(null, '', '#watch'); }}>← Back to the world</a>}
@@ -231,7 +231,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
       </header>
       {!advanced&&!panelOpen&&(()=>{
         const following=chip&&selected===chip&&(viewerState?.cameraMode==='follow'||viewerState?.flyingTo===chip)?r.souls.get(chip):undefined;
-        if(following)return <SoulChip kind="follow" name={following.name} status={doingText(following.doing,(r.entities[following.entityId] as {activity?:string}|undefined)?.activity,following.id)} note={chipNote?.text} openCard={()=>{chipRef.current=null;setChip(null);revealPanel();}}/>;
+        if(following)return <SoulChip kind="follow" name={following.name} status={doingText(following.doing,(r.entities[following.entityId] as {activity?:string}|undefined)?.activity,following.id)} note={chipNote?.text} slowed={readSlowed(following.slowed)} openCard={()=>{chipRef.current=null;setChip(null);revealPanel();}}/>;
         const showing=coarse&&viewerState?.cameraMode==='broadcast'&&viewerState.shownTick!=null&&viewerState.broadcastSoulId?r.souls.get(viewerState.broadcastSoulId):undefined;
         return showing?<SoulChip kind="broadcast" name={showing.name} follow={()=>{viewerHandle?.flyToSoul?.(showing.id,{chip:true});}}/>:null;
       })()}
@@ -239,7 +239,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
         <button className="panel-close" aria-label="Close panel" title="Close" onClick={() => setPanelOpen(false)}>×</button>
         {lessonOpen&&localClassroomPresentation&&<ClassroomPresentation worldId={localClassroomPresentation.worldId} screenEntityId={localClassroomPresentation.screenEntityId} index={lessonIndex} onSelect={setLessonIndex}/>}
         {pairCode&&<button onClick={()=>{setAdvanced(false);setTab('my soul');revealPanel();}}>Finish assistant approval</button>}
-        <SoulFocus key={`${selected}:${sim.me?.userId ?? 'public'}`} sim={sim} api={api} auth={auth} selected={selected} select={inspect} camera={selected&&viewerHandle?{following:viewerState?.cameraMode==='follow'&&viewerState.selection.soulId===selected,follow:()=>{requestFollowSoul(selected);},stop:()=>{viewerHandle.setManualNavigation?.('orbit');viewerHandle.setCameraMode('manual');}}:undefined} manage={openAccount} active={!advanced&&panelOpen&&tab!=='my soul'} />
+        <SoulFocus key={`${selected}:${sim.me?.userId ?? 'public'}`} sim={sim} api={api} auth={auth} selected={selected} select={inspect} camera={selected&&viewerHandle?{following:viewerState?.cameraMode==='follow'&&viewerState.selection.soulId===selected&&!viewerState.followHeld,follow:()=>{requestFollowSoul(selected);},stop:()=>{viewerHandle.setManualNavigation?.('orbit');viewerHandle.setCameraMode('manual');}}:undefined} manage={openAccount} active={!advanced&&panelOpen&&tab!=='my soul'} />
       </aside>
       <aside id="account-panel" className="human-panel account-panel" hidden={advanced||tab!=='my soul'||!panelOpen} aria-label="Soul and account tools">
         <button onClick={() => setTab('watch')}>← Back to the world</button><div className="grid"><SoulAccount sim={sim} auth={auth} api={api} select={id=>{inspect(id);setTab('watch');}} pairCode={pairCode} clearPair={()=>setPairCode(null)}/></div>

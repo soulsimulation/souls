@@ -38,7 +38,7 @@
 //                                unregister it (never deletes; worldops.mjs). restore-world {id} puts it back; list-archive;
 //                                audit {slug?} reads <data>/audit.jsonl
 //   POST /__sim/worlds/<slug>/unlisted the world's owner (signed in, or their own agent's god token): {unlisted: true|false}
-//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token): a 16:9 JPEG as
+//   POST|DELETE /__sim/worlds/<slug>/thumbnail  the world's owner (signed in, or their own agent's god token) or a signed-in site owner: a 16:9 JPEG as
 //                                the body (thumbnail.mjs), or DELETE to fall back to the template's default; never wakes the world
 //   GET  /__sim/thumbs/<slug>/<sha>.jpg, /__sim/thumbs/_template/<sha>.jpg  the world list's pictures, immutable (#887)
 //   POST /__sim/op/soul-pending|soul-approve|soul-message|soul-inbox|soul-delete, /__sim/op/set-test  operator only: TEST Souls
@@ -525,10 +525,14 @@ export async function openLauncher(cfg = {}) {
   const GONE = [404, { ok: false, code: 'not-found', message: 'this world was archived while the thumbnail was being checked' }];
   async function ownerThumbnail(w, method, readBody, authorization) {
     const gone = () => registry.get(w.slug) !== w || closing.has(w.slug);
-    const a = await quietActorOf(w, authorization);
+    let a = await quietActorOf(w, authorization);
     if (gone()) return GONE;
     if (!a) return [401, { ok: false, code: 'unauthorized', message: "sign in, or use this world's god token", fix: "Run it from the world owner's agent folder (eden-god thumbnail), or send the owner's sign-in." }];
-    if (!isOwner(w, a)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+    // the site admin, by session only (the accounts the health page admits); the audit row tells it from the owner's own change
+    if (!isOwner(w, a)) {
+      if (a.via !== 'session' || !dash.owners().has(a.account)) return [403, { ok: false, code: 'forbidden', message: "only this world's owner or the site admin sets its thumbnail", fix: "Ask the world's owner; co-builders and visitors cannot change it." }];
+      a = { ...a, via: 'site-admin' };
+    }
     const wait = thumbRate(w.slug);
     if (wait !== null) return [429, rateRefusal(wait), { 'retry-after': String(wait) }];
     if (method === 'DELETE') {
@@ -828,7 +832,9 @@ export async function openLauncher(cfg = {}) {
     let r;
     try {
       r = await c3.get(key, ttlMs, () => new Promise((yes, no) => {
-        const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...hopless(req.headers), 'x-forwarded-for': xff } }, (u) => {
+        // One flight serves every caller waiting on it, so it always asks for the whole answer: a world's 304 to one would be the others' empty page.
+        const { 'if-none-match': _inm, ...asked } = hopless(req.headers);
+        const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...asked, 'x-forwarded-for': xff } }, (u) => {
           const chunks = []; u.on('data', (c) => chunks.push(c)); u.on('error', no);
           u.on('end', () => { sawLoad(slug, u.headers['x-sim-load']); const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers; const body = Buffer.concat(chunks); yes({ status: u.statusCode ?? 502, headers: { ...headers, 'content-length': String(body.length) }, body }); });
         });
@@ -836,6 +842,8 @@ export async function openLauncher(cfg = {}) {
       }));
     } catch { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); return; }
     if (clientGone(req, res)) return;
+    const tag = r.status === 200 ? r.headers.etag : undefined;
+    if (tag && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === tag)) { const { 'content-length': _l, 'content-type': _t, ...kept } = r.headers; res.writeHead(304, robotsOf(slug, { ...kept, 'x-sim-cache': r.cache })).end(); return; }
     res.writeHead(r.status, robotsOf(slug, { ...r.headers, 'x-sim-cache': r.cache })).end(req.method === 'HEAD' ? undefined : r.body);
   }
   /** Retired (a newer launcher serves now): anything still arriving here, on a connection opened before the switch,

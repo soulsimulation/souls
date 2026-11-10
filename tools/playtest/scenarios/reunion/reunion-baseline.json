@@ -1,0 +1,111 @@
+{
+  "name": "reunion-baseline",
+  "version": 2,
+  "seed": 1138,
+  "providers": {
+    "allowed": [
+      "claude"
+    ]
+  },
+  "world": {
+    "kind": "dev",
+    "genesis": "worlds/templates/hello-hamlet.json",
+    "slug": "pt-reunion",
+    "port": 4351,
+    "natives": false
+  },
+  "durationSec": 800,
+  "seats": [
+    {
+      "id": "ada",
+      "adapter": "claude-headless",
+      "model": "sonnet",
+      "effort": "low",
+      "soulName": "Ada",
+      "wake": true,
+      "home": true,
+      "briefBytes": 0
+    },
+    {
+      "id": "bo",
+      "adapter": "claude-headless",
+      "model": "sonnet",
+      "effort": "low",
+      "soulName": "Bo",
+      "wake": true,
+      "home": true,
+      "briefBytes": 0
+    }
+  ],
+  "god": null,
+  "director": {
+    "mode": "scripted",
+    "sequential": false,
+    "worldTime": {
+      "timeOfDay": "15:00",
+      "timeScale": 120
+    },
+    "script": [
+      {
+        "seat": "ada",
+        "atSec": 5,
+        "restart": true,
+        "channel": "card",
+        "text": "Find Bo, the other Soul in this world: you both start on the village green. Get to know each other, then choose together one of these two places for tomorrow morning: walk:knoll or walk:flag-orchard. When you agree, each of you say aloud in these exact words: Tomorrow at walk:<place>. Then say goodbye.",
+        "budgetSec": 220
+      },
+      {
+        "seat": "bo",
+        "atSec": 5,
+        "restart": true,
+        "channel": "card",
+        "text": "Find Ada, the other Soul in this world: you both start on the village green. Get to know each other, then choose together one of these two places for tomorrow morning: walk:knoll or walk:flag-orchard. When you agree, each of you say aloud in these exact words: Tomorrow at walk:<place>. Then say goodbye.",
+        "budgetSec": 220
+      },
+      {
+        "seat": "ada",
+        "atSec": 240,
+        "after": "result",
+        "channel": "card",
+        "text": "For the evening, walk to walk:lab-pond-hall and stay there.",
+        "budgetSec": 180
+      },
+      {
+        "seat": "bo",
+        "atSec": 240,
+        "after": "result",
+        "channel": "card",
+        "text": "For the evening, walk to walk:cottage and stay there.",
+        "budgetSec": 180
+      },
+      {
+        "seat": "*",
+        "atSec": 470,
+        "after": "result",
+        "restart": true,
+        "channel": "card",
+        "text": "It's a new day. Carry on with what you had planned.",
+        "budgetSec": 300
+      }
+    ]
+  },
+  "observer": {
+    "sampleSec": 5,
+    "viewport": [
+      1280,
+      800
+    ],
+    "dpr": 1,
+    "cameras": []
+  },
+  "review": {
+    "mode": "deterministic",
+    "developer": false
+  },
+  "rails": {
+    "maxTurnWallSec": 180,
+    "onboardWallSec": 240,
+    "onboardTimeoutSec": 200,
+    "maxTurnsPerRequest": 6
+  }
+}

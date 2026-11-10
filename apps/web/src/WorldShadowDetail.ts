@@ -17,7 +17,7 @@ export const SHADOW_DETAIL:ShadowDetailOptions=Object.freeze({near:40,perMetre:2
 const SUB_TEXEL=/curved stems/;
 type Caster={mesh:THREE.Mesh;centre:THREE.Vector3;radius:number;subTexel:boolean};
 export class WorldShadowDetail{
- private casters:Caster[]=[];private frame=0;private off:THREE.Mesh[]=[];private tmp=new THREE.Vector3();private sphere=new THREE.Sphere();
+ private casters:Caster[]=[];private frame=0;private off:(THREE.Mesh|null)[]=[];private offCount=0;private tmp=new THREE.Vector3();private sphere=new THREE.Sphere();
  /** Last apply(): how many casters were skipped (tests, perf readouts). */
  skipped=0;
  private root:THREE.Object3D;private o:ShadowDetailOptions;
@@ -33,12 +33,13 @@ export class WorldShadowDetail{
  apply(camera:THREE.Vector3){
   if(this.frame++%this.o.rescanFrames===0)this.scan();
   this.skipped=0;
-  for(const c of this.casters){const m=c.mesh;if(!m.castShadow)continue;
+  for(let i=0,casters=this.casters;i<casters.length;i++){const c=casters[i],m=c.mesh;if(!m.castShadow)continue;
    let skip=c.subTexel;
    if(!skip&&c.radius<this.o.maxRadius){const d=this.tmp.copy(c.centre).distanceTo(camera)-c.radius;skip=d>this.o.near+this.o.perMetre*c.radius;}
-   if(skip){m.castShadow=false;this.off.push(m);this.skipped++;}}
+   if(skip){m.castShadow=false;this.off[this.offCount++]=m;this.skipped++;}}
  }
- /** Call right after renderer.render. */
- restore(){for(const m of this.off)m.castShadow=true;this.off.length=0;}
- dispose(){this.restore();this.casters=[];}
+ /** Call right after renderer.render. The list keeps its backing store between frames (`length=0` freed it, and the
+  *  next frame regrew it push by push); slots are cleared so a removed mesh is not held. */
+ restore(){const off=this.off;for(let i=0;i<this.offCount;i++){off[i]!.castShadow=true;off[i]=null;}this.offCount=0;}
+ dispose(){this.restore();this.casters=[];this.off=[];}
 }

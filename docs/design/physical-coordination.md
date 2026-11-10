@@ -17,7 +17,7 @@ Required outcomes are the coordination lifecycle, authentic construction recover
 six activity families below, and the interactive materials/accessories those examples require. Prefer adapting
 preserved native machinery over reconstructing it from generic pickup actions.
 
-The November 1 research used release 4.09 (`5eebdc33`). Planning intake checked main `ecb63f57` and release 4.12
+The November 1 research used release 0.113 (`5eebdc33`). Planning intake checked main `ecb63f57` and release 0.116
 (`fa695018`). Twelve relevant source files were byte-identical to the research baseline, including the carry
 bridge, together ledger, catalogue adapter, camp construction/disassembly, runtime snapshot, sequence schema,
 campus generators, native catalogue, Lab registry and authored rack definitions. This is scoped source evidence,
@@ -121,6 +121,8 @@ or manipulation is an explicit primitive. Arbitrary meshes are not automatically
 Maintain one authority for poses, reciprocal connections and support. Scene parenting alone cannot mean a beam
 is supported by two uprights. Rendering and persistent entity adapters observe the same state; avoid overlaying
 a duplicate static campus mesh on dynamic materials. Project progress cannot independently declare completion.
+
+The first of these is built: `rack-bay@1`, `rack-bay-build@1` and persistent projects ([soul actions](../architecture/soul-actions.md)).
 
 Floors and stairs become navigable at actual installation and lose that affordance on safe removal. Temporary
 bracing/held support counts only while present; protect occupants during disassembly. Reverse dependencies recover

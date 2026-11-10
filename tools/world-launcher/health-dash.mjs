@@ -338,10 +338,11 @@ th{font-weight:500;color:var(--mute);font-size:12px}tr:last-child td{border-bott
 .msg{white-space:normal;min-width:220px;word-break:break-word}
 #gate{margin:48px 0;text-align:center;color:var(--mute)}#gate button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
 .muted{color:var(--mute)}
+#main button{font:inherit;font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:var(--chip);color:var(--fg);cursor:pointer}
 @media (max-width:600px){body{padding:14px 16px 40px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hide-s{display:none}}
 </style></head><body>
 <header><h1>Souls health</h1><span class="sub mono" id="build"></span><span id="state">loading…</span></header>
-<div id="gate" hidden></div><main id="main" hidden></main>
+<p id="pic" hidden></p><div id="gate" hidden></div><main id="main" hidden></main>
 <script>
 const CFG=${cfg};let token=null,clerk=null,timer=null,last=null;
 const $=(s)=>document.querySelector(s),esc=(v)=>String(v??'').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -378,10 +379,10 @@ function render(d){
     +Object.entries(h.units||{}).map(([k,u])=>tile('Worlds '+k,fmt(u.workingMb,' MB')+(u.maxMb?' <span class="muted">/ '+u.maxMb+' MB</span>':'')+(u.oomKills?' <span class="bad">'+u.oomKills+' OOM</span>':''),u.pct>=90?'bad':'')).join('')
     +tile('Caddy',esc(h.caddy??'—'),h.caddy&&h.caddy!=='active'?'bad':'')+tile('Up',fmt(h.uptimeH,' h'))
     +tile('Host check',h.check?(h.check.ok?'ok':'<span class="bad">'+esc(h.check.codes.join(', ')||'failed')+'</span>')+' <span class="muted">'+esc(ago(h.check.at))+'</span>':'—')+'</div>';
-  s+='<h2>Worlds <span class="muted">'+d.totals.running+' running of '+d.totals.worlds+' · '+d.totals.viewers+' watching</span></h2><div class="wrap"><table><thead><tr><th>World</th><th>State</th><th class="n">Now</th><th>Last visit</th><th class="n">Souls</th><th class="n">Tick ms</th><th class="n">Clock</th><th class="n hide-s">RSS</th><th>Last god edit</th><th class="n hide-s">Restarts</th></tr></thead><tbody>'
+  s+='<h2>Worlds <span class="muted">'+d.totals.running+' running of '+d.totals.worlds+' · '+d.totals.viewers+' watching</span></h2><div class="wrap"><table><thead><tr><th>World</th><th>State</th><th class="n">Now</th><th>Last visit</th><th class="n">Souls</th><th class="n">Tick ms</th><th class="n">Clock</th><th class="n hide-s">RSS</th><th>Last god edit</th><th class="n hide-s">Restarts</th><th></th></tr></thead><tbody>'
     +d.worlds.map(w=>{const sc=w.halted?'bad':w.status==='running'?'ok':w.status==='failed'||w.status==='restarting'?'bad':'muted',tk=w.tickMs;
       return '<tr><td title="'+esc(w.slug)+'">'+esc(w.name)+'</td><td><span class="'+sc+'">'+esc(w.halted?'halted':w.status)+'</span></td><td class="n">'+(w.viewers||'<span class="muted">0</span>')+'</td><td>'+esc(ago(w.lastVisit))+'</td><td class="n">'+fmt(w.souls)+'</td>'
-      +'<td class="n '+(tk&&tk.avg>50?'warn':'')+'">'+(tk?tk.avg+' <span class="muted">/ '+tk.max+'</span>':'—')+'</td><td class="n '+(w.clockRate!=null&&w.clockRate<0.9?'warn':'')+'">'+(w.clockRate==null?'—':Math.round(w.clockRate*100)+'%')+'</td><td class="n hide-s">'+fmt(w.rssMb,' MB')+'</td><td>'+esc(ago(w.lastEdit))+'</td><td class="n hide-s">'+w.restarts+'</td></tr>'}).join('')+'</tbody></table></div>';
+      +'<td class="n '+(tk&&tk.avg>50?'warn':'')+'">'+(tk?tk.avg+' <span class="muted">/ '+tk.max+'</span>':'—')+'</td><td class="n '+(w.clockRate!=null&&w.clockRate<0.9?'warn':'')+'">'+(w.clockRate==null?'—':Math.round(w.clockRate*100)+'%')+'</td><td class="n hide-s">'+fmt(w.rssMb,' MB')+'</td><td>'+esc(ago(w.lastEdit))+'</td><td class="n hide-s">'+w.restarts+'</td><td><button data-pic="'+esc(w.slug)+'">Picture</button></td></tr>'}).join('')+'</tbody></table></div>';
   const gl=d.worlds.flatMap(w=>Object.entries(w.glitches?w.glitches.byRule:{}).flatMap(([rule,by])=>Object.entries(by).map(([rung,n])=>({name:w.name,slug:w.slug,rule,rung,n}))));
   s+='<h2>Glitches <span class="muted">'+gl.reduce((n,g)=>n+g.n,0)+' since each world began</span></h2>'+(gl.length?'<div class="wrap"><table><thead><tr><th>World</th><th>Rule</th><th>Rung</th><th class="n">Count</th></tr></thead><tbody>'+gl.map(g=>'<tr><td title="'+esc(g.slug)+'">'+esc(g.name)+'</td><td class="mono">'+esc(g.rule)+'</td><td>'+esc(g.rung)+'</td><td class="n">'+g.n+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">None reported by a running world.</p>');
   s+='<h2>Releases and backups</h2><div class="wrap"><table><thead><tr><th>Stage</th><th>Build</th><th>Live since</th><th>Last backup</th><th class="n">Size added</th><th>Timer</th></tr></thead><tbody>'
@@ -394,6 +395,14 @@ function render(d){
   s+='<h2>New errors since this release <span class="muted">'+e.newSinceRelease+' kind'+(e.newSinceRelease===1?'':'s')+'</span></h2>'+(e.top.length?'<div class="wrap"><table><thead><tr><th>Kind</th><th>Message</th><th class="n">Count</th><th class="n">People</th><th>Last</th><th class="hide-s">Worlds</th></tr></thead><tbody>'+e.top.map(x=>'<tr><td><span class="chip">'+esc(x.kind)+'</span></td><td class="msg mono">'+esc(x.message)+(x.source?' <span class="muted">'+esc(x.source)+'</span>':'')+'</td><td class="n">'+x.count+'</td><td class="n">'+x.visitors+'</td><td>'+esc(ago(x.last))+'</td><td class="hide-s">'+esc(x.worlds.join(', '))+'</td></tr>').join('')+'</tbody></table></div>':'<p class="ok">None.</p>');
   s+='<p class="muted">sim-watch: '+(d.watch?'last check '+esc(ago(d.watch.at))+(d.watch.down?' · <span class="bad">down: '+esc(d.watch.down)+'</span>':''):'not seen since this launcher started')+'</p>';
   m.innerHTML=s}
+// the site owner's way to set a world's list picture (POST .../thumbnail): the note sits outside #main, which each refresh redraws
+const picIn=document.createElement('input');picIn.type='file';picIn.accept='image/jpeg';let picSlug=null;
+function picNote(text,cls){const p=$('#pic');p.hidden=false;p.className=cls||'muted';p.textContent=text}
+picIn.onchange=async()=>{const f=picIn.files[0],slug=picSlug;picIn.value='';if(!f||!slug)return;picNote('Sending '+f.name+' to '+slug+'…');
+  if(clerk?.session)token=await clerk.session.getToken().catch(()=>token);
+  let r,e;try{r=await fetch(location.pathname.replace(/health$/,'worlds/'+slug+'/thumbnail'),{method:'POST',headers:{'content-type':'image/jpeg',...(token?{authorization:'Bearer '+token}:{})},body:f});e=await r.json().catch(()=>({}))}catch{return picNote(slug+': could not reach the server.','bad')}
+  if(r.ok)picNote(slug+': picture set, '+e.width+'×'+e.height+'. The world list shows it on its next refresh.','ok');else picNote(slug+': '+(e.message||'refused, '+r.status)+(e.fix?' · '+e.fix:''),'bad')};
+$('#main').addEventListener('click',(ev)=>{const b=ev.target.closest('button[data-pic]');if(b){picSlug=b.dataset.pic;picIn.click()}});
 load();timer=setInterval(()=>{if(!document.hidden)load()},30000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});
 </script></body></html>`;
 }

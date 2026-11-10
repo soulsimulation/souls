@@ -11,7 +11,7 @@ import { entityArrivalPose } from './entity-arrival.ts';
 import { liftHorizon } from './broadcast-horizon.ts';
 import { entryWorldSouls, godTourViews } from './world-env.ts';
 
-type ArrivalLayer = { viewBounds(): readonly [number, number, number, number]; entityCount: number; groundAt: (x: number, z: number) => number | null; arrivalAt(): [number, number] | null };
+type ArrivalLayer = { viewBounds(): readonly [number, number, number, number]; entityCount: number; groundAt: (x: number, z: number) => number | null; groundPeek?: (x: number, z: number) => number | null; arrivalAt(): [number, number] | null };
 export type WorldArrival = { target: [number, number, number]; eye: [number, number, number]; fov: number;
   /** The broadcast view this arrival opens on (WorldBroadcast.opening), or null: the framing of what was built. */
   opening: string | null };
@@ -19,7 +19,9 @@ export type WorldArrival = { target: [number, number, number]; eye: [number, num
 /** The camera a new world's arrival starts at, for an aspect (width / height) at a 45° vertical field of view. */
 export function worldArrivalPose(layer: ArrivalLayer, aspect: number, souls: number | null = entryWorldSouls()): WorldArrival {
   if (souls !== null && souls > 0) {
-    const view = godTourViews(layer, layer.groundAt)[0];
+    // PERF-ARRIVAL (#1481): groundAt's bit-identical height without baking a terrain tile per landmark (Terrain.peek): the scan
+    // reads a few points of tiles all over the world, and baking them was about half of a 4x phone's first long task
+    const view = godTourViews(layer, layer.groundPeek ?? layer.groundAt)[0];
     // = WorldTour.openingMove(view).at(0), the push's start, lifted toward the horizon as WorldBroadcast.sample lifts every
     // Broadcast pose (C1, broadcast-horizon.ts) - so the poster is the broadcast's first frame (arrival-shot.test.ts holds
     // them equal). Lifted here once; WorldTour's moves stay unlifted. WorldTour itself stays out of the phone's first phase

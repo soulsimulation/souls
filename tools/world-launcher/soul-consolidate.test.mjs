@@ -7,15 +7,27 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CAPS, consolidate, fakeMind, NoMind, nextPassIn, ownerMind, settingsOf } from './soul/consolidate.mjs';
+import { CAPS, answerOf, consolidate, fakeMind, NoMind, nextPassIn, offerOf, ownerMind, settingsOf } from './soul/consolidate.mjs';
 import { spawnSync } from 'node:child_process';
 import { openSoulMemory } from './soul/memory.mjs';
 
-const tmp = (t) => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-cons-'))); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
+// #1322: a detached `serve` this test started can still be writing in the folder after `serve --stop` returns. Wait (at most 5 s)
+// for each one to exit, by the pid in its .eden-serve.lock, then remove with bounded retries on ENOTEMPTY and EBUSY.
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+const servePids = (d) => { try { return readdirSync(d, { recursive: true }).filter((f) => String(f).endsWith('.eden-serve.lock')).map((f) => { try { return JSON.parse(readFileSync(join(d, String(f)), 'utf8')).pid; } catch { return null; } }).filter(Number.isInteger); } catch { return []; } };
+async function removeSite(d) {
+  const until = Date.now() + 5000;
+  for (const pid of servePids(d)) while (alive(pid) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+  rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+const tmp = (t) => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-cons-'))); t.after(() => removeSite(d)); return d; };
 const NOW = () => '2026-11-10T12:00:00.000Z';
 const big = 'x'.repeat(3000);
+/** A clock for what the Soul writes: a second a call. A note's id holds its moment, so two in one real millisecond are one note, and
+ *  the real date would decide which journal page is past `NOW`. */
+const ticking = () => { let n = 0; return () => new Date(Date.parse('2026-11-07T09:00:00.000Z') + 1000 * n++).toISOString(); };
 function lived(t, days = 5) {
-  const dir = tmp(t), m = openSoulMemory(dir, { world: 'eden', soul: 's_me' });
+  const dir = tmp(t), m = openSoulMemory(dir, { world: 'eden', soul: 's_me', now: ticking() });
   m.sawHere({ tick: 1, clock: '09:00', now: '· world day 1', me: { place: 'pier', placePath: ['the pier'], posture: 'standing' }, near: [{ id: 's_ana', name: 'Ana', dist: 2 }] });
   m.remember('person', 's_ana', 'Keeps her word.'); m.remember('person', 's_ana', 'Keeps her word.'); m.remember('self', undefined, 'I am patient.');
   for (let d = 1; d <= days; d++) m.sawEvents([{ id: `c_${d}`, kind: 'receipt', tick: d * 100, at: Date.parse(`2026-11-0${d}T10:00:00.000Z`), clock: '10:00', receipt: { id: `r_${d}`, capability: 'play:x', phase: 'completed', outcome: { summary: `Played on day ${d}.`, learned: [], produced: [], met: [] } } }]);
@@ -243,7 +255,7 @@ test('A2: the ledger counts what came back too', async (t) => {
   assert.ok(JSON.parse(readFileSync(join(dir, 'memory/consolidation.json'), 'utf8')).tokens >= 1000);
 });
 
-test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; a Soul with none set off doesn\'t', async (t) => {
+async function cliSite(t) {
   const souls = new Map(), server = createServer((req, res) => { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
     const path = req.url.replace(/^\/w\/a/, '').split('?')[0], body = raw ? JSON.parse(raw) : {}, me = /^Bearer sim_(s_[a-z0-9]+)_/.exec(req.headers.authorization ?? '')?.[1], json = (b) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
     if (path === '/v1/config') return json({ devAuth: true, worldId: 'w_a', worldName: 'World a' });
@@ -264,12 +276,60 @@ test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; 
   const soul = join(dir, '.souls/souls/s_a1'), cfg = join(dir, '.souls/config.json');
   for (let d = 1; d <= 5; d++) writeFileSync(join(soul, `memory/journal/2026-10-0${d}.md`), `# 2026-10-0${d}\n\n${'- A day.\n'.repeat(5000)}`);
   writeFileSync(join(soul, 'memory/consolidation.json'), JSON.stringify({ lastLook: new Date(Date.now() - 2 * 3600_000).toISOString() }));   // clocks in this test run fast, wall time doesn't
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { everyHours: 0 } }));
+  return { run, soul, cfg };
+}
+
+test('#1256: off until the owner says yes; the offer says what it costs and what leaves; an answer ends it', async (t) => {
+  const { run, soul, cfg } = await cliSite(t), offer = async () => JSON.parse(await run('status')).consolidation;
+  const asked = await offer();
+  assert.equal(asked.state, 'not asked');
+  for (const told of [/MEMORY\.md/, /your own claude CLI/, /for each Soul, up to 2 passes a day of about 8000 tokens, each with a \$0\.05 limit/, /A yes covers every Soul in this home/, /go from the Soul's own search/, /What leaves this machine: each Soul's oldest journal days/, /consolidate on/, /consolidate off/]) assert.match(asked.offer, told);
+  assert.equal(JSON.parse(await run('consolidate')).skipped, 'off'); assert.equal(JSON.parse(await run('consolidate', '--force')).skipped, 'off', 'force is no yes');
+  await run('serve'); await new Promise((r) => setTimeout(r, 500)); await run('serve', '--stop');
+  assert.ok(!existsSync(join(soul, 'MEMORY.md')), 'no answer, no pass, on any path');
+  assert.deepEqual(JSON.parse(await run('consolidate', 'off')).consolidation, 'off');
+  assert.deepEqual(await offer(), { state: 'off' }, 'no is an answer: the offer goes');
+  assert.equal(JSON.parse(await run('consolidate')).skipped, 'off');
+  assert.equal(JSON.parse(await run('consolidate', 'on')).consolidation, 'on'); assert.deepEqual(await offer(), { state: 'on' });
+  assert.equal(JSON.parse(readFileSync(cfg, 'utf8')).consolidation.enabled, true);
+  assert.ok(JSON.parse(await run('consolidate')).consolidated.length > 0); assert.ok(existsSync(join(soul, 'MEMORY.md')));
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { callsPerDay: 1, enabled: true } }));
+  await run('consolidate', 'off'); assert.equal(JSON.parse(readFileSync(cfg, 'utf8')).consolidation.callsPerDay, 1, 'an answer leaves the caps as they were');
+});
+
+test('#1256: the question is put once; a typo runs nothing; a damaged journal doesn\'t cost `status`', async (t) => {
+  const { run, soul, cfg } = await cliSite(t), state = async () => JSON.parse(await run('status')).consolidation;
+  assert.equal(JSON.parse(await run('consolidate', 'asked')).consolidation, 'asked');
+  assert.deepEqual(await state(), { state: 'asked' }, 'asked isn\'t answered: it stays off, and the offer is gone');
+  assert.equal(JSON.parse(await run('consolidate')).skipped, 'off');
+  await run('consolidate', 'on'); assert.equal(await run('consolidate', 'of'), '', 'a typo is no pass'); assert.ok(!existsSync(join(soul, 'MEMORY.md')));
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: {} }));
+  mkdirSync(join(soul, 'memory/journal/2026-10-09.md'));
+  const told = JSON.parse(await run('status')); assert.equal(told.paired, true); assert.equal('consolidation' in told, false);
+});
+
+test('#1256: the offer tells the caps in force, and a cap of zero is no question', () => {
+  assert.match(offerOf({ callsPerDay: 1, tokensPerPass: 4000 }), /up to 1 passes a day of about 4000 tokens/);
+  assert.match(offerOf({ everyHours: 0 }), /idle passes are off in your settings/);
+  for (const c of [{ callsPerDay: 0 }, { tokensPerPass: 0 }]) assert.equal(offerOf(c), null);
+  for (const v of [undefined, null, 'on', 1, { enabled: 'yes' }, { enabled: 1 }, []]) assert.equal(answerOf(v), null);
+  assert.equal(answerOf({ enabled: true }), true); assert.equal(answerOf({ enabled: false }), false);
+});
+
+test('#1256: under budget there is no question, and `status` reads as it did', async (t) => {
+  const { run, soul } = await cliSite(t);
+  for (let d = 1; d <= 5; d++) rmSync(join(soul, `memory/journal/2026-10-0${d}.md`));
+  assert.equal('consolidation' in JSON.parse(await run('status')), false);
+});
+
+test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; a Soul with none set off doesn\'t', async (t) => {
+  const { run, soul, cfg } = await cliSite(t);
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { enabled: true, everyHours: 0 } }));
   await run('serve');
   await new Promise((r) => setTimeout(r, 400));
   assert.ok(!existsSync(join(soul, 'MEMORY.md')), 'everyHours 0: never'); await run('serve', '--stop');
   await new Promise((r) => setTimeout(r, 300));
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { everyHours: 1 } }));
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { enabled: true, everyHours: 1 } }));
   writeFileSync(join(soul, 'memory/consolidation.json'), 'null');
   chmodSync(join(soul, 'memory'), 0o500);
   assert.equal(JSON.parse(await run('serve')).serving, true, 'a ledger it can\'t read or write never stops a serve'); await run('serve', '--stop');
