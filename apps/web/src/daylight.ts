@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { solarPosition } from '../../../mars/viewer/engine/env/sun.ts';
 import { siteNorthOffset } from './site-north.ts';
+import { sunSite } from './sun-site.ts';
 import {createEdenDaylight} from './atmosphere/visual-transitions.ts';
 import {shadowFollowBox,installStableShadowFilter,installBakedSunShadow} from './rendering/WorldLook.ts';
 import { daylightFactors } from '../../../mars/viewer/engine/env/daylight.ts';
@@ -136,7 +137,7 @@ export class Daylight {
       return;
     }
     let pos;
-    try { pos = solarPosition(datetime, undefined, undefined, siteNorthOffset()); } catch { return; }
+    try { pos = solarPosition(datetime, ...sunSite(datetime), siteNorthOffset()); } catch { return; }
     const original = daylightFactors(pos.elevationDeg);
     const f=this.nightLighting?this.edenDaylight(datetime,original):original;
     this.daylightFactor=f.daylight;

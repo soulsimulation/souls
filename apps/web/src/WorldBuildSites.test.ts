@@ -235,7 +235,7 @@ for (const skew of [-600_000, 600_000]) test(`pause and alive deadline use serve
   } finally { h.sites.dispose(); Date.now = realDateNow; }
 });
 
-// Release 1.1 walk: after `build step --say` the label grew to two lines on the same CanvasTexture; Chrome refused the
+// Release 0.1 walk: after `build step --say` the label grew to two lines on the same CanvasTexture; Chrome refused the
 // upload (glCopySubTextureCHROMIUM: Offset overflow) and a visitor kept the old one-line "paused" label, stretched.
 test('a label that changes size gets a fresh texture (the old one disposed once) carrying exactly the new text', () => {
   const painted: string[][] = []; let frame: string[] = [];
@@ -681,13 +681,13 @@ test('real applyDiff holds pre-batch removals 1.5s and gives every upsert (inclu
   registerMesh({ gen: 'tag:site-test', build: () => new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()) });
   const layer = new WorldEntityLayer(p => p); layer.sites.siteStyle('ring');
   const model = new WorldModel({ constants: { ground: 'land' }, seed: 'offline-build-sites' });
-  model.defineDef({ schema: 'def/1', name: 'fixture', tags: ['site-test'], make: { kind: 'gen', gen: 'kit/2', args: { shapes: [{ kind: 'box', size: [1, 1, 1], at: [0, 0.5, 0] }] } }, layer: 'decor', size: { box: [1, 1, 1] } }, 'god', 0);
+  model.defineDef({ schema: 'def/1', name: 'fixture', tags: ['site-test'], make: { kind: 'gen', gen: 'kit/2', args: { shapes: [{ kind: 'box', size: [1, 1, 1], at: [0, 0.5, 0] }] } }, layer: 'decor', size: { box: [1, 1, 1] }, slots: [{id:'out',kind:'surface',p:[0,0,0],accepts:{},capacity:1}] }, 'god', 0);
   const root = entity('e_root'), old = entity('e_old', root.id, [0, 0]); model.insert(root); model.insert(old);
   const internals = layer as unknown as { model: WorldModel; seq: number; now: number; draw(e: Entity, ease: boolean): void; drawn: Map<string, { from: { p: THREE.Vector3; s: number }; to: { p: THREE.Vector3 }; t0: number; dur: number; obj: THREE.Object3D }> };
   internals.model = model; internals.seq = 0; internals.now = 1000; layer.active = true;
   layer.sites.apply(start(site({ roots: [root.id], massing: [] })));
   internals.draw(root, false); internals.draw(old, false);
-  const newer = entity('e_new', root.id, [1, 0]);
+  const newer = {...entity('e_new', root.id, [1, 0]), in: {parent:root.id,slot:'out'}};
   const d = diff([delta(2)], [root, newer], [old.id]); layer.applyEdge([d]);
   const removed = internals.drawn.get(old.id)!, added = internals.drawn.get(newer.id)!;
   assert.equal(removed.t0, 2500); assert.equal(removed.dur, 0.6);
