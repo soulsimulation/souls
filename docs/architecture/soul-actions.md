@@ -715,3 +715,6 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Finite oil lantern refilling (#1693)
+`core-lantern-oil-station@1` supplies three measured charges. Existing ten-second native craft completion atomically fills the SAME empty, unlit `core-lantern@4` actually resting on its refill surface. Source/target access, native support, first-start identity, stock/full/on/body/order/idempotence are rechecked; interruption preserves material. Existing native hand contact lights a fueled lantern and puts it out; put-out empties its one manually controlled session charge, with no burn clock/heat/spill/combustion simulation. Native pickup/place handles the same item. Lamp inspection exposes current on/off and charge-gated action availability; the station's exact-def current facts expose only its own stock and historical refill credit/identity, never live state of another object. No generic reader/context/registry change; older lantern revisions keep their bytes. Separate additive God hooks require steward serial integration.
