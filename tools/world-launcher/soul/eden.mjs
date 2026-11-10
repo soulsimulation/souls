@@ -3916,6 +3916,8 @@ async function ack(id, ...rest) {
   const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
   // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
   // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
+  // #1753: an act or plan sent --for this message acknowledged it already: a reply now would reach nothing, so nothing is sent
+  if (!close && (load().served ?? []).includes(id)) return { acked: id, already: "an act sent --for this message acknowledged it; nothing more to send", ...(await stillOpen([id])) };
   const before = load().heard, seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
   if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id], { before, closed: true })) };
   if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id], { before, closed: !!shut.already })) };   // acked already: the first reply stands, so this text reached nothing

@@ -67,7 +67,8 @@ test('a waking listen carries look and found from the disk copy only; act --for 
 
   const act = await cli('act', 'dance:here', '--for', 'm1');
   assert.equal(act.for, 'm1');
-  await cli('ack', 'm1', 'Got it');   // the old loop's ack, sent anyway
+  const late = await cli('ack', 'm1', 'Got it');   // the old loop's ack, sent anyway: answered here, nothing sent
+  assert.match(late.already, /acknowledged it/); assert.equal(seen.filter((x) => x.path.includes('/ack')).length, 0);
   const state = JSON.parse(readFileSync(join(dir, '.eden-agent.json'), 'utf8'));
   assert.equal(state.lastAcked, undefined, 'a late ack of a served message links nothing'); assert.deepEqual(state.served, ['m1']);
   await cli('act', 'wave:here');
