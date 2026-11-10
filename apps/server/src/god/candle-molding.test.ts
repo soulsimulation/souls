@@ -6,7 +6,7 @@ import type {EdgeReceipt} from '../edge/contract.ts';
 function fixture(){
  const model=new WorldModel({constants:{extent:80,ground:'land'},seed:'candle-molding'});model.library=coreLibrary();
  const edit=(ops:unknown[])=>{const r=applyBatch(model,{ops:ops.map(o=>opSchema.parse(o))},'god',0);assert.equal(r.result.accepted,true,JSON.stringify(r.result));};
- edit([{op:'place',def:'core/candle-mold-bench@1',name:'ana-mold',p:[0,0]}]);
+ edit([{op:'place',def:'core/candle-mold-bench@1',name:'ana-mold',p:[0,0],owner:'soul:ana',access:'public'}]);
  const id=[...model.entities.values()][0].id,entities:Record<string,any>={ana:{pose:{p:[0,0,1.1]},human:{}},[id]:{pose:{p:[0,0,0]},support:{kind:'ground'}}};let denied=false,refused=false,commits=0;
  const service=createCandleMolding({model,engine:{world:{entities,tick:20}},levelAt:()=>0,soul:()=>({id:'ana',entity_id:'ana',name:'Ana'}),denied:()=>denied?{code:'object.private',reason:'Private mold bench'}:null,commit(ops){commits++;if(refused)return{accepted:false};edit(ops);return{accepted:true};},log(){}}),soul={soulId:'ana',entityId:'ana',name:'Ana'} as never;
  let serial=0;const run=(verb:string,text?:string,change?:()=>void,end=120)=>{service.expect(soul,id,verb,text===undefined?undefined:{text});const r={id:'r'+serial++,soulId:'ana',capability:'object:'+id+':'+verb,phase:'started',acceptedTick:20,startedTick:20} as EdgeReceipt;service.onReceipt(r);change?.();service.onReceipt({...r,phase:'completed',endedTick:end});};
@@ -15,7 +15,7 @@ function fixture(){
 test('all chosen forms and colors consume exactly one matching wax portion and wick into a real candle',()=>{
  for(const form of ['pillar','taper'])for(const color of ['red','blue','ivory']){
   const x=fixture();x.run('choose-form',form);x.run('choose-color',color);x.run('mold-candle');
-  assert.equal(x.outputs().length,1);const out=x.outputs()[0];assert.equal(out.state!.form,form);assert.equal(out.state!.waxColor,color);assert.equal(out.state!.maker,'Ana');assert.equal(out.state!.waxUnits,1);assert.equal(out.state!.wickUnits,1);assert.equal(out.in.parent,x.id);assert.equal(out.in.slot,'output');assert.equal(out.params.form,form);assert.equal(out.owner,x.bench.owner);assert.equal(out.access,x.bench.access);
+  assert.equal(x.outputs().length,1);const out=x.outputs()[0];assert.equal(out.state!.form,form);assert.equal(out.state!.waxColor,color);assert.equal(out.state!.maker,'Ana');assert.equal(out.state!.waxUnits,1);assert.equal(out.state!.wickUnits,1);assert.equal(out.in.parent,x.id);assert.equal(out.in.slot,'output');assert.equal(out.params.form,form);assert.equal(out.owner,'soul:ana');assert.equal(out.access,'public');
   assert.equal(x.bench.state![color],1);assert.equal(x.bench.state!.wicks,5);assert.equal(x.bench.state!.made,1);for(const other of ['red','blue','ivory'].filter(v=>v!==color))assert.equal(x.bench.state![other],2);
  }
 });
