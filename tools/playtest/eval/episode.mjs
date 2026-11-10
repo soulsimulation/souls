@@ -50,7 +50,7 @@ export async function prepareFolder(seat, { name }) {
   await cli(f, ['serve', '--stop']).catch(() => {});
   const sv = await cli(f, ['serve']);
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
-  for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { await cli(f, ['look']); await sleep(500); }   // the world copy
+  for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { const l = await cli(f, ['look']); if (!l.data) break; await sleep(500); }   // the world copy (a client before 2.25 has no look)
   return { soulId, createdAt, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
 
@@ -88,13 +88,17 @@ export async function attachFolder({ dir, folder, base, seatCfg, rails, refreshC
 /** runEpisode({dir, base, item, seatCfg, rails, folder?, deliver?, resetTo?}) → the episode record (also written to dir/episode.json).
  *  deliver "inbox" (default): the instruction is an owner message (local dev worlds: the dev owner identity). "chat": it is
  *  typed into the agent's chat, as a person at their own agent does; there is no card, so card checks read as unknown. */
-export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder = null, refreshClient = false, deliver = 'inbox', resetTo = null, warmSec = 0, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
+export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder = null, catalogRef = null, refreshClient = false, deliver = 'inbox', resetTo = null, warmSec = 0, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
   let seat, setup;
   if (folder) ({ seat, setup } = await attachFolder({ dir, folder, base, seatCfg, rails, refreshClient }));
   else { seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails }); setup = await prepareFolder(seat, { name: seatCfg.soulName ?? 'Wren' }); }
   const name = seat.info.soulName ?? 'Wren';
   if (resetTo) { const r = await cli(seat.folder, ['act', `walk:${resetTo}`, '--wait', '60'], 120000); log(`${item.id}: reset to ${resetTo}: ${r.data?.receipt?.phase ?? r.data?.code ?? r.code}`); await cli(seat.folder, ['stop']).catch(() => {}); }
-  const catalog = catalogIndex(readCatalog(seat.folder, setup.soulId));
+  // A client before 2.25 keeps no world copy; it is then checked and judged against a saved copy of the same template's
+  // catalog (--catalog), never against nothing.
+  const own = readCatalog(seat.folder, setup.soulId), catalogFrom = own ? 'client' : catalogRef ? 'reference' : null;
+  if (!catalogFrom) { await cli(seat.folder, ['serve', '--stop']).catch(() => {}); throw new Error('the client keeps no world copy (world-catalog.json); pass --catalog <a saved copy of this template\'s catalog>'); }
+  const catalog = catalogIndex(own ?? catalogRef);
   const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
   if (bad.length) { await cli(seat.folder, ['serve', '--stop']).catch(() => {}); throw new Error(bad.join('; ')); }
   const rt = runtimeDir(seat.folder, setup.soulId), traceFile = join(rt, '.eden-report.jsonl');
@@ -150,7 +154,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
   const callsN = nonPoll.reduce((s, r) => s + r.n, 0);
   const mean = (k) => { const xs = http.filter((r) => !isLongPoll(r.route)).map((r) => r[k]).filter(Number.isFinite); return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null; };
   const rec = {
-    item: item.id, instruction: item.instruction, sinceCreateMs: setup.createdAt ? sentLocal - setup.createdAt : null, succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: endLocal - sentLocal,
+    item: item.id, instruction: item.instruction, catalogFrom, sinceCreateMs: setup.createdAt ? sentLocal - setup.createdAt : null, succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: endLocal - sentLocal,
     firstMotionMs, successMs: verdict.ok ? successAt : null, cardClosedMs: closedAt, card: card ? { state: card.state, outcome: card.outcome, acked: !!card.ackAt, closed: cardClosed(card) } : null,
     seat: seatStats(readJsonl(join(seat.dir, 'turns.jsonl')), readJsonl(join(seat.dir, 'transcript.jsonl')), sentLocal),
     kickoff: { costUsd: kick?.usage?.costUsd ?? null, wallMs: kick?.wallMs ?? null, refused: kick?.refused ?? null, seatCheck: seat.info.seatCheck ?? null },

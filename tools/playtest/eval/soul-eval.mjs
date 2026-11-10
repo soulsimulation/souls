@@ -41,6 +41,8 @@ export async function runEval(o) {
   const seatCfg = readJson(resolve(o.seat ?? join(REPO, 'tools/playtest/eval/seats/scripted-m4-v1.json')));
   if (!battery || !seatCfg) throw new Error('--battery and --seat must be readable JSON');
   const errs = validateBattery(battery);
+  const catalogRef = o.catalog ? (readJson(resolve(o.catalog))?.catalog ?? readJson(resolve(o.catalog))) : null;   // for a client that keeps no world copy
+  if (o.catalog && !Array.isArray(catalogRef?.places)) throw new Error('--catalog must be a saved world-catalog.json (soul-catalog/1)');
   if (seatCfg.adapter === 'scripted-owner') errs.push(...validateScript(seatCfg.script));
   if (errs.length) throw new Error(`invalid input:\n  ${errs.join('\n  ')}`);
   const live = LIVE_ADAPTERS.has(seatCfg.adapter ?? 'claude-headless');
@@ -62,16 +64,17 @@ export async function runEval(o) {
   mkdirSync(out, { recursive: true });
   const meta = { schema: RESULT_SCHEMA, battery: battery.battery, world: local ? world : /^http:/.test(world) ? 'local-url' : world.replace(/\/$/, ''), deliver, serverCommit: local ? gitHead(serverRoot) : null, evalCommit: gitHead(REPO),
     seat: { adapter: seatCfg.adapter ?? 'claude-headless', model: seatCfg.model ?? null, effort: seatCfg.effort ?? null, clean: live ? cleanEnvReport() : null },
-    repeats, warmSec: Number(o['warm-sec'] ?? 0), items: items.map((i) => i.id), maxUsd: live ? maxUsd : 0, startedAt: new Date().toISOString() };
+    repeats, warmSec: Number(o['warm-sec'] ?? 0), items: items.map((i) => i.id), catalogReference: !!catalogRef, maxUsd: live ? maxUsd : 0, startedAt: new Date().toISOString() };
   writeJson(join(out, 'run.json'), meta);
   const episodes = []; let spent = 0, stoppedBy = null, n = 0;
   for (let rep = 1; rep <= repeats && !stoppedBy; rep++) for (const item of items) {
+    if (stoppedBy) break;
     if (live && spent >= maxUsd) { stoppedBy = `paid cap $${maxUsd} reached ($${spent.toFixed(3)})`; break; }
     const dir = join(out, 'episodes', `${String(++n).padStart(3, '0')}-${item.id}-r${rep}`);
     let w = null;
     try {
       if (local) w = await startWorld({ serverRoot, slug: 'eden-eval', port, genesis, dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
-      const rec = await runEpisode({ dir, base: local ? w.base : world.replace(/\/$/, ''), item, seatCfg, rails: { ...(seatCfg.rails ?? {}) }, folder, deliver, warmSec: Number(o['warm-sec'] ?? 0), refreshClient: !!o['refresh-client'] && rep === 1 && n === 1,
+      const rec = await runEpisode({ dir, base: local ? w.base : world.replace(/\/$/, ''), item, seatCfg, catalogRef, rails: { ...(seatCfg.rails ?? {}) }, folder, deliver, warmSec: Number(o['warm-sec'] ?? 0), refreshClient: !!o['refresh-client'] && rep === 1 && n === 1,
         resetTo: local ? null : (o['reset-to'] === true ? null : o['reset-to'] ?? null), log });
       rec.repeat = rep; episodes.push(rec);
       spent += (rec.seat.costUsd ?? 0) + (rec.kickoff.costUsd ?? 0);
