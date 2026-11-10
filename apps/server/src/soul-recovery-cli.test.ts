@@ -37,7 +37,7 @@ async function site(t: { after: (f: () => unknown) => void }) {
   const code = async (name = 'gene') => (await (await owner(name, '/v1/account/window-code')).json() as { code: string }).code;
   const folder = (name: string) => {
     const dir = join(root, name); mkdirSync(dir, { recursive: true }); copyFileSync(CLI, join(dir, 'eden.mjs'));
-    const raw = (...args: string[]) => new Promise<{ code: number; out: string; err: string }>(resolve => execFile(process.execPath, ['eden.mjs', ...args], { cwd: dir }, (e, out, err) => resolve({ code: e ? (e.code as number) ?? 1 : 0, out, err })));
+    const raw = (...args: string[]) => new Promise<{ code: number; out: string; err: string }>(resolve => execFile(process.execPath, ['eden.mjs', ...args], { cwd: dir, env: { ...process.env, HOME: dir } }, (e, out, err) => resolve({ code: e ? (e.code as number) ?? 1 : 0, out, err })));
     const run = async (...args: string[]) => { const r = await raw(...args); assert.equal(r.code, 0, `${args.join(' ')}: ${r.err || r.out}`); return JSON.parse(r.out) as Record<string, any>; };
     return { dir, raw, run };
   };

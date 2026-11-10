@@ -19,7 +19,7 @@ const TEST_PORT=await testPort();
 
 const CLI = process.env.PAIR_CLI ?? new URL('../../../tools/edge-skill/eden-agent.mjs', import.meta.url).pathname;
 const cli = (cwd: string, args: string[], ms = 20000) => new Promise<{status: number | null; out: string; error: string}>((resolve, reject) => {
-  const child = spawn(process.execPath, [CLI, ...args], {cwd, env: {...process.env, BRAIN_MODE: 'fake'}, stdio: ['ignore', 'pipe', 'pipe']});
+  const child = spawn(process.execPath, [CLI, ...args], {cwd, env: {...process.env, BRAIN_MODE: 'fake', HOME: cwd}, stdio: ['ignore', 'pipe', 'pipe']});
   let out = '', error = ''; const timer = setTimeout(() => {child.kill('SIGKILL'); reject(new Error(`CLI ${args[0]} exceeded ${ms} ms: ${out}${error}`));}, ms);
   child.stdout.on('data', v => out += v); child.stderr.on('data', v => error += v);
   child.once('close', status => {clearTimeout(timer); resolve({status, out, error});});
