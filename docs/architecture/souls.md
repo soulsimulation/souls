@@ -263,12 +263,13 @@ withholds. Owner messages and credentials are never in it.
 - **Live changes pushed (#1755).** `GET /v1/edge/events?live=1` (the SSE stream `serve` already holds) adds the live
   picture to the Soul's own events: `hello` says `live: true`, then `live.full` (the whole picture) or, with
   `liveAfter=<epoch>:<seq>`, only the changes since, then one `live` frame per change (`seq`, `base`: the seq it
-  applies on; Soul rows set and deleted, things set and deleted, new speech, a new catalog version) and every 5 s a
-  check (`seq`, `check`: a hash of the Souls, things and catalog version, `live-delta.ts` `liveHash`). Live frames
+  applies on; Soul rows set and deleted, new speech, a new catalog version; the frame format carries things set and
+  deleted too, empty until the live picture carries thing state, #1751) and every 5 s a
+  check (`seq`, `check`: a hash of the Souls, things (none yet) and catalog version, `live-delta.ts` `liveHash`). Live frames
   carry no SSE id, so the Soul's cursor is untouched. The world builds and diffs the picture once per change for
-  every client, serialises and encodes each frame once, keeps about two minutes of changes for a client coming back
-  (more than a minute's missed changes, or any after a place is made secret or the places change, are sent as the whole
-  picture instead), and does
+  every client, serialises and encodes each frame once, keeps the last 120 changes (about a minute) for a client
+  coming back (more missed than that, or any change of secrecy or of the places since, is sent as the whole picture
+  instead), and does
   nothing while no client holds the push. A client too slow to take its frames gets nothing more until it has caught
   up, then the whole picture. The push carries only what the public answer carries. Each minute it runs, the world
   logs `[live-push]` with its subscribers and its own time per run.

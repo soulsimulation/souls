@@ -3106,10 +3106,12 @@ async function syncLive({ force = false } = {}) {
   try {
     const t0 = performance.now(), r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); publicReadReported(world + "/v1/edge/live", t0, r); if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const got = await r.json();
-    // a cached answer older than the copy the push keeps is not written over it (#1755)
-    if (mine?.live?.epoch && got.epoch === mine.live.epoch && Number(got.seq) < Number(mine.live.seq)) return mine;
-    const next = soulLive.wholeCopy(world, mine, got, Date.now());
-    if (mine?.push) next.push = mine.push;
+    // a cached answer older than the copy the push keeps is not written over it (#1755). The copy is read again here: the
+    // push may have moved it on while this answer was on its way.
+    const onDisk = readJsonFile(LIVE_FILE), now = onDisk?.world === world ? onDisk : null;
+    if (now?.live?.epoch && got.epoch === now.live.epoch && Number(got.seq) < Number(now.live.seq)) return now;
+    const next = soulLive.wholeCopy(world, now, got, Date.now());
+    if (now?.push) next.push = now.push;
     writeJsonFile(LIVE_FILE, next); return next;
   } catch { return mine ? { ...mine, stale: true } : null; }
 }

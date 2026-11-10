@@ -16,11 +16,11 @@ export const LIVE_CONTRACT = 'soul-live/1';
 export const LIVE_SPEECH = 40;
 /** World ticks one built answer serves (10 ticks = 0.5 s at clock rate 1). */
 const KEEP_TICKS = 10;
-/** #1755: changes kept for a client that comes back (about two minutes at two a second), how often the push looks for a
- *  change, and how often it sends the picture's hash (the client's check, and the stream's sign of life). */
-export const LIVE_RING = 240, PUSH_EVERY_MS = 250, CHECK_EVERY_MS = 5_000;
-/** More changes missed than this (a minute at two a second) are sent as the whole picture instead. */
+/** #1755: more changes missed than this (a minute at two a second) are sent as the whole picture instead, so the ring keeps
+ *  just those; how often the push looks for a change, and how often it sends the picture's hash (the client's check, and
+ *  the stream's sign of life). */
 export const LIVE_REPLAY_MAX = 120;
+export const LIVE_RING = LIVE_REPLAY_MAX + 1, PUSH_EVERY_MS = 250, CHECK_EVERY_MS = 5_000;
 
 type Line = {id: string; tick: number; at: number; soul: string; name: string; text: string; place: string | null; untrusted: true};
 type Spectated = {kind: string; tick: number; at: number; id?: unknown; from?: {soulId?: unknown; name?: unknown}; channel?: {placeId?: unknown; base?: {placeId?: unknown}}; text?: unknown};

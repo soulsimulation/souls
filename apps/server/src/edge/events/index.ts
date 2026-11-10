@@ -179,8 +179,9 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
           let backlog = 0, behind = false;
           const write = (sse: Uint8Array) => { backlog++; void stream.write(sse).finally(() => {
             if (--backlog !== 0 || !behind || ac.signal.aborted) return;
-            behind = false;
-            try { write(live.sse('live.full', live.full())); } catch { /* the live picture failed: this stream goes on without it */ }
+            // the whole picture is built while this stream is still behind, so a change it fans out is not written ahead of it
+            let body: string; try { body = live.full(); } catch { return; /* the live picture failed: this stream goes on without it */ }
+            behind = false; write(live.sse('live.full', body));
           }); };
           // a fault in the live picture drops the push, never the Soul's own stream
           try {

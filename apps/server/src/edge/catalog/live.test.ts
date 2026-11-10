@@ -127,3 +127,27 @@ test('more changes missed than a replay holds are sent as the whole picture', as
   assert.deepEqual(back.got.map(g => g.event), ['live.full']);
   back.stop(); w.hub.close();
 });
+
+test('a client that stops reading gets nothing past its backlog, then the whole picture, and no change ahead of it', async () => {
+  const {eventsFixture, readSSE} = await import('../events/testing.ts');
+  const {LIVE_BACKLOG} = await import('../events/index.ts');
+  const w = fakeWorld(), f = eventsFixture(['Roger'], {events: {live: w.hub}});
+  try {
+    const res = await f.app.request('/v1/edge/events?pad=0&kinds=speech.to-me&live=1', {headers: {authorization: `Bearer ${f.id('Roger')}`}});
+    // nobody reads the body: far more changes than a backlog holds
+    for (let i = 0; i < LIVE_BACKLOG * 2; i++) { w.entities.h_b!.pose.p = [60 + (i % 2), 0, 60 + i / 10]; w.advance(); await w.get(); }
+    const head = JSON.parse(await (await w.app.request('/v1/edge/live')).text()).seq;
+    const msgs = await readSSE(res, m => { const full = m.filter(x => x.event === 'live.full'); return full.length >= 2 && m.at(-1)?.data?.seq >= head; }, 5000);
+    const live = msgs.filter(x => x.event === 'live' || x.event === 'live.full');
+    assert.ok(live.filter(x => x.event === 'live.full').length >= 2, 'the stalled stream fell behind and was sent the whole picture');
+    assert.ok(live.filter(x => x.event === 'live').length <= LIVE_BACKLOG, 'no more changes than the backlog');
+    // applied as a client would: every change after a whole picture is on the seq before it
+    let seq = 0;
+    for (const x of live) {
+      if (x.event === 'live.full') { seq = x.data.seq; continue; }
+      if (x.data.check || x.data.seq <= seq) continue;
+      assert.equal(x.data.base, seq, `change ${x.data.seq} follows ${seq}`); seq = x.data.seq;
+    }
+    assert.equal(seq, head, 'the copy ends current');
+  } finally { w.hub.close(); f.destroy(); }
+});
