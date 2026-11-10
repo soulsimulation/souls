@@ -55,6 +55,9 @@ async function world(t) {
       req.socket.on('close', () => w.listeners.delete(send));
       return undefined;
     }
+    // #1737: the world's public structure and live picture are not admitted requests (C3, answered from the launcher's
+    // cache); this fake world publishes neither, so serve runs without a local copy, as on a world that predates them
+    if (p === '/v1/edge/live' || p === '/v1/edge/catalog') return json(404, { error: { code: 'not-found', message: 'not published here' } });
     // Everything else is heavy: at most one at a time per Soul, or soul.busy.
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
     await sleep(10); w.heavyNow--;
