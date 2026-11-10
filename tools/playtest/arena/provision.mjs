@@ -56,6 +56,28 @@ export function marsWebDir(serverRoot, { env = process.env, exists = existsSync 
   return cands.find((d) => exists(join(d, 'modular/humanoid/kit.json'))) ?? join(root, '.lane/mars-web');
 }
 
+/** The public catalog can declare a startup barrier after healthz is already healthy. Keep this inside provisioning,
+ * before seats or scenario clocks start. Only the declared transient is retried; no client cache or policy is changed. */
+export async function waitForCatalog(base, { deadline, fetchImpl = fetch, now = Date.now, pause = sleep, exited = () => false } = {}) {
+  let attempts = 0;
+  while (now() < deadline) {
+    if (exited()) throw new Error('world exited while waiting for its catalog');
+    const response = await fetchImpl(`${base}/v1/edge/catalog`, { signal: AbortSignal.timeout(Math.max(1, Math.min(30000, Math.ceil(deadline - now())))) });
+    attempts++;
+    if (now() >= deadline) throw new Error('world catalog did not become ready within the boot deadline');
+    // Older server roots have no catalog endpoint. This is explicitly unsupported, never a fabricated ready catalog.
+    if (response.status === 404) return { status: 'unsupported', attempts };
+    let body; try { body = await response.json(); } catch { throw new Error(`catalog startup returned non-JSON HTTP ${response.status}`); }
+    if (now() >= deadline) throw new Error('world catalog did not become ready within the boot deadline');
+    if (response.ok && body?.contract === 'soul-catalog/1') return { status: 'ready', attempts };
+    if (response.status !== 503 || body?.error?.code !== 'world.starting') throw new Error(`catalog startup failed: HTTP ${response.status}${body?.error?.code ? ` ${body.error.code}` : ''}`);
+    const seconds = Number(response.headers.get('retry-after'));
+    const delay = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 500;
+    await pause(Math.min(delay, Math.max(0, deadline - now())));
+  }
+  throw new Error('world catalog did not become ready within the boot deadline');
+}
+
 /** startWorld({serverRoot, slug, port, genesis, dataDir, log, fresh, onSpawn}) → {base, pid, build, healthz, child, dataDir} */
 export async function startWorld({ serverRoot, slug, port, genesis, snapshot, dataDir, log, fresh = true, kind = 'dev', bootTimeoutMs = 900000, natives = false, onSpawn = null }) {
   assertKind(kind);
@@ -89,13 +111,16 @@ export async function startWorld({ serverRoot, slug, port, genesis, snapshot, da
     await sleep(500);
   }
   if (!h) { try { process.kill(-child.pid, 'SIGTERM'); } catch { /* gone */ } throw new Error(`world ${slug} did not come up on :${port} within ${Math.round(bootTimeoutMs / 1000)} s`); }
+  let catalog;
+  try { catalog = await waitForCatalog(base, { deadline: t0 + bootTimeoutMs, exited: () => child.exitCode != null }); }
+  catch (error) { await stopWorld({ pid: child.pid }); throw error; }
   if(fixture){
     // Health can answer before the first native reconciliation; validate after startup settles.
     await sleep(3000);
     try { const r=await fetch(`${base}/v1/world/snapshot`,{signal:AbortSignal.timeout(30000)});if(!r.ok)throw Error('snapshot unavailable after boot');const actual=bootPhysicalSha256(await r.json());if(actual!==fixture.bootPhysicalSha256)throw Error(`snapshot physical state changed during boot: expected ${fixture.bootPhysicalSha256}, got ${actual}`); }
     catch(error){await stopWorld({pid:child.pid});throw error;}
   }
-  return { fixture, base, pid: child.pid, build: h.build ?? null, healthz: h, bootMs: Date.now() - t0, child, dataDir: data, marsWebDir: marsWeb };
+  return { fixture, catalog, base, pid: child.pid, build: h.build ?? null, healthz: h, bootMs: Date.now() - t0, child, dataDir: data, marsWebDir: marsWeb };
 }
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -134,5 +159,5 @@ export async function provision({ runDir, serverRoot, world }) {
   writeJson(join(runDir, 'server', 'healthz-before.json'), w.healthz);
   const desc = await describeWorld({ ...w, slug: world.slug, port: world.port, kind: world.kind ?? 'dev', startedAt });
   writeJson(join(runDir, 'world.json'), desc);
-  return { ...desc, child: w.child };
+  return { ...desc, catalog: w.catalog, child: w.child };
 }
