@@ -36,23 +36,25 @@ async function soulLoop({ folder, until, r, counts }) {
 
 export async function runLoad(o) {
   const sizes = String(o.souls ?? '12,24').split(',').map(Number).filter((n) => n > 0);
-  const repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), port = Number(o.port ?? 18780);
+  const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), port = Number(o.port ?? 18780);
   const serverRoot = resolve(o['server-root'] ?? REPO);
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
-  for (let rep = 1; rep <= repeats; rep++) for (const n of sizes) {
+  for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
     const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
     const souls = [];
     try {
-      for (let i = 0; i < n; i += 6) await Promise.all(Array.from({ length: Math.min(6, n - i) }, async (_, j) => {
+      // setup is paced at 6 Souls per 20 s: all Souls share one address, and a world pairs at most 20 a minute from one
+      // address (POST /v1/agent/pair). Setup is not measured.
+      for (let i = 0; i < n; i += 6) { const b0 = Date.now(); await Promise.all(Array.from({ length: Math.min(6, n - i) }, async (_, j) => {
         const k = i + j, folder = join(dir, 'souls', `s${k}`); mkdirSync(folder, { recursive: true });
         const identity = newIdentity(); writeFileSync(join(folder, '.eden-agent.json'), JSON.stringify({ identity }) + '\n', { mode: 0o600 });
         const fake = { folder, base: w.base, info: {}, save() {} };
         const s = await prepareFolder(fake, { name: `Load ${k}` });
         souls[k] = { folder, identity, soulId: s.soulId };
-      }));
+      })); if (i + 6 < n) await sleep(Math.max(0, b0 + 20000 - Date.now())); }
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();

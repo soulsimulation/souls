@@ -65,6 +65,8 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
 - `--keep-data` keeps each episode's world database.
 - `--catalog <world-catalog.json>` checks and judges against a saved copy of the same template's catalog. Use it for a
   client before 2.25, which keeps no world copy. Each episode records `catalogFrom` (`client` or `reference`).
+- `load --first-repeat 2` numbers a load run's repeats from 2, so a stopped load run can be finished cell by cell. Load
+  setup paces Souls at 6 per 20 s, under a world's 20 pairings a minute from one address.
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
