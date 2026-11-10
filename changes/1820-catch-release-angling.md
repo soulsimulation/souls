@@ -1,0 +1,1 @@
+Adds finite catch-and-release angling at an authored stocked pool. Completed native fishing spends bait and places one integral fish in the selected real portable creel; release to its recorded source recovers fish without restoring bait.
