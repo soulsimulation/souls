@@ -1,3 +1,4 @@
+import type{MeasuringReel}from'./camp-measuring-reel.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -88,6 +89,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  measuringReel?:MeasuringReel;
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -200,6 +202,8 @@ export class GodPerceive {
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
+      measuringReel:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.measuringReel?.plan(soul,id,action,params)??null,
+      measuringReelBegun:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.measuringReel?.begin(soul,id,action,params),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
