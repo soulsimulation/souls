@@ -1,3 +1,4 @@
+import{MELODY_BOX}from'./melody-box.ts';
 // Core-kit families as data. Owner: L4 (library & creatures) for the JSON files; L5 owns mesh.json
 // (pack imports). Each file is an array of def/1 inputs named `core-<name>` (resolvable as
 // `core/<name>@<version>`). Search them with GET /v1/god/defs?q=…; never author what exists.
@@ -66,7 +67,7 @@ import figures from './figures.json' with { type: 'json' };
 import meshLods from '../core-mesh-lods.json' with { type: 'json' };
 import type { DefInput } from '../schemas.ts';
 
-export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
+export const FAMILY_KITS: DefInput[] = /* @__PURE__ */ ([creatures, furniture, [MELODY_BOX, PAINTING_EASEL_DEF, CHALK_SQUARE_DEF, OFFICE_DESK_DEF, ...SWITCHABLE_LIGHTS, ...HAND_OPENINGS, ...PORTABLE_ITEMS, ...LAND_ART_MATERIALS, LOCKABLE_DOOR, ...WRITABLE_BOARDS, ...BOOK_DEFS, ...HAND_WATER, ...WATERING_CAN, ...REPAIR_DEFS, ...HAND_MUSIC, ...HAND_FIRE, ...HAND_COVERINGS, ...INSTRUMENTS, ...HAND_CABINETS, ...HAND_DRAWERS, ...UPRIGHT_LOADS, ...MOVABLE_SEATING, ...POWERED_DISPLAYS, HAND_BELL, HAND_BELL_3, ...TEA_DEFS, ...HAND_STORAGE, ...HAND_LITTER, ...HARVEST_DEFS], props, structures, plants, transport, civic, play, kitchen, work, signage, mesh, terrain, mars, littlemartians, vocab, vocab2, vocabW1, vocabW2, vocabW3, layers, desert, scenery, lightMotion, figures].flat() as unknown as DefInput[]).map((def) => {
   const lod = def.make.kind === 'mesh' ? (meshLods as Record<string, { lod1: string }>)[def.make.asset] : undefined;
   return lod ? { ...def, make: { ...def.make, ...lod } } as DefInput : def;
 });

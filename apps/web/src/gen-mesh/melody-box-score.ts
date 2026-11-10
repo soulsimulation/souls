@@ -1,0 +1,2 @@
+import{parseMelody,melodyTempo}from'../../../../packages/world-compiler/src/core-kit/melody-box.ts';
+export function melodyBoxNotes(text:unknown,tempo:unknown,a:number,b:number){const phrase=parseMelody(text);if(!phrase||!melodyTempo(tempo)||!Number.isFinite(a)||!Number.isFinite(b)||b<=a)return[];const step=60/tempo,out:{t:number;midi:number;hand:1;vel:number}[]=[];for(let k=Math.ceil(a/step-1e-9);k*step<b;k++){const midi=phrase.notes[((k%8)+8)%8];if(midi!==null)out.push({t:k===0?0:k*step,midi,hand:1,vel:.85});}return out;}
