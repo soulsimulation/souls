@@ -2,7 +2,7 @@
 // background-task plumbing played by the harness (the wake loop). DESIGN §4.1, §6.
 // The harness writes `.eden-agent.json` ONLY before register (the identity seed) and never reads it.
 import { join } from 'node:path';
-import { mkdirSync, readdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, renameSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { run, start } from '../lib/proc.mjs';
@@ -13,6 +13,7 @@ import * as claude from './adapters/claude-headless.mjs';
 import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
 import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
+import { assertSeatHome } from './seat-home.mjs';
 
 export const ADAPTERS = { 'claude-headless': claude, 'codex-headless': codex, 'scripted-owner': scriptedOwner };
 export const LIVE_ADAPTERS = new Set(['claude-headless', 'codex-headless']);
@@ -38,9 +39,11 @@ export function splitRendered(md) {
 export const SOUL_CLI = { file: 'eden.mjs', fallbackFile: 'eden-agent.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
 
 export class Seat {
-  constructor({ dir, seat, worldBase, rails = {}, cli = SOUL_CLI, allowedTools, kind = 'soul', budget = null }) {
+  constructor({ dir, seat, worldBase, rails = {}, cli = SOUL_CLI, allowedTools, kind = 'soul', budget = null, infraFile = null }) {
     this.dir = dir; this.folder = join(dir, 'folder'); this.seat = seat; this.base = worldBase; this.kind = kind; this.cli = cli;
     this.adapter = ADAPTERS[seat.adapter ?? 'claude-headless']; if (!this.adapter) throw new Error(`unknown adapter ${seat.adapter}`);
+    // #1098 arm B2: a live seat never runs inside a repository checkout (seat-home.mjs); SOULS_SEAT_HOME_ANY=1 is for tests
+    if (LIVE_ADAPTERS.has(seat.adapter ?? 'claude-headless') && process.env.SOULS_SEAT_HOME_ANY !== '1') assertSeatHome(this.folder);
     this.rails = { maxTurnsPerRequest: 6, maxTurnWallSec: 240, ...rails };
     // 2026-10-26 (round 2): seats sometimes call the CLI by its absolute path and write the skill under .claude/; both were
     // refused by the allowlist and the seat never paired (fix-d3d trio r1, round2 run 1). Allow them for this folder only.
@@ -48,6 +51,8 @@ export class Seat {
       `Write(${this.folder}/.claude/**)`, `Edit(${this.folder}/.claude/**)`, 'Write(./.claude/**)', 'Edit(./.claude/**)'];
     this.turnN = 0; this.chain = Promise.resolve(); this.listener = null; this.waking = false; this.stopped = false;
     this.lastListenId = null; this.wakesSinceRequest = 0; this.cumulative = null; this.listenFailures = 0;
+    // H-g (#371): an adapter with authStatus (Claude) is checked before each turn, once more after authRetryMs on a failure.
+    this.authCheck = undefined; this.authRetryMs = 5000; this.infraFile = infraFile; // authCheck undefined → the adapter's authStatus, read at each turn
     // #1098: live model turns reserve their worst case from the run's world budget before the call (scripted seats spend nothing)
     this.budget = LIVE_ADAPTERS.has(seat.adapter ?? 'claude-headless') ? budget : null; this.budgetRefused = null;
     this.info = readJson(join(dir, 'seat.json'), null) ?? { id: seat.id, kind, adapter: seat.adapter ?? 'claude-headless', model: seat.model ?? null, effort: seat.effort ?? null,
@@ -55,6 +60,16 @@ export class Seat {
       wake: (seat.adapter ?? 'claude-headless') === 'codex-headless' ? seat.wake === true : seat.wake !== false };
   }
   save() { writeJson(join(this.dir, 'seat.json'), this.info); }
+  /** An owner's setting the seat declares for its Souls home: `briefBytes` (0 = no pre-turn brief; #1226's baseline arm).
+   *  Written once the mind has made the home, and checked again on each turn and restart; nothing else in config.json moves. */
+  ownerSettings() {
+    if (this.seat.briefBytes == null) return null;
+    const f = join(this.folder, '.souls', 'config.json'), c = readJson(f, null);
+    if (!c) return null;
+    if (c.briefBytes !== this.seat.briefBytes) { const tmp = `${f}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify({ ...c, briefBytes: this.seat.briefBytes }, null, 1) + '\n', { mode: 0o600 }); renameSync(tmp, f); }
+    if (this.info.briefBytes !== this.seat.briefBytes) { this.info.briefBytes = this.seat.briefBytes; this.save(); }
+    return this.seat.briefBytes;
+  }
   /** A new start for this Soul's owner: its resident client restarts, and the next turn opens a new chat. What the last chat
    *  left unread goes with it, or a replay would stand in for memory. A seat with `home` moves into a Souls home first. */
   async restart() {
@@ -73,6 +88,7 @@ export class Seat {
       for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
       if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
       if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      this.ownerSettings();
       if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
       this.info.sessionId = null; this.save();
     } finally { if (listening) this.startListen(); }
@@ -114,6 +130,20 @@ export class Seat {
 
   async _turn(text, reason, onStart = null) {
     if (this.stopped && reason !== 'final') throw new Error('seat stopped');
+    const check = this.authCheck !== undefined ? this.authCheck : this.adapter.authStatus;
+    if (check) {
+      let a = await check();
+      if (!a?.ok) { await sleep(this.authRetryMs); a = await check(); }
+      if (!a?.ok) {
+        // Signed out twice: no model call. The turn is recorded as an infrastructure failure, never as the agent's.
+        const n = ++this.turnN, t = now();
+        const rec = { turn: n, reason, startedAt: t.t, endedAt: t.t, startMono: t.mono, endMono: t.mono, wallMs: 0, usage: null, finalText: null, toolCalls: [], exit: null, timedOut: false, endedAfterResult: null, authFailed: true, authExit: a?.exit ?? null };
+        appendJsonl(join(this.dir, 'turns.jsonl'), rec);
+        if (this.infraFile) appendJsonl(this.infraFile, { t: t.t, check: 'H-g', seat: this.seat.id, turn: n, reason: 'claude auth status failed twice before the turn; no model call', authExit: a?.exit ?? null });
+        if (this.waking && !this.stopped) this.startListen(); // as a turn's end does: a skipped wake turn must not leave the seat deaf
+        return rec;
+      }
+    }
     // Fidelity: Claude Code keeps a background `listen` alive across turns, so the harness one keeps running during a turn.
     // The agent's own `listen` supersedes it (the old one prints `listen: superseded` and exits); ours restarts at turn end.
     this.inTurn = true;
@@ -122,6 +152,12 @@ export class Seat {
     // #1098: a live seat with no real cost report (Codex) can't be held to the world budget, so under one it is refused
     const noCost = this.budget && this.info.adapter !== 'claude-headless' ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
     const ctxBefore = this.info.sessionContextTokens ?? null;   // the session's context at its last call (null: no call yet)
+    if (this.info.seatCheck && !this.info.seatCheck.ok) {   // #1687: a seat that failed its first-call check takes no further live turn
+      const ended = now(); this.inTurn = false;
+      const rec = { turn: n, reason, startedAt: started.t, endedAt: ended.t, startMono: started.mono, endMono: ended.mono, wallMs: 0, usage: null, finalText: null, toolCalls: [], exit: null, timedOut: false, endedAfterResult: null, refused: 'seat-check', seatCheck: this.info.seatCheck };
+      appendJsonl(join(this.dir, 'turns.jsonl'), rec);
+      return rec;
+    }
     const hold = noCost ?? (this.budget ? await this.budget.reserve(this.seat.id, { contextTokens: ctxBefore }) : null);
     if (hold && !hold.ok) {   // #1098: refused before any provider call; recorded as a turn with no model use
       const ended = now(); this.budgetRefused = hold.reason; this.inTurn = false;
@@ -130,6 +166,7 @@ export class Seat {
       if (this.waking && !this.stopped) this.startListen();
       return rec;
     }
+    this.ownerSettings();
     const first = !this.info.sessionId;
     if (first && this.info.adapter === 'claude-headless') { this.info.sessionId = randomUUID(); this.save(); }
     let r;
@@ -191,10 +228,11 @@ export class Seat {
     if (r.cumulative) this.cumulative = r.cumulative;
     if (r.sessionId && r.sessionId !== this.info.sessionId) { this.info.sessionId = r.sessionId; }
     if (this.info.effortApplied === undefined && r.effortApplied !== null) this.info.effortApplied = r.effortApplied;
+    if (r.seatCheck) this.info.seatCheck = r.seatCheck;   // #1687: a new session's first-call context, and whether it passed
     this.save();
     for (const e of r.stream) appendJsonl(join(this.dir, 'transcript.jsonl'), { turn: n, ...e });
     const rec = { turn: n, reason, startedAt: started.t, endedAt: ended.t, startMono: started.mono, endMono: ended.mono, wallMs: r.wallMs, usage: r.usage ? { ...r.usage, costUsd: turnCost, ...(sessionCost != null ? { sessionCostUsd: sessionCost } : {}) } : r.usage, finalText: r.finalText,
-      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null };
+      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null, ...(r.seatCheck ? { seatCheck: r.seatCheck } : {}) };
     appendJsonl(join(this.dir, 'turns.jsonl'), rec);
     const u = r.usage ?? {};
     appendJsonl(join(this.dir, 'cost.jsonl'), { t: ended.t, mono: ended.mono, turn: n, inputTokens: u.inputTokens ?? null, cachedTokens: u.cachedTokens ?? null,
@@ -238,7 +276,7 @@ export class Seat {
     this.info.onboard = { ok: !!paired, pairedWithinSec: paired ? Math.round(pairedMs / 1000) : null, timeoutSec, onboardTurnWallMs: turn?.wallMs ?? null, attempts,
       cliFile: paired ? (existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile) : null, lastStatus: paired ? null : last };
     if (paired && paired.soul) { this.info.soulId = paired.soul.id; this.info.soulName = paired.soul.name ?? name; }
-    this.save();
+    this.save(); if (paired) this.ownerSettings();
     return { ok: !!paired, soulId: this.info.soulId, soulName: this.info.soulName, turn, status: paired ?? last };
   }
 
@@ -295,7 +333,7 @@ export class Seat {
 export function createSeat({ runDir, seat, worldBase, rails }) {
   const dir = join(runDir, 'seats', seat.id);
   const budget = worldBudgetFor(runDir, { capUsd: rails?.worldBudgetUsd, turnCapUsd: rails?.turnBudgetUsd, file: rails?.worldBudgetFile ?? null });   // one per world
-  const s = new Seat({ dir, seat, worldBase, rails, budget });
+  const s = new Seat({ dir, seat, worldBase, rails, budget, infraFile: join(runDir, 'infrastructure-invalid.jsonl') });
   mkdirSync(s.folder, { recursive: true });
   if (!s.info.ownerIdentity) {
     if (readdirSync(s.folder).length) throw new Error(`seat folder not empty: ${s.folder}`);

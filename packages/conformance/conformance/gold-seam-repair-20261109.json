@@ -1,0 +1,18 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1638,
+  "reason": "New fixed ceramic artwork and carried lacquer brush reuse existing completed-only native repair. Scoped production K=2 qualification sampled five cases per definition, zero findings/gaps; real registered renderer separately checks raw and restored geometry. No older supplement, budget or baseline is changed.",
+  "definitions": [
+    {
+      "ref": "core-gold-seam-station@1",
+      "hash": "2b4c69ecee63ac6677141cdf3954814e3f149ca537f7090c981d92de236ec1c4"
+    },
+    {
+      "ref": "core-lacquer-brush@1",
+      "hash": "34d3624bb68f329ff592200c5f05a5d5459c63a96c266183af1dc0698ab55d9a"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}

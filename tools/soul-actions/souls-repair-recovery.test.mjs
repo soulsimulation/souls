@@ -28,7 +28,7 @@ test('a fault the ladder rewinds, just after the adoption, keeps the repair rule
   t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {}); t.mock.method(console, 'log', () => {});
   const dir = mkdtempSync(join(tmpdir(), 'repair-rewind-')), path = join(dir, 'world.db'); t.after(() => rmSync(dir, {recursive: true, force: true}));
   plan.at = -1;
-  // a world made under 4.16's rules, with a snapshot from before the adoption
+  // a world made under 0.120's rules, with a snapshot from before the adoption
   const f = fixture(path, faulted(old), {durableClockV1: true}); f.brain.quiesce();
   const souls = [];
   for (const n of ['ada', 'bo']) { await invite(f, n); souls.push(await accept(f.host, f.souls.create('dev:' + n, {name: n.toUpperCase() + 'x', description: 'Rewind fixture'}))); }

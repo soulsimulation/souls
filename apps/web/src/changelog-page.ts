@@ -53,7 +53,7 @@ export function inline(text: string): string {
   return text.split(/(`[^`]+`)/).map((part) => (/^`[^`]+`$/.test(part) ? `<code>${escapeHtml(part.slice(1, -1))}</code>` : escapeHtml(part))).join('');
 }
 
-/** A release's anchor: `v4.0`, `v3.62` (stable, so a visitor can link one release). */
+/** A release's anchor: `v0.105`, `v0.67` (stable, so a visitor can link one release). */
 export const releaseId = (version: string) => 'v' + version.replace(/[^A-Za-z0-9._-]/g, '-');
 
 const LONG_DATE = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });

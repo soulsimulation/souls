@@ -1,0 +1,14 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1655,
+  "reason": "One finite supplied intention paper combines existing native writing and fire contact; authored extra state commits only at contact. Production K=2 five samples has zero findings/gaps; registered builder separately confirms paper replacement and flame removal. No older supplement, budget or baseline changes.",
+  "definitions": [
+    {
+      "ref": "core-intention-burner@1",
+      "hash": "cad599178a29233cdfad2ea23c2738161dc8e4507535630005bcbeda370b75c4"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}

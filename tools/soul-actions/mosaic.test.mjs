@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {writeFileSync,mkdirSync} from 'node:fs';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture,invite,accept,factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {coreLibrary,WorldModel} from '../../packages/world-compiler/src/index.ts';
+
+test('native mosaic placement chooses named cells and rearranges stable pieces',{timeout:60000},async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});
+ t.after(()=>{comms.close();f.host.stop();f.db.close();});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
+ const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};
+ await tick(5);await invite(f,'artist');const row=await accept(f.host,f.souls.create('dev:artist',{name:'Ana',description:'Mosaic artist'}));soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick(5);
+ const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};
+ for(const d of coreLibrary().all().filter(d=>d.name.startsWith('core-mosaic-')))ok(god.act({ops:[{op:'define',def:d}]}));
+ const here=async()=>await(await app.request('/v1/edge/here?include=doHere')).json(),bytes=h=>JSON.stringify(h.here).length;
+ const absent=await here();ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/mosaic-board@1',name:'distant-mosaic-'+i,p:[120+(i%10)*2,120+Math.floor(i/10)*2]}))}));await tick(45);
+ const far=await here();assert.equal(bytes(far),bytes(absent),'100 distant mosaic boards add zero nearby bytes');assert.ok(!/distant-mosaic/.test(JSON.stringify(far.here)));
+ ok(god.act({ops:[{op:'place',def:'core/mosaic-cell@1',name:'private-cell',p:[-3,2],access:'private'},{op:'place',def:'core/mosaic-board@1',name:'mosaic',p:[2,2]}, {op:'place',def:'core/mosaic-tile@1',name:'red',p:[0,1],params:{pigment:'#dc5544'}}, {op:'place',def:'core/mosaic-tile@1',name:'blue',p:[-1,1],params:{pigment:'#3e83c4'}}]}));await tick(45);
+ const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=n=>{assert.ok(ent(n),'entity '+n);return ent(n).id;},item=n=>f.host.engine.world.entities[id(n)];
+ const cell=n=>{const e=[...god.model.entities.values()].find(e=>e.in?.parent===id('mosaic')&&(e.name===n||e.name.endsWith('/'+n)));assert.ok(e,'cell '+n);return e.id;};
+ const done=async cap=>{const r=ok(await accept(f.host,edge.act(soul,{capability:cap,params:{}})));for(let i=0;i<1500;i++){const e=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(e.phase)){assert.equal(e.phase,'completed',JSON.stringify(e));return e;}await tick();}assert.fail('native action did not end');};
+ const red=id('red'),blue=id('blue'),a1=cell('cell-a1'),b2=cell('cell-b2'),c3=cell('cell-c3');
+ await done('pick-up:'+red);
+ assert.ok(edge.capabilities(soul).some(c=>c.id==='put-on:'+c3&&c.available),'chosen cell offer');
+ const denied=await accept(f.host,edge.act(soul,{capability:'put-on:'+id('private-cell'),params:{}}));assert.equal(denied.accepted,false);assert.match(JSON.stringify(denied),/object.private/);
+ const interrupted=ok(await accept(f.host,edge.act(soul,{capability:'put-on:'+c3,params:{}})));await done('stand:here');await tick(60);assert.notEqual(edge.receipt(soul.soulId,interrupted.receipt.id).phase,'completed');assert.equal(item('red').support.kind,'in-hand');
+ await done('put-on:'+c3);assert.equal(item('red').support.on,c3);assert.ok(!Object.values(f.host.engine.world.entities).some(e=>e.support?.on===a1),'A1 remains empty while C3 chosen');
+ await done('pick-up:'+blue);const occupied=await accept(f.host,edge.act(soul,{capability:'put-on:'+c3,params:{}}));assert.equal(occupied.accepted,false,'occupied cell refuses');assert.equal(item('blue').support.kind,'in-hand');await done('put-on:'+a1);assert.equal(item('blue').support.on,a1);
+ await done('pick-up:'+red);await done('put-on:'+b2);assert.equal(item('red').support.on,b2);assert.equal(item('red').id,red);assert.equal(item('blue').id,blue);
+ const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);
+ for(const n of ['red','blue']){assert.deepEqual(restored.entities.get(id(n)),JSON.parse(JSON.stringify(ent(n))));assert.deepEqual(restored.worldPose(restored.entities.get(id(n))),god.model.worldPose(ent(n)));}
+ assert.notDeepEqual(item('red').pose.p,item('blue').pose.p);
+ assert.deepEqual(f.host.engine.runtime.violations,[]);
+ const report={status:'pass',contextBytes:{absent:bytes(absent),distant100Boards:bytes(far),nearby:bytes(await here())},checks:['public def validation','select C3 with A1 free','selected retrieval and rearrangement B2','private and occupied refusal','approach interruption preserves held tile','model reload identity/color/support pose','100 distant boards zero nearby bytes','zero native violations'],chosenCells:['c3','a1','b2'],red:item('red').pose,blue:item('blue').pose};if(process.env.SOUL_ACTIONS_OUT){mkdirSync(process.env.SOUL_ACTIONS_OUT,{recursive:true});writeFileSync(process.env.SOUL_ACTIONS_OUT+'/mosaic.json',JSON.stringify(report,null,2));}console.log(JSON.stringify(report));
+});

@@ -99,11 +99,20 @@ export const STOP_GAVE_UP = { code: 'world.stop-gave-up', message: 'What you ask
 /** #1150, #1250: a crew on the same joined frame let go, so this one can't finish it either. */
 export const FRAME_LET_GO = { code: 'world.frame-let-go', message: 'A crew on the same frame let go, so nobody can finish it with you now: your hands were freed, and the part stands where it is. You can act again.' };
 /** #1369 quarantine/1: the ladder could not go back, so this body alone was stopped (and set down clear if it was inside something or broken), and the world went on. */
+/** #1521 stand-height/2: a body left standing in the air was stood on its floor, once, at the policy's adoption. */
+export const STOOD_ON_FLOOR = { code: 'world.stood-on-floor', message: 'Your body was standing a little above the floor, which kept every walk from starting. The world stood you on the floor; you can walk again.' };
 export const QUARANTINED = { code: 'world.quarantined', message: 'Something about you broke a rule the world could not undo, so it stopped what you were doing; if you were inside something, or your body had broken, it set you down clear. Everyone else carried on. You can act again.' };
+/** #1496 nonfinite-hold/1: a number in the world went bad (NaN, Infinity) and was put back; what it touched was stopped. */
+export const NONFINITE_HELD = { code: 'state.non-finite', message: 'A number in the world near you broke, so the world put it back to its last good value and stopped what you were doing with it. Everyone else carried on. You can act again.' };
 export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again once your hands are free.' };
 
 /** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
 export type ContainedKeyV1 = { code: string; subjects: string[] };
+/** #1496 nonfinite-hold/1: one thing put right, as logged. `path` runs from its root (`world`: the engine's world, every
+ *  entity included; `programme`: a programme by id, then its fields). `from`: where it came from, the last good snapshot
+ *  (`baseline`: a number, or an entity's whole `pose`) or the named fallback (`zero`; `arrival`: a free item set down at a
+ *  free spot by the world's arrival, `place` carrying its pose and `release` the bodies that held it: the eject). */
+export type NonFinitePatchV1 = { root: 'world' | 'programme'; path: string[]; from: 'baseline' | 'zero' | 'arrival'; value?: number; pose?: Record<string, unknown>; place?: { p: [number, number, number]; yaw: number }; release?: string[] };
 
 export interface Engine {
   readonly rulesVersion: string;
@@ -137,9 +146,20 @@ export interface Engine {
   stopBodiesV1?(bodies: string[], why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
   /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
   corruptBodiesV1?(): ContainedKeyV1[];
+  /** #1521 stand-height/2's one-time repair: the bodies on level 0 of a world with no ground field standing more than a step above
+   *  their floor, and where each can stand (a pure read; the host logs it), and standing them there (as logged). */
+  planAboveFloorV2?(): { id: string; p: [number, number, number] }[];
+  standOnFloorV2?(bodies: { id: string; p: [number, number, number] }[]): string[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
   /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick. */
   markStandingV1?(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void;
+  /** #1496 nonfinite-hold/1: every non-finite number in the world and the programmes, and what each is put back to: its value in
+   *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A body's
+   *  pose and human state are left out (quarantine/1's). Empty when anything can't be put back legally: that halts by name. */
+  planNonFiniteV1?(baseline?: Engine | null): NonFinitePatchV1[];
+  /** #1496: writes those patches (as logged; a replay passes the same ones back and reads nothing) and stops, with `why`, the
+   *  programmes they touched: a programme whose own state was patched, and those of a body patched or holding a set-down object. */
+  applyNonFiniteV1?(patches: NonFinitePatchV1[], why: { code: string; message: string }): { stopped: number; deadlines: number; bodies: string[]; programmes: string[] };
   setClockV1?(tick: number): void;
   /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
   containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };
