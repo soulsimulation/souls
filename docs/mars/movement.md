@@ -129,6 +129,21 @@ already backed down for it. When neither end of a flight has room to pass (tight
 flight), the pass-back cannot let the other through, so the blocked-walk bound still ends both walks. The same holds for a
 waiter on a tight landing at the foot of a flight whose top is tight too: nobody passes back, and the bound ends both walks.
 Getting them both through would need a retreat over more than one flight.
+A waiter at a flight's end stands at that end's own height, which can differ from its floor's grid height. Floors read
+the world's shared level heights, so in Eden 2026 104 of 392 flight ends, in 74 buildings, sit 4-12 cm off the grid. The
+courtesy therefore takes a waiter standing at its flight's entry at that entry's height as standing on its floor (#1723).
+Before that, it never moved a pass-back holder or an entry waiter there.
+
+Under `stair-pass/1`, a climb cancelled mid-flight (the blocked-walk bound fails its walk, and the action backs off to the
+nearer landing, `cancelTo`) is bounded too (#1723 A3). Before, a body blocking its back-off, often a walker waiting at that
+landing to enter this very flight, kept it waiting with no bound, and the action kept its Soul's reservation, so every later
+act of that Soul was refused `reservation.conflict`. Now:
+- After 100 blocked ticks, the cancelled climb turns to the flight's other end, when its next step that way is clear and
+  that end has supported floor. It turns at most twice.
+- Still blocked after 400 ticks, it fails `route.cancel-blocked`. Its resources and its actor are released, so the Soul's
+  next act is accepted, and the body stays where it stands, on the flight.
+
+A walk from a body left on a flight needs `flight-resume/1` (#1367); without it, that walk is refused `motion.teleport`.
 
 ## Approximations
 

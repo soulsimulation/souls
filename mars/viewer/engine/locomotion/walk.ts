@@ -153,6 +153,9 @@ type Exec = {
   replanWait?: number;
   /** Set by a cancel during a stair traversal: finish the flight at the nearer landing, then stop (review M2). */
   cancelTo?: 'entry' | 'exit';
+  /** #1723 stair-pass/1 (A3): a cancelled climb that stands blocked: since when (reset by every step it makes), and how often
+   *  it has turned to the other end. Plain data (snapshot codec). */
+  cancelWait?: {since:number;turns:number};
   /**
    * Stepping aside for a directed task this blocked walker stands in the way of (a carry formation,
    * `makeWay` with `clearOf`): walk to `spot`, wait there until `clearOf(goal)` holds (the formation no
@@ -1883,7 +1886,12 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   if(!other?.human||other.human.grip||other.human.on||other.human.riding||other.human.sleepPose||!walker||record?.verb!=='walk_to'||record.status!=='blocked'||!(waitingEntry||(walker.phase==='walk'&&walker.route.legs[walker.leg]?.kind==='walk'))||walker.detour||walker.cancelTo)return;
   const sp=spatial(rt,who),from:Vec2=[other.pose.p[0],other.pose.p[2]],level=other.human.level,g=sp.levelAt(level,from);
   const floorY=level===0&&sp.ground?sp.ground.standY(...from):g?.y;
-  if(!g||floorY===undefined||Math.abs(other.pose.p[1]-floorY)>.03)return;
+  // #1723 stair-pass/1: a walker waiting at this flight's end stands at the end's own height, which can differ from its floor's
+  // grid height by more than the support tolerance (the Tower House's flights end 8-10 cm off its shared level heights). It
+  // stands on that floor all the same, so the courtesy asks it; every step of its detour keeps its static and body checks.
+  const wl=waitingEntry?walker.route.legs[walker.leg] as LinkLeg:undefined,end=wl?(wl.ascending?wl.link.from:wl.link.to):undefined;
+  const atEnd=!!end&&end.level===level&&dist2(from,end.p)<=.05&&Math.abs(other.pose.p[1]-end.y)<=.03;
+  if(!g||floorY===undefined||(Math.abs(other.pose.p[1]-floorY)>.03&&!atEnd))return;
   const prior=ex.linkYield,moved=(p:number[],q:number[])=>hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2])>=.1;
   // A third body leaving a candidate pocket changes its availability even if
   // the two waiting bodies and static geometry have not changed. Retain local
@@ -1986,11 +1994,13 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   if (blocker) {
     if(a.body?.family==='floater')makeWay(rt,blocker,[next[0],next[2]],{by:a.id,subjects:[a.id],landing:{y:rt.world.entities[blocker].pose.p[1],radius:2*ex.profile.radius+.3}});
     a.human!.activity = 'climb-wait';
+    if (rt.services.stairPassV1 === true && a.body?.family !== 'floater') { const r = cancelBlocked(rt, ex, a, leg, geo, blocker, dt); if (r) return r; }
     return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} (cancelled) waits on ${leg.link.id} for ${blocker} to move before stepping off at the ${forward ? 'far' : 'near'} landing`, subjects: [ex.actor, blocker, leg.link.id] });
   }
   ex.climbT = at;
   a.pose.p = next;
   a.human!.activity = leg.ascending === forward ? 'climb-up' : 'climb-down';
+  if (ex.cancelWait) ex.cancelWait.since = rt.tick;
   if (forward ? at < geo.total - 1e-9 : at > 1e-9) return { status: 'running', phase: 'cancel-climb' };
   const end = forward ? geo.exit : geo.entry;
   a.pose.p = [end.p[0], end.y, end.p[1]];
@@ -1999,6 +2009,32 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   a.human!.activity = 'idle';
   a.human!.task = undefined;
   return { status: 'completed', outputs: { cancelled: true, stoppedAt: forward ? 'exit' : 'entry', level: end.level, x: end.p[0], z: end.p[1], link: leg.link.id } };
+}
+
+/** #1723 stair-pass/1 (A3): a cancelled climb blocked this long turns to the other end of its flight, when that way is clear. */
+export const CANCEL_TURN_TICKS = 100;
+/** #1723 stair-pass/1 (A3): a cancelled climb that stays blocked this long with no turn left ends, named, and frees its Soul. */
+export const CANCEL_BOUND_TICKS = 400;
+/** #1723 stair-pass/1 (A3): a cancelled climb backing off its flight, blocked by `blocker` (often a walker waiting at that end
+ *  for this very flight, so each waits for the other). After CANCEL_TURN_TICKS it turns to the flight's other end if its next
+ *  step that way is clear and that end has supported floor (at most twice, so two bodies cannot trade turns for ever). Still
+ *  blocked after CANCEL_BOUND_TICKS, the action fails `route.cancel-blocked`: its resources and its actor are released, so the
+ *  Soul's next act is accepted, and the body stays where it stands, on the flight. Undefined = keep waiting this tick. */
+function cancelBlocked(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: LinkGeometry, blocker: string, dt: number): StepResult | undefined {
+  const cw = ex.cancelWait ??= { since: rt.tick, turns: 0 }, waited = rt.tick - cw.since, forward = ex.cancelTo === 'exit';
+  if (waited >= CANCEL_TURN_TICKS && cw.turns < 2) {
+    const back = forward ? geo.entry : geo.exit, sp = spatial(rt, ex.actor), grid = sp.level(back.level);
+    const supported = sp.scene.surfaces.some((s) => s.level === back.level && Math.abs(s.y - back.y) <= 1e-6 && pointInObb(back.p, s.obb));
+    const at = forward ? Math.max(0, ex.climbT - CLIMB_SPEED * dt) : Math.min(geo.total, ex.climbT + CLIMB_SPEED * dt);
+    if (supported && grid && clearanceAt(grid, back.p) >= ex.profile.radius && !stairBlocker(rt, a, a.pose.p, pointOnLink(geo, at), ex.profile.radius)) {
+      ex.cancelTo = forward ? 'entry' : 'exit'; cw.turns++; cw.since = rt.tick;
+      return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} (cancelled) turns back on ${leg.link.id}: ${blocker} holds its ${forward ? 'far' : 'near'} end`, subjects: [ex.actor, blocker, leg.link.id] });
+    }
+  }
+  if (waited < CANCEL_BOUND_TICKS) return undefined;
+  releaseAll(rt, ex);
+  a.human!.activity = 'idle'; a.human!.task = undefined; ex.v = 0;
+  return { status: 'failed', diagnostic: { code: 'route.cancel-blocked', message: `${ex.actor} stopped on ${leg.link.id}: its cancelled climb stayed blocked by ${blocker} at both ends`, subjects: [ex.actor, blocker, leg.link.id] } };
 }
 
 /** Per-tick construction-replan budget (`services.planning.replansPerTick` overrides REPLANS_PER_TICK);
