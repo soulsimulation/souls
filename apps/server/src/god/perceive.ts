@@ -107,6 +107,7 @@ export type PerceiveHost = {
   log(m: string): void;
   /** Entry 34 (watering.ts): "water <plant>" with a watering can from its hook. */
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, and whether a thing is whole (a whole one is no built object). */
+  stringArt?: {plan(soul:EdgeSoul,id:string,action:string,approach:(id:string,soul:EdgeSoul,front:Vec2|null,radius?:number)=>{p:Vec2;level:number}|null):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|{code:string;reason:string}|null};
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
@@ -185,6 +186,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      stringArt:(soul:EdgeSoul,id:string,action:string)=>this.h.stringArt?.plan(soul,id,action,this.actHost().approach)??null,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),

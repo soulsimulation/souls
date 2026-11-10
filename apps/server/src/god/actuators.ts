@@ -78,6 +78,7 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  stringArt?(soul: EdgeSoul,id:string,action:string): {steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   deferContacts?: boolean;
@@ -352,6 +353,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
+      const art=s.key?host.stringArt?.(ctx.soul,s.key,a.name):null;if(art)return 'code'in art?art:null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
       return whenRefusal(a, state, nameOf(s)) ?? (isListAction(def, a) ? listProblem(def, a, state, ctx.soul) : isGameAction(def, a) ? gameProblem(def, a, state, ctx.soul) : null);
@@ -366,6 +368,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
       validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
+        const art=s.key?host.stringArt?.(ctx.soul,s.key,a.name):null;if(art&&!('code'in art))return{state:s,result:{action:a.name,summary:art.summary},bodies:[{label:a.label,steps:art.steps}]};
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
@@ -409,6 +412,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
+    if(host.stringArt?.(soul,id,a.name))return out;
     // Entry 43: so does a tea act (tea.ts)
     if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
     // #438: and a picking act (harvest.ts)

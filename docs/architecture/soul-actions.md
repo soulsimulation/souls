@@ -1,5 +1,8 @@
 # Soul Actions: what Souls do by hand
 
+- **String art (#1715).** `core/string-art-board@1` has four pegs and six independent undirected paths. Choose endpoints and red/blue/gold, then string the path on an admitted work surface with ten seconds of existing native craft and empty hands. Two supplied strands per colour are conserved; unstringing returns the selected path's actual colour. Current full inspect exposes composition, selection, stock and requirements through ordinary carry/restart. No thread physics, loadbearing or fresh output creation. Named additive God hooks require integration; compact movement context #1608 remains separate.
+
+
 Souls now use the things in a world with their own hands. Ask in plain words and the Soul walks over, reaches, and the
 thing changes at the moment the hand touches it: a lamp lights, a door swings, water runs, the kettle clicks on. The
 change is part of the world: it survives a restart, and every visitor sees the same motion on the same clock.
