@@ -16,19 +16,25 @@ type Spectated = {kind: string; tick: number; at: number; id?: unknown; from?: {
 type Body = {pose?: {p: number[]}; human?: {activity?: string}};
 
 export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {onSpectator(l: (m: Spectated) => void): unknown}, catalogVersion: () => string) {
-  const L = deps.ledger, speech: Line[] = [];
+  const L = deps.ledger, speech: Line[] = [], secret = (id: string | null | undefined) => !!id && !!L.knowledge?.isSecret(id);
   comms.onSpectator(m => {
     if (m.kind !== 'speech' || typeof m.id !== 'string' || typeof m.text !== 'string') return;
     const place = m.channel?.placeId ?? m.channel?.base?.placeId;
+    // what is said in a place kept off the map (or by someone standing in one) stays there
+    if ((typeof place === 'string' && secret(place)) || L.placePathOf(String(m.from?.soulId ?? '')).some(p => secret(p.id))) return;
     speech.push({id: m.id, tick: m.tick, at: m.at, soul: String(m.from?.soulId ?? ''), name: String(m.from?.name ?? ''), text: m.text, place: typeof place === 'string' ? place : null, untrusted: true});
     if (speech.length > LIVE_SPEECH) speech.shift();
   });
   let kept: {key: string; body: string} | null = null;
   const build = (tick: number) => {
     const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, r1 = (n: number) => Math.round(n * 10) / 10;
-    const souls = [...L.host.minds.values()].flatMap(m => {
+    type Row = {id: string; name: string; at: number[] | null; place: string | null; doing: string | null};
+    const souls = [...L.host.minds.values()].flatMap((m): Row[] => {
       const e = world.entities[m.entityId], p = e?.pose?.p; if (!p || L.faded.has(m.soulId)) return [];
-      return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: L.placePathOf(m.soulId).find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
+      const path = L.placePathOf(m.soulId);
+      // a Soul in a secret place is in the world, but where is not said
+      if (path.some(x => secret(x.id))) return [{id: m.soulId, name: m.name, at: null, place: null, doing: null}];
+      return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
     }).sort((a, b) => a.id < b.id ? -1 : 1);
     return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech});
   };

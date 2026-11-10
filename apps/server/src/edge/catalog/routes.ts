@@ -23,7 +23,10 @@ export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
   const L = deps.ledger;
   let kept: {key: string; value: ReturnType<typeof buildCatalog>} | null = null;
   const current = () => {
-    const key = `${L.staticVersion()}|${Object.keys((L.host.engine.world as unknown as {entities: object}).entities).length}`;
+    // the static world (places, spots, navigation), which places are secret, and how many things there are. Bodies are not
+    // structure: a Soul arriving or leaving rebuilds nothing.
+    let things = 0; for (const e of Object.values((L.host.engine.world as unknown as {entities: Record<string, WorldEntity>}).entities)) if (e.def && !e.human) things++;
+    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}`;
     if (kept?.key !== key) kept = {key, value: ledgerCatalog(L)};
     return kept.value;
   };

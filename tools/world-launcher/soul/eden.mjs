@@ -1947,9 +1947,9 @@ function indexCatalog(cat) {
   /** A place and every place inside it. */
   const within = (id) => { const root = place(id); if (!root) return new Set(); const out = new Set([root.id]), todo = [root.id]; while (todo.length) for (const k of kids.get(todo.pop()) ?? []) if (!out.has(k.id)) { out.add(k.id); todo.push(k.id); } return out; };
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
-  /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a known thing.
+  /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a thing that is one.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
-  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && things.has(rest)); };
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && SEAT_KIND.test(things.get(rest)?.kind ?? "")); };
   return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows };
 }
 
@@ -2965,7 +2965,10 @@ async function here() {
 // find, query and look answer from them: nothing here waits on the world's clock, and a slow world slows none of it.
 const CATALOG_FILE = "world-catalog.json", LIVE_FILE = "world-live.json", LIVE_FRESH_MS = 4_000, NEARBY_METRES = 30;
 const readJsonFile = (f) => { try { return JSON.parse(readFileSync(f, "utf8")); } catch { return null; } };
-const writeJsonFile = (f, v) => { writeFileSync(f + ".tmp", JSON.stringify(v), { mode: 0o600 }); renameSync(f + ".tmp", f); };
+// (a temp name per process: serve and a command may write the same file at the same moment)
+const writeJsonFile = (f, v) => { const tmp = `${f}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify(v), { mode: 0o600 }); renameSync(tmp, f); };
+/** Is this copy of the catalog not the one the world has now? Without a tag to compare, a copy is trusted for ten minutes. */
+const catalogOld = (have, world, live) => !have || have.world !== world || (live?.live?.catalog ? (have.etag ? have.etag !== `"${live.live.catalog}"` : Date.now() - Date.parse(have.fetchedAt) > 600_000) : false);
 let CATALOG_IX = null;
 /** Fetch the world's catalog if this copy is missing or old. The world answers 304 when the copy is current. */
 async function syncCatalog({ force = false } = {}) {
@@ -2999,15 +3002,25 @@ async function syncLive({ force = false } = {}) {
 async function worldCopy() {
   const s = load(), live = await syncLive();
   let have = readJsonFile(CATALOG_FILE), note;
-  if (!have || have.world !== s.world || (live?.live?.catalog && have.etag !== `"${live.live.catalog}"`)) { const c = await syncCatalog(); note = c.stale; have = c; CATALOG_IX = null; }
+  if (catalogOld(have, s.world, live)) { const c = await syncCatalog(); note = c.stale; have = c; CATALOG_IX = null; }
   CATALOG_IX ??= { etag: have.etag, ix: soulCatalog.indexCatalog(have.catalog) };
   const me = live?.live?.souls?.find((x) => x.id === s.soul) ?? null;
+  if (me && !me.at) delete me.at;
   return { ix: CATALOG_IX.ix, live, me, note: note ?? (live?.stale ? "The live picture is the last one received: the world did not answer just now." : !live ? "No live picture yet: distances and who is where are left out." : undefined) };
 }
 // serve keeps both files current, so a command reads them from disk and never waits.
+// One round at a time, and a world that does not answer is asked less often (2 s, then 4, 8, 16, 32 s), never in a pile.
+let FOLLOWING = false, FOLLOW_SKIP = 0, FOLLOW_FAILS = 0;
 async function followWorld() {
-  const live = await syncLive({ force: true }), have = readJsonFile(CATALOG_FILE);
-  if (!have || have.world !== load().world || (live?.live?.catalog && have.etag !== `"${live.live.catalog}"`)) await syncCatalog();
+  if (FOLLOWING) return;
+  if (FOLLOW_SKIP > 0) { FOLLOW_SKIP--; return; }
+  FOLLOWING = true;
+  try {
+    const live = await syncLive({ force: true });
+    if (!live || live.stale) { FOLLOW_FAILS = Math.min(FOLLOW_FAILS + 1, 4); FOLLOW_SKIP = 2 ** FOLLOW_FAILS - 1; return; }
+    FOLLOW_FAILS = 0;
+    if (catalogOld(readJsonFile(CATALOG_FILE), load().world, live)) { const c = await syncCatalog(); if (c.stale) { FOLLOW_FAILS = 1; FOLLOW_SKIP = 1; } }
+  } finally { FOLLOWING = false; }
 }
 
 async function catalogCommand(...args) {
@@ -3038,7 +3051,7 @@ async function look() {
   const { ix, live, me, note } = await worldCopy(), s = load();
   const far = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1])), souls = (live?.live?.souls ?? []).filter((x) => x.id !== s.soul);
   const placeName = (id) => ix.place(id)?.name ?? id;
-  const near = me ? souls.map((x) => ({ ...x, metres: far(me.at, x.at) })).filter((x) => x.metres <= NEARBY_METRES).sort((a, b) => a.metres - b.metres) : [];
+  const near = me?.at ? souls.filter((x) => x.at).map((x) => ({ ...x, metres: far(me.at, x.at) })).filter((x) => x.metres <= NEARBY_METRES).sort((a, b) => a.metres - b.metres) : [];
   const elsewhere = new Map(); for (const x of souls) if (!near.some((n) => n.id === x.id)) { const k = x.place ?? "somewhere"; elsewhere.set(k, [...(elsewhere.get(k) ?? []), x.name]); }
   const said = (live?.speech ?? []).slice(-6).map((x) => ({ who: x.name, text: x.text, where: x.place ? placeName(x.place) : null, secondsAgo: Math.max(0, Math.round((Date.now() - x.at) / 1000)) }));
   return {

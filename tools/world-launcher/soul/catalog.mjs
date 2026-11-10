@@ -23,9 +23,9 @@ export function indexCatalog(cat) {
   /** A place and every place inside it. */
   const within = (id) => { const root = place(id); if (!root) return new Set(); const out = new Set([root.id]), todo = [root.id]; while (todo.length) for (const k of kids.get(todo.pop()) ?? []) if (!out.has(k.id)) { out.add(k.id); todo.push(k.id); } return out; };
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
-  /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a known thing.
+  /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a thing that is one.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
-  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && things.has(rest)); };
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && SEAT_KIND.test(things.get(rest)?.kind ?? "")); };
   return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows };
 }
 

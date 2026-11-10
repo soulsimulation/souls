@@ -18,6 +18,7 @@ const cat = {
   ],
   things: [
     { id: "e_b1", name: "promenade-bench-1", kind: "core-bench-seat", place: "g-pond", at: [12, 42] },
+    { id: "e_tree", name: "old-oak", kind: "core-tree", place: "g-annex", at: [310, 5] },
     { id: "e_b2", name: "market-bench-9", kind: "core-bench-seat", place: "g-annex", at: [300, 5] },
     ...Array.from({ length: 12 }, (_, i) => ({ id: `e_c${i}`, name: `library/chair-${i}`, kind: "core-chair", place: "g-library.reading", at: [71 + i / 10, 1] })),
   ],
@@ -109,5 +110,5 @@ test("the anchor of a relation is the best-named place, nearest on a tie", () =>
 
 test("the catalog vouches for the ids it publishes and says nothing about the rest", () => {
   for (const id of ["walk:eden-library", "walk:g-library", "hang-out:commons-pond", "read:read.e_t1", "sit:e_b1", "sit-ground:here"]) assert.equal(ix.knows(id), true, id);
-  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
+  for (const id of ["walk:nowhere", "walk:basket", "read:read.e_gone", "sit:e_zz", "sit:e_tree", "dance:here", "object:e_b1:open"]) assert.equal(ix.knows(id), false, id);
 });

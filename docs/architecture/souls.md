@@ -249,7 +249,8 @@ withholds. Owner messages and credentials are never in it.
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
   stands in it and what is done in it are left out. Eden 2026: 1,510 places, 4,518 things, 1,365 acts, 1.4 MB.
 - **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
-  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks.
+  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
+  place is never named: a Soul inside one is listed without position or place, and what is said there is left out.
 - Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
   grow with the number of clients.
 - **The client** (`tools/world-launcher/soul/catalog.mjs`, inlined into `eden.mjs`) keeps both as files in the Soul's
@@ -260,14 +261,15 @@ withholds. Owner messages and credentials are never in it.
   what it cut.
 - **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
-  One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`.
+  One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`. Such an id is
+  built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those
   are still read with `here` and `inspect <id>`.
 
 The served skill is look, find the id, act in one call. `POST /v1/edge/resolve` still answers for older clients; the
 current client uses it only when `act` or a `plan` step is given words where an id belongs.
 
-Every answer on `/v1/edge`, `/v1/god` and `/v1/world` carries `Server-Timing: world;dur=<ms>, queue;dur=<ms>`: the
+Answers on `/v1/edge`, `/v1/god` and `/v1/world` carry `Server-Timing: world;dur=<ms>, queue;dur=<ms>` (not a `world.crowded` refusal or a dropped request; an answer the launcher serves from its cache repeats the first one's): the
 world's own time from arrival to answer, and how much of it was waiting for admission
 ([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
 time.
