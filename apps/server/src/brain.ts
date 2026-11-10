@@ -232,7 +232,7 @@ export class Brain {
     }
     if (this.host.living) {
       const c = clockAt(tick, this.host.living.origin, this.host.living.dayTicks);
-      if (c.phase >= 0.55) for (const m of this.host.minds.values()) if (m.life && m.life.reflectedDay < c.day && !this.reflecting.has(m.soulId)) void this.reflect(m, c.day);
+      if (c.phase >= 0.55) for (const m of this.host.minds.values()) if (m.life && (m.life.reflectedDay < c.day || m.life.reflectedDay > c.day + 1 /* #1649: the day number went back at the cut-over to real time */) && !this.reflecting.has(m.soulId)) void this.reflect(m, c.day);
     }
     // Tier 2b: director + ticker, only while someone is watching
     if (tick % DIRECTOR_EVERY === 0 && !this.directing && this.sink.clients() > 0) void this.direct();

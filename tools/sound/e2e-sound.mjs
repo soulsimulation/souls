@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release 3.1 soundscape proof in real Chrome (shared Chrome lease, Metal GPU): a fresh dev world built from the
+// Release 0.6 soundscape proof in real Chrome (shared Chrome lease, Metal GPU): a fresh dev world built from the
 // eden-district template plus a wood, a windy knoll with flags and a flower bed; the camera visits each place by day and
 // the pond and wood by night, and records which sources play there (`__edenSound.state()`), the output level, and that
 // mute silences it. Fake minds, no paid generation, no production data. Only stops the server it started.

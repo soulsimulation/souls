@@ -25,6 +25,7 @@ test('EF4 small-K gate: every library def places, bakes, furnishes and builds ga
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(readFileSync(out, 'utf8')) as { defs: number; samples: number; rendered: number; findings: Finding[]; qualificationGaps: { def: string; kind: string; reason: string }[] };
   assert.equal(report.defs, coreLibrary().all().length); assert.ok(report.samples > report.defs * 3); assert.ok(report.rendered > 0);
+  const flute = JSON.parse(readFileSync(new URL('../conformance/solo-flute-20261109.json', import.meta.url), 'utf8')) as {findings:(Omit<Finding,'field'>&{fields:string[]})[]};
   const known = JSON.parse(readFileSync(new URL('../conformance/known-20261015.json', import.meta.url), 'utf8')) as { findings: (Omit<Finding, 'field'> & { fields: string[] })[]; qualificationGaps: typeof report.qualificationGaps };
   // M3: exact pre-E1 findings from B1's expanded parameter samples at the supplied integration head.
   const integration = JSON.parse(readFileSync(new URL('../conformance/integration-3baa4c51.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
@@ -46,6 +47,7 @@ test('EF4 small-K gate: every library def places, bakes, furnishes and builds ga
   const soulActions = JSON.parse(readFileSync(new URL('../conformance/soul-actions-20261101.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // PC03 2026-11-04: loose construction materials; the narrow run found nothing, so this pins no finding.
   const looseMaterials = JSON.parse(readFileSync(new URL('../conformance/loose-materials-20261104.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const goldSeam = JSON.parse(readFileSync(new URL('../conformance/gold-seam-repair-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // PC11 2026-11-05: the table-shaped load core-work-table@1; the narrow run found nothing, so this pins no finding.
   const workTable = JSON.parse(readFileSync(new URL('../conformance/work-table-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // 2026-11-05 library budgets (#494): the music family's new in-budget revisions; nothing left to pin (see the record's note).
@@ -55,6 +57,7 @@ test('EF4 small-K gate: every library def places, bakes, furnishes and builds ga
   // #427 2026-11-05: core-tent@2 and core-field-gate@1 opened by hand; the narrow run found nothing, so this pins no finding.
   const openings = JSON.parse(readFileSync(new URL('../conformance/openings-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // 2026-11-05 music family (#431): the new record player; the narrow run found nothing, so this pins no finding.
+  const repertoire = JSON.parse(readFileSync(new URL('../conformance/record-repertoire-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   const recordPlayer = JSON.parse(readFileSync(new URL('../conformance/record-player-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // #430 2026-11-05: core-chalk-square@1 on the painting faculty; the narrow run found nothing, so this pins no finding.
   const chalk = JSON.parse(readFileSync(new URL('../conformance/chalk-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
@@ -64,6 +67,8 @@ test('EF4 small-K gate: every library def places, bakes, furnishes and builds ga
   const pantry = JSON.parse(readFileSync(new URL('../conformance/pantry-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // #429 2026-11-05: core-guestbook@1 on the sign-up faculty; the narrow run found nothing, so this pins no finding.
   const guestbook = JSON.parse(readFileSync(new URL('../conformance/guestbook-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  // #1613: fixed mosaic cells and movable pieces; narrow K=2 found no findings.
+  const mosaic = JSON.parse(readFileSync(new URL('../conformance/mosaic-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // #435 2026-11-05: core-lost-and-found@1, the swap shelf's form with an owner claim; the narrow run found nothing, so this pins no finding.
   const lostAndFound = JSON.parse(readFileSync(new URL('../conformance/lost-and-found-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   // #442 2026-11-05: repairable bench and cart revisions and their tools; the narrow runs found nothing, so this pins no finding.
@@ -85,8 +90,22 @@ test('EF4 small-K gate: every library def places, bakes, furnishes and builds ga
   // 2026-11-05 library budgets (#494): the tea family's new in-budget revisions; nothing left to pin.
   const budgetsTea = JSON.parse(readFileSync(new URL('../conformance/library-budgets-tea-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   const books = JSON.parse(readFileSync(new URL('../conformance/books-20261105.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const tentMending = JSON.parse(readFileSync(new URL('../conformance/tent-mending-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const fridgeStorage = JSON.parse(readFileSync(new URL('../conformance/fridge-storage-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const movableChalkboard = JSON.parse(readFileSync(new URL('../conformance/movable-chalkboard-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const intention = JSON.parse(readFileSync(new URL('../conformance/intention-burning-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const poetryFolio = JSON.parse(readFileSync(new URL('../conformance/poetry-folio-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const landArt = JSON.parse(readFileSync(new URL('../conformance/land-art-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const realBookcase = JSON.parse(readFileSync(new URL('../conformance/real-bookcase-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const campBench = JSON.parse(readFileSync(new URL('../conformance/camp-bench-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const flowerArranging = JSON.parse(readFileSync(new URL('../conformance/flower-arranging-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const movableCandles = JSON.parse(readFileSync(new URL('../conformance/movable-candles-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const campTable = JSON.parse(readFileSync(new URL('../conformance/camp-table-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const handChime = JSON.parse(readFileSync(new URL('../conformance/hand-chime-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const portableIrrigation = JSON.parse(readFileSync(new URL('../conformance/portable-irrigation-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
   const signature = (f: Finding) => JSON.stringify([f.def, f.hash, f.field, f.stage, f.code, f.detail]);
-  const allowed = new Set([...known.findings, ...integration.findings, ...trunk3.findings, ...trunk32.findings, ...w2.findings, ...z2.findings, ...bsgen.findings, ...seatdef.findings, ...officeDesk.findings, ...soulActions.findings, ...books.findings, ...looseMaterials.findings, ...budgetsMusic.findings, ...budgetsWater.findings, ...budgetsOpenings.findings, ...budgetsTea.findings, ...recordPlayer.findings, ...chalk.findings, ...guestbook.findings, ...lostAndFound.findings, ...swapShelf.findings, ...repairDefs.findings, ...openings.findings, ...hidingPlaces.findings, ...pantry.findings, ...workTable.findings, ...litter.findings, ...joints.findings, ...deck.findings, ...stairs.findings, ...jugglingBalls.findings].flatMap(f => f.fields.map(field => signature({ ...f, field }))));
+  const flowerPress = JSON.parse(readFileSync(new URL('../conformance/flower-press-20261109.json', import.meta.url), 'utf8')) as Pick<typeof known, 'findings'>;
+  const allowed = new Set([...handChime.findings, ...flute.findings, ...portableIrrigation.findings, ...known.findings, ...mosaic.findings, ...fridgeStorage.findings, ...realBookcase.findings, ...flowerPress.findings, ...intention.findings, ...poetryFolio.findings, ...integration.findings, ...trunk3.findings, ...trunk32.findings, ...w2.findings, ...z2.findings, ...bsgen.findings, ...seatdef.findings, ...officeDesk.findings, ...soulActions.findings, ...books.findings, ...looseMaterials.findings, ...goldSeam.findings, ...budgetsMusic.findings, ...budgetsWater.findings, ...budgetsOpenings.findings, ...budgetsTea.findings, ...recordPlayer.findings, ...repertoire.findings, ...chalk.findings, ...guestbook.findings, ...lostAndFound.findings, ...swapShelf.findings, ...repairDefs.findings, ...tentMending.findings, ...openings.findings, ...hidingPlaces.findings, ...pantry.findings, ...workTable.findings, ...litter.findings, ...joints.findings, ...deck.findings, ...stairs.findings, ...jugglingBalls.findings, ...movableChalkboard.findings, ...landArt.findings, ...campBench.findings, ...flowerArranging.findings, ...movableCandles.findings, ...campTable.findings].flatMap(f => f.fields.map(field => signature({ ...f, field }))));
   const newFindings = report.findings.filter(f => !allowed.has(signature(f)));
   assert.deepEqual(newFindings, [], `Undocumented conformance failures: ${JSON.stringify(newFindings.slice(0, 12))}`);
   assert.deepEqual(report.qualificationGaps, known.qualificationGaps, 'rendering gaps changed: qualify them or document the exact gap');
