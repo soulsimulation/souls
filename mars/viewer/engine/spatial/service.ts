@@ -20,6 +20,11 @@ import type { GroundField } from './ground.ts';
 const STATIC_PHASES = new Set(['stored', 'reserved', 'staged', 'placed', 'installed', 'raising']);
 /** Non-human entity that blocks walking where it stands: a static phase, or no phase and a catalog `obstacle` fixture (chair, bench, campfire). */
 import { navTrustChecking, navTrustToken } from './nav-trust.ts';
+/** #1770: the exact inputs of a route search as a key, or null when an option is a predicate (never kept). */
+function routeKey(planner: string, reach: boolean, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): string | null {
+  if (opts) for (const k in opts) if (typeof (opts as Record<string, unknown>)[k] === 'function') return null;
+  return JSON.stringify([planner, reach, profile, start, goal, opts ?? null]);
+}
 const isStatic = (e: Entity) => e.kind !== 'human' && (e.phase ? STATIC_PHASES.has(e.phase) : CATALOG[e.def]?.obstacle === true);
 /**
  * What sync's change test reads of one static entity: id, def, phase, pose (p, yaw, pitch, roll),
@@ -688,7 +693,37 @@ export class Spatial {
 
   /** route-reach/1 (#872): set by the engine from its accepted runtime policy (re-applied after every runtime rebuild). */
   routeReachV1 = false;
+  /**
+   * #1770 plan-once: route results kept per navigation epoch (null: off, the default; the server's engine turns it on). A
+   * route is a pure function of the synced grids and scene (both fixed while the epoch stands) and of its inputs, so an act
+   * that checks a seat's approach at admission, again when the tick performs it and again when its walk starts searches
+   * once. Bounded (least recently used first out) and emptied whenever the epoch moves (an edit, a door, a static change).
+   * Options carrying a predicate are never kept, nor a result whose search moved the epoch (a ground window grew). `oracle`:
+   * every reuse is compared with a fresh search (`misses` counts differences). Callers get their own copy.
+   */
+  routeMemo: { cap: number; oracle: boolean; epoch: number; map: Map<string, RouteResult>; hits: number; misses: number; oracleMisses: number } | null = null;
+  enableRouteMemo(cap: number, oracle = false) { this.routeMemo = { cap, oracle, epoch: this.epoch, map: new Map(), hits: 0, misses: 0, oracleMisses: 0 }; }
   route(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
+    const m = this.routeMemo;
+    if (!m) return this.routeNow(world, profile, start, goal, opts);
+    return this.readPass(world, () => this.routeKept(m, world, profile, start, goal, opts));   // one sync for the lookup and the search
+  }
+  private routeKept(m: NonNullable<Spatial['routeMemo']>, world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
+    if (m.epoch !== this.epoch) { m.map.clear(); m.epoch = this.epoch; }
+    const key = routeKey(this.planner, this.routeReachV1, profile, start, goal, opts);
+    if (key === null) return this.routeNow(world, profile, start, goal, opts);
+    const hit = m.map.get(key);
+    if (hit) {
+      m.hits++; m.map.delete(key); m.map.set(key, hit);
+      if (m.oracle) { const fresh = this.routeNow(world, profile, start, goal, opts); if (JSON.stringify(fresh) !== JSON.stringify(hit)) { m.oracleMisses++; console.error('[plan-once-oracle] route', key.slice(0, 200)); } }
+      return structuredClone(hit);
+    }
+    m.misses++;
+    const epoch = this.epoch, r = this.routeNow(world, profile, start, goal, opts);
+    if (this.epoch === epoch) { m.map.set(key, structuredClone(r)); if (m.map.size > m.cap) m.map.delete(m.map.keys().next().value!); }
+    return r;
+  }
+  private routeNow(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
     const o0 = this.planner === 'exact' ? opts : { planner: this.planner, ...opts }, o = this.routeReachV1 ? { ...o0, routeReachV1: true } : o0;
     if (this.ground) {
       this.sync(world);
