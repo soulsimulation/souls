@@ -142,7 +142,9 @@ This folder holds one Soul session as separate records, each copied untouched ap
 with \`[omitted]\`. It is **private**: it holds the owner's chat, the agent's reasoning and local paths. Do not attach
 it, or anything quoted from it, to an issue, a pull request or a proof. Write findings in your own words.
 
-Soul: ${m.soul.name ?? m.soul.id} in world ${m.soul.world ?? 'unknown'}. Window: ${new Date(m.window.since).toISOString()} to ${new Date(m.window.until).toISOString()}.
+Soul: ${m.soul.name ?? m.soul.id} in world ${m.soul.world ?? 'unknown'}, collected from the folder the agent ran in
+(\`folder\` in the manifest) at ${m.collectedAt}. Window searched for transcripts: ${new Date(m.window.since).toISOString()}
+to ${new Date(m.window.until).toISOString()}${m.window.padded ? ' (the record\'s first and last entries, widened by 30 minutes before and 10 after)' : ' (as given)'}.
 
 ## Files
 
@@ -240,7 +242,9 @@ export async function collect(o) {
   write('world/end-states.json', ends, 'The end state of every receipt and owner message named in the client record, fetched once when collected.', '`fetchedAt` local wall time; world times inside are world wall ms and ticks');
   if (config) write('world/config.json', config, 'The world\'s /v1/config at collection time: its build and the client it serves.', 'collection time');
   const catalog = readJson(join(at.runtime, 'world-catalog.json'));
-  const skills = [join(cwd, '.claude', 'skills'), join(cwd, '.agents', 'skills')].flatMap((d) => existsSync(d) ? readdirSync(d).filter((s) => existsSync(join(d, s, 'SKILL.md'))).map((s) => { const b = readFileSync(join(d, s, 'SKILL.md')); return { path: join(d, s, 'SKILL.md').slice(cwd.length + 1), sha256: sha(b), version: /version[:\s"]+([0-9]+\.[0-9]+\.[0-9]+)/i.exec(b.toString('utf8'))?.[1] ?? null }; }) : []);
+  // the skill as the agent found it: a project skill, or the served file beside the client
+  const skillFiles = [...[join(cwd, '.claude', 'skills'), join(cwd, '.agents', 'skills')].flatMap((d) => existsSync(d) ? readdirSync(d).map((s) => join(d, s, 'SKILL.md')) : []), join(cwd, 'skill.md'), join(cwd, 'SKILL.md')];
+  const inodes = new Set(), skills = skillFiles.filter((f) => { if (!existsSync(f)) return false; const k = `${statSync(f).dev}:${statSync(f).ino}`; return !inodes.has(k) && inodes.add(k); }).map((f) => { const b = readFileSync(f); return { path: f.slice(cwd.length + 1), sha256: sha(b), version: /version[:\s"]+([0-9]+\.[0-9]+\.[0-9]+)/i.exec(b.toString('utf8'))?.[1] ?? null }; });
   const clientFile = [join(cwd, 'eden.mjs'), join(cwd, '.souls', 'bin', 'eden.mjs')].find((f) => existsSync(f));
   const versionsOut = {
     client: { recorded: [...versions], file: clientFile ? { path: clientFile.slice(cwd.length + 1), sha256: sha(readFileSync(clientFile)), version: /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(clientFile, 'utf8'))?.[1] ?? null } : null },
@@ -252,7 +256,7 @@ export async function collect(o) {
     schema: BUNDLE_SCHEMA, private: true,
     privateNote: 'Holds the owner\'s chat, the agent\'s reasoning and local paths. Never attach it, or text quoted from it, to an issue, a pull request or a proof.',
     collectedAt: new Date().toISOString(), folder: cwd, soul: { id: at.soul, name: at.name ?? null, world: at.world ?? null },
-    window: { since, until, sinceIso: new Date(since).toISOString(), untilIso: new Date(until).toISOString() },
+    window: { padded: o.since === undefined && o.until === undefined, since, until, sinceIso: new Date(since).toISOString(), untilIso: new Date(until).toISOString() },
     files: manifestFiles,
     joins: [
       'By time: every file carries local wall time (client record `at`/`wallStart` in ms; serve log and transcripts as ISO). They share one machine clock.',
