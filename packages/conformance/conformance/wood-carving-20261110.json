@@ -1,0 +1,18 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1704,
+  "reason": "New irreversible same-item woodcarving: bench@1 and wooden-blank@1, productionK2 two exact scoped sweeps/five placed-baked-rendered samples each, zero findings/gaps. Actual registered blank/leaf/bird/totem geometry distinct and contained; authored raw400tri cap unchanged. No older definitions/supplements/budgets altered.",
+  "definitions": [
+    {
+      "ref": "core-wood-carving-bench@1",
+      "hash": "079e73d76a7b96e805309a2beb6e4916fcb910c9fdb8d937e5211c5348a0b91a"
+    },
+    {
+      "ref": "core-wooden-blank@1",
+      "hash": "1265bcc104e22235939862e72996197c6b52af7872dfc4870728cf4021f95239"
+    }
+  ],
+  "samples": 10,
+  "findings": [],
+  "qualificationGaps": []
+}
