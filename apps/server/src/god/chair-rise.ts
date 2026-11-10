@@ -23,7 +23,7 @@ export function createChairRise(h:ChairRiseHost){
   const at=h.model.worldPose(e),level=h.levelAt(at.x,at.z,at.y);return {e,at,level,repetitions:Number(text)};
  }
  function plan(s:EdgeSoul,id:string,action:string,params?:Record<string,unknown>){if(!chair(id)||action!=='practice-rises')return null;const c=check(s,id,params?.text);if('code'in c)return c;
-  return {summary:'Complete '+c.repetitions+' native sit-to-stand repetitions on this same exercise chair.',steps:[{verb:'stand',params:{}},...Array.from({length:c.repetitions},()=>[{verb:'sit',params:{on:id,seconds:1}},{verb:'stand',params:{}}]).flat()]};
+  return {summary:'Complete '+c.repetitions+' native sit-to-stand repetitions on this same exercise chair.',steps:[{verb:'stand',params:{}},...Array.from({length:c.repetitions},()=>[{verb:'sit',params:{on:id,seconds:1}},{verb:'stand',params:{}},{verb:'mars:pose_v1',params:{activity:'nod',seconds:.5,base:'idle',release:true,clear:true}},{verb:'stand',params:{}}]).flat()]};
  }
  function begin(s:EdgeSoul,id:string,action:string,params:Record<string,unknown>){if(!chair(id)||action!=='practice-rises')return;const c=check(s,id,params.text);if('code'in c)return;requested.set(s.soulId,{id,body:s.entityId,soul:s.soulId,name:s.name.slice(0,80),world:h.worldId,tick:h.engine.world.tick,stamp:stamp(c.e),repetitions:c.repetitions,rises:0,seated:false,invalid:false});}
  function valid(q:Work){const s=h.soul(q.soul),e=chair(q.id),b=h.engine.world.entities[q.body];return !!s&&s.entity_id===q.body&&q.world===h.worldId&&!!b?.human&&!!e&&stamp(e)===q.stamp&&!held(q.body)&&!h.denied(e.id,{soulId:s.id,entityId:s.entity_id,name:s.name});}
