@@ -8,7 +8,7 @@
 //     40 m grid so walking changes who you hear), and water/waves near the world's lakes, rivers and sea.
 //   - residents: distant chatter where residents stand together, footsteps where they walk, and the visitor's own
 //     footsteps when the camera walks at eye height.
-//   - implied (release 3.1): things whose def carries no sound still sound like what they are, from their tags — trees
+//   - implied (release 0.6): things whose def carries no sound still sound like what they are, from their tags — trees
 //     rustle (clustered, so a wood is one voice), flags flap, flower beds hum with bees by day, reeds croak at night, ducks
 //     and gulls call, fridges hum; and some sounding things gain a second sound (a fountain also drips and draws pigeons,
 //     a watermill also runs, a windmill also catches the wind). Birds sing from the world's trees, wind rises on open and

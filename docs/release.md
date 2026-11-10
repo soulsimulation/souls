@@ -70,7 +70,7 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 
 | Input | Default | Meaning |
 |---|---|---|
-| `version` | required | Release version for the changelog and tag, such as `4.17`; also ship.sh's `--label` |
+| `version` | required | Release version for the changelog and tag, such as `0.123`; also ship.sh's `--label` |
 | `dry_run` | **true** | `ship.sh --no-switch`: every step for real except the backup and the activation, checked against the build that stays live. Stage skips `install.sh`, so the host's unit files and timers stay as they are. No receipt is needed and publish does not run. The label is `<version>-rehearsal`. The staged release directory and its dependencies stay on the host; a later real ship of the same build reuses them. It deletes nothing on the host except the rehearsal's own scratch directory, which it created |
 | `date` | today (UTC) | The release date compiled into the changelog page and `CHANGELOG.md`. The page is part of the web build, so a real ship on a later day than its dry run of the same head must pass the dry run's date, or the staged build differs and stage refuses to overwrite it |
 | `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
@@ -78,10 +78,10 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
 
 ```sh
-gh workflow run release.yml --ref main -f version=4.17                    # dry run: nothing goes live
-gh workflow run release.yml --ref main -f version=4.17 -f dry_run=false   # the release
+gh workflow run release.yml --ref main -f version=0.123                   # dry run: nothing goes live
+gh workflow run release.yml --ref main -f version=0.123 -f dry_run=false  # the release
 # then, on the GPU workstation, with the dispatched head and run id (the run's summary prints this line):
-node tools/world-launcher/deploy/ship/eyes.mjs --sha <head, 40 hex> --run <run id> --label 4.17
+node tools/world-launcher/deploy/ship/eyes.mjs --sha <head, 40 hex> --run <run id> --label 0.123
 ```
 
 Its jobs:
@@ -110,7 +110,7 @@ it passes the publication check. The ship job checks it again, and ship.sh's pre
 
 ```sh
 node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
-gh release create receipts-v4.17 --prerelease --title "receipts 4.17" release-receipt.json
+gh release create receipts-v0.123 --prerelease --title "receipts 0.123" release-receipt.json
 ```
 
 **Evidence.** The run's artifact `ship-<label>` holds only result files that pass `tools/proof/publication.mjs`
@@ -122,7 +122,7 @@ The historical dual-stage command (`ship-dual-stage.sh`) is no longer run by the
 ### The workstation's eyes
 
 The GitHub runner has no GPU, so Chrome draws WebGL in SwiftShader, and the browser bars measure the emulator, not the
-release (#1438). The first 4.17 dry run on the runner drew the stall page at about 2.7 fps, with 8 gaps over 1 s; the
+release (#1438). The first 0.121 dry run on the runner drew the stall page at about 2.7 fps, with 8 gaps over 1 s; the
 laptop drew about 2300 frames with a 200 ms worst gap against the same live build. Phone arrivals took 15 to 43 s
 there against 2 to 3 s. The same laptop with `--disable-gpu` and SwiftShader fails stall the same way. So the probe,
 the walks, the poster and the stall run on a GPU workstation, over plain HTTPS, with exactly ship.sh's commands and
@@ -198,7 +198,7 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 
 | Option | Meaning |
 |---|---|
-| `--label <version>` | The release, such as `4.16`. Names the output folder and the backups (`pre-r416-production-<time>`). |
+| `--label <version>` | The release, such as `0.123`. Names the output folder and the backups (`pre-r0123-production-<time>`). |
 | `--sha <full sha>` | The commit to ship. It must be HEAD of a clean tree and an ancestor of `origin/main`. |
 | `--dry-run` | Prints every step and its commands. Nothing remote is touched and nothing is written. Exits 1 when a guard would stop a real run. |
 | `--no-switch` | Runs every step for real except the backup and the activation: snapshot, stage, rehearse, the probe (expecting the live build), healthz of the live build, walks, poster, stall and cdn-walk. Nothing goes live, so there is nothing to back up or roll back. `host-activate.sh` never runs, and stage skips `install.sh` (`SIM_RELEASE_NO_INSTALL=1`), so no unit file or timer changes. A resume keeps the mode its run started in (`STEPS.txt`). Receipts are checked when `SHIP_RECEIPTS` is set and never required. `ship-result.json` says `rehearsed` (or `rehearsed-with-failures`); exit 0 only when every step passed |
@@ -431,6 +431,9 @@ switch it on (one last restart).
 
 **What a viewer sees.** The page and API never get a refused connection. Each world's viewer socket drops once while
 that world moves and reconnects by itself; "Reconnecting…" appears only after 3 s (`apps/web/src/viewer-arrival.ts`).
+The page tries again 50 to 150 ms after the 1001 close, and the launcher holds that upgrade until the new world
+answers, so the pause is the world's boot: 3.6 to 5.1 s on 0.123, 4.17 and 4.18 (#1583). The release probe's bar is
+6500 ms. Each drop carries both parts (`retryMs`, `heldMs`), and the probe's report keeps the probe machine's load.
 A page running the previous bundle reloads at once only if the protocol changed; otherwise it swaps bundles after
 the tab has been hidden for a minute (`useSouls.ts`).
 

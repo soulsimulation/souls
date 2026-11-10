@@ -72,7 +72,7 @@ test('settings: quiet by default, music on (the playlist, lane S3), remembered, 
   saveSettings({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, DEFAULT_SETTINGS);   // must not throw
 });
 
-// ---- release 3.1: a fuller soundscape
+// ---- release 0.6: a fuller soundscape
 const fakeModel = (ents: [string, string, [number, number]][], defs: Record<string, unknown>) => ({
   entities: new Map(ents.map(([id, def, p]) => [id, { id, def, in: { parent: 'world' }, params: {}, p }])),
   resolvedDef: (d: string) => defs[d], worldPose: (e: { p: [number, number] }) => ({ x: e.p[0], y: 0, z: e.p[1], s: 1 }), terrain: { sample: () => 0, peek: () => 0 },

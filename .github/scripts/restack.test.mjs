@@ -234,8 +234,10 @@ test('run: an open (unmerged) PR does nothing unless it is a dry run', () => {
 
 test('the workflow runs main\'s copy on merged PRs only, serialized, and never forces a push', () => {
   const yml = readFileSync(new URL('../workflows/restack.yml', import.meta.url), 'utf8');
-  assert.match(yml, /pull_request_target:\n\s+types: \[closed\]/);
+  assert.match(yml, /pull_request:\n\s+types: \[closed\]/);
   assert.match(yml, /github\.event\.pull_request\.merged == true/);
+  assert.match(yml, /gh workflow run restack\.yml --repo "\$REPO" --ref "\$DEFAULT_BRANCH" -f pr="\$PR"/, 'merged PRs only relay to main\'s copy');
+  assert.match(yml, /  restack:\n    if: github\.event_name == 'workflow_dispatch'\n/, 'the work runs only as main\'s dispatched copy');
   assert.match(yml, /group: restack\n\s+cancel-in-progress: false/);
   assert.match(yml, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   const src = readFileSync(new URL('./restack.mjs', import.meta.url), 'utf8');
