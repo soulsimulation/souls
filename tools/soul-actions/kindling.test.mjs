@@ -35,12 +35,12 @@ test('native finite kindling work consumes stock and creates one supported persi
  {op:'place',def:'core/kindling-block@1',name:'occupied-block',p:[x+4,z]},
  {op:'place',def:'core/bowl@2',name:'obstruction',in:{parent:'occupied-block',slot:'out'},p:[0,0]},
  {op:'place',def:'core/bowl@2',name:'bowl',p:[x+.5,z-.5]}]}));await tick(50);
- const ent=n=>[...god.model.entities.values()].find(e=>e.name===n),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
+ const ent=n=>[...god.model.entities.values()].find(e=>e.name===n||(n==='block'&&e.name==='fresh-block')),id=n=>ent(n).id,native=n=>f.host.engine.world.entities[id(n)];
  const bundles=()=>[...god.model.entities.values()].filter(e=>god.model.resolvedDef(e.def)?.name==='core-kindling-bundle');
  const act=(capability,params={})=>accept(f.host,edge.act(soul,{capability,params}));
  const finish=async r=>{ok(r);for(let n=0;n<2000;n++){const end=edge.receipt(soul.soulId,r.receipt.id);if(['completed','failed','replaced'].includes(end.phase))return end;await tick();}assert.fail('finite action did not end');};
  const done=async(cap,params)=>{const r=await finish(await act(cap,params));assert.equal(r.phase,'completed',JSON.stringify(r));return r;};
- const cap='object:'+id('block')+':prepare-kindling';assert.equal(edge.capabilities(soul).find(c=>c.id===cap)?.available,true);
+ let cap='object:'+id('block')+':prepare-kindling';assert.equal(edge.capabilities(soul).find(c=>c.id===cap)?.available,true);
  for(const [name,reason]of [['private-block',/private|access|owner/],['occupied-block',/output surface/]]){const denied=await act('object:'+id(name)+':prepare-kindling');assert.equal(denied.accepted,false);assert.match(JSON.stringify(denied),reason);}
  await done('pick-up:'+id('bowl'));const hands=await act(cap);assert.equal(hands.accepted,false);assert.match(JSON.stringify(hands),/holding|hands/);await done('put-down:here');
  const cut=ok(await act(cap));assert.equal(ent('block').state.stock,1);assert.equal(bundles().length,0);
@@ -48,11 +48,15 @@ test('native finite kindling work consumes stock and creates one supported persi
  await done('stand:here');await tick(20);assert.notEqual(edge.receipt(soul.soulId,cut.receipt.id).phase,'completed');assert.equal(ent('block').state.stock,1);assert.equal(bundles().length,0);
  // This unrelated God edit must remain the next undo target after Soul completion.
  ok(god.act({ops:[{op:'place',def:'core/bench@1',name:'unrelated-bench',p:[-8,-8]}]}));
- ok(god.act({ops:[{op:'move',id:id('unrelated-bench'),p:[-7,-8]}]}));
- const godEdit=god.store.undoable().seq;
  const outbound=ok(await accept(f.host,edge.performBodies(soul,'fixture:ordinary-walk','Walk to the far start',[{verb:'mars:walk_to',params:{x:-20,z:0,level:0}}])));
  assert.equal((await finish(outbound)).phase,'completed');
  assert.ok(Math.hypot(body().pose.p[0]-20,body().pose.p[2])>30);
+ // A fresh source is created only after the far walk: its offer has never entered this actor's menu/cache.
+ const previousBlock=id('block');ok(god.act({ops:[{op:'remove',id:previousBlock},{op:'place',def:'core/kindling-block@1',name:'fresh-block',p:[20,0]}]}));
+ const fresh=id('fresh-block');assert.notEqual(fresh,previousBlock);
+ cap='object:'+fresh+':prepare-kindling';await tick(20);
+ ok(god.act({ops:[{op:'move',id:id('unrelated-bench'),p:[-7,-8]}]}));
+ const godEdit=god.store.undoable().seq;
  const cold=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap,strict:true})}).then(r=>r.json()));
  const work=ok(cold);assert.equal(work.receipt.capability,cap);let active=0,walked=0;
 
