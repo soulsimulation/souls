@@ -33,7 +33,7 @@ export function createPavementChalk(h:PavementChalkHost){
  function plan(soul:EdgeSoul,id:string,action:string,approach:Approach){
   if(!['draw-line','erase-stroke'].includes(action)||!patch(id))return null;const a=ready(soul,id,action);if(a.no)return a.no;
   const p=h.model.worldPose(a.e!),front:[number,number]=[p.x+Math.sin(p.yaw),p.z+Math.cos(p.yaw)],stand=approach(id,soul,front,1.5);if(!stand)return{code:'object.state',reason:'No ordinary reachable standing point is available beside the pavement.'};
-  return{summary:`Completed four seconds ${action==='draw-line'?'drawing the selected line':'erasing only the selected current stroke'}; inspect the actual composition.`,steps:[{verb:'stand',params:{}},{verb:'mars:walk_to',params:{x:stand.p[0],z:stand.p[1],level:stand.level}},{verb:'mars:pose_v1',params:{activity:'garden',seconds:4,prop:'tool',face:[p.x,p.z]}},{verb:'stand',params:{}}]};
+  return{summary:`Completed four seconds ${action==='draw-line'?'drawing the selected line':'erasing only the selected current stroke'}; inspect the actual composition.`,steps:[{verb:'stand',params:{}},{verb:'mars:walk_to',params:{x:stand.p[0],z:stand.p[1],level:stand.level}},{verb:'mars:pose_v1',params:{activity:'chalk',seconds:4,prop:'brush',face:[p.x,p.z]}},{verb:'stand',params:{}}]};
  }
  function onReceipt(r:EdgeReceipt){
   const m=/^object:(.+):(draw-line|erase-stroke)$/.exec(r.capability);if(!m)return;const soul=h.soul(r.soulId),id=m[1],action=m[2];
