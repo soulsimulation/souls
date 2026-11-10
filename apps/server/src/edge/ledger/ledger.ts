@@ -80,7 +80,7 @@ import {EDEN_LIBRARY_CATALOGUE} from '../content/eden-library-catalogue.ts';
 import {isVerificationProbe, PROBE_OWNER} from '../../verification-probe.ts';
 import {tx,afterCommit} from '../comms/store.ts';
 import {PlaceKnowledge} from '../perception/knowledge.ts';
-import {menuStats, countClear, cpuNow, MENU_ORACLE} from './menu-stats.ts';
+import {menuStats, countClear, cpuNow, MENU_ORACLE, PLAN_ONCE, PLAN_ONCE_ORACLE} from './menu-stats.ts';
 import {pageCapabilities, pageObjects, type LoadLevel, type Omitted, type Where} from './listing.ts';
 import {focusFor, focusObjects, focusSig, wants, type MenuFocus} from './focus.ts';
 import {BodyRule, BODY_PATH_SAMPLE_M, type BodyKnobs, type BodySoul, type Posture} from './body-rule.ts';
@@ -164,9 +164,15 @@ type CapabilityProvider=(soul:EdgeSoul,only?:ReadonlySet<string>,places?:Map<str
 export type ServingWarm = {souls: number; failed: number; ms: number; wallMs: number; slices: number; maxStepMs: number; listingMs: number; stopped: boolean};
 /** A serving warm's slice (ms) between turns of the event loop: well under the 100 ms a visitor's frame notices. */
 const SERVING_SLICE_MS = 40;
-/** How long a rich read waits for a serving warm before building its menu itself (ms). Eden 2026's warm took ~2 s on
- *  a development machine and ~4 s on the former production host in one go; slices also allow other requests to run. */
+/** How long a rich read waits for a serving warm (ms). Eden 2026's warm took ~2 s on a development machine and ~4 s on the
+ *  former production host in one go; slices also allow other requests to run. A read waits up to SERVING_WAIT_MS, then
+ *  builds what it needs itself. #1750: during the *boot* warm the wait is SERVING_BOOT_WAIT_MS (1 s) and a boot warm still
+ *  running after it is answered `world.busy` by name (Retry-After 2), for at most SERVING_WAIT_MS of the warm's age; after
+ *  that, or for any other warm (an activities rewarm after a punt install or a statics change), reads wait and then build
+ *  as before. A silent 15 s wait plus a cold build reached the client's 25 s limit after a restart (#1724 candidate A).
+ *  SIM_SERVING_BOOT_WAIT_MS overrides the 1 s (for a measured comparison). */
 export const SERVING_WAIT_MS = 15_000;
+export const SERVING_BOOT_WAIT_MS = Number(process.env.SIM_SERVING_BOOT_WAIT_MS) > 0 ? Number(process.env.SIM_SERVING_BOOT_WAIT_MS) : 1_000;
 const nextTurn = () => new Promise<void>(r => setImmediate(r));
 
 /** #824: how many offers a "nothing matches" refusal names as `alternatives`, and verbs never offered as one. */
@@ -1284,10 +1290,22 @@ export class EdgeLedger implements EdgeLedgerHooks {
    * from itself; otherwise a focused build (`focusFor`) runs only the sections that can produce `id`. Undefined: not offered.
    */
   bindOne(soul: EdgeSoul, id: string): {cap: EdgeCapability; plan: ReturnType<Plans["get"]>} | undefined {
+    // #1770 plan-once: the strict gate's bind answers the act's own bind in the same synchronous turn (one request, before
+    // its first await: no tick, no other request and no fold can run in between), under the same tick and same-tick
+    // signature. Any await ends the turn (the microtask below forgets it), so the act's later binds are built as before.
+    const turn = this.oneTurn, tick = this.mw.world.tick;
+    if (PLAN_ONCE && turn && turn.soulId === soul.soulId && turn.id === id && turn.tick === tick && turn.sig === this.sameTickSig()) {
+      menuStats.one.turn++;
+      if (PLAN_ONCE_ORACLE) {const fresh = this.bindOneRaw(soul, id), a = JSON.stringify(turn.out ? [turn.out.cap, turn.out.plan] : null), b = JSON.stringify(fresh ? [fresh.cap, fresh.plan] : null); if (a !== b) {menuStats.one.oracleMiss++; console.error('[plan-once-oracle] bindOne', soul.soulId, id);}}
+      return turn.out;
+    }
     const c0 = cpuNow(), out = this.bindOneRaw(soul, id); menuStats.one.n++; menuStats.one.cpuUs += cpuNow() - c0;
     if (MENU_ORACLE) {const diff = this.bindOneOracleV1(soul, id, out); if (diff) {menuStats.one.oracleMiss++; console.error('[bind-one-oracle]', soul.soulId, id, diff);}}
+    if (PLAN_ONCE) {const kept = {soulId: soul.soulId, id, tick, sig: this.sameTickSig(), out}; this.oneTurn = kept; queueMicrotask(() => {if (this.oneTurn === kept) this.oneTurn = null;});}
     return out;
   }
+  /** #1770: the last offer bound in this synchronous turn (forgotten at the turn's end). */
+  private oneTurn: {soulId: string; id: string; tick: number; sig: string; out: ReturnType<EdgeLedger['bindOneRaw']>} | null = null;
   private bindOneRaw(soul: EdgeSoul, id: string) {
     const b = this.bindFocus(soul, focusFor(id)), cap = b.caps.find(c => c.id === id);
     return cap ? {cap, plan: b.plans.get(id)} : undefined;
@@ -1820,19 +1838,26 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  instead of building the same caches cold inside one request. A read, like prepareForServing; it never rejects.
    *  A warm asked for while one runs (a punt rewarm during the boot's) starts when that one ends: two never interleave
    *  their slices over the same caches, and reads wait for the last. */
-  warmForServing(o: {sliceMs?: number; pre?: (soul: EdgeSoul) => Generator<void, void, void>; stop?: () => boolean; turn?: () => Promise<void>} = {}): Promise<ServingWarm> {
+  warmForServing(o: {sliceMs?: number; pre?: (soul: EdgeSoul) => Generator<void, void, void>; stop?: () => boolean; turn?: () => Promise<void>; kind?: 'boot' | 'rewarm'} = {}): Promise<ServingWarm> {
     const prev = this.servingGate; let gate: Promise<void> | null = null;
+    this.servingSince = {kind: o.kind ?? 'rewarm', at: performance.now()};
     const run = (async () => { if (prev) await prev; try { return await this.runServingWarm(o); } finally { if (this.servingGate === gate) this.servingGate = null; } })();
     this.servingGate = gate = run.then(() => {});
     return run;
   }
-  /** While a serving warm runs: a promise that settles when it ends, or after `ceilingMs` (then the read builds what it
-   *  needs itself, as without a warm). Null otherwise (nothing to wait for: no extra turn). */
+  /** While a serving warm runs: a promise that settles when it ends, or after `ceilingMs` (then the caller goes on: it
+   *  builds what it needs itself, or during the boot warm's first SERVING_WAIT_MS is answered busy, http.ts servingWait).
+   *  Null otherwise (nothing to wait for: no extra turn). */
   whenServing(ceilingMs = SERVING_WAIT_MS): Promise<void> | null {
     const gate = this.servingGate; if (!gate) return null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     return Promise.race([gate, new Promise<void>(r => { timer = setTimeout(r, ceilingMs); })]).finally(() => clearTimeout(timer));
   }
+  /** The serving warm running now (the latest asked for): whether it is the boot's, and how long ago it was asked for. */
+  servingWarmState(): {kind: 'boot' | 'rewarm'; ageMs: number} | null {
+    return this.servingGate && this.servingSince ? {kind: this.servingSince.kind, ageMs: performance.now() - this.servingSince.at} : null;
+  }
+  private servingSince: {kind: 'boot' | 'rewarm'; at: number} | null = null;
   private servingGate: Promise<void> | null = null;
   private async runServingWarm({sliceMs = SERVING_SLICE_MS, pre, stop, turn = nextTurn}: {sliceMs?: number; pre?: (soul: EdgeSoul) => Generator<void, void, void>; stop?: () => boolean; turn?: () => Promise<void>}): Promise<ServingWarm> {
     const t0 = performance.now(), out: ServingWarm = {souls: 0, failed: 0, ms: 0, wallMs: 0, slices: 0, maxStepMs: 0, listingMs: 0, stopped: false};
