@@ -2,6 +2,7 @@ import {closeContextViews} from './god/context-views.ts';
 import { Attention, unwatchedPace } from './attention.ts';
 import { ClockCatchUp } from './clock-catchup.ts';
 import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
+import { cutOverReminders } from './god/clock-cutover.ts';
 import { bootPhase } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
@@ -178,7 +179,7 @@ if (groundHost && edge) installGroundCapabilities(edge as never, god!, host);
 const engineBridge = god && config.engine === 'mars' && process.env.ENTITY_BRIDGE !== '0' ? installEngineBridge({ host, god, edge }) : undefined;
 // #1649: real time for every world through the one keeper. God worlds got theirs from the bridge (god/world-clock.ts);
 // an authored world (eden, mars, littlemartians) keeps the local time of its migration zone. Not the toy world.
-if (realTimeEnabled() && config.worldKey !== 'toy' && !hasRealClock(host)) installRealClock(host, { zone: () => defaultTimeZone(config.worldSlug ?? config.worldKey), customs: definition.customs, log: (m) => console.log(m) });
+if (realTimeEnabled() && config.worldKey !== 'toy' && !hasRealClock(host)) installRealClock(host, { zone: () => defaultTimeZone(config.worldSlug ?? config.worldKey), customs: definition.customs, log: (m) => console.log(m), onCutOver: (c) => console.log(`world clock: cut-over to real time: ${cutOverReminders(db.db, host.worldId, c)} reminder(s) mapped`) });
 if (god && process.env.BIRTH_LOOKS !== '0') installBirthLooks(host, edge);  // lane LOOKS: new Souls in new worlds get a varied kit look
 if (god) installWorldEnv(host, god, edge);  // R4-LIVE: Souls perceive the god's weather
 if (god) installLightning(god, edge, () => host.engine.world.tick);  // GOD-ENV: Souls see the bolts and hear the thunder
