@@ -2,7 +2,7 @@ import type { DefInput } from '../schemas.ts';
 import creatures from './creatures.json' with { type: 'json' };
 const rabbit = structuredClone(creatures.find(d => d.name === 'core-rabbit')!) as unknown as DefInput;
 const args = structuredClone((rabbit.make as { args: Record<string, unknown> }).args) as { shapes: Record<string, unknown>[]; gait: string };
-for (const s of args.shapes) if (typeof s.segments === 'number') s.segments = Math.min(3, s.segments);
+for (const s of args.shapes) { if (typeof s.segments === 'number') s.segments = Math.min(3, s.segments); if (s.role && s.role !== 'head') { delete s.role; delete s.pivot; } }
 export const GARDEN_RABBIT: DefInput = { ...rabbit, name: 'core-garden-rabbit', version: 1,
  description: 'An opt-in garden rabbit at a fixed authored feeding place. Initially idle and unfed; one completed native feeding from a nearby supplied rabbit-feed box changes this SAME animal to fed and resting, with feeder/source history. Existing kit rabbit geometry and idle/sleep presentation; no new animal AI, roaming body, hunger decay or physiological timing. Inspect rabbitCare facts and normal catalog/live fed state.',
  tags: ['animal', 'rabbit', 'garden-rabbit'], synonyms: ['garden rabbit', 'pet rabbit'],

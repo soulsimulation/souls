@@ -43,7 +43,8 @@ export function createRabbitCare(h: RabbitCareHost) {
       if (h.engine.clearanceAtV1 && h.engine.clearanceAtV1(x, z, level) < .4) return fail('There is no clear standing room beside the feed or rabbit.');
       steps.push({ verb: 'mars:walk_to', params: { x, z, level } }, { verb: 'mars:pose_v1', params: { activity: 'feed', seconds, face: [p.x, p.z] } });
     }
-    steps.push({ verb: 'stand', params: {} });
+    const end = h.model.worldPose(c.target);
+    steps.push({ verb: 'mars:pose_v1', params: { activity: 'nod', seconds: 1, face: [end.x, end.z] } }, { verb: 'stand', params: {} });
     return { summary: 'Offer one supplied portion through completed native feeding; the same rabbit becomes fed and rests.', steps };
   }
   function begin(s: EdgeSoul, id: string, action: string, params: Record<string, unknown>) {
