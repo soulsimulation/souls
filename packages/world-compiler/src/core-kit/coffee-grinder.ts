@@ -1,0 +1,17 @@
+import type {DefInput} from '../schemas.ts';
+const n=(max:number,value=0)=>({type:'number' as const,min:0,max,default:value});
+export const COFFEE_GRINDER:DefInput={schema:'def/1',name:'core-hand-coffee-grinder',version:1,form:'point',category:'object.tool',description:'A portable hand coffee grinder with six supplied bean portions and a three-portion grounds drawer. Four completed seconds grind chosen string amount1/2/3. Two completed seconds dose one retained portion into the exact selected existing washed empty coffee mug within1.2m, restoring its ordinary brewing faculty. Empty hands and accessible supported ground-level tabletops required. Integral beans/grounds, no loose powder custody or scientific mass claim.',tags:['tool','kitchen','item','recorded-item','local-fixture'],make:{kind:'gen',gen:'kit/2',args:{round:0,shapes:[
+ {kind:'box',at:[0,.1,0],size:[.3,.2,.27],tint:'wood'},
+ {kind:'box',at:[0,.22,0],size:[.34,.04,.31],tint:'metal'},
+ {kind:'box',at:[0,.265,-.13],size:[.3,.07,.025],tint:'metal'},
+ {kind:'box',at:[-.15,.265,0],size:[.025,.07,.27],tint:'metal'},
+ {kind:'box',at:[.15,.265,0],size:[.025,.07,.27],tint:'metal'},
+ {kind:'box',at:[0,.06,.16],size:[.25,.04,.12],tint:'metal'},
+ {kind:'box',at:[0,.31,0],size:[.025,.14,.025],tint:'metal'},
+ {kind:'box',at:[.08,.375,0],size:[.18,.025,.025],tint:'metal'},
+ {kind:'box',at:[.16,.40,0],size:[.04,.06,.04],tint:'wood'},
+ ...Array.from({length:6},(_,i)=>({kind:'box',at:[-.09+(i%3)*.09,.27,-.055+Math.floor(i/3)*.09],size:[.065,.045,.045],tint:'beans',when:`@beans>${i}`})),
+ ...Array.from({length:3},(_,i)=>({kind:'box',at:[-.075+i*.075,.09,.16],size:[.065,.04,.09],tint:'grounds',when:`@grounds>${i}`}))
+]}}as DefInput['make'],palette:{wood:'#996a3e',metal:'#4a5557',beans:'#704630',grounds:'#3c2417'},size:{box:[.36,.44,.44]},components:{carryable:{mass:1.1,grips:1}},state:{beans:n(6,6),grounds:n(3),dosed:n(6),grinds:n(6),routineSeconds:n(4,4),lastBy:{type:'string',max:80,default:''},lastMug:{type:'string',max:100,default:''},lastReceipt:{type:'string',max:100,default:''},lastCompletedTick:{type:'number',min:-1,max:1e12,default:-1}},actions:[{name:'grind',label:'Grind chosen finite bean portions (4 seconds)',params:{amount:{type:'string',max:1,default:'1',doc:'String1,2 or3 whole bean portions; grounds drawer capacity3.'}},then:[{op:'set',field:'routineSeconds',value:4}]},{name:'dose',label:'Dose the exact washed coffee mug (2 seconds)',params:{mug:{type:'string',max:100,default:'',doc:'Exact existing coffee mug entity ID; washed, empty, supported and within1.2m.'}},then:[{op:'set',field:'routineSeconds',value:4}]}]as DefInput['actions']};
+export const COFFEE_TABLE:DefInput={schema:'def/1',name:'core-coffee-worktable',version:1,form:'point',description:'A fixed ordinary worktable with three separated surface places for a coffee grinder, existing mug and kettle.',tags:['table','furniture','local-fixture'],make:{kind:'gen',gen:'kit/2',args:{round:0,shapes:[{kind:'box',at:[0,.965,0],size:[1.8,.03,.8],tint:'wood'},{kind:'box',at:[-.65,.475,0],size:[.15,.95,.4],tint:'wood'},{kind:'box',at:[.65,.475,0],size:[.15,.95,.4],tint:'wood'}]}}as DefInput['make'],palette:{wood:'#78614b'},size:{box:[1.8,.98,.8]},components:{surface:{height:.98}},slots:[{id:'out',kind:'surface',p:[0,.99,0],yaw:0,height:.99,capacity:3,accepts:{maxSize:[.6,.5,.5],maxMass:5}}]};
+export default[COFFEE_GRINDER,COFFEE_TABLE];
