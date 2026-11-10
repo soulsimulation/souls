@@ -257,3 +257,12 @@ test('an unused slice budget does not yield to queued material mutations between
   owner.withRender(()=>{assert.equal(f.a.visible,true);assert.equal(f.b.visible,true);assert.equal(only.visible,true);});assert.equal(owner.inspection().fallbackLastRender,1,'the later material mutation still invalidates its copied material');
  }finally{owner.dispose();}
 });
+test('P2 churn: the hidden originals list is reused between draws, cleared after each, and restored on a throwing draw',async()=>{
+ const f=fixture();const owner=new StaticBatchOwner(f.scene);await owner.prepare([f.root],{generation:1});
+ const list=()=>(owner as unknown as {hiddenList:unknown[]}).hiddenList;
+ owner.withRender(()=>assert.equal(f.a.visible,false));const first=list();
+ assert.ok(first.length>0&&first.every(o=>o===null),'no mesh held after the draw');assert.equal(f.a.visible,true);
+ owner.withRender(()=>assert.equal(f.a.visible,false));assert.equal(list(),first,'the same array next draw');
+ assert.throws(()=>owner.withRender(()=>{throw Error('draw failed');}),/draw failed/);
+ assert.equal(f.a.visible,true);assert.equal(f.b.visible,true);assert.ok(list().every(o=>o===null));owner.dispose();
+});

@@ -1276,7 +1276,7 @@ test('measure dryruns for a first-choice place and blocked candidate search', as
   console.log('H1 place measurement: first choice 1 dryrun; blocked near search 6 (four candidates + suggestion + nudge); command loop hard cap 12.');
 });
 
-// R2F: the release 1.1 walk's describe of a 4-floor lighthouse (r11-walk/diag.txt) said "no way in/out"; the room ends
+// R2F: the release 0.1 walk's describe of a 4-floor lighthouse (r11-walk/diag.txt) said "no way in/out"; the room ends
 // were the problem (reach.bad-to in, reach.bad-from out): no floor the engine could stand on.
 test('describe walk says "no floor to stand on in room X (floor n)" for missing standing room, and keeps route wording', async () => {
   const { walkLine } = await import('./cli.mjs');

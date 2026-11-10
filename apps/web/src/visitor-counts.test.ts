@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { arrivalMark, whenMarked } from './arrival-marks.ts';
-import { countEndpoint, countUrl, countedPath, countedReferrer, localHost } from './visitor-counts.ts';
+import { countEndpoint, countUrl, countedPath, countedReferrer, localHost, presyncReferrer, PRESYNC_REFERRER } from './visitor-counts.ts';
 
 const src = (f: string) => readFileSync(new URL(f, import.meta.url), 'utf8');
 
@@ -96,4 +96,18 @@ test('wired: the page, the two pairings and the god approval count; the build de
   // https://simeden.goatcounter.com, or no visit is counted.
   const csp = src('../../server/src/http.ts').match(/c\.header\('Content-Security-Policy', "([^"]*)"\)/)?.[1];
   assert.ok(csp !== undefined); assert.ok(!/(default|connect|img)-src/.test(csp!) || /goatcounter\.com/.test(csp!), csp);
+});
+
+test('#1385: the referrer from before the Clerk presync is counted once, within a minute, as its origin only', () => {
+  const store = new Map<string, string>(), s = { getItem: (k: string) => store.get(k) ?? null, removeItem: (k: string) => { store.delete(k); } };
+  store.set(PRESYNC_REFERRER, JSON.stringify({ r: 'https://news.example/a/b?q=1#h', t: 1000 }));
+  const r = presyncReferrer(s, 5000);
+  assert.equal(r, 'https://news.example/a/b?q=1#h');
+  assert.equal(countedReferrer(r!, 'https://soul.game', ''), 'https://news.example', 'origin only, as any referrer');
+  assert.equal(presyncReferrer(s, 5000), null, 'read once');
+  store.set(PRESYNC_REFERRER, JSON.stringify({ r: 'https://news.example/', t: 1000 }));
+  assert.equal(presyncReferrer(s, 70_000), null, 'stale after a minute'); assert.equal(store.size, 0);
+  store.set(PRESYNC_REFERRER, '{nope'); assert.equal(presyncReferrer(s, 1), null);
+  assert.equal(presyncReferrer(null, 1), null);
+  assert.match(src('../index.html'), /soul\.presync-referrer/, 'the presync writes the same key');
 });

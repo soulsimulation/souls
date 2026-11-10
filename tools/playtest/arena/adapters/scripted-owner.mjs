@@ -7,9 +7,17 @@
 // script: { rules: [{ match, ack?, do: [[eden.mjs args…], …], close?: "done"|"open", result?, supersede? }], unmatched? }
 //   match      case-insensitive regular expression tested against the owner's message text; the first rule that matches wins
 //   ack        reply sent with `ack <id>` (≤140 chars); default "On it."
-//   do         eden.mjs argument lists run in order; "{id}" is replaced by the message id. A step that fails stops the rule.
+//   do         eden.mjs argument lists run in order; "{id}" is replaced by the message id. A `--wait` step that an owner
+//              message ends while its receipt is still open keeps checking that receipt (`receipt <id>` every 2 s) for the rest
+//              of its window (#832); the message is handled on the next turn. A step that is refused or fails
+//              stops the rule, unless the step ends with an options object {"onRefused": "continue"} (default "fail"):
+//              then the refusal is recorded and the next step runs (#828). A refused final step still fails the request:
+//              there is no next step to recover with. "{{prev.<path>}}" in an argument is replaced from the previous
+//              step's JSON output (a refusal's too), e.g. "{{prev.did_you_mean[0].id}}", reading own properties only; a
+//              placeholder that does not resolve fails its step without running it, and that skipped step leaves no JSON.
 //              A `resolve` step keeps its first candidate's id as "{resolved}" for the steps after it, as an agent reads an
-//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run.
+//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run. One
+//              that reads nothing stops the rule, unless it says onRefused "continue", as a refused act can.
 //   close      "done" (default): `result <id> done|failed` from the steps' outcome. "open": leave the request open (the
 //              activity continues in the world) until a later rule supersedes it or the run ends.
 //   supersede  text for `result <old> failed "<text>"` on every request still open when this rule fires (owner redirection)
@@ -36,13 +44,43 @@ export function validateScript(script) {
     for (const k of Object.keys(r ?? {})) if (!['match', 'ack', 'do', 'close', 'result', 'supersede'].includes(k)) errs.push(`${at}.${k} is unknown`);
     if (typeof r?.match !== 'string') errs.push(`${at}.match: a regular expression string`);
     else { try { new RegExp(r.match, 'i'); } catch (e) { errs.push(`${at}.match: ${e.message}`); } }
-    if (!Array.isArray(r?.do) || !r.do.every((s) => Array.isArray(s) && s.length && s.every((a) => typeof a === 'string'))) errs.push(`${at}.do: a list of eden.mjs argument lists`);
-    else if (r.do.some((s) => ['register', 'create', 'pair', 'listen', 'ack', 'result', 'travel'].includes(s[0]))) errs.push(`${at}.do: setup, inbox and travel commands are the adapter's own (use ack/result/close fields)`);
+    if (!Array.isArray(r?.do) || !r.do.every((s) => Array.isArray(s) && stepArgs(s).length && stepArgs(s).every((a) => typeof a === 'string'))) errs.push(`${at}.do: a list of eden.mjs argument lists`);
+    else {
+      if (r.do.some((s) => ['register', 'create', 'pair', 'listen', 'ack', 'result', 'travel'].includes(s[0]))) errs.push(`${at}.do: setup, inbox and travel commands are the adapter's own (use ack/result/close fields)`);
+      r.do.forEach((s, j) => {
+        const o = stepOptions(s);
+        if (o) for (const [k, v] of Object.entries(o)) if (k !== 'onRefused') errs.push(`${at}.do[${j}].${k} is unknown (step options: onRefused)`); else if (!['continue', 'fail'].includes(v)) errs.push(`${at}.do[${j}].onRefused: continue or fail`);
+        for (const a of stepArgs(s)) for (const m of a.matchAll(PREV)) {
+          if (j === 0) errs.push(`${at}.do[0]: ${m[0]} needs a previous step`);
+          if (!PATH.test(m[1])) errs.push(`${at}.do[${j}]: ${m[0]} is not a path like prev.did_you_mean[0].id`);
+        }
+      });
+    }
     if (r?.close != null && !CLOSES.includes(r.close)) errs.push(`${at}.close: done or open`);
     for (const k of ['ack', 'result', 'supersede']) if (r?.[k] != null && (typeof r[k] !== 'string' || !r[k].trim() || r[k].length > 140)) errs.push(`${at}.${k}: 1-140 characters`);
   });
   if (script.unmatched != null && (typeof script.unmatched !== 'string' || script.unmatched.length > 140)) errs.push('script.unmatched: up to 140 characters');
   return errs;
+}
+
+/** A step is eden.mjs arguments, optionally ending with an options object ({onRefused}). */
+const PREV = /\{\{prev\.([^}]*)\}\}/g, PATH = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[\d+\])*$/;
+export const stepOptions = (s) => (s.length && s.at(-1) && typeof s.at(-1) === 'object' && !Array.isArray(s.at(-1)) ? s.at(-1) : null);
+export const stepArgs = (s) => (stepOptions(s) ? s.slice(0, -1) : s);
+/** The previous step's JSON (stdout, else stderr), or null. */
+export function stepJson(r) { for (const t of [r?.stdout, r?.stderr]) { try { const d = JSON.parse(t); if (d && typeof d === 'object') return d; } catch { /* not JSON */ } } return null; }
+/** bindPrev(args, prev) → {args} with every {{prev.<path>}} replaced, or {error} naming the first that does not resolve
+ *  to a string or number. Own properties only: a path never reaches the prototype chain (`prev.constructor.name`). */
+export function bindPrev(args, prev) {
+  let error = null;
+  const out = args.map((a) => a.replace(PREV, (m, path) => {
+    let v = prev;
+    for (const k of path.match(/[^.[\]]+/g) ?? []) v = v !== null && typeof v === 'object' && Object.hasOwn(v, k) ? v[k] : undefined;
+    if (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) return String(v);
+    error ??= `unresolved ${m}${prev ? '' : ' (the previous step printed no JSON)'}`;
+    return m;
+  }));
+  return error ? { error } : { args: out };
 }
 
 /** The first rule whose match fits the text, or null. */
@@ -78,8 +116,20 @@ export function stepOutcome(r, { waited = false } = {}) {
   if (!ongoing) return { ok: false, why: `still ${phase ?? 'open'} after waiting` };
   return { ok: true, phase, ongoing: true };
 }
+/** #832: an owner message ends a `--wait` early, by design, so the agent can read it. The receipt id to keep waiting on
+ *  when that happened and the receipt has not ended, else null. The message itself is handled on the next turn. */
+const ENDED = ['completed', 'failed', 'refused', 'cancelled', 'interrupted', 'replaced'], POLL_MS = 2000;
+export function ownerWokeOpen(r) {
+  const d = stepJson(r), rec = d?.receipt && !d.receipt.error ? d.receipt : null;
+  return r?.code === 0 && d?.ownerMessages?.length && rec?.id && !ENDED.includes(rec.phase) ? rec.id : null;
+}
+/** The window a step's `--wait [s]` asked for, as the CLI applies it (at most 60 s; 60 when no number follows). */
+export function waitWindowSec(args) {
+  const i = args.indexOf('--wait'), n = /^\d+$/.test(args[i + 1] ?? '') ? Number(args[i + 1]) : 60;
+  return Math.min(60, Math.max(1, n));
+}
 /** The offered id a `resolve` step read its words as, or '' when it read none. */
-const firstCandidate = (r) => { try { return JSON.parse(r.stdout).candidates?.[0]?.id ?? ''; } catch { return ''; } };
+export const firstCandidate = (r) => { try { const d = JSON.parse(r.stdout); return (d.candidates ?? d.did_you_mean)?.[0]?.id ?? ''; } catch { return ''; } };
 /** How much of one CLI output a tool result keeps (#371): all of it up to this many characters. It was 4000, which cut
  *  `around` (its route) and `map` (its flags) mid-JSON, so the scorer read output the Soul really got as a broken string. */
 export const OUTPUT_KEEP = 1024 * 1024;
@@ -132,6 +182,7 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
     await cli(['register', state.base]);
     await cli(['create', state.soulName]);
     await cli(['status']);
+    if (process.env.SOUL_RUNS_RESIDENT) await cli(['serve']); // #1096 A6: the candidate arm; every later command goes through it
     say(`Set up ${state.soulName}; waiting for messages.`);
     return done(0);
   }
@@ -152,13 +203,38 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
       save();
     }
     if (id) await cli(['ack', id, clip(rule.ack ?? 'On it.')]);
-    let failed = null;
-    let resolved = '';
-    for (const step of rule.do) {
-      const r = await cli(step.map((a) => (id ? a.replaceAll('{id}', id) : a).replaceAll('{resolved}', resolved)));
-      const o = stepOutcome(r, { waited: step.includes('--wait') });
-      if (!o.ok) { failed = `${step[0]}: ${o.why}`; break; }
-      if (step[0] === 'resolve') { resolved = firstCandidate(r); if (!resolved) { failed = `resolve: nothing on offer reads as "${clip(step[1])}"`; break; } }
+    let failed = null, prev = null, resolved = '';
+    for (const [i, step] of rule.do.entries()) {
+      const args = stepArgs(step), onRefused = stepOptions(step)?.onRefused ?? 'fail';
+      const bound = bindPrev(args.map((a) => (id ? a.replaceAll('{id}', id) : a).replaceAll('{resolved}', resolved)), prev);
+      let o, r = null;
+      if (bound.error) { o = { ok: false, why: bound.error }; prev = null; }
+      else {
+        const waited = args.includes('--wait'), until = Date.now() + waitWindowSec(args) * 1000;
+        r = await cli(bound.args); prev = stepJson(r);
+        // #832: woken by an owner message with the act still going: keep waiting on its receipt for the rest of the window.
+        // A `wait` would return at once while that card is unacknowledged (the world's rule, so "stop" is never slept
+        // through), so check the receipt instead, every POLL_MS, until it ends or the window does.
+        // Not when the woken output already shows the act under way (a seated sit holds its receipt open while seated).
+        const rid = waited && !stepOutcome(r, { waited }).ok ? ownerWokeOpen(r) : null;
+        while (rid && Date.now() + POLL_MS <= until) {
+          await new Promise((ok) => setTimeout(ok, POLL_MS));
+          const q = await cli(['receipt', rid]), rec = stepJson(q);
+          if (q.code !== 0 || !rec?.id) break;
+          r = { code: 0, stdout: JSON.stringify({ receipt: rec }) };
+          if (ENDED.includes(rec.phase)) break;
+        }
+        o = stepOutcome(r, { waited });
+      }
+      if (o.ok) {
+        if (args[0] !== 'resolve') continue;
+        resolved = firstCandidate(r);
+        if (resolved) continue;
+        if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] resolve found nothing, continuing: ${clip(args[1])}`); continue; }
+        failed = `resolve: nothing on offer reads as "${clip(args[1])}"`; break;
+      }
+      if (onRefused === 'continue' && i < rule.do.length - 1) { say(`[scripted-owner] ${args[0]} refused, continuing: ${o.why}`); continue; }
+      failed = `${args[0]}: ${o.why}`; break;
     }
     if (!id) return;
     if ((rule.close ?? 'done') === 'open' && !failed) { state.open.push(id); handled(); say(`Started; ${id} stays open.`); return; }

@@ -1,31 +1,50 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HudMore, MORE_TARGETS, SMALL_SCREEN, collectMoreItems, moreMenu } from './HudMore.tsx';
+import { HudMenu } from './HudMenu.tsx';
+import { PHONE_WIDTH } from './hud-menu.ts';
 
-test('desktop shows no More button (no matchMedia, a desktop matchMedia, or forced off)', () => {
-  assert.equal(renderToStaticMarkup(<HudMore/>), '');
-  assert.equal(renderToStaticMarkup(<HudMore small={false} initialOpen/>), '');
-  const g = globalThis as { matchMedia?: unknown };
-  const prior = g.matchMedia; const asked: string[] = [];
-  g.matchMedia = (q: string) => { asked.push(q); return { matches: false, addEventListener() {}, removeEventListener() {} }; };
-  try { assert.equal(renderToStaticMarkup(<HudMore/>), ''); } finally { g.matchMedia = prior; }
-  assert.deepEqual(asked, [SMALL_SCREEN]);
-});
-
-test('small screens show one More button, closed until tapped', () => {
+// #1391: the screen classes by media query. Desktop: neither query; tablet: a coarse pointer wider than a phone (the
+// small-screen query only); phone: both. `asked` records which queries were made.
+const screens = { desktop: [] as string[], tablet: [SMALL_SCREEN], phone: [SMALL_SCREEN, PHONE_WIDTH] };
+function onScreen<T>(matching: string[], asked: string[], run: () => T): T {
   const g = globalThis as { matchMedia?: unknown };
   const prior = g.matchMedia;
-  g.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} });
-  try {
-    const closed = renderToStaticMarkup(<HudMore/>);
-    assert.equal(closed.match(/class="hud-camera hud-more"/g)?.length, 1);
-    assert.match(closed, /aria-label="More"/);
-    assert.match(closed, /aria-expanded="false"/);
-    assert.doesNotMatch(closed, /role="menu"/);
-  } finally { g.matchMedia = prior; }
-  const open = renderToStaticMarkup(<HudMore small initialOpen/>);
+  g.matchMedia = (q: string) => { asked.push(q); return { matches: matching.includes(q), addEventListener() {}, removeEventListener() {} }; };
+  try { return run(); } finally { g.matchMedia = prior; }
+}
+
+test('desktop shows neither the More button nor the hamburger (no matchMedia, a desktop matchMedia, or forced off)', () => {
+  assert.equal(renderToStaticMarkup(<HudMore/>), '');
+  assert.equal(renderToStaticMarkup(<HudMore small={false} initialOpen/>), '');
+  assert.equal(renderToStaticMarkup(<HudMore small={false} phone initialOpen/>), '');
+  const asked: string[] = [];
+  assert.equal(onScreen(screens.desktop, asked, () => renderToStaticMarkup(<HudMore/>)), '');
+  assert.deepEqual([...new Set(asked)].sort(), [PHONE_WIDTH, SMALL_SCREEN].sort());
+});
+
+test('tablet width shows one More button, closed until tapped, and no hamburger', () => {
+  const closed = onScreen(screens.tablet, [], () => renderToStaticMarkup(<HudMore/>));
+  assert.equal(closed.match(/class="hud-camera hud-more"/g)?.length, 1);
+  assert.match(closed, /aria-label="More"/);
+  assert.match(closed, /aria-expanded="false"/);
+  assert.doesNotMatch(closed, /role="menu"/);
+  assert.doesNotMatch(closed, /class="hud-menu"/);
+  const open = renderToStaticMarkup(<HudMore small phone={false} initialOpen/>);
   assert.match(open, /aria-expanded="true"/);
   assert.match(open, /role="menu"/);
+});
+
+test('phone width shows the hamburger instead of More, closed until tapped', () => {
+  const closed = onScreen(screens.phone, [], () => renderToStaticMarkup(<HudMore/>));
+  assert.equal(closed.match(/class="hud-menu"/g)?.length, 1);
+  assert.match(closed, /aria-label="Menu"/);
+  assert.match(closed, /aria-expanded="false"/);
+  assert.match(closed, /data-open="false"/);
+  assert.doesNotMatch(closed, /hud-more/);
+  const open = renderToStaticMarkup(<HudMenu initialOpen/>);
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /data-open="true"/);
 });
 
 test('open/close: the button toggles; Escape, a tap outside and an item close it', () => {

@@ -81,8 +81,12 @@ export function createWorldOrbitControls(camera: PerspectiveCamera,canvas: HTMLC
   if(context.mode==='follow'){controls.minDistance=FOLLOW_NEAR;controls.maxDistance=FOLLOW_MAX;}
   if(target){controls.target.copy(target);camera.position.copy(position);camera.quaternion.copy(rotation);}
   if(onUserInput){
+    // #1316: only a change inside an OrbitControls gesture (its start..end: a wheel step, a drag, a pinch) is the viewer's.
+    // A held button elsewhere on the page (a slider, selected text) leaves a capture that a frame's follow update must not
+    // be read through: Follow now decouples on a pull out, so a misread is no longer harmless.
+    let gesture=false;controls.addEventListener('start',()=>{gesture=true;});controls.addEventListener('end',()=>{gesture=false;});
     controls.addEventListener('change',()=>{
-      if(!inputBefore||context.mode!=='follow')return;
+      if(!inputBefore||!gesture||context.mode!=='follow')return;
       const before=inputBefore;inputBefore=null;
       const after=camera.position.clone().sub(controls.target);onUserInput(before,after);
     });

@@ -45,6 +45,10 @@ relax budgets, samples or gap checks to make a sweep pass.
 | `office-desk-20261028.json` | `core-office-desk@2` (no baked scenery chairs): one construction-view draw overrun |
 | `soul-actions-20261101.json` | Soul Actions 1-44 defs over a gallery triangle or draw budget, pinned to their 2026-11-01 revisions |
 | `library-budgets-music-20261105.json` | in-budget music revisions (drum kit, mic stand, jukebox @2); pins nothing |
+| `library-budgets-water-20261105.json` | in-budget water and garden revisions (garden fountain @2, watering can @3); pins nothing |
+| `library-budgets-openings-20261105.json` | in-budget curtained window @2, drawer chest @3, bell @3; pins bell@3's construction-view overruns |
+| `library-budgets-tea-20261105.json` | in-budget kettle @3 and cup @3; pins nothing |
+| `juggling-balls-20261105.json` | `core-juggling-balls@1` (three balls carried as one thing; the `juggling` tag offers `juggle:<id>`); pins nothing |
 | `openings-20261105.json` | `core-tent@2` and `core-field-gate@1` (openings worked by hand); pins nothing |
 | `chalk-20261105.json` | `core-chalk-square@1` (pavement chalk on the painting faculty); pins nothing |
 | `record-player-20261105.json` | the new record player (#431, 368 triangles); pins nothing |
@@ -57,6 +61,7 @@ relax budgets, samples or gap checks to make a sweep pass.
 | `litter-20261106.json` | `core-bin@2`, `core-wheelie-bin@2` (bins open at the top on the container faculty) and `core-wrapper@1` (litter); pins nothing |
 | `deck-20261106.json` | `core-rack-beam@4` (step-ledge joist seats), `core-deck-joist@1` and `core-plywood-sheet@2` (bearing connectors, a floor) (#694); pins nothing |
 | `stairs-20261106.json` | `core-rack-beam@5` (ledge seats take a stair hook), `core-deck-stair@1` and `core-deck-stair-tread@1` (stair hook, tread seats) (#695); pins nothing |
+| `books-20261105.json` | `core-lectern@2` and `core-notebook-stand@1` (#428): `core-lectern@1`'s geometry, so its draw overruns |
 
 Known findings are documented, not fixed: published revisions are immutable so existing worlds keep their geometry.
 Repair a range or budget in a new revision and pin what remains.

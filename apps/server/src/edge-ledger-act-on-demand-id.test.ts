@@ -36,7 +36,7 @@ test('Eden 2026: acting on the far-place id that resolve offered walks there, as
   const target=w.bridge.nav.thing('region-harbour-lighthouse')!,goal=w.bridge.nav.goal(target,[start[0],start[2]])!;assert.ok(goal);
   const a = await accept(w.host, Promise.resolve(w.edge.act(w.soul, { capability: would!, clientRef: 'lh-1' }))) as Act;
   assert.equal(a.accepted, true, `${would} accepted (${a.code ?? ''} ${a.reason ?? ''})`);
-  assert.deepEqual(new Set(w.edge.capabilities(w.soul).map((c) => c.id)), listed, 'the listing is unchanged');
+  assert.deepEqual(new Set(w.edge.capabilities(w.soul).map((c) => c.id)), new Set([...listed, 'stop:current']), 'the listing is unchanged but for the stop of the walk now under way (#1381)');
   const arrive=async(out:Act)=>{assert.equal(out.accepted,true,JSON.stringify(out));const tick=w.host.engine.world.tick;let phase='accepted';while(['accepted','started'].includes(phase)&&w.host.engine.world.tick-tick<600*20){await w.settle(20);phase=w.edge.receipt(w.soul.soulId,out.receipt!.id)!.phase;}assert.equal(phase,'completed');const p=body().pose.p;assert.ok(Math.hypot(p[0]-goal.p[0],p[2]-goal.p[1])<1.5,JSON.stringify({p,goal}));assert.equal(body().human?.level??0,goal.level);return [...p];};
   const walked=await arrive(a);
   body().pose.p=[...start] as [number,number,number];await w.settle(2);

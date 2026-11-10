@@ -6,12 +6,16 @@
 # the single `ci-ok` check. The full Modal gate still qualifies releases (release.yml); CI is the per-PR check.
 # CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (qualify, smoke) only for a ready PR
 # labelled merge:ready or ci:run; otherwise it runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs
-# were selected. Adding either label requests the run (ci-request.yml dispatches this workflow with `pr`), as does
-# `gh workflow run ci.yml --ref <branch> -f pr=<n>`. A requested run is scoped by the PR's paths, not full scope.
+# were selected. Adding either label starts a fresh pull_request run with the window open: the merge queue reads required
+# checks from that event, so a green dispatch never clears a deferred ci-ok. It queues behind a run in progress, cancels
+# nothing, and does no heavy work if that run passes at the same head. Any other label does nothing: its run gets a group of
+# its own, so it cancels nothing, and every job skips with no runner. A skipped required check reads as a pass, so ci-ok is
+# named differently in that run and can never replace a real result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still
+# runs a PR's path-scoped CI by hand, but its checks don't count for the queue.
 name: ci
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   merge_group:
   push:
     branches: [main]
@@ -24,13 +28,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' }}
 env:
   # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
   SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
 jobs:
   scope:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -52,10 +57,11 @@ jobs:
       # heavy work is done (never re-run a passing check on the same tree).
       - id: green
         name: Already green at this head
-        if: github.event_name == 'workflow_dispatch' && inputs.pr != ''
+        if: github.event.action == 'labeled' || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
       - id: scope
         name: Pick jobs from changed paths
         env:
@@ -70,18 +76,27 @@ jobs:
 
   # Fast, dependency-free checks of the repo's own tooling; always runs.
   repo:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
+      # #1462: a removed or renamed gate test is declared in tools/test-harness/renames.json in the same change, and a
+      # newly skipped one in quarantine.json, so a release never blocks on an intended rewrite (docs/testing/remote-gate.md#renames)
+      - name: Gate renames and skips declared
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node .github/scripts/gate-renames.mjs --base "$BASE" --head HEAD
       - name: Media manifest, CI scope, proof, merge train, restack, hooks, changelog and guard tests
         run: >-
           node --test --test-concurrency=1
           tools/assets/manifest.test.mjs
           tools/assets/mars-web.test.mjs
           .github/scripts/ci-scope.test.mjs
+          .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
           .github/scripts/guards.test.mjs
@@ -139,6 +154,7 @@ jobs:
         env:
           CHECK_KIND: ${{ matrix.kind }}
           SERVER_SHARD: ${{ matrix.shard }}
+          GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
           case "$CHECK_KIND" in
@@ -159,11 +175,30 @@ jobs:
               pnpm test:mars
               ;;
             web)
-              # V4-web: every apps/web unit test, TSX included
+              # V4-web: every apps/web unit test, TSX included. The root build first, as V2-build-root does before V4 in
+              # the gate: docs-site.test.ts checks its files and skips without it (#1463: a skip is not proof)
+              pnpm --filter @souls/web build
               bash tools/test-harness/web-suite.sh
               ;;
+            docs-reference)
+              # #898: the generator of the reference pages (docs/site actions, api, mcp) runs, and writes all the server answers
+              node --test --test-concurrency=1 tools/docs/generate.test.mjs
+              ;;
             launcher)
-              # V3-launcher-unit; launcher.test.mjs takes its ports from LAUNCHER_TEST_PORT_BASE (default 6200)
+              # V3-launcher-unit; each test file takes a free block of ports (apps/server/test/test-port.ts).
+              # restic for backup-restic.test.mjs, the same pinned release binary the gate's image installs
+              # (modal_suite.py); without it that test skips (#1463: a skip is not proof). x86_64 only; elsewhere it skips
+              # and the release gate runs the step on Modal.
+              if [ "$(uname -m)" = x86_64 ] && ! command -v restic >/dev/null; then
+                mkdir -p "$RUNNER_TEMP/bin"
+                # #1507: the release CDN 504s at times; retry with backoff, and still fail loudly once retries run out
+                curl -fsSL --connect-timeout 20 --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/restic.bz2" \
+                  https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 \
+                  || { echo "::error::restic download failed after 5 retries (#1507); backup-restic.test.mjs would only skip, so this job fails"; exit 1; }
+                echo "3d4d43c169a9e28ea76303b1e8b810f0dcede7478555fdaa8959971ad499e324  $RUNNER_TEMP/restic.bz2" | sha256sum -c -
+                bunzip2 -c "$RUNNER_TEMP/restic.bz2" > "$RUNNER_TEMP/bin/restic" && chmod 755 "$RUNNER_TEMP/bin/restic"
+                export PATH="$RUNNER_TEMP/bin:$PATH"; restic version
+              fi
               node --test --test-concurrency=1 tools/world-launcher/*.test.mjs
               ;;
             client-cli)
@@ -182,7 +217,10 @@ jobs:
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
               ;;
             server)
-              node --input-type=module <<'NODE'
+              # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay
+              # corpus included; both always run, either failing fails the job.
+              server=0
+              node --input-type=module <<'NODE' || server=$?
           import { spawnSync } from 'node:child_process';
           import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';
           const all = serverTestFiles(), shard = Number(process.env.SERVER_SHARD);
@@ -193,6 +231,9 @@ jobs:
           const a = run(parallel, SERVER_TEST_CONCURRENCY), b = run(serial, 1);
           process.exit(a || b);
           NODE
+              god=0
+              if [ "$GOD_SKILL" = true ]; then node --test --test-concurrency=1 tools/god-skill/*.test.mjs tools/god-skill/lib/*.test.mjs tools/god-skill/scripts/*.test.mjs tools/god-skill/e2e/*.test.mjs || god=$?; fi
+              exit $(( server || god ))
               ;;
             *) echo "unknown check kind: $CHECK_KIND"; exit 1 ;;
           esac
@@ -248,9 +289,11 @@ jobs:
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
   # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
   ci-ok:
+    # Skipped on another label's event, under another name: a skipped `ci-ok` would read as a pass over a deferred one.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready') && 'ci-ok' || 'other-label' }}
     runs-on: ubuntu-latest
     needs: [scope, repo, qualify, smoke]
-    if: always()
+    if: always() && (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready')
     steps:
       - name: Full CI deferred
         if: needs.scope.outputs.deferred == 'true'
