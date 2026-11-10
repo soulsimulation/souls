@@ -40,17 +40,18 @@ function meet(seed: string, pass: boolean, delay: number) {
   const down = walk(e, 'h_down', cx - 1.5, cz + RUN + 1.5, 0); for (let k = 0; k < delay; k++) e.step();
   const up = walk(e, 'h_up', cx + GAP + 1, cz + RUN + 2.2, 2), copy = factory.restore(e.snapshot()) as any, mids: any[] = [];
   const ends: Record<string, any> = {}, run: Record<string, number> = { h_up: 0, h_down: 0 }, longest: Record<string, number> = { h_up: 0, h_down: 0 };
-  let climbersWaiting = 0, jump = 0;
+  let climbersWaiting = 0, jump = 0; const refused: string[] = [];
   for (let t = 0; t < 2500 && !(ends.up && ends.down); t++) {
     const before: Record<string, number[]> = { h_up: [...e.world.entities.h_up.pose.p], h_down: [...e.world.entities.h_down.pose.p] };
-    for (const p of e.step().programs) { if (p.id === up && p.kind !== 'step') ends.up ??= p; if (p.id === down && p.kind !== 'step') ends.down ??= p; }
+    const st = e.step(); for (const r of st.refusals ?? []) refused.push(`${t} ${r.code} ${JSON.stringify(r.subjects ?? [])}`);
+    for (const p of st.programs) { if (p.id === up && p.kind !== 'step') ends.up ??= p; if (p.id === down && p.kind !== 'step') ends.down ??= p; }
     copy.step(); for (const m of mids) m.step();
     if (t % 100 === 50 && t < 700) mids.push(factory.restore(e.snapshot()));   // snapshots taken while one climber backs off or holds
     for (const id of ['h_up', 'h_down']) { const q = e.world.entities[id].pose.p, d = Math.hypot(q[0] - before[id][0], q[1] - before[id][1], q[2] - before[id][2]);
       jump = Math.max(jump, d); run[id] = d < 1e-6 && !(id === 'h_up' ? ends.up : ends.down) ? run[id] + 1 : 0; longest[id] = Math.max(longest[id], run[id]); }
     if (e.world.entities.h_up.human.activity === 'climb-wait' && e.world.entities.h_down.human.activity === 'climb-wait') climbersWaiting++;
   }
-  return { e, copy, mids, ends, longest, jump, climbersWaiting };
+  return { e, copy, mids, ends, longest, jump, climbersWaiting, refused };
 }
 for (const [name, delay] of [['A1 two climbers head-on from the adjacent flights', 40], ['A2 a walker waiting at the upper entry with no room on the landing', 0]] as const) {
   test(`#1722 ${name}: without stair-pass/1 both wait for the blocked-walk bound (the fault)`, () => {
@@ -66,7 +67,55 @@ for (const [name, delay] of [['A1 two climbers head-on from the adjacent flights
     assert.ok(r.climbersWaiting < 200, `both climbers waited on their flights ${r.climbersWaiting} ticks`);
     assert.ok(r.jump <= 0.2, `largest one-tick move ${r.jump.toFixed(3)} m`);
     assert.deepEqual(hh(r.e), []);
+    assert.deepEqual(r.refused, [], 'the engine refuses no move: the back-down\'s last step reaches the entry as a climb');
     assert.equal(r.copy.stateHash(), r.e.stateHash(), 'a restored snapshot continues alike');
     for (const m of r.mids) assert.equal(m.stateHash(), r.e.stateHash(), 'a snapshot taken mid-pass restores and continues alike');
   });
 }
+
+// Review of #1723: a three-flight switchback with tight landings at both ends of the middle flight. Up goes ground to top and
+// Down top to ground. Neither landing has room to pass, so a pass-back cannot let the other through. The bound must still end
+// both walks: no pass-back the other way for a body that already backed down for this one, and no second pass-back by the same
+// walk for the same body. Before that rule the two traded pass-backs every hold (1200 ticks) and neither walk ever ended.
+// Getting both through needs a retreat over more than one flight (Known limits).
+const H3 = 8.55;
+function tower(seed: string, pass: boolean) {
+  const set = { e_house: { surfaces: [
+    { id: 'h:ground', level: 0, y: 0, obb: { c: [cx, cz], half: [6, 6], yaw: 0 } },
+    { id: 'h:l1', level: 1, y: H1, obb: { c: [cx + GAP / 2, cz - 0.45], half: [GAP / 2 + LW, 0.55], yaw: 0 } },
+    { id: 'h:l2', level: 2, y: H2, obb: { c: [cx + 1.5 * GAP, cz + RUN + 0.45], half: [GAP / 2 + LW, 0.55], yaw: 0 } },
+    { id: 'h:top', level: 3, y: H3, obb: { c: [cx + GAP, cz - 1.8], half: [1.5, 1.3], yaw: 0 } }], solids: [],
+    links: [
+      { id: 'h:lower', kind: 'stairs', from: { level: 0, p: [cx, cz + RUN], y: 0 }, to: { level: 1, p: [cx, cz - 0.3], y: H1 }, width: 0.9, heading: -Math.PI / 2, path: flight(cx, cz + RUN, 0, cz - 0.1, H1), usable: true },
+      { id: 'h:mid', kind: 'stairs', from: { level: 1, p: [cx + GAP, cz - 0.3], y: H1 }, to: { level: 2, p: [cx + GAP, cz + RUN + 0.3], y: H2 }, width: 0.9, heading: Math.PI / 2, path: flight(cx + GAP, cz - 0.1, H1, cz + RUN + 0.1, H2), usable: true },
+      { id: 'h:upper', kind: 'stairs', from: { level: 2, p: [cx + 2 * GAP, cz + RUN + 0.3], y: H2 }, to: { level: 3, p: [cx + 2 * GAP, cz - 0.8], y: H3 }, width: 0.9, heading: -Math.PI / 2, path: flight(cx + 2 * GAP, cz + RUN + 0.1, H2, cz - 0.6, H3), usable: true }] } } as unknown as WorldEditV1['set'];
+  const g = emptyGround(2000); g.extent = [-200, -1000, 1800, 1000];
+  const e = factory.create(factory.genesis(seed)) as any;
+  e.installGroundV1(groundFact(g, 1, { paged: true }));
+  const ev: WorldEditV1 = { contract: 'world-edit/1', seq: 1, hash: '', levels: [{ id: 1, y: H1, label: 'l1' }, { id: 2, y: H2, label: 'l2' }, { id: 3, y: H3, label: 'top' }], set, assets: {} } as never; ev.hash = nextEntityPhysics(undefined, ev).hash; e.applyWorldEditV1(ev);
+  e.configureRuntimePolicy({ sleepBlockTicks: 1200, bodyStepGuardV1: true, refusalSettleV1: true, stairWayV1: true, stairLandingClearanceV1: true, concurrentLinkEgressV1: true, occupiedLinkRoutingV1: true, ...(pass ? { stairPassV1: true } : {}) } as never);
+  return e;
+}
+function crossTower(seed: string, pass: boolean, delay: number) {
+  const e = tower(seed, pass);
+  e.spawnHuman({ id: 'h_up', label: 'u', soul: 's_u' }); assert.ok(e.relocateHumanV1('h_up', [cx, cz + RUN + 0.6]));
+  e.spawnHuman({ id: 'h_down', label: 'd', soul: 's_d' }); assert.ok(e.relocateHumanV1('h_down', [cx + 2, cz + RUN + 1]));
+  walk(e, 'h_down', cx + GAP, cz - 2.4, 3); for (let k = 0; k < 4000 && e.programOf('h_down'); k++) e.step();
+  assert.equal(e.world.entities.h_down.human.level, 3, 'the descender starts at the top');
+  const down = walk(e, 'h_down', cx - 1.5, cz + RUN + 1.5, 0); for (let k = 0; k < delay; k++) e.step();
+  const up = walk(e, 'h_up', cx + GAP, cz - 2.4, 3), ends: Record<string, any> = {}, refused: string[] = [], backs = { h_up: 0, h_down: 0 } as Record<string, number>;
+  for (let t = 0; t < 6000 && !(ends.up && ends.down); t++) {
+    const was = { h_up: e.world.entities.h_up.human.activity, h_down: e.world.entities.h_down.human.activity } as Record<string, string>;
+    const st = e.step(); for (const r of st.refusals ?? []) refused.push(`${t} ${r.code}`);
+    for (const p of st.programs) { if (p.id === up && p.kind !== 'step') ends.up ??= { t, ...p }; if (p.id === down && p.kind !== 'step') ends.down ??= { t, ...p }; }
+    // a back-down starts when an ascender turns to climb-down (or a descender to climb-up) on the middle flight
+    for (const id of ['h_up', 'h_down']) { const now = e.world.entities[id].human.activity; if (now === (id === 'h_up' ? 'climb-down' : 'climb-up') && was[id] !== now) backs[id]++; }
+  }
+  return { e, ends, refused, backs };
+}
+for (const delay of [0, 120, 240]) test(`#1722 review: tight landings at both ends of a middle flight (delay ${delay} ticks): under stair-pass/1 the two never trade pass-backs; the bound ends both walks, with no refusal and no overlap`, () => {
+  const off = crossTower(`tower-off-${delay}`, false, delay), on = crossTower(`tower-on-${delay}`, true, delay);
+  for (const r of [off, on]) { assert.equal(r.ends.up?.code, 'route.blocked', JSON.stringify(r.ends.up)); assert.equal(r.ends.down?.code, 'route.blocked'); assert.deepEqual(r.refused, []); assert.deepEqual(hh(r.e), []); }
+  assert.ok(on.ends.up.t < off.ends.up.t + 600, `the bound ends both walks (on ${on.ends.up.t} ticks, off ${off.ends.up.t})`);
+  assert.ok(on.backs.h_up + on.backs.h_down <= 1, `at most one back-down in all (${JSON.stringify(on.backs)})`);
+});

@@ -38,16 +38,17 @@ function meet(seed: string, pass: boolean) {
   assert.equal(e.world.entities.h_down.human.level, 2, 'the descender starts upstairs');
   const up = walk(e, 'h_up', cx + GAP + 1, cz + RUN + 2.2, 2), down = walk(e, 'h_down', cx - 1.5, cz + RUN + 1.5, 0);
   const ends: Record<string, any> = {}, copy = factory.restore(e.snapshot()) as any;
-  let both = 0, longest = 0, run = 0, jump = 0;
+  let both = 0, longest = 0, run = 0, jump = 0; const refused: string[] = [];
   for (let t = 0; t < 3000 && !(ends[up] && ends[down]); t++) {
     const before = ['h_up', 'h_down'].map((id) => [...e.world.entities[id].pose.p]);
-    for (const p of e.step().programs) if ((p.id === up || p.id === down) && p.kind !== 'step' && !ends[p.id]) ends[p.id] = { t, ...p };
+    const st = e.step(); for (const r of st.refusals ?? []) refused.push(`${t} ${r.code} ${JSON.stringify(r.subjects ?? [])}`);
+    for (const p of st.programs) if ((p.id === up || p.id === down) && p.kind !== 'step' && !ends[p.id]) ends[p.id] = { t, ...p };
     copy.step();
     ['h_up', 'h_down'].forEach((id, i) => { const q = e.world.entities[id].pose.p; jump = Math.max(jump, Math.hypot(q[0] - before[i][0], q[1] - before[i][1], q[2] - before[i][2])); });
     const still = ['h_up', 'h_down'].every((id, i) => { const q = e.world.entities[id].pose.p; return Math.hypot(q[0] - before[i][0], q[1] - before[i][1], q[2] - before[i][2]) < 1e-6; });
     run = still ? run + 1 : 0; longest = Math.max(longest, run); if (still) both++;
   }
-  return { e, copy, ends, up, down, longest, jump, hh: hh(e) };
+  return { e, copy, ends, up, down, longest, jump, hh: hh(e), refused };
 }
 
 test('#1722 without stair-pass/1 a descender and a walker waiting at its flight end wait for each other until the blocked-walk bound ends both walks (the fault)', () => {
@@ -62,5 +63,6 @@ test('#1722 under stair-pass/1 the waiting walker steps aside, clear of both fli
   assert.ok(r.longest < 200, `both stood still for ${r.longest} ticks, under 10 s`);
   assert.ok(r.jump <= 0.2, `largest one-tick move ${r.jump.toFixed(3)} m`);
   assert.deepEqual(r.hh, []);
+  assert.deepEqual(r.refused, [], 'the engine refuses no move');
   assert.equal(r.copy.stateHash(), r.e.stateHash(), 'a restored snapshot continues alike');
 });
