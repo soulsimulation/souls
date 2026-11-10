@@ -109,7 +109,9 @@ switch independent. A previously saved master mute migrates to both switches off
   When daylight saving ends, the local clock, and so the world's, goes back an hour once.
 - **Time setter on real time.** `POST /v1/god/env` on a production world (the deploy's marker `SIM_STAGE`: the keeper
   takes it from its unit, `sim-worlds@<stage>`, or its stage link's name, and the launcher passes it to every world;
-  `production` and `legacy` are production) refuses `timeOfDay`
+  `production` and `legacy` are production. It fails closed: with no stage known, as under an older keeper that
+  `activate.sh --reload` keeps running, the launcher marks a world without dev auth `production`, and a world with no
+  `SIM_STAGE` is production unless `DEV_AUTH=1` or its `PUBLIC_URL` is local or unset) refuses `timeOfDay`
   (`time.real-clock`: preview another hour in the viewer or with `look --hour`) and a speed (`timeScale` > 0,
   `time.accelerated-production`); pausing (`timeScale: 0`) and resuming (`realTime: true`) stay allowed. On a dev world
   a set hour or speed puts the world on the dev-only accelerated clock (`time.clock: 'accelerated'`, as playtests need);
