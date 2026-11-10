@@ -1,0 +1,9 @@
+# Three-waypoint field map
+
+Place `core/field-map@1`. Survey1/2/3 takes a short label and two completed stationary native seconds, remembering the Soul's actual location/floor and credit on the same map. Survey can use a nearby set-down map on the same floor or a map held by that Soul. A later completed survey deliberately replaces only that pin. Interrupted or changed-map/pin work preserves the prior saved place.
+
+Pick up the map before selecting return1/2/3. The existing native navigator walks to the saved historical point; blocked or interrupted walking is never forced through and never counts. A completed selected native leg updates the completed-return count and destination/participant. Pin floor existence, current custody/access and exact map/pin/body/world are rechecked. The exact field-map admission preserves these actions while its ordinary built facade is retired as engine-owned; no other carried object's context or admission is changed.
+
+Normal current `inspect` exposes `state.fieldMap` with all three labels, coordinates, surveying makers, requirements and last completed return. The same entity/state survives ordinary pickup/carry/putdown and persistence. There is no generic reader repair, live foreign location tracking, drawn terrain/route, compass sensor or guarantee that an old place remains reachable. Survey is a short stationary observation, not a writing/contact animation. Native rest, navigation and custody remain authoritative.
+
+[Canonical direction](https://github.com/soulsimulation/souls/blob/647d04a5ce5621717c2fad78c153d082e3dffcb2/docs/design/soul-actions-direction.md): breadth and basic coherence; approximate grips are sufficient. Mandatory checks and Claude-only stewardship remain. Named additive God hooks require serial integration with other action PRs.

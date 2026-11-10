@@ -107,6 +107,8 @@ export type ActuatorHost = {
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, as native steps; the world changes when the receipt completes. */
+  fieldMap?(soul:EdgeSoul,thing:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
+  fieldMapBegun?(soul:EdgeSoul,thing:string,action:string,params:Record<string,unknown>):void;
   repair?(soul: EdgeSoul, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
 };
 export type Thing = { id: string; name: string; def: StoredDef; state: Record<string, unknown>; params: Record<string, unknown> };
@@ -339,6 +341,12 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     if (!/^[a-z][a-z0-9_-]{0,39}$/.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
+      // A carried field map retains its actions even when the ordinary built facade is retired as engine-owned.
+      // This exact definition observes live native custody; it does not restore other removed objects.
+      if(s.removed&&s.key&&def.name==='core-field-map'&&def.version===1){
+        const denied=host.access?.(s.key,ctx.soul)??host.busy?.(s.key,a.name)??host.policy?.(s.key,ctx.soul,a.name);if(denied)return denied;
+        const map=host.fieldMap?.(ctx.soul,s.key,a.name,params);if(map)return 'code'in map?map:null;
+      }
       if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
@@ -348,6 +356,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
       if(host.deferContacts&&a.name==='close'&&def.components.opening&&s.key&&host.contactPlan?.(ctx.soul,s.key,a.name)?.noRoom)return {code:'contact.no-room',reason:'There is nowhere to stand clear of it once it is shut.'};
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
+      const fieldMap=s.key&&def.name==='core-field-map'&&def.version===1?host.fieldMap?.(ctx.soul,s.key,a.name,params):null;if(fieldMap)return 'code'in fieldMap?fieldMap:null;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
@@ -366,6 +375,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
       validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
+        const fieldMap=s.key&&def.name==='core-field-map'&&def.version===1?host.fieldMap?.(ctx.soul,s.key,a.name,params):null;if(fieldMap&&!('code'in fieldMap))return{state:s,result:{action:a.name,summary:fieldMap.summary},bodies:[{label:a.label,steps:fieldMap.steps}]};
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
@@ -407,6 +417,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
+    const fieldMap=t.def.name==='core-field-map'&&t.def.version===1?host.fieldMap?.(soul,id,a.name,input.params as Record<string,unknown>|undefined):null;if(fieldMap){if(!('code'in fieldMap))host.fieldMapBegun?.(soul,id,a.name,(input.params??{}) as Record<string,unknown>);return out;}
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
