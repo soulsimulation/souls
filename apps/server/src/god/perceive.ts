@@ -110,6 +110,7 @@ export type PerceiveHost = {
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
+  glassHarp?:import('./glass-harp.ts').GlassHarp;
   tea?: { plan(soul: { entityId: string }, id: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** #438 (harvest.ts): picking from a planter into a basket or a vase. */
   harvest?: { plan(soul: { entityId: string }, id: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
@@ -143,6 +144,8 @@ export class GodPerceive {
     return o;
   }
   private objs: { kindOf(k: string): unknown; register(k: unknown): void } | null = null;
+  /** #1751: set while the object framework builds a whole menu (see wrapCapabilities). */
+  private wholeMenu = false;
   /** R4-INFO: each built object's place (innermost god-built or world place holding it) and standing level. */
   private placed = new Map<string, { place: string | null; level: number }>();
   private kinds = new Set<string>();
@@ -188,12 +191,16 @@ export class GodPerceive {
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
+      glassHarp:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.glassHarp?.plan(soul,id,action,params)??null,
+      glassHarpBegun:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.glassHarp?.begin(soul,id,action,params),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
       policy:(id:string,soul:EdgeSoul,action:string)=>this.h.edge?.contactActuator?.policy(soul,id,action)??null,
+      wholeMenu: () => this.wholeMenu,
+      hidden: (soul: EdgeSoul, at: Vec2) => !!this.h.edge?.knowledge?.hidesPoint(soul.soulId, at),
       bodyAt: (soul: EdgeSoul): Vec2 | null => { const b = this.h.engine.world.entities[soul.entityId]; return b?.pose?.p ? [b.pose.p[0], b.pose.p[2]] : null; },
       commit: (id: string, patch: Record<string, unknown>, note: string) => this.h.commit!([{ op: 'set', id, state: patch }], note),
       stateOf: (id: string) => { const e = this.h.model.entities.get(id), def = e && this.h.model.resolvedDef(e.def); return e && def ? actuatedState(e, def) : null; },
@@ -476,7 +483,15 @@ export class GodPerceive {
   private wrapCapabilities(o: Pick<Objects, 'capabilities'> & { __godCaps?: boolean }) {
     if (o.__godCaps) return; o.__godCaps = true;
     const original = o.capabilities.bind(o);
-    o.capabilities = (...args) => original(...args).filter(cap =>
+    // #1751: a whole menu (no objects named) lists things within sight only; a focused build or an act takes one from anywhere
+    o.capabilities = (...args) => {
+      // #1751: a thing named by id that has no object yet (made a moment ago, the catch-up still running) gets it now
+      const only = args[1] as ReadonlySet<string> | undefined;
+      if (only && this.pending() && [...only].some(id => !this.sigs.has(id) && this.h.model.entities.has(id))) this.sync();
+      const outer = this.wholeMenu; this.wholeMenu = !only; try { return original(...args); } finally { this.wholeMenu = outer; }
+    };
+    const listed = o.capabilities;
+    o.capabilities = (...args) => listed(...args).filter(cap =>
       // #442: a whole thing has nothing to repair (its row may lag a sync behind the state)
       !(cap.object && this.desired.has(cap.object) && (cap.blocked?.code === 'object.out-of-reach' || cap.blocked?.code === 'repair.not-broken')));
   }

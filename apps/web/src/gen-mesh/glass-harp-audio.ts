@@ -1,0 +1,3 @@
+import{glassPitch}from'../../../../packages/world-compiler/src/core-kit/glass-harp.ts';
+/** Undefined leaves every other existing sound unchanged; null silences malformed own strikes. */
+export function glassHarpAudioPitch(def:{name?:string;version?:number}|undefined,state:Record<string,unknown>):number|null|undefined{if(def?.name!=='core-glass-harp'||def.version!==1)return undefined;const glass=Number(state.lastGlass),level=Number(state.lastLevel),strikes=Number(state.strikes),pitch=Number(state.lastPitch);if(!Number.isInteger(glass)||glass<1||glass>3||!Number.isInteger(level)||level<0||level>3||!Number.isInteger(strikes)||strikes<1||!Number.isFinite(pitch)||Math.abs(pitch-glassPitch(glass,level))>1e-6)return null;return pitch;}

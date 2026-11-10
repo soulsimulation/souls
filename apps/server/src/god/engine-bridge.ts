@@ -1,3 +1,4 @@
+import{createGlassHarp,type GlassHarp}from'./glass-harp.ts';
 // The engine bridge (spec eden4/31 B2/B3, plan 33 §3.5, lane L9): Souls live among god-built things.
 //
 //  entity world ──GodMode.onCommit──▶ derive physics per changed entity ──host.enqueue('world-edit')──▶ engine fold
@@ -23,6 +24,7 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
+import { commitSoulCompletion } from './soul-completion.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
@@ -38,7 +40,7 @@ import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
-import { actuatedState, keepsLeftBy, leftByOf } from './actuators.ts';
+import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -319,6 +321,12 @@ export class EngineBridge {
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
+      // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
+      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
+      this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
+        for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}
+        states={v:this.model.editSeq,m};return m;};
       this.edge.thingsVersion=()=>`${this.godEdits}:${this.completedEdits}`;
       // #1737: the catalog waits for the first whole picture: places published and activity spots derived (sliced after listen)
       this.edge.structureReady=()=>{try{return this.contextReady()&&!this.activitySpots.pendingFirst();}catch{return false;}};
@@ -330,7 +338,7 @@ export class EngineBridge {
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
-      moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
+      moreFacts:id=>this.glassHarp?.facts(id)??this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
@@ -345,7 +353,9 @@ export class EngineBridge {
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.glassHarp=createGlassHarp({model:this.god.model,get engine(){return o.host.engine as never;},levelAt:(x,z,y)=>this.levelAt(x,z,y),soul:id=>this.god.db.soul(id)??undefined,denied:(id,soul)=>this.layers.takeRefusal(id,soul)??this.claimRefusal(id,soul as never),commit:(ops,note)=>this.commitSoulWork(ops,note),log:m=>this.log(m)});
+    this.edge?.onReceipt(r=>{try{this.glassHarp?.onReceipt(r);}catch(e){this.log(`glass harp: ${(e as Error).message}`);}});
+    this.perceive = new GodPerceive({ glassHarp:this.glassHarp, mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -475,6 +485,7 @@ export class EngineBridge {
     });
   }
   private watering?: Watering;
+  glassHarp?:GlassHarp;
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
@@ -1576,6 +1587,12 @@ export class EngineBridge {
   }
 
   // ------------------------------------------------------------------ engine → entity world
+
+  /** Completed server-owned Soul work: engine history, current context and derived output geometry.
+   * The family must validate its started receipt/authority and deduplicate before calling this. */
+  commitSoulWork(ops: Op[], note: string): Result {
+    return commitSoulCompletion(this.god, diff => this.onCommit(diff), ops, note);
+  }
 
   /** Trusted engine edit: journaled (by 'engine', never undone by the god), published to viewers, not echoed back. */
   engineAct(ops: Op[], note: string): Result {
