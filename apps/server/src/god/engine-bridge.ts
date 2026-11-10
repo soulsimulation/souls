@@ -38,7 +38,7 @@ import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
-import { actuatedState, keepsLeftBy, leftByOf } from './actuators.ts';
+import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -319,6 +319,12 @@ export class EngineBridge {
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
+      // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
+      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
+      this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
+        for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}
+        states={v:this.model.editSeq,m};return m;};
       this.edge.thingsVersion=()=>`${this.godEdits}:${this.completedEdits}`;
       // #1737: the catalog waits for the first whole picture: places published and activity spots derived (sliced after listen)
       this.edge.structureReady=()=>{try{return this.contextReady()&&!this.activitySpots.pendingFirst();}catch{return false;}};
@@ -1970,7 +1976,7 @@ export class EngineBridge {
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
     L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
-    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? null;
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply
