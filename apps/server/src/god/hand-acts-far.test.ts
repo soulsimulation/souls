@@ -51,6 +51,10 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
   const body = f.host.engine.world.entities[soul.entityId]!.pose.p;
   assert.ok(Math.hypot(body[0]! - me[0]!, body[2]! - me[2]!) > 0.5, 'the body is on its way to the far lamp');
 
+  // a thing made a moment ago, before the world's own catch-up has given it an object: taken by id at once
+  const made = god.act({ops: [{op: 'place', def: coreRef('desk-lamp'), name: 'new-lamp', p: [-60, -10]}]} as never); assert.equal(made.accepted, true);
+  const fresh = id('new-lamp'), cold = await act(`object:${fresh}:${verb(fresh)}`);
+  assert.equal(cold.accepted, true, JSON.stringify(cold).slice(0, 300));
   assert.equal(edge.knowledge.setSecret('g-hollow', true), true); await tick(4); bridge.perceive.sync(true);
   const no = await act(`object:${hidden}:${verb(hidden)}`);
   assert.equal(no.accepted, false, JSON.stringify(no).slice(0, 300));

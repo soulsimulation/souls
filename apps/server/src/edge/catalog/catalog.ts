@@ -30,7 +30,8 @@ export type CatalogThing = {id: string; name: string; kind: string; place: strin
 export type CatalogAct = {id: string; verb: string; place: string | null; thing?: string; at: [number, number]; label: string; with?: number; needs?: string};
 export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope: 'public'; placeVerbs: readonly string[]; anywhere: {id: string; verb: string; label: string}[];
   places: CatalogPlace[]; things: CatalogThing[]; acts: CatalogAct[];
-  /** #1751: per kind of thing, the acts it takes by hand (`object:<thing id>:<verb>`). Only kinds that take any. */
+  /** #1751: per kind of thing, the acts it takes by hand (`object:<thing id>:<verb>`) and its state's defaults. Only kinds
+   *  that take acts or have a published state (a bucket that only receives: acts []). */
   kinds: Record<string, {acts: CatalogKindAct[]; state: Record<string, unknown>}>;
   counts: {places: number; things: number; acts: number; kinds: number; handKinds: number; handThings: number}};
 
@@ -56,7 +57,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   // defaults differ from the kind's first (in id order) gets its own entry, `<kind>@<revision>`, named by its things' `hands`.
   const handKinds = new Map<string, {sig: string; acts: CatalogKindAct[]; state: Record<string, unknown>}>(), handsOf = new Map<string, string>(); let handThings = 0;
   for (const t of [...shown].sort(byId)) {
-    if (!t.hand?.acts.length) continue; handThings++;
+    if (!t.hand) continue; handThings++;
     const base = kindOf(t.kind), sig = stableStringify(t.hand);
     let k = base;
     if (handKinds.has(k) && handKinds.get(k)!.sig !== sig) { k = `${base}@${/@(\d+)/.exec(t.kind)?.[1] ?? '0'}`; if (handKinds.has(k) && handKinds.get(k)!.sig !== sig) k = `${k}:${hashOf(t.hand).slice(0, 8)}`; }
@@ -65,7 +66,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   }
   for (const t of things) {const h = handsOf.get(t.id); if (h) t.hands = h;}
   // a thing of a revision that takes no acts, where another revision of its kind does
-  const bare = new Set(shown.filter(t => !t.hand?.acts.length && handKinds.has(kindOf(t.kind))).map(t => t.id));
+  const bare = new Set(shown.filter(t => !t.hand && handKinds.has(kindOf(t.kind))).map(t => t.id));
   for (const t of things) if (bare.has(t.id)) t.byHand = false;
   const kinds: Catalog['kinds'] = Object.fromEntries([...handKinds].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, m]) => [k, {acts: m.acts, state: m.state}]));
   const acts: CatalogAct[] = [];

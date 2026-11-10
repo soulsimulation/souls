@@ -350,8 +350,13 @@ export function catalogActs(def: StoredDef): CatalogKindAct[] {
 /** #1751: the defaults of the state a def's acts read or write (what a thing is in until the live picture says otherwise). */
 export function stateDefaults(def: StoredDef): Record<string, unknown> {
   const out: Record<string, unknown> = {}, defaults = def.state as Record<string, { default?: unknown }>;
-  for (const f of Object.keys(actuatedState({ state: {} } as Entity, def))) { const v = defaults[f]?.default; if (publishable(def, f, v)) out[f] = v; }
+  for (const f of stateFields(def)) { const v = defaults[f]?.default; if (publishable(def, f, v)) out[f] = v; }
   return out;
+}
+/** #1751: the state a thing publishes: what its acts read or write, and its def's own declared state (a bucket's ash is
+ *  changed by another thing's act). */
+function stateFields(def: StoredDef): string[] {
+  return [...new Set([...Object.keys(actuatedState({ state: {} } as Entity, def)), ...Object.keys(def.state ?? {})])];
 }
 /** Longest enum value a published state carries. */
 export const STATE_TEXT_MAX = 80;
@@ -368,8 +373,9 @@ export function stateDiff(e: Entity, def: StoredDef): Record<string, unknown> | 
   if (!e.state || def.tags?.includes('notebook')) return null;
   let out: Record<string, unknown> | null = null;
   const defaults = def.state as Record<string, { default?: unknown }>;
-  for (const [f, v] of Object.entries(actuatedState(e, def))) {
-    if (e.state[f] === undefined || same(v, defaults[f]?.default) || !publishable(def, f, v)) continue;
+  for (const f of stateFields(def)) {
+    const v = e.state[f];
+    if (v === undefined || same(v, defaults[f]?.default) || !publishable(def, f, v)) continue;
     (out ??= {})[f] = v;
   }
   return out;
