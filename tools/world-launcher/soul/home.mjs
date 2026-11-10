@@ -5,7 +5,7 @@
 // lives inside it as a generated block.
 
 import { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 export const HOME_NAME = ".souls", LEGACY_STATE = ".eden-agent.json", STATE_FILE = "state.json", CREDENTIALS = "credentials.json";
 export const RUNTIME_LOCKS = [".listen.lock", ".eden-serve.lock"];
@@ -531,17 +531,22 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   }
   /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
   const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
-  const skillCopy = (rel) => { try { return readFileSync(join(folder(), rel), "utf8"); } catch { return null; } };
-  /** Each skill copy this home has, and its version. */
-  const skillVersions = () => SKILL_COPIES.map((rel) => ({ rel, text: skillCopy(rel) })).filter((c) => c.text !== null).map(({ rel, text }) => ({ rel, version: skillVersionOf(text) }));
+  const read = (file) => { try { return readFileSync(file, "utf8"); } catch { return null; } };
+  /** Each skill copy beside the home and in `also` (the folder an agent works in), and its version. */
+  const skillVersions = (also = []) => {
+    const here = real(also[0] ?? folder());   // paths are said from where the agent works, never whole
+    return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
+      .map((file) => ({ file, text: read(file) })).filter((c) => c.text !== null).map(({ file, text }) => ({ rel: relative(here, file), file, version: skillVersionOf(text) }));
+  };
   /** The copies older than `version`: what `upgrade` refreshes. */
-  const skillBehind = (version) => skillVersions().filter((c) => newerThan(version, c.version));
-  /** The served skill, verified by the caller, over every copy older than it, and as SKILL.md beside .souls/ when that is
-   *  missing. Never over a copy as new. */
-  function installSkill(bytes, version) {
-    const wrote = [], missing = skillCopy("SKILL.md") === null ? [{ rel: "SKILL.md" }] : [];
-    for (const { rel } of [...missing, ...skillBehind(version)]) {
-      const file = join(folder(), rel), tmp = `${file}.${process.pid}.tmp`;
+  const skillBehind = (version, also) => skillVersions(also).filter((c) => newerThan(version, c.version));
+  /** The served skill, verified by the caller, over every copy older than it, never over one as new. With no SKILL.md
+   *  anywhere, it lands in the first of `also` (the folder the agent works in), else beside the home. */
+  function installSkill(bytes, version, also = []) {
+    const none = !skillVersions(also).some((c) => basename(c.file) === "SKILL.md" && !c.file.includes("/skills/souls/")), wrote = [];
+    const targets = [...(none ? [{ file: join(also[0] ?? folder(), "SKILL.md"), rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
+    for (const { file, rel } of targets) {
+      const tmp = `${file}.${process.pid}.tmp`;
       writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
     }
     return wrote;

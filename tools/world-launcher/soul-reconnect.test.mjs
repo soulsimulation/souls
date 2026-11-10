@@ -152,9 +152,9 @@ test('A6: a legacy one-Soul folder: create and pair twice change nothing', async
 });
 
 test('A4: the first register offers the user-level home; --global moves an empty home there; other folders find it', async (t) => {
-  const w = await world(t), home = tmp(t), a = join(home, 'work', 'a'), b = join(home, 'play', 'b'); mkdirSync(a, { recursive: true }); mkdirSync(b, { recursive: true });
+  const w = await world(t), home = tmp(t), a = join(home, 'a'), b = join(home, 'play', 'b'); mkdirSync(a, { recursive: true }); mkdirSync(b, { recursive: true });
   const url = `${w.base}/dev`, first = await runIn(a, home)('register', url);
-  assert.equal(first.d.homeChoice.home, '~/work/a/.souls'); assert.equal(first.d.homeChoice.global, `node eden.mjs register ${url} --global`);
+  assert.equal(first.d.homeChoice.home, '~/a/.souls'); assert.equal(first.d.homeChoice.global, `node eden.mjs register ${url} --global`);   // scrub-guard: allow (the fixture's own temporary home)
   assert.ok(!existsSync(join(home, '.souls')), 'nothing outside the folder without the owner');
   const g = await runIn(a, home)('register', url, '--global');
   assert.equal(g.code, 0, g.err); assert.equal(g.d.homeChoice.chosen, 'global');
@@ -236,4 +236,16 @@ test('A2 A3: a current client with an older skill copy: update names the skill, 
   assert.ok(!w.hits.includes('dev/eden.mjs'), 'the client was not fetched');
   assert.equal((await run('list')).d.update, undefined);
   assert.equal((await run('upgrade')).d.upgraded, false, 'twice changes nothing');
+});
+
+test('A2: with the user-level home, upgrade refreshes the skill copies of the folder the agent works in', async (t) => {
+  const skill = Buffer.from(skillText(ours)), client = { contract: 'eden-edge/1', version: ours, bytes: 1, sha256: 'x', minVersion: '2.0.0', skill: { version: ours, bytes: skill.length, sha256: sha(skill) } };
+  const w = await world(t, { client, skill }), home = tmp(t), proj = join(home, 'proj'), run = runIn(proj, home);
+  mkdirSync(join(proj, '.claude/skills/souls'), { recursive: true });
+  for (const f of ['SKILL.md', '.claude/skills/souls/SKILL.md']) writeFileSync(join(proj, f), skillText('2.12.0'));
+  await run('register', `${w.base}/dev`, '--global');
+  const up = await run('upgrade'); assert.equal(up.d.upgraded, true, up.err);
+  assert.deepEqual(up.d.skill.wrote.sort(), ['.claude/skills/souls/SKILL.md', 'SKILL.md'], 'said from the working folder');
+  for (const f of ['SKILL.md', '.claude/skills/souls/SKILL.md']) assert.equal(skillVersionOf(readFileSync(join(proj, f), 'utf8')), ours, f);
+  assert.ok(!existsSync(join(home, 'SKILL.md')), 'a copy is not added beside the user-level home');
 });

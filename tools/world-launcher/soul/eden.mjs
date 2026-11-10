@@ -22,7 +22,7 @@ import * as soulHome$fs from "node:fs";
 import * as soulHome$path from "node:path";
 const soulHome = (() => {
 const { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } = soulHome$fs;
-const { basename, dirname, join, resolve } = soulHome$path;
+const { basename, dirname, join, relative, resolve } = soulHome$path;
 // home.mjs: the Souls home, one `.souls/` folder holding every Soul a person keeps on this machine. No HTTP and no
 // model: `doctor` is handed its one way of asking a world. Design: docs/design/soul-context.md section 1.
 //
@@ -554,17 +554,22 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
   const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
-  const skillCopy = (rel) => { try { return readFileSync(join(folder(), rel), "utf8"); } catch { return null; } };
-  /** Each skill copy this home has, and its version. */
-  const skillVersions = () => SKILL_COPIES.map((rel) => ({ rel, text: skillCopy(rel) })).filter((c) => c.text !== null).map(({ rel, text }) => ({ rel, version: skillVersionOf(text) }));
+  const read = (file) => { try { return readFileSync(file, "utf8"); } catch { return null; } };
+  /** Each skill copy beside the home and in `also` (the folder an agent works in), and its version. */
+  const skillVersions = (also = []) => {
+    const here = real(also[0] ?? folder());   // paths are said from where the agent works, never whole
+    return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
+      .map((file) => ({ file, text: read(file) })).filter((c) => c.text !== null).map(({ file, text }) => ({ rel: relative(here, file), file, version: skillVersionOf(text) }));
+  };
   /** The copies older than `version`: what `upgrade` refreshes. */
-  const skillBehind = (version) => skillVersions().filter((c) => newerThan(version, c.version));
-  /** The served skill, verified by the caller, over every copy older than it, and as SKILL.md beside .souls/ when that is
-   *  missing. Never over a copy as new. */
-  function installSkill(bytes, version) {
-    const wrote = [], missing = skillCopy("SKILL.md") === null ? [{ rel: "SKILL.md" }] : [];
-    for (const { rel } of [...missing, ...skillBehind(version)]) {
-      const file = join(folder(), rel), tmp = `${file}.${process.pid}.tmp`;
+  const skillBehind = (version, also) => skillVersions(also).filter((c) => newerThan(version, c.version));
+  /** The served skill, verified by the caller, over every copy older than it, never over one as new. With no SKILL.md
+   *  anywhere, it lands in the first of `also` (the folder the agent works in), else beside the home. */
+  function installSkill(bytes, version, also = []) {
+    const none = !skillVersions(also).some((c) => basename(c.file) === "SKILL.md" && !c.file.includes("/skills/souls/")), wrote = [];
+    const targets = [...(none ? [{ file: join(also[0] ?? folder(), "SKILL.md"), rel: "SKILL.md" }] : []), ...skillBehind(version, also)];
+    for (const { file, rel } of targets) {
+      const tmp = `${file}.${process.pid}.tmp`;
       writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
     }
     return wrote;
@@ -5418,7 +5423,7 @@ async function updateNotice(pending) {
     if (!v || !w) return null;
     const run = `${CLI} upgrade${w.several && w.key ? ` ${w.key}` : ""}`;
     if (soulHome.newerThan(v.version, VERSION)) return { from: VERSION, to: v.version, run };
-    const old = HOME && v.skill ? HOME.skillBehind(v.skill)[0] : null;
+    const old = HOME && v.skill ? HOME.skillBehind(v.skill, [INVOKED])[0] : null;
     return old ? { from: old.version ?? "unversioned", to: v.skill, run, what: `the skill (${old.rel})` } : null;
   } catch { return null; }
 }
@@ -5491,7 +5496,7 @@ async function upgradeCommand(...argv) {
   const clashes = Object.entries(cfg.worlds).filter(([k, v]) => k !== key && v.contract && v.contract !== m.contract), firm = clashes.find(([, v]) => trusted.includes(soulHome.originOf(v.url))), clash = firm ?? clashes[0];
   if (clash && (firm || !trust)) throw new Error(`${key} speaks ${m.contract} and ${clash[0]} speaks ${clash[1].contract}: no one bundle serves both. Nothing changed.${firm ? "" : ` ${clash[0]} is not a site this home trusts, so ask your human. Only if they agree: ${CLI} upgrade ${key} --trust`}`);
   // #1875 A2: the skill moves with the client. A world that does not describe its skill upgrades the client only.
-  const cliNewer = soulHome.newerThan(m.version, VERSION), skillOld = m.skill?.version ? home.skillBehind(m.skill.version) : [];
+  const cliNewer = soulHome.newerThan(m.version, VERSION), skillOld = m.skill?.version ? home.skillBehind(m.skill.version, [INVOKED]) : [];
   if (!cliNewer && !skillOld.length) {
     note();
     if (soulHome.newerThan(m.minVersion, VERSION)) throw new Error(`${key} needs eden ${m.minVersion} or newer but serves ${m.version}, so it has no bundle to give this home. Tell whoever keeps that world.`);
@@ -5513,7 +5518,7 @@ async function upgradeCommand(...argv) {
   const skill = m.skill?.version && (skillOld.length || cliNewer) ? await verified("/skill.md", m.skill, soulHome.skillVersionOf) : null;
   note();
   if (trust) home.trustOrigin(origin);
-  const installed = bytes ? home.installBundle(bytes, process.argv[1], m.version) : null, wrote = skill ? home.installSkill(skill, m.skill.version) : [];
+  const installed = bytes ? home.installBundle(bytes, process.argv[1], m.version) : null, wrote = skill ? home.installSkill(skill, m.skill.version, [INVOKED]) : [];
   const skillOut = skill ? { skill: { to: m.skill.version, wrote }, next: "Read SKILL.md again: it changed." } : {};
   if (!installed) return { upgraded: !!wrote.length, world: key, version: home.config().client ?? VERSION, served: m.version, ...(bytes ? { note: "This home's bundle is already as new." } : {}), ...skillOut };
   return { upgraded: true, world: key, from: VERSION, to: m.version, bytes: m.bytes, sha256: m.sha256, ...skillOut };
@@ -5573,7 +5578,7 @@ export function enterHome(argv) {
   const makes = (found.kind === "none" && (url || first === "import" || (first === "init" && !argv.includes("--global")))) || (found.kind === "legacy" && first === "import");
   if (found.kind !== "home" && !makes) { if (found.kind === "none") soulsElsewhere(first, null); return argv; }
   if (found.kind !== "home") {
-    soulHome.createHome(found.root, { cli: process.argv[1], version: VERSION }); process.stderr.write(`Made a Souls home here: ${found.root}\n`);
+    soulHome.createHome(found.root, { cli: process.argv[1], version: VERSION }); process.stderr.write(`Made a Souls home here: ${tilde(found.root)}\n`);
     soulHome.rememberHome(homedir(), found.root);
     if (url && !HOME_CHOICE && !process.env.SOULS_HOME && real(INVOKED) !== real(homedir())) HOME_CHOICE = homeChoice(found.root, url);
   }
