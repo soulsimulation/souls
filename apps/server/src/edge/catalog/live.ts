@@ -8,6 +8,8 @@ import type {EdgeLedger} from '../ledger/ledger.ts';
 export const LIVE_CONTRACT = 'soul-live/1';
 /** Lines of speech kept and sent: the newest. A client keeps its own longer history by id. */
 export const LIVE_SPEECH = 40;
+/** #1751: most things whose state is sent (those that differ from their kind's default); `thingsMore` counts the rest. */
+export const LIVE_THINGS = 2000;
 /** World ticks one built answer serves (10 ticks = 0.5 s at clock rate 1). */
 const KEEP_TICKS = 10;
 
@@ -26,6 +28,28 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     if (speech.length > LIVE_SPEECH) speech.shift();
   });
   let kept: {key: string; body: string} | null = null;
+  // #1751: things whose acted-on state differs from their kind's default (a lamp on, a door open), only the fields that
+  // differ; nothing in a place kept off the map (cached until the world's things or its secrets change) and nothing a
+  // shut container keeps out of sight (asked on every build: it is not tied to those versions).
+  let shown: {states: unknown; secrets: number; things: Record<string, Record<string, unknown>>; more: number} | null = null;
+  const thingsNow = () => {
+    const states = L.thingStates?.(), secrets = L.knowledge?.version ?? 0;
+    if (shown && shown.states === states && shown.secrets === secrets) return shown;
+    const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, things: Record<string, Record<string, unknown>> = {};
+    const locate = states?.size ? L.places.locator() : null;
+    for (const [id, st] of [...(states ?? [])].sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+      const p = world.entities[id]?.pose?.p; if (!p) continue;
+      let hid = false; for (let q = locate!(p[0]!, p[2]!, 0), k = 0; q && k < 12 && !hid; q = q.parent ? L.places.byId.get(q.parent) : undefined, k++) hid = secret(q.id);
+      if (hid) continue;
+      things[id] = st;
+    }
+    return (shown = {states, secrets, things, more: 0});
+  };
+  const visibleThings = () => {
+    const all = thingsNow().things, things: Record<string, Record<string, unknown>> = {}; let n = 0, more = 0;
+    for (const id in all) { if (L.concealedThing?.(id)) continue; if (n++ < LIVE_THINGS) things[id] = all[id]!; else more++; }
+    return {things, more};
+  };
   const build = (tick: number) => {
     const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, r1 = (n: number) => Math.round(n * 10) / 10;
     type Row = {id: string; name: string; at: number[] | null; place: string | null; doing: string | null};
@@ -37,7 +61,10 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
       return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
     }).sort((a, b) => a.id < b.id ? -1 : 1);
     // a line said before its place was made secret is withheld from then on too
-    return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(l => !secret(l.place))});
+    // #1751: things whose acted-on state differs from their kind's default (a lamp on, a door open), only the fields that
+    // differ; nothing a shut container keeps out of sight and nothing in a place kept off the map
+    const {things, more} = visibleThings();
+    return JSON.stringify({contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(l => !secret(l.place)), things, ...(more ? {thingsMore: more} : {})});
   };
   app.get('/v1/edge/live', (c: Context) => {
     const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${L.knowledge?.version ?? 0}`;
