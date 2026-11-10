@@ -130,10 +130,15 @@ export class DeltaTap {
   /** engine static epoch | ledger static version: the static layer depends on nothing else. Costs two spatial syncs
    *  (~0.5 ms each on Eden 2026 outside the engine's own pass), so the tick reads it only when staticCheapKey moved. */
   epochNow(): string {return `${this.engine().staticEpochV1?.() ?? 0}|${this.L.staticVersion()}`;}
+  /** #1560: a process-unique number for the spatial service in use. A restored engine (WorldHost.restoreBody: a decision
+   *  rollback, a recovery rewind, a held head) brings a new service that counts its epochs from the snapshot's, so the
+   *  same epoch can name a different static world: the scene key the replica rebuilds its spatial service on includes this.
+   *  (The static layer needs no such part: a swapped engine restarts the tap, and every re-init sends the layer whole.) */
+  private spatialId(): number {const sp = this.spatial(); if (!sp) return 0; let id = SPATIALS.get(sp) ?? 0; if (!id) SPATIALS.set(sp, id = ++spatialsN); return id;}
   /** B-spatial seam: the spatial service and the engine's connectivity, read without a sync (the step left them current) */
   private spatial() {return (this.engine() as unknown as {rt?: {services?: {spatial?: {epoch?: number; pageRectsV1?(): unknown}}}}).rt?.services?.spatial;}
   /** the static scene's rebuild key (B-spatial): spatial epoch | entity physics hash */
-  sceneKeyNow(): string {return `${this.spatial()?.epoch ?? '-'}|${(this.engine().world as {entityPhysicsV1?: {hash?: string}}).entityPhysicsV1?.hash ?? ''}`;}
+  sceneKeyNow(): string {return `${this.spatialId()}:${this.spatial()?.epoch ?? '-'}|${(this.engine().world as {entityPhysicsV1?: {hash?: string}}).entityPhysicsV1?.hash ?? ''}`;}
   /** engine.exportStaticScene() (B-spatial; structured-clone data, not JSON: heights may be Infinity), or null on an engine without it */
   sceneNow(): unknown {return (this.engine() as unknown as {exportStaticScene?(): unknown}).exportStaticScene?.() ?? null;}
   pagesNow(): unknown {return this.spatial()?.pageRectsV1?.() ?? null;}
@@ -144,7 +149,7 @@ export class DeltaTap {
    *  the full epoch is read every 200 ticks as well (warmth is part of the ledger's static version and flips once). */
   staticCheapKey(): string {
     const sp = (this.engine() as unknown as {rt?: {services?: {spatial?: {epoch?: number}}}}).rt?.services?.spatial, L = this.L as unknown as {places: {version: number}; spots: unknown; staticSeq?: number};
-    let id = 0; if (sp) {id = SPATIALS.get(sp) ?? 0; if (!id) SPATIALS.set(sp, id = ++spatialsN);}
+    const id = this.spatialId();
     let spots = SPOTS.get(L.spots as object) ?? 0; if (!spots) SPOTS.set(L.spots as object, spots = ++spotsN);
     return `${id}:${sp?.epoch ?? '-'}|${L.places.version}|${spots}|${L.staticSeq ?? 0}`;
   }

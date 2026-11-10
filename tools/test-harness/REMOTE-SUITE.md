@@ -20,7 +20,7 @@ read artifact. Recovery proves collection completeness, not passing assertions. 
 remains a failure and cannot be cache-added as passing evidence; the candidate must fix it.
 
 A solo `--baseline-results` import uses the same executed-suite identity as the cache. The recorded original harness
-commit, tree and archive are verified; only `DRIVER_ONLY` files may differ from the current harness. Such imports
+commit, tree and archive are verified; only `DRIVER_ONLY` and `COMPARISON_ONLY` (`renames.json`) files may differ from the current harness. Such imports
 record `driverTestsChanged`, permitting only attributed driver self-tests to be renamed or removed. Runtime mismatch
 blocks comparison without rerunning the imported baseline. Explicit baseline/candidate pair imports retain exact
 full harness identity. Collector, validation scripts, quarantine and all other execution inputs remain in the suite

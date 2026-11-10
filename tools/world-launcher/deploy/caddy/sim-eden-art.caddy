@@ -1,0 +1,31 @@
+# sim.eden.art on the PRODUCTION host (#1416): the former public origin, and still the Clerk PRIMARY origin. Everything goes
+# to soul.game with the same path and query, except the primary sign-in bridge, which must keep answering on this origin:
+# the satellite's sign-in URL is https://sim.eden.art/sign-in (docs/operations/clerk-satellite.md), and Clerk makes the
+# primary session here. The bridge is the production launcher's own /__sim/clerk-sign-in, so there is no proxy hop to
+# another site.
+#
+# @@PRODUCTION_PORT@@ is a placeholder, never a real value in this repository: the production launcher's loopback port,
+# the --port of SIM_WORLDS_ARGS in /etc/sim-worlds/production.conf. The cutover (docs/operations/clerk-satellite.md,
+# "sim.eden.art on the production host") substitutes it while installing this file as /etc/caddy/sites/sim-eden-art.caddy.
+# It touches no other site. Before sim.eden.art's DNS points at this host the block is inert: Caddy cannot get a
+# certificate for the name yet and retries with back-off; soul.game and every other site are unaffected.
+#
+# GET and HEAD get 301. Other methods get 308, so an old client's POST stays a POST instead of turning into a GET.
+https://sim.eden.art {
+	header X-Robots-Tag "noindex"
+
+	# The query (redirect_url and Clerk's own parameters) survives the rewrite; Clerk routes by hash, so there is no
+	# /sign-in/* subpath. The bridge's own no-store, no-referrer, frame and CSP headers come through: add none here.
+	handle /sign-in {
+		rewrite * /__sim/clerk-sign-in
+		reverse_proxy localhost:@@PRODUCTION_PORT@@
+	}
+
+	@read method GET HEAD
+	handle @read {
+		redir https://soul.game{uri} 301
+	}
+	handle {
+		redir https://soul.game{uri} 308
+	}
+}

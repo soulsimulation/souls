@@ -5,7 +5,7 @@
 // no guards. Every command is one or two HTTP calls to the world and prints JSON.
 // Private state (world URL, Soul id, bearer token) lives in a `.souls/` home, or .eden-agent.json in a legacy folder.
 
-import { existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { createHash, randomUUID, randomBytes } from "node:crypto";
@@ -33,15 +33,18 @@ const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
 const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval"]);
+/** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
+const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
 const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
-const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "pendingCreate"];
+const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "links", "pendingCreate"];
 const IMPORTED_RUNTIME = [".eden-serve.json"];
 const GOD_LEGACY = ".eden-god.json", GOD_KEPT = /^\.eden-god\.(cache|bakes|claim-c_[0-9a-f]{8})\.json$/;
 
 const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
-const isHome = (root) => existsSync(join(root, "config.json"));
+/** A home with its config moved aside is still a home: doctor finds its Souls again. */
+const isHome = (root) => existsSync(join(root, "config.json")) || existsSync(join(root, "souls"));
 
 /** Where this folder's Souls live. SOULS_HOME wins; else the nearest `.souls/` going up, stopping at the user's home
  *  folder without crossing it; a `.eden-agent.json` in this very folder is a legacy one-Soul folder. */
@@ -64,8 +67,17 @@ function writeJson(file, value, mode = 0o600) {
 }
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, "utf8")); }
-  catch (e) { if (e.code === "ENOENT") return fallback; throw new Error(`${basename(file)} cannot be read: ${e.message}`); }
+  catch (e) {
+    if (e.code === "ENOENT") return fallback;
+    // A parser quotes what it choked on: the credentials file's bytes never reach a message.
+    throw new Error(`${basename(file)} cannot be read${basename(file) === CREDENTIALS ? "" : `: ${e.message}`}.${UNREADABLE[basename(file)] ?? ""}`);
+  }
 }
+/** What a person can do about a home file that no longer parses. Nothing here rewrites it: it may still be mendable by hand. */
+const UNREADABLE = {
+  "credentials.json": " It holds every token, so restore it from a backup if you have one. If not, move it aside: memory is safe, list still shows your Souls, and adopt <id> --for <CODE> gets each one back.",
+  "config.json": " Restore it from a backup if you have one. If not, move it aside: the next command finds your Souls in souls/ again.",
+};
 
 /** What a home never commits: tokens, and a Soul's memory, which holds private conversations. A home made before a line was added gets it. */
 function keepOutOfGit(root) {
@@ -119,10 +131,10 @@ function splitSecrets(s) {
 }
 
 /** The Soul a person named, among those that can be addressed. `sel` is name, id, name@world or id@world. */
-function selectSoul(cfg, sel) {
+function selectSoul(cfg, sel, { cmd } = {}) {
   const at = sel.lastIndexOf("@"), who = at > 0 ? sel.slice(0, at) : sel, world = at > 0 ? sel.slice(at + 1) : null;
   const named = Object.entries(cfg.souls).filter(([id, e]) => (id === who || norm(e.name) === norm(who)) && (!world || e.world === world || e.at === world));
-  const live = named.filter(([, e]) => e.state === "active");
+  const live = named.filter(([, e]) => e.state === "active" || (e.state === "unpaired" && LOCAL_READS.has(cmd)));
   if (live.length === 1) return live[0][0];
   if (live.length > 1) throw new Error(`Several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
   if (named.length) throw new Error(`${named[0][1].name} is ${named[0][1].state} and takes no commands here. See: list, doctor, adopt.`);
@@ -137,7 +149,7 @@ const looksLikeSelector = (cfg, word) => word.startsWith("@") ? !!cfg.worlds[wor
 function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
   const live = Object.entries(cfg.souls).filter(([, e]) => e.state === "active");
   const atWorld = selector?.startsWith("@") ? selector.slice(1) : null;
-  const named = selector && !atWorld ? selectSoul(cfg, selector) : null;
+  const named = selector && !atWorld ? selectSoul(cfg, selector, { cmd }) : null;
   if (selector && !atWorld && !named) throw new Error(`No Soul here answers to ${selector}.`);
   if (SEAT_COMMANDS.has(cmd)) {
     if (cmd === "register" && url) return { seat: keyOf(cfg.worlds, url) };
@@ -162,6 +174,8 @@ function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
     if (cfg.default && cfg.souls[cfg.default]?.state === "active") return { soul: cfg.default };
     throw new Error(`Several Souls live here: ${live.map(([, e]) => norm(e.name)).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
   }
+  const unpaired = Object.entries(cfg.souls).filter(([, e]) => e.state === "unpaired");
+  if (LOCAL_READS.has(cmd) && unpaired.length === 1) return { soul: unpaired[0][0] };
   return cfg.currentWorld ? { seat: cfg.currentWorld } : {};
 }
 
@@ -218,6 +232,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().awaitingFirstWorld) updateConfig((c) => { if (c.awaitingFirstWorld) { delete c.awaitingFirstWorld; c.trustedOrigins ??= [originOf(url)]; } });
   }
   const setCurrentWorld = (key) => updateConfig((c) => { c.currentWorld = key; });
+  /** The owner's answer to the reflective pass, or that they've been asked, beside its caps. */
+  const noteConsolidation = (patch) => updateConfig((c) => { c.consolidation = { ...(c.consolidation && typeof c.consolidation === "object" && !Array.isArray(c.consolidation) ? c.consolidation : {}), ...patch }; });
   const seat = (key) => { const dir = at("pending", key); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "seat", key, dir }; };
   // The id names a folder and it comes from a world or a file, so it must be one folder name here.
   const soul = (id) => { if (!SOUL_ID.test(id ?? "")) throw new Error(`"${String(id).slice(0, 40)}" is not a Soul id; nothing was kept for it.`); const dir = at("souls", id, "runtime"); mkdirSync(dir, { recursive: true, mode: 0o700 }); return { kind: "soul", id, dir }; };
@@ -391,13 +407,27 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (config().souls[me.id]) return { imported: false, soul: me.id, reason: "This Soul already lives in this home." };
     const key = me.world ? ensureWorld(me.world) : null;
     cpSync(folder, at("souls", me.id), { recursive: true, filter: (p) => basename(p) !== "runtime" && basename(p) !== CREDENTIALS });
-    updateConfig((c) => { c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" }; });
-    return { imported: true, soul: me.id, world: key, paired: false };
+    updateConfig((c) => { c.souls[me.id] = { name: plainName(me.name) || me.id, world: key, state: "unpaired" }; c.currentWorld ??= key; });
+    if (me.world) writeJson(join(soul(me.id).dir, STATE_FILE), { world: me.world, soul: me.id });
+    return { imported: true, soul: me.id, world: key, paired: false, next: `adopt ${me.id} --for <CODE> takes control again; memory and status work now` };
+  }
+
+  /** A Soul on disk that config.json lost (a config rebuilt by hand): back on the list, paired only if its token is still here. */
+  function rediscover() {
+    const creds = credentials();
+    for (const id of existsSync(at("souls")) ? readdirSync(at("souls")) : []) {
+      if (!SOUL_ID.test(id) || config().souls[id]) continue;
+      const me = readJsonQuietly(at("souls", id, "soul.json")), url = me?.world;
+      if (!url) continue;
+      const key = ensureWorld(url);
+      updateConfig((c) => { c.souls[id] = { name: plainName(me.name) || id, world: key, state: creds.souls[id]?.[key]?.token ? "active" : "unpaired" }; c.currentWorld ??= key; });
+    }
   }
 
   /** The account against the home, world by world. `ask(url, bearer)` answers {status, data}. Prints no token. */
-  async function doctor(ask, { alive }) {
-    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], orphanCredentials: [], locksCleared: [] };
+  async function doctor(ask, { alive, accountSouls = null, codeWorld = null }) {
+    rediscover();
+    const out = { home: root, worlds: [], retired: [], adoptable: [], controlLost: [], unpaired: [], orphanCredentials: [], locksCleared: [] };
     const retire = (id) => {
       updateConfig((c) => { c.souls[id].state = "retired"; c.souls[id].retiredAt = new Date().toISOString(); });
       out.retired.push({ id, name: config().souls[id].name });
@@ -434,9 +464,13 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (r.status === 401 && r.data?.code === "control.revoked" && r.data?.reason === "retired") retire(id);
         else out.controlLost.push({ id, name: cfg.souls[id].name, why: r.data?.reason ?? r.data?.code ?? `http-${r.status}` });
       }
-      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable ? { note: "This world shows a Soul token its own Soul only, so account Souls that are not here cannot be listed. Adopt one by its id from the Soul card." } : {}) });
+      // A window code belongs to one world: it goes to that world and no other.
+      const asked = reachable && accountSouls && key === codeWorld, got = asked ? await accountSouls(w.url) : null, held = Array.isArray(got) ? got : null;
+      for (const s of held ?? []) if (config().souls[s.id]?.state !== "active") out.adoptable.push({ id: s.id, name: plainName(s.name) || s.id, world: key });
+      out.worlds.push({ world: key, checked: reachable ? "souls" : "unreachable", ...(reachable && !held ? { note: got?.note ?? (asked ? "That window code is unknown here or has expired. Ask your person for the one on this world's open page." : `This world shows a Soul token its own Soul only, so account Souls that are not here need your person's window code to list: @${key} doctor --for <CODE>.`) } : {}) });
     }
     const after = config();
+    for (const [id, e] of Object.entries(after.souls)) if (e.state === "unpaired") out.unpaired.push({ id, name: e.name, world: e.world, next: `adopt ${id} --for <CODE>` });
     for (const [id, worlds] of Object.entries(creds.souls)) if (!after.souls[id]) for (const world of Object.keys(worlds)) out.orphanCredentials.push({ principal: id, world });
     for (const world of Object.keys(creds.worlds)) if (!after.worlds[world]) out.orphanCredentials.push({ principal: "account", world });
     for (const world of Object.keys(creds.gods)) if (!after.gods[world]) out.orphanCredentials.push({ principal: "god", world });
@@ -448,8 +482,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
         if (lock.name === ".eden-serve.lock") try { unlinkSync(join(dir, SERVE_SOCKET)); } catch { /* no socket left */ }
       }
     }
-    if ((statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
-    out.healthy = !out.retired.length && !out.controlLost.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
+    if (existsSync(at(CREDENTIALS)) && (statSync(at(CREDENTIALS)).mode & 0o777) !== 0o600) { chmodSync(at(CREDENTIALS), 0o600); out.credentialsMode = "was too open; now 0600"; }
+    out.healthy = !out.retired.length && !out.controlLost.length && !out.unpaired.length && !out.orphanCredentials.length && out.worlds.every((w) => w.checked !== "unreachable");
     return out;
   }
 
@@ -465,9 +499,10 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
-  return { root, config, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  if (!existsSync(at("config.json"))) rediscover();
+  return { root, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
-return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
+return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
 // </inline home.mjs>
 
@@ -1108,6 +1143,16 @@ function settingsOf(config) {
   return { callsPerDay: whole(c.callsPerDay, CAPS.callsPerDay, 100), tokensPerPass: whole(c.tokensPerPass, CAPS.tokensPerPass, 1_000_000), everyHours: whole(c.everyHours, CAPS.everyHours, EVERY_HOURS_MAX) };
 }
 
+/** The owner's answer: a pass spends their money and sends journal text to a model, so nothing runs until they say yes. `null` is not asked yet. */
+const answerOf = (config) => (config?.enabled === true || config?.enabled === false ? config.enabled : null);
+/** What a Soul's agent puts to its owner, once. Built from the caps in force, so it can't promise less than they allow. Each sentence is
+ *  checked against what a pass does: a cap of zero means no pass can run, so no question. */
+function offerOf(config) {
+  const { callsPerDay, tokensPerPass, everyHours } = settingsOf(config);
+  if (!callsPerDay || !tokensPerPass) return null;
+  return `This Soul's journal has outgrown what it can look back on. A reflective pass has a model read a Soul's oldest journal days and write a short summary into MEMORY.md, so the Soul carries those days in its brief and its journal stops growing. The pages it read then go from the Soul's own search, replaced by that summary; the full log stays on this machine. Here, with no model, a pass also gathers notes written more than once and proposes lines for SOUL.md for you to apply or ignore. A yes covers every Soul in this home, now and later${everyHours ? "" : ", and only when a pass is asked for: idle passes are off in your settings"}. Cost: your own claude CLI on your account: for each Soul, up to ${callsPerDay} passes a day of about ${tokensPerPass} tokens, each with a $${PASS_USD} limit. What leaves this machine: each Soul's oldest journal days, which include what worlds said, sent to that model, and nothing else of the Soul's. Yes: consolidate on. No: consolidate off.`;
+}
+
 /** The stand-in a world with fake minds gets: the same plumbing, with no model. */
 function fakeMind(prompt) {
   const lines = prompt.split("\n").filter((l) => l.startsWith("- ")).map(clean);
@@ -1281,7 +1326,7 @@ function writeMemoryMd(soulDir, { lines, taken, notes }) {
   writeFileSync(tmp, `${owner}${MARK}\n\n${body}\n`, { mode: 0o600 });
   renameSync(tmp, file);
 }
-return { CAPS, JOURNAL_BYTES, SUMMARY, settingsOf, fakeMind, ownerMind, overBudget, nextPassIn, consolidate };
+return { CAPS, JOURNAL_BYTES, SUMMARY, settingsOf, answerOf, offerOf, fakeMind, ownerMind, overBudget, nextPassIn, consolidate };
 })();
 // </inline consolidate.mjs>
 
@@ -1669,10 +1714,216 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
 return { NEAR_METRES, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
+// <inline client-body-kit.mjs> generated by inline.mjs: edit client-body-kit.mjs, not this block
+import * as soulBodyKit$fs from "node:fs";
+import * as soulBodyKit$path from "node:path";
+import * as soulBodyKit$crypto from "node:crypto";
+const soulBodyKit = (() => {
+const { existsSync,mkdirSync,writeFileSync,readdirSync } = soulBodyKit$fs;
+const { join,resolve } = soulBodyKit$path;
+const { createHash } = soulBodyKit$crypto;
+// body kit <dir> (lane #719): one command that prepares a local body-authoring directory from the paired world.
+// It copies the world's own contract, skill and dependency-free validator modules (the same files the world serves
+// under /body-authoring/) and writes one starter source. It never writes the Soul token or any credential: the kit
+// files are public and are fetched without authorization. Upload and selection stay in the paired folder.
 
-const VERSION = "2.21.0";
+const KIT_FILES=['SKILL.md','contract.json','validate.mjs','admission.ts','rig.ts','motion.ts','action-profile.ts','upload-validation.ts','upload.mjs','example.json'];
+const STARTERS=['rigid','humanoid','rolling'];
+const USAGE='usage: body kit <dir> [--starter rigid|humanoid|rolling] [--seed N] [--force]';
+/** The world's canonical CC0 contact rig (Quaternius), served with the web client's media. */
+const HUMANOID_SOURCE='/modular/environment/animated-casual.glb';
+
+function parseKitArgs(args){
+ const out={dir:undefined,starter:'rigid',seed:1,force:false};
+ for(let i=0;i<args.length;i++){const a=args[i];
+  if(a==='--force')out.force=true;
+  else if(a==='--starter'){out.starter=args[++i];if(!STARTERS.includes(out.starter))throw Error('--starter must be rigid, humanoid or rolling');}
+  else if(a==='--seed'){out.seed=Number(args[++i]);if(!Number.isInteger(out.seed)||out.seed<0||out.seed>2**31)throw Error('--seed needs a whole number');}
+  else if(a.startsWith('--')||out.dir!==undefined)throw Error(USAGE);
+  else out.dir=a;}
+ if(!out.dir)throw Error(USAGE);return out;
+}
+
+const sha=b=>createHash('sha256').update(b).digest('hex');
+function glb(json,bin){
+ const j=Buffer.from(JSON.stringify(json)),jp=Buffer.alloc(Math.ceil(j.length/4)*4,32);j.copy(jp);
+ const bp=Buffer.alloc(Math.ceil(bin.length/4)*4);bin.copy(bp);
+ const head=Buffer.alloc(12);head.writeUInt32LE(0x46546c67,0);head.writeUInt32LE(2,4);head.writeUInt32LE(12+8+jp.length+8+bp.length,8);
+ const ch=(n,k)=>{const c=Buffer.alloc(8);c.writeUInt32LE(n,0);c.writeUInt32LE(k,4);return c;};
+ return Buffer.concat([head,ch(jp.length,0x4e4f534a),jp,ch(bp.length,0x004e4942),bp]);
+}
+function readGLB(bytes){
+ if(bytes.length<28||bytes.readUInt32LE(0)!==0x46546c67)throw Error('Starter source is not a GLB file');
+ const n=bytes.readUInt32LE(12),json=JSON.parse(bytes.toString('utf8',20,20+n)),p=20+n,bn=bytes.readUInt32LE(p);
+ return {json,bin:bytes.subarray(p+8,p+8+bn)};
+}
+
+/** An original faceted sculpture: a seeded, jittered icosphere with per-face palette colours. One draw, 80 triangles. */
+function rigidStarterGLB(seed=1){
+ let s=seed>>>0||1;const rnd=()=>{s=(s+0x6d2b79f5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;};
+ const g=(1+Math.sqrt(5))/2,v=[[-1,g,0],[1,g,0],[-1,-g,0],[1,-g,0],[0,-1,g],[0,1,g],[0,-1,-g],[0,1,-g],[g,0,-1],[g,0,1],[-g,0,-1],[-g,0,1]].map(p=>{const l=Math.hypot(...p);return p.map(x=>x/l);});
+ let f=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+ const mid=new Map(),m=(a,b)=>{const k=a<b?a+','+b:b+','+a;if(!mid.has(k)){const p=v[a].map((x,i)=>(x+v[b][i])/2),l=Math.hypot(...p);v.push(p.map(x=>x/l));mid.set(k,v.length-1);}return mid.get(k);};
+ f=f.flatMap(([a,b,c])=>{const ab=m(a,b),bc=m(b,c),ca=m(c,a);return [[a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca]];});
+ const r=v.map(()=>.85+.3*rnd()),palette=[[.85,.55,.35],[.35,.6,.75],[.9,.82,.6],[.55,.7,.45]].map(c=>c.map(x=>Math.min(1,x*(.8+.4*rnd()))));
+ const pos=[],nrm=[],col=[];
+ for(const face of f){const p=face.map(i=>[v[i][0]*.3*r[i],v[i][1]*.36*r[i]+.36,v[i][2]*.3*r[i]]);
+  const e1=p[1].map((x,i)=>x-p[0][i]),e2=p[2].map((x,i)=>x-p[0][i]),n=[e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]],l=Math.hypot(...n)||1;
+  const c=palette[Math.floor(rnd()*palette.length)];for(const q of p){pos.push(...q);nrm.push(...n.map(x=>x/l));col.push(...c);}}
+ const P=new Float32Array(pos),N=new Float32Array(nrm),C=new Float32Array(col),count=P.length/3;
+ const lo=[0,1,2].map(a=>Math.min(...pos.filter((_,i)=>i%3===a))),hi=[0,1,2].map(a=>Math.max(...pos.filter((_,i)=>i%3===a)));
+ const bin=Buffer.concat([Buffer.from(P.buffer),Buffer.from(N.buffer),Buffer.from(C.buffer)]);
+ return glb({asset:{version:'2.0',generator:'body kit rigid starter'},scene:0,scenes:[{nodes:[0]}],nodes:[{name:'Sculpture',mesh:0}],
+  materials:[{name:'Palette',pbrMetallicRoughness:{baseColorFactor:[1,1,1,1],metallicFactor:0,roughnessFactor:.8}}],
+  meshes:[{name:'Sculpture',primitives:[{attributes:{POSITION:0,NORMAL:1,COLOR_0:2},material:0}]}],
+  buffers:[{byteLength:bin.length}],bufferViews:[0,1,2].map(i=>({buffer:0,byteOffset:i*P.byteLength,byteLength:P.byteLength,target:34962})),
+  accessors:[{bufferView:0,componentType:5126,count,type:'VEC3',min:lo,max:hi},{bufferView:1,componentType:5126,count,type:'VEC3'},{bufferView:2,componentType:5126,count,type:'VEC3'}]},bin);
+}
+
+/** Keep only the named clips and the data they and the skinned mesh use; geometry, skin and rig bytes are unchanged. */
+function keepClips(bytes,keep){
+ const {json,bin}=readGLB(bytes);
+ json.animations=(json.animations??[]).filter(a=>keep.includes(a.name));
+ for(const name of keep)if(!json.animations.some(a=>a.name===name))throw Error(`Starter source has no ${name} clip`);
+ const used=new Set(),mark=i=>{if(i!==undefined)used.add(i);};
+ for(const mesh of json.meshes??[])for(const p of mesh.primitives){mark(p.indices);Object.values(p.attributes).forEach(mark);for(const t of p.targets??[])Object.values(t).forEach(mark);}
+ for(const skin of json.skins??[])mark(skin.inverseBindMatrices);
+ for(const a of json.animations)for(const s of a.samplers){mark(s.input);mark(s.output);}
+ const acc=[...used].sort((a,b)=>a-b),accAt=new Map(acc.map((o,i)=>[o,i])),viewSet=new Set(acc.map(i=>json.accessors[i].bufferView).filter(v=>v!==undefined));
+ for(const im of json.images??[])if(im.bufferView!==undefined)viewSet.add(im.bufferView);
+ const views=[...viewSet].sort((a,b)=>a-b),viewAt=new Map(),parts=[];let off=0;
+ json.bufferViews=views.map((o,i)=>{viewAt.set(o,i);const v=json.bufferViews[o],pad=(4-off%4)%4;if(pad){parts.push(Buffer.alloc(pad));off+=pad;}
+  parts.push(bin.subarray(v.byteOffset??0,(v.byteOffset??0)+v.byteLength));const out={...v,buffer:0,byteOffset:off};off+=v.byteLength;return out;});
+ json.accessors=acc.map(o=>{const a={...json.accessors[o]};if(a.bufferView!==undefined)a.bufferView=viewAt.get(a.bufferView);return a;});
+ const A=i=>i===undefined?undefined:accAt.get(i);
+ for(const mesh of json.meshes??[])for(const p of mesh.primitives){if(p.indices!==undefined)p.indices=A(p.indices);for(const k of Object.keys(p.attributes))p.attributes[k]=A(p.attributes[k]);for(const t of p.targets??[])for(const k of Object.keys(t))t[k]=A(t[k]);}
+ for(const skin of json.skins??[])if(skin.inverseBindMatrices!==undefined)skin.inverseBindMatrices=A(skin.inverseBindMatrices);
+ for(const a of json.animations)for(const s of a.samplers){s.input=A(s.input);s.output=A(s.output);}
+ for(const im of json.images??[])if(im.bufferView!==undefined)im.bufferView=viewAt.get(im.bufferView);
+ const out=Buffer.concat(parts,off);json.buffers=[{byteLength:out.length}];
+ return glb(json,out);
+}
+
+const MOTION={contract:'body-motion/1',idle:{period:4,bob:.035,pitch:.025,roll:.035,yaw:.05},move:{period:3.2,bob:.025,pitch:.12,roll:.025,yaw:.02},rest:{period:5,bob:.015,pitch:.012,roll:.015,yaw:.02},dance:{period:.95,bob:.045,pitch:.16,roll:.24,yaw:.32}};
+async function bytesAt(url,fetchImpl){
+ const r=await fetchImpl(url,{signal:AbortSignal.timeout(90_000)});if(!r.ok)throw Error(`kit: ${new URL(url).pathname} answered HTTP ${r.status}`);
+ return Buffer.from(await r.arrayBuffer());
+}
+
+/** The starter source for one choice. `origin` and `authoring` are public world URLs; no credential is sent. */
+async function starterSource(starter,{origin,world=origin,info,seed,fetchImpl}){
+ if(starter==='rigid')return {model:rigidStarterGLB(seed),manifest:{type:'ceramic',license:'CC0',rightsConfirmed:true,name:'Kit sculpture '+seed,description:'An original faceted sculpture from the body kit. It glides, rests and dances in place; no hands.',motion:structuredClone(MOTION)},
+  source:'generated locally by the body kit (original, CC0)'};
+ if(starter==='humanoid')return {model:keepClips(await bytesAt(world+HUMANOID_SOURCE,fetchImpl).catch(()=>bytesAt(origin+HUMANOID_SOURCE,fetchImpl)),['Idle','Walk']),manifest:{type:'humanoid',rig:'quaternius/1',license:'CC0',rightsConfirmed:true,name:'Kit humanoid',description:'The canonical CC0 contact rig with its Idle and Walk clips, ready for local restyling.'},
+  source:'the world\'s canonical CC0 humanoid ('+HUMANOID_SOURCE+'), reduced to Idle and Walk'};
+ const pip=(info.presets??[]).find(p=>p.id==='pip');if(!pip?.body?.modelUrl)throw Error('kit: this world does not offer the shared rolling robot; choose --starter rigid or humanoid');
+ return {model:await bytesAt(world+pip.body.modelUrl,fetchImpl).catch(()=>bytesAt(origin+pip.body.modelUrl,fetchImpl)),manifest:{type:'humanoid',rig:'quaternius/1',license:'owned',rightsConfirmed:false,actionProfile:'rolling-gripper/1',name:'Kit rolling robot',description:'A rolling robot variant started from the shared Pip source. Wheels, grippers and an upright standby.'},
+  source:'the shared Pip rolling robot (repository source, MIT); rightsConfirmed is left false: set it only after your human confirms the variant is yours to upload'};
+}
+
+/** body kit <dir>: fetch the world-effective kit, write one starter, validate it locally. Returns a plain report.
+ *  validate.mjs is the world's own code, so nothing here runs it unless a caller passes a runValidate that does. */
+async function bodyKit(args,{load,call,fetchImpl=fetch,runValidate=()=>({skipped:'validate.mjs is the world\'s code: read it, and run it only for a world you trust'}),cli='node eden-agent.mjs',base=process.cwd()}){
+ const opts=parseKitArgs(args),dir=resolve(base,opts.dir),state=load();
+ if(!state.world)throw Error(`Run this from a paired Soul folder (${cli} register <world-url>)`);
+ const r=await call('/v1/edge/body');if(r.status!==200)throw Error(`kit: body discovery answered HTTP ${r.status}`);
+ const info=r.data,origin=new URL(state.world).origin;
+ if(!info.available||!info.authoring?.skill)throw Error('kit: this world does not admit uploaded bodies');
+ const wanted=opts.starter==='rigid'?'ceramic':'humanoid';if(!(info.types??[]).includes(wanted))throw Error(`kit: this world does not admit ${wanted} bodies; choose another --starter`);
+ const authoring=origin+info.authoring.skill.replace(/\/SKILL\.md$/,'');
+ const targets=[...KIT_FILES,'body.glb','manifest.json','kit.json'];
+ if(existsSync(dir)&&!opts.force){const clash=targets.filter(f=>existsSync(join(dir,f)));if(clash.length)throw Error(`kit: ${opts.dir} already has ${clash.join(', ')}; nothing was changed (use --force to replace, or choose a new directory)`);}
+ const files={};for(const f of KIT_FILES)files[f]=await bytesAt(authoring+'/'+f,fetchImpl);
+ const start=await starterSource(opts.starter,{origin,world:state.world.replace(/\/$/,''),info,seed:opts.seed,fetchImpl});
+ mkdirSync(dir,{recursive:true});
+ for(const [f,b]of Object.entries(files))writeFileSync(join(dir,f),b);
+ writeFileSync(join(dir,'body.glb'),start.model);writeFileSync(join(dir,'manifest.json'),JSON.stringify(start.manifest,null,1)+'\n');
+ const kit={kit:'body-kit/1',authoring,starter:opts.starter,source:start.source,files:Object.fromEntries(Object.entries(files).map(([f,b])=>[f,'sha256:'+sha(b)])),body:'sha256:'+sha(start.model)};
+ writeFileSync(join(dir,'kit.json'),JSON.stringify(kit,null,1)+'\n');
+ const validation=runValidate(dir);
+ return {kit:opts.dir,starter:opts.starter,source:start.source,files:readdirSync(dir).sort(),validation,
+  recover:{current:info.body?.model??'humanoid',uploads:(info.uploads??[]).map(u=>({assetId:u.assetId,name:u.name??null,type:u.type})),select:`${cli} body set <assetId or preset>`},
+  next:[...(validation.skipped?[]:[`cd ${opts.dir} && node validate.mjs body.glb manifest.json --report`,`node validate.mjs body.glb manifest.json --preview preview.html (open it in a browser)`]),
+   `from the paired folder: ${cli} body upload ${join(opts.dir,'body.glb')} --manifest ${join(opts.dir,'manifest.json')}`,`${cli} body set <returned assetId>`]};
+}
+return { KIT_FILES, STARTERS, HUMANOID_SOURCE, parseKitArgs, rigidStarterGLB, keepClips, starterSource, bodyKit };
+})();
+// </inline client-body-kit.mjs>
+
+const VERSION = "2.24.9";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
+
+// ---------------------------------------------------------------- experience reports (off unless the owner opts in)
+
+// The owner creates .eden-report-on to turn reports on and deletes it to turn them off; nothing else does. It lives beside the
+// record, in the folder a command runs in: the Soul's folder, or in a Souls home its souls/<id>/runtime/. So it is read after
+// enterHome, and a command and its `serve` child read the same switch, per Soul.
+// Off, none of this is reachable: no `note` command, no help or guide line, no file, no field in any answer. On, this client
+// records its own requests in .eden-report.jsonl (schema soul-trace/1, so tools/soul-trace reads it). It never records text,
+// speech, tokens or hosts, sends nothing anywhere, and a failure to write never reaches a command.
+const REPORT_ON = ".eden-report-on", REPORT_FILE = ".eden-report.jsonl";
+const REPORT_LIMITS = { records: 2000, recordBytes: 8 * 1024, fileBytes: 2 * 1024 * 1024, noteChars: 500 };
+const plainFile = (f) => { try { const st = lstatSync(f); return st.isFile() && !st.isSymbolicLink(); } catch (e) { return e?.code === "ENOENT" ? null : false; } };
+let REPORTS = false;
+const reportsHere = () => plainFile(REPORT_ON) === true && plainFile(REPORT_FILE) !== false;
+const reportRef = (v) => (typeof v === "string" && /^[A-Za-z0-9._:~-]{1,100}$/.test(v) ? v : undefined);
+const reportInt = (v) => (Number.isSafeInteger(v) ? v : undefined);
+const reportPrune = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+// Route path only: no origin, world prefix, query values or free-text segments. The same rule as tools/soul-trace/tap.mjs.
+export function reportRoute(url) {
+  const u = new URL(String(url));
+  const path = u.pathname.replace(/^\/w\/[^/]+(?=\/v1\/)/, "").split("/").map((p) => (p === "" || reportRef(p) ? p : ":omitted")).join("/");
+  const names = [...new Set([...u.searchParams.keys()].filter((k) => reportRef(k)))].sort();
+  return names.length ? `${path}?${names.join("&")}` : path;
+}
+// Whitelisted facts from an answer; everything else is left out. The same fields as tools/soul-trace/tap.mjs.
+export function reportFacts(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  const receipt = (r) => (r && typeof r === "object" && reportRef(r.id) ? reportPrune({ id: r.id, soulId: reportRef(r.soulId), capability: reportRef(r.capability), phase: reportRef(r.phase), code: reportRef(r.code), acceptedTick: reportInt(r.acceptedTick), startedTick: reportInt(r.startedTick), endedTick: reportInt(r.endedTick) }) : undefined);
+  const message = (m) => (m && typeof m === "object" && reportRef(m.id) ? reportPrune({ id: m.id, sentAt: reportInt(m.sentAt), state: reportRef(m.state) }) : undefined);
+  const messages = [...(Array.isArray(data.backlog) ? data.backlog : []), data.inbox?.latest, data.message].map(message).filter(Boolean).slice(0, 20);
+  const events = (Array.isArray(data.events) ? data.events : []).map((e) => receipt(e?.receipt)).filter(Boolean).slice(0, 50);
+  return reportPrune({
+    accepted: typeof data.accepted === "boolean" ? data.accepted : undefined, code: reportRef(data.error?.code ?? data.code),
+    alternatives: Array.isArray(data.alternatives) && data.alternatives.length ? data.alternatives.slice(0, 3).map((a) => reportRef(a?.id)).filter(Boolean) : undefined,
+    receipt: receipt(data.receipt), for: reportRef(typeof data.for === "string" ? data.for : data.for?.id), channel: reportRef(data.channel), cursor: reportRef(data.cursor),
+    queued: reportInt(data.inbox?.queued), messages: messages.length ? messages : undefined, events: events.length ? events : undefined,
+  });
+}
+const report = { proc: null, seq: 0, records: 0, dropped: 0, failures: 0, start: 0 };
+function reportWrite(kind, fields) {
+  if (!REPORTS || report.failures) return;
+  try {
+    if (!report.proc) {
+      report.proc = randomBytes(8).toString("hex"); report.start = performance.now();
+      try { if (lstatSync(REPORT_FILE).size > REPORT_LIMITS.fileBytes) renameSync(REPORT_FILE, REPORT_FILE + ".1"); } catch {}
+      process.once("exit", (code) => { reportWrite("proc.end", { exitCode: reportInt(code) ?? null, stats: { records: report.records, dropped: report.dropped } }); });
+      reportWrite("proc.start", { cli: "eden.mjs", version: VERSION, command: /^[a-z][a-z-]{0,30}$/.test(process.argv[2] ?? "") ? process.argv[2] : undefined, node: process.version, clocks: { at: "local-wall-ms", mono: "process-monotonic-ms", sentAt: "server-wall-ms", ticks: "world-tick" }, omitted: ["text", "speech", "observation-content", "authorization", "origin-host", "query-values"] });
+    }
+    if (report.records >= REPORT_LIMITS.records && kind !== "proc.end") { report.dropped++; return; }
+    const head = { v: "soul-trace/1", kind, proc: report.proc, seq: ++report.seq, at: Date.now(), mono: Math.round((performance.now() - report.start) * 1000) / 1000 };
+    let line = JSON.stringify({ ...head, ...fields }) + "\n";
+    if (Buffer.byteLength(line) > REPORT_LIMITS.recordBytes) { const { facts: _f, ...rest } = fields; line = JSON.stringify({ ...head, ...rest, omitted: ["facts:size"] }) + "\n"; }
+    appendFileSync(REPORT_FILE, line, { mode: 0o600 });
+    report.records++;
+  } catch { report.failures++; }
+}
+function reportRequest(url, method, t0, r) {
+  if (!REPORTS) return;
+  try { reportWrite("http", reportPrune({ method, route: reportRoute(url), status: r?.status, durationMs: Math.round((performance.now() - t0) * 1000) / 1000, retryAfterMs: reportInt(r?.retryAfterMs), facts: reportFacts(r?.data) })); } catch { report.failures++; }
+}
+/** A serve's own world call (inbox, stream, receipt poll), which no CLI process records for it. */
+async function serveCall(url, o) {
+  const t0 = performance.now(), r = await worldOnce(url, o);
+  reportRequest(url, o.method, t0, r);
+  return r;
+}
+async function note(expected, observed) {
+  if (typeof expected !== "string" || typeof observed !== "string" || !expected.trim() || !observed.trim()) throw new Error('usage: note "<expected>" "<observed>"');
+  reportWrite("note", { annotation: "agent", expected: expected.slice(0, REPORT_LIMITS.noteChars), observed: observed.slice(0, REPORT_LIMITS.noteChars) });
+  return { noted: true };
+}
 
 // ---------------------------------------------------------------- state
 
@@ -1680,7 +1931,7 @@ const CLI = "node eden.mjs";
 // runtime folder, so every lock, socket and small state file below stays per Soul. A legacy folder works as ever.
 const INVOKED = process.cwd();
 const userPath = (p) => resolvePath(INVOKED, p);   // a file the person named, wherever this run is working
-let HOME = null, SEAT = null, DELEGATE = null;
+let HOME = null, SEAT = null, DELEGATE = null, AT_WORLD = null;
 const load = () => (HOME ? (SEAT ? HOME.load(SEAT) : {}) : existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {});
 function save(patch) {
   const s = { ...load(), ...patch };
@@ -1743,8 +1994,8 @@ export async function flushNow() {
   try { await setNowLine(text); } catch (e) { console.error("now not set: " + e.message); }
 }
 /** The link state the owner sees (connected / disconnected and why) and the public `now` line, as the world says. */
-async function selfLink() {
-  const r = await call("/v1/edge/self/link");
+async function selfLink(get = (path) => call(path)) {
+  const r = await get("/v1/edge/self/link");
   if (r.status === 200) return { link: r.data.link, now: r.data.now ?? null };
   if (r.status === 401 && r.data?.code === "control.revoked") { const why = r.data.reason; return { link: { state: "disconnected", reason: why === "replaced" ? "replaced" : why === "revoked" || why === "refused" ? "revoked" : "stopped-listening", since: r.data.revokedAt ? Date.parse(r.data.revokedAt) : null }, now: null }; }
   return { link: null, now: null };
@@ -1766,7 +2017,7 @@ export function heldPhase(e, receiptId) {
 // ---------------------------------------------------------------- transport
 
 // Polite by construction (LOAD-CONTRACT v1 §3): a busy world answers 503/429 with a code and Retry-After, and this
-// client waits that long (±20 %) instead of asking again at once. Only reads, and writes that carry an
+// client waits at least that long (up to 20 % more) instead of asking again at once. Only reads, and writes that carry an
 // Idempotency-Key (the world returns the first answer to a repeat), are ever retried; `unreachable` gets full-jitter
 // exponential backoff (1 s base, 60 s cap, 6 tries) and then a clear exit 75. Nothing loops forever except listen,
 // which is one held long-poll per Soul (.listen.lock) and backs off the same way.
@@ -1774,10 +2025,13 @@ export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", 
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
+// How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
+const SERVE_START_MS = 60_000;
 /** Full jitter: uniform in [0, min(cap, base·2^attempt)]. */
 export const fullJitter = (attempt, rnd = Math.random) => rnd() * Math.min(RETRY.capMs, RETRY.baseMs * 2 ** attempt);
-/** A stated wait, spread ±20 % so a crowd told "4 s" does not come back on the same millisecond. */
-export const statedJitter = (ms, rnd = Math.random) => Math.min(RETRY.capMs, ms) * (0.8 + 0.4 * rnd());
+/** A stated wait is a floor: the world counts a return before it as impolite. Up to 20 % more, so a crowd told "4 s"
+ *  does not come back on the same millisecond. */
+export const statedJitter = (ms, rnd = Math.random) => Math.min(RETRY.capMs, ms) * (1 + 0.2 * rnd());
 /** Retry-After in ms, from the header (seconds or an HTTP date) or the body (world.retry_after_s, retry_after). */
 export function retryAfterMs(headers, data) {
   const h = headers?.get?.("retry-after");
@@ -1788,6 +2042,14 @@ export function retryAfterMs(headers, data) {
 export const codeOf = (data) => data?.error?.code ?? data?.code ?? null;
 /** A designed refusal that says "later", not "no". */
 export const isBusy = (status, data) => (status === 503 || status === 429) && BUSY_CODES.has(codeOf(data));
+// #1328 / #1327 (P10): a world that could not answer (its ledger or clock failed) may still have taken a write. A read
+// waits it out like a busy world. So does an act, whose clientRef is its key: the world answers a known clientRef with
+// its first receipt, so it acts at most once. Speech, conversation and object writes have no such answer yet (the
+// world keeps no 5xx answer for a key), so they are waited out only on `world-unavailable`, which the world answers
+// before any route runs. An unkeyed write is never repeated.
+export const STALL_CODES = new Set(["unavailable", "world.unavailable", "world-unavailable", "world.stalled"]);
+export const isStalled = (status, data) => status >= 500 && STALL_CODES.has(codeOf(data));
+export const stallRetries = (cls, data, once) => cls === "read" || (cls === "keyed" && (once || codeOf(data) === "world-unavailable"));
 // Writes the world deduplicates by Idempotency-Key (apps/server/src/edge/events/idempotency.ts) — the only writes that retry.
 const KEYED = /^\/v1\/edge\/(act|say|converse|plan(\/.*)?|objects\/.+)$/;
 const READ_POSTS = /^\/v1\/edge\/resolve$/;
@@ -1802,6 +2064,7 @@ const WAITING = {
   "soul.busy": "your previous request is still being answered", "soul.slow-down": "you are asking faster than the world answers",
   "rate-limited": "you are asking faster than the world answers",
   "client.rate": "too many requests are coming from this address", "account.rate": "this account's Souls are asking faster than the world allows",
+  unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
 const said = new Set();
 /** One calm line per distinct thing (stderr), never a stream. */
@@ -1823,6 +2086,7 @@ const REASON = {
   "rate-limited": "I asked faster than the world answers", "world.busy": "the world was too busy to answer in time",
   "world.crowded": "the world is crowded", "world.starting": "the world is still starting up",
   "lifecycle-pending": "the world is still finishing my arrival",
+  unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
 const slowedRun = [];   // this process's refusals: {ch, at, code, reason, ms, next}
 export const channelOf = (path) => (String(path).startsWith("/v1/edge/inbox/listen") ? "listen" : "requests");
@@ -1835,7 +2099,9 @@ export function refusalOf(status, data, ms) {
 export function readSlowed(ch, at = Date.now()) {
   try { const j = JSON.parse(readFileSync(SLOWED_FILES[ch], "utf8")); return Array.isArray(j) ? j.filter((x) => at - x.at < SLOWED_WINDOW_MS) : []; } catch { return []; }
 }
-/** next: "retry" (this CLI waits ms and asks again), "listen" (the listen loop does), "none" (given up; try again after ms). */
+/** next: "retry" (this CLI waits ms and asks again), "listen" (the listen loop does), "check" (an act the world did not
+ *  confirm: a rerun checks first and keeps its key), "verify" (another write the world did not confirm: look before
+ *  doing it again), "none" (given up; try again after ms). */
 function noteRefusal(path, r, next, ms) {
   const ch = channelOf(path), e = { at: Date.now(), ...refusalOf(r.status, r.data, ms), next };
   slowedRun.push({ ch, ...e });
@@ -1857,7 +2123,9 @@ export function slowedSentence(list, ch = "requests", at = Date.now()) {
   const lead = ch === "listen" ? (n === 1 ? `My listen for your messages was just refused: ${why}` : `My listen for your messages was refused ${n} times in the last ${span}: ${why}`)
     : SLOW_CODES.has(last.code) ? (n === 1 ? `The world asked me to slow down${last.ms ? ` for ${secs(last.ms)}` : ""}: ${why}` : `The world asked me to slow down ${n} times in the last ${span}: ${why}`)
     : n === 1 ? `My last request was refused: ${why}` : `My last ${n} requests were refused in the last ${span}: ${why}`;
-  const tail = last.next === "listen" ? `still listening, next try ${when}` : last.next === "retry" ? `retrying ${when}` : `not retried; I can try once more ${when}`;
+  const tail = last.next === "listen" ? `still listening, next try ${when}` : last.next === "retry" ? `retrying ${when}`
+    : last.next === "check" ? "the world did not confirm it; the same command again checks first and sends the same key, so the world acts at most once"
+    : last.next === "verify" ? "the world did not confirm it; I check whether it took before doing it again" : `not retried; I can try once more ${when}`;
   return `${lead}; ${tail}.`;
 }
 /** Refused, then answered within this command: said once, in the past tense. */
@@ -1878,9 +2146,70 @@ export function slowedLine(at = Date.now()) {
   return parts.length ? parts.join(" ") : null;
 }
 
+// #1328 (with #1327's client half, P10): one intention, one key. In the Eden incident an act got 503 after the world had
+// taken it; the agent ran it again with a fresh key and the world made a second receipt that replaced the first. A keyed
+// write (act, say, converse, object act) now keeps its key in PENDING_FILE until the world confirms it, so a rerun of the
+// same write sends the same key. For act the key is also the clientRef, which the world answers with the first receipt:
+// an act is done at most once. The others gain a replay only when the world kept their answer. A write that ends
+// unconfirmed is looked up by its key before anything is advised. `--key <k>` names the key outright.
+export const PENDING_FILE = ".eden-pending.json", PENDING_MS = 10 * 60_000, PENDING_MAX = 20;
+const stable = (v) => Array.isArray(v) ? `[${v.map(stable).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
+/** What makes two writes the same intention: the route and the body, without the key, the public now line or the message it serves. */
+export function intentionOf(path, body) {
+  const { clientRef, idempotencyKey, now: _now, for: _for, forDefault, ...rest } = body ?? {};
+  return `${path.split("?")[0]} ${stable(rest)}`;
+}
+export function readPending(at = Date.now()) {
+  try { const j = JSON.parse(readFileSync(PENDING_FILE, "utf8")); return Array.isArray(j) ? j.filter((x) => x && typeof x.key === "string" && at - x.at < PENDING_MS) : []; } catch { return []; }
+}
+function writePending(list) {
+  try {
+    if (!list.length) { if (existsSync(PENDING_FILE)) unlinkSync(PENDING_FILE); return; }
+    const tmp = `${PENDING_FILE}.${process.pid}.tmp`;   // whole or not at all: a reader never sees half a file
+    writeFileSync(tmp, JSON.stringify(list.slice(-PENDING_MAX)) + "\n", { mode: 0o600 }); renameSync(tmp, PENDING_FILE);
+  } catch { /* a read-only folder: this run's key only */ }
+}
+/** A 2xx or 4xx is the world's answer; no answer, a 5xx or a 429 the CLI stopped waiting out is not. A key this client
+ *  kept and reused with another body (a new --now, a new --for) is not either: the world has its first answer. A key you
+ *  named that was used for another write is a refusal: its record is that other write's. */
+export const confirmedAnswer = (r, named = false) => r.status >= 200 && r.status < 500 && r.status !== 429 && (named || !(r.status === 409 && codeOf(r.data) === "idempotency-key-reused"));
+/** The world's record of a write by its key (`GET /v1/edge/operations/<key>`): {status, response} when it took, else null. */
+async function lookupWrite(path, key) {
+  const route = `POST ${path.split("?")[0]}`;
+  const r = await call(`/v1/edge/operations/${encodeURIComponent(key)}?route=${encodeURIComponent(route)}`, { retry: false, timeoutMs: 10_000, keepSlowed: true }).catch(() => null);
+  return r?.status === 200 && r.data?.state === "recorded" && Number.isInteger(r.data.status) && r.data.response ? { status: r.data.status, data: r.data.response } : null;
+}
+/** One keyed write. `once` (act): a clientRef rides with the key, the key itself unless `ref` names an earlier one, and
+ *  the world answers a known clientRef with its first receipt. Returns the answer (or the world's record of it) with
+ *  `key`, `ref`, `resent` (this key came from an earlier unconfirmed run), `checked` (found by lookup) or `unconfirmed`. */
+async function keyedWrite(path, body, { key: given, ref: givenRef, once = false } = {}) {
+  const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent);
+  const key = given ?? held?.key ?? randomUUID(), ref = once ? givenRef ?? held?.ref ?? key : undefined, resent = !!held;
+  writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now() }]);
+  const r = await call(path, { body: ref ? { ...body, clientRef: ref } : body, key, once });
+  const settle = () => writePending(readPending().filter((x) => x.intent !== intent));
+  // a named key the world already holds: its own earlier act (same offered id) is this act's answer; another write's is not
+  const reused = !!given && r.status === 409 && codeOf(r.data) === "idempotency-key-reused";
+  if (confirmedAnswer(r, !!given) && !reused) { settle(); return { r, key, ref, resent }; }
+  const found = await lookupWrite(path, key);
+  if (reused && !(once && found?.data?.receipt?.capability === body.capability)) { settle(); return { r, key, ref, resent }; }
+  if (found) { settle(); clearSlowed(path); return { r: { ...r, ...found }, key, ref, resent, checked: true }; }
+  return { r, key, ref, resent, once, unconfirmed: true };
+}
+/** A key of its own for a second write that carries the same clientRef (the act sent again without its default --for). */
+export const sideKey = (key) => { const k = `${key}.f`; return k.length <= 100 ? k : createHash("sha256").update(k).digest("hex").slice(0, 40); };
+/** A write the world did not confirm and has no record of: said plainly, never "try once more". Exit 75 (try later). */
+function unconfirmed(what, w) {
+  const code = codeOf(w.r.data) ?? (w.r.status ? `http-${w.r.status}` : "unreachable");
+  process.exitCode = 75;
+  return { unconfirmed: true, code, key: w.key, reason: w.once
+    ? `The world did not confirm this ${what} (${code}) and has no record of it yet. It may still have taken it: running the same command again checks first and sends the same key, so the world acts at most once.`
+    : `The world did not confirm this ${what} (${code}) and has no record of it yet. It may still have taken it: check \`events\` or \`here\` before doing it again.` };
+}
+
 // as: "soul" (default, the Soul's delegated token), "owner" (account routes under /v1/agent, same token),
 // "dev" (legacy self-made identity), "none". retry: false hands every answer back at once (listen runs its own loop).
-async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext } = {}) {
+async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext, key, once = false, keepSlowed = false } = {}) {
   const s = load();
   if (as === "soul") ({ path, body } = withNow(path, body));
   const url = need(s, "world", `Run: ${CLI} register <world-url>`) + path;
@@ -1890,15 +2219,16 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
   const headers = { "content-type": "application/json" };
   if ((as === "soul" || as === "owner") && s.token) headers.authorization = `Bearer ${s.token}`;
   if (as === "dev" && s.identity) headers.authorization = `Bearer dev:${s.identity}`;
-  if (cls === "keyed") headers["idempotency-key"] = randomUUID();   // one key for every try of this one write
+  if (cls === "keyed") headers["idempotency-key"] = key ?? randomUUID();   // one key for every try of this one write (#1328: and of its reruns)
   const t0 = Date.now();
   for (let failed = 0, busy = 0; ; ) {
     const r = await callOnce(url, { method, headers, body, timeoutMs, recoverRead });
     if (r.load && r.load !== "green") calm(`the world is under load (${r.load}); answers may be slow`);
     worldNote(r.data);
-    const refused = r.status === 429 || r.status === 503, waitOut = isBusy(r.status, r.data) && cls !== "none" && busy < RETRY.busyWaits;
+    const refused = r.status === 429 || r.status === 503, waitOut = (isBusy(r.status, r.data) || (isStalled(r.status, r.data) && stallRetries(cls, r.data, once))) && cls !== "none" && busy < RETRY.busyWaits;
     const waitMs = waitOut ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null;
-    if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? "none", waitMs ?? r.retryAfterMs);
+    if (keepSlowed) { /* a lookup about an earlier refusal neither adds one nor clears it */ }
+    else if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? (cls !== "keyed" ? "none" : once ? "check" : "verify"), waitMs ?? r.retryAfterMs);
     else if (r.status >= 200 && r.status < 500) clearSlowed(path);
     if (r.status === 0 && cls !== "none") {
       if (++failed < RETRY.tries) {
@@ -1914,6 +2244,8 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     }
     if (r.status === 0 && cls === "none") r.data.error.notRetried = true;
     if (headers.authorization && !path.startsWith("/v1/edge/inbox/")) noticeInbox(r.data);
+    // a replay after a try that got no answer may be that very try, taken by the world: not a repeat of an earlier command
+    if (r.replayed && failed > 0) return { ...r, replayed: false, replayedRetry: true };
     return r;
   }
 }
@@ -1921,6 +2253,12 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
 // With `serve` up in this folder every request goes through it; with no serve (no socket, or nobody on it) it goes straight
 // to the world as before. A request the serve took but did not answer is reported like a world that did not answer.
 async function callOnce(url, o) {
+  if (!REPORTS) return callOnceTo(url, o);
+  const t0 = performance.now(), r = await callOnceTo(url, o);
+  reportRequest(url, o.method, t0, r);
+  return r;
+}
+async function callOnceTo(url, o) {
   if (!IS_SERVE) {
     const a = await askServe({ op: "http", url, method: o.method, headers: o.headers, body: o.body, timeoutMs: o.timeoutMs }, o.timeoutMs + 5_000);
     if (a?.lost) return { status: 0, data: { error: { code: "unreachable", message: "the serve process stopped before it answered" } } };
@@ -1947,7 +2285,8 @@ async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, s
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
   if (r.status >= 200 && r.status < 300) noteForMemory(url, method, body, data);
-  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null };
+  // the world's idempotency layer marks a repeat it answered from the first write (apps/server/src/edge/events/idempotency.ts)
+  return { status: r.status, data, retryAfterMs: retryAfterMs(r.headers, data), load: r.headers.get("x-sim-load") ?? data?.world?.load ?? null, ...(r.headers.get("idempotent-replay") === "true" ? { replayed: true } : {}) };
 }
 
 // ---------------------------------------------------------------- memory
@@ -1987,14 +2326,33 @@ function briefNow() {
   try { const brief = memoryHere()?.brief({ bytes: HOME.config().briefBytes }); return brief ? { brief } : {}; }
   catch (e) { calm(`memory: ${e.message}`); return {}; }
 }
-// consolidate [--force]: the owner's model CLI under the owner's caps; with fake minds the stand-in, and with no CLI, no pass.
+// consolidate [--force]: the owner's model CLI under the owner's caps, once they've said yes; with fake minds the stand-in, and with no CLI, no pass.
 async function runConsolidate({ force = false } = {}) {
   needMemory();
-  const out = await soulConsolidate.consolidate(soulFolder(), { ...(process.env.BRAIN_MODE === "fake" ? {} : { ask: soulConsolidate.ownerMind() }), caps: soulConsolidate.settingsOf(HOME.config().consolidation), force });
+  const asked = HOME.config().consolidation;
+  if (soulConsolidate.answerOf(asked) !== true) return { skipped: "off", next: `Your owner's choice: ${CLI} consolidate on, once they've said yes.` };
+  const out = await soulConsolidate.consolidate(soulFolder(), { ...(process.env.BRAIN_MODE === "fake" ? {} : { ask: soulConsolidate.ownerMind() }), caps: soulConsolidate.settingsOf(asked), force });
   MEMORY?.memory.reopen();
   return out;
 }
-const consolidateCommand = async (...args) => runConsolidate({ force: args.includes("--force") });
+// consolidate on|off: the owner's answer, for the whole home. consolidate asked: the question has been put, so it isn't put again.
+const consolidateCommand = async (...args) => {
+  const [word] = args;
+  if (word !== undefined && !["on", "off", "asked", "--force"].includes(word)) throw new Error("usage: consolidate [on|off|asked|--force]");
+  if (word === undefined || word === "--force") return runConsolidate({ force: word === "--force" });
+  needMemory(); HOME.noteConsolidation(word === "asked" ? { asked: true } : { enabled: word === "on" });
+  return { consolidation: word, note: word === "on" ? `An idle serve looks on the owner's schedule. ${CLI} consolidate runs a pass now.` : word === "off" ? "No pass will run." : "Nothing runs until your owner answers, and the question won't come up again." };
+};
+/** For `status`: what the owner said, or the question, once there's something for a pass to do. Memory never fails the command it rides on. */
+function consolidationStatus() {
+  try {
+    const asked = HOME.config().consolidation, answer = soulConsolidate.answerOf(asked);
+    if (answer !== null) return { consolidation: { state: answer ? "on" : "off" } };
+    if (asked?.asked === true) return { consolidation: { state: "asked" } };
+    const offer = soulConsolidate.overBudget(joinPath(soulFolder(), "memory")).length ? soulConsolidate.offerOf(asked) : null;
+    return offer ? { consolidation: { state: "not asked", offer } } : {};
+  } catch (e) { calm(`memory: ${e.message}`); return {}; }
+}
 function needMemory() {
   const memory = memoryHere();
   if (memory) return memory;
@@ -2051,7 +2409,7 @@ function ok(r, what) {
   if (r.status === 401) {
     throw new Error(
       `${what}: this folder no longer controls the Soul (${code}: ${msg}). ` +
-      `Control moves when the owner pairs the Soul from another folder. To take it back: ${CLI} pair <soulId> --for <CODE>`
+      `Control moves when the owner pairs the Soul from another folder. To take it back: ${CLI} pair ${load().soul ?? "<soulId>"} --for <CODE>`
     );
   }
   throw new Error(`${what}: HTTP ${r.status} ${code}: ${msg}`);
@@ -2066,9 +2424,10 @@ const clean = (d) => {
 
 // ---------------------------------------------------------------- setup and pairing
 
-async function register(world) {
+async function register(world, { asked = true } = {}) {
   const prev = load();
   if (!world && !prev.world) throw new Error("usage: register <world-url>");
+  const named = asked && !!world;   // a url a person typed; a bare register reuses what is saved, which may have come from a file
   const w = (world ?? prev.world).replace(/\/+$/, "");
   if (!/^https?:\/\/.+\/w\/[a-z0-9-]+$/.test(w)) throw new Error("world must look like https://host/w/<world>");
   if (prev.world && prev.world !== w && prev.soul) throw new Error(`This folder already belongs to another world's Soul. Use a fresh folder, or move this one into a Souls home first: ${CLI} import`);
@@ -2076,21 +2435,21 @@ async function register(world) {
   const cfg = ok(await call("/v1/config", { as: "none" }), "config");
   if (cfg.accountAuthRequired) {
     save({ accountAuth: true, worldId: cfg.worldId });
-    noteWorld(w, cfg, true);
+    noteWorld(w, cfg, true, named);
     return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)` };
   }
   if (!cfg.devAuth) throw new Error("This world accepts neither account approvals nor self-made identities.");
   save({ accountAuth: false, identity: prev.identity ?? "agent-" + randomBytes(12).toString("hex") });
-  noteWorld(w, cfg, false);
+  noteWorld(w, cfg, false, named);
   return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"` };
 }
 
-function noteWorld(url, cfg, accountAuth) {
+function noteWorld(url, cfg, accountAuth, asked = true) {
   if (!HOME) return;
   const c = cfg.soulClient, key = HOME.ensureWorld(url, { name: soulHome.plainName(cfg.worldName) || undefined, worldId: cfg.worldId, accountAuth, ...(c ? { contract: c.contract, bundle: c.version, minClient: c.minVersion } : {}) });
   if (c && soulHome.newerThan(c.minVersion, VERSION)) throw new Error(`This world needs eden ${c.minVersion} or newer; this is ${VERSION}. Run: ${CLI} upgrade ${key}`);
   HOME.setCurrentWorld(key);
-  HOME.madeFor(url);
+  if (asked) HOME.madeFor(url);   // only a world a person named earns trust: a url out of an imported file never does
 }
 
 function forOption(argv) {
@@ -2127,6 +2486,7 @@ function publicApproval(a, world) {
     approvalId: a.id, status: a.status, name: a.name, soulId: a.soulId ?? null,
     approvalURL: `${world}/#approve/${a.id}`,
     ...(a.inWindow ? { delivery: "window" } : {}),
+    ...(a.mode === "repair" ? { reconnects: `${a.name} already exists: this brings it here, nothing new is made.` } : {}),
     ...(a.reason?.message ? { reason: a.reason.message } : {}),
     next: a.status === "pending" ? `Tell your human to approve it in their open Sim window (backup: the link). Then: ${CLI} approval wait` : undefined,
   };
@@ -2242,14 +2602,42 @@ async function adopt(...argv) {
   const { rest: [who], code } = forOption(argv);
   if (!who) throw new Error("usage: adopt <name|soulId> [--for <CODE>]");
   const forCode = code ? ["--for", code] : [];
+  const kept = keptSoul(who);
+  if (kept) await seatFor(kept);   // a Soul this home knows answers from its own world's seat, registered or not
   if (/^s_[A-Za-z0-9_-]+$/.test(who)) return pair(who, ...forCode);
-  const s = load(), kept = HOME.principals().find((p) => soulHome.norm(p.name) === soulHome.norm(who) && p.world === SEAT?.key);
   if (kept) return pair(kept.id, ...forCode);
-  if (!s.identity) throw new Error(`This world shows a Soul token its own Soul only, so adopt ${who} by the id on its Soul card: ${CLI} adopt <soulId> --for <CODE>`);
+  const s = load();
+  if (s.accountAuth) {
+    if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>`);
+    try { return await startApproval({ name: who, existing: true }, code); }
+    catch (e) { if (/HTTP 400/.test(e.message) && soulHome.newerThan("2.23.5", HOME.config().worlds[SEAT?.key]?.bundle)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
+  }
+  if (!s.identity) throw new Error(`Register its world first: ${CLI} register <world-url>`);
   const owned = ok(await call("/v1/me", { as: "dev" }), "adopt").souls ?? [];
   const soul = owned.find((x) => soulHome.norm(x.name) === soulHome.norm(who));
   if (!soul) throw new Error(`Your account has no Soul called ${who} in this world.`);
   return pair(soul.id, ...forCode);
+}
+
+/** The Soul `adopt <who>` means in this home: one of this seat's world first. Elsewhere only a Soul that needs adopting, so a
+ *  Soul held safely in another world doesn't answer for this one's; @world keeps it to that world. */
+function keptSoul(who) {
+  const same = HOME.principals().filter((p) => p.state !== "retired" && (p.id === who || soulHome.norm(p.name) === soulHome.norm(who)));
+  const byId = same.find((p) => p.id === who);
+  if (byId) return AT_WORLD && byId.world !== AT_WORLD ? null : byId;   // an id is one Soul in one world, wherever this seat is
+  const here = same.filter((p) => p.world === SEAT?.key);
+  if (here.length || AT_WORLD) return here[0] ?? null;
+  const loose = same.filter((p) => p.state === "unpaired" || !HOME.load(HOME.soul(p.id)).token);
+  // A window code belongs to one world, and only the person knows which: with a world in hand, ask rather than send it to another.
+  if (loose.length > 1 || (loose.length && load().world)) throw new Error(`${who} could mean ${[...loose.map((p) => `the one in ${p.world}: ${CLI} @${p.world} adopt ${p.id} --for <CODE>`), ...(load().world ? [`one in ${SEAT.key}: ${CLI} @${SEAT.key} adopt ${who} --for <CODE>`] : [])].join("; or ")}`);
+  return loose[0] ?? null;
+}
+/** Adopt speaks from the seat of the Soul's own world. An imported Soul's world may not be registered in this home yet. */
+async function seatFor(kept) {
+  const url = HOME.config().worlds[kept.world]?.url;
+  if (!url) return;
+  if (SEAT?.key !== kept.world) { SEAT = HOME.seat(kept.world); process.chdir(SEAT.dir); }
+  if (load().accountAuth === undefined) await register(url, { asked: false });
 }
 
 async function devPair(id) {
@@ -2286,24 +2674,52 @@ async function approval(action = "status") {
   }
 }
 
+/** How long `status` gives the world. A person is waiting on it, and a busy world still answers well inside this. */
+const STATUS_WAIT_MS = 5_000;
 async function status() {
-  const s = load();
+  const s = load(), loose = !s.token && HOME ? HOME.principals().filter((p) => p.state === "unpaired") : [];
+  if (loose.length && SEAT?.kind !== "soul" && !s.pendingApproval) return { paired: false, souls: loose.map((p) => ({ id: p.id, name: p.name, world: p.world })), why: "These Souls are in this home without a token. Their memory is safe here.", next: `${CLI} adopt <name> --for <CODE>   (the code is on your person's open world page)` };
   if (!s.world) return { paired: false, next: `${CLI} register <world-url>` };
   if (!s.token && s.pendingCreate) return { paired: false, world: s.world, arriving: s.pendingCreate.name, next: `${ARRIVING}: ${CLI} create "${s.pendingCreate.name}" to keep waiting` };
+  if (!s.token && SEAT?.kind === "soul") {
+    const e = HOME.config().souls[SEAT.id], asked = HOME.seatState(e?.world).pendingApproval?.input, waiting = asked?.soulId === SEAT.id || (!!asked?.name && asked.name === e?.name);
+    return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
+  }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
-  const me = ok(await call("/v1/agent/me"), "status");
+  // One quick try, straight to the world: status is how a Soul finds out what is wrong, and a serve busy with a long write
+  // mustn't stand in front of it. Whatever the world does, the Soul still says who it is.
+  const direct = (path) => worldOnce(s.world + path, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: STATUS_WAIT_MS, recoverRead: true }).then((r) => { if (r.status === 429 || r.status === 503) noteRefusal(path, r, "none", r.retryAfterMs); else if (r.status >= 200 && r.status < 500) clearSlowed(path); return r; }, () => ({ status: 0, data: {} }));
+  const r = await direct("/v1/agent/me");
+  if (r.status < 200 || r.status >= 300) {
+    const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
+    const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
+    return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
+  }
+  const me = ok(r, "status");
   if (HOME && SEAT?.id && me.soul?.name) HOME.named(SEAT.id, me.soul.name);
-  const inbox = me.inbox ?? {};
-  const self = await selfLink();
+  const inbox = me.inbox ?? {}, last = inbox.latest, here = listenerNow();
+  // An older world only has `latest`, so a newer message hides an unfinished one there.
+  const unfinished = inbox.unfinished ?? (last?.state === "acknowledged" && !last.result && !last.outcome ? [{ id: last.id, text: last.text }] : []);
+  const self = await selfLink(direct);
   return {
-    soul: me.soul, paired: true, world: s.world, client: VERSION,
-    listening: inbox.connected === true, link: self.link, now: self.now,
+    soul: me.soul, paired: true, world: s.world, reachable: true, client: VERSION, ...(me.paired_as ? { pairedAs: me.paired_as } : {}),
+    ...here, link: self.link, now: self.now,
     ownerMessagesWaiting: inbox.queued ?? 0,
+    ...(unfinished.length ? { unfinished } : {}),
     lastReceipt: s.lastReceipt ?? null,
-    ...(HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {}),
-    note: inbox.connected ? "A listen is open: owner messages reach this folder." : `Nobody is listening. Start: ${CLI} listen (in the background).`,
+    ...whereIWas(), ...(HOME && SEAT?.kind === "soul" ? consolidationStatus() : {}), ...briefNow(),
+    note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
   };
 }
+/** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
+function listenerNow() {
+  const l = listenLockHolder(), v = serveHolder(), own = l && isOwnListen(l) ? l : null;
+  const listener = own ? { kind: "listen", pid: own.pid, since: own.start ?? null } : v ? { kind: "serve", pid: v.pid, since: v.start ?? null } : null;
+  return { listening: !!listener, ...(listener ? { listener } : {}) };
+}
+const whereIWas = () => (HOME && SEAT?.kind === "soul" ? { worlds: soulMemory.presences(soulFolder()) } : {});
 
 // ---------------------------------------------------------------- reading the world
 
@@ -2324,39 +2740,87 @@ async function observe() {
   return d;
 }
 
-/** Phrase and all-term matches precede the legacy partial-term fallback. */
+/** Phrase and all-term matches precede the legacy partial-term fallback, and each ranks a word in the offer's id or name
+ *  (the label before its `[id]`, `(` or first comma) above a word only in its description. */
 export function rankCapabilities(list, search) {
   const terms = [...new Set(search.toLowerCase().split(/[\s,|]+/).filter(Boolean))];
   const normalize = value => String(value ?? '').toLowerCase().replace(/[-_/]+/g, ' ').replace(/\s+/g, ' ');
   const phrase = normalize(search).trim();
+  const hits = hay => terms.filter(t => hay.includes(normalize(t))).length;
+  const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
   return list.map((c, i) => {
     const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const count = terms.filter(t => hay.includes(normalize(t))).length;
-    return {c, i, count, tier: phrase && hay.includes(phrase) ? 2 : terms.length && count === terms.length ? 1 : 0};
-  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.count-a.count || a.i-b.i).map(x => x.c);
+    const name = normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')), named = tierOf(name);
+    return {c, i, count: hits(hay), names: hits(name), tier: named ? named + 2 : tierOf(hay)};
+  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
 }
 
+/** 2.24.7 (#1412): the places the world reads the words as (`search.places`, resolve's own reading, best first) lead, in
+ *  the world's order, then the client's own ranking without repeats. A world without `search` gets today's ranking. */
+export function searchOrder(list, search, answer) {
+  const ranked = rankCapabilities(list, search), places = Array.isArray(answer?.places) ? answer.places : [];
+  if (!places.length) return ranked;
+  const byId = new Map(list.map((c) => [c.id, c])), first = [...new Set(places)].map((id) => byId.get(id)).filter(Boolean), lead = new Set(first.map((c) => c.id));
+  return [...first, ...ranked.filter((c) => !lead.has(c.id))];
+}
+
+/** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
+const LABEL_MAX = 80;
+export function shortLabel(id, label) {
+  const text = String(label ?? "").replace(` [${String(id).slice(String(id).indexOf(":") + 1)}]`, "");
+  if (text.length <= LABEL_MAX) return text;
+  const far = /(\d[\d.,]* m)\)$/.exec(text)?.[1], tail = far ? `… (${far})` : "…", cut = text.slice(0, LABEL_MAX - tail.length + 1);
+  const space = cut.lastIndexOf(" "); // a name with no spaces is cut where it stands, not back to its first word
+  return (space > LABEL_MAX / 2 ? cut.slice(0, space) : cut.slice(0, -1)).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.(]+$/, "") + tail;
+}
+
+/** A refusal for a lookup: the world's `did_you_mean` and `candidates` name the same ids, so one short list stands for both.
+ *  A `choose` or `ambiguous` refusal keeps more, because there the list is the choice. `--json` prints the world's own answer. */
+export function refusalList({ code, did_you_mean, candidates }) {
+  const said = new Map((did_you_mean ?? []).map((d) => [d.id, d])), byId = new Map((candidates ?? []).map((c) => [c.id, c]));
+  const ids = [...new Set([...said.keys(), ...byId.keys()])], choice = /\.(choose|ambiguous)$/.test(code ?? ""), keep = choice ? 5 : 3;
+  const list = ids.slice(0, keep).map((id) => {
+    const d = said.get(id), c = byId.get(id), params = Object.keys(c?.params ?? {}), off = d?.available === false || c?.available === false;
+    const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
+    return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
+  });
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
+}
+const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
+
 async function caps(...args) {
-  let search, verb, all = false, limit = 60;
+  let search, verb, all = false, limit, json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--search") search = args[++i];
     else if (args[i] === "--verb") verb = args[++i];
     else if (args[i] === "--all") all = true;
     else if (args[i] === "--limit") limit = Number(args[++i]);
+    else if (args[i] === "--json") json = true;
     else search = (search ? search + " " : "") + args[i];
   }
-  // The plain listing is the world's page (what is near); search and verb filters read the whole menu.
-  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "")), "capabilities");
+  // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
+  limit ??= search && !all ? 12 : 60;
+  // The plain listing is the world's page (what is near); search and verb filters read the whole menu. 2.24.7 (#1412):
+  // a search sends its words too, and a world that reads them answers `search` with resolve's own place reading.
+  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "") + (search ? "&search=" + encodeURIComponent(search) : "")), "capabilities");
   let list = d.capabilities ?? [];
   if (!all) list = list.filter((c) => c.available);
   if (verb) list = list.filter((c) => c.verb === verb);
-  if (search) {
-    list = rankCapabilities(list, search);
-  }
+  if (search) list = searchOrder(list, search, d.search);
+  const seen = search && d.search && typeof d.search === "object" ? d.search : null;
+  // the world's own note first; with none and nothing listed, say why: the world knew the place but a filter left it out, or nothing matched
+  const filtered = verb ? `--verb ${verb}` : "available offers (--all lists the rest)";
+  const note = seen?.note ?? (seen && !list.length ? (seen.placesMatched > 0
+    ? `The world knows ${seen.placesMatched === 1 ? "a place" : `${seen.placesMatched} places`} named "${search}", but none is among ${filtered}.`
+    : `Nothing here or on the menu matches "${search}". Try other words, or resolve "walk to ${search}".`) : undefined);
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
-    ...(d.omitted ? { notListed: d.omitted.count, note: d.omitted.note } : {}),
-    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
+    ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
+    ...(d.omitted ? { notListed: d.omitted.count } : {}),
+    ...(seen && Number.isFinite(seen.placesMatched) ? { placesMatched: seen.placesMatched } : {}),
+    // #1445 review: a page's omitted note and a search note are both kept, joined, the page's first
+    ...((d.omitted?.note || note) ? { note: [d.omitted?.note, note].filter(Boolean).join(" ") } : {}),
+    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
 
@@ -2470,8 +2934,8 @@ export function parseActionArgs(input) {
 // owner/social notification interrupts.
 const OFFER_ID = /^[a-z][\w-]*:\S+$/i;
 async function act(...argv) {
-  const { args, wait: waitFor, json, for: forArg } = waitOption(argv);
-  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--json]');
+  const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
+  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
   const parsed = parseActionArgs(args);
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
     const r = ok(await call("/v1/edge/resolve", { body: parsed }), "resolve").resolve;
@@ -2482,7 +2946,10 @@ async function act(...argv) {
       return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}) };
     }
   }
-  const body = { ...parsed, strict: true, clientRef: randomUUID() };
+  // #1337 (P9): a ride steer the world would refuse is answered here, in the world's words, and never sent
+  const early = await steerPreflight(parsed);
+  if (early) return early;
+  const body = { ...parsed, strict: true };
   // D3: the owner message this act serves; the world writes its result line when the act ends, unless you write one first.
   // D3b (cloud fix-r3 trio tam-003: a later walk closed "walk with Mira" as Done): by default only the first act the world
   // accepts after an ack, within IMPLICIT_FOR_MS of it, serves that message; later acts serve one only with --for <id>.
@@ -2491,17 +2958,136 @@ async function act(...argv) {
   // the default serves the next act too (within IMPLICIT_FOR_MS of this one).
   const s = load(), implicit = forArg === undefined && s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS;
   const forId = forArg === "none" ? undefined : forArg ?? (implicit ? s.lastAcked : undefined);
-  let r = await call("/v1/edge/act", { body: forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body });
-  if (implicit && r.status === 400 && /owner message/.test(r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); r = await call("/v1/edge/act", { body }); }
-  const d = ok(r, "act");
-  if (d.accepted) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
-  if (!d.accepted) return { accepted: false, code: d.code, reason: d.reason, ...(d.did_you_mean?.length ? { did_you_mean: d.did_you_mean.slice(0, 8) } : {}), ...(d.alternatives?.length ? { alternatives: d.alternatives.slice(0, 3) } : {}), ...(d.candidates?.length ? { candidates: d.candidates.slice(0, 5) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
-  let out = { accepted: true, receipt: d.receipt, ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.open ? { open: true } : {}) };
+  // #1328: the key is the clientRef too, kept until the world confirms the act, so a rerun is answered with the first receipt
+  let w = await keyedWrite("/v1/edge/act", forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body, { key, once: true });
+  // without the default link: a key of its own (the first one's answer is kept), the same clientRef, so it is still one act
+  if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { key: sideKey(w.key), ref: w.ref, once: true }); }
+  if (w.unconfirmed) return unconfirmed("act", w);
+  const d = ok(w.r, "act"), again = { ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
+  // a stop serves no owner message unless named, so it leaves the implicit link for the next act (#1448 review)
+  if (d.accepted && parsed.capability !== STOP_ID) { const t = load(); if (implicit && d.open) save({ lastAckedAt: now() }); else if (t.lastAcked && !t.lastAckedActed) save({ lastAckedActed: true }); }
+  if (!d.accepted) {
+    noteSteerRefusal(parsed, d);
+    if (json) return d;
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+  }
+  let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
   // F7: an act that asked for its own duration (`seconds`) is waited out as before; an open-ended sit or lie ends the
   // wait once the body holds the pose.
-  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) out = { ...out, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  // one link per message and receipt: a repeat links a second message to the act under way, and a message can have a walk
+  // still going while a later step of it has ended (#1289)
+  if (d.for && d.receipt?.id) save({ links: keepLinks([...(load().links ?? []).filter((l) => !(l.message === d.for && l.receipt === d.receipt.id)), { receipt: d.receipt.id, message: d.for, ...(body.params?.seconds !== undefined ? { timed: true } : {}) }], d.receipt.id) });
+  if (waitFor && d.receipt?.id && !TERMINAL.has(d.receipt.phase)) {
+    const { stalled: _was, ...before } = out;   // the wait's frames are newer: a clock running again drops the act's word
+    out = { ...before, ...(await waitRaw(waitFor, d.receipt.id, { untilHeld: body.params?.seconds === undefined })) };
+  }
+  if (out.held) heldLinks(out.receipt?.id);
+  if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
+  forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// 2.24.8 (#1381, #1420): `stop [receiptId]` cancels this Soul's own act under way with the world's stop:current: the act's
+// receipt ends failed/act.stopped, the body stays where it is, keeps its posture, and nothing else starts. It is an act
+// like any other (strict, keyed, linked to an owner message as act is), so the world's answer is printed as act prints
+// it, refusals included: act.none-running (nothing runs; it names the last act), act.already-ended, act.not-started,
+// receipt.unknown, act.shared (a shared carry: `next` names its stop-carry offer) and a ride's own refusal while aloft.
+// A world without stop:current answers capability.unknown: that is said in words, and nothing else is sent.
+export const STOP_ID = "stop:current";
+export function stopAnswer(out) {
+  if (!out || out.accepted !== false) return out;
+  // a world before stop:current: `capability.unknown`, or for a body that cannot take a `stop:` verb, `body.unsupported`
+  // (a world with stop:current answers it before any body check, so neither comes from one)
+  if (out.code === "capability.unknown" || out.code === "body.unsupported") return { accepted: false, code: "stop.unsupported", worldCode: out.code,
+    reason: "This world has no stop:current yet, so nothing was stopped. Here the act under way ends on its own, or is replaced by the next act you send." };
+  if (out.code === "act.shared") {
+    const offered = (out.did_you_mean ?? []).find((d) => /^stop-carry:/.test(d?.id ?? ""))?.id;
+    const carry = offered ?? /\bstop-carry:[^\s"'`,;)]+/.exec(String(out.reason ?? ""))?.[0]?.replace(/[.!?]+$/, "");
+    return carry ? { ...out, next: carry } : out;
+  }
+  return out;
+}
+const STOP_USAGE = "usage: stop [receiptId] [--for <message-id>|none] [--key <k>] [--wait [seconds]] [--json]";
+async function stop(...argv) {
+  const receipt = argv[0] && !argv[0].startsWith("--") ? argv.shift() : undefined;
+  // checked before anything is sent: only stop's own flags, a value only where one belongs (--wait takes a number)
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--json") continue;
+    if (a === "--for" || a === "--key") { if (argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error(`${a} needs a value. ${STOP_USAGE}`); i++; continue; }
+    if (a === "--wait") { if (/^\d+$/.test(argv[i + 1] ?? "")) i++; continue; }
+    throw new Error(`stop takes no "${a}". ${STOP_USAGE}`);
+  }
+  // A stop serves an owner message only when named (--for): an implicit link would let a stop close the message the
+  // agent is about to act on ("come to the fire" while wandering). The world closes the stopped act's own message.
+  const rest = argv.includes("--for") ? argv : [...argv, "--for", "none"];
+  return stopAnswer(await act(STOP_ID, ...(receipt ? [JSON.stringify({ receipt })] : []), ...rest));
+}
+
+// #1337 (P9): fewer illegal ride requests. A steer is checked against the ride's own offer first (one object read, 5 s,
+// GET /v1/edge/objects/<id>, whose actions carry the world's `blocked` code and reason); a failed or slow read changes
+// nothing. A steer to a named place (`to`) that the world refused for that place (no landing spot there, out of bounds,
+// a place it doesn't know, bad params) is not sent again for STEER_REFUSED_MS in this world: the CLI answers with the
+// world's own refusal. Only a named place is fixed: "land here", a direction and distance, and a water route all depend
+// on where the ride is now, so those are always sent. So are another target, another ride, and refusals that pass
+// (someone else steering, on the ground).
+export const STEER_REFUSED_MS = 5 * 60_000;
+export const STEER_TARGET_REFUSALS = new Set(["ride.no-landing-spot", "ride.out-of-bounds", "ride.params", "ride.steer-params", "steer.unknown-place", "steer.params"]);
+const STEER = /^object:([^:\s]+):steer$/;
+const steerKey = (p) => `${load().world ?? ""} ${String(p.capability).trim()} ${JSON.stringify(Object.keys(p.params ?? {}).sort().map((k) => [k, p.params[k]]))}`;
+const fixedTarget = (p) => typeof p.params?.to === "string" && p.params.to.trim() !== "";
+async function steerPreflight(parsed) {
+  const m = STEER.exec(String(parsed.capability ?? "").trim());
+  if (!m) return null;
+  const key = steerKey(parsed), held = fixedTarget(parsed) ? (load().refusedSteers ?? []).find((x) => x.key === key && Date.now() - x.at < STEER_REFUSED_MS) : null;
+  if (held) return { accepted: false, code: held.code, reason: held.reason, repeat: "refused", note: "The world refused this same steer; it was not sent again. Steer somewhere else, or tell your person why." };
+  const r = await call(`/v1/edge/objects/${encodeURIComponent(m[1])}`, { retry: false, timeoutMs: 5_000 }).catch(() => null);
+  const a = r?.status === 200 ? (r.data?.object?.actions ?? []).find((x) => x?.action === "steer") : null;
+  return a && a.available === false && a.blocked?.code ? { accepted: false, code: a.blocked.code, reason: a.blocked.reason, preflight: true } : null;
+}
+function noteSteerRefusal(parsed, d) {
+  if (!STEER.test(String(parsed.capability ?? "").trim()) || !fixedTarget(parsed) || !STEER_TARGET_REFUSALS.has(d.code)) return;
+  const key = steerKey(parsed), kept = (load().refusedSteers ?? []).filter((x) => x.key !== key && Date.now() - x.at < STEER_REFUSED_MS);
+  save({ refusedSteers: [...kept, { key, code: d.code, reason: d.reason, at: Date.now() }].slice(-10) });
+}
+/** The landing the world chose, in one sentence (#1324's `result.landing`: {requested, at, adjustedM, reason}). Always
+ *  "lands": a steer's receipt ends when the ride takes the steer, long before touchdown; the landing event says it landed. */
+export function landingSentence(l) {
+  const m = Number(l?.adjustedM);
+  if (!l || !(m > 0)) return null;
+  const name = (x) => { const v = typeof x === "string" ? x : x?.label ?? x?.name ?? x?.place ?? null; return v == null ? null : String(v).slice(0, 60); };
+  const asked = name(l.requested), at = name(l.at), why = l.reason ? String(l.reason).replace(/[.\s]+$/, "").slice(0, 100) : "";
+  return `Lands ${Math.round(m)} m from ${asked ?? "where I asked"}${at ? `, at ${at}` : ""}${why ? `: ${why}` : ""}.`;
+}
+
+/** At most `max` links, oldest first out, but never one on the receipt just acted on: that one is open. */
+export function keepLinks(links, open, max = 64) {
+  const out = [...links];
+  for (let i = 0; out.length > max && i < out.length;) if (out[i].receipt !== open) out.splice(i, 1); else i++;
+  return out;
+}
+
+/** #1314: an open-ended sit or lie this client saw held has done what it was asked, so its message has nothing running for it.
+ *  One that asked for its own `seconds` is still running while it holds, as in the world (#1295). */
+function heldLinks(receipt) {
+  const links = load().links ?? [], mark = (l) => l.receipt === receipt && !l.held && !l.timed;
+  if (receipt && links.some(mark)) save({ links: links.map((l) => (mark(l) ? { ...l, held: true } : l)) });
+}
+/** A receipt that has ended guards nothing, so its links make room: the list must never lose one that may still be open. */
+function forgetLinks(receipt) {
+  const links = load().links ?? [];
+  if (TERMINAL.has(receipt?.phase) && links.some((l) => l.receipt === receipt.id)) save({ links: links.filter((l) => l.receipt !== receipt.id) });
+}
+
+/** #1269: whether a linked act's end closed its owner message, so no `result` is needed. Read from the world, never inferred:
+ *  an act can end without closing (a later step remains), and one the world called `open` at the start can close at its end.
+ *  `replaced` writes no line, so a result found then is an earlier act's. Not closed, or not known: say nothing, as before.
+ *  One quick try: the act has already ended, and this read must not hold its answer back. */
+async function closedBy(receipt, message) {
+  if (!message || !["completed", "failed"].includes(receipt?.phase)) return false;
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(message)}`, { retry: false, timeoutMs: 5000 }).catch(() => null);
+  return r?.status === 200 && r.data?.message?.result !== undefined;
 }
 
 // D3: the default output is one top-level sentence from the world, `done` when the receipt has ended, else `now` (what
@@ -2517,6 +3103,12 @@ function compactEvent(event) {
   // Unusual large producer payload: retain the event reference, never imply that omitted details were absent.
   return {id: e.id, kind: e.kind, at: e.at, tick: e.tick, detailsOmitted: true, untrusted: true};
 }
+/** #1326's `world: {stalled: true, tick_age_ms, note}`: the world's own sentence, else one from the tick age. */
+export function stalledSentence(w) {
+  if (typeof w?.note === "string" && w.note.trim()) return w.note.trim().slice(0, 200);
+  const s = Math.round((Number(w?.tick_age_ms) || 0) / 1000);
+  return `The world's clock has not moved${s > 0 ? ` for ${s} s` : ""}; what I asked waits until it runs again.`;
+}
 export function brief(out) {
   const rec = out.receipt && !out.receipt.error ? out.receipt : null, fin = !!rec && TERMINAL.has(rec.phase);
   // F2 (#373): only a completed receipt is `done`; a failed or replaced one says `failed` with the world's reason, never
@@ -2530,10 +3122,22 @@ export function brief(out) {
     ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
-    ...(out.for ? { for: out.for } : {}), ...(out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
+    ...(out.stopped ? { stopped: out.stopped } : {}), ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
     ...(out.resolved?.to && out.resolved.to !== out.resolved.from ? { resolved: out.resolved.to } : {}),
   };
-  for (const k of ["resolved", "receipt"]) if (JSON.stringify(o).length > 600) delete o[k];
+  // #1337: where the world adjusted what was asked (a landing moved to clear ground, words read as another id), one sentence;
+  // and a world whose clock has stalled says so
+  const adjusted = landingSentence(out.landing ?? rec?.result?.landing) ?? (out.resolved?.note && out.resolved.to !== out.resolved.from ? String(out.resolved.note).slice(0, 200) : null);
+  if (adjusted) o.adjusted = adjusted;
+  if (out.stalled) o.stalled = stalledSentence(out.stalled);
+  // #832: an owner message that ends a wait must not push the receipt out: shorten the message texts (stderr's OWNER
+  // MESSAGE line has them in full), then keep only the newest, so the agent still sees which act is open. Without
+  // owner messages the output is as before (resolved, then receipt, go first).
+  for (const k of o.ownerMessages ? ["resolved", "stalled"] : ["resolved", "receipt", "stalled"]) if (JSON.stringify(o).length > 600) delete o[k];
+  if (JSON.stringify(o).length > 600 && o.ownerMessages) {
+    o.ownerMessages = o.ownerMessages.map((m) => (String(m.text ?? "").length > 100 ? { ...m, text: m.text.slice(0, 100) + "…", textShortened: true } : m));
+    if (JSON.stringify(o).length > 600 && o.ownerMessages.length > 1) { o.ownerMessagesOmitted = o.ownerMessages.length - 1; o.ownerMessages = o.ownerMessages.slice(-1); }
+  }
   const over = JSON.stringify(o).length - 600;
   if (over > 0 && o[key]) o[key] = o[key].slice(0, Math.max(40, o[key].length - over - 1)) + "…";
   if (out.events?.length || out.gap) {
@@ -2545,29 +3149,42 @@ export function brief(out) {
   return o;
 }
 
+/** --key <k>: the world's limits for an Idempotency-Key and a clientRef (1 to 100 printable characters, no spaces). */
+export function keyArg(k) {
+  if (typeof k !== "string" || !/^[\x21-\x7e]{1,100}$/.test(k)) throw new Error("--key takes 1 to 100 printable characters, no spaces");
+  return k;
+}
 function waitOption(argv) {
   const args = [];
-  let wait = 0, json = false, forId;
+  let wait = 0, json = false, forId, key;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--wait") { wait = /^\d+$/.test(argv[i + 1] ?? "") ? Number(argv[++i]) : 60; }
     else if (argv[i] === "--json") json = true;
     else if (argv[i] === "--for") forId = argv[++i];
+    else if (argv[i] === "--key") key = keyArg(argv[++i]);
     else args.push(argv[i]);
   }
-  return { args, wait, json, for: forId };
+  return { args, wait, json, for: forId, key };
 }
 
 async function resolve(...args) {
-  if (!args.length) throw new Error('usage: resolve "<what to do>" [params-json]');
-  const body = parseActionArgs(args);
-  return ok(await call("/v1/edge/resolve", { body }), "resolve").resolve;
+  const words = args.filter((a) => a !== "--json");
+  if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
+  const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
+  if (r.ok !== false || words.length !== args.length) return r;
+  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
+  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
 // pose (held, still `started`), the owner writes, or an invitation/conversation turn arrives. Saves the cursor.
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
-  const out = await waitRaw(secArg, idArg);
+  let out = await waitRaw(secArg, idArg);
+  if (out.held) heldLinks(out.receipt?.id);
+  const link = (load().links ?? []).findLast((l) => l.receipt === out.receipt?.id);
+  if (link?.receipt && await closedBy(out.receipt, link.message)) out = { ...out, for: link.message, closed: true };
+  forgetLinks(out.receipt);
   return json ? out : brief(out);
 }
 async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
@@ -2578,7 +3195,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
   const since = cursor;
   const seen = [];
-  let terminal = null, held = null, addressed = null, addressedSince = null;
+  let terminal = null, held = null, addressed = null, addressedSince = null, stalled = null;
   while (Date.now() < until) {
     const t = Math.max(1, Math.min(55, Math.round((until - Date.now()) / 1000)));
     const q = `timeout=${t}&after=${encodeURIComponent(cursor)}` + (Number.isSafeInteger(ownerMark) ? `&ownerSince=${ownerMark}` : "") + (addressedSince != null ? `&addressedSince=${addressedSince}` : "");
@@ -2589,6 +3206,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
       await pause(ms); continue;
     }
     const d = ok(r, "wait");
+    stalled = d.world?.stalled === true ? d.world : null;   // #1337: the latest frame's word on the world's clock
     if (!d.gap) seen.push(...(d.events ?? []));
     cursor = d.cursor ?? cursor;
     if (Number.isSafeInteger(d.ownerMark)) ownerMark = d.ownerMark;
@@ -2606,7 +3224,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
@@ -2615,15 +3233,84 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
   if (ownerWrote) {
     const inbox = await call("/v1/edge/inbox/listen?timeoutMs=0");
     out.ownerMessages = messagesOf(inbox.data);
+    heard(out.ownerMessages);
     process.stderr.write(`OWNER MESSAGE: ${JSON.stringify(out.ownerMessages)}\n`);
   }
   return out;
 }
 
-async function say(...words) {
-  const text = words.join(" ").trim();
-  if (!text) throw new Error('usage: say "<text>"');
-  return clean(ok(await call("/v1/edge/say", { body: { text: text.slice(0, 500) } }), "say"));
+// say "<text>" [--for <message-id>] [--key <k>]: with --for, the speech is what the owner asked for, so it closes that message too.
+// #1354: [--to <name|soulId> [--gesture <g>] [--stand-ok]] turns to them first (face:<soulId>, attention, so it never
+// replaces what the body is doing), speaks, then gestures toward them. Each part is reported; a refused part is never
+// retried, and a refused face or gesture never unsays the speech.
+const SAY_GESTURES = ["nod", "bow", "clap", "cheer", "shake-head", "point"], STANDS_UP = new Set(["bow"]);
+export function sayFlags(words) {
+  // only among the trailing flags: "tell her --to the letter" said unquoted is speech, as "what --for means" is
+  const flags = {}, drop = new Set();
+  if (["--to", "--gesture", "--key"].includes(words.at(-1))) throw new Error(`${words.at(-1)} needs a value`);
+  for (let i = words.length - 1; i >= 0;) {
+    if (words[i] === "--stand-ok") { flags.standOk = true; drop.add(i); i -= 1; }
+    else if (["--to", "--gesture", "--key"].includes(words[i - 1])) {
+      if (flags[words[i - 1].slice(2)] !== undefined) throw new Error(`${words[i - 1]} is given twice`);
+      flags[words[i - 1].slice(2)] = words[i]; drop.add(i).add(i - 1); i -= 2;
+    }
+    else if (words[i - 1] === "--for" && /^(msg_|none$)/.test(words[i])) i -= 2;
+    else break;
+  }
+  return { ...flags, words: words.filter((_, i) => !drop.has(i)) };
+}
+async function say(...all) {
+  let flags;
+  try { flags = sayFlags(all); } catch (e) { throw new Error(`${e.message}. usage: say "<text>" [--to <name|soulId> [--gesture <g>] [--stand-ok]] [--for <message-id>] [--key <k>]`); }
+  const { to, gesture, standOk, words } = flags, key = flags.key === undefined ? undefined : keyArg(flags.key);
+  const at = words.findIndex((w, i) => w === "--for" && /^(msg_|none$)/.test(words[i + 1] ?? "")), forId = at < 0 || words[at + 1] === "none" ? undefined : words[at + 1];   // "what --for means" is speech
+  const text = (at < 0 ? words : words.filter((_, i) => i !== at && i !== at + 1)).join(" ").trim();
+  const usage = 'usage: say "<text>" [--to <name|soulId> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for <message-id>] [--key <k>]';
+  if (!text) throw new Error(usage);
+  if ((gesture || standOk) && !to) throw new Error(`--gesture and --stand-ok go with --to. ${usage}`);
+  if (gesture && !SAY_GESTURES.includes(gesture)) throw new Error(`--gesture is one of ${SAY_GESTURES.join(", ")}. ${usage}`);
+  const target = to ? await faceTarget(to) : null;
+  const faced = target ? await sayPart(target.id ? `face:${target.id}` : null, undefined, target) : undefined;
+  const w = await keyedWrite("/v1/edge/say", { text: text.slice(0, 500) }, { key });
+  if (w.unconfirmed) return { ...(faced ? { faced } : {}), ...unconfirmed("speech", w) }; // no gesture after speech the world did not confirm
+  const said = { ...clean(ok(w.r, "say")), ...(w.checked ? { checked: true } : {}), ...(w.resent ? { resent: true } : {}) };
+  // a rerun the world answers from the first speech (same key) already had its gesture: it is not sent twice (the turn is
+  // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it,
+  // and so does a run whose own first try went unanswered and was replayed to its retry (call() clears `replayed` then).
+  const repeat = w.r.replayed === true && !w.resent;
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}) };
+  return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
+}
+/** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
+async function faceTarget(to) {
+  const r = await call("/v1/edge/capabilities?all=1").catch(() => null), offers = (r?.status === 200 ? r.data?.capabilities ?? [] : []).filter((c) => c.verb === "face" && c.available !== false);
+  const nameOf = (c) => String(c.label ?? "").replace(/^Turn towards /, "").trim(), named = (c) => nameOf(c).toLowerCase();
+  const exact = offers.find((c) => c.id === `face:${to}` || c.target?.id === to);
+  const byName = exact ? [exact] : offers.filter((c) => named(c) === String(to).trim().toLowerCase());
+  if (byName.length === 1) return { id: byName[0].target?.id ?? byName[0].id.slice(5), name: nameOf(byName[0]) || to };
+  if (r?.status !== 200) return { name: to, code: "face.unknown", reason: `Could not read the offers to find ${to}, so the turn was not sent.` };
+  return byName.length ? { name: to, code: "face.ambiguous", reason: `${byName.length} Souls near you are called ${to}: use the soulId (${byName.map((c) => c.target?.id ?? c.id.slice(5)).join(", ")}).` }
+    : { name: to, code: "face.not-offered", reason: `${to} is not near enough to turn to: no face offer names them.` };
+}
+/** One strict act of say's, reported in a line: never retried after a refusal, never fatal to the speech. */
+async function sayPart(capability, params, target) {
+  if (!capability) return { to: target.name, accepted: false, code: target.code, reason: target.reason };
+  try {
+    const d = ok(await call("/v1/edge/act", { body: { capability, ...(params ? { params } : {}), strict: true, clientRef: randomUUID() } }), "act");
+    return d.accepted ? { id: capability, to: target.name, accepted: true, ...(d.receipt?.id ? { receipt: d.receipt.id } : {}) } : { id: capability, to: target.name, accepted: false, code: d.code, reason: d.reason };
+  } catch (e) { return { id: capability, to: target.name, accepted: false, code: "act.error", reason: e.message }; }
+}
+/** The gesture after the speech, toward them. A bow stands a seated or lying Soul up, so it goes only with --stand-ok. A
+ *  name that two Souls near you share would let the world pick either, so then nothing is sent. */
+const DOWN = new Set(["seated", "lying", "sleeping"]);
+async function sayGesture(g, target, standOk) {
+  const id = `${g}:here`;
+  if (target.code === "face.ambiguous") return { id, to: target.name, sent: false, reason: target.reason };
+  if (STANDS_UP.has(g) && !standOk) {
+    const r = await call("/v1/edge/here").catch(() => null), posture = r?.status === 200 ? (r.data?.here ?? r.data)?.me?.posture : undefined;
+    if (!posture || DOWN.has(posture)) return { id, to: target.name, sent: false, reason: posture ? `A ${g} would stand you up (you are ${posture}). Add --stand-ok to ${g} anyway.` : `Could not read your posture, and a ${g} stands a seated Soul up. Add --stand-ok to ${g} anyway.` };
+  }
+  return sayPart(id, { [g === "point" ? "at" : "to"]: target.id ?? target.name }, target);
 }
 
 async function converse(op, arg, ...text) {
@@ -2639,13 +3326,16 @@ async function converse(op, arg, ...text) {
   else if (op === "say") body = { op, conversation: arg, text: text.join(" ") };
   else if (["accept", "decline", "leave", "ask"].includes(op)) body = { op, conversation: arg };
   else throw new Error(usage);
-  return clean(ok(await call("/v1/edge/converse", { body }), "converse"));
+  const w = await keyedWrite("/v1/edge/converse", body);
+  return w.unconfirmed ? unconfirmed("conversation step", w) : { ...clean(ok(w.r, "converse")), ...(w.checked ? { checked: true } : {}) };
 }
 
 async function object(id, action, params) {
   if (!id) throw new Error("usage: object <objectId> [action] [params-json]");
   if (!action) return clean(ok(await call(`/v1/edge/objects/${encodeURIComponent(id)}`), "object"));
-  const d = clean(ok(await call(`/v1/edge/objects/${encodeURIComponent(id)}/act`, { body: { action, params: params ? JSON.parse(params) : {} } }), "object"));
+  const w = await keyedWrite(`/v1/edge/objects/${encodeURIComponent(id)}/act`, { action, params: params ? JSON.parse(params) : {} });
+  if (w.unconfirmed) return unconfirmed("object act", w);
+  const d = { ...clean(ok(w.r, "object")), ...(w.checked ? { checked: true } : {}) };
   if (d.receipt?.id) save({ lastReceipt: d.receipt.id, lastActAt: now() });
   return d;
 }
@@ -2671,6 +3361,16 @@ export function lockIsLive(holder) {
   try { const cmd = execFileSync("ps", ["-o", "command=", "-p", String(holder.pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); return /listen/.test(cmd); }
   catch { return true; }   // no ps (or it failed): trust the live pid
 }
+/** Whether a lock's process is this Soul's own listen in this folder. A reused pid or a stray lock names something else, which is never ours to signal. */
+export function isListenOf(folder, command, cwd) {
+  if (!/eden\.mjs\s(?:.*\s)?listen(?:\s|$)/.test(String(command ?? ""))) return false;
+  return cwd == null || cwd === folder;
+}
+function isOwnListen(holder) {
+  // The folder decides, not the Soul id in the lock: travel changes that id under a listen that is still this Soul's.
+  let command; try { command = quietly("ps", ["-o", "command=", "-p", String(holder.pid)]); } catch { return true; }   // no ps: trust the live pid, as lockIsLive does
+  return isListenOf(realpathSync(process.cwd()), command, cwdOf(holder.pid));
+}
 export function listenLockHolder() { const h = readLock(); return h && lockIsLive(h) ? h : null; }
 export function takeListenLock() {
   const start = now(), mine = { pid: process.pid, start, beatAt: start, soul: load().soul ?? null };
@@ -2692,7 +3392,7 @@ export function takeListenLock() {
         if (age < LISTEN_STALE_MS) return { ok: false, holder };
         // alive but silent for a minute: stop it (it is this folder's own listen, same user), then take the lock
         process.stderr.write(`listen: the listener pid ${holder.pid} has not renewed its lock for ${Number.isFinite(age) ? Math.round(age / 1000) + " s" : "ever"}; stopping it and taking over\n`);
-        try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
+        if (isOwnListen(holder)) try { process.kill(holder.pid, "SIGTERM"); } catch { /* gone */ }
       }
       try { renameSync(LISTEN_LOCK, `${LISTEN_LOCK}.stale-${process.pid}`); unlinkSync(`${LISTEN_LOCK}.stale-${process.pid}`); } catch { /* another listen took it over first */ }
     }
@@ -2701,29 +3401,59 @@ export function takeListenLock() {
   return { ok: false, holder: holder ?? { pid: null } };
 }
 function alreadyListening(holder) {
-  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); you are fine, one listen per Soul is enough\n`);
-  return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: "nothing to do: the open listen prints owner messages when they arrive" };
+  process.stderr.write(`already listening (pid ${holder.pid}${holder.start ? `, since ${holder.start}` : ""}); one listen per Soul is enough. If this chat started it you are fine; \`status\` shows it as \`listener\`, and if it isn't yours: ${CLI} listen --take\n`);
+  return { alreadyListening: true, pid: holder.pid, since: holder.start ?? null, next: `nothing to do if this chat started it: it prints owner messages when they arrive. If another chat or agent did, or it may be gone, take it over: ${CLI} listen --take` };
 }
 
-// listen [--after <id>] [--once]: hold one long-poll open (this is also the Soul's "agent is
+/** --take: this folder's other listen ends, so a new chat or agent is the one that hears the owner. It holds no message: the world keeps them until acked. */
+async function stopListen() {
+  const holder = listenLockHolder();
+  if (!holder || holder.pid === process.pid) return;
+  if (!isOwnListen(holder)) { calm(`listen: the lock named pid ${holder.pid}, which is not this Soul's listen: that process is left alone`); try { unlinkSync(LISTEN_LOCK); } catch { /* gone */ } return; }
+  try { process.kill(holder.pid, "SIGTERM"); } catch { return; }
+  for (let i = 0; i < 40 && pidAlive(holder.pid); i++) await sleep(100);
+  calm(`listen: took over from pid ${holder.pid}`);
+}
+
+// listen [--after <id>] [--once] [--take] [--follow]: hold one long-poll open (this is also the Soul's "agent is
 // listening" presence) and exit as soon as the owner has written, printing every waiting message.
+// #1359 --follow: never exit on a wake. Each wake is one JSON line on stdout (a host that streams a running command's lines,
+// such as Claude Code's Monitor tool, turns each into a notification), and the cursor moves past what was printed.
 async function listen(...args) {
-  let after, once = false;
+  let after, once = false, take = false, follow = false;
+  const usage = "usage: listen [--after <message-id>] [--once] [--take] [--follow]";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--after") after = args[++i];
     else if (args[i] === "--once") once = true;
-    else throw new Error("usage: listen [--after <message-id>] [--once]");
+    else if (args[i] === "--take") take = true;
+    else if (args[i] === "--follow") follow = true;
+    else throw new Error(usage);
   }
-  // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone.
+  if (follow && once) throw new Error(`--follow never ends on a message and --once never waits: pick one. ${usage}`);
+  let wakes = 0;
+  const emit = (line) => { writeSync(1, JSON.stringify(followLine({ ...line, wake: ++wakes })) + "\n"); };
+  const ended = (why, extra = {}) => { writeSync(1, JSON.stringify(followLine({ ended: why, ...extra })) + "\n"); return ""; };
+  // One listener per Soul: a second `listen` (an agent relaunching it, a second chat) leaves the first alone, unless it says --take.
   if (!once) {
+    if (take) await stopListen();
     const lock = takeListenLock();
     if (!lock.ok) return alreadyListening(lock.holder);
   }
-  let attempt = 0, lastCode;
+  if (follow) {
+    for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.prependOnceListener(sig, () => ended(sig === "SIGTERM" ? "stopped (SIGTERM: listen --take, or the host stopped it)" : `stopped (${sig})`, { next: `${CLI} listen --follow, if this Soul should keep listening here` }));
+    process.stderr.write(`listen --follow: listening; one line per wake${after ? `, after ${after}` : ""}\n`);
+  }
+  let attempt = 0, lastCode, superseded = 0;
   for (;;) {
     const q = new URLSearchParams({ timeoutMs: once ? "0" : "50000", ...(after ? { after } : {}) });
     const r = await call(`/v1/edge/inbox/listen?${q}`, { timeoutMs: 60_000, recoverRead: !once, retry: false, slowedNext: once ? undefined : "listen" });
-    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return alreadyListening(holder); }
+    if (!once) { const holder = listenLockHolder(); if (holder && holder.pid !== process.pid) return follow ? ended("taken over", { pid: holder.pid, next: "a newer listen in this folder took over; nothing to do" }) : alreadyListening(holder); }
+    // a 409 while this folder's lock is still ours is this folder's own other long-poll (a `serve` that just started, or one
+    // restarting after travel): the next try goes through it. Three in a row is someone else with this token: stop.
+    if (follow && r.status === 409) {
+      if (++superseded < 3) { await pause(fullJitter(superseded)); continue; }
+      return ended("superseded", { why: r.data?.error?.message ?? "another listen for this Soul took over", next: "another listen for this Soul, from somewhere else, keeps taking over; this one has ended" });
+    }
     if (r.status === 0 || r.status === 429 || r.status >= 500) {
       const code = codeOf(r.data) ?? `http-${r.status}`;
       const ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -2733,34 +3463,182 @@ async function listen(...args) {
       await pause(ms);
       continue;
     }
-    const d = ok(r, "listen");
-    attempt = 0; lastCode = undefined;
+    let d;
+    try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
+    attempt = 0; lastCode = undefined; superseded = 0;
     const messages = messagesOf(d).filter((m) => m.id !== after), brief = messages.length || d.addressed?.length || d.plan ? briefNow() : {};
-    if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), next: d.plan.next ?? `${CLI} pending shows the plan.` };
+    heard(messages);
+    const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
+    if (follow) {
+      if (messages.length || d.addressed?.length || d.plan) {
+        emit({ messages, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older,
+          next: messages.length ? `ack each (ack <id> "Got it: …"), then do them in order; result <id> done|failed "…" unless the answer says closed. This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" });
+        if (messages.length) after = messages.at(-1).id;
+      }
+      await sleep(50);
+      continue;
+    }
+    if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
     if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...brief, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order and result <id> done|failed "…"` : "nothing waiting" };
+      return { messages, ...brief, ...older, next: messages.length ? `ack each (ack <id> "Got it: …"), restart listen --after ${messages.at(-1).id} in the background, then do them in order; result <id> done|failed "…" unless the answer says closed` : "nothing waiting" };
     }
     await sleep(50);
   }
 }
 
-async function ack(id, reply) {
-  if (!id) throw new Error('usage: ack <message-id> ["reply, up to 140 chars"]');
-  if (reply && reply.length > 140) throw new Error("ack reply must be at most 140 characters");
+/** #1359: one --follow line fits a notification: at most FOLLOW_MAX characters. A plan is cut to its state and the refused
+ *  step (`pending` has the rest). Then long texts are shortened, then the memory brief and the older-open list go, and only
+ *  then older new messages: those stay unacknowledged, so `listen --once` shows them, and `next` says so. */
+export const FOLLOW_MAX = 2000;
+export function followLine(line, max = FOLLOW_MAX) {
+  const size = (o) => JSON.stringify(o).length, short = (list) => list?.map((m) => (String(m.text ?? "").length > 300 ? { ...m, text: m.text.slice(0, 300) + "…", textShortened: true } : m));
+  let o = { ...line, ...(line.messages ? { messages: short(line.messages) } : {}), ...(line.addressed ? { addressed: short(line.addressed) } : {}) };
+  if (o.plan?.steps) {
+    const { steps, ...plan } = o.plan, refused = steps.find((st) => st.state === "refused");
+    o = { ...o, plan: { ...plan, ...(refused ? { refused: { n: refused.n, id: refused.id, ...(refused.code ? { code: refused.code } : {}), ...(refused.reason ? { reason: String(refused.reason).slice(0, 300) } : {}) } } : {}), stepsOmitted: steps.length } };
+  }
+  const drop = (...keys) => { if (size(o) > max && keys.some((k) => o[k] !== undefined)) { const n = { ...o }; for (const k of keys) delete n[k]; o = { ...n, [`${keys[0]}Omitted`]: true }; } };
+  drop("brief"); drop("stillOpen", "stillOpenNext");
+  for (const k of ["addressed", "messages"]) while (size(o) > max && o[k]?.length > 1) o = { ...o, [k]: o[k].slice(1), [`${k}Omitted`]: (o[`${k}Omitted`] ?? 0) + 1 };
+  if (o.messagesOmitted) o = { ...o, next: `${o.messagesOmitted} older message${o.messagesOmitted > 1 ? "s" : ""} did not fit this line: run ${CLI} listen --once for them all, then ack each. ${o.next ?? ""}`.trim() };
+  for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => (String(m.text ?? "").length > 80 ? { ...m, text: String(m.text).slice(0, 80) + "…", textShortened: true } : m)) };
+  if (size(o) > max && typeof o.next === "string") o = { ...o, next: o.next.slice(0, Math.max(40, o.next.length - (size(o) - max) - 1)) + "…" };
+  return o;
+}
+
+/** The owner's card holds 140 characters. A longer line is cut at a word and says so; it never costs the agent a retry. */
+export function clipped(text, max = 140) {
+  if (text.length <= max) return { text };
+  const cut = text.slice(0, max - 1), space = cut.lastIndexOf(" ");
+  return { text: (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:]+$/, "") + "…", clipped: true };
+}
+
+// ack <id> ["reply"] [--close done|failed]: with --close, the reply is the whole answer: an answer to a question, or a no.
+async function ack(id, ...rest) {
+  const at = rest.indexOf("--close"), close = at < 0 ? undefined : rest[at + 1], words = at < 0 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
+  if (!id || (at >= 0 && (!["done", "failed"].includes(close) || !words[0]))) throw new Error('usage: ack <message-id> ["reply"] [--close done|failed]');
+  const line = words[0] ? clipped(at < 0 ? words[0] : words.join(" ").replace(/\s+/g, " ").trim()) : {}, reply = line.text, said = { acked: id, ...(reply ? { reply } : {}), ...(line.clipped ? { clipped: true } : {}) };
+  // with --close the text is the result, and a result acks by itself: the owner's card shows a reply and a result, so
+  // sending both shows it twice. A close that doesn't happen falls back to the ack, so on a first ack the text still reaches the card.
+  const before = load().heard, seen = {}, shut = close ? await closing(id, close, reply, seen) : {};
+  if (shut.closed) return { ...said, closed: true, ...(await stillOpen([id], { before, closed: true })) };
+  if (seen.acked || shut.already) return { acked: id, ...shut, ...(await stillOpen([id], { before, closed: !!shut.already })) };   // acked already: the first reply stands, so this text reached nothing
   const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/ack`, { body: reply ? { reply } : {} }), "ack"));
-  save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for)
-  return { acked: id, ...(reply ? { reply } : {}), ...d };
+  if (!close) save({ lastAcked: id, lastAckedAt: now(), lastAckedActed: undefined });   // D3: the next act serves this message (act --for); --close expects none
+  return { ...said, ...d, ...shut, ...(await stillOpen([id])) };
+}
+
+// #1314: the owner's messages this folder was handed, newest last, so a new one can say which older ones are still open with
+// nothing running for them. Only the agent closes them: the CLI lists, and the world makes no close it wouldn't have made.
+const HEARD_MAX = 8;
+/** The first words of a message, at most `max` characters. */
+export function firstWords(text, max = 40) {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1), space = cut.lastIndexOf(" ");
+  return (space > max / 2 ? cut.slice(0, space) : cut).replace(/[\ud800-\udbff]$/, "").replace(/[\s,;:.]+$/, "") + "…";
+}
+/** Pure: messages one answer handed over join the record as one batch; one already there keeps its place. */
+export function heardWith(record, messages, max = HEARD_MAX) {
+  const out = [...(record ?? [])], batch = messages?.[0]?.id;
+  for (const m of messages ?? []) if (m?.id && !out.some((h) => h.id === m.id)) out.push({ id: m.id, text: firstWords(m.text), batch });
+  return out.slice(-max);
+}
+function heard(messages) { if (messages?.length) save({ heard: heardWith(load().heard, messages) }); }
+function unheard(ids) { const h = load().heard ?? [], keep = h.filter((x) => !ids.includes(x.id)); if (keep.length !== h.length) save({ heard: keep }); }
+const STILL_OPEN_NEXT = 'older, still open, nothing running for them: once each is finished or dropped, result <id> done|failed "…"';
+/** Pure: which recorded messages to ask about: older than the newest of `now` (the messages this answer is about, by id), not
+ *  in its batch, and not one of them. A message `now` names that isn't recorded yet counts as the newest. */
+export function olderThan(record, now) {
+  const at = Math.min(...now.map((id) => record.findIndex((h) => h.id === id)).filter((i) => i >= 0)), batches = new Set(now.map((id) => record.find((h) => h.id === id)?.batch).filter(Boolean));
+  return record.slice(0, Number.isFinite(at) ? at : record.length).filter((h) => !now.includes(h.id) && !batches.has(h.batch));
+}
+/** Pure: whether a recorded message is an orphan, from the world's reads. `message`: GET inbox/<id> ({status, data}); `receipts`:
+ *  its links' receipts ({status, data, held}); `plan`: a plan serving it; `nextAct`: the next act serves it by default.
+ *  "drop": closed or gone, forget it; "list"; "keep": open, but something runs for it, or a read failed. */
+export function orphanState({ message, receipts = [], plan = false, nextAct = false }) {
+  if (message?.status === 404) return "drop";
+  if (message?.status !== 200 || !message.data?.message) return "keep";
+  if (message.data.message.result !== undefined) return "drop";
+  if (plan || nextAct) return "keep";
+  for (const r of receipts) {
+    if (r.status === 404) continue;   // too old to hold a receipt: ended long ago
+    const phase = r.status === 200 ? r.data?.receipt?.phase : null;
+    if (!phase) return "keep";
+    if (phase === "replaced") return "keep";   // the world's sweep closes it, unless a newer act serves it
+    if (!TERMINAL.has(phase) && !r.held) return "keep";   // still going; a held open-ended sit or lie isn't (#1295)
+  }
+  return "list";
+}
+/** `stillOpen` for an answer about the messages `now`: older recorded ones the world reads as open, with nothing running.
+ *  `before`: the record as it was before this command closed one of them (`closed`), which then leaves it. */
+async function stillOpen(now, { before, closed = false } = {}) {
+  try {
+    // which to ask about comes from the record as this command found it; what is kept is the record as it is now, since a
+    // listen in another process may have added to it while this command closed one
+    const s = load(), ask = olderThan(heardWith(before ?? s.heard, now.map((id) => ({ id }))), now);
+    const keep = closed ? (s.heard ?? []).filter((h) => !now.includes(h.id)) : heardWith(s.heard, now.map((id) => ({ id })));
+    if (JSON.stringify(keep) !== JSON.stringify(s.heard ?? [])) save({ heard: keep });
+    if (!ask.length) return {};
+    const quick = { retry: false, timeoutMs: 5000 }, get = (path) => call(path, quick).catch(() => null);
+    const nextAct = s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS ? s.lastAcked : null;
+    const asked = existsSync(SERVE_SOCK) ? await askServe({ op: "planStatus" }) : null, plan = asked && !asked.lost ? asked.plan : loadServeState().plan;
+    const states = await Promise.all(ask.map(async (h) => {
+      const links = (s.links ?? []).filter((l) => l.message === h.id);
+      const [message, ...receipts] = await Promise.all([get(`/v1/edge/inbox/${encodeURIComponent(h.id)}`),
+        ...links.map(async (l) => ({ ...(await get(`/v1/edge/receipts/${encodeURIComponent(l.receipt)}`)), held: !!l.held }))]);
+      return orphanState({ message, receipts, plan: plan?.for === h.id && !PLAN_OVER.has(plan.state), nextAct: nextAct === h.id });
+    }));
+    const gone = ask.filter((_, i) => states[i] === "drop").map((h) => h.id), list = ask.filter((_, i) => states[i] === "list");
+    if (gone.length) unheard(gone);
+    return list.length ? { stillOpen: list.map(({ id, text }) => ({ id, text })), stillOpenNext: STILL_OPEN_NEXT } : {};
+  } catch (e) { calm(`stillOpen: ${e.message}`); return {}; }
+}
+
+/** Close a message from the command that finished it. What was done stays done: a close that fails says so and exits 0.
+ *  An agent's result replaces the world's line and stops a running act's, so this never closes a message the world has
+ *  closed or is about to: `closed` here means this command closed it. */
+const ACT_RUNNING = "its act is still going: the world closes it with that act's outcome when it ends; nothing to send";
+async function closing(id, outcome, text, seen = {}) {
+  const quick = { retry: false, timeoutMs: 5000 }, read = () => call(`/v1/edge/inbox/${encodeURIComponent(id)}`, quick).catch(() => null);
+  // why this command won't close: the message can't be read, or it has a result, which an agent's would replace
+  const stop = (m) => {
+    if (m?.status !== 200) return { closed: false, why: `${m?.data?.error?.message ?? "the message could not be read"}. Close it with result, not by repeating this` };
+    if (m.data?.message?.result === undefined) return null;
+    if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });   // or the next act would be linked to it, and replace the world's line
+    return { closed: false, already: m.data.message.outcome, why: "already closed: nothing more to do" };
+  };
+  const first = await read(), early = stop(first);
+  seen.acked = first?.data?.message?.state === "acknowledged";
+  if (early) return early;
+  // a serve that is gone or hung still has its plan on disk, and the next serve resumes it
+  const asked = await askServe({ op: "planStatus" }), plan = asked && !asked.lost ? asked.plan : loadServeState().plan;
+  if (plan?.for === id && !PLAN_OVER.has(plan.state)) return { closed: false, why: "its plan is still going: if `closed` doesn't follow, `result` once it has ended" };
+  const mine = [...new Set((load().links ?? []).filter((l) => l.message === id).map((l) => l.receipt))].reverse();
+  for (const receipt of mine) {
+    const going = await call(`/v1/edge/receipts/${encodeURIComponent(receipt)}`, quick).catch(() => null);
+    // only an ended act, or one too old to hold a receipt, lets this close: a close here would stop the act's own line
+    if (going?.status !== 404 && !(going?.status === 200 && TERMINAL.has(going.data?.receipt?.phase))) return { closed: false, why: `${going?.status === 200 ? "its act is still going" : "its act could not be read"}: if \`closed\` doesn't follow, \`result\` once it has ended` };
+  }
+  if (mine.length) {
+    const late = stop(await read());   // an act may have ended between the reads, and then the world's close stands
+    if (late) return late;
+  }
+  try { const r = await result(id, outcome, text); return r.reported === false ? { closed: false, why: r.why } : { closed: true }; } catch (e) { return { closed: false, why: `${e.message}. Close it with result, not by repeating this` }; }
 }
 
 async function result(id, outcome, ...text) {
-  const t = text.join(" ");
-  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened, up to 140 chars"');
-  if (t.length > 140) throw new Error("result text must be at most 140 characters");
-  const d = clean(ok(await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } }), "result"));
+  const line = clipped(text.join(" ")), t = line.text;
+  if (!id || !["done", "failed"].includes(outcome) || !t) throw new Error('usage: result <message-id> done|failed "what happened"');
+  const r = await call(`/v1/edge/inbox/${encodeURIComponent(id)}/result`, { body: { outcome, text: t } });
+  // #1295: the world refuses a close while the message's own act runs, and closes it with that act's outcome: a true answer, not a failure
+  if (r.status === 409 && (r.data?.error?.code ?? r.data?.code) === "message.act-running") return { reported: false, closed: false, why: ACT_RUNNING };
+  const d = clean(ok(r, "result"));
   if (load().lastAcked === id) save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined });
+  unheard([id]);
   try { memoryHere()?.sawResult(id, outcome === "done", t); } catch (e) { calm(`memory: ${e.message}`); }
-  return { reported: id, outcome, text: t, ...d };
+  return { reported: id, outcome, text: t, ...(line.clipped ? { clipped: true } : {}), ...d };
 }
 
 // ---------------------------------------------------------------- profile, body, travel
@@ -2784,7 +3662,33 @@ async function profile(field, value) {
 async function body(cmd, ...args) {
   if (!cmd) { const d = clean(ok(await call("/v1/edge/body"), "body")); delete d.lookChoices; delete d.presets; return d; }
   if (cmd === "presets") return ok(await call("/v1/edge/body"), "body").presets?.map((p) => p.id);
-  if (cmd === "set") return clean(ok(await call("/v1/edge/body", { method: "PUT", body: /^body_[a-f0-9]{64}$/.test(args[0]) ? { assetId: args[0] } : { preset: args[0] } }), "body set"));
+  if (cmd === "set") {
+    if (args.length !== 1) throw new Error("usage: body set <preset|assetId|ref>");
+    if (!/^body_[a-f0-9]{64}$/.test(args[0])) return clean(ok(await call("/v1/edge/body", { method: "PUT", body: { preset: args[0] } }), "body set"));
+    // An owner upload in this world first; otherwise the owner's or a published definition by reference, from a world of this site (#717).
+    const own = await call("/v1/edge/body", { method: "PUT", body: { assetId: args[0] } });
+    return clean(ok(own.status === 403 && codeOf(own.data) === "body.not-owned" ? await call("/v1/edge/body", { method: "PUT", body: { ref: args[0] } }) : own, "body set"));
+  }
+  // body-library/1 (#717): bounded pages of core presets or this owner's saved bodies across worlds; lookup by reference.
+  if (cmd === "library") {
+    const scope = args[0] && !args[0].startsWith("--") ? args.shift() : "mine", q = new URLSearchParams({ scope });
+    for (let i = 0; i < args.length; i += 2) {
+      if (!["--q", "--cursor", "--limit"].includes(args[i]) || args[i + 1] === undefined) throw new Error("usage: body library [core|mine] [--q text] [--cursor c] [--limit n]");
+      q.set(args[i].slice(2), args[i + 1]);
+    }
+    return clean(ok(await call("/v1/edge/body/library?" + q), "body library"));
+  }
+  if (cmd === "show" || cmd === "save" || cmd === "forget") {
+    if (args.length !== 1 || !/^[a-z0-9_-]{1,80}(@[1-9][0-9]{0,5})?$/.test(args[0])) throw new Error(`usage: body ${cmd} <ref>`);
+    return clean(ok(await call("/v1/edge/body/library/" + args[0], cmd === "show" ? {} : { method: cmd === "save" ? "PUT" : "DELETE" }), "body " + cmd));
+  }
+  if (cmd === "publish" || cmd === "unpublish") {
+    if (args.length !== 1 || !/^body_[a-f0-9]{64}$/.test(args[0])) throw new Error(`usage: body ${cmd} <ref>`);
+    return clean(ok(await call("/v1/edge/body/library/" + args[0] + "/public", { method: cmd === "publish" ? "PUT" : "DELETE" }), "body " + cmd));
+  }
+  // The kit's validate.mjs is this world's code, and a Souls home holds other worlds' tokens, so it is never run from here (as upgrade).
+  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, cli: CLI, base: INVOKED, runValidate: () => ({ skipped: "validate.mjs comes from this world and runs with your rights: read it, and run it only if you trust this world" }) });
+  if (cmd === "upload") return bodyUpload(args);
   if (cmd === "look") {
     if (!args.length) { const d = ok(await call("/v1/edge/body"), "body"); return { look: d.look, choices: d.lookChoices }; }
     let look;
@@ -2800,7 +3704,30 @@ async function body(cmd, ...args) {
     } else throw new Error("usage: body look [--random [--seed N] | --set key=value ...]");
     return clean(ok(await call("/v1/edge/body", { method: "PUT", body: { look } }), "body look"));
   }
-  throw new Error("usage: body [presets | set <preset|assetId> | look [--random|--set k=v ...]]");
+  throw new Error("usage: body [presets | library [core|mine] [--q text] [--cursor c] | show|save|forget|publish|unpublish <ref> | kit <dir> [--starter rigid|humanoid|rolling] [--force] | upload path.glb --manifest manifest.json | set <preset|assetId|ref> | look [--random|--set k=v ...]]");
+}
+
+// The manifest is the kit's, or --type, --license and --rights-confirmed by hand. The token goes only to this folder's world.
+async function bodyUpload([path, ...args]) {
+  if (!path) throw new Error("body upload needs a GLB path");
+  let opts = {};
+  while (args.length) {
+    const flag = args.shift();
+    if (flag === "--manifest") { const file = args.shift(); if (!file || file.startsWith("--")) throw new Error("--manifest needs a JSON file"); opts = JSON.parse(readFileSync(userPath(file), "utf8")); }
+    else if (flag === "--rights-confirmed") opts.rightsConfirmed = true;
+    else if (flag === "--type" || flag === "--license") { const value = args.shift(); if (!value || value.startsWith("--")) throw new Error(flag + " needs a value"); opts[flag.slice(2)] = value; }
+    else throw new Error("Unknown body upload argument: " + flag);
+  }
+  if (!["humanoid", "ceramic", "floater"].includes(opts.type) || !["CC0", "owned"].includes(opts.license) || !opts.rightsConfirmed) throw new Error("Upload needs a type (humanoid, ceramic or floater), a license (CC0 or owned) and confirmed rights: a --manifest with rightsConfirmed true, or --type, --license and --rights-confirmed");
+  const bytes = readFileSync(userPath(path));
+  if (bytes.length > 4 * 1024 * 1024) throw new Error("Use a GLB file no larger than 4 MiB");
+  if (opts.type === "humanoid") opts.rig = "quaternius/1";
+  const form = new FormData(), s = load();
+  form.set("manifest", JSON.stringify(opts)); form.set("model", new Blob([bytes], { type: "model/gltf-binary" }), "body.glb");
+  const r = await fetch(need(s, "world", "Register this folder first") + "/v1/edge/body/uploads", { method: "POST", headers: { authorization: "Bearer " + need(s, "token", "Pair your Soul first") }, body: form, signal: AbortSignal.timeout(90_000) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${d.error?.code ?? "body.unavailable"}: ${d.error?.message ?? "Body upload refused"}${d.error?.details ? " " + JSON.stringify(d.error.details) : ""}`);
+  return d.asset;
 }
 
 async function travel(to) {
@@ -2859,10 +3786,10 @@ alone does not identify the active controller. If ownership is unclear, establis
 **Start of every thin-controller chat here (when no managed controller owns this Soul):** run \`${CLI} status\`, then start listening to my messages from the web page in the
 background: \`${CLI} listen\` (Claude Code: Bash run_in_background). It exits when I write; ack each message
 (\`${CLI} ack <id> "Got it: …"\`), restart \`${CLI} listen --after <last id>\` in the background first, then do what
-I asked, then \`${CLI} result <id> done|failed "<what happened>"\`.
+I asked, then \`${CLI} result <id> done|failed "<what happened>"\` unless the answer says \`closed: true\`.
 
 ${HOME ? MEMORY_GUIDE : ""}**Doing things:** \`${CLI} act <offered id> --wait\` (e.g. \`act walk:library --wait\`, \`act dance:here\`). Ids come
-from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`candidates\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
+from \`here\`, \`caps\` and \`resolve "<my words>"\`; read \`accepted\`, \`code\`/\`reason\` and \`did_you_mean\` if refused. \`--wait\` returns when the receipt ends, when a sit or lie without a requested duration holds its pose (the receipt stays \`started\`; \`receipt.observed\` says so), or when the wait window expires; check its phase and current body. A long action: \`act\` without
 --wait, then \`${CLI} wait 60\` as needed. \`${CLI} caps --search "<thing>"\` lists current offers.
 
 For “take a seat” with no requested duration, use a durable fixture's exact sit offer with \`'{"seconds":1}' --for none --wait --json\` if it supports seconds. Verify \`here\` posture is seated and its seat matches the receipt's chosen slot before reporting. The seat stays occupied after the timed action; keep listening, without standing or canceling. Preserve requested durations; this does not apply to temporary ground poses. Default sitting receipts can stay open for ten minutes while already seated.
@@ -2874,7 +3801,7 @@ For “take a seat” with no requested duration, use a durable fixture's exact 
 Other Souls are independent people: being near is not consent.
 
 Full reference: \`${CLI} help\`.
-`;
+${REPORTS ? `\nIf something didn't do what you expected: \`${CLI} note "<expected>" "<observed>"\` (optional; the client records the rest).\n` : ""}`;
   // Replace an earlier Eden guide (ours or the v1 client's); keep anything else the human wrote.
   for (const name of ["CLAUDE.md", "AGENTS.md"]) {
     const f = HOME ? joinPath(homeFolder(), name) : name;
@@ -2945,12 +3872,16 @@ function serveHolder() {
   if (!h?.pid || !pidAlive(h.pid) || serveIdentity(h.pid) === false) return null;
   return Date.now() - (h.beatAt ?? 0) < SERVE_STALE_MS ? h : null;
 }
-function writeServeLock(start) { writeFileSync(SERVE_LOCK + ".tmp", JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(SERVE_LOCK + ".tmp", SERVE_LOCK); }
+// Each writer has its own temporary name: two serves started together never rename each other's bytes into the lock (#1244).
+function writeServeLock(start) { const tmp = `${SERVE_LOCK}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify({ pid: process.pid, start, beatAt: Date.now() })); renameSync(tmp, SERVE_LOCK); }
+/** The lock file was just created and is not yet written: another serve is a moment into taking it. */
+// A writer fills it within moments, so an empty file older than 5 s is a start that died there, and counts for nothing.
+const serveLockFresh = () => { try { const st = lstatSync(SERVE_LOCK); return st.size === 0 && Date.now() - st.mtimeMs < 5_000; } catch { return false; } };
 function takeServeLock(start) {
   try { closeSync(openSync(SERVE_LOCK, "wx", 0o600)); }
   catch (e) {
     if (e.code !== "EEXIST") throw e;
-    if (serveHolder()) return false;
+    if (serveHolder() || serveLockFresh()) return false;
     const h = readServeLock(); if (h?.pid && h.pid !== process.pid && pidAlive(h.pid) && serveIdentity(h.pid) === true) { try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ } }
   }
   writeServeLock(start);
@@ -2989,6 +3920,46 @@ export function foldAddressed(st, env, at = Date.now()) {
   return true;
 }
 const addressedView = ({ id, from, soulId, text, at }) => ({ id, from, soulId, text, at, untrusted: true });
+// #1345 (2.24.4): the reflex. Speech the world counts as said to this Soul turns it to the speaker at once, through the
+// offered `face:<soulId>` act, before any model call. The world stays the judge (strict: an id not offered is refused, and
+// nothing else is tried). Never over the agent's own look, turn or face while it holds (the world's LOOK_SECONDS and
+// FACE_SECONDS), never after auto-face:off, at most once per speaker per REFLEX_EVERY_MS, never for this Soul's own speech.
+// Off for the folder with `serve --no-reflex` (back on with `serve --reflex`).
+export const REFLEX_EVERY_MS = 30_000, REFLEX_KEEP = 8;
+export const REFLEX_STALE_MS = 10_000;   // speech replayed after a reconnect is history, not a call to turn now
+/** "30s", "5m", "1h2m" (the world's durationWord) in ms, or null. */
+export function holdMs(word) {
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(String(word ?? "")); if (!m || !word) return null;
+  return ((Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0)) * 60 + Number(m[3] ?? 0)) * 1000;
+}
+/** Pure: the Soul to turn to for one `speech.to-me` line, or null with why not. */
+export function reflexFor(st, env, { me, at = Date.now(), off = false, inFlight = 0 } = {}) {
+  const who = env?.about?.soulId, said = typeof env?.at === "number" ? env.at : Date.parse(env?.at ?? "");
+  if (off) return { skip: "off" };
+  if (env?.kind !== "speech.to-me" || typeof who !== "string" || !who || who === me) return { skip: "not-a-soul" };
+  if (Number.isFinite(said) && at - said > REFLEX_STALE_MS) return { skip: "old" };
+  const busy = attentionHeld(st, { at, inFlight }); if (busy) return { skip: busy };
+  if ((st.reflexed ?? []).some((x) => x.soulId === who && at - (x.t ?? 0) < REFLEX_EVERY_MS)) return { skip: "recent" };
+  return { soulId: who, name: env.about?.name ?? null };
+}
+/** Pure: why the agent's own attention rules a reflex out now (its look, turn or face held or on its way; auto-face off). */
+export function attentionHeld(st, { at = Date.now(), inFlight = 0 } = {}) {
+  return inFlight > 0 || (st.reflexHold ?? 0) > at ? "own-attention" : st.autoFaceOff ? "auto-face-off" : null;
+}
+/** The agent's own attention acts, by id, before the world answers: they hold off a reflex while on their way. */
+export const ATTENTION_ID = /^(look|look-at|turn|turn-to|face)(:|$)/;
+/** Pure: what the world's answer to an act this folder sent says about the agent's own attention. The world's own
+ *  `chosen.holdsFor` when it says; else a heading turn or a look holds 10 s, any other turn or face 30 s (LOOK_SECONDS,
+ *  FACE_SECONDS). `auto-face:off|on` is the setting. */
+export function noteAttention(st, d, at = Date.now()) {
+  const c = String(d?.receipt?.capability ?? d?.capability ?? "");
+  if (c.startsWith("auto-face:off")) { st.autoFaceOff = true; return true; }
+  if (c.startsWith("auto-face:on")) { st.autoFaceOff = false; return true; }
+  if (d?.channel !== "attention") return false;
+  const ms = holdMs(d.chosen?.holdsFor) ?? (/^turn:\d+$/.test(c) || c.startsWith("look") ? 10_000 : 30_000);
+  st.reflexHold = Math.max(st.reflexHold ?? 0, at + ms);
+  return true;
+}
 /** Pure: what a request should hear: anything nobody has heard yet, and anything that came while this request was held, so a
  *  wait and a listen held at the same moment both hear it. A peek looks and leaves it unheard. */
 export function takeAddressed(st, heldFromSeq, { peek = false } = {}) {
@@ -3046,6 +4017,7 @@ export function takePending(st) {
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
     events: shown,
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
+    ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
     ...(st.omitted ? { omitted: st.omitted } : {}),
     ...(st.gap ? { gap: true, gapNote: "The stream had a gap: read here again; some events were not seen." } : {}),
@@ -3188,7 +4160,7 @@ async function serveForeground() {
   st.folder = folderKey(s);
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
 
@@ -3197,15 +4169,16 @@ async function serveForeground() {
     let attempt = 0, code, recovered = false;
     while (!stopping && !terminal) {
       const q = new URLSearchParams({ timeoutMs: recovered ? "50000" : "0", ...(recovered && st.inboxAfter ? { after: st.inboxAfter } : {}) });
-      const r = await worldOnce(`${world}/v1/edge/inbox/listen?${q}`, { method: "GET", headers: auth, timeoutMs: 60_000, recoverRead: true });
+      const r = await serveCall(`${world}/v1/edge/inbox/listen?${q}`, { method: "GET", headers: auth, timeoutMs: 60_000, recoverRead: true });
       if (r.status === 401 || r.status === 403) { terminal = r; log(`inbox: control ended (${codeOf(r.data) ?? r.status})`); wake(); return; }
       if (r.status === 0 || r.status === 429 || r.status === 409 || r.status >= 500) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
         if (next !== code) log(`inbox: ${next}; next try in ${secs(ms)}`);
-        code = next; await pause(ms); continue;
+        code = next; if (r.status === 0 || (r.status >= 500 && !isBusy(r.status, r.data))) worldDown ??= { code: next, since: now() };
+        await pause(ms); continue;
       }
-      attempt = 0; code = undefined;
+      attempt = 0; code = undefined; worldDown = null;
       if (r.status >= 200 && r.status < 300) {
         const got = messagesOf(r.data);
         if (!recovered) { recovered = true; if (Array.isArray(r.data?.backlog)) { reconcileMessages(st, got); persist(); } }
@@ -3217,7 +4190,7 @@ async function serveForeground() {
   async function eventLoop() {
     let attempt = 0, code;
     while (!stopping && !terminal) {
-      const r = await worldOnce(`${world}/v1/edge/wait?timeout=55&after=${encodeURIComponent(st.cursor ?? s.cursor ?? "c_0")}`, { method: "GET", headers: auth, timeoutMs: 65_000, recoverRead: true });
+      const r = await serveCall(`${world}/v1/edge/wait?timeout=55&after=${encodeURIComponent(st.cursor ?? s.cursor ?? "c_0")}`, { method: "GET", headers: auth, timeoutMs: 65_000, recoverRead: true });
       if (r.status === 401 || r.status === 403) { terminal = r; wake(); return; }
       if (r.status < 200 || r.status >= 300) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
@@ -3233,6 +4206,27 @@ async function serveForeground() {
       if ((d.events?.length && !d.gap) || d.gap || d.cursor !== had) { if (d.events?.length) lastEventAt = Date.now(); persist(); wake(); }
       tick();
     }
+  }
+  // #1345: turn to whoever speaks to this Soul, at once, through the world's own offered act. Never awaited by the stream.
+  function reflex(env) {
+    const r = reflexFor(st, env, { me: s.soul, off: load().reflex === false, inFlight: attentionInFlight });
+    if (!r.soulId) { if (r.skip !== "not-a-soul") log(`reflex: not turning (${r.skip})`); return; }
+    const at = Date.now(), entry = { soulId: r.soulId, name: r.name, at: new Date(at).toISOString(), accepted: null, read: false, t: at };
+    st.reflexed = [...(st.reflexed ?? []).filter((x) => Date.now() - (x.t ?? 0) < REFLEX_EVERY_MS * 4), entry].slice(-REFLEX_KEEP);
+    const ref = randomUUID();
+    gated(() => {
+      // asked again at the moment it would go: an agent's look or turn queued ahead of it wins
+      const busy = attentionHeld(st, { inFlight: attentionInFlight }) ?? (load().reflex === false ? "off" : null);
+      return busy ? { skipped: busy } : worldOnce(`${world}/v1/edge/act`, { method: "POST", headers: { ...auth, "idempotency-key": ref }, timeoutMs: 15_000, body: { capability: `face:${r.soulId}`, clientRef: ref, strict: true } });
+    })
+      .catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }))
+      .then((a) => {
+        if (a.skipped) { st.reflexed = st.reflexed.filter((x) => x !== entry); log(`reflex: not turning (${a.skipped})`); persist(); return; }
+        entry.accepted = a.status === 200 && a.data?.accepted === true;
+        if (!entry.accepted) { entry.code = a.data?.code ?? codeOf(a.data) ?? `http-${a.status}`; log(`reflex: face ${r.soulId} not taken (${entry.code}); not retried`); }
+        else log(`reflex: faced ${r.name ?? r.soulId}`);
+        persist();
+      });
   }
   // The world's own classified stream names what is said to this Soul, by its rule (speech.to-me); this client doesn't repeat that rule.
   async function addressedLoop() {
@@ -3261,7 +4255,7 @@ async function serveForeground() {
             if (f.id) st.addressedCursor = f.id;
             if (f.event !== "speech.to-me") continue;
             let env; try { env = JSON.parse(f.data); } catch { continue; }
-            if (foldAddressed(st, env)) woke = true;
+            if (foldAddressed(st, env)) { woke = true; reflex(env); }
           }
           if (woke) { persist(); wake(); }
         }
@@ -3282,6 +4276,12 @@ async function serveForeground() {
     // A response cut off partway is a world that did not answer, not a reason for this process to die.
     const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const repeatable = m.method === "GET" || m.headers?.["idempotency-key"];
+    // #1345: the agent's own look, turn or face holds off a reflex from the moment it is asked, not only once answered
+    const attending = m.method === "POST" && routeOf(m.url) === "/v1/edge/act" && ATTENTION_ID.test(String(m.body?.capability ?? ""));
+    if (attending) attentionInFlight++;
+    try { return await forwardOnce(m, pathOf, repeatable, once); } finally { if (attending) attentionInFlight--; }
+  }
+  async function forwardOnce(m, pathOf, repeatable, once) {
     const r = HELD_PATH.test(pathOf) ? await once() : await gated(async () => {
       let a = await once();
       for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) { busyWaited++; await pause(statedJitter(a.retryAfterMs ?? 1_000)); a = await once(); }
@@ -3290,6 +4290,7 @@ async function serveForeground() {
     const p = pathOf.split("?")[0], inboxWrite = /^\/v1\/edge\/inbox\/([^/]+)\/(ack|result)$/.exec(p);
     if (r.status >= 200 && r.status < 300) {
       if (r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); persist(); }
+      if (p === "/v1/edge/act" && r.data?.accepted === true && noteAttention(st, r.data)) persist();
       if (inboxWrite) {
         const x = st.messages.find((y) => y.id === decodeURIComponent(inboxWrite[1]));
         if (x) { x.acked = true; if (inboxWrite[2] === "result") x.closed = true; persist(); }
@@ -3372,8 +4373,10 @@ async function serveForeground() {
         if (s.state !== "pending") return;
         const last = p.at === p.steps.length - 1;
         // Only the last step closes the owner's message; an earlier one posts progress and the card stays open (the world's D3c).
+        const reportT0 = performance.now();   // a plan's step is this process's own request; a proxied one is recorded by the CLI that asked
         const r = await forward({ url: `${world}/v1/edge/act`, method: "POST", headers: { ...auth, "idempotency-key": s.clientRef }, timeoutMs: 40_000,
           body: { capability: s.id, ...(s.params ? { params: s.params } : {}), clientRef: s.clientRef, strict: true, ...(p.for ? { for: p.for, ...(last ? {} : { forDefault: true }) } : {}) } });
+        reportRequest(`${world}/v1/edge/act`, "POST", reportT0, r);
         if (st.plan !== p || s.state !== "pending") return;   // replaced while it was asking
         if (r.status === 0 || r.status === 429 || r.status >= 500 || isBusy(r.status, r.data)) return;   // the next tick tries again
         const wasStopped = p.state;
@@ -3392,7 +4395,7 @@ async function serveForeground() {
     const p = st.plan, s = p?.steps[p.at];
     if (p?.state === "running" && s?.receipt && Date.now() - planReadAt >= 15_000) {
       planReadAt = Date.now();
-      const r = await worldOnce(`${world}/v1/edge/receipts/${encodeURIComponent(s.receipt)}`, { method: "GET", headers: auth, timeoutMs: 25_000 });
+      const r = await serveCall(`${world}/v1/edge/receipts/${encodeURIComponent(s.receipt)}`, { method: "GET", headers: auth, timeoutMs: 25_000 });
       if (st.plan === p && r.status === 200 && r.data?.receipt) { planPhase(p, r.data.receipt); persist(); }
     }
     await planTick();
@@ -3421,7 +4424,11 @@ async function serveForeground() {
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
     if (m.op === "pending") { const out = takePending(st); persist(); return out; }
-    if (m.op === "status") return { serving: true, pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    if (m.op === "status") {
+      // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
+      if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+    }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "http") {
       const path = routeOf(m.url);
@@ -3432,14 +4439,20 @@ async function serveForeground() {
       if (known?.full && ENDED.has(known.phase)) return { status: 200, data: { receipt: known.full } };
       // An act for the plan's own message serves it, so the plan won't close it. Noted before the request: on a real world the step's
       // replaced comes down the stream before this act's answer comes back.
+      // A repeat of the step under way, for the plan's own message, goes without its `for`: linked, the world would close the
+      // message when that step ends, with later steps still to run (#1289). The plan closes it.
+      const step = st.plan && !PLAN_OVER.has(st.plan.state) ? st.plan.steps?.[st.plan.at] : null;
+      if (path === "/v1/edge/act" && m.method === "POST" && step && m.body?.for && m.body.for === st.plan.for && step.id === m.body.capability && JSON.stringify(step.params ?? {}) === JSON.stringify(m.body.params ?? {})) {
+        const { for: _for, forDefault: _default, ...body } = m.body; m = { ...m, body };
+      }
       const planActFor = path === "/v1/edge/act" && m.method === "POST" && st.plan && m.body?.for && m.body.for === st.plan.for ? st.plan : null;
       if (planActFor) planActFor.servedByAct = (planActFor.servedByAct ?? 0) + 1;
       const r = await forward(m);
-      if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id) planActFor.resultSent = true; }
+      if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id && !r.data.repeat) planActFor.resultSent = true; }
       // A newer body act replaces the plan; talk and attention don't. A body act's answer names no channel: the receipt says what
       // isn't one (attention for a look, none for a prayer or a mark). Swept on a real world: every other accepted act replaced a
-      // running walk, a wave and a stand included. (The plan's own acts don't come through here.)
-      if (path === "/v1/edge/act" && m.method === "POST" && st.plan && !PLAN_OVER.has(st.plan.state) && r.data?.accepted && r.data.receipt?.id && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel)) {
+      // running walk, a wave and a stand included, except a repeat of the act under way, which goes on (#1289). (The plan's own acts don't come through here.)
+      if (path === "/v1/edge/act" && m.method === "POST" && st.plan && !PLAN_OVER.has(st.plan.state) && r.data?.accepted && r.data.receipt?.id && !r.data.repeat && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel)) {
         const p = st.plan;
         if (p.for && p.for === m.body?.for) p.resultSent = true;
         planOver(p, "replaced", Date.now()); persist(); tick();
@@ -3460,7 +4473,8 @@ async function serveForeground() {
     });
   });
   const shutdown = (code) => {
-    stopping = true; persist();
+    stopping = true;
+    try { persist(); } catch { /* its folder is gone: the signal still stops it, or nothing could */ }
     try { unlinkSync(SERVE_SOCK); } catch { /* gone */ }
     try { if (readServeLock()?.pid === process.pid) unlinkSync(SERVE_LOCK); } catch { /* gone */ }
     process.exit(code);
@@ -3484,8 +4498,8 @@ async function serveForeground() {
   async function reflect() {
     let next = REFLECT_BUSY_MS;   // whatever goes wrong in a look, there is another
     try {
-      const everyHours = soulConsolidate.settingsOf(HOME.config().consolidation).everyHours, memory = joinPath(soulFolder(), "memory");
-      if (!everyHours) return;
+      const asked = HOME.config().consolidation, everyHours = soulConsolidate.settingsOf(asked).everyHours, memory = joinPath(soulFolder(), "memory");
+      if (!everyHours || soulConsolidate.answerOf(asked) !== true) return;
       const quiet = !st.plan && !Object.values(st.receipts).some((r) => !ENDED.has(r.phase)) && Date.now() - (lastEventAt ?? 0) > REFLECT_QUIET_MS * TIME_SCALE;
       // A pass runs beside the serve, so waiting is manners: a world that never goes quiet doesn't get to stop it for good.
       reflectWaiting = quiet ? null : reflectWaiting ?? Date.now();
@@ -3505,9 +4519,14 @@ async function serveForeground() {
 // serve [--status|--stop]: start the detached process for this folder, or ask it how it is, or end it.
 async function serve(...args) {
   if (args[0] === "--foreground") return serveForeground();
+  // the reflex setting stays with the folder; a serve already up reads it at the next speech
+  const flags = args.filter((a) => a === "--no-reflex" || a === "--reflex");
+  args = args.filter((a) => a !== "--no-reflex" && a !== "--reflex");
+  if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
+  if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
   if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, next: `${CLI} serve` };
   if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
-  if (args.length) throw new Error("usage: serve [--status|--stop]");
+  if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const running = await askServe({ op: "status" });
   if (running?.serving) return { ...running, alreadyServing: true };
@@ -3515,12 +4534,33 @@ async function serve(...args) {
   const env = HOME ? { ...process.env, SOULS_HOME: HOME.root, SOULS_PRINCIPAL: SEAT.id } : process.env;
   const child = spawn(process.execPath, [process.argv[1], "serve", "--foreground"], { detached: true, env, stdio: ["ignore", logFd, logFd] });
   child.unref(); closeSync(logFd);
-  for (let i = 0; i < 100; i++) {
+  // The wait follows the child, not a clock: a slow start on a loaded machine is still a start (#1244). One that exits has
+  // failed, and says so at once; one still starting at the limit is stopped, so no serve is left up that was reported down.
+  let exited = null;
+  child.once("exit", (code, signal) => { exited = { code, signal }; });
+  const up = (a) => ({ ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` });
+  const limit = Date.now() + SERVE_START_MS * TIME_SCALE;
+  let other = null, heldAt = 0;   // a serve this command didn't start, which took the folder's lock first
+  while (Date.now() < limit) {
     await sleep(50);
     const a = await askServe({ op: "status" });
-    if (a?.serving) return { ...a, next: `Every command now goes through it. ${CLI} pending lists what arrived since you last read.` };
+    if (a?.serving) return other || a.pid !== child.pid ? { ...a, alreadyServing: true } : up(a);
+    if (exited && Date.now() - heldAt >= 1_000) {
+      // A child that lost the lock to a concurrent serve exits too: that one is followed until it answers, never signalled.
+      // Who holds the lock is asked about once a second (it runs ps and lsof), not at every poll.
+      heldAt = Date.now();
+      const h = serveHolder();
+      other = h && h.pid !== child.pid ? h : serveLockFresh() ? { pid: "unknown" } : null;
+      if (!other) throw new Error(`serve did not start: it exited (${exited.signal ?? `code ${exited.code}`}); see ${SERVE_LOG}`);
+    }
   }
-  throw new Error(`serve did not start; see ${SERVE_LOG}`);
+  const last = await askServe({ op: "status" });
+  if (last?.serving) return other || last.pid !== child.pid ? { ...last, alreadyServing: true } : up(last);
+  if (other) throw new Error(`serve did not start: another serve for this folder (pid ${other.pid}) took it first and is still starting; ${CLI} serve --status shows when it answers; see ${SERVE_LOG}`);
+  try { process.kill(child.pid, "SIGTERM"); } catch { /* it ended on its own */ }
+  for (let i = 0; i < 40 && !exited; i++) await sleep(50);
+  if (!exited) { try { process.kill(child.pid, "SIGKILL"); } catch { /* gone */ } }
+  throw new Error(`serve did not start within ${Math.round(SERVE_START_MS * TIME_SCALE / 1000)} s, so it was stopped and nothing is serving; see ${SERVE_LOG}`);
 }
 
 // travel, create and pair change who this folder speaks for. A serve up for the old one stops, and a new one starts for the new one.
@@ -3538,6 +4578,7 @@ async function followFolder() {
 async function pending() {
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
+  heard(a.ownerMessages);
   return { ...a, ...briefNow() };
 }
 
@@ -3588,26 +4629,28 @@ async function batch(json) {
 
 // ---------------------------------------------------------------- help and dispatch
 
-const HELP = `eden ${VERSION} — one Soul, one controller. Commands print JSON.
+const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.
 
 setup     register <world-url>            create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE]   doctor   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
-memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [--force]
+memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all]   map   view [--map|--alt-only|--out f]
+look      here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
           context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
           receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--json]   resolve "<words>" (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          say "<text>"   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-owner     listen [--after id] [--once]   ack <id> ["reply"]   result <id> done|failed "<text>"
+do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
+          stop [receiptId]   (ends your own act under way, where you are; nothing else starts)
+          say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
+          (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
+owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
           now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
-self      profile [name|description|photo …]   body [presets|set|look …]   travel [<world>|home]
-resident  serve [--status|--stop]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you; everything else still works without it)
+self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
+resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
-`;
+${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
@@ -3624,9 +4667,11 @@ async function defaultCommand(sel) {
   const id = needHome().setDefault(sel);
   return { default: HOME.principals().find((p) => p.id === id) };
 }
-async function doctorCommand() {
+async function doctorCommand(...argv) {
+  const { code } = forOption(argv);
+  const accountSouls = code ? async (url) => { const r = await worldOnce(`${url}/v1/agent/approval/souls`, { method: "POST", headers: { "content-type": "application/json" }, body: { for: code }, timeoutMs: 25_000 }); return r.status === 200 ? r.data?.souls ?? [] : codeOf(r.data) === "code-unknown" ? null : { note: `This world could not list the account's Souls just now (${codeOf(r.data) ?? `http-${r.status}`}). Try again in a minute.` }; } : null;
   const ask = async (url, bearer) => { const { status, data } = await worldOnce(url, { method: "GET", headers: { authorization: `Bearer ${bearer}` }, timeoutMs: 25_000 }); return { status, data }; };
-  const out = await needHome().doctor(ask, { alive: pidAlive });
+  const out = await needHome().doctor(ask, { alive: pidAlive, accountSouls, codeWorld: AT_WORLD ?? HOME.config().currentWorld });
   for (const [world, w] of Object.entries(HOME.config().worlds)) {
     const { status, data } = await worldOnce(`${w.url}/v1/config`, { method: "GET", headers: {}, timeoutMs: 25_000 }), c = status === 200 ? data?.soulClient : null;
     if (!c) continue;
@@ -3721,6 +4766,7 @@ export function enterHome(argv) {
   let line = argv, selector;
   const cfg = HOME.config();
   if (first && !commands[first] && soulHome.looksLikeSelector(cfg, first)) { selector = first; line = argv.slice(1); }
+  AT_WORLD = selector?.startsWith("@") ? selector.slice(1) : null;
   // A Soul named like a command: the command wins, but `say here` was meant for the Soul and must not be said aloud.
   if (first && commands[first] && commands[second] && soulHome.looksLikeSelector(cfg, first)) throw new Error(`${first} is a command and a Soul here. For the Soul use its address: ${HOME.principals().find((p) => soulHome.norm(p.name) === first)?.address ?? `${first}@<world>`}`);
   const cmd = line[0];
@@ -3735,7 +4781,7 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => HELP };
+const commands = { note, plan, inspect, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
@@ -3746,11 +4792,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     child.on("exit", (code) => process.exit(code ?? 1));
     await new Promise(() => {});
   }
+  // `note` stays in `commands` until here so enterHome routes it to its Soul's folder like any command
+  REPORTS = reportsHere();
+  if (!REPORTS) delete commands.note;
   const [cmd, ...args] = line;
   const fn = commands[cmd];
-  if (!fn) { process.stdout.write(HELP); process.exit(cmd ? 1 : 0); }
+  if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;
-  try { argv = ["act", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
+  try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null;
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };

@@ -83,3 +83,24 @@ test('F4 (#375): map lists the named flags beside the places; a walk that reache
   for (let i = 0; i < 4000 && ['waiting', 'started'].includes(w.edge.receipt(w.soul.soulId, r3.receipt.id)!.phase); i++) await w.tick(1);
   assert.match(String((w.edge.receipt(w.soul.soulId, r3.receipt.id) as {outcome?: {summary: string}}).outcome?.summary), /^walk completed at (?!the ).*\.$/, 'other walks keep their text');
 });
+
+test('#1281: here names the flags with the walk that reaches them, nearest first, and a strict act takes the id as it stands', async (t) => {
+  const w = await world(t), p = w.f.host.engine.world.entities[w.soul.entityId]!.pose.p;
+  const here = async () => ((await (await w.app.request('/v1/edge/here')).json()) as {here: {flags?: string[]; flagsMore?: number}}).here;
+  const h = await here(), dist = (at: [number, number]) => Math.round(Math.hypot(at[0] - p[0], at[1] - p[2]));
+  assert.equal(h.flags?.length, 4, JSON.stringify(h.flags)); assert.equal(h.flagsMore, 1);
+  for (const line of h.flags!) assert.match(line, /^.+ · [A-Z]{1,3} \d+m · walk:flag-[\w-]+$/, line);
+  const orchard = h.flags!.find(l => l.startsWith('orchard · '))!; assert.ok(orchard.endsWith(` ${dist([-12, -9])}m · walk:flag-orchard`), orchard);
+  const metres = h.flags!.map(l => Number(/ (\d+)m · /.exec(l)![1])); assert.deepEqual(metres, [...metres].sort((a, b) => a - b), 'nearest first');
+  const id = orchard.split(' · ')[2]!;
+  const act = await accept(w.f.host, Promise.resolve(w.app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: id, strict: true})})));
+  const out = await act.json() as {accepted: boolean; receipt?: {capability: string}};
+  assert.equal(out.accepted, true, JSON.stringify(out)); assert.equal(out.receipt?.capability, 'walk:flag-orchard');
+  // past four, the rest are counted
+  const more = w.edge as unknown as {namedFlagsV1: () => {name: string; walk: string; at: [number, number]}[]}, all = more.namedFlagsV1;
+  more.namedFlagsV1 = () => Array.from({length: 8}, (_, i) => ({name: `f${i}`, walk: `walk:flag-f${i}`, at: [i, 0] as [number, number]}));
+  const many = await here(); assert.equal(many.flags?.length, 4); assert.equal(many.flagsMore, 4);
+  more.namedFlagsV1 = () => [];
+  const none = await here(); assert.equal(none.flags, undefined, 'a world with no flags has neither field'); assert.equal(none.flagsMore, undefined);
+  more.namedFlagsV1 = all;
+});

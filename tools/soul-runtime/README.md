@@ -35,6 +35,10 @@ retention gaps, a blocked notification and a backlog larger than one page.
 
 Before production use, complete real-agent recovery/retention acceptance and the
 four-activity evaluation and long soak.
+This runtime runs a legacy paired folder, not a Soul in a Souls home, so it
+writes no home memory and gives the model no pre-turn brief: its continuity is
+the journal, the saved plan and `openOwnerTasks` (#1227). A Soul that should
+remember across worlds runs through the Soul CLI from its home.
 A filesystem path is private runtime storage; never put a credential or raw
 host transcript into the event journal. OS sleep stops local execution; a
 durable record does not make a sleeping host available.

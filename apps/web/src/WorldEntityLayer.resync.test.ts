@@ -120,3 +120,36 @@ test('teardown while the snapshot client module is loading prevents a late decod
   f.layer.dispose();
   await assert.rejects(pending, { name: 'AbortError' });
 });
+
+// #1664: actual socket/resync drawing, not a detached birth-transform helper.
+for (const instanced of [false, true]) test(`new supported output is full-size at its authoritative surface from first draw (${instanced ? 'instanced' : 'ordinary'})`, async t => {
+  const f = await fixture(); t.after(() => f.layer.dispose());
+  const placed = applyBatch(f.model, {ops:[{op:'place',def:'core/table@1',name:'support',p:[8,4],r:.7}]}, 'god', 2);
+  assert.equal(placed.result.accepted,true,JSON.stringify(placed.result));
+  const parent = f.model.get('support')!; f.inner.draw(parent,false); f.frame();
+  const result = applyBatch(f.model,{ops:[{op:'place',def:'core/bowl@1',name:'output',in:{parent:parent.id,slot:'top'},p:[.1,0]}]},'god',3);
+  assert.equal(result.result.accepted,true,JSON.stringify(result.result));
+  const child = structuredClone(f.model.get('support/output')!), expected=f.model.worldPose(child); f.model.delete(child.id);
+  const inner=f.inner as typeof f.inner & {build(e:Entity,...args:unknown[]):THREE.Object3D};
+  const build=inner.build; inner.build=function(e,...args){const obj=build.call(this,e,...args);delete obj.userData.instanceKey;if(instanced&&e.id===child.id)obj.userData.instanceKey='supported-output';return obj;};
+  const before=plain(f.model,10), instancesBefore=f.layer.instancer.instances;
+  f.layer.applyEdge([{type:'edge',kind:'world-diff',seq:11,by:'god',diff:{upserts:[child],removes:[],defs:[],tiles:[]}} as never]);
+  const d=f.d(child.id)!;
+  assert.deepEqual(d.obj.position.toArray(),[expected.x,expected.y,expected.z],'first draw at actual supported transform');
+  assert.equal(d.obj.scale.x,expected.s,'first draw at full authoritative scale'); assert.ok(d.dur<.01);
+  f.frame(); assert.deepEqual(d.obj.position.toArray(),[expected.x,expected.y,expected.z]);
+  if(instanced){assert.equal(f.layer.instancer.instances,instancesBefore+1);const pool=(f.layer.instancer as unknown as {pools:Map<string,{meshes:THREE.InstancedMesh[]}>}).pools.get('supported-output')!;assert.ok(pool.meshes.length>0);for(const mesh of pool.meshes){const m=new THREE.Matrix4();mesh.getMatrixAt(0,m);const p=new THREE.Vector3().setFromMatrixPosition(m);assert.ok(Math.hypot(p.x-expected.x,p.z-expected.z)<1e-5);assert.ok(Math.abs(p.y-expected.y)<1e-5);}}
+  // A resync must qualify the same admitted output through the real delta path.
+  f.model.delete(child.id); (f.inner as unknown as {unload(id:string):void}).unload(child.id);
+  const next=plain(f.model,12);next.entities.push(child as never);
+  await f.inner.applyDelta(diffSnapshots(before,next),new Set(),f.inner.signal);
+  assert.deepEqual(f.d(child.id)!.obj.position.toArray(),[expected.x,expected.y,expected.z]);assert.equal(f.d(child.id)!.obj.scale.x,expected.s);
+});
+
+test('a child of a newly created surface parent keeps ordinary God creation easing',async t=>{
+  const f=await fixture();t.after(()=>f.layer.dispose());
+  const parent={id:'new-parent',name:'new-parent',def:'core/table@1',in:{parent:'world'},p:[8,0,4],by:'god',born:0,v:1} as Entity;
+  const child={id:'new-output',name:'output',def:'core/bowl@1',in:{parent:parent.id,slot:'top'},p:[0,0],by:'god',born:0,v:1} as Entity;
+  f.layer.applyEdge([{type:'edge',kind:'world-diff',seq:11,by:'god',diff:{upserts:[parent,child],removes:[],defs:[],tiles:[]}} as never]);
+  const d=f.d(child.id)!;assert.equal(d.obj.position.y,d.to.p.y+40);assert.equal(d.obj.scale.x,.2);assert.equal(d.dur,2.5);
+});

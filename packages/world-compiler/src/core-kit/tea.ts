@@ -62,6 +62,9 @@ export const kettleWord = (p: KettlePhase) => p;
 export type Vessel = { grip: [number, number, number]; opening: [number, number, number]; outlet: [number, number, number]; outletAngle: number; pour: 'rose' | 'spout' };
 export const isKettleDef = (def: { name?: string; version?: number; tags?: readonly string[]; slots?: readonly { kind: string }[] } | undefined) => !!def && !!def.tags?.includes('kettle') && !!def.slots?.some((s) => s.kind === 'carry');
 export const isTeaCupDef = (def: { tags?: readonly string[]; state?: Record<string, unknown> } | undefined) => !!def && !!def.tags?.includes('tea-cup') && !!def.state?.tea;
+/** #437 W078: what a `tea-cup` mug makes and holds, by its tags: 'coffee' for a coffee mug, otherwise 'tea'. Its words, refusals
+ *  and nearby fact say this; its state fields stay the tea faculty's (`tea` is how full it is, `bag` the unused brew in it). */
+export const cupDrink = (def: { tags?: readonly string[] } | undefined): 'tea' | 'coffee' => def?.tags?.includes('coffee') ? 'coffee' : 'tea';
 /** #435: a thing eaten from the hand, bite by bite: tagged `edible`, with its `left` (0..1) and `bites` in its state. */
 export const isFoodDef = (def: { tags?: readonly string[]; state?: Record<string, unknown> } | undefined) => !!def && !!def.tags?.includes('edible') && !!def.state?.left && !!def.state?.bites;
 
@@ -151,6 +154,75 @@ const campSink: DefInput = {
   actions: (vocab.find((d) => d.name === 'core-desk-lamp')! as unknown as DefInput).actions!.map((a) => ({ ...structuredClone(a), label: a.name === 'switch-on' ? 'Turn on the sink tap' : 'Turn off the sink tap' })) as DefInput['actions'],
 } as unknown as DefInput;
 
+// #437 W078: a coffee mug. The tea mug's faculty with data only (the `tea-cup` tag, its state, rim and body): a
+// spoonful of ground coffee at the bottom where the tea mug has its bag, made into coffee by the kettle's hot water, drunk
+// in sips and rinsed clean the same way. The `coffee` tag names what it holds (cupDrink), so its words and facts say coffee.
+const coffeePalette = { glaze: '#33506e', coffee: '#3b2416', grounds: '#4a3020' };
+// within the 400-triangle item budget (#416, #494; 376, about a third of the tea mug): the body and the coffee's discs at
+// eight sides, the handle at six; the coffee drawn at five levels, one per sip (1, 0.8 .. 0.2; a third poured shows as
+// 0.4, two thirds as 0.6), and one disc of grounds on the floor of the mug: the unbrewed spoonful before the pour, the
+// dregs once drunk, gone once rinsed (the tea mug's bag, stain and string in one). Rim, floor and levels are CUP_RIM's.
+const SEG = { lathe: 8, torus: 6 } as Record<string, number>;
+const COFFEE_STEPS: [number, number][] = [[0.9, 1], [0.7, 0.8], [0.5, 0.6], [0.3, 0.4], [0.05, 0.2]];
+/** A flat disc facing up (a one-band lathe drawn inward), on the mug body's own sides. */
+const disc = (y: number, r: number, tint: string, when: string) => ({ kind: 'lathe', at: [0, 0, 0], profile: [[r, y], [0, y]], segments: SEG.lathe, tint, when });
+const cupShapes = (cup.make as unknown as { args: { shapes: { kind: string; tint: string; when?: string }[] } }).args.shapes;
+const coffeeMug: DefInput = {
+  ...structuredClone(cup), name: 'core-coffee-mug', version: 1,
+  description: 'A mug with a spoonful of ground coffee in it. Boiling water poured in makes a cup of coffee that stays in it, carried or set down, until it is drunk, sip by sip. Rinsed at a tap it is clean again.',
+  tags: ['kitchen', 'item', 'cup', 'mug', 'coffee', 'container', 'tea-cup', 'recorded-item'],
+  make: { kind: 'gen', gen: 'kit/2', args: { round: 0.006, shapes: [
+    // the tea mug's body and handle; the coffee's levels; the grounds where the tea mug has its bag
+    ...cupShapes.filter((sh) => sh.tint === 'glaze').map((sh) => ({ ...structuredClone(sh), segments: SEG[sh.kind] })),
+    ...COFFEE_STEPS.map(([when, tea]) => disc(CUP_RIM.floor + (CUP_RIM.full - CUP_RIM.floor) * tea, 0.038 + 0.0015 * tea, 'coffee', `@tea>${when}`)),
+    disc(CUP_RIM.floor + 0.001, 0.036, 'grounds', '!@bag=false&@tea<=0.05')] } } as unknown as DefInput['make'],
+  params: Object.fromEntries(Object.entries(coffeePalette).map(([k, v]) => [k, { type: 'color', default: v, doc: `${k} colour` }])) as DefInput['params'], palette: coffeePalette,
+  actions: [{ name: 'brew', label: 'Make a cup of coffee', then: [{ op: 'set', field: 'tea', value: 1 }] },
+    { name: 'drink', label: 'Drink the coffee', then: [{ op: 'set', field: 'tea', value: 0 }] },
+    { name: 'sip', label: 'Take a sip of the coffee', then: [{ op: 'set', field: 'tea', value: 0 }] },
+    { name: 'wash', label: 'Wash the coffee mug', then: [{ op: 'set', field: 'tea', value: 0 }] }] as DefInput['actions'],
+} as unknown as DefInput;
+// #494 / #416: kettle@2 and cup@2 above are immutable (worlds keep their geometry); @3 of each fits the 400-triangle
+// budget, as estimated and as drawn in every state, with @2's state, components, slots, actions and every point code
+// reads (KETTLE_GRIP, KETTLE_OPENING, KETTLE_SPOUT and its angle, KETTLE_SWITCH; the mug's MUG / CUP_RIM rim, radius,
+// floor and full height). @2's sweeps drew as tubes of four rings per path point (the kettle drew 1,044 triangles, a full
+// mug over 1,000); here the spout and handle are straight rods along @2's paths (two for the spout, four for the handle),
+// which never collide, like the sweeps. The kettle and the mug turn with 10 sides. The mug's tea surface steps by fifths (five discs instead of seven;
+// every level tea can reach is drawn within 0.067 of a cup of its true level, except 1/15, drawn at 0.2 as @2 did). Its
+// discs are 7-sided and kept inside the outer wall, so slim gaps show at the inner wall instead of corners outside.
+/** A cylinder from a to b (kit cylinders run along +y, turned by pitch then yaw). */
+const rod = (a: number[], b: number[], r: number, segments: number, tint: string) => {
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], len = Math.hypot(d[0], d[1], d[2]);
+  return { kind: 'cyl', at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], r, h: len, segments, tint, pitch: Math.acos(d[1] / len), yaw: Math.atan2(d[0], d[2]), collide: false };
+};
+const kettle3: DefInput = { ...structuredClone(kettle), version: 3,
+  make: { kind: 'gen', gen: 'kit/2', args: { round: 0.006, shapes: [
+    { kind: 'lathe', at: [0, 0, 0], profile: [[0, 0.012], [0.084, 0.012], [0.092, 0.07], [0.088, 0.16], [0.062, 0.226], [0, 0.229]], segments: 10, tint: 'shell' },
+    { kind: 'cyl', at: [0, 0.007, 0], r: 0.086, h: 0.014, segments: 10, tint: 'dark' },
+    { kind: 'cyl', at: [0, 0.229, 0], r: 0.058, h: 0.006, segments: 8, tint: 'steel' },
+    { kind: 'sphere', at: [0, 0.242, 0], r: 0.014, segments: 5, tint: 'dark' },
+    rod([0.082, 0.11, 0], [0.17, 0.14, 0], 0.016, 6, 'shell'), rod([0.17, 0.14, 0], [0.262, 0.192, 0], 0.015, 6, 'shell'),
+    { kind: 'cyl', at: [KETTLE_SPOUT[0], KETTLE_SPOUT[1], 0], r: 0.013, h: 0.006, segments: 6, tint: 'steel', roll: -(Math.PI / 2 - KETTLE_SPOUT_ANGLE) },
+    rod([-0.07, 0.212, 0], [-0.118, 0.222, 0], 0.013, 5, 'dark'), rod([-0.118, 0.222, 0], [-0.137, 0.19, 0], 0.013, 5, 'dark'),
+    rod([-0.137, 0.19, 0], [-0.137, 0.11, 0], 0.013, 5, 'dark'), rod([-0.137, 0.11, 0], [-0.084, 0.06, 0], 0.013, 5, 'dark'),
+    { kind: 'box', at: [KETTLE_SWITCH[0], KETTLE_SWITCH[1], 0], size: [0.03, 0.012, 0.02], round: 0.004, tint: 'switch' }] } } as unknown as DefInput['make'],
+} as DefInput;
+/** cup@3's tea surface: [shown while tea is above, the level drawn], by fifths of a cup. */
+const TEA_STEPS_3: [number, number][] = [[0.9, 1], [0.7, 0.8], [0.5, 0.6], [0.3, 0.4], [0.05, 0.2]];
+const cup3: DefInput = { ...structuredClone(cup), version: 3,
+  make: { kind: 'gen', gen: 'kit/2', args: { round: 0.006, shapes: [
+    { kind: 'lathe', at: [0, 0, 0], profile: [[0, 0], [0.042, 0], [0.044, 0.1], [0.04, 0.1], [0.038, 0.014], [0, 0.014]], segments: 10, tint: 'glaze' },
+    { kind: 'torus', at: [0.05, 0.055, 0], r: 0.024, r2: 0.0065, segments: 6, tint: 'glaze' },
+    ...TEA_STEPS_3.map(([when, tea]) => ({ kind: 'cyl', at: [0, CUP_RIM.floor + (CUP_RIM.full - CUP_RIM.floor) * tea, 0], r: 0.0404 + 0.0012 * tea, h: 0.003, segments: 7, tint: 'tea', when: `@tea>${when}` })),
+    // drunk, a 5-sided tea stain at the bottom
+    { kind: 'cyl', at: [0, CUP_RIM.floor + 0.001, 0], r: 0.039, h: 0.002, segments: 5, tint: 'stain', when: '@tea<=0.05&@brewedTick>=0' },
+    { kind: 'box', at: [0.006, CUP_RIM.floor + 0.008, -0.01], size: [0.034, 0.012, 0.026], round: 0.004, tint: 'bag', when: '!@bag=false&@brewedTick>=0&@tea<=0.4' },
+    // the tea bag's string, from the bag up over the rim and down to its paper tag outside (@2's tag)
+    { ...rod([0.008, 0.03, -0.012], [0.012, 0.104, -0.044], 0.0012, 3, 'string'), when: '!@bag=false' },
+    { ...rod([0.012, 0.104, -0.044], [0.006, 0.087, -0.051], 0.0012, 3, 'string'), when: '!@bag=false' },
+    { kind: 'box', at: [0.006, 0.074, -0.051], size: [0.02, 0.026, 0.003], round: 0, tint: 'tag', when: '!@bag=false' }] } } as unknown as DefInput['make'],
+} as DefInput;
+
 // #435: food eaten from the hand on entry 44's cup motion. Each is no wider than the mug (the palm's side hold is MUG.wrapOut
 // from the axis) and about as tall (the top comes to the lips). `left` falls at each bite's own moment; what is left is drawn
 // by `when` shapes on it and stays in the hand. Everything that differs between two foods is here, in the def.
@@ -196,4 +268,4 @@ const bun: DefInput = {
   size: { box: [0.09, 0.085, 0.09] }, actions: foodActions('bun'),
 } as unknown as DefInput;
 
-export const TEA_DEFS: DefInput[] = [kettle, cup, campSink, apple, bun];
+export const TEA_DEFS: DefInput[] = [kettle, cup, campSink, kettle3, cup3, coffeeMug, apple, bun];

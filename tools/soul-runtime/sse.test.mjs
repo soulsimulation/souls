@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createEventReader} from './sse.mjs';
+import {createEventReader,idleFromHello,IDLE_MIN_MS,IDLE_MAX_MS} from './sse.mjs';
 const stream=chunks=>new Response(new ReadableStream({start(c){for(const chunk of chunks)c.enqueue(new TextEncoder().encode(chunk));c.close();}}));
 test('split frames, heartbeat and cursor-only delivery preserve event identity and connection',async()=>{
  let opens=0;const read=createEventReader({open:async()=>{opens++;return stream([': hello\r','\n\r\nevent: hello\ndata: {}\n\nevent: conversation.turn\nid: c_1\ndata: {"id":"c_1","text":"hé','llo"}\n\nevent: cursor\ndata: {"cursor":"c_2"}\n\n']);}});
@@ -36,7 +36,7 @@ test('failed hello validation, missing hello and aborted adoption never report r
 
 const encode=text=>new TextEncoder().encode(text),hold=()=>new Promise(r=>setTimeout(r,10));
 test('#466: a stream that stops sending reads as interrupted within 3 heartbeats of hello',async()=>{
- const read=createEventReader({idleMs:60000,open:async()=>new Response(new ReadableStream({start(c){c.enqueue(encode('event: hello\ndata: {"heartbeatSeconds":0.02}\n\n'));}}))});
+ const read=createEventReader({idleMs:60000,minIdleMs:1,open:async()=>new Response(new ReadableStream({start(c){c.enqueue(encode('event: hello\ndata: {"heartbeatSeconds":0.02}\n\n'));}}))});
  const started=performance.now();await assert.rejects(read({after:'c_0'}),e=>e.message==='Event stream interrupted'&&e.transient===true&&e.streamClosed===true);
  const took=performance.now()-started;assert.ok(took>=50&&took<1000,`${took} ms`);
 });
@@ -52,7 +52,20 @@ test('#466: keepalives hold the stream open for longer than the idle limit, on o
  assert.deepEqual(await pending,{cursor:'c_1',events:[{id:'c_1'}]});assert.equal(opens,1);
 });
 test('#466: a reconnect starts from the default limit, not the last hello\'s',async()=>{
- let opens=0;const read=createEventReader({idleMs:30,open:async()=>{opens++;return new Response(new ReadableStream({start(c){if(opens===1)c.enqueue(encode('event: hello\ndata: {"heartbeatSeconds":0.01}\n\n'));}}));}});
+ let opens=0;const read=createEventReader({idleMs:30,minIdleMs:1,open:async()=>{opens++;return new Response(new ReadableStream({start(c){if(opens===1)c.enqueue(encode('event: hello\ndata: {"heartbeatSeconds":0.01}\n\n'));}}));}});
  await assert.rejects(read({after:'c_0'}),/interrupted/);const started=performance.now();await assert.rejects(read({after:'c_0'}),/interrupted/);
  assert.ok(performance.now()-started>=25,'the second connection had no hello');assert.equal(opens,2);
+});
+test('#466 review: the world\'s heartbeat is clamped; a rate that isn\'t a positive number keeps the default',()=>{
+ assert.equal(idleFromHello(15,45000),45000,'3 heartbeats');
+ assert.equal(idleFromHello(0.01,45000),IDLE_MIN_MS,'tiny: no constant reconnects');
+ assert.equal(idleFromHello(1e9,45000),IDLE_MAX_MS,'past setTimeout\'s range');
+ assert.equal(idleFromHello(Infinity,45000),IDLE_MAX_MS);
+ for(const bad of [0,-5,NaN,'15',null,undefined,{}])assert.equal(idleFromHello(bad,45000),45000,String(bad));
+ assert.ok(IDLE_MAX_MS<2**31-1);
+});
+test('#466 review: a hello stating a tiny heartbeat waits the floor, not 3 tiny beats',async()=>{
+ const read=createEventReader({idleMs:60000,minIdleMs:200,open:async()=>new Response(new ReadableStream({start(c){c.enqueue(encode('event: hello\ndata: {"heartbeatSeconds":0.001}\n\n'));}}))});
+ const started=performance.now();await assert.rejects(read({after:'c_0'}),/interrupted/);
+ const took=performance.now()-started;assert.ok(took>=190&&took<2000,`${took} ms`);
 });

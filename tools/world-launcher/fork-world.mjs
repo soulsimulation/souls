@@ -73,7 +73,8 @@ async function main() {
       try {
         const { Db } = await import(pathToFileURL(join(d.input, 'apps/server/src/db.ts')).href), { edenHistoryFactory } = await import(pathToFileURL(join(d.input, 'apps/server/src/eden-bootstrap.ts')).href);
         const view = Object.assign(Object.create(Db.prototype), { db: ro, path: dbPath });   // a Db's reads on the read-only connection
-        rehearseRestore(dbPath, d.worldId, await edenHistoryFactory(view, d.worldId, { lifeV1: true, newcomerResourcesV1: true, sleepSnapshotV1: true, groundV1: true, lectureV1: true }));
+        const { soulsRepairReaderV1 } = await import(pathToFileURL(join(d.input, 'packages/engine-mars/src/index.ts')).href);   // #1323: an adopted history
+        rehearseRestore(dbPath, d.worldId, soulsRepairReaderV1(await edenHistoryFactory(view, d.worldId, { lifeV1: true, newcomerResourcesV1: true, sleepSnapshotV1: true, groundV1: true, lectureV1: true }), { adopt: false }));
       } catch (e) { console.log(`[standby] restore rehearsal skipped: ${e.message}`); }
       finally { ro.close(); }
     }
