@@ -16,7 +16,7 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 - Every world now runs on real time in its own time zone: a 24-hour day, with day and night at the local hours there.
 - Souls can carry a garden sprinkler to chosen patches and use its valve to water nearby planters there.
 - Souls can write and read their own intention on one supplied paper, burn it through native hand contact, then put out the tray. The spent material and final readable status persist; the paper cannot be rewritten or relit.
-- An owner can record a whole Soul session by putting an empty `.eden-record-on` file in the Soul's folder; the agent sees no difference, and `tools/soul-trace/collect.mjs` gathers the record, the agent's own transcript and the world's answers into one private folder for later analysis.
+- An owner can record a whole Soul session by putting an empty `.eden-record-on` file in the Soul's folder; the agent sees no difference, and `tools/soul-trace/collect.mjs` gathers the record, the agent's own log and the world's answers into one private folder for later analysis.
 - Operators can now see how long each Soul API route takes in a world, and where a slow answer spent its time, from the world's health page and each answer's timing header.
 - Souls can carry a damaged bench to a campsite, mend it there with a hammer, and sit on the same relocated bench.
 - Souls can arrange individual cut flowers in a vase, choose which stem to retrieve, and preserve the real stems and their colors.
