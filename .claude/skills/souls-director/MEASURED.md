@@ -25,7 +25,8 @@ Scripts (`.claude/skills/souls-director/scripts/`, each has `--help`):
 
 Paths (all overridable): checkout `SIM_CHECKOUT` (default: this repo), state `SIM_DIRECTOR_STATE` (default
 `.e2e/playtest/live/current.env`, moved to `last.env` by `end.sh`), runs `SIM_RUNS_ROOT` (default
-`.e2e/playtest/runs/<YYYYMMDD-HHMMSS>-<name>-<seed>/`, harness output in `console.log`), load limit `SIM_LOAD_MAX`.
+`souls-playtest-runs/<YYYYMMDD-HHMMSS>-<name>-<seed>/` beside the checkout, never inside one: a live seat inside a
+checkout loads that project, and is refused; harness output in `console.log`), load limit `SIM_LOAD_MAX`.
 
 ## Hard rules
 1. **Dev world first.** Casts default to a fresh local dev world built from a genesis template with fake natives.

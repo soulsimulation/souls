@@ -15,7 +15,7 @@
 # and ship-receipt.mjs refuses to write it unless it passes tools/proof/publication.mjs. One gate per head runs through
 # gate.yml or the laptop; V7 needs real Chrome on a GPU, which the runner lacks, so this workflow runs no gate.
 #   node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
-#   gh release create receipts-v4.17 --prerelease --title "receipts 4.17" release-receipt.json
+#   gh release create receipts-v0.123 --prerelease --title "receipts 0.123" release-receipt.json
 # Dry run:  gh workflow run release.yml --ref main -f version=<next version>            (dry_run defaults to true)
 # Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f date=<the dry run's date>]
 #           [-f accept_host_codes=halted]
@@ -32,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version for the changelog and tag (e.g. 4.0.1)
+        description: Release version for the changelog and tag (e.g. 0.123 or 0.123.1)
         required: true
       dry_run:
         description: ship.sh --no-switch (every step but the activation; the live build and the host's units stay as they are; no publish). false ships
@@ -97,7 +97,7 @@ jobs:
           DATE: ${{ inputs.date }}
         run: |
           [ "$REF" = refs/heads/main ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
-          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 4.0 or 4.0.1 (got '$VERSION')"; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 0.123 or 0.123.1 (got '$VERSION')"; exit 1; }
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "::error::tag v$VERSION already exists"; exit 1; fi
           [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "::error::accept_host_codes: comma-separated host codes, such as halted"; exit 1; }
           # ship.sh's label (its output folder and backup prefix pre-r<label without dots>) is the version itself
@@ -137,7 +137,7 @@ jobs:
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: '${{ needs.preflight.outputs.sha }}', fetch-depth: 0, persist-credentials: false }
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
