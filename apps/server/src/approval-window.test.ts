@@ -171,9 +171,10 @@ test('HTTP: the signed-in page gets a code, the agent request with it lands in t
   // pressed Approve succeeds instead of failing with soul-name-changed.
   const sid = after.soulId as string, real = f.db.soul(sid)!.name;
   const bare = input('http-0003'); delete (bare as any).name;
-  const byId = await call('/v1/agent/approval/start', { ...bare, soulId: sid });
+  // #1875: the Soul is held (its token was just collected), so a reconnect from elsewhere says move (soul-recovery-cli tests the refusal)
+  const byId = await call('/v1/agent/approval/start', { ...bare, soulId: sid, move: true });
   assert.equal(byId.status, 200, JSON.stringify(byId.data)); assert.equal(byId.data.delivery, 'window'); assert.equal(byId.data.approval.name, real);
-  const guessed = await call('/v1/agent/approval/start', { ...input('http-0004'), name: sid.slice(0, 32), soulId: sid });
+  const guessed = await call('/v1/agent/approval/start', { ...input('http-0004'), name: sid.slice(0, 32), soulId: sid, move: true });
   assert.equal(guessed.status, 200); assert.equal(guessed.data.approval.name, real, 'the agent-supplied name is ignored for a reconnect');
   const mine = (await call('/v1/account/approvals', undefined, 'gene')).data.approvals;
   assert.deepEqual(mine.map((a: any) => [a.id, a.name, a.soulId]).sort(), [[byId.data.approval.id, real, sid], [guessed.data.approval.id, real, sid]].sort());
