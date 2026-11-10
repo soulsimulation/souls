@@ -8,4 +8,4 @@ State includes each numeric lane mask, its atomically updated visible pad bits, 
 
 Playback uses the existing depicted world beat and existing percussion synthesis. Start joins the current phase; it does not establish a new clock. Stop/removal/mute cancels scheduled future hits while begun short tails decay naturally. The selected pad grid remains visible. Carry/place while stopped retains the same box and pattern. No wearing, receiver, acoustic realism, live performance precision or subjective listening certification is claimed.
 
-Issue: #1847. Required proof includes cold exact-ID native work/refusals, catalog/live state, cancellation, Undo/redo, same-box handling/restart, registered geometry and whole real-speed app media. Claude retains T3 integration authority.
+Issue: #1847. PR: https://github.com/soulsimulation/souls/pull/1851. Hosted proof: https://github.com/soulsimulation/souls/releases/download/proofs-1851/pr-1851.proof-2.json. Required proof includes cold exact-ID native work/refusals, catalog/live state, cancellation, Undo/redo, same-box handling/restart, registered geometry and whole real-speed app media. Claude retains T3 integration authority.
