@@ -164,8 +164,11 @@ export type ServingWarm = {souls: number; failed: number; ms: number; wallMs: nu
 /** A serving warm's slice (ms) between turns of the event loop: well under the 100 ms a visitor's frame notices. */
 const SERVING_SLICE_MS = 40;
 /** How long a rich read waits for a serving warm before building its menu itself (ms). Eden 2026's warm took ~2 s on
- *  a development machine and ~4 s on the former production host in one go; slices also allow other requests to run. */
-export const SERVING_WAIT_MS = 15_000;
+ *  a development machine and ~4 s on the former production host in one go; slices also allow other requests to run.
+ *  #1750: 1 s, was 15 s. The wait comes before admission and answers nothing, so 15 s of it plus a cold build reached the
+ *  client's 25 s limit with no word from the world (#1724 candidate A); after 1 s the read goes through admission, whose
+ *  frame budget and deadlines bound it and answer `world.busy` by name. */
+export const SERVING_WAIT_MS = 1_000;
 const nextTurn = () => new Promise<void>(r => setImmediate(r));
 
 /** #824: how many offers a "nothing matches" refusal names as `alternatives`, and verbs never offered as one. */
