@@ -3,7 +3,7 @@
 import { assetBytes } from './asset-bytes.ts';
 import { downloadShare } from './viewer-arrival.ts';
 
-const DISC_RADIUS = 146, START = 0.55, PEAK = 0.6;   // arrival-light.ts; repeated so the first chunk doesn't carry the shader
+const DISC_RADIUS = 146, START = 0.33, PEAK = 0.6;   // arrival-light.ts; repeated so the first chunk doesn't carry the shader
 
 export function followBootLight(): void {
   let peak = 0;
@@ -19,6 +19,6 @@ export function followBootLight(): void {
     if (next - peak < 0.005 && peak) return;
     peak = next; bar.value = Math.round(peak * 1000);
     const from = START * DISC_RADIUS, to = PEAK * Math.hypot(innerWidth, innerHeight) / 2;   // #1318
-    disc.style.setProperty('--s', String((from + (to - from) * peak) / DISC_RADIUS));
+    disc.style.setProperty('--s', String((from + (to - from) * (0.15 * peak + 0.85 * peak ** 3)) / DISC_RADIUS));   // growth(), arrival-light.ts
   });
 }

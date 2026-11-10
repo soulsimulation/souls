@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {writeFileSync,mkdirSync} from 'node:fs';
+import {Hono} from '../../apps/server/node_modules/hono/dist/index.js';
+import {fixture,invite,accept,factory} from '../../apps/server/test/native-owner-fixture.ts';
+import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
+import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
+import {GodMode} from '../../apps/server/src/god/god.ts';
+import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {handActuatorFrame} from '../../mars/viewer/engine/social/hand-actuator.ts';
+import {coreLibrary,WorldModel} from '../../packages/world-compiler/src/index.ts';
+
+test('flower press changes material only at native close contact and preserves it on reopening',{timeout:60000},async t=>{
+ const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
+ const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});
+ t.after(()=>{comms.close();f.host.stop();f.db.close();});
+ const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
+ const tick=async(n=1)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};
+ const ok=r=>{assert.equal(r.accepted,true,JSON.stringify(r));return r;};
+ await tick(5);await invite(f,'artist');const row=await accept(f.host,f.souls.create('dev:artist',{name:'Ana',description:'Botanical artist'}));soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};await tick(5);
+ const here=async()=>await(await app.request('/v1/edge/here?include=doHere')).json(),bytes=h=>JSON.stringify(h.here).length;const absent=await here();
+ ok(god.act({ops:Array.from({length:100},(_,i)=>({op:'place',def:'core/flower-press@1',name:'far-press-'+i,p:[120+i%10*2,120+Math.floor(i/10)*2]}))}));await tick(45);const far=await here();assert.equal(bytes(far),bytes(absent),'100 distant presses add zero nearby bytes');
+ const d=coreLibrary().get('core-flower-press@1');ok(god.act({ops:[{op:'define',def:d},{op:'place',def:'core/flower-press@1',name:'press',p:[2,2],r:Math.PI},{op:'place',def:'core/flower-press@1',name:'private-press',p:[-3,2],access:'private'}]}));await tick(45);
+ const e=()=>[...god.model.entities.values()].find(e=>e.name==='press'),id=e().id,state=()=>e().state??{};
+ const act=a=>accept(f.host,edge.act(soul,{capability:'object:'+id+':'+a,params:{}}));
+ let transition,early=false;const finish=async(r,watch=false)=>{ok(r);for(let i=0;i<1500;i++){const x=edge.receipt(soul.soulId,r.receipt.id),m=f.host.engine.world.entities[soul.entityId].human?.handActuator;if(watch&&state().pressed===true&&m?.target===id){const frame=handActuatorFrame(m,(f.host.engine.world.tick-m.startTick)*f.host.engine.dt);if(!frame.contact)early=true;transition??={atTick:f.host.engine.world.tick,contact:frame.contact,commitAt:frame.commitAt};}if(['completed','failed','replaced'].includes(x.phase)){assert.equal(x.phase,'completed',JSON.stringify(x));return x;}await tick();}assert.fail('finite action did not end');};
+ await app.request('/v1/edge/here?include=doHere');assert.ok(edge.capabilities(soul).some(c=>c.id==='object:'+id+':close'&&c.available));
+ const priv=[...god.model.entities.values()].find(e=>e.name==='private-press');const denied=await accept(f.host,edge.act(soul,{capability:'object:'+priv.id+':close',params:{}}));assert.equal(denied.accepted,false);assert.match(JSON.stringify(denied),/object.private/);
+ const interrupted=ok(await act('close'));assert.notEqual(state().pressed,true,'admission does not press');await finish(await accept(f.host,edge.act(soul,{capability:'stand:here',params:{}})));await tick(60);assert.notEqual(edge.receipt(soul.soulId,interrupted.receipt.id).phase,'completed');assert.notEqual(state().pressed,true,'interruption leaves raw material');
+ const close=ok(await act('close'));assert.notEqual(state().pressed,true);await finish(close,true);assert.equal(early,false,'no material mutation before native contact');assert.equal(transition?.contact,true);assert.equal(state().pressed,true);assert.equal(state().open,false);
+ await finish(await act('open'));assert.equal(state().open,true);assert.equal(state().pressed,true);
+ const ix=await(await app.request('/v1/edge/inspect/'+id)).json();assert.ok((ix.inspect??ix).offers.some(c=>c.id==='read:'+id&&c.available),'readable status offer is discoverable');
+ const reading=await finish(await accept(f.host,edge.act(soul,{capability:'read:'+id,params:{}})));assert.ok(JSON.stringify(reading.outcome).includes('Pressed botanical artwork preserved in this press.'),'native read reports lasting material status');
+ const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.deepEqual(restored.entities.get(id),JSON.parse(JSON.stringify(e())));assert.deepEqual(f.host.engine.runtime.violations,[]);
+ const report={status:'pass',state:state(),transition,contextBytes:{absent:bytes(absent),distant100:bytes(far),nearby:bytes(await here())},checks:['native close contact','interruption before contact','reopening retains pressed form','model persistence','zero violations']};if(process.env.SOUL_ACTIONS_OUT){mkdirSync(process.env.SOUL_ACTIONS_OUT,{recursive:true});writeFileSync(process.env.SOUL_ACTIONS_OUT+'/flower-press.json',JSON.stringify(report,null,2));}console.log(JSON.stringify(report));
+});

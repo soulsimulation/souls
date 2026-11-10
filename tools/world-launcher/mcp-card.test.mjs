@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { MCP_SCHEMA, MCP_TOOLS, mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
 
 test('server.json meets the registry schema (2025-12-11) constraints', () => {
-  const d = mcpServerJson({ origin: 'https://soul.game', version: '4.14.0' });
+  const d = mcpServerJson({ origin: 'https://soul.game', version: '0.118.0' });
   assert.equal(d.$schema, MCP_SCHEMA);
   for (const k of ['name', 'description', 'version']) assert.ok(typeof d[k] === 'string' && d[k].length, k);
   assert.match(d.name, /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/); assert.ok(d.name.length >= 3 && d.name.length <= 200);

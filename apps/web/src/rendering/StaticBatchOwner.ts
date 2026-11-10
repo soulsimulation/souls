@@ -164,6 +164,9 @@ export class StaticBatchOwner{
  private released={bytes:0};
  constructor(scene:THREE.Scene,limits:Partial<StaticBatchLimits>={}){this.scene=scene;this.limits={...STATIC_BATCH_LIMITS,...limits};if(Object.values(this.limits).some(n=>!Number.isFinite(n)||n<=0)||!Number.isInteger(this.limits.maxMeshes)||!Number.isInteger(this.limits.maxNodes)||!Number.isInteger(this.limits.maxRootInputs)||!Number.isInteger(this.limits.maxMeshesPerBatch)||this.limits.maxWorkingBytes<this.limits.maxMergedBytes)throw Error('static-batches.invalid-limits');this.group.name='Derived static render batches';this.group.visible=false;scene.add(this.group);}
  private committing=false;private cleanupError:string|null=null;
+ /** P2 phones: the originals hidden for one draw. Kept between draws (a new array per frame regrew it push by push for
+  *  every batched mesh: ~50 KB a frame on Eden 2026); its slots are cleared after each draw so nothing is held. */
+ private hiddenList:(THREE.Object3D|null)[]=[];
  /** Three's removal/disposal events can call back into the owner or throw. Detach the entire retired set before
   * disposing any resources, keep cleanup going, and never let a listener roll back a published replacement. */
  private cleanup(action:()=>void){try{action();}catch(error){this.cleanupError??=error instanceof Error?error.message:'static-batches.cleanup-failed';}}
@@ -275,7 +278,7 @@ export class StaticBatchOwner{
   * With `revision` (PERF-BATCH), sources are validated only when it differs from the last validated one: the caller
   * promises to change it before anything under its roots moves, hides, shows, is added or removed. */
  withRender<T>(draw:()=>T,revision?:number):T{
-  if(this.committing)throw Error('static-batches.render-during-commit');if(this.disposed||!this.batches.length)return draw();if(this.rendering)throw Error('static-batches.nested-render');this.rendering=true;const start=performance.now(),hidden:THREE.Object3D[]=[];this.used=this.fallback=this.callsSaved=this.wholeRootsHidden=0;
+  if(this.committing)throw Error('static-batches.render-during-commit');if(this.disposed||!this.batches.length)return draw();if(this.rendering)throw Error('static-batches.nested-render');this.rendering=true;const start=performance.now(),hidden=this.hiddenList;let hiddenCount=0;this.used=this.fallback=this.callsSaved=this.wholeRootsHidden=0;
   try{
    const validate=revision===undefined||revision!==this.validatedRevision;this.validatedLastRender=validate;
    if(validate){const cache=validationWindow();cache.paths=this.snapshot!.refresh();for(const batch of this.batches)batch.okay=batch.sources.every(s=>unchanged(s,cache,batch.material,this.shaderMerge));this.validatedRevision=revision??null;}
@@ -289,10 +292,10 @@ export class StaticBatchOwner{
     }
     whole.add(root);
    }
-   for(const batch of this.batches){batch.mesh.visible=batch.okay;if(!batch.okay){this.fallback++;continue;}this.used++;this.callsSaved+=batch.sources.length-1;for(const s of batch.sources){if(whole.has(s.root))continue;s.mesh.visible=false;hidden.push(s.mesh);}}
-   for(const root of whole){root.visible=false;hidden.push(root);}this.wholeRootsHidden=whole.size;
+   for(const batch of this.batches){batch.mesh.visible=batch.okay;if(!batch.okay){this.fallback++;continue;}this.used++;this.callsSaved+=batch.sources.length-1;for(const s of batch.sources){if(whole.has(s.root))continue;s.mesh.visible=false;hidden[hiddenCount++]=s.mesh;}}
+   for(const root of whole){root.visible=false;hidden[hiddenCount++]=root;}this.wholeRootsHidden=whole.size;
    this.group.visible=this.used>0;this.validationCpuMs=performance.now()-start;return draw();}
-  finally{const restoreStart=performance.now();for(const o of hidden)o.visible=true;this.group.visible=false;this.rendering=false;this.restoreCpuMs=performance.now()-restoreStart;}
+  finally{const restoreStart=performance.now();for(let i=0;i<hiddenCount;i++){hidden[i]!.visible=true;hidden[i]=null;}this.group.visible=false;this.rendering=false;this.restoreCpuMs=performance.now()-restoreStart;}
  }
  inspection(){return{generation:this.generation,preparing:this.preparing!==null,batches:this.batches.length,batchedMeshes:this.batches.reduce((n,b)=>n+b.sources.length,0),callsSavedLastRender:this.callsSaved,mergedBytes:this.batches.reduce((n,b)=>n+b.bytes,0),usedLastRender:this.used,fallbackLastRender:this.fallback,roots:this.roots.length,rootInputs:this.rootInputs,sourceTruncated:this.sourceTruncated,ancestorNodes:this.ancestorNodes,topologyLinks:this.topologyLinks,matrixUpdates:this.matrixUpdates,sourceNodes:this.sourceNodes,sourceMeshes:this.sourceMeshes,budgetSkippedMeshes:this.budgetSkippedMeshes,budgetSkippedBatches:this.budgetSkippedBatches,workingGeometryPeakBytes:this.workingGeometryPeakBytes,prepareCpuMs:this.prepareCpuMs,validationCpuMs:this.validationCpuMs,restoreCpuMs:this.restoreCpuMs,preparationError:this.preparationError,cleanupError:this.cleanupError,validatedLastRender:this.validatedLastRender,reusedBatches:this.reusedBatches,sourceMaterials:this.sourceMaterials,batchMaterials:new Set(this.batches.map(b=>b.material)).size,wholeRootsHidden:this.wholeRootsHidden,releasedBytes:this.released.bytes};}
  dispose(){if(this.committing)throw Error('static-batches.dispose-during-commit');if(this.rendering)throw Error('static-batches.dispose-during-render');if(this.disposed)return;this.disposed=true;this.clear();this.group.removeFromParent();}

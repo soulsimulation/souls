@@ -1,10 +1,14 @@
 import { spawn } from 'node:child_process';
+/** The child's environment: the parent's with `env` on top, or exactly `env` when `envExact` (#1687: a live seat must not
+ *  inherit the launcher's own variables). */
+export const childEnv = (env, envExact = false) => (envExact ? { ...(env ?? {}) } : { ...process.env, ...(env ?? {}) });
+
 /** Run a command in its own process group, capture stdout/stderr (bounded), kill the group at maxWallMs.
  *  Never pipes stdin from the parent. Returns {code, signal, stdout, stderr, wallMs, timedOut}. */
-export function run(cmd, args, { cwd, env, maxWallMs = 120000, input = null, maxBytes = 8 * 1024 * 1024, onStdoutLine } = {}) {
+export function run(cmd, args, { cwd, env, envExact = false, maxWallMs = 120000, input = null, maxBytes = 8 * 1024 * 1024, onStdoutLine } = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const child = spawn(cmd, args, { cwd, env: { ...process.env, ...(env ?? {}) }, stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'], detached: true });
+    const child = spawn(cmd, args, { cwd, env: childEnv(env, envExact), stdio: [input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'], detached: true });
     let out = '', err = '', timedOut = false, buf = '';
     const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGTERM'); } catch { /* gone */ } setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } }, 5000); }, maxWallMs);
     child.stdout.on('data', (d) => { const s = d.toString(); if (out.length < maxBytes) out += s; if (onStdoutLine) { buf += s; let i; while ((i = buf.indexOf('\n')) >= 0) { onStdoutLine(buf.slice(0, i)); buf = buf.slice(i + 1); } } });
@@ -15,8 +19,8 @@ export function run(cmd, args, { cwd, env, maxWallMs = 120000, input = null, max
   });
 }
 /** Start a long-lived child (own group); returns {child, kill()}. stdout lines go to onLine. */
-export function start(cmd, args, { cwd, env, onLine, onExit } = {}) {
-  const child = spawn(cmd, args, { cwd, env: { ...process.env, ...(env ?? {}) }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+export function start(cmd, args, { cwd, env, envExact = false, onLine, onExit } = {}) {
+  const child = spawn(cmd, args, { cwd, env: childEnv(env, envExact), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let buf = '', out = '', err = '';
   child.stdout.on('data', (d) => { const s = d.toString(); out += s; buf += s; let i; while ((i = buf.indexOf('\n')) >= 0) { onLine?.(buf.slice(0, i)); buf = buf.slice(i + 1); } });
   child.stderr.on('data', (d) => { err += d.toString(); });
