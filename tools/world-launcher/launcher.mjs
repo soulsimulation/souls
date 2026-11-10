@@ -789,6 +789,7 @@ export async function openLauncher(cfg = {}) {
       if (opts.worldDeferred) { const no = ceilings.chargeWorld(slug); if (no) { st.fallbackRefused++; json(res, no.refuse.status, no.refuse.body, no.refuse.headers); return; } }
       proxyHttp(req, res, mainPort, opts);
     };
+    const sent = performance.now();   // #1750: for Server-Timing `launcher` and `upstream` (as proxyHttp)
     const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: readPort, path: req.url, method: req.method, headers: { ...hopless(req.headers), 'x-forwarded-for': xff } }, (r) => {
       if (settled) { r.resume(); return; }
       if ((r.statusCode ?? 502) >= 500 && r.statusCode !== 503) { r.resume(); fallback(`status ${r.statusCode}`); return; }
