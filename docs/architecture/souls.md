@@ -247,7 +247,12 @@ withholds. Owner messages and credentials are never in it.
   kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
-  stands in it and what is done in it are left out. Eden 2026: 1,510 places, 4,518 things, 1,365 acts, 1.4 MB.
+  stands in it and what is done in it are left out. A `ref` two places share (a lake and its bank) is left off both, so
+  `walk:<ref>` always names one place. The version follows the god's edits too: a thing moved, renamed or removed is a
+  new catalog, and a spot whose thing is gone leaves it. Until the world first has its places and activity spots laid out
+  (a few seconds after it starts listening) the route answers `503 world.starting` with `Retry-After: 2` rather than
+  publish a world with no acts; `live` names no version until then. Eden 2026: 1,510 places, 4,518 things, 1,365 acts,
+  1.4 MB.
 - **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
   of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
   place is never named: a Soul inside one is listed without position or place, and what is said there is left out.
@@ -258,10 +263,13 @@ withholds. Owner messages and credentials are never in it.
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
   its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
-  what it cut.
+  what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
+  narrow nothing; an act that needs others ranks after one done alone. A fresh folder's first `find` fetches both itself,
+  and waits out `world.starting`.
 - **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
-  One that cannot be used is refused with the reason: `place.closed`, `spot.taken` or `spot.no-room`. Such an id is
+  One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
+  a spot whose thing a god removed. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those
   are still read with `here` and `inspect <id>`.
