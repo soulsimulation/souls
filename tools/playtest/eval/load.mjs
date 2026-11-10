@@ -46,7 +46,7 @@ export async function runLoad(o) {
     const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
     const souls = [];
     try {
-      // setup is paced at 6 Souls per 20 s: all Souls share one address, and a world pairs at most 20 a minute from one
+      // setup is paced at 6 Souls per 30 s: all Souls share one address, and a world pairs at most 20 in any 60 s from one
       // address (POST /v1/agent/pair). Setup is not measured.
       for (let i = 0; i < n; i += 6) { const b0 = Date.now(); await Promise.all(Array.from({ length: Math.min(6, n - i) }, async (_, j) => {
         const k = i + j, folder = join(dir, 'souls', `s${k}`); mkdirSync(folder, { recursive: true });
@@ -54,7 +54,7 @@ export async function runLoad(o) {
         const fake = { folder, base: w.base, info: {}, save() {} };
         const s = await prepareFolder(fake, { name: `Load ${k}` });
         souls[k] = { folder, identity, soulId: s.soulId };
-      })); if (i + 6 < n) await sleep(Math.max(0, b0 + 20000 - Date.now())); }
+      })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
