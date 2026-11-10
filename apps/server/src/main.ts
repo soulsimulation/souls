@@ -222,7 +222,7 @@ const SERVING_STEP_MS = 20;
 // is served (EdgeLedger.warmForServing); rich edge reads wait for it. Before listening, release 404 held Eden 2026's
 // handover ~4 s longer (8.5 s "Reconnecting…"). An optimisation only: a failure is logged and Souls build them on demand.
 const servingWarm=(why:'boot'|'activities')=>{if(closing||!edge||!engineBridge)return;const tick=host.engine.world.tick;
-  void edge.warmForServing({pre:s=>engineBridge.servingWarmGen(s,SERVING_STEP_MS),stop:()=>closing}).then(w=>console.log(`[${why}] edge capability caches ${w.stopped?'stopped':'warm'} after listen: ${w.ms} ms: ${w.slices} slices (longest ${w.maxStepMs} ms) and the listing ${w.listingMs} ms, over ${w.wallMs} ms for ${w.souls} Souls${w.failed?` (${w.failed} failed)`:''} from tick ${tick}`));};
+  void edge.warmForServing({pre:s=>engineBridge.servingWarmGen(s,SERVING_STEP_MS),stop:()=>closing,kind:why==='boot'?'boot':'rewarm'}).then(w=>console.log(`[${why}] edge capability caches ${w.stopped?'stopped':'warm'} after listen: ${w.ms} ms: ${w.slices} slices (longest ${w.maxStepMs} ms) and the listing ${w.listingMs} ms, over ${w.wallMs} ms for ${w.souls} Souls${w.failed?` (${w.failed} failed)`:''} from tick ${tick}`));};
 // A punt install moves the static world (new carriers and rides): its caches are rebuilt the same way shortly after.
 if(edge)installPuntActivities(host,edge,m=>console.log(`[activities] ${m}`),engineBridge?()=>{setTimeout(()=>servingWarm('activities'),1000).unref();}:undefined);
 // Stage B (lane B-port): the read-worker pool, DARK unless SIM_READ_WORKER=1 (split/read-pool.ts; nothing is imported

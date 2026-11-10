@@ -10,6 +10,7 @@ import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, WARM_WAIT_KEY, worldBlock, type Admission} from './load/admission.ts';
 import {apiOf, apiRoute, recordApi} from './load/api-times.ts';
+import {SERVING_BOOT_WAIT_MS, SERVING_WAIT_MS} from './edge/ledger/ledger.ts';
 import type {Level} from './load/shared.ts';
 import {slowedFromRefusals} from './load/soul-slowed.ts';
 import type {LoadMonitor} from './load/monitor.ts';
@@ -85,19 +86,26 @@ export function servingRead(method: string, path: string, view?: string): boolea
 /** Continuity (warm after listen): a listing read waits for a running serving warm (EdgeLedger.whenServing, which has a
  *  ceiling) before it goes on. Mounted BEFORE admission, so the wait is never a request in flight (no soul.busy for it)
  *  nor billed as the request's own time; nothing to wait for: no extra turn. */
-export function servingWait(whenServing: () => Promise<void> | null, warming: () => boolean = () => false, level: () => Level = () => 'green'): MiddlewareHandler {
+export type ServingWarmState = {kind: 'boot' | 'rewarm'; ageMs: number} | null;
+export function servingWait(whenServing: (ceilingMs?: number) => Promise<void> | null, state: () => ServingWarmState = () => null, level: () => Level = () => 'green',
+  o: {bootWaitMs?: number; busyForMs?: number} = {}): MiddlewareHandler {
+  const bootWaitMs = o.bootWaitMs ?? SERVING_BOOT_WAIT_MS, busyForMs = o.busyForMs ?? SERVING_WAIT_MS;
   // #1750: the wait is said (Server-Timing `warm;dur`, and the route's queue time in /healthz `api`): it happens before
-  // admission, so without this it was invisible on the world's side of an answer. A warm still running when the wait's
-  // ceiling (SERVING_WAIT_MS, 1 s) is up is answered `world.busy` by name, Retry-After 2: building the menus cold instead
-  // made every read after a restart cost seconds and taught admission to refuse reads for half a minute (#1766's playtest)
+  // admission, so without this it was invisible on the world's side of an answer. During the boot warm a read waits at
+  // most 1 s; a boot warm still running then, and younger than 15 s, is answered `world.busy` by name (Retry-After 2).
+  // Any other warm (an activities rewarm), or a boot warm past 15 s, is waited for up to 15 s and then built past, as
+  // before #1750: a busy answer is never the steady state, and a warm that never ends never freezes a Soul.
   return async (c, next) => {
-    const w = servingRead(c.req.method, c.req.path, c.req.query('view')) ? whenServing() : null;
+    if (!servingRead(c.req.method, c.req.path, c.req.query('view'))) return next();
+    const st = state(), boot = st?.kind === 'boot' && st.ageMs < busyForMs;
+    const w = whenServing(boot ? bootWaitMs : undefined);
     if (!w) return next();
     const t = performance.now(); await w; const ms = performance.now() - t;
     (c.set as (k: string, v: unknown) => void)(WARM_WAIT_KEY, ms);
-    if (!warming()) return next();
+    const now = state();
+    if (!boot || now?.kind !== 'boot' || now.ageMs >= busyForMs) return next();
     const route = apiRoute(c.req.method, c.req.path); if (route) recordApi(route, ms, 0);
-    return c.json({contract: EDGE_CONTRACT, error: {code: 'world.busy', message: 'the world is still warming up after a restart; ask again in 2 s'}, world: worldBlock(level(), 2)}, 503,
+    return c.json({contract: EDGE_CONTRACT, error: {code: 'world.busy', message: 'the world is still warming up after starting; ask again in 2 s'}, world: worldBlock(level(), 2)}, 503,
       {'Retry-After': '2', 'Cache-Control': 'no-store', 'X-Sim-Load': level(), 'Server-Timing': `world;dur=${ms.toFixed(1)}, queue;dur=0.0, warm;dur=${ms.toFixed(1)}`});
   };
 }
@@ -162,7 +170,7 @@ export function buildApp(d: Deps) {
       c.res = new Response(JSON.stringify({...body, world}), {status: 200, headers});
     } catch { /* not a JSON object: left as it is */ }
   });
-  if (d.edge) { const edge = d.edge, mon = d.load?.monitor; app.use('/v1/edge/*', servingWait(() => edge.whenServing(), () => edge.warming, () => mon?.level ?? 'green')); }
+  if (d.edge) { const edge = d.edge, mon = d.load?.monitor; app.use('/v1/edge/*', servingWait((ms) => edge.whenServing(ms), () => edge.servingWarmState(), () => mon?.level ?? 'green')); }
   // srv-load (LOAD-CONTRACT §2): heavy Soul/god requests queue for the admission dispatcher; edge answers carry X-Sim-Load
   // #456: the public Soul's `slowed`, from the admission's refusals addressed to that Soul (load/soul-slowed.ts)
   slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
