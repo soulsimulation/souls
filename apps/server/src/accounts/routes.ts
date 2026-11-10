@@ -5,7 +5,7 @@ import type {Auth} from '../auth.ts';
 import {AccountStoreError,type ApprovalDTO} from './store.ts';
 import type {WorldAccounts} from './service.ts';
 
-const startSchema=z.object({agentLabel:z.string().min(1).max(120),name:z.string().min(2).max(32).optional(),description:z.string().max(1200).optional(),idempotencyKey:z.string().min(16).max(256),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/),soulId:z.string().regex(/^s_[a-zA-Z0-9_-]+$/).optional(),for:z.string().max(16).optional(),existing:z.literal(true).optional()}).strict();
+const startSchema=z.object({agentLabel:z.string().min(1).max(120),name:z.string().min(2).max(32).optional(),description:z.string().max(1200).optional(),idempotencyKey:z.string().min(16).max(256),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/),soulId:z.string().regex(/^s_[a-zA-Z0-9_-]+$/).optional(),for:z.string().max(16).optional(),existing:z.literal(true).optional(),move:z.literal(true).optional()}).strict();
 const codeSchema=z.object({for:z.string().max(16)}).strict();
 const UNKNOWN_CODE='That window code is unknown or has expired. Ask your person for the one on their open page.';
 const pollSchema=z.object({approvalId:z.string().regex(/^ap_[a-f0-9]{32}$/),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/)}).strict();
@@ -21,7 +21,7 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
  const world=(c:Context)=>({id:accounts.host.worldId,name:accounts.souls.cfg.worldKey,url:deps.baseOf(c)});
  // Lane PUX: what the person's card shows: the Soul's profile picture once the Soul exists (a reconnect, or after creation)
  const shown=(a:ApprovalDTO)=>({...a,photo:a.soulId?accounts.host.profilePhoto(a.soulId)?.url??null:null});
- app.post('/v1/agent/approval/start',c=>wrap(c,async()=>{deps.limit(c,'account-start',6,60000);const p=parse(startSchema,await json(c)),{soulId:named,for:forCode,name,existing,...input}=p,asked=name?.trim();
+ app.post('/v1/agent/approval/start',c=>wrap(c,async()=>{deps.limit(c,'account-start',6,60000);const p=parse(startSchema,await json(c)),{soulId:named,for:forCode,name,existing,move,...input}=p,asked=name?.trim();
   // #1274: a name this window's account already holds is that Soul, asked for again from a new folder: reconnect it. A
   // second Soul would strand the first. Only that account's code gets here, so anyone else still sees name-taken. A retry
   // stays the request it was: the key decides, not what the name means by now.
@@ -33,11 +33,12 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
   if(soulId&&(!soul||soul.world_id!==accounts.host.worldId||soul.retired_at!==null))throw new ApiError(404,'soul-not-found',`No Soul ${soulId} lives in this world. Check the ID on the Soul's card (Copy start prompt).`);
   if(!soulId&&!asked)throw new ApiError(400,'invalid','A new Soul needs a name.');
   if(existing&&!soulId){if(accounts.store.codeSouls(forCode)===null)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);throw new ApiError(404,'soul-not-found',`The account behind this code holds no Soul called ${asked} in this world.`);}
-  // #1875: a reconnect says whether someone holds the Soul now (read before this request), so a client can step back.
-  const control=soulId&&deps.control?deps.control(soulId):null;
+  // #1875: a Soul whose control is held now is not taken over unless the request says so (move). Refused before any
+  // request exists, so nothing reaches the owner's window. Says only that it is held: not since when, nor how.
+  if(soulId&&!retry&&!move&&deps.control?.(soulId)?.held)throw new ApiError(409,'soul.held-elsewhere','This Soul is controlled from another folder now. Run there, or ask again with move (eden.mjs: --move), which disconnects that folder.');
   const approval=soulId?accounts.store.startRepairRequest(soulId,{...input,name:soul!.name,forCode}):accounts.store.start({...input,name:asked!,forCode});
   // delivery 'window': the person's open, signed-in world page shows the request (lane PUX); the link stays as a backup
-  return {approval,...(control?{control}:{}),world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${approval.id}`,delivery:approval.inWindow?'window':'link',intervalSeconds:3};}));
+  return {approval,world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${approval.id}`,delivery:approval.inWindow?'window':'link',intervalSeconds:3};}));
  // #1274: what a person gets back with a new folder: the Souls their open window's account holds here, ids and names only.
  app.post('/v1/agent/approval/souls',c=>wrap(c,async()=>{deps.limit(c,'account-souls',6,60000);const p=parse(codeSchema,await json(c)),ids=accounts.store.codeSouls(p.for);if(!ids)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);
   return {souls:heldSouls(ids).map(s=>{const control=deps.control?.(s.id);return {id:s.id,name:s.name,...(control?{control}:{})};})};}));

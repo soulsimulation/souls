@@ -97,10 +97,13 @@ whose token the world no longer takes is paired again by `create` (`"reconnected
 cannot say answers `"not checked: the world didn't answer"` and pairs nothing. A second `register` with no Soul yet says
 `"registered again"`. Two folders of one home running the same `create` at once end with one Soul and one live token.
 A Soul whose control another folder holds now (its own home, on this machine or another) is never taken over unasked:
-`create`, `pair` and `adopt` read its control state first (`/v1/agent/approval/souls` and the repair's `/approval/start`
-answer carry `control: {held, state, since}`) and refuse with `soul.held-elsewhere`, naming that folder when this
-machine knows it. With `--move` the repair goes ahead, and its answer and `approval wait` say the other folder is
-disconnected. A dead or revoked token needs no `--move`. Each run works inside that Soul's `runtime/`, so nothing
+the world refuses a repair request for it with 409 `soul.held-elsewhere` before any request exists (nothing reaches the
+owner's window), unless the request says `move: true`; the refusal says only that it is held. With a window code the CLI
+reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that account's Souls only) first, so it can name
+the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
+folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
+A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
+the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 

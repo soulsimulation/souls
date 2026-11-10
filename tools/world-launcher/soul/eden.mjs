@@ -2983,31 +2983,34 @@ function forOption(argv) {
 // Soul or a reconnection. The server mints the Soul's delegated token when approved.
 async function startApproval(input, code) {
   const s = load();
+  if (MOVE) input = { ...input, move: true };
   const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
-  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") }, ...(MOVE ? { move: true } : {}) };
-  // #1875 A6: a Soul another folder holds now is not taken over unasked. A request already started was allowed then.
+  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
+  // #1875 A6: a Soul another folder holds now is not taken over unasked. The world refuses it (soul.held-elsewhere) before
+  // any request exists; this read, when there is a code, only lets the refusal name the Soul first.
   if (!resumed && !MOVE && code && (input.soulId || input.name)) {
     const list = await call("/v1/agent/approval/souls", { as: "none", body: { for: code } });
-    const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
     const it = list.status === 200 ? (list.data?.souls ?? []).find((x) => (input.soulId ? x.id === input.soulId : fold(x.name) === fold(input.name))) : null;
     if (it?.control?.held) throw heldElsewhere(it);
   }
-  const r = ok(await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } }), "approval start");
-  const a = r.approval ?? r;
-  if (!resumed && !MOVE && a.mode === "repair" && r.control?.held) {
-    // No code to ask with first: the world said so in its answer. The request is withdrawn before anyone sees it for long.
-    await call("/v1/agent/approval/cancel", { as: "none", body: { approvalId: a.id, pollSecret: pending.input.pollSecret } });
-    throw heldElsewhere({ id: a.soulId, name: a.name });
-  }
+  const started = await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } });
+  if (started.status === 409 && codeOf(started.data) === "soul.held-elsewhere") throw heldElsewhere({ id: input.soulId, name: input.name });
+  const r = ok(started, "approval start"), a = r.approval ?? r;
   pending.approvalId = a.id;
   save({ pendingApproval: pending });
-  return { ...publicApproval(a, s.world), ...(pending.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
+  return { ...publicApproval(a, s.world), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
 }
-/** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. */
+/** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. A
+ *  Soul this home keeps without a working token is most likely its own grant, left in an older copy of this folder. */
 function heldElsewhere(soul) {
-  const where = soulHome.knownHomes(homedir()).filter((r) => !HOME || real(r) !== real(HOME.root)).find((r) => soulHome.soulsIn(r).some((x) => x.id === soul.id));
+  const kept = HOME ? Object.entries(HOME.config().souls).find(([id, e]) => id === soul.id || (!soul.id && soulHome.norm(e.name) === soulHome.norm(soul.name))) : null;
+  const who = soul.name ?? kept?.[1].name ?? soul.id ?? "This Soul";
+  const where = kept && !HOME.load(HOME.soul(kept[0])).token ? null : soulHome.knownHomes(homedir()).filter((r) => !HOME || real(r) !== real(HOME.root)).find((r) => soulHome.soulsIn(r).some((x) => x.id === soul.id));
   const again = [CLI, ...process.argv.slice(2).map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)), "--move"].join(" ");
-  return new Error(`soul.held-elsewhere: ${soul.name ?? soul.id} is controlled from another folder ${where ? `(${tilde(resolvePath(where, ".."))})` : "on this or another machine"}. Run there, or add --move to take control here, which disconnects the other. Next: ${again}`);
+  const lost = kept && !HOME.load(HOME.soul(kept[0])).token;   // no token here at all: the live grant is likely this folder's own
+  const why = lost ? `the world still has ${who} connected, perhaps from an older copy of this folder` : `${who} is controlled from another folder ${where ? `(${tilde(resolvePath(where, ".."))})` : "on this or another machine"}`;
+  return new Error(`soul.held-elsewhere: ${why}. Run there, or add --move to take control here, which disconnects the other. Next: ${again}`);
 }
 
 function publicApproval(a, world) {
@@ -3230,7 +3233,7 @@ async function approval(action = "status") {
       if (!token.startsWith(`sim_${a.soulId}_`)) throw new Error("Approval returned a credential for a different Soul; nothing saved.");
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.move ? { moved: "Control moved here; the folder that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move ? { moved: "Control moved here; the folder that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
