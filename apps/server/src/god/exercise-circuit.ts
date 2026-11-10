@@ -15,6 +15,8 @@ export type ExerciseCircuitHost = {
 };
 const isCircuit = (def: StoredDef | undefined) => def?.name === 'core-exercise-circuit' && def.version === 1;
 export function createExerciseCircuit(h: ExerciseCircuitHost) {
+  // IDs are opaque. Keep only successful receipts for each marker's current tick.
+  const completedAtTick = new Map<string, { tick: number; ids: Set<string> }>();
   const circuit = (id: string) => { const e = h.model.entities.get(id); return e && isCircuit(h.model.resolvedDef(e.def)) ? e : null; };
   function plan(soul: EdgeSoul, id: string, action: string) {
     const e = circuit(id); if (action !== 'exercise' || !e) return null;
@@ -38,9 +40,13 @@ export function createExerciseCircuit(h: ExerciseCircuitHost) {
     const match = /^object:(.+):exercise$/.exec(r.capability); if (!match) return;
     const e = circuit(match[1]), soul = h.soul(r.soulId); if (!e || !soul || h.denied(e.id, { soulId: soul.id, entityId: soul.entity_id, name: soul.name })) return;
     const tick = Number(e.state?.lastCompletedTick ?? -1), previous = String(e.state?.lastReceipt ?? '');
-    if (r.endedTick! < tick || (r.endedTick === tick && r.id <= previous)) return;
+    if (r.endedTick! < tick || r.id === previous) return;
+    const current = completedAtTick.get(e.id);
+    const ids = current?.tick === tick ? new Set(current.ids) : new Set(previous ? [previous] : []);
+    if (r.endedTick === tick && ids.has(r.id)) return;
     const done = h.commit([opSchema.parse({ op: 'set', id: e.id, state: { completedRounds: Math.min(1e9, Number(e.state?.completedRounds ?? 0) + 1), lastBy: soul.name.slice(0, 100), lastCompletedTick: r.endedTick, lastReceipt: r.id } })], `${r.soulId} completed an exercise circuit`);
-    if (!done.accepted) h.log('exercise-circuit: the world refused the completion record');
+    if (!done.accepted) { h.log('exercise-circuit: the world refused the completion record'); return; }
+    completedAtTick.set(e.id, { tick: r.endedTick!, ids: r.endedTick === tick ? ids.add(r.id) : new Set([r.id]) });
   }
   return { plan, onReceipt, facts(id: string) {
     const e = circuit(id); if (!e) return null;
