@@ -1,3 +1,6 @@
+<!-- #1711: finite camp journal writing -->
+- **Portable field journal (#1711).** Draft a short entry on `core/field-journal@1`, put the same journal on `core/field-writing-desk@1`, then append it with ten seconds of existing native writing. One ink charge and the signed entry commit together on completion. Five chronological entries remain readable through ordinary current inspect after carrying and restart; earlier entries cannot be edited. A draft is not a completed entry. No automatic dating, private-memory promise or fresh item creation. Full current menu/inspect is the supported discovery route; compact movement context #1608 remains separate. Named additive God hooks need integration with other action branches.
+
 # Soul Actions: what Souls do by hand
 
 Souls now use the things in a world with their own hands. Ask in plain words and the Soul walks over, reaches, and the
