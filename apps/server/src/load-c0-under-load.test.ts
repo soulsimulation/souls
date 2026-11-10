@@ -98,3 +98,15 @@ test('A4: an activities rewarm (punt install, statics change) never answers busy
   assert.equal(r.status, 200);   // (warm;dur is added by the admission middleware, not mounted here)
   assert.deepEqual(w.asked, [15_000]);
 });
+
+test('A4: the ledger marks the warm it runs: boot (main.ts serving warm at boot) or rewarm (default, as the activities rewarm asks)', async () => {
+  const {EdgeLedger} = await import('./edge/ledger/ledger.ts');
+  const P = EdgeLedger.prototype as unknown as {warmForServing(o?: {kind?: 'boot' | 'rewarm'}): Promise<unknown>; servingWarmState(): {kind: string; ageMs: number} | null};
+  const fake = {servingGate: null, servingSince: null, runServingWarm: () => new Promise(r => setTimeout(() => r({}), 60))};
+  const boot = P.warmForServing.call(fake, {kind: 'boot'});
+  const s1 = P.servingWarmState.call(fake); assert.equal(s1?.kind, 'boot'); assert.ok(s1!.ageMs >= 0 && s1!.ageMs < 50);
+  const re = P.warmForServing.call(fake, {});   // asked while the boot warm runs: it queues behind it and is the state now
+  assert.equal(P.servingWarmState.call(fake)?.kind, 'rewarm');
+  await boot; await re;
+  assert.equal(P.servingWarmState.call(fake), null, 'no warm: no state');
+});
