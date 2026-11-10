@@ -124,7 +124,8 @@ export function decorateCommand({ cmd, args, env }, s) {
   Object.assign(out, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake', ANTHROPIC_API_KEY: '', TYPESAFE_API_KEY: '', OPENAI_API_KEY: '' });
   if (s.devAuth) out.DEV_AUTH = '1'; else out.DEV_AUTH = '0';
   out.PUBLIC_URL = s.publicOrigin;
-  if (s.stage) out.SIM_STAGE = s.stage; else delete out.SIM_STAGE;
+  // #1649: fail closed. No known stage (an older keeper kept by `activate.sh --reload` sets none) and no dev auth: production.
+  if (s.stage) out.SIM_STAGE = s.stage; else if (!s.devAuth) out.SIM_STAGE = 'production'; else delete out.SIM_STAGE;
   if (out.WORLD_KEY) out.WORLD_PATH = `${s.base ?? ''}/w/${out.WORLD_SLUG ?? out.WORLD_KEY}`;
   // this release's identity, not a BUILD_ID that a shared settings file may carry for another release
   if (s.build && s.build !== 'dev') out.BUILD_ID = s.build;

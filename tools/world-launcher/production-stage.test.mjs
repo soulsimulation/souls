@@ -7,5 +7,12 @@ test('the stage reaches the world; a world env cannot claim one the launcher did
   const s = { devAuth: false, publicOrigin: 'https://sim.eden.art', base: '/worlds', worldHeapMb: 0 };
   assert.equal(decorateCommand({ cmd: 'node', args: [], env: { WORLD_KEY: 'a' } }, { ...s, stage: 'production' }).env.SIM_STAGE, 'production');
   assert.equal(decorateCommand({ cmd: 'node', args: [], env: { WORLD_KEY: 'a' } }, { ...s, stage: 'staging' }).env.SIM_STAGE, 'staging');
-  assert.equal('SIM_STAGE' in decorateCommand({ cmd: 'node', args: [], env: { WORLD_KEY: 'a', SIM_STAGE: 'production' } }, { ...s, stage: null }).env, false);
+  // a world env cannot claim a stage: with dev auth and no stage it carries none
+  assert.equal('SIM_STAGE' in decorateCommand({ cmd: 'node', args: [], env: { WORLD_KEY: 'a', SIM_STAGE: 'production' } }, { ...s, devAuth: true, publicOrigin: 'http://127.0.0.1:4980', stage: null }).env, false);
+});
+
+test('fail closed: no known stage and no dev auth is production; a world env cannot downgrade it', () => {
+  const s = { devAuth: false, publicOrigin: 'https://sim.eden.art', base: '/worlds', worldHeapMb: 0, stage: null };
+  assert.equal(decorateCommand({ cmd: 'node', args: [], env: { WORLD_KEY: 'a' } }, s).env.SIM_STAGE, 'production');
+  assert.equal(decorateCommand({ cmd: 'node', args: [], env: { WORLD_KEY: 'a', SIM_STAGE: 'staging' } }, s).env.SIM_STAGE, 'production');
 });
