@@ -12,7 +12,7 @@ const isStrand=(d:StoredDef|undefined)=>d?.name==='core-bead-strand'&&d.version=
 export function createBeadStrand(h:BeadStrandHost){
  const pending=new Map<string,{stamp:string;body:string;target:string;action:string}>();
  const strand=(id:string)=>{const e=h.model.entities.get(id);return e&&isStrand(h.model.resolvedDef(e.def))?e:null;};
- const stamp=(id:string)=>{const e=strand(id);return e?JSON.stringify([e.by,e.access,e.in,h.model.worldPose(e),...['red','blue','amber'].map(c=>e.state?.[c+'Stock']),...cells.map(c=>e.state?.[c]),h.engine.world.entities[id]?.support]):'';};
+ const stamp=(id:string)=>{const e=strand(id);return e?JSON.stringify([e.by,e.owner,e.access,e.in,h.model.worldPose(e),...['red','blue','amber'].map(c=>e.state?.[c+'Stock']),...cells.map(c=>e.state?.[c]),h.engine.world.entities[id]?.support]):'';};
  function ready(soul:Pick<EdgeSoul,'soulId'|'entityId'|'name'>,id:string,action:string):Refusal|null{
   const e=strand(id),pick=choice(action);if(!e||!pick)return{code:'object.gone',reason:'The bead strand is no longer there.'};
   const no=h.denied(id,soul);if(no)return no;
