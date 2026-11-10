@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 188.1,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-10T04:19:22.529Z",
+  "mono": 190103,
+  "elapsedSec": 188.1,
+  "n": 10,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "that's all, now walk to the pond hall and wait for the others",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_8f64579a-5aa9-4084-b8a2-00f5da4af0f1",
+  "requestId": "ada-006"
+ }
+}

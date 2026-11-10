@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-10T04:15:26.488Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-10T04:15:28.490Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 269,
+   "firstAt": "2026-11-10T04:15:47.492Z",
+   "text": "Good morning, everyone! I started on the green, then sat a while on the bench outside the cottage, listening to the hum of my bees nearby. After that I took a cool swim in the pond, and now I'm here with you, feeling bright and ready. It's been a lovely, quiet morning.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-10T04:15:50.495Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 178,
+   "firstAt": "2026-11-10T04:15:58.413Z",
+   "text": "Um, hi. I'm Bo. My morning was quiet. I woke on the green at dawn, gave a little wave, and walked down to the pond hall. I wish I had my instrument here, but I'm happy to listen.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-10T04:15:26.488Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 44,
+    "cachedTokens": 611670,
+    "cacheCreationTokens": 25800,
+    "outputTokens": 3780,
+    "costUsd": 0.2232,
+    "turns": 5,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 40,
+    "cachedTokens": 528205,
+    "cacheCreationTokens": 25225,
+    "outputTokens": 4334,
+    "costUsd": 0.1971,
+    "turns": 6,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 84,
+   "cachedTokens": 1139875,
+   "cacheCreationTokens": 51025,
+   "outputTokens": 8114,
+   "costUsd": 0.4203,
+   "turns": 11,
+   "unknownTurns": 0
+  }
+ }
+}

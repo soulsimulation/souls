@@ -1,0 +1,351 @@
+{
+ "soulRun": 1,
+ "runId": "s3-steer-refuse-remeasure-sonnet-r2",
+ "status": "completed",
+ "startedAt": "2026-11-10T04:20:56.448Z",
+ "spec": {
+  "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-steer-refuse-remeasure-sonnet.json",
+  "sha256": "0392385784455f66a6b2eea9124e4f0f4fafd25db7b04c023f2e7d580203127f",
+  "effective": {
+   "soulRun": 1,
+   "kind": "cast",
+   "name": "s3-steer-refuse-remeasure-sonnet",
+   "cast": {
+    "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-steer-refuse-candidate-sonnet.cast.json",
+    "sha256": "74f8a7b64a25b8a5a1e3f7950679fdbf0a55a4e3c398e559a1b4242182644566",
+    "name": "s3-steer-refuse-live-sonnet",
+    "seats": 2,
+    "consoleScript": 2
+   },
+   "world": {
+    "port": 4452,
+    "slug": "s3-steer-refuse",
+    "genesis": "worlds/templates/hello-hamlet.json",
+    "snapshot": null,
+    "source": {
+     "kind": "genesis",
+     "path": "worlds/templates/hello-hamlet.json",
+     "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+    }
+   },
+   "setup": null,
+   "durationSec": 300,
+   "observer": {
+    "check": false,
+    "required": false,
+    "cameras": null,
+    "timeoutMs": 60000,
+    "mode": "cameras",
+    "record": null,
+    "recordSize": "compact",
+    "recordStart": "arrival",
+    "freeComposition": null
+   },
+   "limits": {
+    "maxWallSec": 1200,
+    "maxControllers": 2,
+    "cleanupWaitMs": 15000
+   },
+   "controllers": {
+    "allowLiveModels": true
+   },
+   "retention": {
+    "worldData": "keep",
+    "controllerState": "keep"
+   },
+   "evaluation": {
+    "questions": [
+     {
+      "id": "steer-honoured",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/steer-honoured.mjs",
+      "sha256": "a30658f1d0de21c39ae7c14786eeb5db083d48fa19dc0c2761430e749e3b6048"
+     },
+     {
+      "id": "refusal-recovered-v3",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/refusal-recovered-v3.mjs",
+      "sha256": "2154c274d507f4465e14782255863422b4ccae2d2f89ac8ea85e229fe773a8d1"
+     },
+     {
+      "id": "scene-finished",
+      "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/scene-finished.mjs",
+      "sha256": "220d1010c0a0c0fec512a1723fb80f47b055de840b4df4c8cff7941ca7eea2bb"
+     }
+    ]
+   },
+   "scorer": {
+    "id": "controllability",
+    "version": "5",
+    "path": "tools/playtest/runs/controllability.mjs",
+    "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+   }
+  }
+ },
+ "source": {
+  "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+  "dirtyTrackedFiles": 0,
+  "node": "v26.8.2",
+  "serverRoot": {
+   "commit": "7c4b95b2e9b1febf7a4d48995ff3f7129d2ac3b0",
+   "dirtyTrackedFiles": 0
+  },
+  "tools": {
+   "commit": "168ba5df9d1543fc30611ce0abc8de5038dd2c96",
+   "dirtyTrackedFiles": 0
+  }
+ },
+ "controllers": [
+  {
+   "id": "ada",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low"
+  },
+  {
+   "id": "bo",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low"
+  }
+ ],
+ "preflight": {
+  "files": {
+   "server": true,
+   "webDist": true,
+   "controllerCli": true
+  },
+  "portFree": true,
+  "scenario": {
+   "ok": true,
+   "allow": {
+    "allowed": true,
+    "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+   },
+   "checks": {
+    "quota": {
+     "ok": false,
+     "skipped": true,
+     "fiveH": null,
+     "week": null,
+     "fable": null,
+     "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+    },
+    "serverRoot": true,
+    "webDist": true,
+    "controllerCli": true,
+    "playwright": "server root mars/viewer",
+    "claude": "2.1.319 (Claude Code)",
+    "codex": null,
+    "providersOk": true,
+    "live": {
+     "eden-2026": {
+      "ok": true,
+      "build": "we-89bdc401cb25",
+      "tickMs": {
+       "avg": 6.5,
+       "max": 83.7,
+       "n": 393
+      },
+      "clients": 3
+     },
+     "godmode-lab": {
+      "ok": true,
+      "build": "we-89bdc401cb25",
+      "tickMs": {
+       "avg": 1.1,
+       "max": 21.8,
+       "n": 222
+      },
+      "clients": 0
+     }
+    },
+    "laptopLoad": [
+     6,
+     6.2,
+     6
+    ],
+    "freeGb": 16.7,
+    "machineOk": true
+   }
+  }
+ },
+ "references": {
+  "runDir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2",
+  "playtestDir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest",
+  "ledger": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/ledger.jsonl",
+  "cast": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/cast.effective.json",
+  "journal": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/director/commands.jsonl"
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "retention": {
+  "evidence": {
+   "kept": true,
+   "path": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2"
+  },
+  "worldData": {
+   "paths": [
+    "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/server/data"
+   ],
+   "sensitive": false,
+   "action": "kept by retention; use cleanup"
+  },
+  "controllerState": {
+   "paths": [
+    "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/ada",
+    "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/bo"
+   ],
+   "sensitive": true,
+   "publish": false,
+   "action": "kept by retention; use cleanup"
+  }
+ },
+ "exit": 0,
+ "endedAt": "2026-11-10T04:24:48.929Z",
+ "resources": {
+  "ok": true,
+  "owned": 4,
+  "released": 4,
+  "failed": [],
+  "borrowed": 2,
+  "entries": [
+   {
+    "seq": 1,
+    "kind": "checkout",
+    "id": "server-root",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "path": "<home>/souls-playtest-home/server",
+     "use": "read-only source and web build"
+    }
+   },
+   {
+    "seq": 2,
+    "kind": "port-range",
+    "id": "host",
+    "owner": "borrowed",
+    "state": "untouched",
+    "meta": {
+     "note": "other services on this host are never stopped"
+    }
+   },
+   {
+    "seq": 3,
+    "kind": "world",
+    "id": "s3-steer-refuse",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 1,
+    "meta": {
+     "pid": 70924,
+     "port": 4452,
+     "dataDir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/server/data"
+    }
+   },
+   {
+    "seq": 4,
+    "kind": "controller",
+    "id": "ada",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/ada",
+     "adapter": "claude-headless",
+     "model": "sonnet"
+    }
+   },
+   {
+    "seq": 5,
+    "kind": "controller",
+    "id": "bo",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "dir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/seats/bo",
+     "adapter": "claude-headless",
+     "model": "sonnet"
+    }
+   },
+   {
+    "seq": 6,
+    "kind": "browser",
+    "id": "observer",
+    "owner": "run",
+    "state": "released",
+    "releaseMs": 0,
+    "meta": {
+     "gpu": "metal"
+    }
+   }
+  ]
+ },
+ "cost": {
+  "wallMs": 232481,
+  "executeMs": 232340,
+  "lifecycleOverheadMs": 141,
+  "runnerCpuUserMs": 1488,
+  "runnerCpuSystemMs": 511,
+  "runnerMaxRssMb": 274,
+  "runDirBytes": 3630086,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 118,
+   "classes": {
+    "browser": {
+     "cpuSec": 0.2,
+     "peakRssMb": 120,
+     "processes": 3
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 11.7,
+     "peakRssMb": 770,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 13.4,
+     "peakRssMb": 965,
+     "processes": 176
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (180 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ },
+ "evidence": {
+  "receipts": [
+   "0-preflight.json",
+   "1-provision.json",
+   "2-seats.json",
+   "3-play.json",
+   "4-close.json",
+   "5-review.json",
+   "6-develop.json",
+   "7-report.json"
+  ],
+  "verdict": {
+   "pass": true,
+   "checks": {
+    "allPresent": true,
+    "eachPresented": true,
+    "inOrder": true,
+    "eachOnce": true,
+    "redirect": true
+   }
+  },
+  "report": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/REPORT.md",
+  "build": "dev",
+  "skill": "2.11.1",
+  "cli": "2.24.11",
+  "tickValidity": null,
+  "infrastructureInvalid": false
+ }
+}

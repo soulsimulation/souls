@@ -1,0 +1,6 @@
+{"t":"2026-11-10T04:25:23.534Z","mono":29864,"turn":1,"inputTokens":18,"cachedTokens":174057,"cacheCreationTokens":13295,"outputTokens":1215,"costUsd":0.0827717,"sessionCostUsd":0.0827717,"reservedUsd":0.48096}
+{"t":"2026-11-10T04:26:04.823Z","mono":71153,"turn":2,"inputTokens":6,"cachedTokens":77978,"cacheCreationTokens":3171,"outputTokens":483,"costUsd":0.025323800000000007,"sessionCostUsd":0.10809550000000001,"reservedUsd":0.17274}
+{"t":"2026-11-10T04:26:51.645Z","mono":117975,"turn":3,"inputTokens":6,"cachedTokens":86189,"cacheCreationTokens":3184,"outputTokens":527,"costUsd":0.02663689999999999,"sessionCostUsd":0.1347324,"reservedUsd":0.184632}
+{"t":"2026-11-10T04:28:11.717Z","mono":198046,"turn":4,"inputTokens":6,"cachedTokens":95910,"cacheCreationTokens":3886,"outputTokens":545,"costUsd":0.030596999999999985,"sessionCostUsd":0.1653294,"reservedUsd":0.197124}
+{"t":"2026-11-10T04:28:49.482Z","mono":235811,"turn":5,"inputTokens":4,"cachedTokens":70554,"cacheCreationTokens":3020,"outputTokens":350,"costUsd":0.022643400000000008,"sessionCostUsd":0.1879728,"reservedUsd":0.21294}
+{"t":"2026-11-10T04:30:06.077Z","mono":312406,"turn":6,"inputTokens":4,"cachedTokens":76660,"cacheCreationTokens":1612,"outputTokens":541,"costUsd":0.019531999999999994,"sessionCostUsd":0.2075048,"reservedUsd":0.225}

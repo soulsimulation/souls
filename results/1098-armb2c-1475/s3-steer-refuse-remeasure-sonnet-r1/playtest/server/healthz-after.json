@@ -1,0 +1,42 @@
+{
+ "ok": true,
+ "tick": 6053,
+ "clients": 0,
+ "paused": false,
+ "halted": false,
+ "glitches": {
+  "total": 0,
+  "byRule": {}
+ },
+ "build": "dev",
+ "worldId": "s3-steer-refuse-1",
+ "tickMs": {
+  "avg": 0.4,
+  "max": 3.1,
+  "n": 251
+ },
+ "clockRate": 1,
+ "baseRate": 1,
+ "tickAgeMs": 24,
+ "stalled": false,
+ "load": {
+  "level": "green",
+  "service5s": 1,
+  "loopP99Ms": 13,
+  "heapPct": 2,
+  "gcPct10s": 0,
+  "tickP99Ms": 1.9,
+  "loopBaselineMs": 12,
+  "quietTickMs": 0.4,
+  "frameBudgetMs": 25,
+  "queue": {
+   "depth": 0,
+   "oldestMs": 0
+  },
+  "souls": {
+   "awake": 2,
+   "waiting": 0,
+   "connected": 2
+  }
+ }
+}

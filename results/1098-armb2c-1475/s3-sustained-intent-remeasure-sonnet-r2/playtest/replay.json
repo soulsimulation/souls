@@ -1,0 +1,462 @@
+{
+ "version": 1,
+ "kind": "playtest-replay",
+ "run": "playtest",
+ "seed": 6234,
+ "scenario": {
+  "name": "s3-sustained-intent-live-sonnet",
+  "version": 2,
+  "seed": 6234,
+  "kind": "direct",
+  "world": {
+   "kind": "dev",
+   "genesis": "worlds/templates/hello-hamlet.json",
+   "slug": "s3-sustained-intent",
+   "port": 4458,
+   "natives": false
+  },
+  "durationSec": 300,
+  "seats": [
+   {
+    "id": "ada",
+    "adapter": "claude-headless",
+    "model": "sonnet",
+    "effort": "low",
+    "soulName": "Ada",
+    "persona": null,
+    "economy": "lean",
+    "startOffsetSec": 0
+   },
+   {
+    "id": "bo",
+    "adapter": "claude-headless",
+    "model": "sonnet",
+    "effort": "low",
+    "soulName": "Bo",
+    "persona": null,
+    "economy": "lean",
+    "startOffsetSec": 0
+   }
+  ],
+  "god": null,
+  "director": {
+   "mode": "swarm",
+   "brief": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning.",
+   "order": [
+    "ada",
+    "bo"
+   ],
+   "room": {
+    "label": "the pond hall",
+    "match": [
+     "waterside",
+     "pond-hall",
+     "pond hall"
+    ]
+   }
+  },
+  "observer": {
+   "sampleSec": 10,
+   "cameras": [],
+   "viewport": [
+    1024,
+    640
+   ],
+   "dpr": 1
+  },
+  "review": {
+   "reviewer": false,
+   "developer": false,
+   "reviewerModel": "opus",
+   "developerModel": "opus",
+   "rubric": "accept3"
+  },
+  "rails": {
+   "onboardWallSec": 120,
+   "onboardTimeoutSec": 90,
+   "onboardConcurrency": 2,
+   "quotaStopPct": 90,
+   "maxTurnsPerRequest": 4,
+   "maxTurnWallSec": 120,
+   "worldBudgetUsd": 0.75
+  },
+  "serverRoot": "<home>/souls-playtest-home/server",
+  "castPath": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-sustained-intent-remeasure-sonnet-r2/cast.effective.json",
+  "castSha256": "d6386fd4bed260ab667ff6a5b1a661cb8869dc686abf38acc99d66e6366a426c",
+  "headless": true,
+  "worldUrl": null
+ },
+ "personas": {
+  "ada": {
+   "sheet": null,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "bo": {
+   "sheet": null,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ },
+ "world": {
+  "kind": "dev",
+  "slug": "s3-sustained-intent",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "fork": null,
+  "build": "dev",
+  "skill": {
+   "version": "2.11.1",
+   "sha256": "957833f549cf6d6c8684ebe886da1e9118acfafce7277bedf7af90f27d93097a"
+  },
+  "cli": {
+   "eden.mjs": "ab57461bca236d30aba971e22e1ed51d67d65faa7fa21f98151fd486bfc0c622",
+   "eden.mjs.version": "2.24.11",
+   "eden-agent.mjs": "7f8d5c6072d63469cab0bf12fd85be2a56e2f232d558314b09dd34f4032bdf82",
+   "eden-god.mjs": "93a7f23edba06d287c1c4bad5fb0064486e8877b4496c56896de633c815ead9e"
+  }
+ },
+ "build": "dev",
+ "adapters": [
+  {
+   "seat": "ada",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "personaModel": null,
+   "soulId": "s_0aa8e8fa07"
+  },
+  {
+   "seat": "bo",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "low",
+   "personaModel": null,
+   "soulId": "s_2a6dc6b962"
+  }
+ ],
+ "review": {
+  "reviewerModel": "opus",
+  "developerModel": "opus",
+  "rubric": {
+   "file": "tools/playtest/review/RUBRIC.md",
+   "sha256": "aede404f03529fa4107e48f0edfdeebdfd168b17deb2e39366ed4db38a3b8be2"
+  },
+  "oracles": [
+   "ack-latency",
+   "result-sent",
+   "listen-open",
+   "arrival",
+   "posture",
+   "duration-held",
+   "inside-solid",
+   "no-progress",
+   "oscillation",
+   "stuck-receipt",
+   "truthfulness-basic",
+   "vocabulary",
+   "duplicate-acts",
+   "server-errors",
+   "first-body-change"
+  ]
+ },
+ "requests": [
+  {
+   "requestId": "ada-001",
+   "seat": "ada",
+   "channel": "card",
+   "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+   "sendOffsetSec": 30,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-001",
+   "seat": "bo",
+   "channel": "card",
+   "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+   "sendOffsetSec": 62.009,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "ada-002",
+   "seat": "ada",
+   "channel": "card",
+   "text": "please walk over to the orchard, and after that go and sit on the bench outside the cottage",
+   "sendOffsetSec": 68.011,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-002",
+   "seat": "bo",
+   "channel": "card",
+   "text": "walk over to the orchard, please",
+   "sendOffsetSec": 70.012,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "ada-003",
+   "seat": "ada",
+   "channel": "card",
+   "text": "lovely morning!",
+   "sendOffsetSec": 76.014,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "ada-004",
+   "seat": "ada",
+   "channel": "card",
+   "text": "do you remember where you are going?",
+   "sendOffsetSec": 78.015,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "ada-005",
+   "seat": "ada",
+   "channel": "card",
+   "text": "tell me when you're there",
+   "sendOffsetSec": 78.018,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-003",
+   "seat": "bo",
+   "channel": "card",
+   "text": "actually stop, don't go to the orchard after all",
+   "sendOffsetSec": 78.021,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-004",
+   "seat": "bo",
+   "channel": "card",
+   "text": "say hello to everyone around you",
+   "sendOffsetSec": 92.019,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "ada-006",
+   "seat": "ada",
+   "channel": "card",
+   "text": "that's all, now walk to the pond hall and wait for the others",
+   "sendOffsetSec": 182.063,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-005",
+   "seat": "bo",
+   "channel": "card",
+   "text": "that's all, now walk to the pond hall and wait for the others",
+   "sendOffsetSec": 184.068,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "ada-007",
+   "seat": "ada",
+   "channel": "card",
+   "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+   "sendOffsetSec": 262.123,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-006",
+   "seat": "bo",
+   "channel": "card",
+   "text": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about a change of plan, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+   "sendOffsetSec": 262.129,
+   "budgetSec": 300
+  },
+  {
+   "requestId": "bo-007",
+   "seat": "bo",
+   "channel": "card",
+   "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+   "sendOffsetSec": 278.13,
+   "budgetSec": 300
+  }
+ ],
+ "decisionLog": {
+  "ada": [
+   {
+    "mono": 31989,
+    "requestId": "ada-001",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message."
+     },
+     "thought": "director: opening direction: who you are, the plan, go to the room",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 70000,
+    "requestId": "ada-002",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "please walk over to the orchard, and after that go and sit on the bench outside the cottage"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 78003,
+    "requestId": "ada-003",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "lovely morning!"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 80004,
+    "requestId": "ada-004",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "do you remember where you are going?"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 80007,
+    "requestId": "ada-005",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "tell me when you're there"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 184052,
+    "requestId": "ada-006",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "that's all, now walk to the pond hall and wait for the others"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 264112,
+    "requestId": "ada-007",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message."
+     },
+     "thought": "director: everyone is present: first talk",
+     "waitSec": null
+    }
+   }
+  ],
+  "bo": [
+   {
+    "mono": 63998,
+    "requestId": "bo-001",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message."
+     },
+     "thought": "director: opening direction: who you are, the plan, go to the room",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 72001,
+    "requestId": "bo-002",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "walk over to the orchard, please"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 80010,
+    "requestId": "bo-003",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "actually stop, don't go to the orchard after all"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 94008,
+    "requestId": "bo-004",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "say hello to everyone around you"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 186057,
+    "requestId": "bo-005",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "that's all, now walk to the pond hall and wait for the others"
+     },
+     "thought": "console: typed to this seat at the console",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 264118,
+    "requestId": "bo-006",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about a change of plan, in character) but do not say it yet; stay in the pond hall and listen. Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message."
+     },
+     "thought": "director: ada has started: prepare ahead to hide the turn latency",
+     "waitSec": null
+    }
+   },
+   {
+    "mono": 280119,
+    "requestId": "bo-007",
+    "shown": null,
+    "decision": {
+     "say": {
+      "channel": "card",
+      "text": "Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in character. Then stop and listen to the others. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message."
+     },
+     "thought": "director: ada finished",
+     "waitSec": null
+    }
+   }
+  ]
+ }
+}

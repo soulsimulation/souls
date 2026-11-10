@@ -1,0 +1,15 @@
+2026-11-10T04:06:19Z arm start tools 168ba5df9 server 7c4b95b2e specs: tools/playtest/runs/specs/1098/s3-steer-refuse-remeasure-sonnet.json tools/playtest/runs/specs/1098/s3-reasonable-actions-remeasure-sonnet.json tools/playtest/runs/specs/1098/s3-sustained-intent-remeasure-sonnet.json
+2026-11-10T04:06:19Z start s3-steer-refuse-remeasure-sonnet-r1 load 4.20
+2026-11-10T04:11:27Z end s3-steer-refuse-remeasure-sonnet-r1 rc=0 spend=0.3716 arm=0.3716 dollarHit=0 predeclared=true
+2026-11-10T04:11:27Z start s3-reasonable-actions-remeasure-sonnet-r1 load 6.57
+2026-11-10T04:11:27Z seat check s3-steer-refuse-remeasure-sonnet-r1 first-call ctx 17367
+2026-11-10T04:16:11Z end s3-reasonable-actions-remeasure-sonnet-r1 rc=0 spend=0.4203 arm=0.7919 dollarHit=0 predeclared=true
+2026-11-10T04:16:11Z start s3-sustained-intent-remeasure-sonnet-r1 load 6.35
+2026-11-10T04:20:55Z end s3-sustained-intent-remeasure-sonnet-r1 rc=0 spend=0.4321 arm=1.2240 dollarHit=0 predeclared=true
+2026-11-10T04:20:55Z start s3-steer-refuse-remeasure-sonnet-r2 load 6.17
+2026-11-10T04:24:50Z end s3-steer-refuse-remeasure-sonnet-r2 rc=0 spend=0.3549 arm=1.5789 dollarHit=0 predeclared=true
+2026-11-10T04:24:50Z start s3-reasonable-actions-remeasure-sonnet-r2 load 9.59
+2026-11-10T04:30:21Z end s3-reasonable-actions-remeasure-sonnet-r2 rc=0 spend=0.4279 arm=2.0068 dollarHit=0 predeclared=true
+2026-11-10T04:30:21Z start s3-sustained-intent-remeasure-sonnet-r2 load 17.62
+2026-11-10T04:35:18Z end s3-sustained-intent-remeasure-sonnet-r2 rc=0 spend=0.4559 arm=2.4627 dollarHit=0 predeclared=true
+2026-11-10T04:35:18Z arm end, spent $2.4627

@@ -1,0 +1,4 @@
+{"t":"2026-11-10T04:22:18.541Z","mono":82021,"requestId":"bo-001","cutoffReason":"next-direction","openSec":8.005}
+{"t":"2026-11-10T04:22:58.607Z","mono":122087,"requestId":"bo-002","cutoffReason":"result","openSec":40.066}
+{"t":"2026-11-10T04:24:34.642Z","mono":218122,"requestId":"bo-003","cutoffReason":"next-direction","openSec":10.017}
+{"t":"2026-11-10T04:24:48.574Z","mono":232054,"requestId":"bo-004","cutoffReason":"result","openSec":13.932}

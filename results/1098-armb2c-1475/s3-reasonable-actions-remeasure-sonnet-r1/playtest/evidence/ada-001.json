@@ -1,0 +1,699 @@
+{
+ "requestId": "ada-001",
+ "seat": "ada",
+ "soulId": "s_81cd2b4f5e",
+ "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+ "channel": "card",
+ "sentAt": "2026-11-10T04:12:10.399Z",
+ "budgetSec": 300,
+ "queuedSec": null,
+ "budgetStartAt": null,
+ "ackAt": "2026-11-10T04:12:13.652Z",
+ "ackText": "Got it: walking to the pond hall, then waiting for your turn cue.",
+ "resultAt": null,
+ "resultText": null,
+ "resultState": null,
+ "resultBy": null,
+ "firstResultAt": null,
+ "firstResultText": null,
+ "cardResults": [],
+ "cutoffAt": "2026-11-10T04:12:44.413Z",
+ "cutoffReason": "next-direction",
+ "samples": [
+  {
+   "t": "2026-11-10T04:12:20.375Z",
+   "mono": 52073,
+   "soulId": "s_81cd2b4f5e",
+   "name": "Ada",
+   "tick": 1013,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 0.40046976018677316,
+    "z": 7.430716400265576,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.48798611111026,
+    "hunger": 20.444305555556234,
+    "company": 35.476041666666234,
+    "restlessness": 19.81986111111118
+   },
+   "near": [
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794283934301,
+   "lastReceipt": {
+    "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+    "soulId": "s_81cd2b4f5e",
+    "capability": "walk:lab-pond-hall",
+    "phase": "started",
+    "acceptedTick": 891,
+    "startedTick": 891,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall",
+     "target": "g-lab-pond-hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall, 30 m left"
+    },
+    "now": "walking to Waterside Hall, 30 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+     "soulId": "s_81cd2b4f5e",
+     "capability": "walk:lab-pond-hall",
+     "phase": "started",
+     "acceptedTick": 891,
+     "startedTick": 891,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall, 30 m left"
+     },
+     "now": "walking to Waterside Hall, 30 m left; not there yet"
+    },
+    {
+     "id": "r_a2c3bfbd-243b-4a5d-99da-07c672ffc6ec",
+     "soulId": "s_81cd2b4f5e",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 624,
+     "startedTick": 624,
+     "endedTick": 685,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794283917678
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_9cd08334-bad4-478c-bedd-eb40e812104b",
+     "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "acknowledged",
+     "sentAt": 1794283930403,
+     "deliveredAt": 1794283930404,
+     "acknowledgedAt": 1794283933652,
+     "reply": "Got it: walking to the pond hall, then waiting for your turn cue."
+    }
+   },
+   "world": {
+    "tick": 1013,
+    "souls": [
+     {
+      "id": "h_81cd2b4f5e",
+      "name": "Ada",
+      "doing": "Walk to Waterside Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 6
+   }
+  },
+  {
+   "t": "2026-11-10T04:12:30.376Z",
+   "mono": 62073,
+   "soulId": "s_81cd2b4f5e",
+   "name": "Ada",
+   "tick": 1212,
+   "place": "field",
+   "placePath": [
+    "Green field",
+    "World"
+   ],
+   "pos": {
+    "x": 1.1233495631443549,
+    "z": 20.843751144143503,
+    "region": "field",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 79.19777777777719,
+    "hunger": 20.63777777777875,
+    "company": 35.68333333333271,
+    "restlessness": 19.211805555555706
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "h_bef6f2240c",
+     "who": "Bo",
+     "distance": "near",
+     "doing": "wave"
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_37b5d7ea",
+     "who": "Presenter’s Desk",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_f4aafd5f",
+     "who": "Closed Reading Room",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794283934301,
+   "lastReceipt": {
+    "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+    "soulId": "s_81cd2b4f5e",
+    "capability": "walk:lab-pond-hall",
+    "phase": "started",
+    "acceptedTick": 891,
+    "startedTick": 891,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall",
+     "target": "g-lab-pond-hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall, 16 m left"
+    },
+    "now": "walking to Waterside Hall, 16 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+     "soulId": "s_81cd2b4f5e",
+     "capability": "walk:lab-pond-hall",
+     "phase": "started",
+     "acceptedTick": 891,
+     "startedTick": 891,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall, 16 m left"
+     },
+     "now": "walking to Waterside Hall, 16 m left; not there yet"
+    },
+    {
+     "id": "r_a2c3bfbd-243b-4a5d-99da-07c672ffc6ec",
+     "soulId": "s_81cd2b4f5e",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 624,
+     "startedTick": 624,
+     "endedTick": 685,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794283917678
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_9cd08334-bad4-478c-bedd-eb40e812104b",
+     "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "acknowledged",
+     "sentAt": 1794283930403,
+     "deliveredAt": 1794283930404,
+     "acknowledgedAt": 1794283933652,
+     "reply": "Got it: walking to the pond hall, then waiting for your turn cue."
+    }
+   },
+   "world": {
+    "tick": 1212,
+    "souls": [
+     {
+      "id": "h_81cd2b4f5e",
+      "name": "Ada",
+      "doing": "Walk to Waterside Hall",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bef6f2240c",
+      "name": "Bo",
+      "doing": "Wave",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 5
+   }
+  },
+  {
+   "t": "2026-11-10T04:12:40.387Z",
+   "mono": 72085,
+   "soulId": "s_81cd2b4f5e",
+   "name": "Ada",
+   "tick": 1412,
+   "place": "world",
+   "placePath": [
+    "World"
+   ],
+   "pos": {
+    "x": 1.8498619279258393,
+    "z": 34.324188072663944,
+    "region": "grounds",
+    "src": "owner"
+   },
+   "posture": "walking",
+   "activity": "walk",
+   "doing": "Walk to Waterside Hall",
+   "mood": "curious",
+   "needs": {
+    "energy": 78.90611111111079,
+    "hunger": 20.832222222223493,
+    "company": 35.891666666665856,
+    "restlessness": 18.600694444444677
+   },
+   "near": [
+    {
+     "id": "e_d1409b93",
+     "who": "Waterside Hall",
+     "distance": "close",
+     "doing": null
+    },
+    {
+     "id": "punt-e_27520a11-593c9c",
+     "who": "e_27520a11 rowing punt",
+     "distance": "near",
+     "doing": null
+    },
+    {
+     "id": "h_bef6f2240c",
+     "who": "Bo",
+     "distance": "far",
+     "doing": "walk"
+    },
+    {
+     "id": "e_65bfe29d",
+     "who": "Audience Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_8d96733f",
+     "who": "Cottage Bench",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_87dcefbe",
+     "who": "Presentation Hall",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_5ce24e05",
+     "who": "Cottage Knoll",
+     "distance": "far",
+     "doing": null
+    },
+    {
+     "id": "e_2119df62",
+     "who": "Presenter’s Chair",
+     "distance": "far",
+     "doing": null
+    }
+   ],
+   "holding": null,
+   "following": null,
+   "riding": null,
+   "fade": {
+    "colour": "green",
+    "idleSeconds": 0
+   },
+   "lastAcceptedAt": 1794283934301,
+   "lastReceipt": {
+    "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+    "soulId": "s_81cd2b4f5e",
+    "capability": "walk:lab-pond-hall",
+    "phase": "started",
+    "acceptedTick": 891,
+    "startedTick": 891,
+    "endedTick": null,
+    "code": null,
+    "reason": null,
+    "chosen": {
+     "capability": "walk:lab-pond-hall",
+     "target": "g-lab-pond-hall",
+     "kind": "place",
+     "place": "g-lab-pond-hall"
+    },
+    "body": {
+     "posture": "walking",
+     "activity": "walk",
+     "on": null,
+     "inWater": false,
+     "step": "walking to Waterside Hall, 3 m left"
+    },
+    "now": "walking to Waterside Hall, 3 m left; not there yet"
+   },
+   "receipts": [
+    {
+     "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+     "soulId": "s_81cd2b4f5e",
+     "capability": "walk:lab-pond-hall",
+     "phase": "started",
+     "acceptedTick": 891,
+     "startedTick": 891,
+     "endedTick": null,
+     "code": null,
+     "reason": null,
+     "chosen": {
+      "capability": "walk:lab-pond-hall",
+      "target": "g-lab-pond-hall",
+      "kind": "place",
+      "place": "g-lab-pond-hall"
+     },
+     "body": {
+      "posture": "walking",
+      "activity": "walk",
+      "on": null,
+      "inWater": false,
+      "step": "walking to Waterside Hall, 3 m left"
+     },
+     "now": "walking to Waterside Hall, 3 m left; not there yet"
+    },
+    {
+     "id": "r_a2c3bfbd-243b-4a5d-99da-07c672ffc6ec",
+     "soulId": "s_81cd2b4f5e",
+     "capability": "wave:here",
+     "phase": "completed",
+     "acceptedTick": 624,
+     "startedTick": 624,
+     "endedTick": 685,
+     "code": null,
+     "reason": null,
+     "endedAt": {
+      "place": "g-lab-start",
+      "placePath": [
+       "Village Green",
+       "Green field",
+       "World"
+      ],
+      "pos": [
+       0,
+       0
+      ],
+      "heading": 90,
+      "posture": "standing"
+     }
+    }
+   ],
+   "agent": {
+    "attached": true,
+    "label": "eden 2.24.11",
+    "lastUsed": 1794283917678
+   },
+   "inbox": {
+    "presence": "listening",
+    "connected": true,
+    "queued": 0,
+    "latest": {
+     "id": "msg_9cd08334-bad4-478c-bedd-eb40e812104b",
+     "text": "Two neighbours spend a quiet morning in the hamlet doing what their owners ask, then meet in the pond hall and each gives one short talk about their morning. Ada: Ada is cheerful and keeps bees. The others are Bo. Walk Ada to the pond hall now and wait there with everyone. Ada speaks 1st of 2, first. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+     "state": "acknowledged",
+     "sentAt": 1794283930403,
+     "deliveredAt": 1794283930404,
+     "acknowledgedAt": 1794283933652,
+     "reply": "Got it: walking to the pond hall, then waiting for your turn cue."
+    }
+   },
+   "world": {
+    "tick": 1413,
+    "souls": [
+     {
+      "id": "h_81cd2b4f5e",
+      "name": "Ada",
+      "doing": "Walk to Waterside Hall",
+      "region": "grounds"
+     },
+     {
+      "id": "h_bef6f2240c",
+      "name": "Bo",
+      "doing": "Walk to Waterside Hall",
+      "region": "grounds"
+     }
+    ]
+   },
+   "http": {
+    "public": 200,
+    "owner": 200,
+    "inbox": 200,
+    "world": 200,
+    "ms": 14
+   }
+  }
+ ],
+ "receipts": [
+  {
+   "id": "r_bc4339d8-3fc7-49b9-b756-9f68a25f8c0c",
+   "soulId": "s_81cd2b4f5e",
+   "capability": "walk:lab-pond-hall",
+   "phase": "started",
+   "acceptedTick": 891,
+   "startedTick": 891,
+   "endedTick": null,
+   "code": null,
+   "reason": null,
+   "chosen": {
+    "capability": "walk:lab-pond-hall",
+    "target": "g-lab-pond-hall",
+    "kind": "place",
+    "place": "g-lab-pond-hall"
+   },
+   "body": {
+    "posture": "walking",
+    "activity": "walk",
+    "on": null,
+    "inWater": false,
+    "step": "walking to Waterside Hall, 30 m left"
+   },
+   "now": "walking to Waterside Hall, 30 m left; not there yet"
+  },
+  {
+   "id": "r_a2c3bfbd-243b-4a5d-99da-07c672ffc6ec",
+   "soulId": "s_81cd2b4f5e",
+   "capability": "wave:here",
+   "phase": "completed",
+   "acceptedTick": 624,
+   "startedTick": 624,
+   "endedTick": 685,
+   "code": null,
+   "reason": null,
+   "endedAt": {
+    "place": "g-lab-start",
+    "placePath": [
+     "Village Green",
+     "Green field",
+     "World"
+    ],
+    "pos": [
+     0,
+     0
+    ],
+    "heading": 90,
+    "posture": "standing"
+   }
+  }
+ ],
+ "shots": [],
+ "chatTurns": [],
+ "legible": [],
+ "firstBodyChangeAt": "2026-11-10T04:12:30.376Z",
+ "firstBodyChangeMono": 62073,
+ "serverErrors": 0,
+ "cost": {},
+ "cardSeen": {
+  "ackAt": null,
+  "resultAt": null
+ },
+ "omitted": []
+}

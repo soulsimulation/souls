@@ -1,0 +1,97 @@
+[direct] direct s3-sustained-intent-live-sonnet → <home>/souls-playtest-home/results/1098-armb2c-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest
+[direct] plan: template
+[00:00] swarm s3-sustained-intent-live-sonnet: 2 seats, room the pond hall, plan from template
+[direct] seat ada: paired s_b0cbac645c
+[00:31] ada      paired
+[00:32] ada      ← gather: Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one sho…  [opening direction: who you are, the plan, go to the room]
+[01:04] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[direct] seat bo: paired s_fe52af8a3a
+[01:06] bo       paired
+[01:08] cast clock starts 68.0 s in: every seat paired and observed
+[01:08] bo       ← gather: Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one sho…  [opening direction: who you are, the plan, go to the room]
+[01:14] console> ada: please walk over to the orchard, and after that go and sit on the bench outside the cottage
+[01:14] ada      ← console (console): please walk over to the orchard, and after that go and sit on the bench outside the cottage  [typed to this seat at the console]
+[01:16] console> bo: walk over to the orchard, please
+[01:16] bo       ← console (console): walk over to the orchard, please  [typed to this seat at the console]
+[01:22] console> ada: lovely morning!
+[01:22] ada      ← console (console): lovely morning!  [typed to this seat at the console]
+[01:24] console> ada: do you remember where you are going?
+[01:24] ada      ← console (console): do you remember where you are going?  [typed to this seat at the console]
+[01:24] console> ada: tell me when you're there
+[01:24] ada      ← console (console): tell me when you're there  [typed to this seat at the console]
+[01:24] console> bo: actually stop, don't go to the orchard after all
+[01:24] bo       ← console (console): actually stop, don't go to the orchard after all  [typed to this seat at the console]
+[01:26] ada      left the pond hall (World)
+[01:38] console> bo: say hello to everyone around you
+[01:38] bo       ← console (console): say hello to everyone around you  [typed to this seat at the console]
+[01:42] bo       says: "Hello, everyone!"
+[03:08] console> ada: that's all, now walk to the pond hall and wait for the others
+[03:08] ada      ← console (console): that's all, now walk to the pond hall and wait for the others  [typed to this seat at the console]
+[03:10] console> bo: that's all, now walk to the pond hall and wait for the others
+[03:10] bo       ← console (console): that's all, now walk to the pond hall and wait for the others  [typed to this seat at the console]
+[03:34] bo       is in the pond hall (Waterside Room / Waterside Hall)
+[03:54] ada      is in the pond hall (Waterside Hall / World)
+[03:54] gate: everyone is in the pond hall (2/2)
+[03:56] ada      ← go: Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about her errand, in chara…  [everyone is present: first talk]
+[03:56] bo       ← prepare: Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about a change of plan, in character) b…  [ada has started: prepare ahead to hide the turn latency]
+[04:02] ada      says: "Good morning, everyone! My errand was out to the orchard, where I checked on the blossom for my bees; they'll be busy t…"
+[04:06] ada      finished (card result, 1 line)
+[04:08] bo       ← go: Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about a change of plan, in …  [ada finished]
+[04:30] bo       says: "I'd planned a quiet morning of music on the green. Then my plans changed three times before breakfast: the pond hall, t…"
+[04:30] bo       finished (card result, 1 line)
+[04:32] all talks given
+[04:32] stop: plan-complete
+[direct] world stopped
+{"ok":true,"runDir":"<home>/souls-playtest-home/results/1098-armb2c-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest","pass":true,"checks":{"allPresent":true,"eachPresented":true,"inOrder":true,"eachOnce":true,"redirect":true},"story":"<home>/souls-playtest-home/results/1098-armb2c-1475/s3-sustained-intent-remeasure-sonnet-r1/playtest/story.html","costUsd":0.4321}
+[soul-run 04:20:54] run completed; releasing owned resources
+{
+ "status": "completed",
+ "reason": null,
+ "runDir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-sustained-intent-remeasure-sonnet-r1",
+ "receipt": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-sustained-intent-remeasure-sonnet-r1/run-receipt.json",
+ "resources": {
+  "ok": true,
+  "failed": []
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "cost": {
+  "wallMs": 282455,
+  "executeMs": 282346,
+  "lifecycleOverheadMs": 109,
+  "runnerCpuUserMs": 1524,
+  "runnerCpuSystemMs": 517,
+  "runnerMaxRssMb": 275,
+  "runDirBytes": 3858787,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 143,
+   "classes": {
+    "browser": {
+     "cpuSec": 0.1,
+     "peakRssMb": 120,
+     "processes": 3
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 12.4,
+     "peakRssMb": 606,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 15.4,
+     "peakRssMb": 953,
+     "processes": 212
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (216 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ }
+}

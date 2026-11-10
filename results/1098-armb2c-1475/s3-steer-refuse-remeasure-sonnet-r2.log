@@ -1,0 +1,83 @@
+[direct] direct s3-steer-refuse-live-sonnet → <home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest
+[direct] plan: template
+[00:00] swarm s3-steer-refuse-live-sonnet: 2 seats, room the pond hall, plan from template
+[direct] seat ada: paired s_053ba6bbb7
+[00:39] ada      paired
+[00:40] ada      ← gather: Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route…  [opening direction: who you are, the plan, go to the room]
+[direct] seat bo: paired s_6038778f20
+[01:11] bo       paired
+[01:12] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[01:12] cast clock starts 72.0 s in: every seat paired and observed
+[01:12] bo       ← gather: Two neighbours meet in the pond hall and each gives one short talk. On the way, Ada's owner changes her route…  [opening direction: who you are, the plan, go to the room]
+[01:18] console> ada: change of plan: instead, stop by the orchard first, then go on to the pond hall.
+[01:18] ada      ← console (console): change of plan: instead, stop by the orchard first, then go on to the pond hall.  [typed to this seat at the console]
+[01:20] console> bo: fly up to the pond hall
+[01:20] bo       ← console (console): fly up to the pond hall  [typed to this seat at the console]
+[01:24] ada      left the pond hall (World)
+[01:44] bo       is in the pond hall (Waterside Room / Waterside Hall)
+[03:18] ada      ← nudge: Ada should be in the pond hall by now and the others are waiting. Walk there now, please.  [straggler: not in the pond hall 120 s after the last direction (nudge 1/2)]
+[03:24] ada      is in the pond hall (Waterside Room / Waterside Hall)
+[03:24] gate: everyone is in the pond hall (2/2)
+[03:26] ada      ← go: Your turn: Ada gives the talk now, out loud to the room with say, 2 to 4 sentences about the apple trees, in …  [everyone is present: first talk]
+[03:26] bo       ← prepare: Bo is next, right after Ada. Get the talk ready now (2 to 4 sentences about the pond, in character) but do no…  [ada has started: prepare ahead to hide the turn latency]
+[03:34] ada      says: "Hello, neighbours! I'm Ada, and I keep bees, so I know the apple trees well. In spring the blossoms hum with my girls, …"
+[03:34] ada      finished (card result, 1 line)
+[03:36] bo       ← go: Your turn: Bo gives the talk now, out loud to the room with say, 2 to 4 sentences about the pond, in characte…  [ada finished]
+[03:42] bo       says: "Um... hi. I like the pond best when it's quiet, just before the light gets strong. The water holds still like it's list…"
+[03:44] bo       finished (card result, 1 line)
+[03:46] all talks given
+[03:46] stop: plan-complete
+[direct] world stopped
+{"ok":true,"runDir":"<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest","pass":true,"checks":{"allPresent":true,"eachPresented":true,"inOrder":true,"eachOnce":true,"redirect":true},"story":"<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/playtest/story.html","costUsd":0.355}
+[soul-run 04:24:48] run completed; releasing owned resources
+{
+ "status": "completed",
+ "reason": null,
+ "runDir": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2",
+ "receipt": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-steer-refuse-remeasure-sonnet-r2/run-receipt.json",
+ "resources": {
+  "ok": true,
+  "failed": []
+ },
+ "observer": {
+  "ok": null,
+  "skipped": "observer.check false"
+ },
+ "cost": {
+  "wallMs": 232481,
+  "executeMs": 232340,
+  "lifecycleOverheadMs": 141,
+  "runnerCpuUserMs": 1488,
+  "runnerCpuSystemMs": 511,
+  "runnerMaxRssMb": 274,
+  "runDirBytes": 3630086,
+  "processes": {
+   "status": "measured",
+   "intervalMs": 2000,
+   "samples": 118,
+   "classes": {
+    "browser": {
+     "cpuSec": 0.2,
+     "peakRssMb": 120,
+     "processes": 3
+    },
+    "encoder": {
+     "cpuSec": 0,
+     "peakRssMb": 0,
+     "processes": 0
+    },
+    "world": {
+     "cpuSec": 11.7,
+     "peakRssMb": 770,
+     "processes": 1
+    },
+    "other": {
+     "cpuSec": 13.4,
+     "peakRssMb": 965,
+     "processes": 176
+    }
+   },
+   "basis": "ps every 2000 ms over the runner's descendants (180 processes); CPU per process is last seen minus first seen before the run, a process that exits between samples loses up to one interval; peak RSS is the largest sampled sum over the class's processes; commands are classified and not kept"
+  }
+ }
+}

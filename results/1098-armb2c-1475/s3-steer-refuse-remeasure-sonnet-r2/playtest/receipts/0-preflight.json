@@ -1,0 +1,11 @@
+{
+ "step": "preflight",
+ "t": "2026-11-10T04:20:56.521Z",
+ "mono": 0,
+ "ok": true,
+ "allow": {
+  "allowed": true,
+  "note": "quota check skipped: PLAYTEST_USAGE_PY not set"
+ },
+ "machineOk": true
+}

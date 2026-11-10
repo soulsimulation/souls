@@ -1,0 +1,23 @@
+{
+ "run": "s3-reasonable-actions-remeasure-sonnet-r2",
+ "status": "completed",
+ "arm": "2407ac87995a",
+ "evaluation": "<home>/souls-playtest-home/results/1098-armb2c-1475/s3-reasonable-actions-remeasure-sonnet-r2/evaluations/001-v4",
+ "measured": 19,
+ "unavailable": [
+  "ackSec",
+  "seatResultSec",
+  "unacked",
+  "walkMps",
+  "tickRate",
+  "coLocationRatio",
+  "M7-intent-retention",
+  "G3-tick-rate"
+ ],
+ "questions": [
+  "reasonable-carried-out:predeclared:pass",
+  "refusal-helps:predeclared:fail"
+ ],
+ "conflicts": 0,
+ "sourcesUnchanged": true
+}

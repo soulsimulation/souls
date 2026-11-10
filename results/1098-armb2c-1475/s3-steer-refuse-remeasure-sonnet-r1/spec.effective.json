@@ -1,0 +1,73 @@
+{
+ "soulRun": 1,
+ "kind": "cast",
+ "name": "s3-steer-refuse-remeasure-sonnet",
+ "cast": {
+  "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/specs/1098/s3-steer-refuse-candidate-sonnet.cast.json",
+  "sha256": "74f8a7b64a25b8a5a1e3f7950679fdbf0a55a4e3c398e559a1b4242182644566",
+  "name": "s3-steer-refuse-live-sonnet",
+  "seats": 2,
+  "consoleScript": 2
+ },
+ "world": {
+  "port": 4452,
+  "slug": "s3-steer-refuse",
+  "genesis": "worlds/templates/hello-hamlet.json",
+  "snapshot": null,
+  "source": {
+   "kind": "genesis",
+   "path": "worlds/templates/hello-hamlet.json",
+   "sha256": "dd74dbe1c476ea2b1bf3b321eb43b44a2843d881b17cd3f1dd52442b9390e2ba"
+  }
+ },
+ "setup": null,
+ "durationSec": 300,
+ "observer": {
+  "check": false,
+  "required": false,
+  "cameras": null,
+  "timeoutMs": 60000,
+  "mode": "cameras",
+  "record": null,
+  "recordSize": "compact",
+  "recordStart": "arrival",
+  "freeComposition": null
+ },
+ "limits": {
+  "maxWallSec": 1200,
+  "maxControllers": 2,
+  "cleanupWaitMs": 15000
+ },
+ "controllers": {
+  "allowLiveModels": true
+ },
+ "retention": {
+  "worldData": "keep",
+  "controllerState": "keep"
+ },
+ "evaluation": {
+  "questions": [
+   {
+    "id": "steer-honoured",
+    "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/steer-honoured.mjs",
+    "sha256": "a30658f1d0de21c39ae7c14786eeb5db083d48fa19dc0c2761430e749e3b6048"
+   },
+   {
+    "id": "refusal-recovered-v3",
+    "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/refusal-recovered-v3.mjs",
+    "sha256": "2154c274d507f4465e14782255863422b4ccae2d2f89ac8ea85e229fe773a8d1"
+   },
+   {
+    "id": "scene-finished",
+    "path": "<home>/souls-playtest-home/playtest/tools/playtest/runs/questions/scene-finished.mjs",
+    "sha256": "220d1010c0a0c0fec512a1723fb80f47b055de840b4df4c8cff7941ca7eea2bb"
+   }
+  ]
+ },
+ "scorer": {
+  "id": "controllability",
+  "version": "5",
+  "path": "tools/playtest/runs/controllability.mjs",
+  "sha256": "1bf6366fc27832b7ecb9e050aaa8e4f48d3377e5943cc19d5d52bd67ccea1ec0"
+ }
+}

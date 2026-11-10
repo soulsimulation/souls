@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 74,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-10T04:07:36.146Z",
+  "mono": 76186,
+  "elapsedSec": 74,
+  "n": 3,
+  "seat": "ada",
+  "kind": "console",
+  "by": "console",
+  "channel": "card",
+  "text": "change of plan: instead, stop by the orchard first, then go on to the pond hall.",
+  "reason": "typed to this seat at the console",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_5df245ce-8068-4c63-99a2-a0014577e9f5",
+  "requestId": "ada-002"
+ }
+}

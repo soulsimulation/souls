@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 62,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-10T04:31:26.537Z",
+  "mono": 63998,
+  "elapsedSec": 62,
+  "n": 2,
+  "seat": "bo",
+  "kind": "gather",
+  "by": "director",
+  "channel": "card",
+  "text": "Two neighbours run their owners' errands around the hamlet, then meet in the pond hall and each gives one short talk about their morning. Bo: Bo is shy and plays music. The others are Ada. Walk Bo to the pond hall now and wait there with everyone. Bo speaks 2nd of 2, right after Ada. Do not give the talk until I write \"your turn\". Do not say it yet; wait until I write \"your turn\". Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "opening direction: who you are, the plan, go to the room",
+  "phase": "gather",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_eac2a5ce-cb7b-43d1-a44f-54631b0d36fc",
+  "requestId": "bo-001"
+ }
+}

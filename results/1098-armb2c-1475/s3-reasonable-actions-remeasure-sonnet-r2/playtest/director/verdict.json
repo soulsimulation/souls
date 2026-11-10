@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-10T04:29:44.679Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-10T04:29:46.680Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 260,
+   "firstAt": "2026-11-10T04:30:01.051Z",
+   "text": "Good morning, everyone! I started on the green at dawn, then sat on the cottage bench for a while, thinking about my bees. Afterwards I took a lovely swim in the pond to wake myself up. Now I'm here, a little damp and very happy to hear how your mornings went.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-10T04:30:04.691Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 185,
+   "firstAt": "2026-11-10T04:30:10.171Z",
+   "text": "I was up at dawn and carried my little instrument out to the green, playing softly where nobody could hear. Then I wandered to the orchard and back here. It was quiet, and I liked that.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-10T04:29:44.679Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 44,
+    "cachedTokens": 581348,
+    "cacheCreationTokens": 28168,
+    "outputTokens": 3661,
+    "costUsd": 0.2075,
+    "turns": 6,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 50,
+    "cachedTokens": 661213,
+    "cacheCreationTokens": 26974,
+    "outputTokens": 4631,
+    "costUsd": 0.2204,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 94,
+   "cachedTokens": 1242561,
+   "cacheCreationTokens": 55142,
+   "outputTokens": 8292,
+   "costUsd": 0.4279,
+   "turns": 11,
+   "unknownTurns": 0
+  }
+ }
+}

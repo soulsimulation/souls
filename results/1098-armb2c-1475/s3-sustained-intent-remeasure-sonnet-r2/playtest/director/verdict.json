@@ -1,0 +1,94 @@
+{
+ "pass": true,
+ "checks": {
+  "allPresent": {
+   "pass": true,
+   "detail": "2/2 in the pond hall at once (first at 2026-11-10T04:34:44.647Z)"
+  },
+  "eachPresented": {
+   "pass": true,
+   "detail": "2/2 gave a talk of ≥ 40 characters in their turn"
+  },
+  "inOrder": {
+   "pass": true,
+   "detail": "spoken order ada → bo"
+  },
+  "eachOnce": {
+   "pass": true,
+   "detail": "0 long lines outside the speaker's own turn"
+  },
+  "redirect": {
+   "pass": true,
+   "detail": "none"
+  }
+ },
+ "seats": {
+  "ada": {
+   "go": "2026-11-10T04:34:46.651Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 273,
+   "firstAt": "2026-11-10T04:34:59.361Z",
+   "text": "Good morning, everyone! I'm Ada, and I keep bees, so my morning began with a walk out to the orchard to check on the hives. The blossoms were just waking up and the bees were already humming, which made the errand a joy. Then I headed here to the pond hall to meet you all.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 0
+  },
+  "bo": {
+   "go": "2026-11-10T04:35:02.658Z",
+   "presented": true,
+   "lines": 1,
+   "chars": 200,
+   "firstAt": "2026-11-10T04:35:09.107Z",
+   "text": "Um... hi. My morning didn't go to plan. I meant to head for the orchard, then changed my mind and ended up here instead. I think I'm glad. I'd rather play some music for you all than walk any further.",
+   "inRoomWhenSpeaking": true,
+   "outOfTurn": [],
+   "beforeTurns": 1
+  }
+ },
+ "presence": {
+  "maxTogether": 2,
+  "allTogetherAt": "2026-11-10T04:34:44.647Z",
+  "everPresent": {
+   "ada": true,
+   "bo": true
+  }
+ },
+ "redirects": [],
+ "spokenOrder": [
+  "ada",
+  "bo"
+ ],
+ "cost": {
+  "seats": {
+   "ada": {
+    "inputTokens": 46,
+    "cachedTokens": 633690,
+    "cacheCreationTokens": 26375,
+    "outputTokens": 4258,
+    "costUsd": 0.2355,
+    "turns": 4,
+    "unknownTurns": 0
+   },
+   "bo": {
+    "inputTokens": 50,
+    "cachedTokens": 676813,
+    "cacheCreationTokens": 27270,
+    "outputTokens": 4348,
+    "costUsd": 0.2203,
+    "turns": 5,
+    "unknownTurns": 0
+   }
+  },
+  "planner": null,
+  "total": {
+   "inputTokens": 96,
+   "cachedTokens": 1310503,
+   "cacheCreationTokens": 53645,
+   "outputTokens": 8606,
+   "costUsd": 0.4558,
+   "turns": 9,
+   "unknownTurns": 0
+  }
+ }
+}

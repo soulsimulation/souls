@@ -1,0 +1,21 @@
+{
+ "elapsedSec": 268.1,
+ "legible": null,
+ "direction": {
+  "t": "2026-11-10T04:10:50.224Z",
+  "mono": 270264,
+  "elapsedSec": 268.1,
+  "n": 8,
+  "seat": "ada",
+  "kind": "nudge",
+  "by": "director",
+  "channel": "card",
+  "text": "It is Ada's turn now: say the talk out loud in the pond hall (say), 2 to 4 sentences, then stop. Keep it cheap: do just this with one or two commands, no exploring, then wait for my next message.",
+  "reason": "silent 60 s after its turn began (nudge 1/1)",
+  "phase": "turns",
+  "speaker": "ada",
+  "economy": "lean",
+  "messageId": "msg_0914fb69-8aea-4e60-8bb4-5cba43d677d5",
+  "requestId": "ada-005"
+ }
+}
