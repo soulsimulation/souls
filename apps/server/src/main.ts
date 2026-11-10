@@ -41,6 +41,7 @@ import { setKitViewerContract } from '@souls/generators';
 import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
 import { stallConfig, startWatchdog, writeLiveNow } from './load/watchdog.ts';
+import { StallLog } from './load/stall-log.ts';
 import { sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
@@ -195,6 +196,8 @@ const monitor = new LoadMonitor({ host, drill: drill && ['amber', 'red', 'black'
   requestMs: () => admission?.spentMs ?? 0, baselineMs: process.env.SIM_LOAD_BASELINE_MS !== undefined && process.env.SIM_LOAD_BASELINE_MS !== '' ? Number(process.env.SIM_LOAD_BASELINE_MS) : undefined,
   souls: () => { let awake = 0, connected = 0; for (const id of host.minds.keys()) { const st = host.publicBodyOf?.(id)?.state; if (st === 'awake') awake++; if (st && st !== 'asleep') connected++; } return { awake, waiting: waking?.waiting() ?? 0, connected }; },
   onBlackTooLong: () => { console.log(`[load] black for ${Math.round((Number(process.env.SIM_LOAD_BLACK_MS) || 60_000) / 1000)} s: planned restart (snapshot, exit 75)`); plannedSnapshot('load:black: planned restart'); void shutdown('load:black', 75).catch(() => process.exit(75)); } });
+// #1750 A3: a main-thread stall over 1 s is logged with its time, length and what ran in it (SIM_STALL_LOG=0 turns it off)
+const stallLog = process.env.SIM_STALL_LOG === '0' ? undefined : new StallLog({ ticks: () => ({ tick: host.engine.world.tick, tickMs: host.tickMs }) });
 if (admission) monitor.register('admission', (l) => admission.setLoadLevel(l));
 monitor.register('hub', (l) => hub.setLoadLevel(l));
 // L4's perception dial (lane srv-spatial, god/engine-bridge.ts PERCEIVE_DIAL); guarded until that lane merges
@@ -328,7 +331,7 @@ if (engineBridge) {
   }
 }
 server.listen(config.port, config.host, () => {
-  bootPhase('serving', host.engine.world.tick); monitor.start(); servingWarm('boot');
+  bootPhase('serving', host.engine.world.tick); monitor.start(); stallLog?.start(); servingWarm('boot');
   console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
   const s = (ms: number) => (ms / 1000).toFixed(2);
   console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);

@@ -7,6 +7,8 @@ import {createHash} from 'node:crypto';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
+import {apiRoute, handlerMsOf, recordApi} from './api-times.ts';
+import {noteAnswer} from './stall-log.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
@@ -292,7 +294,13 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   };
   // #1724: every answer says how long this world took over it and how much of that was waiting its turn, so a slow call
   // can be laid beside the client's own clock (Server-Timing: world = arrival to answer, queue = admission wait; ms)
-  const timed = (c: Context, t0: number, queued = 0) => { c.header('Server-Timing', `world;dur=${(performance.now() - t0).toFixed(1)}, queue;dur=${queued.toFixed(1)}`); };
+  // #1750 A2: and the same two numbers go into the route's histograms (api-times.ts), for /healthz and live.json
+  const timed = (c: Context, t0: number, queued = 0) => {
+    const ms = performance.now() - t0;
+    c.header('Server-Timing', `world;dur=${ms.toFixed(1)}, queue;dur=${queued.toFixed(1)}`);
+    const route = apiRoute(c.req.method, c.req.path);
+    if (route) { recordApi(route, queued, handlerMsOf(route, ms - queued, k => c.req.query(k))); noteAnswer(route, t0 + queued, t0 + ms); }
+  };
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');
     if (!edge) return next();

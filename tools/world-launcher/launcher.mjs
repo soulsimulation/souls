@@ -188,7 +188,10 @@ export function docFile(path, accept = '') {
   if (!m) return null;
   return m[2] === '.md' || md ? `docs${m[1]}.md` : `docs${m[1]}/index.html`;
 }
-const json = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': NOINDEX, ...headers }).end(JSON.stringify(body)); };
+// #1750 (#981's fold-in): an answer the launcher gives itself (a refusal, a ceiling, an unavailable world) says so in
+// Server-Timing (`launcher;desc=answered`), so a client never mistakes it for the world's time
+const launcherTiming = (res, desc) => { const t0 = res.req?.simT0; return `launcher;${t0 !== undefined ? `dur=${(performance.now() - t0).toFixed(1)};` : ''}desc=${desc}`; };
+const json = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': NOINDEX, 'server-timing': launcherTiming(res, 'answered'), ...headers }).end(JSON.stringify(body)); };
 const BUILD = (() => { try { return readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../BUILD'), 'utf8').trim(); } catch { return 'dev'; } })();
 /** Direct requests from this machine (not through a reverse proxy, which adds x-forwarded-for). */
 /** World routes that make someone a world's god while it has none (blocked on a world marked not claimable). */
@@ -653,6 +656,7 @@ export async function openLauncher(cfg = {}) {
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
   function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false } = {}) {
     if (clientGone(req, res)) return;
+    const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
     // the worlds see people, not the proxy; locally it is set to the connecting address as before.
     const xff = behindProxy && req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] : (req.socket.remoteAddress ?? '127.0.0.1');
@@ -660,6 +664,10 @@ export async function openLauncher(cfg = {}) {
       // hop-by-hop headers stay on their hop: an upstream `connection: keep-alive` would turn this server's own choice
       // back on (forward() closes after its response; Node lets a user connection header override that)
       const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, ...headers } = r.headers;
+      // #1750 A2: the launcher's own wait (ceilings, a waking world) and the world's whole answer as seen from here, after the
+      // world's own `world;dur` and `queue;dur`: upstream minus world is the hop and the world's event-loop wait before it read the request
+      const now = performance.now(), mine = `launcher;dur=${((req.simT0 !== undefined ? sent - req.simT0 : 0)).toFixed(1)}, upstream;dur=${(now - sent).toFixed(1)}`;
+      headers['server-timing'] = headers['server-timing'] ? `${headers['server-timing']}, ${mine}` : mine;
       if (soul && account) ceilings.learn(soul, account);   // lane L1: the account a Soul token belongs to (never shown to the client)
       if (slug) sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
@@ -789,6 +797,10 @@ export async function openLauncher(cfg = {}) {
       // counted against the world budget after the fact (the answer is already main's)
       if (opts.worldDeferred && r.headers['x-sim-read'] !== 'worker') { ceilings.chargeWorld(slug, { force: true }); st.mainAnswered++; }
       const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, ...headers } = r.headers;
+      // #1750 A2: the launcher's own wait (ceilings, a waking world) and the world's whole answer as seen from here, after the
+      // world's own `world;dur` and `queue;dur`: upstream minus world is the hop and the world's event-loop wait before it read the request
+      const now = performance.now(), mine = `launcher;dur=${((req.simT0 !== undefined ? sent - req.simT0 : 0)).toFixed(1)}, upstream;dur=${(now - sent).toFixed(1)}`;
+      headers['server-timing'] = headers['server-timing'] ? `${headers['server-timing']}, ${mine}` : mine;
       if (opts.soul && account) ceilings.learn(opts.soul, account);
       sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, robotsOf(slug, headers));
@@ -844,7 +856,7 @@ export async function openLauncher(cfg = {}) {
     if (clientGone(req, res)) return;
     const tag = r.status === 200 ? r.headers.etag : undefined;
     if (tag && String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === tag)) { const { 'content-length': _l, 'content-type': _t, ...kept } = r.headers; res.writeHead(304, robotsOf(slug, { ...kept, 'x-sim-cache': r.cache })).end(); return; }
-    res.writeHead(r.status, robotsOf(slug, { ...r.headers, 'x-sim-cache': r.cache })).end(req.method === 'HEAD' ? undefined : r.body);
+    res.writeHead(r.status, robotsOf(slug, { ...r.headers, 'x-sim-cache': r.cache, ...(r.cache !== 'miss' ? { 'server-timing': launcherTiming(res, 'cache') } : {}) })).end(req.method === 'HEAD' ? undefined : r.body);
   }
   /** Retired (a newer launcher serves now): anything still arriving here, on a connection opened before the switch,
    *  goes to the keeper's port, i.e. to the newer launcher; the connection closes after this response. */
@@ -852,6 +864,7 @@ export async function openLauncher(cfg = {}) {
 
   const sockets = new Set();
   const server = createServer(async (req, res) => {
+    req.simT0 = performance.now();   // #1750: arrival, for Server-Timing `launcher` (time here before the world was asked)
     const sock = req.socket; sock.simBusy = (sock.simBusy ?? 0) + 1; res.once('close', () => { sock.simBusy--; });
     if (closed) res.shouldKeepAlive = false;   // stopping: answered, then this connection ends (see close())
     if (retiredTo) { forward(req, res); return; }

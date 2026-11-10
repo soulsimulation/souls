@@ -9,6 +9,7 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, type Admission} from './load/admission.ts';
+import {apiOf} from './load/api-times.ts';
 import {slowedFromRefusals} from './load/soul-slowed.ts';
 import type {LoadMonitor} from './load/monitor.ts';
 import {clockNow, setClockSource} from './load/clock-source.ts';
@@ -268,7 +269,7 @@ export function buildApp(d: Deps) {
     const clock = mon?.clock();
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
       tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
-      ...(mon ? {load: mon.health()} : {}) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
+      ...(mon ? {load: mon.health()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
   const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile); return soulClient ? {soulClient} : {}; };
