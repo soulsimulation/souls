@@ -75,7 +75,12 @@ export const MIGRATION_ZONES: Readonly<Record<string, string>> = Object.freeze({
   'rna-studio': 'Europe/Lisbon',
 });
 export const DEFAULT_TIME_ZONE = 'America/New_York';
-export function defaultTimeZone(slug: string | undefined): string { return (slug && MIGRATION_ZONES[slug]) || DEFAULT_TIME_ZONE; }
+/** A world's zone before it has its own: the zone its creator chose in the New world dialog (the launcher passes it as
+ *  WORLD_TIME_ZONE, so the first real-time boot records it), else its slug's migration zone, else America/New_York. */
+export function defaultTimeZone(slug: string | undefined, env: Record<string, string | undefined> = process.env): string {
+  if (isTimeZone(env.WORLD_TIME_ZONE)) return env.WORLD_TIME_ZONE;
+  return (slug && MIGRATION_ZONES[slug]) || DEFAULT_TIME_ZONE;
+}
 
 /** #1649: the deploy's explicit production marker. The keeper names its stage from the unit instance it runs
  *  (sim-worlds@<stage>: SIM_STAGE, or its --link /srv/sim-worlds/<stage>), the launcher passes it to every world; the

@@ -116,6 +116,15 @@ switch independent. A previously saved master mute migrates to both switches off
   `realTime: true` puts it back. `POST /v1/god/act` holds the same rule for a `world` op's time (`clock: 'accelerated'`,
   `set` or `dayTicks` on a production world: `time.accelerated-production`). With the flag off again, a migrated world's
   `time.clock` is cleared at boot so nothing reads a clock it does not run.
+- **Choosing and changing the zone (#1649 part 3).** The New world dialog has a time zone field, prefilled with the
+  creator's browser zone; the launcher refuses an invalid one (`time.zone-invalid`), keeps it on the registry row and
+  passes it to the world as `WORLD_TIME_ZONE`, which the first real-time boot records as `time.timeZone` (before the slug
+  defaults). The owner changes it with `POST /v1/god/env {timeZone}`: one `world` op, in the ledger and undoable; an
+  invalid zone is `time.zone-invalid`, a co-builder token `cobuilder.scope` (or `cobuilder.disabled`), a helper token
+  `helper.scope`. The clock re-aligns to the new local time at once. `GET /v1/god/status` reports the zone, so the
+  launcher's list (`worlds.json` `timeZone`) follows an owner's change, and the viewer's time panel names it. When the
+  shown clock jumps 20 world minutes or more while live, the viewer eases the sky and lights to the new time over about
+  4 s (`apps/web/src/clock-ease.ts`); scrubbing history, reduced motion and `?shot` pages cut instead.
 - **Registry.** `<data>/worlds.json` records each world (slug, owner, template, flags). Reserved slugs include `toy`,
   `mars`, `littlemartians`, `eden`, `assets`, `api`, `god` and `launcher`.
 - **Thumbnails.** Each `worlds.json` row carries `thumbnail` (a URL or `null`) and `thumbnailSource` (`owner`,

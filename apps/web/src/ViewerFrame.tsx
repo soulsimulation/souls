@@ -11,6 +11,7 @@ import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';
 import { hourLabel, setVisitorPreviewHour, subscribeVisitorHour, visitorPreviewHour } from './visitor-hour.ts';
+import { subscribeWorldZone, worldZone } from './world-zone.ts';
 import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
 
@@ -65,6 +66,7 @@ export function useViewerInsets(root: RefObject<HTMLDivElement | null>, visible:
 export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationChange, worldTime, connected = true, connecting = false, worldName, followName, selectedName, slots, initial }: { handle: WorldViewerHandle | null; state: WorldViewerState | null; dt: number; navigationOpen: boolean; onNavigationChange: (open: boolean) => void; onNavigationOpen?: () => void; worldTime?: string; connected?: boolean; connecting?: boolean; worldName?: string; followName?: string | null; selectedName?: string | null; slots?: { status: HTMLElement | null; camera: HTMLElement | null }; initial?: InitialWorldProgress | null }) {
   const [cameraNote, setCameraNote] = useState('');
   const previewHour = useSyncExternalStore(subscribeVisitorHour, visitorPreviewHour, visitorPreviewHour);
+  const zone = useSyncExternalStore(subscribeWorldZone, worldZone, worldZone);   // #1649: a real-time world's own time zone
   const [hourOpen, setHourOpen] = useState(false);
   const hourButton = useRef<HTMLButtonElement>(null);
   // DLG3 (Gene): the history scrub ("Back 1 min") is hidden for now; `?rewind` keeps it reachable for tests.
@@ -154,12 +156,13 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
       <div className="row viewer-status">
         {/* #1392 (Gene): at the present time the element is one "● Live" pill; the day and time are in the panel it opens.
             A previewed hour turns the circle orange and the pill shows that hour; Back to now restores Live. */}
-        {pill ? <button ref={hourButton} type="button" className="world-time-button live-pill" aria-expanded={hourOpen} aria-label={previewHour != null ? `Previewing ${hourLabel(previewHour)}: change the time of day` : `Live, ${worldTime}: preview the time of day`} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>
+        {pill ? <button ref={hourButton} type="button" className="world-time-button live-pill" aria-expanded={hourOpen} aria-label={previewHour != null ? `Previewing ${hourLabel(previewHour)}: change the time of day` : `Live, ${worldTime}: preview the time of day`} title={`${zone ? `Local time in ${zone.replace(/_/g, ' ')}. ` : ''}Preview the time of day (only you see it)`} onClick={() => setHourOpen(!hourOpen)}>
           <span className={previewHour != null ? 'preview' : statusClass} data-viewer-status data-viewer-live={live} data-viewer-preview={previewHour != null || undefined}>{previewHour != null ? hourLabel(previewHour) : status}</span>
         </button> : <span className={statusClass} data-viewer-status data-viewer-live={live} title={state?.shownTick == null ? undefined : `Recorded tick ${state.shownTick.toFixed(0)}`}>{status}</span>}
-        {!pill && state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title="Preview the time of day (only you see it)" onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
+        {!pill && state?.shownTick != null && !arriving && worldTime && <button ref={hourButton} type="button" className="world-time world-time-button" aria-expanded={hourOpen} title={`${zone ? `Local time in ${zone.replace(/_/g, ' ')}. ` : ''}Preview the time of day (only you see it)`} onClick={() => setHourOpen(!hourOpen)}>{previewHour != null ? <>Preview {hourLabel(previewHour)}</> : worldTime.includes(' · ') ? <><span className="world-day">{worldTime.split(' · ')[0]} </span>{worldTime.split(' · ').slice(1).join(' · ')}</> : worldTime}</button>}
         {hourOpen && !arriving && createPortal(<div className="time-preview" role="group" aria-label="Preview the time of day" style={(() => { const r = hourButton.current?.getBoundingClientRect(); return { top: (r?.bottom ?? 48) + 8, left: Math.max(16, (r?.left ?? 16) - 12) }; })()}>
           {pill && <span className="time-preview-now" data-world-time>{worldTime}</span>}
+          {zone && <span className="dim" data-world-zone={zone}>Local time in {zone.replace(/_/g, ' ')}</span>}
           <label>Time of day <b>{previewHour != null ? hourLabel(previewHour) : 'now'}</b>
             <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} /></label>
           <button type="button" onClick={() => { setVisitorPreviewHour(null); setHourOpen(false); }}>Back to now</button>
