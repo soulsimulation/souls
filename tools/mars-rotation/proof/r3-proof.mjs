@@ -76,7 +76,7 @@ try {
     note('dev copy vs live', result.vsLive);
   }
   // daylight for the pictures: a local-only edit before the patches (paused at 10:00); not part of the live steps
-  await ctx.api('/v1/god/act', { body: { note: 'daylight for proof shots', ops: [{ op: 'world', state: { time: { set: { hour: 10, n: 1 }, paused: true } } }] } });
+  await ctx.api('/v1/god/act', { body: { note: 'daylight for proof shots', ops: [{ op: 'world', state: { time: { set: { hour: 10, n: 1 }, paused: true, clock: 'accelerated' } } }] } });
   await shoot('before', 90);
   result.apply = {};
   for (const k of ['fidelity', 'rotation', 'field', 'water']) {

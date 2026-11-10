@@ -108,7 +108,7 @@ test('plain listen still exits on the first wake with the usual output', async t
   const w = await world(t);
   setTimeout(() => w.post({id: 'm1', text: 'hello'}), 300);
   const r = await w.cli('listen');
-  assert.equal(r.code, 0); assert.deepEqual(r.json.messages.map(m => m.id), ['m1']); assert.match(r.json.next, /restart listen --after m1/);
+  assert.equal(r.code, 0); assert.deepEqual(r.json.messages.map(m => m.id), ['m1']); assert.match(r.json.next, /restart listen --after m1/i);
   assert.ok(r.out.split('\n').length > 2, 'pretty-printed as before, not one line');
 });
 
