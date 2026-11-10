@@ -86,19 +86,22 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
   // A change kept for a client coming back was public when it was made. A place made secret (or the places changed) since
   // may have made it not so: the kept changes are dropped, and a client coming back takes the whole picture as it is now.
   let shown = '';
+  // the push's own time: the picture's build (shared with GET), and the diff, frame and fan-out on top of it
+  const cost = {runs: 0, ms: [] as number[], build: [] as number[], push: [] as number[], bytes: 0, since: Date.now()};
+  const rec = (a: number[], v: number) => { if (timer && a.length < 4800) a.push(v); };   // only while the push runs; a minute's worth
   const current = () => {
     const nowShown = `${L.knowledge?.version ?? 0}|${L.places.version}`;
     if (nowShown !== shown) { shown = nowShown; ring.length = 0; }
     const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${L.knowledge?.version ?? 0}`;
     if (kept?.key === key) return kept;
-    const pic = build(tick);
+    const tb = performance.now(), pic = build(tick), td = performance.now(); rec(cost.build, td - tb);
     if (!kept) { kept = {key, pic, seq: 1, body: null, hash: null}; return kept; }
     const d = liveDelta(kept.pic, pic, kept.seq + 1);
-    if (!d) { kept = {...kept, key, pic}; kept.body = null; return kept; }   // the clock alone moved: same seq, no frame
+    if (!d) { kept = {...kept, key, pic}; kept.body = null; rec(cost.push, performance.now() - td); return kept; }   // the clock alone moved: same seq, no frame
     kept = {key, pic, seq: d.seq, body: null, hash: null};
     const frame = JSON.stringify({epoch, ...d}), sse = sseOf('live', frame);
     ring.push({seq: d.seq, frame, sse}); if (ring.length > LIVE_RING) ring.shift();
-    fanout('live', frame, sse);
+    fanout('live', frame, sse); rec(cost.push, performance.now() - td); cost.bytes += sse.length * subs.size;
     return kept;
   };
   const full = () => { const k = current(); return k.body ??= JSON.stringify({...k.pic, epoch, seq: k.seq}); };
@@ -106,16 +109,15 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
 
   // ---- the push: only while someone holds it. Its own time is measured and logged once a minute while it runs.
   let timer: ReturnType<typeof setInterval> | null = null, lastCheck = 0;
-  const cost = {runs: 0, ms: [] as number[], since: Date.now()};
   const step = () => {
     const t0 = performance.now();
     try { current(); if (Date.now() - lastCheck >= CHECK_EVERY_MS) { lastCheck = Date.now(); check(); } }
     catch (error) { console.error('[live-push] fault', error instanceof Error ? error.message : String(error)); }
-    cost.runs++; cost.ms.push(performance.now() - t0);
+    cost.runs++; rec(cost.ms, performance.now() - t0);
     if (Date.now() - cost.since >= 60_000) {
-      const s = cost.ms.sort((a, b) => a - b), q = (p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))]!.toFixed(3);
-      console.log(`[live-push] subscribers=${subs.size} runs=${cost.runs} seq=${kept?.seq ?? 0} ms p50=${q(0.5)} p99=${q(0.99)} max=${q(1)}`);
-      cost.runs = 0; cost.ms = []; cost.since = Date.now();
+      const q = (a: number[], p: number) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))]!.toFixed(3) : '-'; };
+      console.log(`[live-push] subscribers=${subs.size} runs=${cost.runs} seq=${kept?.seq ?? 0} ms p50=${q(cost.ms, 0.5)} p99=${q(cost.ms, 0.99)} max=${q(cost.ms, 1)} build p99=${q(cost.build, 0.99)} push p99=${q(cost.push, 0.99)} max=${q(cost.push, 1)} bytesOut=${cost.bytes}`);
+      cost.runs = 0; cost.ms = []; cost.build = []; cost.push = []; cost.bytes = 0; cost.since = Date.now();
     }
   };
   const subscribe = (after: string | null, send: LiveSend) => {
