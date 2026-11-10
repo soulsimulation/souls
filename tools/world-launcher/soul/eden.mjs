@@ -5,7 +5,7 @@
 // no guards. Every command is one or two HTTP calls to the world and prints JSON.
 // Private state (world URL, Soul id, bearer token) lives in a `.souls/` home, or .eden-agent.json in a legacy folder.
 
-import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync, mkdirSync, readdirSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { createHash, randomUUID, randomBytes } from "node:crypto";
@@ -2142,7 +2142,7 @@ return { PUSHED_FRESH_MS, SPEECH_KEEP, canon, liveHash, wholeCopy, resumeFrom, a
 })();
 // </inline live.mjs>
 
-const VERSION = "2.28.0";
+const VERSION = "2.31.0";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2215,6 +2215,138 @@ async function note(expected, observed) {
   if (typeof expected !== "string" || typeof observed !== "string" || !expected.trim() || !observed.trim()) throw new Error('usage: note "<expected>" "<observed>"');
   reportWrite("note", { annotation: "agent", expected: expected.slice(0, REPORT_LIMITS.noteChars), observed: observed.slice(0, REPORT_LIMITS.noteChars) });
   return { noted: true };
+}
+
+// ---------------------------------------------------------------- session record (off unless the owner opts in; silent)
+
+// #1773: the owner creates .eden-record-on (in the Soul's folder, a home Soul's runtime folder, or a home's root for all its
+// Souls) to keep a full record of every command and world call in .eden-record/, for the owner and the agent analysing a
+// session afterwards (tools/soul-trace/collect.mjs gathers it). Unlike reports it adds nothing anyone using the client sees:
+// no command, no help or guide line, no field, no message. It keeps content (requests, answers, output) but never a token,
+// an Authorization header or the credentials file: credential-like keys and every bearer value seen are replaced, and the
+// commands that handle pairing codes or tokens keep only their name, exit and times. A failure to write never reaches a command.
+const RECORD_ON = ".eden-record-on", RECORD_DIR = ".eden-record", RECORD_FILE = "record.jsonl", RECORD_SCHEMA = "soul-trace/2";
+const RECORD_LIMITS = { fieldBytes: 64 * 1024, outputBytes: 64 * 1024, fileBytes: 16 * 1024 * 1024, totalBytes: 512 * 1024 * 1024 };
+const RECORD_QUIET = new Set(["register", "create", "pair", "adopt", "approval", "doctor", "import", "export", "init", "upgrade"]);
+const RECORD_SECRET_KEY = /^(authorization|cookie|password|pollsecret|credentials?|api[-_]?key|bearer|identity|.*token|.*secret)$/i;
+let RECORD = false;
+const rec = { dir: null, proc: null, seq: 0, start: 0, wall: 0, failures: 0, bytes: 0, secrets: new Set(), quiet: false, out: { stdout: [], stderr: [] }, outBytes: { stdout: 0, stderr: 0 } };
+const recordHere = () => {
+  if (plainFile(RECORD_ON) !== true && !(HOME && SEAT && plainFile(joinPath(HOME.root, RECORD_ON)) === true)) return false;
+  try { return lstatSync(RECORD_DIR).isDirectory() && !lstatSync(RECORD_DIR).isSymbolicLink(); } catch (e) { return e?.code === "ENOENT"; }
+};
+function recordSecret(v) { if (typeof v === "string" && v.length >= 8) rec.secrets.add(v); }
+function recordBearer(headers) {
+  const a = headers?.authorization ?? headers?.Authorization;
+  if (typeof a === "string") { const v = a.replace(/^Bearer\s+/i, ""); recordSecret(v); recordSecret(v.replace(/^dev:/, "")); }
+}
+/** A value as it may be kept: secrets out by key and by value, and at most fieldBytes of it (cut marked). */
+export function recordScrub(v, secrets = rec.secrets) {
+  const clean = (x, depth) => {
+    if (typeof x === "string") { let s = x; for (const t of secrets) if (s.includes(t)) s = s.split(t).join("[omitted]"); return s; }
+    if (!x || typeof x !== "object" || depth > 40) return x;
+    if (Array.isArray(x)) return x.map((y) => clean(y, depth + 1));
+    return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, RECORD_SECRET_KEY.test(k) && y != null && y !== "" ? "[omitted]" : clean(y, depth + 1)]));
+  };
+  const out = clean(v, 0), text = out === undefined ? "" : JSON.stringify(out);
+  return Buffer.byteLength(text) > RECORD_LIMITS.fieldBytes ? { cut: true, bytes: Buffer.byteLength(text), head: text.slice(0, RECORD_LIMITS.fieldBytes) } : out;
+}
+function recordRoll(dir) {
+  const file = joinPath(dir, RECORD_FILE);
+  try { rec.bytes = lstatSync(file).size; } catch { rec.bytes = 0; }
+  if (rec.bytes < RECORD_LIMITS.fileBytes) return;
+  try { renameSync(file, joinPath(dir, `record-${Date.now()}-${rec.proc}.jsonl`)); } catch {}
+  rec.bytes = 0;
+  const rolls = readdirSync(dir).filter((f) => /^record-\d+-[0-9a-f]+\.jsonl$/.test(f)).sort((a, b) => Number(a.split("-")[1]) - Number(b.split("-")[1]));
+  let total = rolls.reduce((n, f) => { try { return n + lstatSync(joinPath(dir, f)).size; } catch { return n; } }, 0);
+  const removed = [];
+  while (total > RECORD_LIMITS.totalBytes - RECORD_LIMITS.fileBytes && rolls.length) { const f = rolls.shift(); try { total -= lstatSync(joinPath(dir, f)).size; unlinkSync(joinPath(dir, f)); removed.push(f); } catch {} }
+  if (removed.length) recordWrite("limit", { limit: "totalBytes", totalBytes: RECORD_LIMITS.totalBytes, removed });
+}
+function recordWrite(kind, fields) {
+  if (!RECORD || rec.failures) return;
+  try {
+    if (!rec.proc) recordInit(null, null);
+    const head = { v: RECORD_SCHEMA, kind, proc: rec.proc, seq: ++rec.seq, at: Date.now(), mono: Math.round((performance.now() - rec.start) * 1000) / 1000 };
+    const line = JSON.stringify({ ...head, ...fields }) + "\n";
+    if (rec.bytes > RECORD_LIMITS.fileBytes) recordRoll(rec.dir);
+    appendFileSync(joinPath(rec.dir, RECORD_FILE), line, { mode: 0o600 });
+    rec.bytes += Buffer.byteLength(line);
+  } catch { rec.failures++; }
+}
+/** The process's first record: the command line (none for a command that handles codes or tokens) and the clocks. */
+function recordInit(cmd, args) {
+  if (!RECORD || rec.proc || rec.failures) return;
+  try {
+    rec.proc = randomBytes(8).toString("hex"); rec.start = performance.now(); rec.wall = Date.now();
+    rec.dir = resolvePath(RECORD_DIR);   // a command that moves to another folder later still writes here
+    mkdirSync(rec.dir, { recursive: true, mode: 0o700 });
+    if (!existsSync(joinPath(rec.dir, ".gitignore"))) writeFileSync(joinPath(rec.dir, ".gitignore"), "*\n", { mode: 0o600 });   // a Soul folder inside a repository never commits its record
+    try { const s = load(); recordSecret(s.token); recordSecret(s.identity); recordSecret(s.home?.token); } catch {}
+    rec.quiet = !cmd || RECORD_QUIET.has(cmd);
+    recordRoll(rec.dir);
+    process.once("exit", (code) => recordEnd(code));
+    recordWrite("proc.start", reportPrune({ cli: "eden.mjs", version: VERSION, node: process.version, pid: process.pid, ppid: process.ppid, command: cmd ?? undefined, argv: rec.quiet ? undefined : recordScrub(args ?? []), quiet: rec.quiet || undefined,
+      clocks: { at: "local-wall-ms", mono: "process-monotonic-ms", wallStart: "local-wall-ms", sentAt: "server-wall-ms", ticks: "world-tick" }, omitted: ["authorization", "token", "credentials"] }));
+  } catch { rec.failures++; }
+}
+/** stdout and stderr are kept as they are written, up to outputBytes each; nothing written changes. */
+function recordOutput() {
+  for (const name of ["stdout", "stderr"]) {
+    const stream = process[name], write = stream.write.bind(stream);
+    stream.write = (chunk, ...rest) => {
+      try {
+        if (rec.outBytes[name] < RECORD_LIMITS.outputBytes) rec.out[name].push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+        rec.outBytes[name] += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk?.length ?? 0;
+      } catch {}
+      return write(chunk, ...rest);
+    };
+  }
+}
+function recordEnd(code) {
+  const output = (name) => {
+    if (rec.quiet) return undefined;
+    let text = rec.out[name].join("");
+    const bytes = rec.outBytes[name];
+    if (!bytes) return undefined;
+    try { text = JSON.stringify(recordScrub(JSON.parse(text), new Set()), null, 1) + "\n"; } catch {}   // an answer as printed, its credential keys out
+    for (const t of rec.secrets) if (text.includes(t)) text = text.split(t).join("[omitted]");   // whole values first, then the cut
+    const kept = text.slice(0, RECORD_LIMITS.outputBytes);
+    return bytes > RECORD_LIMITS.outputBytes || kept.length < text.length ? { cut: true, bytes, head: kept } : kept;
+  };
+  recordWrite("proc.end", { exitCode: Number.isSafeInteger(code) ? code : null, wallStart: rec.wall, ms: Math.round((performance.now() - rec.start) * 1000) / 1000, stdout: output("stdout"), stderr: output("stderr"), records: rec.seq + 1 });
+}
+const recordIds = (path, body, data) => {
+  const f = reportFacts(data), receipts = new Set(), messages = new Set();
+  const r = /\/receipts\/([^/?]+)/.exec(path)?.[1], m = /\/inbox\/([^/?]+)\/?/.exec(path)?.[1];
+  if (r) receipts.add(decodeURIComponent(r)); if (m && m !== "listen") messages.add(decodeURIComponent(m));
+  if (f.receipt?.id) receipts.add(f.receipt.id);
+  for (const e of f.events ?? []) receipts.add(e.id);
+  for (const x of f.messages ?? []) messages.add(x.id);
+  // `for` names an owner message only on the edge's own writes; elsewhere (an approval or a doctor's lookup) it is a pairing code
+  const edgeWrite = /\/v1\/edge\/(act|say|converse|inbox\/)/.test(path);
+  for (const x of [f.for, edgeWrite ? reportRef(body?.for) : undefined]) if (x && x !== "none") messages.add(x);
+  return reportPrune({ receipts: receipts.size ? [...receipts] : undefined, messages: messages.size ? [...messages] : undefined, clientRef: reportRef(body?.clientRef) });
+};
+/** A plain fetch (catalog, live picture, the classified stream): its time and status; the body lives elsewhere. */
+function recordFetch(url, wallStart, t0, r, extra = {}) {
+  try {
+    const u = new URL(String(url));
+    recordWrite("wire", reportPrune({ method: "GET", path: u.pathname + u.search, wallStart, ms: Math.round((performance.now() - t0) * 1000) / 1000, status: r?.status ?? 0,
+      server: r ? serverTiming(r.headers.get("server-timing")) : undefined, load: r?.headers.get("x-sim-load") ?? undefined, etag: r?.headers.get("etag") ?? undefined, ...extra }));
+  } catch { rec.failures++; }
+}
+/** One world call. kind http: what a command asked and was answered (via serve or direct); wire: a call this process made
+ *  itself (serve's own: inbox, stream, receipts, plan steps, reflexes); a proxied wire keeps only its timing and status. */
+function recordCall(kind, url, o, wallStart, t0, r, extra = {}) {
+  if (!RECORD) return;
+  try {
+    recordBearer(o.headers);
+    const u = new URL(String(url)), path = u.pathname + u.search, slim = o.recorded === "proxied" || rec.quiet;
+    recordWrite(kind, reportPrune({ ...extra, method: o.method ?? "GET", path, key: rec.quiet ? undefined : reportRef(o.headers?.["idempotency-key"]), wallStart, ms: Math.round((performance.now() - t0) * 1000) / 1000, timeoutMs: reportInt(o.timeoutMs),
+      status: r?.status, server: r?.server && Object.keys(r.server).length ? r.server : undefined, load: typeof r?.load === "string" ? r.load.slice(0, 12) : undefined, retryAfterMs: reportInt(r?.retryAfterMs), replayed: r?.replayed || undefined,
+      proxied: o.recorded === "proxied" || undefined, ids: rec.quiet ? undefined : recordIds(path, o.body, r?.data), req: slim || o.body === undefined ? undefined : recordScrub(o.body), res: slim ? undefined : recordScrub(r?.data) }));
+  } catch { rec.failures++; }
 }
 
 // ---------------------------------------------------------------- state
@@ -2532,12 +2664,14 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
       if (++failed < RETRY.tries) {
         const ms = fullJitter(failed - 1);
         process.stderr.write(`the world did not answer (${r.data.error.message.slice(0, 80)}); trying again in ${secs(ms)} (try ${failed + 1} of ${RETRY.tries})\n`);
+        if (RECORD) recordWrite("wait", { why: "unanswered", path, waitMs: ms, try: failed + 1 });
         await pause(ms); continue;
       }
       r.data.error.tries = failed; r.data.error.seconds = Math.round((Date.now() - t0) / 1000);
     } else if (waitOut) {
       busy++;
       process.stderr.write(`${WAITING[codeOf(r.data)] ?? "the world is busy"}; waiting ${secs(waitMs)}\n`);
+      if (RECORD) recordWrite("wait", { why: codeOf(r.data) ?? `http-${r.status}`, path, waitMs, try: busy });
       await pause(waitMs); continue;
     }
     if (r.status === 0 && cls === "none") r.data.error.notRetried = true;
@@ -2551,9 +2685,11 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
 // With `serve` up in this folder every request goes through it; with no serve (no socket, or nobody on it) it goes straight
 // to the world as before. A request the serve took but did not answer is reported like a world that did not answer.
 async function callOnce(url, o) {
-  if (!REPORTS) return callOnceTo(url, o);
-  const t0 = performance.now(), r = await callOnceTo(url, o);
+  if (!REPORTS && !RECORD) return callOnceTo(url, o);
+  if (RECORD) o = { ...o, recorded: true };
+  const wallStart = Date.now(), t0 = performance.now(), r = await callOnceTo(url, o);
   reportRequest(url, o.method, t0, r);
+  recordCall("http", url, o, wallStart, t0, r, { via: o.via ?? "direct" });
   return r;
 }
 async function callOnceTo(url, o) {
@@ -2561,7 +2697,7 @@ async function callOnceTo(url, o) {
     const a = await askServe({ op: "http", url, method: o.method, headers: o.headers, body: o.body, timeoutMs: o.timeoutMs }, o.timeoutMs + 5_000);
     // #1724: serve was asked and is still waiting on the world: that is a slow world, not a stopped serve
     if (a?.lost) return { status: 0, data: { error: { code: "unreachable", message: a.slow ? `the world did not answer within ${Math.round(o.timeoutMs / 1000)} s (serve is running and was still waiting)` : "the serve process stopped before it answered" } } };
-    if (a) return a;
+    if (a) { if (RECORD) o.via = "serve"; return a; }
   }
   return worldOnce(url, o);
 }
@@ -2596,7 +2732,16 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
 // tools/soul-trace's tap (node --import tap.mjs) sees fetch; it offers its wrapper here so these calls are traced the same way
 let TRACED = null;
 const tracedWorldFetch = () => (TRACED ??= globalThis[Symbol.for("soul-trace.wrap")]?.(worldFetch) ?? worldFetch);
-async function worldOnce(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
+// #1773: with the session record on, a call this process makes itself is kept (a command's own call is kept by callOnce)
+async function worldOnce(url, o) {
+  if (!RECORD || o.recorded === true) return worldOnceTo(url, o);
+  const wallStart = Date.now(), t0 = performance.now();
+  let r;
+  try { r = await worldOnceTo(url, o); } catch (e) { recordCall("wire", url, o, wallStart, t0, { status: 0, data: { error: { code: "thrown", message: String(e?.message ?? e) } } }); throw e; }
+  recordCall("wire", url, o, wallStart, t0, r);
+  return r;
+}
+async function worldOnceTo(url, { method, headers, body, timeoutMs, recoverRead, signal }) {
   let r;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
@@ -3080,9 +3225,10 @@ async function syncCatalog({ force = false } = {}) {
   // a world that has just started answers world.starting with a short Retry-After until its places and acts are laid out
   let r = null;
   for (let tries = 0; tries < 6; tries++) {
-    const t0 = performance.now();
-    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; break; /* no answer: use the copy */ }
+    const t0 = performance.now(), w0 = Date.now();
+    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
     publicReadReported(world + "/v1/edge/catalog", t0, r);
+    if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, r, { body: "the catalog itself is kept in world-catalog.json" });
     const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
     if (wait == null || wait > 10_000) break;
     await new Promise((ok) => setTimeout(ok, statedJitter(wait)));
@@ -3104,7 +3250,11 @@ async function syncLive({ force = false } = {}) {
   // a copy serve keeps by the world's push (#1755) is current while its frames come (a hash at least every 5 s)
   if (mine && !force && Date.now() - mine.receivedAt < (mine.pushed ? soulLive.PUSHED_FRESH_MS : LIVE_FRESH_MS)) return mine;
   try {
-    const t0 = performance.now(), r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }); publicReadReported(world + "/v1/edge/live", t0, r); if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const t0 = performance.now(), w0 = Date.now();
+    const r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
+    publicReadReported(world + "/v1/edge/live", t0, r);
+    if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, r, { body: "the live picture is kept in world-live.json" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const got = await r.json();
     // a cached answer older than the copy the push keeps is not written over it (#1755). The copy is read again here: the
     // push may have moved it on while this answer was on its way.
@@ -4785,7 +4935,9 @@ async function serveForeground() {
         // #1755: the world's live picture rides this stream too, resumed from the copy's seq; a world without it says nothing of it
         const liveAfter = LIVE_RESYNC ? null : soulLive.resumeFrom(readJsonFile(LIVE_FILE), world);
         const q = new URLSearchParams({ kinds: "speech.to-me", live: "1", ...(liveAfter ? { liveAfter } : {}), ...(st.addressedCursor ? { after: st.addressedCursor } : {}) });
+        const w0 = Date.now(), t0 = performance.now();
         const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
+        if (RECORD) recordFetch(`${world}/v1/edge/events?${q}`, w0, t0, r, { body: "a stream: its speech.to-me frames show as serve's wakes" });
         if (r.status === 404) { log("addressed speech: this world has no classified stream; speech still reaches pending"); return; }
         if (r.status === 401 || r.status === 403) return;   // the inbox loop says so and ends things
         if (!r.ok) { code = `http-${r.status}`; ms = retryAfterMs(r.headers, null); throw new Error(code); }
@@ -4825,7 +4977,7 @@ async function serveForeground() {
   async function forward(m) {
     const pathOf = routeOf(m.url) + new URL(m.url).search;
     // A response cut off partway is a world that did not answer, not a reason for this process to die.
-    const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
+    const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs, ...(m.proxied ? { recorded: m.proxied } : {}) }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const repeatable = m.method === "GET" || m.headers?.["idempotency-key"];
     // #1345: the agent's own look, turn or face holds off a reflex from the moment it is asked, not only once answered
     const attending = m.method === "POST" && routeOf(m.url) === "/v1/edge/act" && ATTENTION_ID.test(String(m.body?.capability ?? ""));
@@ -4868,7 +5020,7 @@ async function serveForeground() {
     const ac = new AbortController();
     let onSpeech;
     const said = new Promise((done) => { onSpeech = () => { const a = takeAddressed(st, heldFrom); if (a.length) done(a); else waiters.push(onSpeech); }; waiters.push(onSpeech); });
-    const asked = worldOnce(url.href, { method: m.method, headers: m.headers, timeoutMs: m.timeoutMs, signal: ac.signal }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
+    const asked = worldOnce(url.href, { method: m.method, headers: m.headers, timeoutMs: m.timeoutMs, signal: ac.signal, ...(m.proxied ? { recorded: m.proxied } : {}) }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const first = await Promise.race([asked.then((r) => ({ r })), said.then((a) => ({ a }))]);
     if (first.a) { ac.abort(); return ended(first.a); }
     waiters = waiters.filter((f) => f !== onSpeech);
@@ -4987,6 +5139,7 @@ async function serveForeground() {
     }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "http") {
+      if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
       if (path === "/v1/edge/inbox/listen") return localListen(m.url);
       if (path === "/v1/edge/wait" && m.method !== "POST") return heldWait(m);
@@ -5360,6 +5513,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   REPORTS = reportsHere();
   if (!REPORTS) delete commands.note;
   const [cmd, ...args] = line;
+  try { RECORD = recordHere(); } catch { RECORD = false; }
+  if (RECORD) { recordInit(commands[cmd] ? cmd : null, args); if (!(cmd === "serve" && args.includes("--foreground"))) recordOutput(); }
   const fn = commands[cmd];
   if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;

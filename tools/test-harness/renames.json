@@ -150,7 +150,7 @@
     {
       "step": "V3-launcher-unit",
       "from": "writes without an idempotency key are never repeated: ack on world.busy and on unreachable",
-      "to": "#1753: ack and result are retried with one key after a busy refusal and a dropped connection",
+      "to": "\\#1753: ack and result are retried with one key after a busy refusal and a dropped connection",
       "reason": "#1753: ack and result became keyed writes, retried with one key until answered (safe: the world answers a repeat from the message state); the old test asserted they were never retried",
       "pr": "#1762"
     }

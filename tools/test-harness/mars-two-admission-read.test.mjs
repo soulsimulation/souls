@@ -11,7 +11,7 @@ const check = response => ({ ok: checkedCapabilities(response).some(c => c.id ==
 async function refusal(admission, level) {
   const headers = new Headers();
   const context = { req: { path, method: 'GET', header: () => undefined, raw: { signal: new AbortController().signal } },
-    env: {}, res: { status: 200, headers }, set() {}, header: (key, value) => headers.set(key, value),
+    env: {}, res: { status: 200, headers }, set() {}, get() {}, header: (key, value) => headers.set(key, value),
     json: (data, status) => Response.json(data, { status, headers }) };
   const response = await admissionMiddleware(admission, () => level, () => 'fixture')(context, () => { throw Error('refused read ran'); });
   return { status: response.status, data: await response.json(), retryAfter: response.headers.get('retry-after') };
