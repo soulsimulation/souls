@@ -18,7 +18,7 @@ export const PHONE_STAND_INS:StandInOptions=Object.freeze({cardRadiusPx:7,minIns
 export type Snapshotter=(geometry:THREE.BufferGeometry,material:THREE.Material)=>THREE.Texture|null;
 
 type Source={mesh:THREE.InstancedMesh;near:THREE.InstancedMesh;cards:THREE.InstancedMesh;texture:THREE.Texture|null;
-  centres:Float32Array;radii:Float32Array;cardMatrices:Float32Array;version:number;count:number;world:string;lastCam:THREE.Vector3|null;nearCount:number;farCount:number};
+  centres:Float32Array;radii:Float32Array;cardMatrices:Float32Array;version:number;count:number;world:Float64Array;activeFrame:number;lastCam:THREE.Vector3|null;nearCount:number;farCount:number};
 
 const tmpM=new THREE.Matrix4(),tmpW=new THREE.Matrix4(),tmpP=new THREE.Vector3(),tmpQ=new THREE.Quaternion(),tmpS=new THREE.Vector3(),one=new THREE.Quaternion();
 /** A unit card: x in [-0.5, 0.5], y in [0, 1], normal straight up so it is lit like the ground cover around it. */
@@ -47,9 +47,12 @@ function cardMaterial(texture:THREE.Texture){
 const triangles=(g:THREE.BufferGeometry)=>(g.index?g.index.count:g.attributes.position?.count??0)/3;
 const inScene=(o:THREE.Object3D,root:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if(p===root)return true;return false;};
 
+/** `n` elements of `from` at `at` into `to` at `into`, without a view object. */
+const sameMatrix=(a:Float64Array,b:ArrayLike<number>)=>{for(let k=0;k<16;k++)if(a[k]!==b[k])return false;return true;};
+const copy=(from:ArrayLike<number>,at:number,to:Float32Array,into:number,n:number)=>{for(let k=0;k<n;k++)to[into+k]=from[at+k];};
 export class WorldFarStandIns{
   readonly group=new THREE.Group();
-  private sources=new Map<THREE.InstancedMesh,Source>();private frame=0;private active:Source[]=[];private o:StandInOptions;private snapshot:Snapshotter;
+  private sources=new Map<THREE.InstancedMesh,Source>();private frame=0;private list:Source[]=[];private active:(Source|null)[]=[];private activeCount=0;private o:StandInOptions;private snapshot:Snapshotter;
   /** Last apply(): sources, instances drawn as cards / as meshes, triangles saved per view pass, CPU ms. */
   readonly stats={sources:0,cards:0,near:0,trianglesSaved:0,cpuMs:0};
   constructor(o:StandInOptions,snapshot:Snapshotter){this.o=o;this.snapshot=snapshot;this.group.name='far-stand-ins';this.group.visible=false;}
@@ -66,6 +69,8 @@ export class WorldFarStandIns{
       if(box.getSize(tmpP).length()/2>this.o.maxRadius)return;
       seen.add(m);if(!this.sources.has(m))this.add(m);});
     for(const s of [...this.sources.values()])if(!seen.has(s.mesh)||!inScene(s.mesh,root))this.drop(s);
+    // The per-frame passes walk this array: a Map iterator allocated a result object per source per pass.
+    const list=this.list;list.length=0;for(const s of this.sources.values())list.push(s);
   }
   private add(m:THREE.InstancedMesh){
     const cap=m.instanceMatrix.count,near=new THREE.InstancedMesh(m.geometry,m.material,cap);
@@ -76,7 +81,7 @@ export class WorldFarStandIns{
     cards.frustumCulled=false;cards.castShadow=false;cards.receiveShadow=false;cards.count=0;
     if(m.instanceColor)cards.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(cap*3),3);
     m.parent!.add(near);this.group.add(cards);
-    this.sources.set(m,{mesh:m,near,cards,texture:null,centres:new Float32Array(cap*3),radii:new Float32Array(cap),cardMatrices:new Float32Array(cap*16),version:-1,count:-1,world:'',lastCam:null,nearCount:0,farCount:0});
+    this.sources.set(m,{mesh:m,near,cards,texture:null,centres:new Float32Array(cap*3),radii:new Float32Array(cap),cardMatrices:new Float32Array(cap*16),version:-1,count:-1,world:new Float64Array(16).fill(NaN),activeFrame:-1,lastCam:null,nearCount:0,farCount:0});
   }
   private drop(s:Source){
     this.sources.delete(s.mesh);s.near.removeFromParent();s.near.dispose();s.cards.removeFromParent();s.cards.geometry.dispose();
@@ -84,16 +89,17 @@ export class WorldFarStandIns{
   }
   /** Instance centres, radii and card matrices in world space; recomputed when the instances or the mesh move. */
   private refresh(s:Source){
-    const m=s.mesh,world=m.matrixWorld.elements.join(',');
-    if(s.version===m.instanceMatrix.version&&s.count===m.count&&s.world===world)return;
+    // P2 phones: compare the world matrix element by element; joining it into a string key was ~10 KB a frame of churn.
+    const m=s.mesh,e=m.matrixWorld.elements,world=s.world;
+    if(s.version===m.instanceMatrix.version&&s.count===m.count&&sameMatrix(world,e))return;
     const box=m.geometry.boundingBox!,c=box.getCenter(new THREE.Vector3()),r=box.getSize(new THREE.Vector3()).length()/2,base=new THREE.Vector3(c.x,0,c.z);
     for(let i=0;i<m.count;i++){
       m.getMatrixAt(i,tmpM);tmpW.multiplyMatrices(m.matrixWorld,tmpM);tmpW.decompose(tmpP,tmpQ,tmpS);
       const k=Math.max(tmpS.x,tmpS.y,tmpS.z);s.radii[i]=r*k;
-      tmpP.copy(c).applyMatrix4(tmpW);s.centres.set([tmpP.x,tmpP.y,tmpP.z],i*3);
+      tmpP.copy(c).applyMatrix4(tmpW);s.centres[i*3]=tmpP.x;s.centres[i*3+1]=tmpP.y;s.centres[i*3+2]=tmpP.z;
       tmpP.copy(base).applyMatrix4(tmpW);tmpM.compose(tmpP,one,tmpS.set(Math.max(tmpS.x,tmpS.z),tmpS.y,1));tmpM.toArray(s.cardMatrices,i*16);
     }
-    s.version=m.instanceMatrix.version;s.count=m.count;s.world=world;s.lastCam=null;
+    s.version=m.instanceMatrix.version;s.count=m.count;for(let k=0;k<16;k++)world[k]=e[k];s.lastCam=null;
   }
   /** Split near/far for the current camera (only when it moved). */
   private split(s:Source,cam:THREE.Vector3,pxPerUnit:number){
@@ -105,8 +111,9 @@ export class WorldFarStandIns{
     for(let i=0;i<m.count;i++){
       const dx=s.centres[i*3]-cam.x,dy=s.centres[i*3+1]-cam.y,dz=s.centres[i*3+2]-cam.z,d=Math.sqrt(dx*dx+dy*dy+dz*dz)-s.radii[i];
       const far=s.texture!==null&&d>0&&s.radii[i]*pxPerUnit/d<limit;
-      if(far){cardM.set(s.cardMatrices.subarray(i*16,i*16+16),f*16);if(srcC&&cardC)cardC.set(srcC.subarray(i*3,i*3+3),f*3);f++;}
-      else{nearM.set(src.subarray(i*16,i*16+16),n*16);if(srcC&&nearC)nearC.set(srcC.subarray(i*3,i*3+3),n*3);n++;}
+      // PERF-CHURN (#1476): element copies, not subarray views: a view per instance per camera move was ~18% of a phone orbit's allocation
+      if(far){copy(s.cardMatrices,i*16,cardM,f*16,16);if(srcC&&cardC)copy(srcC,i*3,cardC,f*3,3);f++;}
+      else{copy(src,i*16,nearM,n*16,16);if(srcC&&nearC)copy(srcC,i*3,nearC,n*3,3);n++;}
     }
     s.near.count=n;s.cards.count=f;s.nearCount=n;s.farCount=f;
     s.near.instanceMatrix.needsUpdate=true;s.cards.instanceMatrix.needsUpdate=true;
@@ -117,8 +124,9 @@ export class WorldFarStandIns{
     const t0=performance.now();
     if(this.frame++%this.o.rescanFrames===0)this.scan(root);
     let snaps=0,cards=0,near=0,saved=0;const pxPerUnit=viewHeight/(2*Math.tan(camera.fov*Math.PI/360))*(camera.zoom||1);
-    for(const s of this.sources.values()){
-      const m=s.mesh;if(!m.visible||!m.parent)continue;
+    const list=this.list;
+    for(let i=0;i<list.length;i++){
+      const s=list[i],m=s.mesh;if(!m.visible||!m.parent)continue;
       if(!s.texture&&snaps<this.o.snapshotsPerFrame){snaps++;try{s.texture=this.snapshot(m.geometry,m.material as THREE.Material);}catch{s.texture=null;}
         if(s.texture){const old=s.cards.material as THREE.Material;s.cards.material=cardMaterial(s.texture);old.dispose();s.lastCam=null;}else{m.userData.keepDetail=true;continue;}}   // a mesh that cannot be photographed keeps its full detail
       if(!s.texture)continue;
@@ -126,16 +134,17 @@ export class WorldFarStandIns{
       if(!s.farCount)continue;   // nothing far: draw the original untouched
       s.near.position.copy(m.position);s.near.quaternion.copy(m.quaternion);s.near.scale.copy(m.scale);s.near.castShadow=m.castShadow;s.near.receiveShadow=m.receiveShadow;s.near.renderOrder=m.renderOrder;
       if(s.near.parent!==m.parent)m.parent.add(s.near);
-      m.visible=false;s.near.visible=s.nearCount>0;s.cards.visible=true;this.active.push(s);
+      m.visible=false;s.near.visible=s.nearCount>0;s.cards.visible=true;s.activeFrame=this.frame;this.active[this.activeCount++]=s;
       cards+=s.farCount;near+=s.nearCount;saved+=s.farCount*(triangles(m.geometry)-2);
     }
-    for(const s of this.sources.values())if(!this.active.includes(s))s.cards.visible=false;
-    this.group.visible=this.active.length>0;
-    Object.assign(this.stats,{sources:this.sources.size,cards,near,trianglesSaved:saved,cpuMs:performance.now()-t0});
+    // A frame stamp, not active.includes (a scan of the active list per source); the stats are written in place.
+    for(let i=0;i<list.length;i++)if(list[i].activeFrame!==this.frame)list[i].cards.visible=false;
+    this.group.visible=this.activeCount>0;
+    const st=this.stats;st.sources=this.sources.size;st.cards=cards;st.near=near;st.trianglesSaved=saved;st.cpuMs=performance.now()-t0;
   }
-  /** Call right after renderer.render. */
-  restore(){for(const s of this.active){s.mesh.visible=true;s.near.visible=false;s.cards.visible=false;}this.active.length=0;this.group.visible=false;}
-  dispose(){this.restore();for(const s of [...this.sources.values()])this.drop(s);this.group.removeFromParent();}
+  /** Call right after renderer.render. The active list keeps its store between frames; its slots are cleared. */
+  restore(){const a=this.active;for(let i=0;i<this.activeCount;i++){const s=a[i]!;s.mesh.visible=true;s.near.visible=false;s.cards.visible=false;a[i]=null;}this.activeCount=0;this.group.visible=false;}
+  dispose(){this.restore();this.active=[];this.list=[];for(const s of [...this.sources.values()])this.drop(s);this.group.removeFromParent();}
 }
 
 /** Albedo snapshot of one instance from the side into a small transparent texture, with the world's renderer. */

@@ -169,6 +169,12 @@ test('read worker mode 2: here?view= is main\'s (body view answered by main\'s h
     assert.equal((j.error as {code: string}).code, 'invalid', q);
   }
   assert.deepEqual(forwarded, ['/v1/edge/here?view=body', '/v1/edge/here?view=unknown', '/v1/edge/here?view=body&include=doHere']);
+  // #1329 part 4: a capabilities search builds far walks with main's navigation: main answers it
+  const search = await get('capabilities?all=1&search=nowhere');
+  assert.equal(search.r.status, 200); assert.equal(search.r.headers.get('x-sim-read'), null);
+  assert.equal((search.j.search as {query: string}).query, 'nowhere');
+  assert.equal(forwarded.at(-1), '/v1/edge/capabilities?all=1&search=nowhere');
   const h = await (await fetch(`http://127.0.0.1:${port}/w/eden/healthz/read`)).json() as {read: {served: number; fallbacks: Record<string, number>}};
   assert.equal(h.read.fallbacks['here-view'], 3, JSON.stringify(h.read.fallbacks));
+  assert.equal(h.read.fallbacks['capabilities-search'], 1, JSON.stringify(h.read.fallbacks));
 });

@@ -1,35 +1,61 @@
 // #1166: the light a world arrives through. Plain WebGL2, no library: download progress drives the size of the light, and
 // time only keeps its rays alive. It runs beside the world's own first load, so it draws small and slow, and it stops
-// for good the moment the screen is white. Without WebGL2 the caller's CSS disc does the same job (`startLight` is null).
+// drawing for good once the last of it has grown. Without WebGL2 the caller's CSS disc does the same job (`startLight` is null).
 
 export const DISSOLVE_MS = 2000;
 /** The last of the light, as a compositor transition (world-chrome.css `data-fill`). */
 export const FILL_MS = 1200;
+/** The last of the light grows on the compositor (world-chrome.css `data-fill`) on an ease-in-cubic curve, the reference's
+ *  flood. It takes FULL_MS for the whole way and its share of that for what is left, never less than FILL_MS, so a world
+ *  that loads before the light has grown still blooms instead of jumping. */
+export const FULL_MS = 2600;
+export const fillMs = (phase: number) => Math.round(Math.max(FILL_MS, FULL_MS * (1 - Math.min(1, Math.max(0, phase)))));
 /** The CSS disc's solid radius at scale 1 (world-chrome.css). */
 export const DISC_RADIUS = 146;
 /** Radius of the part that reads as solid white, at scale 1, as a fraction of the screen's short side (see FRAG). */
 export const SOLID = 0.16;
 /** Text that sits on the light needs this much white around it, in CSS pixels. */
 export const TEXT_MARGIN = 20;
-/** Fastest the radius may move, in fractions of the whole way per second: a clump of progress reads as a swell. */
-const RATE = 0.6, TAU = 0.35;
+/** The light is a clock, not a meter (Gene, after white-light/index2.html): `phase` runs 0 → 1 continuously, at the speed
+ *  that would finish it when the load is expected to finish. That expectation comes from the progress so far (elapsed ÷
+ *  progress) and is itself smoothed over SETTLE seconds, so a lumpy progress bar only ever bends the speed gently; the
+ *  speed follows its target over INERTIA seconds. It never gets more than LEAD ahead of the real progress (it slows
+ *  softly as it nears that), never stops short of HOLD by itself, and a load is assumed to take between MIN_S and MAX_S
+ *  (FIRST_S until enough progress has come in to judge). */
+export const MIN_S = 2.5, MAX_S = 25, FIRST_S = 6, SETTLE = 1.5, INERTIA = 0.8, LEAD = 0.12, HOLD = 0.97;
+/** While a world wakes, its progress can sit still for many seconds: the light may still creep toward WAIT over about
+ *  WAIT_S seconds, so a long wait reads as the light slowly coming rather than a frozen picture. */
+export const WAIT = 0.5, WAIT_S = 12;
 /** The drawing buffer's long side and the frame rate; the picture is soft, so it upscales well. At 640 px and 30 fps a
  *  software renderer slowed the world's download by about half a second on a phone-sized page; here it doesn't measurably. */
 const MAX_SIDE = 480;
 export const FRAME_MS = 1000 / 24;
 
-/** The radius from just covering the text to reaching the corners, in CSS pixels. */
-export const lightRadius = (fraction: number, width: number, height: number, textHalf: number) =>
-  textHalf + (Math.hypot(width, height) / 2 - textHalf) * fraction;
+/** #1318: the light starts at this share of the radius that just covers the text (its grey halo sets the text off), and
+ *  at 100% its solid part reaches this share of the way to the corners, so they stay light grey; it never whites out. */
+export const START = 0.33, PEAK = 0.6;
+/** How much of its growth the light has done at `phase`: like the reference's cubic white-out, it blooms slowly at
+ *  first and floods outward at the end, with a little linear growth so the very start still moves. */
+export const growth = (phase: number) => { const e = Math.min(1, Math.max(0, phase)); return 0.15 * e + 0.85 * e * e * e; };
+/** The solid radius at `phase`, in CSS pixels. */
+export const lightRadius = (phase: number, width: number, height: number, textHalf: number) =>
+  START * textHalf + (PEAK * Math.hypot(width, height) / 2 - START * textHalf) * growth(phase);
 /** The shader's scale for a solid-white radius of `radius` CSS pixels. */
 export const lightScale = (radius: number, width: number, height: number) => radius / (SOLID * Math.min(width, height));
 
-/** One step of the radius toward `target`: it eases, moves at a capped speed and never shrinks. */
-export function easeFraction(fraction: number, target: number, seconds: number): number {
-  const dt = Math.max(0, Math.min(seconds, 0.25));
-  const goal = Math.max(fraction, Math.min(1, target)), left = goal - fraction;
-  if (left < 0.001) return goal;
-  return fraction + Math.min(left * (1 - Math.exp(-dt / TAU)), RATE * dt);
+export type Clock = { phase: number; speed: number; expected: number; elapsed: number };
+/** A clock starting at `phase` (where the first paint's boot light already got to), `elapsed` seconds into the load. */
+export const startClock = (phase = 0, elapsed = 0): Clock => ({ phase: Math.min(HOLD, Math.max(0, phase)), speed: 0, expected: FIRST_S, elapsed: Math.max(0, elapsed) });
+/** One frame of the light's clock, `seconds` after the last, with the load at `progress` (0–1). */
+export function tickClock(c: Clock, progress: number, seconds: number): Clock {
+  const dt = Math.max(0, Math.min(seconds, 0.25)), p = Math.min(1, Math.max(0, progress)), elapsed = c.elapsed + dt;
+  const guess = p > 0.08 ? Math.min(MAX_S, Math.max(MIN_S, elapsed / p)) : FIRST_S;
+  const expected = c.expected + (guess - c.expected) * (1 - Math.exp(-dt / SETTLE));
+  // the time left at the expected pace sets the speed; near LEAD ahead of the work it eases off (smoothstep), never a wall
+  const cap = Math.min(HOLD, Math.max(p + LEAD, WAIT * (1 - Math.exp(-elapsed / WAIT_S)))), room = Math.min(1, Math.max(0, (cap - c.phase) / LEAD)), soft = room * room * (3 - 2 * room);
+  const want = Math.max(0, (1 - c.phase) / Math.max(0.6, expected - elapsed));
+  const speed = c.speed + (want - c.speed) * (1 - Math.exp(-dt / INERTIA));
+  return { phase: Math.min(HOLD, Math.max(c.phase, c.phase + speed * soft * dt)), speed, expected, elapsed };
 }
 
 const VERT = `#version 300 es

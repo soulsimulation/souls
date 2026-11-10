@@ -490,7 +490,7 @@ function scanWorld(model: WorldModel) {
     const def = model.resolvedDef(e.def); if (!def || def.form !== 'point') continue;
     const p = model.worldPose(e), b = def.size?.box ?? [1, 1, 1], tall = (b[1] ?? 1) * p.s, wide = Math.max(b[0] ?? 1, b[2] ?? 1) * p.s;
     if (tall > 1.8) obstacles.push([p.x, Math.min(3, (tall * wide) / 12), p.z]);   // weight: how much wind it blocks
-    try { ys.push(model.terrain.sample(p.x, p.z)); } catch { /* no terrain */ }
+    try { ys.push(model.terrain.peek(p.x, p.z)); } catch { /* no terrain */ }   // PERF-ARRIVAL: no tile bake per thing (as placeOf)
   }
   ys.sort((a, b) => a - b); typicalGround = ys.length ? ys[Math.floor(ys.length / 2)] : 0;
 }
@@ -521,7 +521,10 @@ const DUCK_HOLD_MS = 2500; let duckHeldUntil = 0;
 const musicDuck = () => { const now = performance.now(); if (pianoNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
 const musicSync = () => syncMusic({ on: musicOn(), station: settings.station, audible: audible(), volume: settings.volume * musicDuck(), unlocked: !!ctx && ctx.state === 'running' });
 function unlock() {
-  if (ctx || typeof AudioContext === 'undefined') return;
+  // #1389: a tap also wakes a context the browser suspended or interrupted (iOS after the page was in the background);
+  // only a tap may, and the music waits on this one (`unlocked`)
+  if (ctx) { if (ctx.state !== 'running' && audible()) void ctx.resume().catch(() => {}); return; }
+  if (typeof AudioContext === 'undefined') return;
   try { ctx = new AudioContext(); master = ctx.createGain(); applyMaster(); master.connect(ctx.destination); meter = ctx.createAnalyser(); meter.fftSize = 2048; master.connect(meter); noise(ctx).stop(); } catch { ctx = null; }
 }
 function step(host: Host) {
