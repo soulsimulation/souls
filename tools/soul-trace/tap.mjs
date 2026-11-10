@@ -152,6 +152,8 @@ export function installFromEnv(env = process.env) {
   const tap = createTap({file, env});
   tap.start();
   globalThis.fetch = tap.wrapFetch(globalThis.fetch);
+  // eden.mjs 2.25 sends Soul API calls over node:http (#1750), not fetch: it asks for this wrapper for them
+  globalThis[Symbol.for('soul-trace.wrap')] = tap.wrapFetch;
   process.once('exit', code => { try { tap.close(code); } catch {} });
   return tap;
 }
