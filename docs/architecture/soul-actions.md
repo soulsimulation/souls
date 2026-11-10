@@ -715,3 +715,14 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Folded cloth dyeing
+
+`core/cloth-dye-bench@1` supplies one indigo charge, one rust charge and two water charges.
+Choose a solid or banded finish with `dye-indigo-solid`, `dye-indigo-banded`, `dye-rust-solid` or
+`dye-rust-banded` while one `core/dyeable-cloth@1` actually rests on its cloth board and the worker has empty
+hands. Existing ten-second native craft/brush work owns time. Natural completion rechecks the initially bound
+cloth, finish, actor/body/floor, support, access and supplies before one ordinary batch changes that same cloth
+and consumes one chosen pigment and one water charge. The other pigment can re-dye it; the current finish and
+maker credit persist through ordinary carrying and placement. Current offers/inspection expose requirements,
+remaining supplies and credit. No new entity, refill/drying clock, wearable or cloth simulation is involved.
