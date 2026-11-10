@@ -84,6 +84,10 @@ test('#1753 review: an explicit --for that acknowledged "walk to the field, then
   const act = (await accept(f.host, req('/v1/edge/act', token, {capability: walk.id, strict: true, for: m.id}))).data;
   assert.equal(act.accepted, true, JSON.stringify(act)); assert.equal(act.open, true, 'the walk is not the message\'s last step');
   assert.equal((await card()).state, 'acknowledged');
+  // the agent sends the same act again (its --wait ran out): a repeat of the walk under way keeps the message's steps
+  const again = (await accept(f.host, req('/v1/edge/act', token, {capability: walk.id, strict: true, for: m.id, clientRef: 'again'}))).data;
+  assert.equal(again.accepted, true, JSON.stringify(again)); assert.equal(again.repeat, true); assert.equal(again.receipt.id, act.receipt.id);
+  assert.equal(again.open, true, 'a repeat is still not the message\'s last step');
   // the new close branch: an ack with an outcome while the linked act runs is refused and writes nothing
   const early = await req(`/v1/edge/inbox/${m.id}/ack`, token, {reply: 'Done', outcome: 'done'});
   assert.equal(early.status, 409, JSON.stringify(early.data)); assert.equal(early.data.code ?? early.data.error?.code, 'message.act-running');

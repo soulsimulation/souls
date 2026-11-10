@@ -157,12 +157,13 @@ export class OwnerLoop {
     const scope = this.scope(soul), acked = this.inbox.serverAck?.(scope, message) ?? false;
     const text = implicit || acked ? this.inbox.messageText?.(scope, message) : null;
     const world = this.world, read = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
-    const steps = implicit || read.length > 1 ? read : [];
-    const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
+    // a repeat of the act under way (a new key, `repeat: true`) relinks the same receipt: what the first link judged by stays
+    const prior = this.links.get(receipt.id), same = prior?.message === message ? prior : prior?.also?.find(x => x.message === message);
+    const steps = implicit || read.length > 1 ? read : same?.steps ?? [];
+    const aim = world && steps.length > 1 && steps.at(-1)!.target ? same?.steps === steps && same.act ? same.act[0] : world.actTarget(soul, receipt.capability) : null;
     const rideId = RIDE_JOIN.exec(receipt.capability)?.[1], rideName = rideId && world?.aboard ? world.rideName?.(rideId) ?? null : null;
     const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {}),
       ...(rideId && rideName ? {ride: {object: rideId, name: rideName}} : {})};
-    const prior = this.links.get(receipt.id);
     if (prior) {l.also = [...(prior.message === message ? [] : [{...prior, also: undefined, late: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)]; if (prior.late) l.late = true;}
     this.keep(receipt.id, l);
     if (this.links.size > MAX_LINKS) this.forget(this.links.keys().next().value!);
