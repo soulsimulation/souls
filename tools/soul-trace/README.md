@@ -93,7 +93,8 @@ The served client keeps a full record of a session when its owner opts in: an em
 Soul's folder (in a Souls home: the Soul's `runtime/` folder, or `.souls/` for every Soul in the home). Nothing the
 agent sees changes, byte for byte: no command, help or guide line, answer field or message. The client writes
 `.eden-record/record.jsonl` (schema `soul-trace/2`: the `/1` head plus content), rolled at 16 MB and capped at 512 MB
-(the oldest roll goes first, with a `limit` record):
+(the oldest roll goes first, with a `limit` record). The folder carries its own `.gitignore` of `*`, so a Soul folder
+inside a repository never commits it. It keeps:
 
 - `proc.start` / `proc.end`: the command, its arguments, exit code, start and duration, stdout and stderr (64 KB each,
   a longer one is `{cut, bytes, head}`);
@@ -127,7 +128,9 @@ working directory exactly equal to `<folder>`, within the session's window, open
 taken only when named with `--transcript`, and only when it was recorded in `<folder>`. With none found it says so
 and what to pass.
 
-**A bundle is private**: it holds the owner's chat, the agent's reasoning and local paths. It is written only to
+**A bundle is private**: it holds the owner's chat, the agent's reasoning and local paths. A transcript may hold single-use
+pairing or window codes the owner typed (they are not replaced), and in a Souls home the transcripts cover every Soul
+the agent drove there within the window, not only the one collected. It is written only to
 `--out` (with a `.gitignore` of `*`) and sent nowhere. Never attach it, or quotes from it, to an issue, PR or proof.
 
 ## Contract `soul-trace/1`

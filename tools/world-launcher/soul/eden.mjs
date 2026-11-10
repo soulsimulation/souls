@@ -2216,6 +2216,7 @@ function recordInit(cmd, args) {
     rec.proc = randomBytes(8).toString("hex"); rec.start = performance.now(); rec.wall = Date.now();
     rec.dir = resolvePath(RECORD_DIR);   // a command that moves to another folder later still writes here
     mkdirSync(rec.dir, { recursive: true, mode: 0o700 });
+    if (!existsSync(joinPath(rec.dir, ".gitignore"))) writeFileSync(joinPath(rec.dir, ".gitignore"), "*\n", { mode: 0o600 });   // a Soul folder inside a repository never commits its record
     try { const s = load(); recordSecret(s.token); recordSecret(s.identity); recordSecret(s.home?.token); } catch {}
     rec.quiet = !cmd || RECORD_QUIET.has(cmd);
     recordRoll(rec.dir);
