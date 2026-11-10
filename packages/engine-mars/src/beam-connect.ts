@@ -286,6 +286,23 @@ export function beamBays(w: WorldState, beamId: string, near = 3.5): BeamBay[] {
   return out.sort((x, y) => x.height - y.height || (x.column < y.column ? -1 : 1));
 }
 
+/** #1250, #1150: what the rule no longer supports stands on the ground instead, as a god's joined upright does: the frames and
+ *  beams of a group something has just changed, judged on the whole group. An edit can change what a frame it never touched is
+ *  judged on, and extending a bay shouldn't rewind the world. It runs where the change lands, so replay does the same. This is a
+ *  courtesy, not the guarantee: whatever it doesn't catch is the repair ladder's. Returns the ids it stood down. */
+export function settleFrames(rt: Runtime): string[] {
+  const ids = [...new Set(framesStand(rt).flatMap((d) => d.subjects ?? []))].filter((id) => rt.world.entities[id]).sort();
+  for (const id of ids) rt.world.entities[id]!.support = { kind: 'ground' };
+  return ids;
+}
+
+/** #1250: the uprights standing in their beams now, and which of those no longer stand after an edit: an edit re-derives a frame
+ *  it touches to the ground, so `settleFrames` never sees that one, and the god should hear of it all the same. */
+/** #1250: what has changed about the frame `u` is part of: its frames and their joins. A stop waiting on it can tell progress. */
+export const frameProgress = (w: WorldState, u: Entity): string => frameGroup(w, u).map((g) => `${g.id}:${g.connections?.length ?? 0}`).join();
+export const framesUp = (w: WorldState): string[] => Object.values(w.entities).filter((e) => isFrame(e) && e.phase === 'installed' && e.support?.kind === 'connected').map((e) => e!.id);
+export const framesFell = (w: WorldState, ids: string[]): string[] => ids.filter((id) => { const e = w.entities[id]; return !!e && e.support?.kind !== 'connected' && !frameStability(w, e).stable; });
+
 /** Every tick: an installed loose beam has both ends joined to standing frames, and an upright a crew let go into its beams
  *  (support `connected`, as the native release) stands in a frame that stands on its own. A god's joined upright stands on
  *  the ground by the god's authority (PC12) and is not this. */

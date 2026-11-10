@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { evaluateRun, compareRunSet, cliArgs, joinRequests, loadSoulRun, answerQuestion, renderIndex, indexSources } from './evaluate.mjs';
+import { evaluateRun, compareRunSet, cliArgs, joinRequests, loadSoulRun, answerQuestion, questionSteps, renderIndex, indexSources, directionsMeasure } from './evaluate.mjs';
 import { validateSpec } from './spec.mjs';
 
 const Q = (f) => new URL(`./questions/${f}`, import.meta.url).pathname;
@@ -36,11 +36,18 @@ function makeRun(opts = {}) {
   for (const [n, s] of ['0-preflight', '1-provision', '2-seats', '3-play', '4-close', '5-review', '7-report'].entries()) w(join(p, 'receipts', `${s}.json`), { step: s.slice(2), ok: true, ...(n === 5 ? { requests: 0 } : {}) });
   w(join(p, 'world.json'), { startedAt: iso(-10) });
   const m1 = 'msg_1', m2 = 'msg_2';
-  w(join(p, 'personas/bo/decisions.jsonl'), jl([
+  // A directed cast (#783) writes its cards to director/directions.jsonl (here after another seat's card) instead.
+  if (opts.directed) w(join(p, 'director/directions.jsonl'), jl([
+    { t: iso(-1), seat: 'ada', kind: 'gather', by: 'director', channel: 'card', text: 'Go to the hall', messageId: 'msg_a', requestId: 'ada-001' },
+    { t: iso(0), seat: 'bo', kind: 'gather', by: 'director', channel: 'card', text: script[0].text, messageId: m1, requestId: 'bo-001' },
+    { t: iso(5), seat: 'bo', kind: 'note', by: 'console', channel: 'card', text: 'not delivered' },
+    { t: iso(9), seat: 'bo', kind: 'redirect', by: 'console', channel: 'card', text: script[1].text, messageId: m2, requestId: 'bo-002' },
+  ]));
+  else if (!opts.noDirector) w(join(p, 'personas/bo/decisions.jsonl'), jl([
     { t: iso(0), seat: 'bo', mode: 'scripted', scripted: script[0], delivered: { requestId: 'bo-001', channel: 'card', messageId: m1 } },
     { t: iso(9), seat: 'bo', mode: 'scripted', scripted: script[1], delivered: { requestId: 'bo-002', channel: 'card', messageId: m2 } },
   ]));
-  w(join(p, 'personas/bo/requests.jsonl'), jl([
+  if (!opts.noDirector) w(join(p, 'personas/bo/requests.jsonl'), jl([
     { t: iso(40), requestId: 'bo-002', cutoffReason: 'result', openSec: 31, resultText: 'At the hall' },
     { t: iso(100), requestId: 'bo-001', cutoffReason: opts.director001 ?? 'budget', openSec: 100 },
   ]));
@@ -76,6 +83,21 @@ const M = (e, id) => e.measures.find((m) => m.id === id);
 test('cliArgs reads the served CLI calls the transcript records', () => {
   assert.deepEqual(cliArgs('node eden.mjs result msg_1 failed "My owner \\"changed\\" it"'), ['result', 'msg_1', 'failed', 'My owner "changed" it']);
   assert.deepEqual(cliArgs('curl -fsSo eden.mjs http://x'), []);
+});
+
+test('a question reads a close without `result` as the result it replaced, just after the command that made it (#1269)', () => {
+  const step = (verb, args, out) => ({ verb, args, out, line: 1, file: 'f' });
+  const close = questionSteps([step('ack', ['msg_a', 'No, sorry', '--close', 'failed'], { closed: true }), step('say', ['Hi', '--for', 'msg_b'], { closed: true }),
+    step('act', ['walk:x'], { for: 'msg_c', receipt: { id: 'r', phase: 'started' } }), step('wait', ['60', 'r'], { closed: true, receipt: { id: 'r', phase: 'completed' } })]);
+  assert.deepEqual(close.map((s) => s.verb), ['ack', 'result', 'say', 'result', 'act', 'wait', 'result']);
+  assert.deepEqual(close.filter((s) => s.verb === 'result').map((s) => s.args), [['msg_a', 'failed', 'No, sorry'], ['msg_b', 'done', 'Hi'], ['msg_c', 'done']]);
+  assert.equal(close[1].file, 'f', 'it cites the closing step');
+  const plain = [step('act', ['walk:x'], { for: 'msg_c', receipt: { id: 'r', phase: 'completed' } }), step('result', ['msg_c', 'done', 'Here'], { outcome: 'done' })];
+  assert.deepEqual(questionSteps(plain), plain, 'a run with no close reads as before');
+  const both = [step('result', ['msg_c', 'done', 'Here'], {}), step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })];
+  assert.deepEqual(questionSteps(both), both, 'a result already there wins');
+  const refused = [step('result', ['msg_c', 'failed', 'Replaced'], { reported: false, closed: false, why: 'its act is still going' }), step('act', ['walk:x'], { closed: true, for: 'msg_c', receipt: { id: 'r', phase: 'completed' } })];
+  assert.deepEqual(questionSteps(refused).map((s) => s.verb), ['result-refused', 'act', 'result'], '#1309: a refused result closed nothing, so the later close is the result');
 });
 
 test('a completed run: separate measure families with units and denominators; observer-only measures are unavailable, not 0', async () => {
@@ -115,7 +137,7 @@ test('offline rescore writes a new version and leaves sources and earlier evalua
   const a = await evaluateRun(dir, { questions: [Q('redirect-honoured.mjs')] });
   const first = readFileSync(join(a.dir, 'evaluation.json'), 'utf8');
   const b = await evaluateRun(dir, { questions: [Q('redirect-honoured.mjs'), Q('walk-seen.mjs')] });
-  assert.deepEqual(readdirSync(join(dir, 'evaluations')), ['001-v2', '002-v2']);
+  assert.deepEqual(readdirSync(join(dir, 'evaluations')), ['001-v4', '002-v4']);
   assert.equal(readFileSync(join(a.dir, 'evaluation.json'), 'utf8'), first);
   assert.deepEqual(indexSources(dir), before, 'evaluations/ is excluded and no source changed');
   assert.equal(b.evaluation.questions.length, 2);
@@ -243,4 +265,54 @@ test('compare lists the tools checkout next to the server root and flags a tools
   const md = renderIndex(ix);
   assert.match(md, /Conditions differ: toolsCommit, toolsDirtyTrackedFiles/);
   assert.match(md, /trio-1 \(server root c0ffee, tools aaaa1111\); trio-2 \(server root c0ffee, tools cccc2222\+3\); trio-old \(server root c0ffee, tools unrecorded\)/);
+});
+
+test('directions: the direction journal is counted by command and outcome; each redirection says whether its target spoke after', () => {
+  const pt = mkdtempSync(join(tmpdir(), 'sr-dir-'));
+  const sr = { playtestDir: pt, at: (...p) => ['playtest', ...p].join('/') };
+  assert.equal(directionsMeasure(sr).status, 'unavailable', 'no journal: unavailable, never 0');
+  w(join(pt, 'director', 'commands.jsonl'), jl([
+    { t: iso(10), elapsedSec: 10, source: 'console', cmd: 'broadcast', target: 'all', outcome: 'applied', requestIds: ['a-001', 'b-001'] },
+    { t: iso(12), elapsedSec: 12, source: 'console', cmd: 'error', target: null, outcome: 'refused', reason: 'unknown seat "zed"', requestIds: [] },
+    { t: iso(20), elapsedSec: 20, source: 'script', cmd: 'redirect', target: 'b', outcome: 'applied', requestIds: ['b-002'], expect: ['Piano'] },
+    { t: iso(25), elapsedSec: 25, source: 'script', cmd: 'redirect', target: 'c', outcome: 'held', reason: 'card not delivered (seat not paired); kept for its turn', requestIds: [] },
+    { t: iso(90), elapsedSec: 90, source: 'lifecycle', cmd: 'end', target: 'all', outcome: 'applied', reason: 'lifecycle-cancel', requestIds: [] },
+  ]));
+  w(join(pt, 'director', 'speech.jsonl'), jl([{ t: iso(15), seat: 'b', atMs: T0 + 15000, text: 'rocks' }, { t: iso(40), seat: 'b', atMs: T0 + 40000, text: 'I love the old piano' }]));
+  const m = directionsMeasure(sr);
+  assert.deepEqual({ status: m.status, value: m.value, refused: m.refused }, { status: 'measured', value: 5, refused: 1 });
+  assert.deepEqual(m.byCommand, { broadcast: { applied: 1, held: 0, refused: 0 }, error: { applied: 0, held: 0, refused: 1 }, redirect: { applied: 1, held: 1, refused: 0 }, end: { applied: 1, held: 0, refused: 0 } });
+  assert.deepEqual(m.redirections.map((r) => [r.target, r.atSec, r.outcome, r.spokeAfter, r.expectHeard ?? null]), [['b', 20, 'applied', true, true], ['c', 25, 'held', false, null]]);
+  assert.deepEqual(m.sources, ['playtest/director/commands.jsonl', 'playtest/director/speech.jsonl']);
+  assert.equal(m.skipped, 0);
+  // A killed run's torn last line is skipped and counted; it is not a command and adds no undefined key.
+  writeFileSync(join(pt, 'director', 'commands.jsonl'), readFileSync(join(pt, 'director', 'commands.jsonl'), 'utf8') + '{"t":"2026-01-01T00:01:40Z","cmd":"redir');
+  const torn = directionsMeasure(sr);
+  assert.deepEqual({ value: torn.value, skipped: torn.skipped, keys: Object.keys(torn.byCommand) }, { value: 5, skipped: 1, keys: ['broadcast', 'error', 'redirect', 'end'] });
+});
+
+test('directed casts: requests come from the direction stream, joined with the seat transcripts; absent stays unavailable', async () => {
+  const persona = (await evaluateRun(makeRun(), { write: false })).evaluation;
+  const e = (await evaluateRun(makeRun({ name: 'direct-1', directed: true }), { write: false })).evaluation;
+  for (const id of ['ackSec', 'seatResultSec', 'unacked', 'directorOpenSec', 'requestsPhysicallyCompleted', 'requestsPhysicallyUnknown', 'seatReportedDone']) {
+    assert.equal(M(e, id).status, 'measured', id);
+    assert.equal(M(e, id).value, M(persona, id).value, `${id} matches the persona-director run of the same calls`);
+  }
+  assert.equal(M(e, 'requestsPhysicallyCompleted').denominator, 2);
+  assert.match(M(e, 'ackSec').basis, /director\/directions\.jsonl/);
+  assert.ok(M(e, 'ackSec').sources.includes('playtest/director/directions.jsonl'));
+  const bo2 = e.requests.find((r) => r.requestId === 'bo-002');
+  assert.deepEqual(bo2.refs[0], { path: 'playtest/director/directions.jsonl', line: 4, sha256: bo2.refs[0].sha256 }, 'the card keeps its line in the stream');
+  assert.equal(bo2.text, 'Change of plan: the pond hall instead');
+  // ada has a delivered card but no transcript: her request is left out of seat timing and said so.
+  assert.match(M(e, 'ackSec').basis, /no transcript for ada/);
+  // Seats without a transcript: latency unavailable with the reason, never 0.
+  const deaf = (await evaluateRun(makeRun({ name: 'direct-2', directed: true, noTranscript: true }), { write: false })).evaluation;
+  for (const id of ['ackSec', 'seatResultSec', 'unacked', 'requestsPhysicallyCompleted']) assert.equal(M(deaf, id).status, 'unavailable', id);
+  assert.equal(M(deaf, 'ackSec').reason, 'no seat transcripts were retained');
+  // No director records at all: no requests, so physical completion is unavailable rather than 0 over nothing.
+  const none = (await evaluateRun(makeRun({ name: 'direct-3', noDirector: true }), { write: false })).evaluation;
+  assert.equal(M(none, 'ackSec').reason, 'no director records');
+  assert.equal(M(none, 'requestsPhysicallyCompleted').status, 'unavailable');
+  assert.equal(M(none, 'requestsPhysicallyCompleted').reason, 'no director records to join the seat\'s acts to');
 });

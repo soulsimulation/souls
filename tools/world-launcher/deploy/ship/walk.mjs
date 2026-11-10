@@ -1,4 +1,4 @@
-// Release 3.8 stranger walk (from r37 walk.mjs; adds a still pair 8 s apart for sky/weather motion) (+ WS frame sizes) on the LIVE site (lane R, evening run): real Chrome (lease, Metal GPU), real mouse/wheel/keys,
+// Release 0.13 stranger walk (from release 0.12's r37 walk.mjs; adds a still pair 8 s apart for sky/weather motion) (+ WS frame sizes) on the LIVE site (lane R, evening run): real Chrome (lease, Metal GPU), real mouse/wheel/keys,
 // dpr 1 and 2, no ?shot. Per world: time to arrival, drag-orbit, wheel-zoom, arrow keys, then Explore picks (typed search).
 //   node walk.mjs <outDir> <worldUrl>=<pick1|pick2|...> ...      (PHONE=1: 390x844 touch; DPRS=1,2 default; PICK2=1: a second pick shot)
 // Run by ship.sh after every release (was team/scratch/t4/r/walk319.mjs).

@@ -2,8 +2,16 @@ import * as THREE from 'three';
 import {WorldVisibilityInstances} from './WorldVisibilityInstances.ts';
 /** Camera-only sightline protection. Requested orbit/zoom survives temporary
  * obstruction; the rendered camera may move nearer or around a blocking post. */
-/** VF6: Follow zoom bounds (metres from the Soul) and how long after the last drag/zoom the viewer's view is kept as is. */
-export const FOLLOW_MIN=2.4,FOLLOW_MAX=40;const USER_HOLD=.6;
+/** VF6: Follow zoom bounds (metres from the Soul) and how long after the last drag/zoom the viewer's view is kept as is
+ *  (#1316: a grace period long enough that no automatic move lands while the viewer is still between gestures). */
+export const FOLLOW_MIN=2.4,FOLLOW_MAX=40;const USER_HOLD=1.5;
+/** #1316: automatic moves are eased. Glide time constants on the sphere around the Soul (seconds; blocked: the sight is cut),
+ *  the pull in through an opening, and the cap on any automatic move in metres per second (faster while the sight is cut,
+ *  so a wall is never stared at for long). Viewer gestures stay immediate. */
+const GLIDE={angle:1.4,angleBlocked:.6,radius:1.8,radiusBlocked:.5,opening:.35,openingSpeed:5,speed:6,speedBlocked:12};
+/** #1316: a pull out is deliberate past these, summed over one gesture (input events less than GESTURE_GAP s apart):
+ *  click jitter and a slip inside a pinch stay coupled, a slow trackpad zoom out or a slow drag still decouples. */
+const PULL_OUT={ratio:1.05,angle:.05},GESTURE_GAP=.4;
 /** Nearest the camera comes to the Soul when walls (a narrow room, a stair) leave no clear view farther out. */
 export const FOLLOW_NEAR=1;
 const NEAR=FOLLOW_NEAR;
@@ -14,7 +22,7 @@ export class WorldFollow {
   private instances=new WorldVisibilityInstances();
   private objects:THREE.Object3D[]=[];
   private hits:THREE.Intersection[]=[];
-  reset(){this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.userAt=-Infinity;this.instances.reset();}
+  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.userAt=-Infinity;this.instances.reset();}
   /** Same candidates as recursive intersectObjects, minus objects whose hits
    * opaque() always rejects: hidden ancestry or own cameraTransparent. */
   private collect(roots:readonly THREE.Object3D[]){
@@ -112,13 +120,31 @@ export class WorldFollow {
   userInput(before:THREE.Vector3,after:THREE.Vector3){
     if(![...before.toArray(),...after.toArray()].every(Number.isFinite)||before.length()<.01||after.length()<.01||before.distanceTo(after)<1e-5)return;
     this.requested??=before.clone();
-    const length=Math.max(FOLLOW_MIN,Math.min(FOLLOW_MAX,this.requested.length()*after.length()/before.length()));
+    // #1316 (Gene): the rule is coupling. Following, the camera may come in close, even into a house after the Soul. A
+    // deliberate pull out (zooming out, or dragging round) decouples it: from then on it stays where the viewer put it,
+    // carried along with the Soul, and nothing pulls it back in. Follow again (a reset) couples it. Zooming in keeps it coupled.
+    // Only the viewer's own steps count (each before..after pair), never what moved the camera between them (follow
+    // motion, the search): a running turn and zoom over the gesture.
+    if(!this.gesture||this.clock-this.userAt>GESTURE_GAP)this.gesture={turn:0,zoom:1};
+    this.gesture.turn+=before.angleTo(after);this.gesture.zoom*=after.length()/before.length();
+    if(this.gesture.zoom>PULL_OUT.ratio||this.gesture.turn>PULL_OUT.angle)this.decoupled=true;
+    // Decoupled, the camera is exactly where the gesture put it (within the zoom bounds); coupled, the gesture scales the
+    // asked-for distance, which the search comes back to.
+    const length=this.decoupled?Math.max(FOLLOW_NEAR,Math.min(FOLLOW_MAX,after.length())):Math.max(FOLLOW_MIN,Math.min(FOLLOW_MAX,this.requested.length()*after.length()/before.length()));
     // The gesture chooses the displayed direction, including when a previous
     // collision search had moved it away from the old preferred direction.
     this.requested.copy(after).setLength(length);
-    this.rendered=after.clone().setLength(this.requested.length());
+    this.rendered=after.clone().setLength(this.decoupled?length:this.requested.length());
     this.chosen=null;this.userAt=this.clock;this.userOrbited=true;
   }
+  private gesture:{turn:number;zoom:number}|null=null;
+  /** #1316: true once the viewer pulled the camera out: it keeps their view, and occlusion never moves it. */
+  get held(){return this.decoupled;}
+  /** #1317: the offset the viewer asked for (the camera trace's desired pose), or null before the first frame. */
+  get desired():THREE.Vector3|null{return this.requested;}
+  private decoupled=false;
+  /** #1316: what moved the camera on the last frame, and with what, for the camera trace (#1317). */
+  rule:{name:'start'|'held'|'user'|'collision'|'opening'|'search'|'glide'|'speed-cap';blocked?:boolean;reach?:number;cap?:number}={name:'start'};
   resolve(target:THREE.Vector3,actualOffset:THREE.Vector3,roots:readonly THREE.Object3D[],seconds:number):THREE.Vector3 {
     if(!actualOffset.toArray().every(Number.isFinite)||actualOffset.length()<.01)return actualOffset.clone();
     if(!this.requested||!this.rendered)this.requested=actualOffset.clone();
@@ -180,8 +206,9 @@ export class WorldFollow {
     if(cap===Infinity){this.pulled=null;return r;}
     // the glide outward (toward the asked-for length) keeps pushing; the pulled length moves only inward, to the cap
     const from=Math.min(r.length(),this.pulled??Infinity);
-    this.pulled=from<=cap?from:dt>0?from-Math.min((from-cap)*-Math.expm1(-dt/.18),8*dt):cap;  // quick, never a jump (<= 8 m/s)
-    r.setLength(Math.min(r.length(),Math.max(this.pulled,cap)));
+    this.pulled=from<=cap?from:dt>0?from-Math.min((from-cap)*-Math.expm1(-dt/GLIDE.opening),GLIDE.openingSpeed*dt):cap;  // eased, never a jump
+    const before=r.length();r.setLength(Math.min(before,Math.max(this.pulled,cap)));
+    if(r.length()<before-1e-6)this.rule={...this.rule,name:'opening',cap};
     return r;
   }
   private resolveCollected(target:THREE.Vector3,roots:readonly THREE.Object3D[],seconds:number):THREE.Vector3 {
@@ -195,11 +222,14 @@ export class WorldFollow {
       let d=behind-s.theta;d=Math.atan2(Math.sin(d),Math.cos(d));s.theta+=Math.sign(d)*Math.min(Math.abs(d),.1*dt);this.requested!.setFromSpherical(s);
     }
     const wanted=this.requested!.clone();
+    // #1316: decoupled, the viewer's view is the camera, exactly as they left it, carried along with the Soul.
+    if(this.decoupled){this.rendered=wanted.clone();this.rule={name:'held'};return wanted;}
     // While the viewer's hand is on the camera, show their view; only a wall between camera and Soul pulls it in
     // (a collision camera). Their requested distance survives, and the search resumes from their angle after.
     if(this.userActive&&this.rendered){
-      const reach=this.limit(target,this.rendered,roots);
-      this.rendered.setLength(this.fit(this.rendered.length(),reach));
+      const reach=this.limit(target,this.rendered,roots),length=this.rendered.length();
+      this.rendered.setLength(this.fit(length,reach));
+      this.rule=this.rendered.length()<length-1e-6?{name:'collision',reach}:{name:'user'};
       return this.inOpening(target,dt).clone();
     }
     const previous=this.rendered?.clone();
@@ -207,13 +237,15 @@ export class WorldFollow {
     if(!this.chosen||this.clock-this.lastSearch>=.2||this.chosenClear&&!this.clear(target,this.chosen,roots)){
       this.chosen=this.choose(target,wanted,roots).clone();this.lastSearch=this.clock;this.chosenClear=this.clear(target,this.chosen,roots);}
     const goal=this.chosen;
-    if(!this.rendered)this.rendered=goal.clone();
+    this.rule={name:goal.distanceTo(wanted)>.01?'search':'glide'};
+    if(!this.rendered){this.rendered=goal.clone();this.rule={name:'start'};}
     else{
       // Glide on the sphere around the Soul (around obstacles, not through them); hurry, never jump, when blocked.
-      const blocked=!this.clear(target,this.rendered,roots),k=(tau:number)=>-Math.expm1(-dt/tau);
+      const blocked=!this.clear(target,this.rendered,roots),k=(tau:number)=>-Math.expm1(-dt/tau);this.rule.blocked=blocked;
       const a=new THREE.Spherical().setFromVector3(this.rendered),b=new THREE.Spherical().setFromVector3(goal);
       let dTheta=b.theta-a.theta;dTheta=Math.atan2(Math.sin(dTheta),Math.cos(dTheta));
-      a.theta+=dTheta*k(blocked?.35:.9);a.phi+=(b.phi-a.phi)*k(blocked?.35:.9);a.radius+=(b.radius-a.radius)*k(blocked?.3:1.2);
+      const turn=k(blocked?GLIDE.angleBlocked:GLIDE.angle);
+      a.theta+=dTheta*turn;a.phi+=(b.phi-a.phi)*turn;a.radius+=(b.radius-a.radius)*k(blocked?GLIDE.radiusBlocked:GLIDE.radius);
       this.rendered.setFromSpherical(a);
       // A glide that would carry a clear camera out through a wall (growing the radius in a narrow room before it
       // turns) stops at the wall instead. Only a small correction: a house that suddenly cuts the sight is left to
@@ -226,8 +258,8 @@ export class WorldFollow {
     // when the visibility search switches sides. Bound automatic motion in
     // metres/second as well; actual viewer gestures above remain immediate.
     if(previous&&dt>0){
-      const limit=12*dt;
-      if(previous.distanceTo(result)>limit){
+      const limit=(this.rule.blocked?GLIDE.speedBlocked:GLIDE.speed)*dt;
+      if(previous.distanceTo(result)>limit){this.rule={...this.rule,name:'speed-cap'};
         const from=previous.length(),to=result.length(),rotation=new THREE.Quaternion().setFromUnitVectors(previous.clone().normalize(),result.clone().normalize());
         const arc=previous.angleTo(result)*Math.max(from,to)+Math.abs(to-from),fraction=Math.min(1,limit/arc);
         result.copy(previous).normalize().applyQuaternion(new THREE.Quaternion().slerp(rotation,fraction)).multiplyScalar(from+(to-from)*fraction);

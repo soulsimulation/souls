@@ -44,12 +44,15 @@ Everything is created beside the clone, in its parent directory.
 6. `cloud/compress-shots.mjs` converts every PNG to JPEG (≤ 1024 px, q75) and rewrites `.png` references in text files.
 7. `CLOUD.md` records the server and playtest commits, toolchain, memory and load before and after, and per-step
    timings.
-8. A secret guard scans the results for token-shaped strings and refuses to commit if it finds any. Otherwise the
+8. The results are copied for the branch (`cloud/publish-copy.sh`), and only the copy is checked, so the run's own folder keeps what retention keeps (#1311). A spec arm's copy goes through `cloud/publish-scrub.mjs` first (#1131). Then `cloud/secret-guard.sh` scans the copy
+   for token-shaped strings, Soul tokens (`sim_…`) and provider keys included, and refuses to commit if it finds any
+   or can't run. Otherwise the
    results are committed under `results/<out-name>/` on `playtest-results` (an orphan branch on first use) and pushed
    with backoff. Files over 95 MB are left out and listed in `OMITTED-LARGE-FILES.txt`.
 
 Exit codes: the play's own (0 ok, 2 preflight or gate), 3 secret guard, 4 push failed (results stay committed
-locally in `../results-branch`).
+locally in `../results-branch`), 7 publish-scrub failed (nothing committed). A spec arm's per-world stop is $1;
+`PLAYTEST_WORLD_MAX_USD` can lower it, and a higher value is refused.
 
 `PLAYTEST_CLOUD_SKIP=step,step` skips named steps. For example, check the git plumbing from a throwaway clone whose
 `origin` is a scratch bare repository:

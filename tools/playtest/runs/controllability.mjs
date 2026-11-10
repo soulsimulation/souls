@@ -7,8 +7,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonl } from '../lib/jsonl.mjs';
+import { readFinalCardsFile } from './final-cards.mjs';
 
-export const SCORER = Object.freeze({ id: 'controllability', version: '3', path: 'tools/playtest/runs/controllability.mjs' });
+export const SCORER = Object.freeze({ id: 'controllability', version: '5', path: 'tools/playtest/runs/controllability.mjs' });
 export const SCORECARD_SCHEMA = 'soul-run-scorecard/1';
 
 // ---- refusal classes (#1097 A2, #628). Only `offer` counts against M1.
@@ -21,7 +22,7 @@ const RESOLUTION = new Set(['params.invalid', 'place.unknown', 'place.ambiguous'
   // also covers "no free seat near", which is a judgement: a seat's being taken has its own code, seat.none-free.
   'seat.none-in-place', 'seat.none-near', 'target.not-in-sight', 'swim.not-swimmable', 'swim.unavailable',
   // Engine codes that reach an act's answer through canPerform (ledger launch): the steps the world compiled from the command.
-  'target.unknown', 'action.invalid-params', 'action.unknown-verb', 'gait.invalid', 'body.motion-unavailable']);
+  'target.unknown', 'receipt.unknown', 'action.invalid-params', 'action.unknown-verb', 'gait.invalid', 'body.motion-unavailable']);
 // The world named or accepted the place and then found no way there. Not a state change unless the world moved, and the
 // world's own offer is what failed, so it counts against M1 under its own label (the #874 geometry sample folds in here).
 const ROUTE = new Set(['place.unreachable', 'route.unreachable', 'travel.unreachable', 'place.unwalkable', 'place.unsupported-floor', 'place.no-standing-room', 'room.no-standing-room', 'carry.no-route', 'carry.search-exhausted', 'use.no-approach', 'object.out-of-reach', 'tea.cup-unreachable',
@@ -33,7 +34,7 @@ const ROUTE = new Set(['place.unreachable', 'route.unreachable', 'travel.unreach
 // The world's state answering: a seat taken, a ride gone, hands full, a game in progress. Listed one by one on purpose, so a
 // new code is unclassified and named on the card until someone decides. Left out for that reason: carry.crew-too-small,
 // carry.crew-too-large, carry.too-tall and carry.ground-only, which an agent could read before asking.
-const STATE = new Set(`action.interrupted activity.not-reached bed.attachment-unavailable bed.native-berth-required bed.taken bed.yours bike.no-dock bike.none-left
+const STATE = new Set(`act.already-ended act.none-running act.not-started act.shared action.interrupted activity.not-reached bed.attachment-unavailable bed.native-berth-required bed.taken bed.yours bike.no-dock bike.none-left
 body.authority-changed body.changed body.moderated body.protected body.receipt-changed body.safe-standing-required body.source-slow body.source-unavailable body.unavailable body.withdrawn body.world-policy
 calendar.already-interested calendar.full calendar.over carry.hands-full carry.in-use carry.occupied
 chess.already-seated chess.illegal chess.in-progress chess.not-playing chess.not-your-piece chess.not-your-turn chess.seat-taken chess.seats-taken
@@ -48,7 +49,7 @@ painting.failed painting.identity-changed painting.no-easel painting.not-reached
 place.dynamic place.items-full place.marks-full pose.no-room
 presentation.already-reserved presentation.closed presentation.doors-closed presentation.ended presentation.entered presentation.full presentation.no-ticket presentation.not-open presentation.presenter presentation.standby-wait
 project.done project.unfinished receipt.lost-on-restart revision.stale
-ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.closed ride.departed ride.full ride.keeping-place ride.landing ride.not-aboard ride.not-boarding ride.on-ground ride.seated ride.steered ride.unavailable
+ride.aboard ride.aloft ride.already-aboard ride.automatic ride.blocked ride.climbing-in ride.closed ride.departed ride.full ride.keeping-place ride.landing ride.not-aboard ride.not-boarding ride.on-ground ride.seated ride.steered ride.unavailable
 seat.approach-busy seat.none-free seat.taken seat.yours shared.busy shared.full shared.left shared.not-member shared.not-ready shared.not-running shared.revision-changed shared.stop-asked shared.stop-requested shared.too-far
 site.under-construction sky.daylight sky.no-clock slot.none-free soul.faded soul.not-in-sight stall.released state.asleep state.changed state.safe-stop-timeout steer.unavailable surface.full swim.no-deep-middle
 tea.counter-blocked tea.cup-clean tea.cup-empty tea.cup-full tea.cup-not-down tea.cup-not-empty tea.hands-full tea.kettle-cold tea.kettle-empty tea.kettle-full tea.kettle-hot tea.kettle-not-down tea.kettle-on tea.no-bag tea.no-cup tea.no-kettle tea.no-tap tea.not-boiled tea.not-holding tea.tap-blocked
@@ -74,6 +75,23 @@ const SAY_VERBS = new Set(['say', 'converse']);
 const REPLY_VERBS = new Set(['ack', 'result']);
 const WAIT_VERBS = new Set(['wait', 'listen']);
 const MSG = /^msg_/;
+
+const flag = (args, name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] ?? null : null; };
+const worldOutcome = (out) => (out.receipt?.phase ? (out.receipt.phase === 'completed' ? 'done' : 'failed') : out.failed ? 'failed' : typeof out.done === 'string' ? 'done' : null);
+/** A close the step itself made (#1269): `closed: true` in its answer, from a client that needs no `result`. `ack` names the message
+ *  and `--close`, `say` names it with `--for`, and an `act` or `wait` the world closed names it through `for` or the act that took
+ *  the receipt. Its outcome is the receipt's, or, when the brief output dropped the receipt for length, the answer's own `failed` or
+ *  `done` sentence. `closed: false` is no close. Returns {id, outcome}, or null when the step closed nothing we can place. */
+export function closureOf(s, forOfReceipt = new Map()) {
+  if (s.out?.closed !== true) return null;
+  const id = s.verb === 'ack' ? s.args[0] : s.verb === 'say' ? flag(s.args, '--for') : s.out.for ?? forOfReceipt.get(s.out.receipt?.id) ?? null;
+  if (!MSG.test(id ?? '')) return null;
+  const outcome = s.verb === 'ack' ? flag(s.args, '--close') : s.verb === 'say' ? 'done' : worldOutcome(s.out);
+  return ['done', 'failed'].includes(outcome) ? { id, outcome } : null;
+}
+
+/** A `result` the world refused (#1309): `reported: false`, e.g. "its act is still going" (#1299). It closed nothing. */
+export const refusedResult = (s) => s.verb === 'result' && s.out?.reported === false;
 
 /** The assistant turns of one transcript: stream events sharing a message id are one model decision. */
 export function seatDecisions(file) {
@@ -262,10 +280,13 @@ function scoreSeat(sr, seat, packs) {
   for (const s of steps) if (isPlanCall(s) && reasons.get(s.turn) !== 'onboard') actRows.push(...readPlan(s, plans, planCounted));
 
   // Which message each act and reply belongs to: the world's `for`, the id the seat named, or the seat's latest ack.
-  const closedAt = new Map(), resultOf = new Map(), ackAt = new Map();
+  const closedAt = new Map(), resultOf = new Map(), ackAt = new Map(), forOfReceipt = new Map();
   for (const s of steps) {
     if (s.verb === 'ack' && MSG.test(s.args[0] ?? '')) { if (!ackAt.has(s.args[0])) ackAt.set(s.args[0], s); }
-    if (s.verb === 'result' && MSG.test(s.args[0] ?? '') && !resultOf.has(s.args[0])) { resultOf.set(s.args[0], s); closedAt.set(s.args[0], s.line); }
+    if (s.verb === 'result' && MSG.test(s.args[0] ?? '') && !refusedResult(s) && !resultOf.has(s.args[0])) { resultOf.set(s.args[0], s); closedAt.set(s.args[0], s.line); }
+    if (s.verb === 'act' && s.out?.receipt?.id && MSG.test(s.out.for ?? '')) forOfReceipt.set(s.out.receipt.id, s.out.for);
+    const c = closureOf(s, forOfReceipt);
+    if (c && !resultOf.has(c.id)) { resultOf.set(c.id, { verb: 'result', args: [c.id, c.outcome], out: { outcome: c.outcome }, line: s.line, resultLine: s.resultLine, atMs: s.atMs, doneMs: s.doneMs, viaClose: true }); closedAt.set(c.id, s.line); }
   }
   // The client closes a plan's message itself. The seat knows only once a report says so; until then it is an open intention.
   for (const p of plans.values()) if (p.for && p.ended && !resultOf.has(p.for)) {
@@ -282,7 +303,7 @@ function scoreSeat(sr, seat, packs) {
       if (r) { r.intention = r.for ?? current; actFor.set(r.line, r.intention); }
     }
     if (isPlanCall(s)) for (const r of actRows.filter((x) => x.viaPlan && x.line === (s.resultLine ?? s.line))) { r.intention = r.for ?? current; actFor.set(r.line, r.intention); }
-    if (s.verb === 'result' && s.args[0] === current) current = null;
+    if ((s.verb === 'result' && !refusedResult(s) && s.args[0] === current) || (current && closedAt.get(current) === s.line)) current = null;
   }
 
   const hasBody = (id) => actRows.some((r) => r.intention === id);
@@ -506,13 +527,19 @@ export function scoreRun(sr, { answers = [], scorer = null } = {}) {
 
   const metrics = { M1, M2, M3, M4, M5, M6, M7 }, guardrails = { G1, G2, G3 };
   for (const [k, m] of [...Object.entries(metrics), ...Object.entries(guardrails)]) m.target = TARGETS[k];
+  // #1309: what the world says of every owner message at run end; the seat's calls can't see the world's own later closes.
+  const fc = sr.playtestDir ? readFinalCardsFile(sr.playtestDir) : null, finalOf = new Map((fc?.cards ?? []).filter((c) => c.found).map((c) => [c.messageId, c]));
+  const messages = fc ? { status: 'measured', ...fc.summary, source: `final-cards.json (${fc.source})`,
+    basis: 'every owner message the director delivered, as the world records it at run end: closed when it has a result, by the agent or the server (a replaced or overlong act, #1299)' }
+    : { status: 'unknown', reason: 'no final-cards.json: the run predates #1309, or its world could not be read at run end' };
+  for (const i of intentions) { const c = finalOf.get(i.id); i.final = c ? { closed: c.closed, outcome: c.outcome, closedBy: c.closedBy } : null; }
   return {
     schema: SCORECARD_SCHEMA,
     scorer: { ...SCORER, ...(scorer ?? {}) },
     run: { runId: sr.runId, status: sr.status, kind: sr.kind },
     controllers: seats.map((s) => ({ seat: s.seat, adapter: s.adapter, transcript: s.hasTranscript })),
     modelFree, source, ...(sourceNote ? { sourceNote } : {}),
-    metrics, guardrails,
+    metrics, guardrails, messages,
     intentions: intentions.map(({ deliveredMs, closeMs, ...i }) => i),
     limits: ['Two repeats is a demonstration, not a rate.', 'Refusal classes come from the code alone: a state code cannot tell a seat taken after the agent looked from one it could have seen.', 'Absolute times need a quiet machine.'],
   };
@@ -535,5 +562,9 @@ export function renderScorecard(card) {
   for (const [k, m] of [...Object.entries(card.metrics), ...Object.entries(card.guardrails)]) L.push(`| ${k} | ${fmt(m.value)}${m.reason ? ` (${m.reason})` : ''} | ${fmt(m.denominator)} | ${miss(m)} | ${m.target} |`);
   const c = card.metrics.M1.classes;
   L.push('', `M1 refusals: offer ${c.offer} (resolution ${c.offerResolution}, route ${c.offerRoute}), state ${c.state}, admission ${c.admission}, unclassified ${card.metrics.M1.missing.unclassified}${card.metrics.M1.unclassifiedCodes?.length ? ` (${card.metrics.M1.unclassifiedCodes.join(', ')})` : ''}.`);
+  const g = card.messages;
+  if (g) L.push('', g.status === 'measured'
+    ? `Owner messages at run end (the world's record): ${g.delivered} delivered, ${g.closed} closed (agent ${g.closedBy.agent}, server ${g.closedBy.server}; done ${g.outcome.done}, failed ${g.outcome.failed}), ${g.open} open${g.unread ? `, ${g.unread} not read` : ''}.`
+    : `Owner messages at run end: unknown (${g.reason}).`);
   return L.join('\n') + '\n';
 }

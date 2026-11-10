@@ -27,8 +27,9 @@ import { arrivalOver } from '../arrival-marks.ts';
 import { useFileMusic } from './music-source.ts';
 import type { ScoreConductor, ScoreNamespace, ScorePieceModule } from '../score/playlist/engine.d.mts';
 import type { FilePlayer } from './music-file.ts';
+import { registerMusicControls, setMusicView, type MusicStatus } from '../music-status.ts';
 
-export const TRACK_S = 240, FADE_S = 4, GAP_S = 0.25, GRACE_S = 12, PREFETCH_S = 20, LOOK_AHEAD_S = 0.3, VOLUME_RAMP_S = 0.9, FILE_FAILURES_MAX = 3;
+export const TRACK_S = 240, FADE_S = 4, GAP_S = 0.25, GRACE_S = 12, PREFETCH_S = 20, LOOK_AHEAD_S = 0.3, VOLUME_RAMP_S = 0.9, FILE_FAILURES_MAX = 3, BLOCKED_AFTER_MS = 1500;
 let trackS = TRACK_S;
 /** The music sits at the visitor's master volume (0..1), as the music's destination level in dB (pieces peak at -1 dBFS). */
 export const musicDb = (volume: number) => (volume <= 0 ? -Infinity : 20 * Math.log10(Math.min(1, volume)));
@@ -51,6 +52,10 @@ let file: FilePlayer | null = null, fileFailures = 0, fileOff = false, fileIndex
 const fileFailed = new Set<string>();
 let conductor: ScoreConductor | null = null, index = -1, playing: string | null = null, source: MusicSource | null = null, starting = false, gen = 0;
 let endsAt = 0, fading = false, gapUntil = 0, resumeAt = 0, seed = 0, paused: Paused | null = null, graceUntil = 0, prefetched = false;
+// #1389: the browser would not let the music sound (a rejected play(), or a context that stays suspended): it waits for a
+// tap instead of counting the piece as broken, and the menu says "Tap to play". `stuckSince`: since when the music has
+// wanted to sound but its context (or the soundscape's, `unlocked`) is not running.
+let blocked = false, stuckSince = 0, unlockedNow = false;
 const events: MusicEvent[] = [];
 const note = (e: Omit<MusicEvent, 't'>) => { events.push({ t: Math.round(performance.now()), ...e }); if (events.length > 200) events.splice(0, events.length - 200); };
 
@@ -97,7 +102,23 @@ export function musicGesture() {
   if (!want) return;
   if (Tone && Tone.getContext().state !== 'running') void Tone.start().catch(() => {});
   try { if (file && file.ctx.state !== 'running') void file.ctx.resume().catch(() => {}); } catch { /* no context yet */ }
+  if (!blocked) return;
+  // #1389: try again now, inside the tap, from where it was held back
+  blocked = false; stuckSince = 0; gapUntil = 0; resumeAt = 0; note({ ev: 'load', piece: order[index], reason: 'retry after a tap' });
+  if (!playing && !starting && unlockedNow && index >= 0 && order.length && file && sourceFor(order[index]) === 'file') start(index, 'retry', paused);
+  publish(performance.now());
 }
+/** #1393: the previous (-1) or next (+1) piece. With music on it plays from its start; off, it is only selected. */
+export function skipPiece(step: number) {
+  // with music off no player has loaded yet: the order alone (a tiny chunk) is enough to choose a track
+  if (!order.length) { if (!fullOrder.length) void import('../score/playlist/order.mjs').then((m) => { if (!fullOrder.length) setOrder(m.PLAYLIST as readonly string[]); if (order.length) skipPiece(step); }, () => {}); return; }
+  const base = index < 0 ? 0 : index;
+  if (playing || starting) stop(step < 0 ? 'previous' : 'next');
+  paused = null; gapUntil = 0; blocked = false; stuckSince = 0;
+  index = (((base + step) % order.length) + order.length) % order.length;
+  publish(performance.now());
+}
+registerMusicControls({ skip: skipPiece, retry: musicGesture });
 
 /** A piece's own chunk, fetched and registered once: just before it plays, or during the previous piece's fade. */
 function fetchPiece(id: string, why: string) {
@@ -136,9 +157,12 @@ function start(i: number, reason: string, from: Paused | null = null) {
     file!.play(id, { positionS: resume?.positionS ?? 0, perf: resume?.perf, reason }).then(() => {
       if (my !== gen) return;
       starting = false; playing = id; source = 'file'; paused = null; endsAt = file!.playing()?.endsAt ?? performance.now() + trackS * 1000;
+      if (file!.ctx.state !== 'running') { stop('blocked', true); block(id, 'context ' + file!.ctx.state, 'file'); }
     }, (e) => {
       if (my !== gen) return;
-      starting = false; note({ ev: 'error', piece: id, reason: String(e).slice(0, 200), source: 'file' });
+      starting = false;
+      if (/NotAllowed/i.test(String(e))) { paused = { index, seed, cycle: 0, remainingMs: trackS * 1000, positionS: resume?.positionS ?? 0, perf: resume?.perf }; block(id, String(e).slice(0, 120), 'file'); return; }
+      note({ ev: 'error', piece: id, reason: String(e).slice(0, 200), source: 'file' });
       fileTrouble(id, String(e)); gapUntil = performance.now() + 500;   // the same piece again, through Tone, once it has loaded
     });
     return;
@@ -157,6 +181,21 @@ function start(i: number, reason: string, from: Paused | null = null) {
     });
   }).catch((e) => { if (my !== gen) return; starting = false; note({ ev: 'error', piece: id, reason: String(e).slice(0, 200), source: 'tone' }); gapUntil = performance.now() + 5000; index++; });
 }
+/** The browser held the music back: wait for a tap (musicGesture) rather than count the piece as broken. */
+function block(id: string, why: string, src: MusicSource) { blocked = true; note({ ev: 'error', piece: id, reason: 'blocked: ' + why, source: src }); }
+/** The state of the context the playing piece sounds through (the file player's or Tone's); 'running' when none plays. */
+function musicCtxState(): string {
+  try { if (source === 'file') return file?.ctx.state ?? 'running'; if (source === 'tone' && Tone) return Tone.getContext().state; } catch { /* not made yet */ }
+  return 'running';
+}
+function publish(now: number) {
+  let status: MusicStatus = 'starting';
+  if (!want) status = 'off';
+  else if (blocked || (stuckSince && now - stuckSince > BLOCKED_AFTER_MS)) status = 'blocked';
+  else if (playing) status = 'playing';
+  setMusicView({ status, piece: order[index] ?? null });
+}
+
 /** The playing piece's place now (file position, or Tone cycle; time left), for a later resume. */
 function placeNow(): Paused | null {
   if (!playing) return null;
@@ -187,10 +226,13 @@ function setLevel(db: number, rampS: number) {
 export function syncMusic(o: { on: boolean; volume: number; unlocked: boolean; audible?: boolean; station?: string }) {
   const selected=musicStation(o.station);
   if(selected!==station){stop('station');station=selected;order=stationPlaylist(fullOrder,station);index=-1;paused=null;gapUntil=0;}
-  want = o.on;
+  want = o.on; unlockedNow = o.unlocked;
   const hear = o.audible ?? true, now = performance.now();
+  try { syncInner(o, hear, now); } finally { publish(now); }
+}
+function syncInner(o: { on: boolean; volume: number; unlocked: boolean }, hear: boolean, now: number) {
   if (o.volume !== volume) { volume = o.volume; if (playing && !graceUntil) setLevel(musicDb(volume), VOLUME_RAMP_S); }
-  if (!want) { if (playing || starting) stop('off', true); return; }
+  if (!want) { if (playing || starting) stop('off', true); blocked = false; stuckSince = 0; return; }
   if (!hear) {
     if (starting) stop('focus', true);
     else if (playing) {
@@ -200,7 +242,12 @@ export function syncMusic(o: { on: boolean; volume: number; unlocked: boolean; a
     return;
   }
   if (graceUntil && playing) { graceUntil = 0; setLevel(musicDb(volume), 0.6); note({ ev: 'unduck', piece: playing, reason: 'focus' }); }
-  if (!o.unlocked || !arrivalOver()) return;
+  if (!arrivalOver()) return;
+  // wanted, audible and arrived: is anything holding the sound back? (the soundscape's context, or the music's own)
+  const ctxState = playing ? musicCtxState() : 'running', stuck = playing ? ctxState !== 'running' : !o.unlocked;
+  if (!stuck) stuckSince = 0; else if (!stuckSince) stuckSince = now;
+  if (playing && stuck && now - stuckSince > BLOCKED_AFTER_MS) { const id = playing, src = source ?? 'file'; stop('blocked', true); block(id, 'context ' + ctxState, src); }
+  if (!o.unlocked || blocked) return;
   if (!file && !Sim) { loadFiles(); return; }
   if (!order.length) return;
   if (!playing && !starting) {
@@ -208,7 +255,7 @@ export function syncMusic(o: { on: boolean; volume: number; unlocked: boolean; a
     const first = index < 0; if (first) index = Math.floor(Math.random() * order.length);   // picked once, kept while its source loads
     if (sourceFor(order[index]) === 'tone') {
       if (!Sim) { loadTone(); return; }
-      if (Tone!.getContext().state !== 'running') { if (now >= resumeAt) { resumeAt = now + 2000; void Tone!.start().catch(() => {}); } return; }
+      if (Tone!.getContext().state !== 'running') { if (now >= resumeAt) { if (resumeAt) { resumeAt = 0; block(order[index], 'context ' + Tone!.getContext().state, 'tone'); return; } resumeAt = now + 2000; void Tone!.start().catch(() => {}); } return; }
     }
     start(index, first ? 'first' : paused?.index === index ? 'resume' : 'next', paused); return;
   }

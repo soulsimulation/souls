@@ -9,6 +9,7 @@ import { getHeapStatistics } from 'node:v8';
 import { Worker } from 'node:worker_threads';
 const slug = process.env.WORLD_KEY, port = Number(process.env.PORT);
 const base = process.env.WORLD_PATH ?? `/w/${slug}`;
+let conditional = 0;
 const server = createServer((req, res) => {
   const path = req.url.startsWith(base) ? req.url.slice(base.length) || '/' : req.url;
   res.setHeader('x-sim-load', LEVELS[L[3]] ?? 'green');   // LOAD-CONTRACT §3 (set with /level?l=red)
@@ -17,6 +18,10 @@ const server = createServer((req, res) => {
   if (path.startsWith('/v1/site/body/')) { if (!req.headers['x-sim-site-key']) return res.writeHead(404).end('{}'); if (path.includes('body_' + 'f'.repeat(64))) return res.writeHead(410, { 'content-type': 'application/json' }).end('{"code":"body.withdrawn"}'); return res.writeHead(200, { 'content-type': 'model/gltf-binary' }).end(Buffer.alloc(Number(process.env.FAKE_BODY_BYTES ?? 64), 7)); }
   // #1150: /halt stands in for a world whose clock has stopped: /healthz answers 503 with its counts, live.json says halted
   if (path === '/halt') { L[8] = 1; return res.end('halted'); }
+  // #1326: /stall and /unstall stand in for a clock that owes ticks and has none (live.json stalled, with the tick's age)
+  if (path === '/stall') { L[10] = Date.now(); return res.end('stalled'); }
+  if (path === '/unstall') { L[10] = 0; return res.end('running'); }
+  if (path === '/rewind') { L[9]++; return res.end('rewound'); }   // #1150: a rung 3, which the launcher alerts on
   if (path === '/healthz' && L[8] === 1) return res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, code: 'world-unavailable', message: 'World temporarily unavailable.', halted: true, glitches: { total: 2, byRule: { 'collision.human-load': { recovery: 1, halt: 1 } } } }));
   if (path === '/healthz') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, worldId: `${slug}-1`, genesis: process.env.GENESIS_FILE ?? null, pid: process.pid, ...(process.env.FAKE_TICK_MS ? { tickMs: { avg: Number(process.env.FAKE_TICK_MS), max: 2 * Number(process.env.FAKE_TICK_MS), n: 400 }, clockRate: 1 } : {}) }));
   if (path === '/argv') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ execArgv: process.execArgv, heapMb: process.env.SIM_WORLD_HEAP_MB ?? null, nodeOptions: process.env.NODE_OPTIONS ?? null, limitMb: Math.round(getHeapStatistics().heap_size_limit / 2 ** 20) }));
@@ -29,6 +34,9 @@ const server = createServer((req, res) => {
   if ((path === '/v1/god/claim' || path === '/v1/god/mint' || path === '/v1/god/pair/approve') && req.method === 'POST') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, claimedBy: req.headers.authorization ?? null }));
   // dev sign-in stand-in: "Bearer dev:<name>" is the account dev:<name>
   if (path === '/v1/me') { const id = /^Bearer (dev:[a-z0-9_-]+)$/i.exec(req.headers.authorization ?? '')?.[1]; return id ? res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ me: { userId: id } })) : res.writeHead(401, { 'content-type': 'application/json' }).end('{"ok":false}'); }
+  // #1141: a public read that revalidates. It answers 304 to any tag, as no caller should ever make it: the launcher's cache keeps whole answers.
+  if (path.startsWith('/v1/edge/public/souls/s_tagged')) { if (req.headers['if-none-match']) { conditional++; return res.writeHead(304, { etag: '"t1"' }).end(); } return res.writeHead(200, { 'content-type': 'application/json', etag: '"t1"', 'cache-control': 'no-cache' }).end('{"soul":"s_tagged"}'); }
+  if (path === '/conditional') return res.end(String(conditional));
   if (path === '/sse') { res.writeHead(200, { 'content-type': 'text/event-stream' }); let n = 0; const t = setInterval(() => { res.write(`data: ${n++}\n\n`); if (n > 3) { clearInterval(t); res.end(); } }, 100); return; }
   if (path === '/echo' && req.method === 'POST') { res.writeHead(200, { 'x-echo': '1', 'x-host': req.headers.host ?? '', 'x-xff': req.headers['x-forwarded-for'] ?? '' }); req.pipe(res); return; }
   if (path === '/env') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(Object.fromEntries(['MIND_DRIVER', 'DEV_AUTH', 'BRAIN_MODE', 'PUBLIC_URL', 'ANTHROPIC_API_KEY', 'NODE_OPTIONS', 'FAKE_FROM_FILE', 'WORLD_PATH'].map((k) => [k, process.env[k] ?? null]))));
@@ -64,20 +72,20 @@ const lock = () => {
   try { const { pid } = JSON.parse(readFileSync(file, 'utf8')); process.kill(pid, 0); if (pid !== process.pid) { console.log(`fork refused: another edge server (pid ${pid}) is still running on this data dir`); process.exit(7); } } catch { /* free */ }
   mkdirSync(process.env.DATA_DIR, { recursive: true }); writeFileSync(file, JSON.stringify({ pid: process.pid }));
 };
-// Lane L1 guard tests (LOAD-CONTRACT §4). FAKE_LIVE=1: a worker thread writes DATA_DIR/live.json every FAKE_LIVE_MS
+// Lane L1 guard tests (LOAD-CONTRACT §4). FAKE_STALL_TOP: live.json's `stall.top` once the main thread is stuck (#457). FAKE_LIVE=1: a worker thread writes DATA_DIR/live.json every FAKE_LIVE_MS
 // (200) and answers SIM_HEALTH_PORT /healthz (503 once the main thread has not turned for FAKE_TURN_MS, 30 000), so both go
 // on while the main thread is stuck (/wedge). FAKE_BOOT_TICK_MS: the boot moves that often (live.json boot.tick, or a
 // line of output without FAKE_LIVE); FAKE_BOOT_STUCK=1: a boot that never moves nor listens. FAKE_FLAP_MS: exits 3 that
 // long after it serves; FAKE_PLANNED_MS: exits 75 (a planned restart) that long after it serves.
-const LEVELS = ['green', 'amber', 'red', 'black'], L = new Float64Array(new SharedArrayBuffer(72));   // turn, serving, tick, level, readPort, readMode, readFail, lagGens, halted
+const LEVELS = ['green', 'amber', 'red', 'black'], L = new Float64Array(new SharedArrayBuffer(96));   // turn, serving, tick, level, readPort, readMode, readFail, lagGens, halted, rewinds, stalledSince
 L[0] = Date.now(); setInterval(() => { L[0] = Date.now(); }, 50).unref();
 if (process.env.FAKE_LIVE === '1') new Worker(`
   const { workerData: w } = require('node:worker_threads'), fs = require('node:fs'), L = new Float64Array(w.buf);
-  const live = () => { const now = Date.now(), serving = L[1] === 1, o = { v: 1, pid: w.pid, at: now, phase: serving ? 'serving' : 'boot:replay', loop: { lastTurnAgeMs: Math.round(now - L[0]), delayP99Ms: 1 }, level: ${JSON.stringify(LEVELS)}[L[3]] ?? 'green' }; if (L[8] === 1) o.halted = true; if (!serving) o.boot = { stage: 'replay', tick: L[2], target: 1000 }; if (L[4] > 0) { o.readPort = L[4]; o.read = { ports: [L[4]], workers: 1, lagGens: L[7], subset: L[5] === 1, routes: L[5] === 1 ? ['here', 'capabilities'] : ['here', 'observe', 'capabilities', 'resolve', 'view'] }; } return o; };
+  const live = () => { const now = Date.now(), serving = L[1] === 1, o = { v: 1, pid: w.pid, at: now, phase: serving ? 'serving' : 'boot:replay', loop: { lastTurnAgeMs: Math.round(now - L[0]), delayP99Ms: 1 }, level: ${JSON.stringify(LEVELS)}[L[3]] ?? 'green' }; if (L[8] === 1) o.halted = true; if (w.stallTop && now - L[0] > 300) o.stall = { at: now, stuckMs: Math.round(now - L[0]), top: w.stallTop, frames: [w.stallTop] }; if (L[10] > 0) { o.stalled = true; o.tick = { world: 1, service5s: 0, p99Ms: 1, quietAvgMs: 1, ageMs: Math.round(now - L[10]) }; } if (L[9]) o.rewinds = L[9]; if (!serving) o.boot = { stage: 'replay', tick: L[2], target: 1000 }; if (L[4] > 0) { o.readPort = L[4]; o.read = { ports: [L[4]], workers: 1, lagGens: L[7], subset: L[5] === 1, routes: L[5] === 1 ? ['here', 'capabilities'] : ['here', 'observe', 'capabilities', 'resolve', 'view'] }; } return o; };
   const write = () => { if (!w.file) return; fs.writeFileSync(w.file + '.tmp', JSON.stringify(live())); fs.renameSync(w.file + '.tmp', w.file); };
   write(); setInterval(write, w.every);
   if (w.port) require('node:http').createServer((q, r) => { const l = live(), up = l.phase === 'serving' && l.loop.lastTurnAgeMs < w.turnMs; r.writeHead(up ? 200 : 503, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: up, ...l })); }).listen(w.port, '127.0.0.1');
-`, { eval: true, workerData: { buf: L.buffer, pid: process.pid, file: process.env.DATA_DIR ? join(process.env.DATA_DIR, 'live.json') : null, every: Number(process.env.FAKE_LIVE_MS ?? 200), turnMs: Number(process.env.FAKE_TURN_MS ?? 30_000), port: Number(process.env.SIM_HEALTH_PORT) || 0 } });
+`, { eval: true, workerData: { buf: L.buffer, pid: process.pid, file: process.env.DATA_DIR ? join(process.env.DATA_DIR, 'live.json') : null, every: Number(process.env.FAKE_LIVE_MS ?? 200), turnMs: Number(process.env.FAKE_TURN_MS ?? 30_000), stallTop: process.env.FAKE_STALL_TOP ?? null, port: Number(process.env.SIM_HEALTH_PORT) || 0 } });
 // Stage B (lane B-port): SIM_READ_WORKER=1 (from the launcher) starts a read worker thread on SIM_READ_PORTS' first port
 // (else one the OS picks), advertised in live.json once it listens; it answers {from: 'worker'} on its own thread, so it
 // answers while the main thread is held (/busy). FAKE_READ_MODE=full: the B-facade route set, else the spike's subset.

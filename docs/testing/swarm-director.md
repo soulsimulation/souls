@@ -28,7 +28,11 @@ Steps: preflight, provision (or attach to `--world`), seats onboarding in parall
 wide), planner, orchestrator with the console, close, verdict, then metrics, journal and `story.html`. Reviewer and
 developer are off by default. `node tools/playtest/playtest.mjs review <run-dir>` adds them later.
 
-Outputs in the run folder: `director/directions.jsonl` (every direction and its reason), `director/verdict.json` and
+Outputs in the run folder: `director/directions.jsonl` (every direction and its reason), `director/commands.jsonl`
+(the direction journal: every console command, typed, scripted or from a Soul Run's cancel, with its source, target,
+time, outcome `applied`, `held` or `refused` with the reason, and the request ids of the cards it sent; it keeps each command's text as typed, so do not paste secrets into the
+console, and a journal write failure warns once without stopping the run),
+`director/verdict.json` and
 `director/VERDICT.md` (checks plus per-seat cost), `REPORT.md`, `story.html`, and the usual seats, evidence and shots
 folders. Re-verify a finished run with `node tools/playtest/director/swarm/verify.mjs <run-dir>`.
 
@@ -66,21 +70,23 @@ Script entries are `{ "atSec": n, "line": "..." }` or `{ "at": "go:<seat>" | "pr
   "order": ["doc", "grumpy"],                    // presentation order (default: seat order)
   "seats": [{ "id": "doc", "soulName": "Doc", "character": "One paragraph.", "topic": "what they present",
               "adapter": "claude-headless", "model": "haiku", "effort": "low", "economy": "lean" }],
-  "economy": { "lean": { "maxTurnsPerDirection": 2, "maxTurnWallSec": 150, "guidance": "..." } },  // merged over defaults
+  "economy": { "lean": { "maxTurnsPerDirection": 2, "maxTurnWallSec": 480, "guidance": "..." } },  // merged over defaults
   "timing": { "truthPollSec": 5, "gatherMaxSec": 900, "nudgeAfterSec": 150, "maxNudges": 3, "quietSec": 25,
               "speakTimeoutSec": 240, "maxSpeakNudges": 1, "prepareAhead": true, "presentWaitSec": 120 },
   "orchestrator": { "planner": null, "plannerEffort": "medium" },   // planner: a model name, or null for templates
   "success": { "allPresent": true, "minChars": 40, "inOrder": true, "eachOnce": true, "fromPodium": false },
   "observer": { "sampleSec": 15, "cameras": ["follow", "wide"], "viewport": [1024, 640], "dpr": 1 },
   "rails": { "onboardWallSec": 600, "onboardTimeoutSec": 540, "onboardConcurrency": 4, "quotaStopPct": 90,
-             "maxTurnsPerRequest": 6, "maxTurnWallSec": 240 },
+             "maxTurnsPerRequest": 6, "maxTurnWallSec": 480 },
   "console": { "script": [{ "at": "go:doc", "line": "redirect grumpy: talk about the piano.", "expect": ["piano"] }] }
 }
 ```
 
 Required: `kind: "cast"`, a lowercase `name`, `world` (a `dev` world needs `genesis`), `brief`, `room.label` and
 `room.match`, and seats with a unique lowercase `id`, `soulName` and `character`. Seats default to `claude-headless`,
-`haiku`, `low` effort and `lean` economy. `success.fromPodium` needs a `podium`.
+`haiku`, `low` effort and `lean` economy. `success.fromPodium` needs a `podium`. Every economy level allows a seat
+turn 480 s of wall time; `lean`, `normal` and `rich` differ in turns per direction and in the words the direction
+carries. Shorter walls cut turns off mid-walk on a loaded host.
 
 How the orchestrator behaves:
 

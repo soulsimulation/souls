@@ -1,5 +1,5 @@
-// node --test tools/world-launcher/thumbnail.test.mjs — world thumbnails on the world list (#887). Lane ports: proxy 6470,
-// children 6471–6474. Stand-in worlds (fake-world.mjs) write their owner and god tokens into sim.db the way GodMode does.
+// node --test tools/world-launcher/thumbnail.test.mjs — world thumbnails on the world list (#887). On a free block of ports.
+// Stand-in worlds (fake-world.mjs) write their owner and god tokens into sim.db the way GodMode does.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -13,8 +13,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { appendFileSync } from 'node:fs';
 import { THUMB, intakeThumbnail, thumbnailRate } from './thumbnail.mjs';
 import { setUploadClassifier } from '../../apps/server/src/moderation/classifier.ts';
+import { testPort } from '../../apps/server/test/test-port.ts';
+const P0 = await testPort(8);
 
-const PORT = 6470, RANGE = [6471, 6474], ORIGIN = `http://127.0.0.1:${PORT}`;
+const PORT = P0, RANGE = [P0 + 1, P0 + 4], ORIGIN = `http://127.0.0.1:${PORT}`;
 const dir = mkdtempSync(join(tmpdir(), 'launcher-thumbnail-test-'));
 const data = join(dir, 'data'), hits = join(dir, 'hits.txt');
 const templatesDir = join(dir, 'templates'); mkdirSync(join(templatesDir, 'thumbs'), { recursive: true });
@@ -180,13 +182,13 @@ test('the rate limit answers 429 with Retry-After and a fix', async () => {
 test('Clerk sign-in: the owner’s verified session sets it, another account’s is refused, a dev token is nobody', { timeout: 120_000 }, async () => {
   const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../apps/server/test/clerk-fixture.ts');
   const { verifiedCreator } = await import('./creator-auth.mjs');
-  const CPORT = 6475, corigin = `http://127.0.0.1:${CPORT}`, cdir = join(dir, 'clerk'); mkdirSync(cdir);
+  const CPORT = P0 + 5, corigin = `http://127.0.0.1:${CPORT}`, cdir = join(dir, 'clerk'); mkdirSync(cdir);
   const keys = await clerkKeys(corigin);
   writeFileSync(join(cdir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
   const envFile = join(cdir, 'fixture.env'), preload = new URL('../../apps/server/test/clerk-jwks-preload.mjs', import.meta.url).pathname;
   writeFileSync(envFile, [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${corigin}`, `SIM_TEST_JWKS_FILE=${join(cdir, 'jwks.json')}`, `NODE_OPTIONS=--import=${preload}`, ''].join('\n'));
   const ccommand = (w, port, o) => { const c = defaultCommand(w, port, { ...o, publicOrigin: corigin }); return { cmd: process.execPath, args: [born], env: { ...c.env, DATA_DIR: w.dataDir } }; };
-  const C = await openLauncher({ port: CPORT, range: [6476, 6477], dataDir: join(cdir, 'data'), webDir, templatesDir, authEnvFile: envFile, publicOrigin: corigin, command: ccommand, eager: 0, log: () => {} });
+  const C = await openLauncher({ port: CPORT, range: [P0 + 6, P0 + 7], dataDir: join(cdir, 'data'), webDir, templatesDir, authEnvFile: envFile, publicOrigin: corigin, command: ccommand, eager: 0, log: () => {} });
   try {
     const alice = await keys.sign('user_alice'), bob = await keys.sign('user_bob');
     const child = { envFile, registryPath: join(cdir, 'data', 'accounts.sqlite') };
@@ -199,7 +201,22 @@ test('Clerk sign-in: the owner’s verified session sets it, another account’s
     assert.equal((await send('dev:alice')).status, 401, 'no dev identity on a Clerk launcher');
     r = await send(alice); const b = await r.json();
     assert.equal(r.status, 200, JSON.stringify(b)); assert.equal(b.thumbnailSource, 'owner');
-  } finally { await C.close(); }
+    // #1279: the site admin, a signed-in site owner, sets it on a world they do not own; a god token gives them no such reach
+    const bobId = await verifiedCreator(`Bearer ${bob}`, child, corigin, new URL('../..', import.meta.url).pathname);
+    process.env.SIM_SITE_OWNERS = bobId;
+    assert.equal((await send('dev:alice')).status, 401, 'still no dev identity');
+    assert.equal((await send('god_unknown')).status, 401, 'a token this world does not know is nobody');
+    r = await send(bob); const admin = await r.json();
+    assert.equal(r.status, 200, JSON.stringify(admin)); assert.equal(admin.thumbnailSource, 'owner');
+    const rows = readFileSync(join(cdir, 'data', 'audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((x) => x.op === 'thumbnail');
+    assert.deepEqual(rows.map((x) => [x.by, x.via]), [[aliceId, 'session'], [bobId, 'site-admin']], 'the owner and the admin are told apart');
+    r = await fetch(`${corigin}/__sim/worlds/alice-fen/thumbnail`, { method: 'POST', headers: { 'content-type': 'image/jpeg', authorization: `Bearer ${bob}` }, body: jpeg(1000, 1000) });
+    assert.equal(r.status, 400, 'the same gate as the owner'); assert.equal((await r.json()).code, 'thumbnail.dimensions');
+    r = await fetch(`${corigin}/__sim/worlds/alice-fen/thumbnail`, { method: 'DELETE', headers: { authorization: `Bearer ${bob}` } });
+    assert.equal(r.status, 200, 'and may clear it');
+    delete process.env.SIM_SITE_OWNERS;
+    assert.equal((await send(bob)).status, 403, 'no longer a site owner, no longer allowed');
+  } finally { delete process.env.SIM_SITE_OWNERS; await C.close(); }
 });
 
 test('archived while an upload is being checked: nothing is written into the moved folder, and restore still works', async () => {

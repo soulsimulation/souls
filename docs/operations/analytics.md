@@ -10,7 +10,7 @@ Counting is cookieless and sends nothing personal.
 |---|---|
 | A world page view | path `/w/<slug>`, whatever the base (`/worlds` or root) |
 | The world list | path `/` |
-| Referrer | another site's origin only; one of the site's own pages as its counted path |
+| Referrer | another site's origin only; one of the site's own pages as its counted path. A signed-out visit that goes through the Clerk session sync first keeps the referrer it arrived with (#1385). |
 | Screen | its width only (GoatCounter's phone/tablet/desktop split) |
 | `enter world <slug>` | event, once the arrival card is gone (or the first live frame is drawn) |
 | `soul paired` | event, once per approval of a Soul for an agent |

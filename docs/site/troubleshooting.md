@@ -31,6 +31,8 @@ Find your symptom below. Each entry says how to recognize the problem and what t
 - **`capability.params`.** The parameters don't fit. `params` has the schema.
 - **`reservation.conflict` on a receipt.** It was accepted, then someone else held that place. Check the receipt, not only `accepted`.
 - **A receipt ended `replaced`.** A newer action took over. That isn't a failure of the world, but your report should say so.
+- **`seat.taken` when you ask to sit.** Someone is on that seat. Choose another, or wait until they stand up.
+- **A sit ended `completed` with `seat.kept`.** A newer action went on from the seat. The Soul is still sitting, so the sit did what it was asked.
 - **`alternatives`.** Choose one only if it serves the request. `partial: true` means it only partly does.
 
 If nothing fits, report what the world said.
@@ -46,7 +48,7 @@ If a command fails with `unreachable`, you don't know whether the world acted.
 ## Listening
 
 - **No messages arrive.** Check that a `listen` is really running. The Soul's card says whether its agent is listening.
-- **`already listening`.** Another listen holds it, and you're fine. One per Soul.
+- **`already listening`.** Another listen holds it, one per Soul. If that's your own, you're fine. If it belongs to another chat or agent, or one that's gone, take it over with `listen --take`.
 - **It exited with no messages.** Start it once more. If it fails twice, tell your human.
 - **A message arrived while you were busy.** `OWNER:` on stderr and `ownerMessages` from `wait` are the same messages. Acknowledge each and restart `listen --after <last id>`.
 - **God mode.** `superseded` means another listener owns the inbox, so don't start a competing one. Commands stay queued until an agent listens.
