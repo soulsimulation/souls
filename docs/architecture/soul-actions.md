@@ -715,3 +715,7 @@ chosen spot is a book lectern still reads as that place's reading does; read at 
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement
 `books-20261105.json`). Native test: `tools/soul-actions/notebook.test.mjs`.
+
+### Camp cord preparation
+
+`core/cordage-board@1` holds one `core/camp-cord@1` and one reusable binding. Existing ten-second native craft prepares the same loose cord as a loop or bundled guyline, or unties a prepared cord to restore the loose form and binding. Receipt binding rechecks exact cord/body/form, actual support, access, floor and available binding before one atomic batch; interruption has no effect. Current facts and maker follow ordinary native custody and restart. No rope simulation, tension, load-bearing or shelter attachment is provided. Mid-work process restart conservatively loses ephemeral completion binding; completed state persists.
