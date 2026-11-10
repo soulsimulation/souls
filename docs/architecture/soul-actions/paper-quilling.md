@@ -1,0 +1,9 @@
+# Paper quilling
+
+Find the fixed quilling table and its portable paper-scroll artwork by readable names. Act on `object:<artwork-id>:coil` with string parameters `coil`1–3, `turns`1–3, `color` red/blue/gold and finite decimal local `x`/`z` within±0.17m. Defaults are coil1, one red turn at0,0. Coils cannot overlap; choose another free position or recover an occupied coil. `object:<artwork-id>:unroll` takes string `coil`1–3 and returns exactly that occupied coil's material.
+
+Three coarse strip units of each color exist, including material already wound. Four completed native seconds atomically return the selected coil's old stock and allocate its new chosen stock, or recover it. Partial/interrupted work changes neither stock nor history. Rework can change position, color and turns without minting paper. Current facts/catalogue/live state expose every coil, unwound stock, operation count and last maker.
+
+The same artwork must actually rest on an accessible tabletop0.65–1.35m high; empty hands, source/parent ownership/access, body identity, poses/support and exact starting state bind completion. Normal native pickup/placement/reuse remains available. Soul work uses commitSoulWork, separate from unrelated God Undo/Redo. All real offers are strict exact IDs, with supported cold walking or useful own refusals; no new words/client rules.
+
+Scrolls and unwound stock are integral to the portable artwork, not separately physical loose pieces. Coarse paper ribbons/stock marks and approximate operate/nod-clear release make work understandable; no paper-deformation/adhesive physics, exact length or finger-contact claim. Fresh per-instance geometry follows the established retain/release lifecycle and does not key global prototypes by free coordinates. Existing four-draw/400triangle budget applies. Canonical direction647d04a5 and #1737/#1751 apply.
