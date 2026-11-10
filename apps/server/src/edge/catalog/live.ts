@@ -87,7 +87,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
   // may have made it not so: the kept changes are dropped, and a client coming back takes the whole picture as it is now.
   let shown = '';
   // the push's own time: the picture's build (shared with GET), and the diff, frame and fan-out on top of it
-  const cost = {runs: 0, ms: [] as number[], build: [] as number[], push: [] as number[], bytes: 0, since: Date.now()};
+  const cost = {runs: 0, ms: [] as number[], build: [] as number[], push: [] as number[], bytes: 0, since: Date.now(), tick: 0};
   const rec = (a: number[], v: number) => { if (timer && a.length < 4800) a.push(v); };   // only while the push runs; a minute's worth
   const current = () => {
     const nowShown = `${L.knowledge?.version ?? 0}|${L.places.version}`;
@@ -116,8 +116,10 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     cost.runs++; rec(cost.ms, performance.now() - t0);
     if (Date.now() - cost.since >= 60_000) {
       const q = (a: number[], p: number) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))]!.toFixed(3) : '-'; };
-      console.log(`[live-push] subscribers=${subs.size} runs=${cost.runs} seq=${kept?.seq ?? 0} ms p50=${q(cost.ms, 0.5)} p99=${q(cost.ms, 0.99)} max=${q(cost.ms, 1)} build p99=${q(cost.build, 0.99)} push p99=${q(cost.push, 0.99)} max=${q(cost.push, 1)} bytesOut=${cost.bytes}`);
-      cost.runs = 0; cost.ms = []; cost.build = []; cost.push = []; cost.bytes = 0; cost.since = Date.now();
+      // per tick: the push's own time (diff, frame, fan-out) on the ticks of the minute, a tick with no change counting 0
+      const ticks = L.host.engine.world.tick - cost.tick, perTick = [...cost.push, ...Array(Math.max(0, ticks - cost.push.length)).fill(0)];
+      console.log(`[live-push] subscribers=${subs.size} runs=${cost.runs} ticks=${ticks} seq=${kept?.seq ?? 0} ms p50=${q(cost.ms, 0.5)} p99=${q(cost.ms, 0.99)} max=${q(cost.ms, 1)} build p99=${q(cost.build, 0.99)} push p99=${q(cost.push, 0.99)} max=${q(cost.push, 1)} perTick p99=${q(perTick, 0.99)} bytesOut=${cost.bytes}`);
+      cost.runs = 0; cost.ms = []; cost.build = []; cost.push = []; cost.bytes = 0; cost.since = Date.now(); cost.tick = L.host.engine.world.tick;
     }
   };
   const subscribe = (after: string | null, send: LiveSend) => {
@@ -126,7 +128,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     if (e === epoch && Number.isSafeInteger(have) && have <= k.seq && k.seq - have <= LIVE_REPLAY_MAX && (have === k.seq || (ring[0] && ring[0].seq <= have + 1))) { for (const r of ring) if (r.seq > have) send('live', r.frame, r.sse); }
     else { const body = full(); send('live.full', body, sseOf('live.full', body)); }
     subs.add(send);
-    if (!timer) { timer = setInterval(step, PUSH_EVERY_MS); timer.unref?.(); cost.since = Date.now(); }
+    if (!timer) { timer = setInterval(step, PUSH_EVERY_MS); timer.unref?.(); cost.since = Date.now(); cost.tick = L.host.engine.world.tick; }
     return () => { subs.delete(send); if (!subs.size && timer) { clearInterval(timer); timer = null; } };
   };
 
