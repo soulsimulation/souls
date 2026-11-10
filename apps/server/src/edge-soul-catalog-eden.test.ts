@@ -16,7 +16,7 @@ const CLIENT_CATALOG = new URL('../../../tools/world-launcher/soul/catalog.mjs',
 
 type Spot = {id: string; activity: string; at: [number, number]; level?: number; together?: unknown; base: string; place?: string};
 
-test('Eden: far spots by id, and what the catalog and live picture publish (things worked by hand too, #1751)', {timeout: 900_000}, async t => {
+test('Eden: far spots by id, and what the catalog and live picture publish', {timeout: 900_000}, async t => {
   const w = await bootEden(); t.after(() => w.close());
   const L = w.edge as any, host = w.host, soul = w.soul;
   const run = async (n: number) => {for (let i = 0; i < n; i++) {host.tickOnce(); if (i % 10 === 0) {await setImmediate(); host.drainInputs();}} await setImmediate(); host.drainInputs();};
