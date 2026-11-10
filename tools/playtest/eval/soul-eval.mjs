@@ -62,7 +62,7 @@ export async function runEval(o) {
   mkdirSync(out, { recursive: true });
   const meta = { schema: RESULT_SCHEMA, battery: battery.battery, world: local ? world : /^http:/.test(world) ? 'local-url' : world.replace(/\/$/, ''), deliver, serverCommit: local ? gitHead(serverRoot) : null, evalCommit: gitHead(REPO),
     seat: { adapter: seatCfg.adapter ?? 'claude-headless', model: seatCfg.model ?? null, effort: seatCfg.effort ?? null, clean: live ? cleanEnvReport() : null },
-    repeats, items: items.map((i) => i.id), maxUsd: live ? maxUsd : 0, startedAt: new Date().toISOString() };
+    repeats, warmSec: Number(o['warm-sec'] ?? 0), items: items.map((i) => i.id), maxUsd: live ? maxUsd : 0, startedAt: new Date().toISOString() };
   writeJson(join(out, 'run.json'), meta);
   const episodes = []; let spent = 0, stoppedBy = null, n = 0;
   for (let rep = 1; rep <= repeats && !stoppedBy; rep++) for (const item of items) {
@@ -71,7 +71,7 @@ export async function runEval(o) {
     let w = null;
     try {
       if (local) w = await startWorld({ serverRoot, slug: 'eden-eval', port, genesis, dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
-      const rec = await runEpisode({ dir, base: local ? w.base : world.replace(/\/$/, ''), item, seatCfg, rails: { ...(seatCfg.rails ?? {}) }, folder, deliver, refreshClient: !!o['refresh-client'] && rep === 1 && n === 1,
+      const rec = await runEpisode({ dir, base: local ? w.base : world.replace(/\/$/, ''), item, seatCfg, rails: { ...(seatCfg.rails ?? {}) }, folder, deliver, warmSec: Number(o['warm-sec'] ?? 0), refreshClient: !!o['refresh-client'] && rep === 1 && n === 1,
         resetTo: local ? null : (o['reset-to'] === true ? null : o['reset-to'] ?? null), log });
       rec.repeat = rep; episodes.push(rec);
       spent += (rec.seat.costUsd ?? 0) + (rec.kickoff.costUsd ?? 0);

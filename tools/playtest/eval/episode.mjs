@@ -40,7 +40,8 @@ export async function prepareFolder(seat, { name }) {
   const cliText = await fetchServed(base, 'eden.mjs', join(f, 'eden.mjs'));
   const skill = await fetchServed(base, 'skill.md', join(f, 'skill.md'));
   const steps = [['register', base], ['create', name]];
-  for (const s of steps) { const r = await cli(f, s); if (r.code !== 0) throw new Error(`setup ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`); }
+  let createdAt = null;
+  for (const s of steps) { if (s[0] === 'create') createdAt = Date.now(); const r = await cli(f, s); if (r.code !== 0) throw new Error(`setup ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`); }
   const st = await cli(f, ['status']);
   const soulId = st.data?.soul?.id;
   if (!soulId) throw new Error(`setup: no Soul after create: ${st.stdout.slice(0, 300)}`);
@@ -50,7 +51,7 @@ export async function prepareFolder(seat, { name }) {
   const sv = await cli(f, ['serve']);
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
   for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { await cli(f, ['look']); await sleep(500); }   // the world copy
-  return { soulId, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
+  return { soulId, createdAt, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
 
 /** Read the client's world copy (soul-catalog/1) from the Soul's runtime folder, or null. */
@@ -87,7 +88,7 @@ export async function attachFolder({ dir, folder, base, seatCfg, rails, refreshC
 /** runEpisode({dir, base, item, seatCfg, rails, folder?, deliver?, resetTo?}) → the episode record (also written to dir/episode.json).
  *  deliver "inbox" (default): the instruction is an owner message (local dev worlds: the dev owner identity). "chat": it is
  *  typed into the agent's chat, as a person at their own agent does; there is no card, so card checks read as unknown. */
-export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder = null, refreshClient = false, deliver = 'inbox', resetTo = null, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
+export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder = null, refreshClient = false, deliver = 'inbox', resetTo = null, warmSec = 0, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
   let seat, setup;
   if (folder) ({ seat, setup } = await attachFolder({ dir, folder, base, seatCfg, rails, refreshClient }));
   else { seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails }); setup = await prepareFolder(seat, { name: seatCfg.soulName ?? 'Wren' }); }
@@ -105,6 +106,8 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
 
   const kick = await seat.chat(kickoffText(name, setup.skillFile), { reason: 'kickoff' });
   seat.wakeLoop();
+  // --warm-sec: the instruction waits until the Soul is this old, so a run can show the steady state beside the cold start
+  if (warmSec > 0 && setup.createdAt) { const wait = setup.createdAt + warmSec * 1000 - Date.now(); if (wait > 0) await sleep(wait); }
   const sentLocal = Date.now();
   const chatMode = deliver === 'chat';
   const sent = chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
@@ -147,7 +150,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
   const callsN = nonPoll.reduce((s, r) => s + r.n, 0);
   const mean = (k) => { const xs = http.filter((r) => !isLongPoll(r.route)).map((r) => r[k]).filter(Number.isFinite); return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null; };
   const rec = {
-    item: item.id, instruction: item.instruction, succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: endLocal - sentLocal,
+    item: item.id, instruction: item.instruction, sinceCreateMs: setup.createdAt ? sentLocal - setup.createdAt : null, succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: endLocal - sentLocal,
     firstMotionMs, successMs: verdict.ok ? successAt : null, cardClosedMs: closedAt, card: card ? { state: card.state, outcome: card.outcome, acked: !!card.ackAt, closed: cardClosed(card) } : null,
     seat: seatStats(readJsonl(join(seat.dir, 'turns.jsonl')), readJsonl(join(seat.dir, 'transcript.jsonl')), sentLocal),
     kickoff: { costUsd: kick?.usage?.costUsd ?? null, wallMs: kick?.wallMs ?? null, refused: kick?.refused ?? null, seatCheck: seat.info.seatCheck ?? null },

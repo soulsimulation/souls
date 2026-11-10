@@ -18,9 +18,11 @@ function routeTable(result) {
   return [...by.values()].sort((p, q) => q.n - p.n).map((a) => `| \`${a.route}\` | ${a.n} | ${med(a.client) ?? 'n/a'} | ${med(a.p50) ?? 'n/a'} | ${a.max} | ${a.longPoll ? 'long poll' : `${a.level} ${a.levelMs} ms: ${a.over} over`} |`);
 }
 
+const med = (eps) => { const xs = (eps ?? []).map((e) => e.sinceCreateMs).filter(Number.isFinite).sort((p, q) => p - q); return xs.length ? xs[Math.floor((xs.length - 1) / 2)] : null; };
+
 export function renderReport(a, b = null) {
   const L = [];
-  const head = (x) => `${x.battery} on ${x.world}; seat ${x.seat.adapter}${x.seat.model ? ` (${x.seat.model})` : ''}; client ${x.episodes?.find((e) => e.client)?.client?.cli ?? '?'} / skill ${x.episodes?.find((e) => e.client)?.client?.skill ?? '?'}; server ${x.serverCommit ?? '?'}; ${x.repeats} repeat(s); spent $${(x.spentUsd ?? 0).toFixed(3)}`;
+  const head = (x) => `${x.battery} on ${x.world}; seat ${x.seat.adapter}${x.seat.model ? ` (${x.seat.model})` : ''}; client ${x.episodes?.find((e) => e.client)?.client?.cli ?? '?'} / skill ${x.episodes?.find((e) => e.client)?.client?.skill ?? '?'}; server ${x.serverCommit ?? '?'}; ${x.repeats} repeat(s); ${x.warmSec ? `instructions sent at least ${x.warmSec} s after create` : 'instructions sent as soon as the agent is listening (cold)'}${med(x.episodes) != null ? `, median ${Math.round(med(x.episodes) / 1000)} s after create` : ''}; spent $${(x.spentUsd ?? 0).toFixed(3)}`;
   L.push(`# Soul Client eval`, '', `- **Run:** ${head(a)}`);
   if (b) L.push(`- **Against:** ${head(b)}`);
   if (a.stoppedBy) L.push(`- **Stopped early:** ${a.stoppedBy}`);

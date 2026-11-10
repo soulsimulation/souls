@@ -61,6 +61,7 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
 
 - `--items a,b` runs a subset of the battery.
 - `--keep-data` keeps each episode's world database.
+- `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
 
