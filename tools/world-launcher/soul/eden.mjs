@@ -2237,7 +2237,8 @@ const soulWake = (() => {
 // already stores (events, receipts, the plan, the owner's messages, speech said to this Soul, the live copy) against the rules and
 // says which fire. Firing only queues {id, kind, why, at}; the budget, merging and delivery are listen's and pending's (#1968).
 // #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
-// rule over it, and stay held until another agent command reaches serve, or go back to the queue, refunded, after HELD_MS.
+// rule over it, and stay held until a command from another process reaches serve, or go back to the queue after HELD_MS. Each
+// handing to a reader is one delivery and is charged once: the budget's count is the deliveries made, never more than it allows.
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
 const WAKE_EVERY_S = 300;
@@ -2257,7 +2258,7 @@ function fresh() {
 
 /** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
 const BUDGETS = { quiet: 4, normal: 12, lively: 60, unlimited: null };
-/** A delivered wake no later agent command confirmed goes back to the queue after this long, and its budget is refunded. */
+/** A delivered wake no later agent command confirmed goes back to the queue after this long, to be delivered again within the budget. */
 const HELD_MS = 600_000;
 /** speech-to-me: at most one wake per speaker in this long; their further lines join the next one. */
 const SPEAKER_MS = 60_000;
@@ -2337,30 +2338,39 @@ function enqueue(queue, fired) {
   return q.slice(-WAKE_QUEUE_MAX);
 }
 
-/** Pure: held deliveries older than heldMs go back to the queue (under what queued since) and their budget is refunded. */
+/** Pure: held deliveries older than heldMs go back to the queue, under what queued since. The delivery made stays counted: the
+ *  reader was handed it, and a refund would let a reader that never confirms take more turns than the budget (review of #2053). */
 function expire(wake, now, heldMs = HELD_MS) {
   const w = { ...fresh(), ...wake }, old = (w.held ?? []).filter((g) => now - g.at >= heldMs);
   if (!old.length) return w;
-  const back = old.flatMap((g) => g.wakes), refund = new Set(old.filter((g) => g.charged).map((g) => g.at));
-  const queue = enqueue(back, w.queue ?? []);   // what queued since is newer: its why stands
-  return { ...w, queue, held: w.held.filter((g) => !old.includes(g)), delivered: (w.delivered ?? []).filter((d) => !refund.has(d.at)) };
+  const queue = enqueue(old.flatMap((g) => g.wakes), w.queue ?? []);   // what queued since is newer: its why stands
+  return { ...w, queue, held: w.held.filter((g) => !old.includes(g)) };
 }
 
 /** Pure: what a reader is handed now. The always-on kinds come by their own paths (the owner's messages, speech, the plan), so
  *  their entries leave the queue; the ambient ones are handed over, all at once, when the budget allows one more delivery
  *  (`free`: they ride with a wake that is coming anyway, and cost nothing). Handed wakes are held, not gone: confirm() ends that. */
-function deliver(wake, now, { free = false, heldMs = HELD_MS } = {}) {
+/** `reader`: the process asking, so its own later requests confirm nothing. `rehand` (pending, a run that is awake anyway): wakes
+ *  still held for another reader, which no command has confirmed, are handed to this one too, at no new charge. */
+function deliver(wake, now, { free = false, heldMs = HELD_MS, reader = null, rehand = false } = {}) {
   const w0 = expire(wake, now, heldMs), queue = (w0.queue ?? []).filter((x) => !ALWAYS.includes(x.kind));
-  const delivered = (w0.delivered ?? []).filter((d) => now - d.at < DAY_MS), w = { ...w0, queue, delivered };
-  if (!queue.length) return { wake: w, wakes: [] };
+  const delivered = (w0.delivered ?? []).filter((d) => now - d.at < DAY_MS);
+  const again = rehand ? (w0.held ?? []).filter((g) => g.reader !== reader) : [];
+  const held = [...(w0.held ?? []).filter((g) => !again.includes(g)), ...again.map((g) => ({ ...g, at: now, reader }))];
+  const w = { ...w0, queue, delivered, held }, before = enqueue([], again.flatMap((g) => g.wakes));
+  if (!queue.length) return { wake: w, wakes: before };
   const hour = perHour(w), day = w.budget?.day ?? null;
   const over = !free && ((hour !== null && delivered.filter((d) => now - d.at < HOUR_MS).length >= hour) || (day !== null && delivered.length >= day));
-  if (over) return { wake: w, wakes: [], over: true };
-  return { wake: { ...w, queue: [], held: [...(w.held ?? []), { at: now, wakes: queue, charged: !free }], delivered: free ? delivered : [...delivered, { at: now }] }, wakes: queue };
+  if (over) return { wake: w, wakes: before, over: true };
+  return { wake: { ...w, queue: [], held: [...held, { at: now, wakes: queue, charged: !free, reader }], delivered: free ? delivered : [...delivered, { at: now }] }, wakes: enqueue(before, queue) };
 }
 
-/** Pure: another agent command reached serve: what was handed before it was taken. */
-const confirm = (wake) => (wake?.held?.length ? { ...wake, held: [] } : wake);
+/** Pure: a command reached serve from `reader`: what was handed to any other process was taken. A reader's own requests (a listen's
+ *  next poll) confirm nothing it was handed. Without a reader, everything held is taken. */
+function confirm(wake, reader) {
+  const held = (wake?.held ?? []).filter((g) => reader != null && g.reader === reader);
+  return held.length === (wake?.held?.length ?? 0) ? wake : { ...wake, held };
+}
 
 const speaker = (a) => a.soulId ?? a.from ?? "someone";
 /** Pure: does any of these lines said to this Soul come from a speaker who has not woken it within SPEAKER_MS? */
@@ -4467,7 +4477,6 @@ async function listen(...args) {
     else throw new Error(usage);
   }
   if (follow && once) throw new Error(`--follow never ends on a message and --once never waits: pick one. ${usage}`);
-  LISTENING = true;
   let wakes = 0;
   const emit = (line) => { writeSync(1, JSON.stringify(followLine({ ...line, wake: ++wakes })) + "\n"); };
   const ended = (why, extra = {}) => { writeSync(1, JSON.stringify(followLine({ ended: why, ...extra })) + "\n"); return ""; };
@@ -4933,7 +4942,7 @@ const SERVE_BEAT_MS = 20_000, SERVE_STALE_MS = 60_000, SERVE_CLOSED_KEEP = 50;
 const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupted", "replaced"]);
 const HELD_PATH = /^\/v1\/edge\/(wait|events)(\?|$|\/)/;  // long-polls and streams: never queued behind a heavy request
 let IS_SERVE = false;
-let LISTENING = false;   // #1968: this process is a listen: what it asks serve confirms no wake it was handed
+const READER = `${process.pid}:${randomUUID().slice(0, 8)}`;   // #1968: this process, to serve: its own requests confirm no wake it was handed
 
 /** One request over the local socket: null when no serve is there to take it, {lost:true} when it took it and went away. */
 function askServe(msg, timeoutMs = 5_000) {
@@ -4943,7 +4952,7 @@ function askServe(msg, timeoutMs = 5_000) {
     const c = createConnection(SERVE_SOCK);
     const end = (v) => { c.destroy(); clearTimeout(timer); done(v); };
     const timer = setTimeout(() => end(sent ? { lost: true, slow: true } : null), timeoutMs);
-    c.on("connect", () => { sent = true; c.write(JSON.stringify(LISTENING ? { ...msg, listen: true } : msg) + "\n"); });
+    c.on("connect", () => { sent = true; c.write(JSON.stringify({ ...msg, reader: READER }) + "\n"); });
     c.on("data", (b) => { text += b; const i = text.indexOf("\n"); if (i >= 0) { try { end(JSON.parse(text.slice(0, i))); } catch { end({ lost: true }); } } });
     c.on("error", () => end(sent ? { lost: true } : null));
     c.on("close", () => end(sent ? { lost: true } : null));
@@ -5110,8 +5119,9 @@ export function reconcileMessages(st, unacked) {
 /** Pure: everything since the last read, and the read cursor moves past it. Nothing is lost across agent turns. */
 /** #1951: event kinds that carry another Soul's words: speech, a mention, a conversation turn or invitation, an invite. */
 const SPOKEN = /^(speech|mention|invite|conversation\.(turn|invite))(\.|$)/;
-export function takePending(st, now = Date.now(), heldMs = soulWake.HELD_MS) {
-  const w = st.wake ? soulWake.deliver(st.wake, now, { heldMs }) : null;   // #1968: ambient wakes within the budget, held till the next command
+export function takePending(st, now = Date.now(), heldMs = soulWake.HELD_MS, reader = null) {
+  // #1968: ambient wakes within the budget, and any still held for a reader no command has confirmed; held till the next command
+  const w = st.wake ? soulWake.deliver(st.wake, now, { heldMs, reader, rehand: true }) : null;
   if (w) st.wake = w.wake;
   const from = readIndex(st), rest = st.events.slice(from).filter((e) => !["receipt", "activity.observed"].includes(e?.kind));
   const shown = rest.slice(0, PENDING_EVENTS_MAX);
@@ -5460,7 +5470,7 @@ async function serveForeground() {
     waiters = waiters.filter((f) => f !== onSpeech);
     return first.r.data && typeof first.r.data === "object" ? { ...first.r, data: { ...first.r.data, addressedSeq: heldFrom } } : first.r;
   }
-  async function localListen(url) {
+  async function localListen(url, reader) {
     // The world's own rule (Inbox.takeBacklog): every message not acknowledged after the cursor, however often it has been seen.
     // A wait's timeoutMs=0 peek comes through here too, and must not take a message from the listener waiting for it.
     const q = new URL(url).searchParams, after = q.get("after"), until = Date.now() + Math.min(Number(q.get("timeoutMs") ?? 25_000), 55_000);
@@ -5471,10 +5481,10 @@ async function serveForeground() {
       const stopped = st.plan?.state === "stopped" && !st.plan.announced ? st.plan : null;   // a refused step wakes the agent
       // said to this Soul: a wake too, and a peek doesn't use it up either. #1968: one wake per speaker a minute; their later lines join the next
       const t = Date.now(), said = takeAddressed(st, heldFrom, { peek: true }), speech = said.length > 0 && (peek || soulWake.speechDue(said, st.wake.spoke, t));   // a peek wakes no one: it shows them
-      const ambient = !peek && !backlog.length && !stopped && !speech ? soulWake.deliver(st.wake, t, { heldMs: WAKE_HELD_MS }) : null;
+      const ambient = !peek && !backlog.length && !stopped && !speech ? soulWake.deliver(st.wake, t, { heldMs: WAKE_HELD_MS, reader }) : null;
       if (ambient?.wakes.length || backlog.length || stopped || speech) {
         const addressed = peek ? said : takeAddressed(st, heldFrom);
-        const wakes = ambient ?? (peek ? { wakes: [] } : soulWake.deliver(st.wake, t, { free: true, heldMs: WAKE_HELD_MS }));   // ambient wakes ride free with one coming anyway
+        const wakes = ambient ?? (peek ? { wakes: [] } : soulWake.deliver(st.wake, t, { free: true, heldMs: WAKE_HELD_MS, reader }));   // ambient wakes ride free with one coming anyway
         if (!peek) { st.wake = { ...wakes.wake ?? st.wake, spoke: soulWake.spokeNow(st.wake.spoke, addressed, t) }; persist(); }
         if (stopped && !peek) stopped.announced = true;   // a peek shows it but doesn't use up the wake
         const out = backlog.map(({ id, text, sentAt }) => ({ id, text, sentAt, state: "delivered" }));
@@ -5568,11 +5578,12 @@ async function serveForeground() {
   }
   const pendingClose = [];
   async function handle(m) {
-    if (!m.listen && st.wake?.held?.length) { st.wake = soulWake.confirm(st.wake); persist(); }   // #1968: the agent took what it was handed
+    // #1968: a command from another process means the agent took what was handed; pending and status read without taking it
+    if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
     if (moved()) { log("the folder's world, Soul or token changed: stopping"); setTimeout(() => shutdown(0), 10); return m.op === "http" ? { status: 0, data: { error: { code: "unreachable", message: "this serve stopped: the folder moved to another world or Soul" } } } : { serving: false, stopping: true, moved: true }; }
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
-    if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS); persist(); return out; }
+    if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS, m.reader); persist(); return out; }
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
@@ -5583,7 +5594,7 @@ async function serveForeground() {
     if (m.op === "http") {
       if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
-      if (path === "/v1/edge/inbox/listen") return localListen(m.url);
+      if (path === "/v1/edge/inbox/listen") return localListen(m.url, m.reader);
       if (path === "/v1/edge/wait" && m.method !== "POST") { heldWaits++; try { return await heldWait(m); } finally { heldWaits--; } }
       const cached = m.method === "GET" && /^\/v1\/edge\/receipts\/([^/]+)$/.exec(path);
       const known = cached ? st.receipts[decodeURIComponent(cached[1])] : null;

@@ -2,7 +2,8 @@
 // already stores (events, receipts, the plan, the owner's messages, speech said to this Soul, the live copy) against the rules and
 // says which fire. Firing only queues {id, kind, why, at}; the budget, merging and delivery are listen's and pending's (#1968).
 // #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
-// rule over it, and stay held until another agent command reaches serve, or go back to the queue, refunded, after HELD_MS.
+// rule over it, and stay held until a command from another process reaches serve, or go back to the queue after HELD_MS. Each
+// handing to a reader is one delivery and is charged once: the budget's count is the deliveries made, never more than it allows.
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
 export const WAKE_EVERY_S = 300;
@@ -22,7 +23,7 @@ export function fresh() {
 
 /** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
 export const BUDGETS = { quiet: 4, normal: 12, lively: 60, unlimited: null };
-/** A delivered wake no later agent command confirmed goes back to the queue after this long, and its budget is refunded. */
+/** A delivered wake no later agent command confirmed goes back to the queue after this long, to be delivered again within the budget. */
 export const HELD_MS = 600_000;
 /** speech-to-me: at most one wake per speaker in this long; their further lines join the next one. */
 export const SPEAKER_MS = 60_000;
@@ -102,30 +103,39 @@ export function enqueue(queue, fired) {
   return q.slice(-WAKE_QUEUE_MAX);
 }
 
-/** Pure: held deliveries older than heldMs go back to the queue (under what queued since) and their budget is refunded. */
+/** Pure: held deliveries older than heldMs go back to the queue, under what queued since. The delivery made stays counted: the
+ *  reader was handed it, and a refund would let a reader that never confirms take more turns than the budget (review of #2053). */
 export function expire(wake, now, heldMs = HELD_MS) {
   const w = { ...fresh(), ...wake }, old = (w.held ?? []).filter((g) => now - g.at >= heldMs);
   if (!old.length) return w;
-  const back = old.flatMap((g) => g.wakes), refund = new Set(old.filter((g) => g.charged).map((g) => g.at));
-  const queue = enqueue(back, w.queue ?? []);   // what queued since is newer: its why stands
-  return { ...w, queue, held: w.held.filter((g) => !old.includes(g)), delivered: (w.delivered ?? []).filter((d) => !refund.has(d.at)) };
+  const queue = enqueue(old.flatMap((g) => g.wakes), w.queue ?? []);   // what queued since is newer: its why stands
+  return { ...w, queue, held: w.held.filter((g) => !old.includes(g)) };
 }
 
 /** Pure: what a reader is handed now. The always-on kinds come by their own paths (the owner's messages, speech, the plan), so
  *  their entries leave the queue; the ambient ones are handed over, all at once, when the budget allows one more delivery
  *  (`free`: they ride with a wake that is coming anyway, and cost nothing). Handed wakes are held, not gone: confirm() ends that. */
-export function deliver(wake, now, { free = false, heldMs = HELD_MS } = {}) {
+/** `reader`: the process asking, so its own later requests confirm nothing. `rehand` (pending, a run that is awake anyway): wakes
+ *  still held for another reader, which no command has confirmed, are handed to this one too, at no new charge. */
+export function deliver(wake, now, { free = false, heldMs = HELD_MS, reader = null, rehand = false } = {}) {
   const w0 = expire(wake, now, heldMs), queue = (w0.queue ?? []).filter((x) => !ALWAYS.includes(x.kind));
-  const delivered = (w0.delivered ?? []).filter((d) => now - d.at < DAY_MS), w = { ...w0, queue, delivered };
-  if (!queue.length) return { wake: w, wakes: [] };
+  const delivered = (w0.delivered ?? []).filter((d) => now - d.at < DAY_MS);
+  const again = rehand ? (w0.held ?? []).filter((g) => g.reader !== reader) : [];
+  const held = [...(w0.held ?? []).filter((g) => !again.includes(g)), ...again.map((g) => ({ ...g, at: now, reader }))];
+  const w = { ...w0, queue, delivered, held }, before = enqueue([], again.flatMap((g) => g.wakes));
+  if (!queue.length) return { wake: w, wakes: before };
   const hour = perHour(w), day = w.budget?.day ?? null;
   const over = !free && ((hour !== null && delivered.filter((d) => now - d.at < HOUR_MS).length >= hour) || (day !== null && delivered.length >= day));
-  if (over) return { wake: w, wakes: [], over: true };
-  return { wake: { ...w, queue: [], held: [...(w.held ?? []), { at: now, wakes: queue, charged: !free }], delivered: free ? delivered : [...delivered, { at: now }] }, wakes: queue };
+  if (over) return { wake: w, wakes: before, over: true };
+  return { wake: { ...w, queue: [], held: [...held, { at: now, wakes: queue, charged: !free, reader }], delivered: free ? delivered : [...delivered, { at: now }] }, wakes: enqueue(before, queue) };
 }
 
-/** Pure: another agent command reached serve: what was handed before it was taken. */
-export const confirm = (wake) => (wake?.held?.length ? { ...wake, held: [] } : wake);
+/** Pure: a command reached serve from `reader`: what was handed to any other process was taken. A reader's own requests (a listen's
+ *  next poll) confirm nothing it was handed. Without a reader, everything held is taken. */
+export function confirm(wake, reader) {
+  const held = (wake?.held ?? []).filter((g) => reader != null && g.reader === reader);
+  return held.length === (wake?.held?.length ?? 0) ? wake : { ...wake, held };
+}
 
 const speaker = (a) => a.soulId ?? a.from ?? "someone";
 /** Pure: does any of these lines said to this Soul come from a speaker who has not woken it within SPEAKER_MS? */

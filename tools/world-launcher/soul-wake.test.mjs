@@ -237,18 +237,44 @@ test('#1968 A3: wakes over the budget merge to one entry per rule with a count a
   assert.equal(line.wakes.at(-1).id, 'w49', 'the newest rules stay');
 });
 
-test('#1968 A4: a delivered wake is held until another command; unconfirmed for 10 minutes it returns, refunded', () => {
-  const d = deliver({ ...fresh(), budget: { hour: 'quiet' }, queue: enqueue([], [{ id: 'w1', kind: 'soul-arrives', why: 'Mira arrived', at: 'a' }]) }, T0);
+test('#1968 A4: a delivered wake is held until a command from another process; unconfirmed for 10 minutes it returns', () => {
+  const d = deliver({ ...fresh(), budget: { hour: 'quiet' }, queue: enqueue([], [{ id: 'w1', kind: 'soul-arrives', why: 'Mira arrived', at: 'a' }]) }, T0, { reader: 'L1' });
   assert.deepEqual(d.wakes.map((x) => [x.id, x.count]), [['w1', 1]]);
   const w = { ...d.wake, queue: enqueue(d.wake.queue, [{ id: 'w1', kind: 'soul-arrives', why: 'Ivo arrived', at: 'b' }]) };
   assert.equal(budgetView(w, T0).deliveredLastHour, 1);
+  assert.equal(confirm(w, 'L1'), w, 'the reader\'s own next request (a listen\'s next poll) confirms nothing');
   assert.equal(expire(w, T0 + HELD_MS - 1).held.length, 1, 'held for ten minutes');
   const back = expire(w, T0 + HELD_MS);
   assert.deepEqual(back.held, []);
   assert.deepEqual(back.queue, [{ id: 'w1', kind: 'soul-arrives', why: 'Ivo arrived', at: 'b', count: 2 }], 'back in the queue, merged under what queued since');
-  assert.equal(budgetView(back, T0 + HELD_MS).deliveredLastHour, 0, 'its budget refunded');
-  const taken = confirm(w);
-  assert.deepEqual([taken.held, expire(taken, T0 + HELD_MS).queue[0].count], [[], 1], 'confirmed: only what queued since is left');
+  assert.equal(budgetView(back, T0 + HELD_MS).deliveredLastHour, 1, 'the delivery made stays counted (review of #2053: a refund let the budget be exceeded)');
+  assert.equal(budgetView(deliver(back, T0 + HELD_MS, { reader: 'L2' }).wake, T0 + HELD_MS).deliveredLastHour, 2, 'delivered again, it is charged again');
+  const taken = confirm(w, 'L2');
+  assert.deepEqual([taken.held, expire(taken, T0 + HELD_MS).queue[0].count], [[], 1], 'a new listen started: it took what the last one was handed; only what queued since is left');
+
+  // a run reads with pending and dies; the next run's pending, inside the hold, is handed the same wake, at no new charge
+  const p = deliver(w, T0 + 1_000, { reader: 'P2', rehand: true });
+  assert.deepEqual(p.wakes.map((x) => [x.id, x.why, x.count]), [['w1', 'Ivo arrived', 2]], 'the held one and what queued since, merged');
+  assert.equal(budgetView(p.wake, T0 + 1_000).deliveredLastHour, 2, 'the queued one is a new delivery; the held one costs nothing again');
+  assert.deepEqual(p.wake.held.map((g) => g.reader), ['P2', 'P2']);
+});
+
+test('#1968 review: an hour of a lively place with rule wakes nobody confirms never delivers more than the budget, and status counts every delivery', () => {
+  for (const hour of ['quiet', 'normal', 'lively']) {
+    const st = serveState({ live: pic([['s_me', 'g-yard']]) });
+    let wake = { ...fresh(), rules: [soulArrives('w1')], budget: { hour } }, handed = 0;
+    for (let t = 0; t < HOUR; t += 2_000) {   // someone arrives every 4 s; one listen --follow polls every 2 s and nothing else ever runs
+      st.live = pic([['s_me', 'g-yard'], ...(t % 4_000 ? [[`s_${t}`, 'g-hall']] : [])]);
+      const r = evaluate(wake.rules, { ...st, wake }, T0 + t);
+      wake = { ...wake, rules: r.rules, cursor: r.cursor, queue: enqueue(wake.queue, r.fired) };
+      const d = deliver(confirm(wake, 'L'), T0 + t, { reader: 'L' });
+      if (d.wakes.length) handed++;
+      wake = d.wake;
+    }
+    assert.ok(handed <= BUDGETS[hour], `${hour}: ${handed} deliveries`);
+    assert.equal(handed, BUDGETS[hour], `${hour}: the budget is used, not exceeded`);
+    assert.equal(budgetView(wake, T0 + HOUR - 1).deliveredLastHour, handed, `${hour}: status counts what was delivered`);
+  }
 });
 
 test('#1968 A5: five --every 0 rules raise 200 matches in an hour on a busy place: quiet delivers 4, normal 12, unlimited one per rule per evaluation', () => {
@@ -263,9 +289,9 @@ test('#1968 A5: five --every 0 rules raise 200 matches in an hour on a busy plac
       const r = evaluate(wake.rules, { ...st, wake }, T0 + t);
       wake = { ...wake, rules: r.rules, cursor: r.cursor, queue: enqueue(wake.queue, r.fired) };
       matches += r.fired.length; if (r.fired.length) evaluations++;
-      const d = deliver(wake, T0 + t);   // a reader takes what it is handed at every evaluation, and acts: confirmed
+      const d = deliver(wake, T0 + t, { reader: 'listen' });   // a reader takes what it is handed at every evaluation, and acts: confirmed
       if (d.wakes.length) deliveries.push(d.wakes);
-      wake = confirm(d.wake);
+      wake = confirm(d.wake, 'act');
     }
     return { matches, evaluations, deliveries, wake };
   };
@@ -279,9 +305,9 @@ test('#1968 A5: five --every 0 rules raise 200 matches in an hour on a busy plac
   for (const d of unlimited.deliveries) assert.deepEqual(d.map((x) => [x.id, x.count]), [['w1', 1], ['w2', 1], ['w3', 1], ['w4', 1], ['w5', 1]], 'merged to one per rule');
 });
 
-test('#1968 A1, A4: wake budget and status through the CLI; a killed pending reader\'s wake is delivered again', async (t) => {
+test('#1968 A1, A4: wake budget and status through the CLI; a run killed after pending leaves its wake to the next run', async (t) => {
   const w = await world(t);
-  w.env = { EDEN_TIME_SCALE: '0.002' };   // serve holds a handed wake HELD_MS × 0.002 = 1.2 s here
+  w.env = { EDEN_TIME_SCALE: '0.01' };   // serve holds a handed wake HELD_MS × 0.01 = 6 s here
   let r = await w.cli('wake');
   assert.deepEqual([r.json.budget.budget, r.json.budget.chosen], ['normal', false]);
   r = await w.cli('wake', 'budget', 'quiet');
@@ -290,9 +316,8 @@ test('#1968 A1, A4: wake budget and status through the CLI; a killed pending rea
   assert.deepEqual([r.json.budget.budget, r.json.budget.perDay], ['quiet', 20]);
   assert.equal((await w.cli('wake', 'budget', 'busy')).code, 1);
   assert.equal((await w.cli('wake', 'add', 'soul-arrives', '{"where":"g-yard"}')).code, 0);
-  const st = w.state();
-  st.wake.queue = [{ id: 'w1', kind: 'soul-arrives', why: 'Mira arrived at g-yard', at: new Date().toISOString(), count: 3 }];
-  writeFileSync(join(w.dir, '.eden-serve.json'), JSON.stringify(st));
+  const queue = (why, count) => { const st = w.state(); st.wake.queue = [{ id: 'w1', kind: 'soul-arrives', why, at: new Date().toISOString(), count }]; writeFileSync(join(w.dir, '.eden-serve.json'), JSON.stringify(st)); };
+  queue('Mira arrived at g-yard', 3);
   assert.equal((await w.cli('serve')).code, 0);
 
   const killed = await new Promise((done) => {   // a scheduled run reads its wakes and dies
@@ -303,12 +328,19 @@ test('#1968 A1, A4: wake budget and status through the CLI; a killed pending rea
   assert.deepEqual([w.state().wake.held.length, w.state().wake.queue.length], [1, 0], 'held, not gone');
   r = await w.cli('status');
   assert.deepEqual([r.json.wake.budget, r.json.wake.deliveredLastHour, r.json.wake.deliveredLast24h], ['quiet', 1, 1], 'status shows the budget and what was delivered');
-  assert.ok(await until(() => w.state().wake.queue.some((q) => q.id === 'w1')), 'no command came: it returns to the queue');
-  assert.deepEqual([w.state().wake.held.length, w.state().wake.delivered.length], [0, 0], 'and its budget is refunded');
+  assert.equal((await w.cli('serve', '--status')).json.serving, true);
+  assert.equal(w.state().wake.held.length, 1, 'the next run\'s status, through serve, takes nothing');
   r = await w.cli('pending');
-  assert.deepEqual(r.json.wakes.map((x) => [x.id, x.why, x.count]), [['w1', 'Mira arrived at g-yard', 3]], 'delivered again');
+  assert.deepEqual(r.json.wakes.map((x) => [x.id, x.why, x.count]), [['w1', 'Mira arrived at g-yard', 3]], 'the next run\'s pending, inside the hold, is handed it again');
+  assert.equal(w.state().wake.delivered.length, 1, 'at no new charge');
   assert.equal((await w.cli('wake')).code, 0, 'another agent command reaches serve');
   assert.deepEqual(w.state().wake.held, [], 'it took what pending handed');
-  await new Promise((done) => setTimeout(done, 2_500));
-  assert.deepEqual(w.state().wake.queue, [], 'and nothing comes back');
+
+  await w.cli('serve', '--stop'); await until(async () => (await w.cli('serve', '--status')).json?.serving === false);
+  queue('Ivo arrived at g-yard', 1); assert.equal((await w.cli('serve')).code, 0);
+  assert.deepEqual((await w.cli('pending')).json.wakes.map((x) => x.why), ['Ivo arrived at g-yard']);
+  assert.ok(await until(() => w.state().wake.queue.some((q) => q.id === 'w1'), 15_000), 'no command came: after the hold it returns to the queue');
+  assert.deepEqual([w.state().wake.held.length, w.state().wake.delivered.length], [0, 2], 'the delivery made stays counted');
+  assert.deepEqual((await w.cli('pending')).json.wakes.map((x) => x.why), ['Ivo arrived at g-yard'], 'delivered again');
+  assert.equal(w.state().wake.delivered.length, 3, 'and charged again: the count is the deliveries made');
 });
