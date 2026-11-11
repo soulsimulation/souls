@@ -91,7 +91,9 @@ export class QuietBaseline {
  *  windows (~50 s, half-life ~33 s), long enough to average over a large world's heavy ticks (one every 10-15 s) and short
  *  enough to follow a world that grows within a minute or two. Until the first quiet window, non-warm windows with tick
  *  service >= 0.95 seed it provisionally (a world that boots straight into load still calibrates); the first quiet window
- *  replaces that seed. A window needs >= 20 ticks of its own (1 s) to count. */
+ *  replaces that seed. After that, a served loaded window whose ticks cost less moves it down by the same alpha, never up
+ *  (#2124: under steady load no window is quiet, and the heavier setup ticks held the budget down). A window needs >= 20
+ *  ticks of its own (1 s) to count. */
 export const QUIET_TICK_ALPHA = 0.1, QUIET_TICK_MIN_TICKS = 20;
 export class QuietTick {
   value = 0;
@@ -102,9 +104,9 @@ export class QuietTick {
     if (!Number.isFinite(avgMs) || avgMs < 0) return this.value;
     if (quiet && !this.quietSeen) { this.quietSeen = true; this.value = avgMs; return this.value; }
     if (quiet || (!this.quietSeen && served)) this.value = this.value > 0 ? this.value + QUIET_TICK_ALPHA * (avgMs - this.value) : avgMs;
-    // #2124: a served window whose ticks cost less lowers it (never raises it): under steady load no window is quiet, and the
-    // value learned during setup (heavier ticks) held the admission budget below what the world's tick actually leaves
-    else if (served && avgMs < this.value) this.value = avgMs;
+    // #2124: a served window whose ticks cost less lowers it, by alpha (never raises it): under steady load no window is
+    // quiet, and the value learned during setup (heavier ticks) held the admission budget below what the tick leaves
+    else if (served && avgMs < this.value) this.value += QUIET_TICK_ALPHA * (avgMs - this.value);
     return this.value;
   }
 }
