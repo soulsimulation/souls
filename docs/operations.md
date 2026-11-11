@@ -135,6 +135,13 @@ qualified separately.
   <port> --base /` summarises them on the current root-only host. Use the actual configured base for other deployments.
 - Operator actions: `<data>/audit.jsonl` (`op.mjs audit`).
 
+## Platform feed
+
+Every client pulls site news from `<base>/v1/feed?after=<id>&limit=N` (public, cached 60 s, no credentials). Post from
+the host: `op.mjs feed-post --port <port> --base / --kind announcement|release|world|event --title "…" [--body …]
+[--url https://…] [--starts-at …] [--replaces <id>]`. `<data>/feed.jsonl` is append-only: correct an item by posting one
+that replaces it. `op.mjs feed-stats` prints reads per UTC day by client version (`x-soul-client`); no ids are kept.
+
 ## CDN
 
 Reviewed immutable assets (models, textures, the Mars campus, the humanoid kit) are content-addressed objects on
