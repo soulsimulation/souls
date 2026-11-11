@@ -1,16 +1,16 @@
 // timed-run.mjs (#1943, #1970): the per-command allowlist, the argument check, the start-load gate, the scrubbed staging
-// and the world/load core split.
+// and the world/load core split; #2147: the runner routing and the base arm's cache key.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE, COMMANDS, PASS_FAIL, RUNNERS, runnerFor, baseKey, EVAL_BATTERY, EVAL_SEAT } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
 test('inputs: ref, command and repeats are checked before anything runs', () => {
-  assert.deepEqual(parseInputs(ENV), { ref: 'main', command: 'walk', repeats: 1, args: [] });
+  assert.deepEqual(parseInputs(ENV), { ref: 'main', command: 'walk', repeats: 1, args: [], runner: 'souls-timed', arm: 'ref' });
   assert.equal(parseInputs({ ...ENV, INPUT_REF: 'agent/1943-timed-run', INPUT_COMMAND: 'eval-scripted', INPUT_REPEATS: '3' }).repeats, 3);
   for (const [k, v] of [['INPUT_REF', 'feature/x'], ['INPUT_REF', 'agent/../main'], ['INPUT_REF', '$(id)'], ['INPUT_COMMAND', 'gate'], ['INPUT_COMMAND', 'walk;id'],
     ['INPUT_COMMAND', ''], ['INPUT_REPEATS', '0'], ['INPUT_REPEATS', '4'], ['INPUT_REPEATS', '2 x']])
@@ -150,4 +150,34 @@ test('world pinning: only world servers under the run\'s own process tree', () =
   assert.ok(isWorld(['node', 'apps/server/src/main.ts'].join('\0')));
   for (const c of ['node\0tools/world-launcher/launcher.mjs', 'node\0tools/bench/capacity/bench.mjs', 'grep\0apps/server/src/main.ts.bak'])
     assert.ok(!isWorld(c), c);
+});
+
+test('#2147 routing: the pass/fail eval goes to souls-heavy by default; every timing command stays on souls-timed', () => {
+  assert.deepEqual(PASS_FAIL, ['eval-scripted']);
+  for (const c of COMMANDS) {
+    const timing = c !== 'eval-scripted';
+    assert.equal(runnerFor(c), timing ? 'souls-timed' : 'souls-heavy', c);
+    assert.equal(parseInputs({ ...ENV, INPUT_COMMAND: c }).runner, runnerFor(c));
+    assert.equal(runnerFor(c, 'souls-timed'), 'souls-timed');
+    if (timing) assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: c, INPUT_RUNNER: 'souls-heavy' }), /input runner="souls-heavy": .* souls-timed only/, c);
+    else assert.equal(runnerFor(c, 'souls-heavy'), 'souls-heavy');
+  }
+  assert.deepEqual(RUNNERS['souls-heavy'], ['self-hosted', 'souls-heavy']);
+  assert.deepEqual(RUNNERS['souls-timed'], ['self-hosted', 'souls-timed']);
+  for (const r of ['hosted', 'ubuntu-latest', 'souls-ci', '$(id)']) assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'eval-scripted', INPUT_RUNNER: r }), /input runner=/, r);
+  // the base arm is the eval's only
+  assert.equal(parseInputs({ ...ENV, INPUT_COMMAND: 'eval-scripted', INPUT_ARM: 'base' }).arm, 'base');
+  for (const [c, a] of [['walk', 'base'], ['eval-load', 'base'], ['eval-scripted', 'candidate']]) assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: c, INPUT_ARM: a }), /input arm=/, `${c} ${a}`);
+});
+
+test('#2147 base cache key: one per main commit, battery version, seat, repeats and args', () => {
+  const battery = readFileSync(join(import.meta.dirname, '../..', EVAL_BATTERY), 'utf8'), seat = readFileSync(join(import.meta.dirname, '../..', EVAL_SEAT), 'utf8');
+  const k = { commit: 'c1f118aaa64c0579d2c601d3c1c0cba56ab1434f', battery, seat, repeats: 2, args: [] }, key = baseKey(k);
+  assert.match(key, /^timed-run-eval-base-c1f118aaa64c0579d2c601d3c1c0cba56ab1434f-m4-v1-b[0-9a-f]{12}-s[0-9a-f]{12}-r2-a[0-9a-f]{12}$/);
+  assert.equal(baseKey({ ...k }), key, 'the same inputs give the same key');
+  const other = [{ commit: 'f40a30f5a246ca3e4658483d82103e8dc73c5ce7' }, { battery: battery.replace('Walk to the bandstand.', 'Walk to the bandstand!') }, { battery: battery.replace('"m4-v1"', '"m4-v2"') },
+    { seat: seat.replace('"60"', '"61"') }, { repeats: 1 }, { args: ['--items', 'bandstand'] }, { args: ['--warm-sec', '40'] }];
+  const keys = other.map((d) => baseKey({ ...k, ...d }));
+  assert.equal(new Set([key, ...keys]).size, other.length + 1, 'each input changes the key');
+  for (const d of [{ commit: 'c1f118aaa' }, { commit: 'main' }, { battery: '{}' }, { battery: '{"battery":"a b"}' }]) assert.throws(() => baseKey({ ...k, ...d }), /base key/);
 });
