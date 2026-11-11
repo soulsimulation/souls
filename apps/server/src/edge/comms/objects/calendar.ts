@@ -1,10 +1,12 @@
-// Calendar items the steward posts (often proposed by Souls): an open gathering at a place and time.
+// Calendar items the steward or a Soul posts: an open gathering at a place and time, an announcement only (#1917).
 // Anyone may mark interest from anywhere; interested Souls get a reminder when it starts.
 import type {ObjectEvent, ObjectKind, SoulRef, TimeCtx} from './types.ts';
 import {readOnlyObjectAdvance} from './framework.ts';
 
 export type CalendarState = {title: string; description: string; placeId: string; placeName: string; startsAtTick: number; endsAtTick: number;
-  proposedBy: string; interested: SoulRef[]; phase: 'upcoming' | 'happening' | 'over'; reminded: boolean};
+  proposedBy: string; interested: SoulRef[];
+  /** #1917: the posting Soul's id (absent on steward items and items made before it; outside `schema`, so they still check). */
+  proposedById?: string; phase: 'upcoming' | 'happening' | 'over'; reminded: boolean};
 const clip = (v: unknown, n: number) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 export const calendarKind: ObjectKind<CalendarState> = {
@@ -19,7 +21,9 @@ export const calendarKind: ObjectKind<CalendarState> = {
     const startsAtTick = Number(p.startsAtTick), duration = Number(p.durationTicks ?? 3000);
     if (!Number.isInteger(startsAtTick) || !Number.isInteger(duration) || duration < 1) throw new Error('calendar item needs integer startsAtTick and durationTicks');
     return {title: clip(p.title, 80) || 'A gathering', description: clip(p.description, 500), placeId: String(p.placeId ?? ''), placeName: clip(p.placeName, 100),
-      startsAtTick, endsAtTick: startsAtTick + duration, proposedBy: p.proposedBy ? clip(p.proposedBy, 100) : '', interested: [], phase: 'upcoming', reminded: false};
+      startsAtTick, endsAtTick: startsAtTick + duration, proposedBy: p.proposedBy ? clip(p.proposedBy, 100) : '', phase: 'upcoming', reminded: false,
+      // #1917: a Soul's own post names it and counts it as coming
+      ...(p.proposedById ? {proposedById: String(p.proposedById), interested: [{soulId: String(p.proposedById), name: clip(p.proposedBy, 100)}]} : {interested: []})};
   },
   rolesOf: (s, id) => s.interested.some(x => x.soulId === id) ? ['interested'] : [],
   actions: {

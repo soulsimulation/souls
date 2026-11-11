@@ -23,6 +23,8 @@ import {ensureCommsSchema,tx,afterCommit} from './store.ts';
 import {EventStreams, parseCursor} from './stream.ts';
 import {Webhooks, type Fetch} from './webhook.ts';
 import {TokenBuckets} from '../../flood.ts';
+import {clockAt} from '@souls/brain';
+import type {CalendarState} from './objects/calendar.ts';
 
 export type CommsOptions = {
   now?: () => number;
@@ -199,13 +201,55 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
   // address may read it 60 times a minute (a request with no x-forwarded-for came from this machine: no limit).
   const calendarReads = new TokenBuckets(1, 60);
   let calendarItems: {changes: number; json: string} | undefined;
+  // #1917: real minutes to ticks at the clock's current rate (20 ticks a second at rate 1).
+  const ticksPerRealMinute = () => 1200 * (deps.host.clockRate > 0 ? deps.host.clockRate : 1);
+  const calendarOpen = () => objects.ofKind('calendar-item').filter(o => (o.state as CalendarState).phase !== 'over');
   app.get('/v1/edge/calendar', c => {
     const xff = c.req.header('x-forwarded-for'), wait = xff ? calendarReads.take(xff.split(',')[0].trim()) : 0;
     if (wait) { c.header('Retry-After', String(Math.ceil(wait / 1000))); return failure(c, new EdgeError(429, 'rate-limited', 'More than 60 calendar reads a minute from your address; wait a moment.')); }
+    // #1917: `withinMinutes` (real minutes) and/or `limit` ask for a window: items overlapping it, soonest first. Every item's
+    // words are a Soul's or the steward's, so each row is marked untrusted.
+    const rawWithin = c.req.query('withinMinutes'), rawLimit = c.req.query('limit');
+    if (rawWithin !== undefined || rawLimit !== undefined) {
+      const within = rawWithin === undefined ? Infinity : Number(rawWithin), limit = rawLimit === undefined ? 50 : Number(rawLimit);
+      const badWithin = within !== Infinity && !(within > 0 && within <= 10080);
+      if (badWithin || !Number.isInteger(limit) || limit < 1 || limit > 200) return failure(c, new EdgeError(400, 'invalid', 'withinMinutes must be real minutes, 0 < n <= 10080; limit an integer 1..200 (default 50)'));
+      const tick = core.tick(), until = tick + within * ticksPerRealMinute();
+      const items = calendarOpen().filter(o => { const s = o.state as CalendarState; return s.startsAtTick < until && s.endsAtTick > tick; })
+        .sort((a, b) => (a.state as CalendarState).startsAtTick - (b.state as CalendarState).startsAtTick).slice(0, limit);
+      return c.json(edgeBody({tick, items: items.map(o => ({id: o.id, ...(o.state as object), untrusted: true}))}));
+    }
     const changes = objects.generation();
-    if (calendarItems?.changes !== changes) calendarItems = {changes, json: JSON.stringify(objects.ofKind('calendar-item').filter(o => (o.state as {phase: string}).phase !== 'over').map(o => ({id: o.id, ...(o.state as object)})))};
+    if (calendarItems?.changes !== changes) calendarItems = {changes, json: JSON.stringify(calendarOpen().map(o => ({id: o.id, ...(o.state as object), untrusted: true})))};
     return c.body(`${JSON.stringify(edgeBody({tick: core.tick()})).slice(0, -1)},"items":${calendarItems.json}}`, 200, {'Content-Type': 'application/json'});
   });
+  // #1917: any Soul announces a gathering with its own token. An announcement only: the world never acts for it at the
+  // start. 5 posts an hour and 10 items not over per Soul; it reaches the spectator feed and Souls already interested in
+  // that place's items, never every live Soul.
+  app.post('/v1/edge/calendar', route(async (c, soul) => {
+    const b = await json(c), title = String(b.title ?? '').trim(), placeId = String(b.placeId ?? ''), minutes = Number(b.startsInMinutes), duration = Number(b.durationMinutes);
+    if (!title || title.length > 80 || !Number.isFinite(minutes) || minutes < 0 || minutes > 10080 || !Number.isFinite(duration) || duration < 5 || duration > 600 || (b.description !== undefined && typeof b.description !== 'string'))
+      throw new EdgeError(400, 'invalid', 'body: {title 1..80 chars, placeId, startsInMinutes 0..10080, durationMinutes 5..600, description?}, in real minutes');
+    const place = (deps.ledger as unknown as {places?: {byId: Map<string, {name: string}>}}).places?.byId.get(placeId);
+    if (!place) throw new EdgeError(400, 'calendar.unknown-place', `No place "${placeId.slice(0, 100)}" in this world.`);
+    const mine = calendarOpen().filter(o => (o.state as CalendarState).proposedById === soul.soulId).length;
+    if (mine >= 10) throw new EdgeError(429, 'calendar.too-many-open', 'You already have 10 calendar items that are not over; post again when one ends.');
+    const lim = deps.souls.limits.allow(`edge-calendar:${soul.soulId}`, 5, 3600_000);
+    if (!lim.ok) { c.header('Retry-After', String(lim.retryAfter)); throw new EdgeError(429, 'rate-limited', 'At most 5 calendar posts an hour.', {retry_after: lim.retryAfter}); }
+    const tick = core.tick(), at = now(), perMinute = ticksPerRealMinute(), id = 'cal-' + Math.random().toString(36).slice(2, 10);
+    const o = objects.create({id, kind: 'calendar-item', name: title, placeId, params: {title, description: b.description, placeId, placeName: place.name, proposedBy: soul.name, proposedById: soul.soulId,
+      startsAtTick: tick + Math.round(minutes * perMinute), durationTicks: Math.round(duration * perMinute)}});
+    const s = o.state as CalendarState, day = deps.host.living, world = (t: number) => day && day.dayTicks > 0 ? clockAt(t, day.origin, day.dayTicks).datetime : null;
+    const text = `${soul.name} put on the calendar: "${s.title}" at ${s.placeName} in ${Math.round(minutes)} minutes.`;
+    const to = new Set<string>();
+    for (const other of calendarOpen()) { const os = other.state as CalendarState; if (other.id !== o.id && os.placeId === placeId) for (const x of os.interested) to.add(x.soulId); }
+    to.delete(soul.soulId);
+    for (const sid of to) streams.deliver(sid, 'world', tick, {text, untrusted: true, calendarItem: o.id});
+    core.spectate({kind: 'world', tick, text, untrusted: true});
+    return {calendarItem: {id: o.id, ...s, untrusted: true,
+      starts: {real: new Date(at + minutes * 60_000).toISOString(), world: world(s.startsAtTick), tick: s.startsAtTick},
+      ends: {real: new Date(at + (minutes + duration) * 60_000).toISOString(), world: world(s.endsAtTick), tick: s.endsAtTick}}};
+  }));
   app.get('/v1/edge/digest', route(() => ({digest: steward.latestDigest()})));
 
   // Steward session endpoints (not Soul-authenticated).
