@@ -41,8 +41,9 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 
 0. **Client stamp.** When `eden.mjs` or `skill.md` changed since the last release (the newest `v*` tag) and the client
    is not stamped, the release workflow's first dispatch stamps it (`stamp.mjs <client version>`, default the next
-   patch; input `client_version`), pushes the stamp commit to `main` and ends there. That commit is the release head:
-   the gate, the dry run and the ship run on it. Every dispatch fails when `stamp.mjs --check` fails, and a real ship
+   patch; input `client_version`), opens the stamp commit as a pull request (branch `release/stamp-<version>`, like
+   publish's changelog, since the `main` ruleset requires checks and the merge queue) and ends there. Once it merges,
+   the gate, the dry run and the ship run on that head. Every dispatch fails when `stamp.mjs --check` fails, and a real ship
    refuses a client that still needs a stamp ([versioning](process/versioning.md#the-client-version)).
 1. **Gate receipt.** The candidate commit has a clean full-scope receipt from the
    [remote gate](testing/remote-gate.md) (`tools/test-harness/release-gate.sh`), combined with the V7 browser walk
@@ -66,8 +67,9 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 6. **Walks.** Real-Chrome arrivals on desktop and phone, the poster and stall checks.
 7. **cdn-walk.** `tools/cdn/cdn-walk.mjs` proves the live pages load mapped assets from the CDN.
 8. **Feed.** Once the health checks pass, a real ship posts one `release` item to the site feed through the operator
-   route on the host (`op.mjs feed-post`, loopback only): the client version, the changelog link
-   (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release.
+   route on the host (`/__sim/op/feed-post`, loopback only): the client version, the changelog link
+   (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release. The link
+   is the release's id: a retry that finds it in the feed posts nothing.
 9. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
@@ -97,7 +99,7 @@ Its jobs:
 
 1. **preflight**: the required secrets and variables exist (it names any that are missing), the head is `main`, the
    tag does not exist yet, the inputs are sane. Then the client stamp (`tools/world-launcher/deploy/ship/release-client.mjs
-   stamp`): a dry run that has to stamp commits the stamp, pushes it to `main` and skips the other jobs; a real ship
+   stamp`): a dry run that has to stamp opens the stamp pull request and skips the other jobs; a real ship
    that would have to stamp stops; `stamp.mjs --check` must pass either way.
 2. **ship**: in the `production` environment (limited to `main`). It installs, pulls media, installs Chromium at a
    known `PLAYWRIGHT_BROWSERS_PATH`, builds the Mars web overlay (`MARS_WEB_SRC`: the viewer's static site from this
@@ -109,8 +111,8 @@ Its jobs:
    for its verdict after it. Both waits fail closed: no pass, no publish. A stop once the host activation began (other than
    the host's own refusal) is reported as "live state unknown", with the rollback command. A real ship whose browser checks then fail is
    live; the summary prints the [rollback](#rollback-without-ssh) command. After the health checks pass, a real ship
-   posts the release item to the site feed (`release-client.mjs feed --ssh`, which runs `op.mjs feed-post` on the
-   host). A failed post leaves the release live and prints the command to retry.
+   posts the release item to the site feed (`release-client.mjs feed --ssh`, which posts on the host's loopback unless
+   the item is already there). A failed post leaves the release live and prints the command to retry.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit and creates the GitHub Release.
 

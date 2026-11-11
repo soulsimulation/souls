@@ -7,10 +7,11 @@
 //     default: the next patch) and commits the stamp. Then stamp.mjs --check; exit 1 on any disagreement. Prints
 //     `client=<version> stamped=<0|1>` as its last line.
 //   node release-client.mjs feed --version <release> --origin <https origin> (--port <launcher port> [--base /] | --ssh <target>)
-//     After the health checks. Posts one `release` item through op.mjs feed-post: the client version, the changelog link
-//     (<origin>/changelog#v<release>) and minClient when SOUL_CLIENT_MIN was raised since the last release. --port posts to
-//     a launcher on this machine; --ssh runs op.mjs on the production host against its live launcher (the route is
-//     loopback only).
+//     After the health checks. Posts one `release` item through the operator route (/__sim/op/feed-post, as op.mjs
+//     feed-post): the client version, the changelog link (<origin>/changelog#v<release>, the release's id in the feed) and
+//     minClient when SOUL_CLIENT_MIN was raised since the last release. Idempotent: when the feed already holds a release
+//     item with that link, it posts nothing. --port talks to a launcher on this machine; --ssh runs the same program on
+//     the production host against its live launcher (the route is loopback only).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -55,15 +56,22 @@ if (cmd === 'stamp') {
   const client = CLI_LINE.exec(head(`${SOUL}eden.mjs`))?.[1], minNow = MIN_LINE.exec(head(MIN_FILE))?.[1], minLast = MIN_LINE.exec(at(last, MIN_FILE) ?? '')?.[1];
   if (!client || !minNow) fail(`feed: no client version in ${SOUL}eden.mjs or SOUL_CLIENT_MIN in ${MIN_FILE}`);
   const raised = minLast !== minNow;
-  const post = ['feed-post', '--kind', 'release', '--title', `Soul ${version}`,
-    '--body', `Release ${version} is live. Soul client ${client}.${raised ? ` Clients older than ${minNow} must upgrade: eden upgrade.` : ''}`,
-    '--url', `${origin}/changelog#v${version}`, ...(raised ? ['--min-client', minNow] : [])];
-  // ssh joins its arguments into one remote shell line, so every argument is single-quoted; on the host, the live release
-  // link and the live launcher's port, as the runbook reads them.
-  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-  const [bin, args] = flag('port')
-    ? [process.execPath, [`${ROOT}tools/world-launcher/op.mjs`, ...post, '--port', flag('port'), ...(flag('base') ? ['--base', flag('base')] : [])]]
-    : ['ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', flag('ssh'),
-      `P=$(sed -n 's/.*--port \\([0-9]*\\).*/\\1/p' /etc/sim-worlds/production.conf) && node /srv/sim-worlds/production/tools/world-launcher/op.mjs ${post.map(q).join(' ')} --port "$P" --base /`]];
-  try { process.stdout.write(execFileSync(bin, args, { encoding: 'utf8' })); } catch (e) { process.stdout.write(e.stdout ?? ''); fail('feed: the release item was not posted'); }
+  const item = { kind: 'release', title: `Soul ${version}`, url: `${origin}/changelog#v${version}`,
+    body: `Release ${version} is live. Soul client ${client}.${raised ? ` Clients older than ${minNow} must upgrade: eden upgrade.` : ''}`, ...(raised ? { minClient: minNow } : {}) };
+  // One program, run by node from stdin here (--port) or on the host (--ssh): read the whole feed on loopback; post only
+  // when no release item carries this link. argv: <port> <base>.
+  const program = `const [port, base] = process.argv.slice(2), root = 'http://127.0.0.1:' + port + base.replace(/\\/$/, ''), item = ${JSON.stringify(item)};
+const say = (d) => console.log(JSON.stringify(d, null, 2));
+for (let after = '';;) {
+  const r = await fetch(root + '/v1/feed?limit=100' + (after ? '&after=' + after : '')); if (!r.ok) { say({ status: r.status, read: 'feed' }); process.exit(1); }
+  const d = await r.json(), hit = d.items.find((i) => i.kind === 'release' && i.url === item.url);
+  if (hit) { say({ status: 200, alreadyPosted: true, item: hit }); process.exit(0); }
+  if (!d.items.length || d.next === after) break; after = d.next;
+}
+const r = await fetch(root + '/__sim/op/feed-post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(item) });
+say({ status: r.status, ...(await r.json().catch(() => ({}))) }); process.exit(r.ok ? 0 : 1);`;
+  // On the host: the live launcher's port, as the runbook reads it; base /.
+  const [bin, args] = flag('port') ? [process.execPath, ['--input-type=module', '-', flag('port'), flag('base') ?? '']]
+    : ['ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', flag('ssh'), `P=$(sed -n 's/.*--port \\([0-9]*\\).*/\\1/p' /etc/sim-worlds/production.conf) && node --input-type=module - "$P" /`]];
+  try { process.stdout.write(execFileSync(bin, args, { encoding: 'utf8', input: program })); } catch (e) { process.stdout.write(e.stdout ?? ''); fail('feed: the release item was not posted'); }
 }

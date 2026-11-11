@@ -1,8 +1,8 @@
 # One production release of the current main head, by manual dispatch (#1402):
 #   preflight  required secrets/vars exist (fails fast, naming what is missing), the head is main, inputs are sane; when the
-#              Soul client changed since the last release and is not stamped, a dry run stamps it, pushes the stamp commit
-#              to main and stops there (gate that head, then dispatch again), a real ship refuses; stamp.mjs --check must
-#              pass (#1969)
+#              Soul client changed since the last release and is not stamped, a dry run stamps it, opens the stamp commit
+#              as a pull request (branch release/stamp-<version>, merged through the queue) and stops there (gate the head it
+#              merges as, then dispatch again), a real ship refuses; stamp.mjs --check must pass (#1969)
 #   ship       in the `production` environment: tools/world-launcher/deploy/ship.sh, the committed root-only release:
 #              snapshot, stage, boot rehearsal of every world, backup, probe, activate, healthz, walks, poster, stall,
 #              cdn-walk. With dry_run (the DEFAULT) it runs `ship.sh --no-switch`: every step for real except the
@@ -71,7 +71,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write   # a dry run pushes the client stamp commit to main (#1969)
+      contents: write        # a dry run pushes the client stamp branch release/stamp-<version> (#1969)
+      pull-requests: write   # and opens its pull request
     outputs:
       sha: ${{ steps.refs.outputs.sha }}
       label: ${{ steps.refs.outputs.label }}
@@ -106,6 +107,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           DATE: ${{ inputs.date }}
           CLIENT: ${{ inputs.client_version }}
+          PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}   # as publish.yml: CI runs on the stamp pull request
         run: |
           [ "$REF" = refs/heads/main ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
           [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 0.123 or 0.123.1 (got '$VERSION')"; exit 1; }
@@ -116,9 +118,10 @@ jobs:
           [ -n "$DATE" ] || DATE=$(date -u +%F)
           [[ "$DATE" =~ ^20[0-9]{2}-[01][0-9]-[0-3][0-9]$ ]] || { echo "::error::date must be YYYY-MM-DD (got '$DATE')"; exit 1; }
           node tools/changelog/compile.mjs --check
-          # #1969: the client is stamped once per release, before the gate. A dry run stamps a changed, unstamped client, pushes
-          # the stamp commit to main and ends (ship is skipped): the gate, the dry run and the real ship then run on that
-          # commit. A real ship refuses an unstamped client. --check gates every dispatch.
+          # #1969: the client is stamped once per release, before the gate. A dry run stamps a changed, unstamped client, opens
+          # the stamp commit as a pull request and ends (ship is skipped); the main ruleset requires its checks and the queue,
+          # as for publish.yml's changelog. Once it merges, the gate, the dry run and the real ship run on main's head. A real
+          # ship refuses an unstamped client. --check gates every dispatch.
           [[ -z "$CLIENT" || "$CLIENT" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "::error::client_version must be digits and dots (got '$CLIENT')"; exit 1; }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -127,10 +130,15 @@ jobs:
             || { cat "$stamp"; echo "::error::client stamp refused or stamp.mjs --check failed (above): the release stops"; exit 1; }
           cat "$stamp"
           if [ "$(tail -1 "$stamp" | sed -n 's/.* stamped=//p')" = 1 ]; then
-            [ "$DRY_RUN" != false ] || { echo "::error::the Soul client changed since the last release and is not stamped. Dispatch a dry run of $VERSION first: it stamps the client and pushes the stamp commit to main. Gate that head, then ship it"; exit 1; }
-            git push origin HEAD:main || { echo "::error::could not push the client stamp commit to main (did main move since the dispatch?); dispatch again"; exit 1; }
+            [ "$DRY_RUN" != false ] || { echo "::error::the Soul client changed since the last release and is not stamped. Dispatch a dry run of $VERSION first: it opens the stamp pull request. Merge it, gate that head, then ship it"; exit 1; }
+            branch="release/stamp-$VERSION"
+            ! git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null || { echo "::error::$branch already exists: merge or close its pull request, then dispatch again"; exit 1; }
+            git push origin "HEAD:refs/heads/$branch"
+            GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --title "release: stamp the Soul client for $VERSION" \
+              --body "$(tail -1 "$stamp"): the client changed since the last release. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready; once it merges, gate main's head and dispatch the dry run again." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
             echo "stamped=1" >> "$GITHUB_OUTPUT"
-            echo "Client stamp committed to main as $(git rev-parse --short HEAD); nothing else ran. Gate that head, then dispatch the dry run again." >> "$GITHUB_STEP_SUMMARY"
+            echo "Client stamp opened as a pull request (above); nothing else ran." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Soul $(tail -1 "$stamp")" >> "$GITHUB_STEP_SUMMARY"
           # One release date for the page the ship job builds and the CHANGELOG.md publish commits.
@@ -139,7 +147,7 @@ jobs:
 
   ship:
     needs: preflight
-    if: ${{ needs.preflight.outputs.stamped != '1' }}   # a dispatch that stamped the client ends at its push (#1969)
+    if: ${{ needs.preflight.outputs.stamped != '1' }}   # a dispatch that stamped the client ends at its pull request (#1969)
     runs-on: ubuntu-latest
     timeout-minutes: 240   # setup + the 20-min eyes wait + ship.sh + the 45-min verdict wait + margin, so the verdict and its rollback line always print
     environment: production
@@ -364,9 +372,10 @@ jobs:
           SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
         run: |
           # #1969: the health checks passed. One `release` item (the client version, the changelog link, minClient when the
-          # minimum was raised) on the site feed, through the operator route on the host, which answers loopback only.
+          # minimum was raised) on the site feed, through the operator route on the host, which answers loopback only. A retry
+          # finds the item already posted for this version and posts nothing.
           set +e
-          node tools/world-launcher/deploy/ship/release-client.mjs feed --version "$VERSION" --origin "$SIM_ORIGIN" --ssh "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" 2>&1 | sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g'
+          node tools/world-launcher/deploy/ship/release-client.mjs feed --version "$VERSION" --origin "$SIM_ORIGIN" --ssh "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" 2>&1 | sed -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g'
           rc=${PIPESTATUS[0]}
           [ "$rc" = 0 ] || echo "::warning::the release item was not posted to the feed. Retry: node tools/world-launcher/deploy/ship/release-client.mjs feed --version $VERSION --origin $SIM_ORIGIN --ssh <deploy target>"
           exit "$rc"
