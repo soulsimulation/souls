@@ -36,8 +36,8 @@ jobs:
     runs-on: [self-hosted, souls-timed]
     timeout-minutes: 120
     env:
-      INPUT_REF: ${{ inputs.ref || 'main' }}
-      INPUT_COMMAND: ${{ inputs.command || 'walk' }}
+      INPUT_REF: ${{ inputs.ref || 'agent/1752-soul-eval' }}
+      INPUT_COMMAND: ${{ inputs.command || 'eval-scripted' }}
       INPUT_REPEATS: ${{ inputs.repeats || '1' }}
       INPUT_ARGS: ${{ inputs.args }}
       CTL: ../ctl/.github/scripts/timed-run.mjs
