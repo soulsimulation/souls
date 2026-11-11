@@ -13,13 +13,13 @@ const factory=await marsFactory();
 const B='h_block0000',W='h_walker000';
 const execOf=(e:MarsEngine,actor:string):any=>[...((e as any).rt.services.walkExecs?.values()??[])].find((x:any)=>x.actor===actor);
 
-function yieldBesideWall(policy:Record<string,boolean>={}){
+function yieldBesideWall(policy:Record<string,boolean>={},gait?:'jog'){
   const e=factory.create(factory.genesis('wait-bound')) as MarsEngine;
   e.configureRuntimePolicy({sleepBlockTicks:1200,...policy} as never);
   e.spawnHuman({id:B,soul:'s_'+B,label:'Blocker',near:{at:[15,-14.8],first:true}});
   e.spawnHuman({id:W,soul:'s_'+W,label:'Walker',near:{at:[19,-17],first:true}});
   assert.deepEqual([e.world.entities[B].pose.p,e.world.entities[W].pose.p],[[15,0,-14.8],[19,0,-17]],'both bodies stand where the scene puts them');
-  const r=e.perform({actor:W,label:'through the passage',steps:[{verb:'mars:walk_to',params:{x:14.8,z:-10}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  const r=e.perform({actor:W,label:'through the passage',steps:[{verb:'mars:walk_to',params:{x:14.8,z:-10,...(gait?{gait}:{})}}]});assert.equal(r.ok,true,JSON.stringify(r));
   return {e,id:r.id!};
 }
 /** Steps the scene. The blocker stands in the passage holding it, as a walker inside it would, and never leaves. */
@@ -103,4 +103,21 @@ test('#1952 A4 under wait-bound/1 a forced cancel and a normal release both remo
     const nx=execOf(normal.e,W);assert.ok(nx);(normal.e as any).rt.cancel(nx.id,{code:'route.blocked',message:'test release'});
     assert.equal((normal.e as any).rt.isActive(nx.id),false);assert.equal(execOf(normal.e,W),undefined,'a normal release leaves no walk exec');
   }
+});
+
+test('#1288 A2 jog: a jog held by a yield beside a wall rocks on without the bound, and ends route.blocked within 1,200 ticks under it',()=>{
+  const off=yieldBesideWall({},'jog');off.e.step();assert.equal(execOf(off.e,W)?.speed,2.5,'at jog pace');const offRun=run(off.e,1500);
+  assert.ok(offRun.firstBlocked!==undefined&&offRun.firstBlocked<200,'the jogger yields at the passage');
+  assert.equal(off.e.programOf(W),off.id,'without the bound it is still jogging');assert.equal(offRun.events.some(x=>x.id===off.id&&x.kind!=='step'),false);
+  const {e,id}=yieldBesideWall({waitBoundV1:true,waitBoundV2:true},'jog'),{events,headway}=run(e,1500);
+  const failed=events.filter(x=>x.id===id&&x.kind==='failed');assert.equal(failed.length,1);
+  assert.equal(failed[0].code,'route.blocked');assert.match(failed[0].message!,new RegExp(`^wait-bound/1: the walk .*traffic\\.yield.*${B}`));
+  assert.ok(failed[0].tick>=headway+1199&&failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
+  assert.equal(e.programOf(W),null);assert.equal(execOf(e,W),undefined,'nothing left behind');assert.deepEqual(e.runtime.violations,[]);
+});
+
+test('#1288 wait-bound/2 is a named state-hash input of its own',()=>{
+  const one=factory.create(factory.genesis('wait-bound-2-hash')) as MarsEngine,two=factory.create(factory.genesis('wait-bound-2-hash')) as MarsEngine;
+  one.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true} as never);two.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true,waitBoundV2:true} as never);
+  assert.notEqual(one.stateHash(),two.stateHash());
 });
