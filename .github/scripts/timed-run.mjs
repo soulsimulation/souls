@@ -261,7 +261,11 @@ async function main(cmd) {
     const now = snapshot([env.HOME, '/tmp'], { allow: [env.RUNNER_TOOL_CACHE, runnerRoot], exclude: (arg('exclude') ?? '').split(','), uid: process.getuid?.() ?? null });
     if (cmd === 'snapshot') { writeFileSync(file, JSON.stringify(now)); console.log(`snapshot: ${now.length} entries`); return; }
     const found = newEntries(JSON.parse(readFileSync(file, 'utf8')), now), sw = scrubWith();
-    for (const f of found.slice(0, 50)) console.log(`::error::written outside the per-run directory: ${scrub(f, sw)}`);
+    // #2147: on `souls-heavy` CI jobs of the same account write to the home and /tmp beside the run, so new entries there
+    // cannot be told apart from the run's: they are listed as warnings, not failed on.
+    const advisory = process.argv.includes('--advisory');
+    for (const f of found.slice(0, 50)) console.log(`::${advisory ? 'warning' : 'error'}::written outside the per-run directory${advisory ? ' (or by a concurrent job on this account)' : ''}: ${scrub(f, sw)}`);
+    if (found.length && advisory) { console.log(`${found.length} new entries; advisory on a shared runner set`); return; }
     if (found.length) throw new Error(`${found.length} entries written outside the per-run directory`);
     console.log('no entries written outside the per-run directory'); return;
   }

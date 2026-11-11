@@ -190,10 +190,13 @@ jobs:
         run: |
           if [ -n "${PER_RUN:-}" ]; then pkill -TERM -f "$PER_RUN/" || true; sleep 5; rm -rf "$PER_RUN"; fi
           rm -rf src base-cache
+      # On souls-heavy, CI jobs of the same account write beside the run, so the check there is advisory (warnings).
       - name: Nothing written outside the per-run directory
         if: always()
         working-directory: ctl
+        env:
+          ADVISORY: ${{ contains(needs.route.outputs.labels, 'souls-heavy') && '--advisory' || '' }}
         run: |
           if [ -z "${SNAPSHOT:-}" ] || [ ! -f "$SNAPSHOT" ]; then echo "::error::no start snapshot"; exit 1; fi
           trap 'rm -f "$SNAPSHOT"' EXIT
-          node .github/scripts/timed-run.mjs strays --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE"
+          node .github/scripts/timed-run.mjs strays --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE" $ADVISORY
