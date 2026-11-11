@@ -215,10 +215,10 @@ export function reportText(receipt, all) {
     for (const x of failed) L.push(`| ${x.arm?.id ?? '?'} | ${x.rep ?? '?'} | ${String(x.error).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 300)} |`);
   }
   if (walks.length) {
-    L.push('', `## Where a tick's time goes (#1961): ${WALK_TICKS} ticks per arm`, '', `| arm | ticks | p50 ms | p99 ms | mean ms | ${SPAN_NAMES.join(' | ')} | other | GC ms of sampled | snapshot in run | engine step: top five (self ms, share of step) |`, `|---|---|---|---|---|${SPAN_NAMES.map(() => '---|').join('')}---|---|---|---|`);
+    L.push('', `## Where a tick's time goes (#1961): ${WALK_TICKS} ticks per arm`, '', `| arm | ticks | ticks/s | p50 ms | p99 ms | mean ms | ${SPAN_NAMES.join(' | ')} | other | GC ms of sampled | snapshot in run | engine step: top five (self ms, share of step) |`, `|---|---|---|---|---|---|${SPAN_NAMES.map(() => '---|').join('')}---|---|---|---|`);
     for (const x of walks) {
       const t = x.ticks ?? {}, sh = t.shares ?? {}, p = x.stepProfile;
-      L.push(`| ${x.arm.id} | ${t.ticks ?? '?'} | ${t.p50Ms ?? '?'} | ${t.p99Ms ?? '?'} | ${t.meanMs ?? '?'} | ${[...SPAN_NAMES, 'other'].map((k) => sh[k] ?? '?').join(' | ')} | ${p ? `${p.gcMs} of ${p.sampledMs}` : '—'} | ${t.snapshotTicks?.length ? `yes (ticks ${t.snapshotTicks.join(', ')})` : 'no'} | ${p ? p.top.map((f) => `\`${f.fn}\` ${f.ms} (${f.share})`).join('<br>') : '—'} |`);
+      L.push(`| ${x.arm.id} | ${t.ticks ?? '?'} | ${x.facts?.ticksPerS ?? '?'} | ${t.p50Ms ?? '?'} | ${t.p99Ms ?? '?'} | ${t.meanMs ?? '?'} | ${[...SPAN_NAMES, 'other'].map((k) => sh[k] ?? '?').join(' | ')} | ${p ? `${p.gcMs} of ${p.sampledMs}` : '—'} | ${t.snapshotTicks?.length ? `yes (ticks ${t.snapshotTicks.join(', ')})` : 'no'} | ${p ? p.top.map((f) => `\`${f.fn}\` ${f.ms} (${f.share})`).join('<br>') : '—'} |`);
     }
     L.push('', `Per walker: \`${JSON.stringify(walkerSlope(walks))}\``);
   }

@@ -176,7 +176,12 @@ async function walkRun(arm, rep) {
     log(`${run.id}: boot Eden 2026 (span timers on)`);
     W = await bootWorld(join(dir, 'w0'), { slug: 'sw0', templateFile: join(ROOT, 'worlds/templates/eden-2026.json'), port: PORT, inspect: PROF ? INSPECT : 0, extraEnv: { SOULS_TICK_SPANS: spans } }); LIVE.add(W);
     const souls = []; jp = await joinProxy(W, PORT + 40); run.joinUrl = jp.url;
-    for (let i = 0; i < arm.walkers; i += 4) souls.push(...await Promise.all(Array.from({ length: Math.min(4, arm.walkers - i) }, (_, k) => joinSoul(run, W, i + k))));
+    // joins come from one address, and the world pairs at most 20 a minute per address (http.ts `pair`): 16 a minute here
+    for (let i = 0, started = []; i < arm.walkers; i += 4) {
+      while (started.filter((t) => mono() - t < 60_000).length + 4 > 16) await sleep(1000);
+      const k4 = Math.min(4, arm.walkers - i); started.push(...Array(k4).fill(mono()));
+      souls.push(...await Promise.all(Array.from({ length: k4 }, (_, k) => joinSoul(run, W, i + k))));
+    }
     await jp.close(); jp = null;
     const caps = souls.length ? (await getJ(`${W.origin}/v1/edge/capabilities?all=1`, 60_000, { authorization: `Bearer ${souls[0].token}` })).j?.capabilities ?? [] : [];
     const places = caps.filter((c) => c.verb === 'walk' && c.available && c.id.startsWith('walk:')).map((c) => c.id).sort();
@@ -188,13 +193,15 @@ async function walkRun(arm, rep) {
     await sleep(WALK_EVERY_MS + 2000);
     const from = spanRows(spans).at(-1)?.[0] ?? 0;
     prof = PROF ? await inspector(INSPECT) : null; if (prof) await prof.start();
-    for (const t0 = mono(); (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 600_000;) await sleep(2000);
+    const w0 = mono();
+    for (const t0 = w0; (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 900_000;) await sleep(2000);
+    const windowS = (mono() - w0) / 1000;
     const profile = prof ? await prof.stop() : null; prof?.close(); prof = null;
     walking = false; await walkers; walkers = null;
     if (profile) writeFileSync(join(dir, 'profile-walk.cpuprofile'), JSON.stringify(profile));
     for (const c of calls) appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ phase: 'walk', ...c }) + '\n');
     const rows = spanRows(spans).filter((x) => x[0] > from && x[0] <= from + WALK_TICKS);
-    const result = { arm, rep, facts: { walkers: souls.length, places: places.length }, ticks: tickSpanTable(rows), stepProfile: subtreeTop(profile, ROOT),
+    const result = { arm, rep, facts: { walkers: souls.length, places: places.length, ticksPerS: +(WALK_TICKS / windowS).toFixed(1) }, ticks: tickSpanTable(rows), stepProfile: subtreeTop(profile, ROOT),
       walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
     if (result.ticks?.ticks !== WALK_TICKS) throw new Error(`${result.ticks?.ticks ?? 0} of ${WALK_TICKS} ticks recorded`);
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
