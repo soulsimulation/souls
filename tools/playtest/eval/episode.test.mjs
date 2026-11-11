@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runEpisode } from './episode.mjs';
+import { runEpisode, runCase } from './episode.mjs';
 
 // A stand-in client: `serve` starts a detached process and logs its pid, `serve --stop` ends it, `listen` logs its pid and blocks.
 const FAKE_CLI = `import { spawn } from 'node:child_process';
@@ -15,6 +15,7 @@ else if (cmd === 'serve' && arg === '--stop') { if (existsSync('.serve.pid')) { 
 else if (cmd === 'serve') { const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { detached: true, stdio: 'ignore' }); c.unref(); writeFileSync('.serve.pid', String(c.pid)); appendFileSync('pids.log', 'serve ' + c.pid + '\\n'); out({ serving: true }); }
 else if (cmd === 'look') { writeFileSync('world-catalog.json', JSON.stringify({ catalog: { places: [{ id: 'field', kind: 'walkable' }], things: [] } })); out({ ok: true }); }
 else if (cmd === 'listen') { appendFileSync('pids.log', 'listen ' + process.pid + '\\n'); setInterval(() => {}, 1e6); }
+else if (cmd === 'register' && process.cwd().includes('-second')) process.exit(3);
 else out({ ok: true });
 `;
 
@@ -38,6 +39,30 @@ test('an episode that throws after wakeLoop() still stops its seat and its serve
     const item = { id: 'walk', instruction: 'Walk to the field.', check: { place: ['field'] }, timeoutSec: 5 };
     const seatCfg = { adapter: 'scripted-owner', script: { rules: [{ match: '.', do: [['status']] }] } };
     await assert.rejects(runEpisode({ dir, base: `http://127.0.0.1:${server.address().port}`, item, seatCfg, folder }), /POST .*\/inbox → 500 test\.refused/);
+    const started = pids(folder);
+    assert.ok(started.some((p) => p.k === 'serve'), 'serve started');
+    for (const p of started) assert.ok(await gone(p.pid), `${p.k} (pid ${p.pid}) is still running`);
+  } finally {
+    for (const p of pids(folder)) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } }
+    server.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a case that throws during setup still stops every serve it started (#1950 review)', { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'case-test-')), dir = join(root, 'run');
+  mkdirSync(dir);
+  // The world serves the stand-in client; the case's second folder cannot register, so setup throws after Wren's serve started.
+  const server = createServer((req, res) => {
+    if (req.url === '/eden.mjs') { res.writeHead(200); return res.end(FAKE_CLI); }
+    if (req.url === '/skill.md') { res.writeHead(200); return res.end('version: "0"\n'); }
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  const folder = join(dir, 'seats', 'wren', 'folder');
+  try {
+    const item = { id: 'double-claim', bar: 'test', souls: [{ id: 'wren', name: 'Wren', folders: ['second'], script: [{ run: ['status'], expect: 'ok' }] }] };
+    await assert.rejects(runCase({ dir, base: `http://127.0.0.1:${server.address().port}`, item, seatCfg: { adapter: 'scripted-owner' } }), /wren second: register exited 3/);
     const started = pids(folder);
     assert.ok(started.some((p) => p.k === 'serve'), 'serve started');
     for (const p of started) assert.ok(await gone(p.pid), `${p.k} (pid ${p.pid}) is still running`);

@@ -14,6 +14,8 @@ export const AXES = Object.freeze({
   // #1961: where a tick's time goes. Eden 2026 as authored, quiet and with 25, 50 and 100 scripted walkers (each walks to
   // another place of its menu every WALK_EVERY_MS), WALK_TICKS ticks with the world's span timers on (SOULS_TICK_SPANS).
   walkers: Object.freeze([0, 25, 50, 100].map((n) => Object.freeze({ id: `walk${n}`, placed: null, registered: n, active: 0, quiet: 0, walkers: n }))),
+  // #1973: what a quiet Eden 2026 world holds. The quiet walkers arm, then the world's memory (slopes.mjs memoryOf).
+  memory: Object.freeze([Object.freeze({ id: 'mem0', placed: null, registered: 0, active: 0, quiet: 0, walkers: 0, memory: true })]),
 });
 export const WALK_TICKS = 2000, WALK_EVERY_MS = 8000;
 export const SPAN_NAMES = Object.freeze(['drain', 'step', 'clock', 'listeners', 'broadcast']);
@@ -61,8 +63,9 @@ export function walkerSlope(all) {
 // The per-route probe (serial, rotating over the registered Souls, nothing else active) and the active window's per-Soul demand: CW1's rates
 // (a read every 4 s, an act every 20 s, one call at a time) with acts that never move a Soul, so the neighbourhood
 // stays the same in every arm. Walk planning (#454) is not exercised here.
-export const PROBE_ROUTES = Object.freeze(['here', 'observe', 'capabilities', 'resolve', 'act']);
-export const ACTS = Object.freeze(['look left', 'wave', 'say', 'look right', 'nod', 'say']);
+// #1972: no resolve route; acts are catalog ids (the client of #1945 is strict): attention is a point, gestures anywhere acts
+export const PROBE_ROUTES = Object.freeze(['here', 'observe', 'capabilities', 'act']);
+export const ACTS = Object.freeze(['point:here', 'wave:here', 'say', 'point:here', 'nod:here', 'say']);
 
 // The active window's plan: per Soul, a read every 4 s and an act every 20 s from seeded offsets. The demand is strictly
 // periodic, so a Soul's phase against the others holds for the whole window and decides how often its calls queue
@@ -205,7 +208,7 @@ export function reportText(receipt, all) {
   const s = slopes(all), L = [], walks = all.filter((x) => !x.error && x.arm?.walkers != null), results = all.filter((x) => !x.error && x.arm?.walkers == null), failed = all.filter((x) => x.error);
   L.push(`# Slopes bench (${SLOPES}) — ${receipt.indicative ? 'INDICATIVE (not a qualifying run)' : 'qualifying executor'}`, '');
   L.push(`Source ${receipt.source?.commit ?? '?'}${receipt.source?.dirty ? ' (dirty)' : ''} · host class ${receipt.host?.class} · ${receipt.host?.cores} cores · quiet declared ${!!receipt.host?.quietDeclared} · repeats ${receipt.repeats} · windows quiet ${receipt.windows?.quietS} s / active ${receipt.windows?.activeS} s · fake minds`, '');
-  L.push('| arm | rep | placed | reg/active | quiet worlds | quiet cores | active cores | CPU-ms/served | served/s | e2e p95 ms | crowded reads | probe CPU-ms here/observe/caps/resolve/act | loop p99 max ms | RSS max MB | boot s |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  L.push('| arm | rep | placed | reg/active | quiet worlds | quiet cores | active cores | CPU-ms/served | served/s | e2e p95 ms | crowded reads | probe CPU-ms here/observe/caps/act | loop p99 max ms | RSS max MB | boot s |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const x of results) {
     const p = (k) => x.probe?.[k]?.cpuMsPerCall ?? '?';
     L.push(`| ${x.arm.id} | ${x.rep} | ${x.facts?.placed ?? '?'} | ${x.arm.registered}/${x.arm.active} | ${x.arm.quiet} | ${x.windows?.quiet?.cores ?? '?'} | ${x.windows?.active?.cores ?? '?'} | ${x.active?.cpuMsPerServed ?? '—'} | ${x.active?.servedPerS ?? '—'} | ${x.active?.endToEnd?.p95 ?? '—'} | ${x.schedule?.crowdedReadFrac ?? '—'} | ${PROBE_ROUTES.map(p).join(' / ')} | ${x.live?.active?.loopP99MsMax ?? '?'} | ${x.windows?.active?.rssMbMax ?? '?'} | ${x.boot?.seconds ?? '?'} |`);

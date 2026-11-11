@@ -1,0 +1,39 @@
+{
+ "battery": "hostile-v1",
+ "kind": "cases",
+ "world": "eden-2026",
+ "note": "#1950: the first hostile cases. Each case is several scripted Souls on one fresh world, scripted through the served eden.mjs (no model); every step is a check, and a case passes only when every check of every Soul held. A failed case is a finding for a new issue, never a reason to change its bar here.",
+ "items": [
+  {
+   "id": "double-claim",
+   "bar": "A Soul claimed from a second folder is refused soul.held-elsewhere; --move hands it over once; the first folder's next command reports the move.",
+   "souls": [
+    { "id": "wren", "name": "Wren", "folders": ["second"], "script": [
+     { "run": ["pair", "{soul}"], "in": "second", "expect": { "refused": "soul.held-elsewhere" } },
+     { "run": ["pair", "{soul}", "--move"], "in": "second", "expect": "ok" },
+     { "run": ["status"], "in": "second", "expect": { "says": "\"paired\":\\s*true" } },
+     { "run": ["pair", "{soul}", "--move"], "in": "second", "expect": { "says": "already connected" } },
+     { "run": ["here"], "expect": { "refused": "control.revoked" } }
+    ] }
+   ]
+  },
+  {
+   "id": "restart",
+   "bar": "The world restarts during a two-minute act; within 60 s of the restart the act's receipt reaches an end state and the Soul's next act is accepted. Two Souls, both in a two-minute act.",
+   "souls": [
+    { "id": "wren", "name": "Wren", "script": [
+     { "run": ["act", "rest:here", "{\"seconds\":120}"], "expect": "accepted", "keep": true },
+     { "world": "restart", "afterSec": 15 },
+     { "until": ["receipt", "{receipt}"], "phase": "ended", "withinSec": 60, "from": "restart" },
+     { "run": ["act", "wave:here"], "expect": "accepted", "withinSec": 60, "from": "restart" }
+    ] },
+    { "id": "moss", "name": "Moss", "script": [
+     { "run": ["act", "rest:here", "{\"seconds\":120}"], "expect": "accepted", "keep": true },
+     { "await": "restart" },
+     { "until": ["receipt", "{receipt}"], "phase": "ended", "withinSec": 60, "from": "restart" },
+     { "run": ["act", "wave:here"], "expect": "accepted", "withinSec": 60, "from": "restart" }
+    ] }
+   ]
+  }
+ ]
+}

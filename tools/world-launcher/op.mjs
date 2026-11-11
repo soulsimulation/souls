@@ -22,6 +22,9 @@
 //        (what visitors' pages reported: top errors by count, world, browser, first/last seen, build; client-errors.mjs)
 //   node tools/world-launcher/op.mjs glitches --port 4620 [--base /worlds] [--world <slug>] [--limit N]
 //        (every world's recoveries and halts by rule and rung, from each store; --world adds its records with their evidence)
+//   node tools/world-launcher/op.mjs usage --port 4620 [--base /worlds] [--days N]
+//        (per UTC day: accounts and Souls that acted, new and returning accounts, acts, refusals, clients; per account: first
+//        and last seen, days active; test worlds left out. From <data>/usage.sqlite, usage.mjs)
 //   node tools/world-launcher/op.mjs set-test --port 4620 [--base /worlds] --slug <slug> --test true|false
 //        (a scratch world operator TEST-Soul commands may use; product worlds and old-world forks are refused)
 //   node tools/world-launcher/op.mjs soul-pending --port 4620 [--base /worlds] --slug <test world>
@@ -62,6 +65,7 @@ const usage = () => {
     + '       op.mjs list-archive --port <launcher port> [--base /worlds]\n'
     + '       op.mjs audit --port <launcher port> [--base /worlds] [--slug <slug>]\n'
     + '       op.mjs glitches --port <launcher port> [--base /worlds] [--world <slug>] [--limit N]\n'
+    + '       op.mjs usage --port <launcher port> [--base /worlds] [--days N]\n'
     + '       op.mjs set-test --port <launcher port> [--base /worlds] --slug <slug> --test true|false\n'
     + '       op.mjs soul-pending --port <launcher port> [--base /worlds] --slug <test world>\n'
     + '       op.mjs soul-approve --port <launcher port> [--base /worlds] --slug <test world> --request <ap_id> --name <TestName>\n'
@@ -76,6 +80,11 @@ if (cmd === 'glitches' && flag('port')) {
   const q = new URLSearchParams({ ...(flag('world') ? { world: flag('world') } : {}), ...(flag('limit') ? { limit: flag('limit') } : {}) });
   const r = await fetch(`http://127.0.0.1:${Number(flag('port'))}${(flag('base') ?? '').replace(/\/$/, '')}/__sim/glitches?${q}`, { signal: AbortSignal.timeout(30_000) });
   console.log(JSON.stringify(await r.json().catch(() => ({ status: r.status })), null, 2)); process.exit(r.ok ? 0 : 1);
+}
+if (cmd === 'usage' && flag('port')) {
+  const { formatReport } = await import('./usage.mjs');
+  const r = await fetch(`http://127.0.0.1:${Number(flag('port'))}${(flag('base') ?? '').replace(/\/$/, '')}/__sim/usage${flag('days') ? `?days=${Number(flag('days'))}` : ''}`, { signal: AbortSignal.timeout(30_000) });
+  const d = await r.json().catch(() => ({ status: r.status })); console.log(r.ok ? formatReport(d) : JSON.stringify(d, null, 2)); process.exit(r.ok ? 0 : 1);
 }
 if (cmd === 'client-errors' && flag('port')) {
   const q = new URLSearchParams({ ...(flag('world') ? { world: flag('world') } : {}), ...(flag('limit') ? { limit: flag('limit') } : {}) });
