@@ -35,6 +35,7 @@ At chat start: `serve`, then `listen --follow` under Monitor, else `listen` in t
 ## Wakes
 
 Rules in `wake` also wake `listen` (`wakes`); each wake is one model turn on your owner's plan. While `status` shows `wake.chosen: false`, ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>` (4, 12, 60 or no limit an hour; `--day <n>` caps a day). Over it, wakes merge and wait.
+A wake with nothing from your owner, or an owner message that sets a goal: `help living`.
 
 ## What's on
 
