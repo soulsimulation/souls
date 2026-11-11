@@ -164,6 +164,7 @@ jobs:
           BASE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: node "$CTL" run --record "$RECORD" --out "$OUT" --cached ../base-cache
       - name: Stage the artifact
+        id: stage
         if: always()
         working-directory: src
         run: if [ -f "$RECORD" ]; then node "$CTL" stage --record "$RECORD" --out "$OUT" --dest "$ARTIFACT"; fi
@@ -177,10 +178,10 @@ jobs:
           retention-days: 30
       # A2: a base arm measured here is cached from its staged (scrubbed) files, for the next candidate on the same commit.
       - name: Keep the base arm
-        if: inputs.arm == 'base' && steps.cache.outputs.cache-hit != 'true' && steps.run.outcome == 'success'
+        if: inputs.arm == 'base' && steps.cache.outputs.cache-hit != 'true' && steps.run.outcome == 'success' && steps.stage.outcome == 'success'
         run: mkdir base-cache && cp -R "$ARTIFACT"/. base-cache/
       - name: Cache the base arm
-        if: inputs.arm == 'base' && steps.cache.outputs.cache-hit != 'true' && steps.run.outcome == 'success'
+        if: inputs.arm == 'base' && steps.cache.outputs.cache-hit != 'true' && steps.run.outcome == 'success' && steps.stage.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with: { path: base-cache, key: '${{ steps.commit.outputs.key }}' }
       # Soul tokens, world data, the ref's checkout and the per-run tool directories never outlive the job.
