@@ -72,6 +72,7 @@ const PROFILE = opt('profile', 'real'), RAW_FROM = Number(opt('raw-from', 4)), B
 const CADENCE = JSON.parse(readFileSync(new URL('./profiles/cadence.json', import.meta.url), 'utf8'))[PROFILE];
 if (CLIENT && !CADENCE) throw new Error('--profile real|stress');
 if (CLIENT && !(RAW_FROM >= 1)) throw new Error('--raw-from <first raw Soul, 1-based>');
+const TOOL = { 'x-soul-client': BENCH_CLIENT };   // #1936: the bench's own Soul requests say they are the bench
 if ((RW_MODES.length || LOAD === 'stageb' || CPUS) && !VIA) throw new Error('--load stageb, --read-worker and --cpus run through the launcher: add --via-launcher');
 if (RW_MODES.some((m) => m !== 'on' && m !== 'off')) throw new Error('--read-worker off|on|off,on');
 if (CPUS && !sh0('taskset', ['-V'])) throw new Error('--cpus needs Linux taskset');
@@ -485,7 +486,7 @@ function waitStream(run, soul) {   // C0 long-poll, in-process (no CLI process p
   (async () => {
     let cursor = 'c_0';
     while (!run.stopped) {
-      try { const r = await fetch(`${BASE}/v1/edge/wait?timeout=55&after=${encodeURIComponent(cursor)}`, { headers: { authorization: `Bearer ${soul.token}` }, signal: AbortSignal.timeout(65_000) }); const d = await r.json().catch(() => ({})); cursor = d.cursor ?? cursor; if (!r.ok) await sleep(5000); }
+      try { const r = await fetch(`${BASE}/v1/edge/wait?timeout=55&after=${encodeURIComponent(cursor)}`, { headers: { ...TOOL, authorization: `Bearer ${soul.token}` }, signal: AbortSignal.timeout(65_000) }); const d = await r.json().catch(() => ({})); cursor = d.cursor ?? cursor; if (!r.ok) await sleep(5000); }
       catch { await sleep(5000); }
     }
   })();
@@ -498,7 +499,7 @@ function viewer(run, hello) {
   run.sockets.push(ws);
 }
 function hostile(run, soul) {   // 4 parallel loops that ignore Retry-After and retry at once
-  const H = { authorization: `Bearer ${soul.token}`, ...(VIA ? { 'x-forwarded-for': `10.66.0.${soul.i + 1}` } : {}) };   // via the launcher: one address per hostile Soul
+  const H = { ...TOOL, authorization: `Bearer ${soul.token}`, ...(VIA ? { 'x-forwarded-for': `10.66.0.${soul.i + 1}` } : {}) };   // via the launcher: one address per hostile Soul
   const reqs = [
     () => fetch(`${BASE}/v1/edge/here?include=doHere`, { headers: H, signal: AbortSignal.timeout(30_000) }),
     () => fetch(`${BASE}/v1/edge/capabilities`, { headers: H, signal: AbortSignal.timeout(30_000) }),
@@ -618,7 +619,7 @@ function diffFields(a, b, path = '', out = [], max = 50) {   // = apps/server/sr
 }
 async function oracleSample(run, soul) {
   const o = run.oracle, rec = worldRec(o.w.ldata), ports = readPorts(o.w); if (!rec?.port || !ports.length) { o.skipped++; return; }
-  const H = { authorization: `Bearer ${soul.token}` }, path = `/w/${SLUG}/v1/edge/here?include=doHere`;
+  const H = { ...TOOL, authorization: `Bearer ${soul.token}` }, path = `/w/${SLUG}/v1/edge/here?include=doHere`;
   const a = await getJ(`http://127.0.0.1:${rec.port}${path}`, H, 30_000), b = await getJ(`http://127.0.0.1:${pick(ports)}${path}`, H, 30_000);
   o.sampled++;
   if (a.status !== 200 || b.status !== 200 || b.headers?.get?.('x-sim-read-cpu-ms') == null) { o.notServed++; return; }
