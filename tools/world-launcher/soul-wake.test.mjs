@@ -452,6 +452,17 @@ test('#1933 A2, A3: going away keeps the line; the next acting command restores 
   assert.equal(back(fresh(), text).restore, undefined, 'not away: nothing to restore');
 });
 
+test('#1933 review: while away, a next check that has passed is renewed to a future time, and the kept line still comes back', () => {
+  const hb = { every: 60, at: new Date(T0 - 30 * MIN).toISOString() };   // kept at 07:30, every hour
+  const first = awayText(T0, hb, T0 + 10 * MIN), away = wentAway(fresh(), T0, first, 'rowing to the mill');
+  assert.equal(first, 'mind away, next check about 08:30 UTC');
+  const later = T0 + 95 * MIN, again = awayText(away.mind.away.since, hb, later);   // 09:35: 08:30 has passed
+  assert.equal(again, 'mind away, next check about 10:30 UTC');
+  assert.ok(Date.parse(`2027-01-15T${again.match(/\d\d:\d\d/)[0]}:00Z`) > later, 'a future time');
+  const renewed = wentAway(away, away.mind.away.since, again, away.mind.away.stored);
+  assert.equal(back(renewed, again).restore, 'rowing to the mill');
+});
+
 test('#1933 A3: an acting command that sets its own line wins; the kept one is dropped', () => {
   const text = awayText(T0, undefined, T0 + 10 * MIN), b = back(wentAway(fresh(), T0, text, 'rowing to the mill'), text, true);
   assert.equal(b.restore, undefined); assert.equal(b.wake.mind.away, undefined);

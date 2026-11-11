@@ -5376,8 +5376,17 @@ async function serveForeground() {
   const setLine = (text) => serveCall(`${world}/v1/edge/self/now`, { method: "POST", headers: auth, body: { text }, timeoutMs: 4_000 });
   let awaying = null;
   const awayTick = () => (awaying ??= (async () => {
-    const t = Date.now(), since = soulWake.awaySince(st.wake, t, Date.parse(start), AWAY_AFTER_MS);
-    if (since === null || st.wake.mind?.away || stopping || terminal) return;
+    const t = Date.now(), since = soulWake.awaySince(st.wake, t, Date.parse(start), AWAY_AFTER_MS), a = st.wake.mind?.away;
+    if (a && !stopping && !terminal) {   // a "next check" that has passed is renewed, only while the line still says away
+      const text = soulWake.awayText(a.since, load().heartbeat, t);
+      if (text === a.text) return;
+      const seen = await lineNow();
+      if (seen?.line !== a.text) return;
+      const r = await setLine(text);
+      if (r.status === 200) { st.wake = soulWake.wentAway(st.wake, a.since, r.data?.now ?? text, a.stored); persist(); log(`away: ${text}`); }
+      return;
+    }
+    if (since === null || a || stopping || terminal) return;
     const was = await lineNow();
     if (!was) return;   // the world did not say what the line is: the next tick asks again
     const text = soulWake.awayText(since, load().heartbeat, t), r = await setLine(text);
