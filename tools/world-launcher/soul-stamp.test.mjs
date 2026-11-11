@@ -1,13 +1,13 @@
 // #1935: the release owner stamps the client's version and hashes once per release, with one command, on a copy of the client.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { frozen } from './soul/stamp.mjs';
+import { frozen, listed } from './soul/stamp.mjs';
 
 const soul = fileURLToPath(new URL('./soul/', import.meta.url));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -42,6 +42,21 @@ test('stamp.mjs refuses a stale or malformed version, stamps eden.mjs, the skill
 // one fails here, in PR CI, until its version and sha256 move in the same pull request; and a stamp refuses to re-hash it.
 test('the frozen client files (eden-agent.mjs, instructions.md, schema-notes.md, the runtime) match their SOURCES.json pins', () => {
   const off = frozen((p) => { try { return readFileSync(join(soul, p)); } catch { return null; } });
+  assert.deepEqual(off, [], off.join('\n'));
+});
+
+test('a frozen file whose sha256 changed since the latest release tag also changed its version', (t) => {
+  const git = (...args) => { try { return execFileSync('git', ['-C', soul, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
+  const tag = git('describe', '--tags', '--match', 'v*', '--abbrev=0');
+  if (!tag) return t.skip('no release tag (v*) is reachable from HEAD; fetch tags (CI checks out with fetch-depth 0) to compare frozen versions');
+  const then = JSON.parse(git('show', `${tag}:./SOURCES.json`)), now = JSON.parse(readFileSync(join(soul, 'SOURCES.json'), 'utf8'));
+  const versioned = (s) => new Map(listed(s).filter(([p]) => p !== s.controllerCli.file && p !== s.skill.file)
+    .map(([p, e]) => [p, { sha256: e.sha256, version: s.runtime?.artifacts?.includes(e) ? s.runtime.version : e.version }]));
+  const before = versioned(then), off = [];
+  for (const [p, e] of versioned(now)) {
+    const b = before.get(p);
+    if (b && b.sha256 !== e.sha256 && b.version === e.version) off.push(`${p} changed since ${tag} but its SOURCES.json version is still ${e.version}: move the version with the sha256`);
+  }
   assert.deepEqual(off, [], off.join('\n'));
 });
 
