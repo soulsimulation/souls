@@ -2301,6 +2301,7 @@ function reportRequest(url, method, t0, r) {
 async function serveCall(url, o) {
   const t0 = performance.now(), r = await worldOnce(url, o);
   reportRequest(url, o.method, t0, r);
+  if (codeOf(r.data) === UPGRADE_REQUIRED) SERVE_TOO_OLD?.(r);   // #1937: terminal, never retried
   return r;
 }
 async function note(expected, observed) {
@@ -2769,6 +2770,7 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     if (r.status === 0 && cls === "none") r.data.error.notRetried = true;
     if (headers.authorization && !path.startsWith("/v1/edge/inbox/")) noticeInbox(r.data);
     // a replay after a try that got no answer may be that very try, taken by the world: not a repeat of an earlier command
+    if (codeOf(r.data) === UPGRADE_REQUIRED) throw tooOld(r.data, s.world);
     if (r.replayed && failed > 0) return { ...r, replayed: false, replayedRetry: true };
     return r;
   }
@@ -2951,6 +2953,20 @@ async function memoryCommand(...words) {
 function noticeInbox(data) {
   const n = data?.inbox?.queued;
   if (Number.isInteger(n) && n > 0) process.stderr.write(`OWNER: ${n} message(s) waiting. Run: ${CLI} listen\n`);
+}
+
+// #1937: a world refuses a client older than its minimum (docs/architecture/api.md, frozen), and a home caches that minimum
+// per world. That world's commands then fail with the line that fixes it; upgrade, help, version and doctor never do.
+const UPGRADE_REQUIRED = "client.upgrade-required", UPGRADE_FREE = new Set(["upgrade", "help", "version", "doctor"]);
+let SERVE_TOO_OLD = null;   // serve --foreground: stops on the code and records why
+const upgradeRun = (run, url) => { const key = HOME && url ? soulHome.keyOf(HOME.config().worlds, url) : null; return key ? `${run} ${key}` : run; };
+const tooOldMessage = (min, run) => `This Soul client is too old for this world: it needs ${min} or newer, and this is ${VERSION}. Run: ${run}`;
+const tooOld = (d, url) => Object.assign(new Error(tooOldMessage(d?.min, upgradeRun(d?.run ?? `${CLI} upgrade`, url))), { code: UPGRADE_REQUIRED });
+/** The world this command speaks to, when the home's cached minimum for it is above this client. */
+function tooOldHere(cmd) {
+  if (!HOME || !commands[cmd] || UPGRADE_FREE.has(cmd) || soulHome.HOME_COMMANDS.has(cmd)) return null;
+  const url = load().world, key = url ? soulHome.keyOf(HOME.config().worlds, url) : null, min = key ? HOME.config().worlds[key].minClient : null;
+  return min && soulHome.newerThan(min, VERSION) ? tooOldMessage(min, `${CLI} upgrade ${key}`) : null;
 }
 
 // Throw on non-2xx with the server's own code and message. A revoked controller token is
@@ -3350,6 +3366,7 @@ async function status() {
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
+    if (said === UPGRADE_REQUIRED) { process.exitCode = 1; return { ...local, ...lastServeEnd(), paired: true, reachable: true, upgradeRequired: { min: r.data.min, have: r.data.have }, why: tooOld(r.data, s.world).message, next: upgradeRun(r.data.run ?? `${CLI} upgrade`, s.world) }; }
     if (r.status === 401) return { ...local, ...lastServeEnd(), paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
@@ -5056,6 +5073,12 @@ async function serveForeground() {
     st.ended = { code: codeOf(c.data) ?? `http-${c.status}`, ...(c.data?.reason ? { reason: c.data.reason } : {}), at: new Date().toISOString() };
     log(`control ended (${st.ended.code}${st.ended.reason ? `: ${st.ended.reason}` : ""}); stopping`); wake(); shutdown(0); return true;
   }, () => false).finally(() => { confirming = null; }));
+  SERVE_TOO_OLD = (r) => {
+    if (terminal) return;
+    terminal = r;
+    st.ended = { code: UPGRADE_REQUIRED, min: r.data?.min, have: r.data?.have, run: upgradeRun(r.data?.run ?? `${CLI} upgrade`, world), at: new Date().toISOString() };
+    log(`this client is too old for the world (it needs ${st.ended.min}); stopping. Run: ${st.ended.run}`); wake(); shutdown(0);
+  };
 
   async function inboxLoop() {
     // The first listen of this process asks with no cursor: a message the world handed over just before a kill, unsaved, comes back.
@@ -5813,6 +5836,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;
   try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
+  const old = tooOldHere(cmd);
+  if (old) { process.stderr.write(`error: ${old}\n`); process.exit(1); }
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null, pendingUpdate = startUpdateCheck(cmd);
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
