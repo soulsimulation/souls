@@ -116,7 +116,7 @@ export function strays(roots, since, allow, uid = null) {
     for (const e of ents) {
       const p = join(d, e.name); if (inside(p)) continue;
       if (e.isDirectory()) walk(p);
-      else { const st = lstatSync(p, { throwIfNoEntry: false }); if (st && st.mtimeMs > since && (uid == null || st.uid === uid)) found.push(p); }
+      else { let st; try { st = lstatSync(p); } catch { continue; } if (st.mtimeMs > since && (uid == null || st.uid === uid)) found.push(p); }   // another account's entry may not be readable
     }
   };
   for (const r of roots) if (r && existsSync(r) && !inside(resolve(r))) walk(resolve(r));
