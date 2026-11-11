@@ -2197,7 +2197,10 @@ export class EngineBridge {
   private listCapabilities(soul: EdgeSoul, caps: EdgeCapability[], plans: Map<string, { label: string; steps: { verb: string; params: Record<string, unknown> }[]; seconds?: boolean }>) {
     // L3 item 4: a focused build (EdgeLedger.bindOne) offers only the walks the focus names
     const focus = (this.edge as { menuFocusV1?(): MenuFocus | null } | undefined)?.menuFocusV1?.() ?? null;
-    try { this.nav.capabilities(soul, caps, plans, focus); } catch (e) { this.log(`nav capabilities: ${(e as Error).message}`); }
+    // #1848: a focus that names no walk, seat, hang-out or stroll, by id or verb, and no target (an activity spot by its
+    // id) has no walk to offer (nav wantsThing is false for every thing): the ranking of the walks is not run
+    const walks = !focus || !!focus.targets.size || ['walk', 'sit', 'hang-out', 'stroll'].some((v) => focus.verbs.has(v)) || [...focus.ids].some((id) => /^(?:walk|sit|hang-out|stroll):/.test(id));
+    if (walks) try { this.nav.capabilities(soul, caps, plans, focus); } catch (e) { this.log(`nav capabilities: ${(e as Error).message}`); }
     releaseBigScratch();   // L1: room-reach searches inside a multi-storey house share one ~110 MB workspace; not kept after
     // B-facade item 4 (L3 b4): a focused build (bindOne / words act) runs only the sections whose offers the focus can name:
     // the object scans read every entity of the world (three passes) and perceive/layers scan signs and stalls
