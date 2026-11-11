@@ -7,6 +7,7 @@ import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { frozen } from './soul/stamp.mjs';
 
 const soul = fileURLToPath(new URL('./soul/', import.meta.url));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -35,4 +36,28 @@ test('stamp.mjs refuses a stale or malformed version, stamps eden.mjs, the skill
   assert.deepEqual(after.legacy, before.legacy, 'the 1.9 guide provenance is kept');
   assert.equal(run('--check').status, 0, 'stamped');
   assert.equal(run(next).status, 0, 'a re-stamp of unchanged bytes is a no-op');
+});
+
+// #2000: a stamp re-hashes only eden.mjs and skill.md. Every other file SOURCES.json lists keeps its own version, so an edit to
+// one fails here, in PR CI, until its version and sha256 move in the same pull request; and a stamp refuses to re-hash it.
+test('the frozen client files (eden-agent.mjs, instructions.md, schema-notes.md, the runtime) match their SOURCES.json pins', () => {
+  const off = frozen((p) => { try { return readFileSync(join(soul, p)); } catch { return null; } });
+  assert.deepEqual(off, [], off.join('\n'));
+});
+
+test('an edit to a frozen file is named, and stamp.mjs refuses to re-hash it under an unchanged version', (t) => {
+  const dir = join(mkdtempSync(join(tmpdir(), 'souls-stamp-')), 'soul'); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  cpSync(soul, dir, { recursive: true });
+  const read = (p) => { try { return readFileSync(join(dir, p)); } catch { return null; } };
+  const runtime = JSON.parse(read('SOURCES.json')).runtime, edited = ['eden-agent.mjs', 'instructions.md', `${runtime.directory}/${runtime.artifacts[0].file}`];
+  for (const f of edited) appendFileSync(join(dir, f), '\n');
+  appendFileSync(join(dir, 'eden.mjs'), '// a client change\n');
+  const off = frozen(read);
+  assert.equal(off.length, edited.length, off.join('\n'));
+  for (const f of edited) assert.ok(off.some((l) => l.startsWith(`${f} is frozen and changed: move its version and sha256`)), f);
+  const before = read('SOURCES.json').toString('utf8');
+  const r = spawnSync(process.execPath, [join(dir, 'stamp.mjs'), '99.0.0'], { encoding: 'utf8' });
+  assert.equal(r.status, 1); assert.match(r.stderr, /instructions\.md is frozen and changed/);
+  assert.equal(read('SOURCES.json').toString('utf8'), before, 'a refused stamp writes nothing');
+  assert.equal(read('eden.mjs').toString('utf8').includes('const VERSION = "99.0.0";'), false);
 });

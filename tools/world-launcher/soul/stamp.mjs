@@ -22,6 +22,17 @@ export function listed(sources) {
   return files;
 }
 
+/** The listed files a stamp must not re-hash (#2000): everything but eden.mjs and skill.md keeps its own version, so a changed
+ * byte needs that file's version and sha256 moved by hand in the same pull request. Empty when every frozen file matches its pin. */
+export function frozen(read) {
+  const sources = JSON.parse(read("SOURCES.json").toString("utf8")), own = [sources.controllerCli.file, sources.skill.file];
+  return listed(sources).filter(([path]) => !own.includes(path)).flatMap(([path, e]) => {
+    const bytes = read(path);
+    return bytes && sha(bytes) === e.sha256 && (e.bytes === undefined || e.bytes === bytes.length) ? []
+      : [`${path} is frozen and changed: move its version and sha256 in SOURCES.json in the same pull request (stamp.mjs re-hashes only eden.mjs and skill.md)`];
+  });
+}
+
 /** What disagrees, given read(path in the soul folder) -> bytes or null. Empty when the client is stamped. */
 export function problems(read) {
   const text = (p) => read(p)?.toString("utf8") ?? "", sources = JSON.parse(text("SOURCES.json")), skill = text("skill.md");
@@ -45,6 +56,8 @@ export function stamp(version, dir = DIR) {
   if (!current || !SKILL_META.test(skill) || !SKILL_TITLE.test(skill)) throw Error("eden.mjs or skill.md has no version line to stamp");
   const changed = sha(cli) !== sources.controllerCli.sha256 || sha(skill) !== sources.skill.sha256;
   if (changed && !newerThan(version, current)) throw Error(`the client changed since ${current}; stamp a version above it`);
+  const off = frozen((p) => { try { return readFileSync(at(p)); } catch { return null; } });
+  if (off.length) throw Error(off.join("\n"));
   writeFileSync(at("eden.mjs"), cli.replace(CLI_LINE, `const VERSION = "${version}";`));
   writeFileSync(at("skill.md"), skill.replace(SKILL_META, `  version: "${version}"`).replace(SKILL_TITLE, `# Soul — skill ${version}`));
   sources.controllerCli.version = sources.skill.version = version;
