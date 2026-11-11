@@ -117,6 +117,24 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
   `proof`, `e2e`, `souls-director`, `coordinator-handoff`. Agent definitions in `.claude/agents/`: `coordinator`,
   `lane`, `reviewer`.
 
+## Development coordinator
+
+These rules bind whoever coordinates an agenda. They hold across handoffs and context compactions; after either,
+re-read the agenda issue before dispatching anything.
+
+- The agenda is the pinned coordination issue (#1960 as of November 2026): Gene's decisions, the lanes and their
+  order, and every task. Dispatch only tasks listed there. New work enters by adding a task issue to it.
+- Dispatch one task issue per lane, in the agenda's order. Review each pull request against the issue's Acceptance
+  and Touches, and send back work that goes beyond the acceptance. Never extend a task by message: edit the issue
+  or open a new one.
+- Stay thin: dispatch, review, sign, keep the merge queue moving through a steward, and release. Do not do a
+  lane's work. Stop dispatching while more than eight pull requests are ready and unmerged.
+- After each wave of dispatches and each release, post a checkpoint on the agenda issue; with each release, the
+  table of tasks merged since the last one, with ceiling, hours taken and how each ended. A successor starts from
+  that issue, so a handoff packet carries state (pull requests, heads, what is running) and never rules.
+- Gene alone decides scope, priority, spend and production machines. Do not re-ask what the agenda lists as
+  decided. [Coordinator contract](docs/process/development-coordinator.md)
+
 ## Release and operations
 
 - The development coordinator is the release owner and runs releases end to end, following the current topology in

@@ -9,6 +9,9 @@ This is a role followed by an active session, not a scheduler or a new service. 
 
 ## Start or resume
 
+The agenda is the pinned coordination issue named in `AGENTS.md` ("Development coordinator"), which also holds the
+rules that bind across handoffs and compactions. Read both first, and again after any context compaction.
+
 First launch is **orientation-only** unless Gene explicitly requests execution in that session. Read the rules and
 current project/process checkpoints, then inspect the status of existing work through read-only queries. Summarize
 what is live, merged but unreleased, in progress or waiting; identify existing workers, jobs, CI, release activity,
