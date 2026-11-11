@@ -70,6 +70,8 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
+`run` exits 1, after writing its result, when every episode errored or more than 20% did: a run that measured nothing
+never passes.
 
 A live seat needs `--max-usd`. The run stops before an episode once its spend reaches the cap. Measure on a quiet
 machine, two repeats per arm, and take the playtest lock where the machine is shared.

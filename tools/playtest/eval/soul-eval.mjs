@@ -106,6 +106,17 @@ export async function runEval(o) {
   return { out, result };
 }
 
+/** #2047: the share of episodes that may error before a run counts as having measured nothing (declared, not tuned). */
+export const MAX_ERRORED_SHARE = 0.2;
+/** Why this run measured too little to pass (every episode errored, or more than MAX_ERRORED_SHARE did), or null. */
+export function unmeasured(episodes) {
+  const errored = episodes.filter((e) => e.error).length;
+  if (!episodes.length) return 'the run measured nothing: no episode ran';
+  if (errored === episodes.length) return `the run measured nothing: all ${errored} episode(s) errored (first: ${episodes[0].error})`;
+  if (errored / episodes.length > MAX_ERRORED_SHARE) return `${errored} of ${episodes.length} episodes errored, over the declared ${MAX_ERRORED_SHARE * 100}% (first: ${episodes.find((e) => e.error).error})`;
+  return null;
+}
+
 /** A case battery (#1950): each case on its own fresh local world, its scripted Souls started and judged together. */
 async function runCases(o, battery, seatCfg) {
   const errs = validateCases(battery);
@@ -172,7 +183,11 @@ export function loadResult(dir) {
 
 async function main() {
   const { cmd, o } = parseArgs(process.argv.slice(2));
-  if (cmd === 'run') { await runEval(o); process.exit(0); }   // a seat's in-flight turn or timers must not hold the lock past the result
+  if (cmd === 'run') {   // a seat's in-flight turn or timers must not hold the lock past the result
+    const { result } = await runEval(o), why = unmeasured(result.kind === 'cases' ? result.cases : result.episodes);   // a case battery's records are its cases
+    if (why) log(`FAILED: ${why}`);
+    process.exit(why ? 1 : 0);
+  }
   if (cmd === 'report') {
     const dir = o._[0]; if (!dir) throw new Error('report <out> [--against <out>]');
     const a = loadResult(dir), b = o.against ? loadResult(o.against) : null;
