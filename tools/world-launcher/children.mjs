@@ -8,7 +8,7 @@ import { createServer } from 'node:net';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cgroupHeadroomMb, memAvailableMb, PREWARM_MB, prewarmBlocked, rotateLog } from './production.mjs';
-import { SLUG_RE, worldIdOf } from './registry.mjs';
+import { SLUG_RE, isTimeZone, worldIdOf } from './registry.mjs';
 import { GUARD, bootMark, jitterMs, liveWedge, readLive } from './guard.mjs';
 const STRIP_HOOK = 'apps/server/src/strip-cache.mjs'; // lane BOOT2 (defaultCommand)
 
@@ -441,13 +441,14 @@ export class ChildPool {
   onExit(k, child, code, signal) {
     if (k.child !== child) return;
     const wedged = k.wedging; k.wedging = null;
-    k.child = null; k.frozen = false; k.lastExit = { code, signal, at: Date.now(), ...(wedged ? { reason: `wedged: ${wedged.reason}` } : {}) }; this.savePids();
+    const halted = k.haltRestarting; k.haltRestarting = null;
+    k.child = null; k.frozen = false; k.lastExit = { code, signal, at: Date.now(), ...(wedged ? { reason: `wedged: ${wedged.reason}` } : halted ? { reason: 'halted' } : {}) }; this.savePids();
     if (this.closing || k.stopped || this.fenced) { k.status = 'stopped'; this.o.onChange?.(k.slug); return; }
     if (k.status === 'starting') return;  // boot() reports it (to ensure()'s caller, or to the restart loop)
     // exit 75 (LOAD-CONTRACT §4): the world asked for a planned restart (black too long; its snapshot is saved): at once
-    const planned = !wedged && code === PLANNED_EXIT;
-    this.log(`world ${k.slug} exited (${code ?? signal})${wedged ? ` after it was found wedged: ${wedged.reason}` : planned ? ': a planned restart' : ''}`);
-    this.scheduleRestart(k, wedged ? 'wedged' : planned ? 'planned' : 'exit');
+    const planned = !wedged && !halted && code === PLANNED_EXIT;
+    this.log(`world ${k.slug} exited (${code ?? signal})${wedged ? ` after it was found wedged: ${wedged.reason}` : halted ? ' after it halted' : planned ? ': a planned restart' : ''}`);
+    this.scheduleRestart(k, wedged ? 'wedged' : halted ? 'halted' : planned ? 'planned' : 'exit');
   }
   /** A crash, a wedge or a failed restart (lane L1): restart after a full-jitter backoff (1 s base, 5 min cap; the count
    *  resets after 10 min healthy). breakerN failures within breakerWindowMs: held, no more restarts until resume().
@@ -509,7 +510,7 @@ export class ChildPool {
    *  live.json when it writes one. failures looks in a row, or a stale live.json: wedged. */
   async look(k) {
     const c = k.child, g = this.g;
-    if (!c || k.status !== 'running' || k.frozen || k.adopted || k.ready || k.stopped || k.stopping || k.wedging || k.looking) return;
+    if (!c || k.status !== 'running' || k.frozen || k.adopted || k.ready || k.stopped || k.stopping || k.wedging || k.haltRestarting || k.looking) return;
     k.looking = true;
     try {
       const { ok, why: said } = await this.ask(k);
@@ -517,9 +518,14 @@ export class ChildPool {
       const now = Date.now(), h = k.health ?? (k.health = { fails: 0, okAt: null });
       if (ok) { h.fails = 0; h.okAt = now; } else h.fails++;
       k.live = k.world?.dataDir ? readLive(join(k.world.dataDir, 'live.json'), c.pid) : null;
+      // #1150: each new rung 3 is an ALERT, shown for as long as a wedge is
+      if (k.rewindsSeen !== undefined && (k.live?.rewinds ?? 0) > k.rewindsSeen) k.lastRewind = { at: Date.now(), n: k.live.rewinds }; if (k.live) k.rewindsSeen = k.live.rewinds ?? 0;
       if (said) h.said = said; else if (ok) h.said = null;
       const why = this.liveWhy(k, now) ?? (h.fails >= g.failures ? `${h.said ?? '/healthz unanswered'} ${h.fails} times in a row` : null);
       if (why) void this.wedge(k, why);
+      // #1326: a halted world is restarted once per breaker window (a restart boots from the log); a second halt in the
+      // same window stays halted, its process and evidence up, for an operator
+      else if (this.halted(k) && (k.haltRestartAt == null || now - k.haltRestartAt >= g.breakerWindowMs)) void this.restartHalted(k);
     } finally { k.looking = false; }
   }
   /** Is the world stuck? Its watchdog thread's /healthz (SIM_HEALTH_PORT) when it has one: 200 = fine, 503 while serving
@@ -550,7 +556,9 @@ export class ChildPool {
     const c = k.child, g = this.g;
     if (!c || k.wedging) return;
     k.wedging = { reason: why, at: Date.now() }; this.o.onChange?.(k.slug);
-    this.log(`world ${k.slug} wedged (${why}): SIGUSR2, SIGTERM after ${g.usr2WaitMs / 1000} s, SIGKILL ${g.termGraceMs / 1000} s later`);
+    // #457: the frame the world's watchdog caught its main thread stuck in (live.json `stall`, fresh: within this stall)
+    const st = k.live?.stall, frame = st && typeof st.top === 'string' && Date.now() - st.at < 120_000 ? `; stuck in ${st.top}` : '';
+    this.log(`world ${k.slug} wedged (${why}${frame}): SIGUSR2, SIGTERM after ${g.usr2WaitMs / 1000} s, SIGKILL ${g.termGraceMs / 1000} s later`);
     const exited = () => c.exitCode !== null || c.signalCode !== null;
     const exit = exited() ? Promise.resolve() : new Promise((r) => c.once('exit', r));
     try { c.kill('SIGUSR2'); } catch { /* gone */ }
@@ -558,8 +566,23 @@ export class ChildPool {
     if (!exited()) { this.log(`world ${k.slug} still running after SIGUSR2: SIGTERM`); try { c.kill('SIGTERM'); } catch { /* gone */ } await within(exit, g.termGraceMs); }
     if (!exited()) { this.log(`world ${k.slug} still running after SIGTERM: SIGKILL`); try { c.kill('SIGKILL'); } catch { /* gone */ } }
   }
+  /** #1326: a halted world (its clock stopped, live.json says so) is stopped and restarted once per breaker window:
+   *  SIGTERM (it saves what it can), SIGKILL after termGraceMs; onExit restarts it and the breaker counts it. */
+  async restartHalted(k) {
+    const c = k.child, g = this.g;
+    if (!c || k.wedging || k.haltRestarting) return;
+    k.haltRestartAt = Date.now(); k.haltRestarting = { at: k.haltRestartAt }; this.o.onChange?.(k.slug);
+    this.log(`world ${k.slug} halted: its clock has stopped; restarting it (once per ${Math.round(g.breakerWindowMs / 60_000)} min; the reason is its [world] glitch line)`);
+    const exited = () => c.exitCode !== null || c.signalCode !== null;
+    const exit = exited() ? Promise.resolve() : new Promise((r) => c.once('exit', r));
+    try { c.kill('SIGTERM'); } catch { /* gone */ }
+    await within(exit, g.termGraceMs);
+    if (!exited()) { this.log(`world ${k.slug} still running after SIGTERM: SIGKILL`); try { c.kill('SIGKILL'); } catch { /* gone */ } }
+  }
   /** The world said its clock has stopped (live.json, #1150): running, but serving nobody. Until a restart. */
   halted(k) { return k.status === 'running' && !!k.live?.halted && k.live.pid === k.child?.pid; }
+  /** #1326: the world said its clock is stalled (live.json): running and answering, but no tick for longer than it should. */
+  stalled(k) { return k.status === 'running' && !k.frozen && !!k.live?.stalled && !k.live?.halted && k.live.pid === k.child?.pid; }
   /** What host-health and /__sim/healthz show (LOAD-CONTRACT §4): wedged, held, crashloop, bootSlow, halted. */
   problems(now = Date.now()) {
     const g = this.g, out = [], s = (ms) => `${Math.round(ms / 1000)} s`;
@@ -571,7 +594,12 @@ export class ChildPool {
       if (k.wedging) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} wedged (${k.wedging.reason}) ${s(now - k.wedging.at)} ago; being restarted` });
       else if (suspect) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} not answering: ${suspect}` });
       else if (k.lastWedge && now - k.lastWedge.at < g.wedgeShownMs) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} was wedged ${s(now - k.lastWedge.at)} ago (${k.lastWedge.reason}); restarted` });
-      if (this.halted(k)) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted: its clock has stopped and visitors get 503; the reason is its [world] glitch line (op.mjs glitches --world ${k.slug}); a restart boots from the log` });
+      if (k.lastRewind && now - k.lastRewind.at < 2 * g.wedgeShownMs) out.push({ slug: k.slug, code: 'rewound', text: `${k.slug} went back to its last clean state or stopped on the spot (rewind ${k.lastRewind.n}); Souls lost what they were doing (op.mjs glitches --world ${k.slug})` });
+      if (k.haltRestarting) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestarting.at)} ago: its clock stopped; being restarted (once per ${Math.round(g.breakerWindowMs / 60_000)} min)` });
+      else if (k.haltRestartAt != null && !this.halted(k) && now - k.haltRestartAt < g.wedgeShownMs) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestartAt)} ago and was restarted; the reason is its [world] glitch line (op.mjs glitches --world ${k.slug})` });
+      // #1326: the clock owes ticks and none has completed past its threshold, but the process still answers
+      if (this.stalled(k)) out.push({ slug: k.slug, code: 'stalled', text: `${k.slug} stalled: its clock has not ticked for ${s(k.live.tick?.ageMs ?? 0)} while it should; reads say so and acts are refused until it runs again` });
+      if (this.halted(k)) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted: its clock has stopped and visitors get 503, or every step is failing and nothing can move; the reason is its [world] glitch line (op.mjs glitches --world ${k.slug}); a restart boots from the log` });
       if (k.status === 'starting' && k.boot && now - k.boot.since > g.bootSlowMs) out.push({ slug: k.slug, code: 'bootSlow', text: `${k.slug} booting for ${s(now - k.boot.since)}${k.boot.stage ? ` (${k.boot.stage}${k.boot.tick != null ? ` ${k.boot.tick}${k.boot.target ? `/${k.boot.target}` : ''}` : ''})` : ''}; last progress ${s(now - k.boot.movedAt)} ago` });
     }
     return out;
@@ -600,7 +628,7 @@ export class ChildPool {
   async closeAll() { this.closing = true; this.stopGuard(); await Promise.all([...this.kids.keys()].map((s) => this.stop(s))); }
 }
 
-export const EYES_ENV = ['EDGE_EYES', 'EDGE_EYES_GPU', 'EDGE_EYES_SOUL_SECONDS', 'EDGE_EYES_GLOBAL_PER_MINUTE', 'EDGE_EYES_TIMEOUT_SECONDS', 'EDGE_EYES_RELOAD_HOURS', 'EDGE_EYES_NICE', 'EDGE_EYES_CPUS', 'EDGE_EYES_CHROME_ARGS', 'PLAYWRIGHT_BROWSERS_PATH', 'SIM_RENDER_LOCK_DIR', 'GOD_LOOK_CHROME', 'EDEN_GOD_GL'];
+export const EYES_ENV = ['EDGE_EYES', 'EDGE_EYES_GPU', 'EDGE_EYES_CHROME', 'EDGE_EYES_SOUL_SECONDS', 'EDGE_EYES_GLOBAL_PER_MINUTE', 'EDGE_EYES_TIMEOUT_SECONDS', 'EDGE_EYES_RELOAD_HOURS', 'EDGE_EYES_NICE', 'EDGE_EYES_CPUS', 'EDGE_EYES_CHROME_ARGS', 'PLAYWRIGHT_BROWSERS_PATH', 'SIM_RENDER_LOCK_DIR', 'GOD_LOOK_CHROME', 'EDEN_GOD_GL'];
 
 /** Launcher-only exact world allowlist; the server still checks its own viewer URL and world path.
  *  Unset keeps the legacy env bytes. Empty disables all; enabling members requires EDGE_EYES=world.
@@ -652,6 +680,9 @@ export function defaultCommand(world, port, o) {
     ...eyesEnv(world.slug),
     // measurement only (lane SLEEP): log the engine state hash at boot and at stop
     ...(process.env.SIM_BOOT_HASH === '1' ? { SIM_BOOT_HASH: '1' } : {}),
+    // #1649: the zone chosen at creation (recorded by the world's first real-time boot), and the launcher's real-time flag
+    ...(isTimeZone(world.timeZone) ? { WORLD_TIME_ZONE: world.timeZone } : {}),
+    ...(process.env.SIM_REAL_TIME ? { SIM_REAL_TIME: process.env.SIM_REAL_TIME } : {}),
     // Soul mode of the world's one skill (/SKILL.md) points at Codex's Soul skill (/skill.md) and CLI (/eden-agent.mjs),
     // served as is from the published files when the launcher is given them (--soul-skill, --soul-cli).
     ...(o.soulSkillFile && existsSync(o.soulSkillFile) ? { EDGE_SKILL_FILE: resolve(o.soulSkillFile) } : {}),

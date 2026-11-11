@@ -12,14 +12,32 @@
 // pavilion, Tam): the receipt's own target is it or a place inside it, or the body ended inside the named place or near
 // the named thing or Soul. A last step whose target the world cannot resolve is never closed by default: progress only,
 // the agent's `result` closes it. One-step messages and explicit links are unchanged.
+// #1295: the world never records a message as finished while an act linked to it runs. A close then (`result`, a Soul's
+// ack with `outcome`) is refused and writes nothing (`running`); an act that ends while another linked to the same
+// message runs posts progress, and the last one to end closes it. Every message still reaches a close: a linked act
+// replaced with nothing else serving its message closes it `failed` (after GONE_TICKS, so a replacing act linked to the
+// message can take it); one still running after HOLD_TICKS has it closed `failed` (never done), and its real end
+// replaces that line. An open-ended hold the body has reached (a sit or lie with no `seconds`) or a follow has done what
+// it was asked and holds nothing. Links are kept durably beside the receipts (`ownerLinkStore`), not in the world's log:
+// a restart keeps the guard and the close, and a link whose receipt is gone (a rewind or restore) is dropped.
+// #1329 (Eden smoke test, bug 8): a ride join (`object:<ride>:join`) completes at boarding, but the owner asked for the
+// ride: its message stays open ("now: aboard the <ride>") and the join counts as running while the body is aboard, so no
+// other close gets past it; it closes once the body is back on the ground: done when the ride departed with this Soul
+// aboard, failed when the Soul left before it did, or after RIDE_TICKS still aboard.
 import type {EdgeReceipt, EdgeSoul} from './contract.ts';
+import type {Db} from '../db.ts';
 import {messageSteps, type MessageStep, type StepTarget} from './ledger/vocabulary.ts';
 
 export type OwnerLoopInbox = {
   hasMessage(s: {scope: string; owner: string}, id: string): boolean;
-  serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed'): boolean;
+  /** `open`: write only into a message with no result yet (#1295: the world's own replaced and overlong lines). */
+  serverResult(s: {scope: string; owner: string}, id: string, text: string, outcome: 'done' | 'failed', open?: boolean): boolean;
   messageText?(s: {scope: string; owner: string}, id: string): string | null;
   serverProgress?(s: {scope: string; owner: string}, id: string, text: string): boolean;
+  /** #1753: an act linked to a message acknowledges it (no separate `ack`); false when it was already. */
+  serverAck?(s: {scope: string; owner: string}, id: string): boolean;
+  /** #1295: set by the loop; the inbox refuses a close while it answers a receipt. */
+  closeHold?: ((s: {scope: string; owner: string}, id: string) => {receipt: string; capability: string} | null) | null;
 };
 /** D3d: what the world knows to judge a step's target (the ledger): the resolver, what an offered capability points at
  *  (its target's id), a place's id with its ancestors (null: not a place), and where a thing or Soul stands now. */
@@ -28,9 +46,37 @@ export type OwnerLoopWorld = {
   actTarget(soul: EdgeSoul, capability: string): string | null;
   placePath(id: string): string[] | null;
   posOf(id: string): [number, number] | null;
+  /** #1295: whether this open act is an open-ended hold its body has reached, or a follow (the ledger's `holding`). */
+  holding?(soulId: string, receiptId: string): boolean;
+  /** #1295: a light read of a receipt for the sweep and the guard (no body or outcome facts); else `read` is used. */
+  brief?(soulId: string, receiptId: string): {id: string; capability: string; phase: string; acceptedTick: number; endedTick: number | null} | null;
+  /** #1329: a ride object's name (null: not a ride), and the ride this Soul's body is aboard now (null: on the ground). */
+  rideName?(objectId: string): string | null;
+  aboard?(soulId: string): {phase: string} | null;
 };
+/** #1295: where links are kept across a restart (`ownerLinkStore`); without one they live in memory only. */
+export type OwnerLinkStore = {load(): [string, string][]; save(receipt: string, soulId: string, link: string): void; drop(receipt: string): void};
+export function ownerLinkStore(db: Db, worldId: string): OwnerLinkStore {
+  db.db.exec('CREATE TABLE IF NOT EXISTS edge_owner_links_v1 (world_id TEXT NOT NULL, receipt_id TEXT NOT NULL, soul_id TEXT NOT NULL, link TEXT NOT NULL, PRIMARY KEY (world_id, receipt_id))');
+  const save = db.db.prepare('INSERT INTO edge_owner_links_v1 (world_id,receipt_id,soul_id,link) VALUES (?,?,?,?) ON CONFLICT(world_id,receipt_id) DO UPDATE SET link=excluded.link');
+  const drop = db.db.prepare('DELETE FROM edge_owner_links_v1 WHERE world_id=? AND receipt_id=?');
+  return {
+    load: () => (db.db.prepare('SELECT receipt_id,link FROM edge_owner_links_v1 WHERE world_id=?').all(worldId) as {receipt_id: string; link: string}[]).map(r => [r.receipt_id, r.link]),
+    save: (receipt, soulId, link) => {save.run(worldId, receipt, soulId, link);},
+    drop: receipt => {drop.run(worldId, receipt);},
+  };
+}
 /** `steps`: the message's steps when the link is implicit and its words name some (else the act closes it, as before). */
-type Link = {scope: {scope: string; owner: string}; message: string; steps?: MessageStep[]; act?: string[]};
+type Link = {scope: {scope: string; owner: string}; message: string; steps?: MessageStep[]; act?: string[];
+  /** #1272: other messages on this receipt: a repeated act returns the one under way, and each message still closes with it. */
+  also?: Link[];
+  /** #1295: the act asked for its own duration (`seconds`), so a held pose is still running; `gone`: the tick the receipt was
+   *  replaced (the world closes its messages GONE_TICKS later unless another act serves them); `late`: past HOLD_TICKS, the
+   *  world has said it hadn't finished. */
+  timed?: number; gone?: number; late?: true;
+  /** #1329: the act joins a ride: the message waits for the body to be back on the ground. `since`: the tick the join
+   *  completed aboard; `flew`: the ride left its boarding while this Soul was aboard; `said`: the aboard progress line is out. */
+  ride?: {object: string; name: string; since?: number; flew?: true; said?: true}};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
@@ -38,6 +84,15 @@ function pending(step: string[]) {
   return v === 'rest' || v === 'nap' || v === 'lie' ? 'resting' : v === 'sit' ? 'sitting' : step.includes('walk') ? 'there' : v === 'ride' ? 'aboard' : `${v} done`;
 }
 const MAX_LINKS = 2000;
+const OPEN = ['waiting', 'started', 'accepted'];
+/** #1295: a linked act still running this long (world ticks, 15 minutes) has its message closed `failed`, never done. */
+export const HOLD_TICKS = 15 * 60 * 20;
+/** #1295: how long a replaced act's messages wait for the replacing act to be linked to them (world ticks). */
+export const GONE_TICKS = 40;
+const SWEEP_TICKS = 20;
+/** #1329: a ride's message still aboard this long after boarding (world ticks, 30 minutes) closes `failed`, never stays open. */
+export const RIDE_TICKS = 30 * 60 * 20;
+const RIDE_JOIN = /^object:([^:]+):join$/;
 /** How near a named thing or Soul the body must end to be at it (metres). */
 const AT_M = 6;
 
@@ -56,6 +111,8 @@ export function reachedTarget(r: EdgeReceipt, t: StepTarget, world: Pick<OwnerLo
 /** The one line the owner's card shows when the linked act ends: the receipt's outcome summary, else its phase. */
 export function resultLine(r: EdgeReceipt & {outcome?: {summary?: string}; done?: string}): {text: string; outcome: 'done' | 'failed'} | null {
   if (r.phase !== 'completed' && r.phase !== 'failed') return null;   // replaced: the act that replaced it closes the message
+  // #1381: stopped at the Soul's own request: not done, and not a failure of the world (the inbox has done | failed)
+  if (r.phase === 'failed' && r.code === 'act.stopped') return {text: `Stopped at your request before it finished: ${r.capability}.`, outcome: 'failed'};
   const text = r.done ?? r.outcome?.summary ?? (r.phase === 'completed' ? `${r.capability} done.` : `${r.capability} failed${r.reason ? `: ${r.reason}` : '.'}`);
   return {text, outcome: r.phase === 'completed' ? 'done' : 'failed'};
 }
@@ -66,14 +123,20 @@ export class OwnerLoop {
   private inbox: OwnerLoopInbox;
   private read: (soulId: string, receiptId: string) => (EdgeReceipt & {outcome?: {summary?: string}; done?: string}) | null;
   private world: OwnerLoopWorld | null;
-  constructor(inbox: OwnerLoopInbox, read: OwnerLoop['read'], onReceipt: (l: (r: EdgeReceipt) => void) => void, world: OwnerLoopWorld | null = null) {
-    this.inbox = inbox; this.read = read; this.world = world;
+  private store: OwnerLinkStore | null;
+  private holdTicks: number;
+  constructor(inbox: OwnerLoopInbox, read: OwnerLoop['read'], onReceipt: (l: (r: EdgeReceipt) => void) => void, world: OwnerLoopWorld | null = null,
+    {store = null, holdTicks = HOLD_TICKS}: {store?: OwnerLinkStore | null; holdTicks?: number} = {}) {
+    this.inbox = inbox; this.read = read; this.world = world; this.store = store; this.holdTicks = holdTicks;
     onReceipt(r => this.ended(r));
+    for (const [id, json] of store?.load() ?? []) try {this.links.set(id, JSON.parse(json) as Link);} catch {store!.drop(id);}
+    inbox.closeHold = (s, id) => {const r = this.running(s, id); return r ? {receipt: r.id, capability: r.capability} : null;};
   }
   /** D3d: whether this act serves step `i` of a linked message: its verb, and (several steps, last one) its target. */
   private serves(l: Link, i: number, r: EdgeReceipt, ended: boolean): boolean {
     const st = l.steps![i]!;
-    if (!st.verbs.includes(verbOf(r))) return false;
+    // #1329: a ride join (`object:<ride>:join`) is the message's "ride"
+    if (!st.verbs.includes(l.ride ? 'ride' : verbOf(r))) return false;
     if (l.steps!.length < 2 || i < l.steps!.length - 1) return true;
     if (st.unresolved) return false;   // the agent's own result closes it
     return !st.target || !this.world || reachedTarget(r, st.target, this.world, ended, l.act);
@@ -84,23 +147,119 @@ export class OwnerLoop {
     return this.inbox.hasMessage(this.scope(soul), message) ? null : `no owner message ${message} for this Soul (it may be too old)`;
   }
   /** Link an accepted act's receipt to its owner message; a receipt already terminal closes the message now. Implicit
-   *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open. */
-  link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false): {open: boolean} {
-    const scope = this.scope(soul), text = implicit ? this.inbox.messageText?.(scope, message) : null;
-    const world = this.world, steps = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
-    const aim = world && steps.length > 1 && steps.at(-1)!.target ? world.actTarget(soul, receipt.capability) : null;
-    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {})};
-    this.links.set(receipt.id, l);
-    if (this.links.size > MAX_LINKS) this.links.delete(this.links.keys().next().value!);
-    const open = !!l.steps && !this.serves(l, l.steps.length - 1, receipt, false);
-    if (receipt.phase !== 'waiting' && receipt.phase !== 'started') this.ended(receipt);
+   *  (the CLI's default): true when this act cannot close the message (not its last step), so the card stays open.
+   *  `seconds`: the duration the act asked for (#1295: a held pose still runs until it ends, and the hold limit allows it). */
+  link(soul: EdgeSoul, receipt: EdgeReceipt, message: string, implicit = false, seconds?: number): {open: boolean} {
+    // #1753: an act linked to a message nobody acknowledged is its acknowledgement (the owner's card reads "Acknowledged").
+    // Such a link is the agent's one call for the whole message, so a message of several steps is judged by its steps, as an
+    // implicit link is (D3c/D3d): "walk to the field, then dance" stays open after the walk. One step closes as before: the
+    // agent chose the act, and the words' vocabulary no longer judges that choice.
+    const scope = this.scope(soul), acked = this.inbox.serverAck?.(scope, message) ?? false;
+    const text = implicit || acked ? this.inbox.messageText?.(scope, message) : null;
+    const world = this.world, read = text ? messageSteps(text, world ? words => world.stepTarget(soul, words) : undefined) : [];
+    // a repeat of the act under way (a new key, `repeat: true`) relinks the same receipt: what the first link judged by stays
+    const prior = this.links.get(receipt.id), same = prior?.message === message ? prior : prior?.also?.find(x => x.message === message);
+    const steps = implicit || read.length > 1 ? read : same?.steps ?? [];
+    const aim = world && steps.length > 1 && steps.at(-1)!.target ? same?.steps === steps && same.act ? same.act[0] : world.actTarget(soul, receipt.capability) : null;
+    const rideId = RIDE_JOIN.exec(receipt.capability)?.[1], rideName = rideId && world?.aboard ? world.rideName?.(rideId) ?? null : null;
+    const l: Link = {scope, message, ...(steps.length ? {steps} : {}), ...(aim ? {act: [aim, receipt.capability.slice(receipt.capability.indexOf(':') + 1)]} : {}), ...(seconds !== undefined ? {timed: Math.max(1, seconds)} : {}),
+      ...(rideId && rideName ? {ride: {object: rideId, name: rideName}} : {})};
+    if (prior) {l.also = [...(prior.message === message ? [] : [{...prior, also: undefined, late: undefined}]), ...(prior.also ?? []).filter(x => x.message !== message)]; if (prior.late) l.late = true;}
+    this.keep(receipt.id, l);
+    if (this.links.size > MAX_LINKS) this.forget(this.links.keys().next().value!);
+    // #1329: a ride join is boarding, not the ride: the message stays open until the body is back on the ground
+    const open = !!l.ride || (!!l.steps && !this.serves(l, l.steps.length - 1, receipt, false));
+    if (!OPEN.includes(receipt.phase)) this.ended(receipt);
     return {open};
   }
-  private ended(r: EdgeReceipt) {
-    const l = this.links.get(r.id); if (!l || ['waiting', 'started', 'accepted'].includes(r.phase)) return;
-    this.links.delete(r.id);
-    const full = this.read(r.soulId, r.id) ?? r, line = resultLine(full); if (!line) return;
+  /** #1295: the act linked to this message that is running now (not ended, not replaced, not an open-ended hold its body
+   *  has reached), or null. `except`: a receipt not to count (the one ending). A link whose receipt is gone is dropped. */
+  running(s: {scope: string; owner: string}, message: string, except?: string): EdgeReceipt | null {
+    for (const [id, l] of [...this.links]) {
+      if (id === except || l.gone !== undefined) continue;
+      const mine = [l, ...(l.also ?? [])].find(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner); if (!mine) continue;
+      const soul = l.scope.scope.slice(5);
+      try {
+        const r = this.peek(soul, id);
+        if (!r) {this.forget(id); continue;}
+        // #1329: a ride join runs until the body is back on the ground (its receipt completed at boarding)
+        if (!OPEN.includes(r.phase)) {if (l.ride?.since !== undefined && this.world?.aboard?.(soul)) return r as EdgeReceipt; continue;}
+        if (!mine.timed && this.world?.holding?.(soul, id)) continue;
+        return r as EdgeReceipt;
+      } catch {/* a link that can't be read holds nothing */}
+    }
+    return null;
+  }
+  /** #1295: whether any act not replaced is still linked to this message (it will close it). */
+  private serving(s: {scope: string; owner: string}, message: string) {
+    return [...this.links.values()].some(l => l.gone === undefined && [l, ...(l.also ?? [])].some(x => x.message === message && x.scope.scope === s.scope && x.scope.owner === s.owner));
+  }
+  private peek(soulId: string, id: string) {return this.world?.brief ? this.world.brief(soulId, id) : this.read(soulId, id);}
+  private ended(r: EdgeReceipt, tick?: number) {
+    const l = this.links.get(r.id); if (!l || OPEN.includes(r.phase)) return;
+    const full = this.read(r.soulId, r.id) ?? r, ride = this.aboard(l, r, tick);
+    if (ride === 'aboard') return;
+    const line = ride ?? resultLine(full);
+    // replaced: the act that replaced it closes the message when it is linked to it; else the world does (sweep)
+    if (!line) {if (l.gone === undefined) {l.gone = r.endedTick ?? r.acceptedTick; this.keep(r.id, l);} return;}
+    this.forget(r.id);
     const seen = {...r, ...(full.endedAt !== undefined ? {endedAt: full.endedAt} : {})};
+    for (const one of [l, ...(l.also ?? [])]) {
+      // #1295: another act linked to this message still runs: it closes the message when it ends
+      const other = this.running(one.scope, one.message, r.id);
+      if (other) {this.inbox.serverProgress?.(one.scope, one.message, `now: ${line.text.replace(/[.\s]+$/, '')}; ${other.capability} still going`); continue;}
+      this.report(one, seen, line);
+    }
+  }
+  /** #1329: a completed ride join: 'aboard' while the body is on the ride (the first time, a progress line), else the
+   *  ride's own close: done when it departed with this Soul aboard, failed when the Soul left before it did, or after
+   *  RIDE_TICKS still aboard. null: not a ride join, or the join did not complete (it closes as any act does). */
+  private aboard(l: Link, r: EdgeReceipt, tick?: number): 'aboard' | {text: string; outcome: 'done' | 'failed'} | null {
+    if (!l.ride || r.phase !== 'completed' || !this.world?.aboard) return null;
+    const ride = l.ride, now = this.world.aboard(r.soulId);
+    if (now) {
+      const was = JSON.stringify(ride);
+      ride.since ??= r.endedTick ?? r.acceptedTick;
+      if (now.phase !== 'boarding') ride.flew = true;
+      if (tick !== undefined && tick - ride.since >= RIDE_TICKS) return {text: `Still on the ${ride.name} after ${Math.round(RIDE_TICKS / 1200)} minutes.`, outcome: 'failed'};
+      if (!ride.said) {ride.said = true; for (const one of [l, ...(l.also ?? [])]) this.inbox.serverProgress?.(one.scope, one.message, `now: aboard the ${ride.name}; not back on the ground yet`);}
+      if (JSON.stringify(ride) !== was) this.keep(r.id, l);   // written when it changes, not once a second
+      return 'aboard';
+    }
+    // never seen aboard (a join that completed while the Soul was already out): the join's own line
+    if (ride.since === undefined) return null;
+    return ride.flew ? {text: `Rode the ${ride.name} and stepped out on the ground.`, outcome: 'done'} : {text: `Left the ${ride.name} before it departed.`, outcome: 'failed'};
+  }
+  /** #1295: once a second (call after each world tick): close what a replaced act left with nothing serving it, close a
+   *  message whose act has run past the hold limit as not done, catch an end this process missed (a restart), and drop a
+   *  link whose receipt is gone. */
+  sweep(tick: number) {
+    if (tick % SWEEP_TICKS) return;
+    for (const [id, l] of [...this.links]) {
+      try {this.sweepOne(tick, id, l);} catch {/* one link's fault never stops the others; it is looked at again next time */}
+    }
+  }
+  private sweepOne(tick: number, id: string, l: Link) {
+    const soul = l.scope.scope.slice(5), r = this.peek(soul, id);
+    if (!r) {this.forget(id); return;}
+    // only into a message with no result: a replacing act linked to it may have closed it already, with its real outcome
+    if (l.gone !== undefined) {
+      if (tick - l.gone < GONE_TICKS) return;
+      for (const one of [l, ...(l.also ?? [])]) if (!this.serving(one.scope, one.message) && !this.running(one.scope, one.message)) this.inbox.serverResult(one.scope, one.message, `${r.capability} was replaced by a newer act before it finished.`, 'failed', true);
+      this.forget(id);
+      return;
+    }
+    if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full, tick); else this.forget(id); return;}
+    // a timed act gets the time it asked for, and a minute more, before it counts as overlong
+    const limit = Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0));
+    if (l.late || tick - r.acceptedTick < limit) return;
+    const held = this.world?.holding?.(soul, id) ?? false;
+    l.late = true; this.keep(id, l);
+    for (const one of [l, ...(l.also ?? [])]) if (one.timed || !held) this.inbox.serverResult(one.scope, one.message, `${r.capability} hadn't finished after ${limit < 2400 ? `${Math.round(limit / 20)} seconds` : `${Math.round(limit / 1200)} minutes`}, so it isn't done.`, 'failed', true);
+  }
+  private keep(id: string, l: Link) {this.links.set(id, l); try {this.store?.save(id, l.scope.scope.slice(5), JSON.stringify(l));} catch {/* kept in memory */}}
+  private forget(id: string) {this.links.delete(id); try {this.store?.drop(id);} catch {/* the sweep drops it again */}}
+  private report(l: Link, seen: EdgeReceipt, line: NonNullable<ReturnType<typeof resultLine>>) {
     if (!l.steps || this.serves(l, l.steps.length - 1, seen, true)) { this.reached.delete(l.message); this.inbox.serverResult(l.scope, l.message, line.text, line.outcome); return; }
     // not the last step (or not its target): the owner sees what happened and what is still to come; the message stays open
     const last = l.steps.length - 1, at = l.steps.findIndex((_, i) => i >= (this.reached.get(l.message) ?? 0) && i < last && this.serves(l, i, seen, true));

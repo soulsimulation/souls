@@ -87,6 +87,52 @@ Stop it with Ctrl-C; the trace and the world are unaffected.
 Limit: the session cookie is the bearer token, and cookies ignore ports, so another server on 127.0.0.1 that the same
 browser visits would receive it (any local process could read the trace file anyway).
 
+## Session record and collect (#1773)
+
+The served client keeps a full record of a session when its owner opts in: an empty file `.eden-record-on` in the
+Soul's folder (in a Souls home: the Soul's `runtime/` folder, or `.souls/` for every Soul in the home). Nothing the
+agent sees changes, byte for byte: no command, help or guide line, answer field or message. The client writes
+`.eden-record/record.jsonl` (schema `soul-trace/2`: the `/1` head plus content), rolled at 16 MB and capped at 512 MB
+(the oldest roll goes first, with a `limit` record). The folder carries its own `.gitignore` of `*`, so a Soul folder
+inside a repository never commits it. It keeps:
+
+- `proc.start` / `proc.end`: the command, its arguments, exit code, start and duration, stdout and stderr (64 KB each,
+  a longer one is `{cut, bytes, head}`);
+- `http`: a command's world call as it saw it (`via` serve or direct): method, path with query, request and answer
+  bodies, status, client time, the world's own time (`server`, from Server-Timing), load, waits, idempotency key and
+  the receipt, message and clientRef ids it involves;
+- `wire`: a call a process made itself (serve's inbox, stream, receipt polls, plan steps, reflexes; catalog and live
+  fetches keep only time and status); `proxied: true` is serve's wire time for a command's call;
+- `wait`: a retry or a stated wait.
+
+Each process reads the switch once when it starts, so a running `serve` keeps recording until it is restarted
+(`serve --stop`, then `serve`) after the switch is removed, and starts recording only once restarted after it is added.
+
+Never recorded: the token, any Authorization header, the credentials file. Credential-like keys and every bearer
+value are replaced with `[omitted]`, and the commands that handle codes or tokens (`register`, `create`, `pair`,
+`adopt`, `approval`, `doctor`, `import`, `export`, `init`, `upgrade`) keep only their name, exit and times.
+
+```bash
+node tools/soul-trace/collect.mjs <folder> --out <dir> [--soul <name>] [--since <time>] [--until <time>] \
+  [--transcript <file>]... [--claude-dir <dir>]... [--no-fetch]
+```
+
+`<folder>` is the folder the agent ran in (a Soul's folder or a home's). The bundle holds, as separate files:
+the client record and `serve` log; the harness transcripts; the end state of every receipt and owner message the
+record names (fetched once); the versions in use (client, skill, catalog, world build); a `manifest.json` (marked
+`private`) and a README for the analysing agent. Any token the folder or home holds is replaced wherever it appears.
+
+Transcripts: collect takes by itself only Claude Code transcripts (and their subagents' transcripts) recorded with a
+working directory exactly equal to `<folder>`, within the session's window, opening only that folder's project directory under `CLAUDE_CONFIG_DIR`,
+`~/.claude` or `--claude-dir`; it never lists other projects. Codex keeps sessions by date, so a Codex transcript is
+taken only when named with `--transcript`, and only when it was recorded in `<folder>`. With none found it says so
+and what to pass.
+
+**A bundle is private**: it holds the owner's chat, the agent's reasoning and local paths. A transcript may hold single-use
+pairing or window codes the owner typed (they are not replaced), and in a Souls home the transcripts cover every Soul
+the agent drove there within the window, not only the one collected. It is written only to
+`--out` (with a `.gitignore` of `*`) and sent nowhere. Never attach it, or quotes from it, to an issue, PR or proof.
+
 ## Contract `soul-trace/1`
 
 One JSON object per line. Every record: `v`, `kind`, `proc` (random per CLI process), `seq` (per process,
@@ -100,10 +146,11 @@ from 1), `at` (local wall ms), `mono` (process-monotonic ms since start).
 | `proc.end` | `exitCode`, `durationMs`, `stats` {records, dropped, truncated, sinkFailures, inFlightAtExit, bodiesPendingAtExit, bodyOmitted} |
 
 `facts` is a whitelist: `accepted`, `code`, `receipt` {id, soulId, capability, phase, code, acceptedTick,
-startedTick, endedTick}, `for`, `channel`, `cursor`, `queued`, `messages` [{id, sentAt, state}], `events` (receipt
+startedTick, firstMotionTick, endedTick}, `for`, `channel`, `cursor`, `queued`, `messages` [{id, sentAt, state}], `events` (receipt
 facts only). Never recorded: owner or speech text, observation content, reasons, authorization, hosts, query values.
 
-Clock domains: `sentAt` server wall; receipt ticks world tick (authoritative for accepted/started/ended); `at` local
+Clock domains: `sentAt` server wall; receipt ticks world tick (authoritative for accepted/started/first motion/ended:
+`started` is the body program's start, first motion the receipt's `firstMotionTick`, when the body visibly began); `at` local
 wall (display); `mono` exact only inside one process. The readout labels cross-domain intervals approximate and
 never subtracts them as exact latency. Without host records the chat host's work is opaque: the time between a delivery
 and the next command is shown as unattributed host time (see Host boundaries).

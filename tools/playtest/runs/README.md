@@ -12,13 +12,14 @@ node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/smoke-world.
 node tools/playtest/runs/run.mjs start    --scenario tools/playtest/scenarios/unified-codex-smoke.json --cast none --port 4311 --duration 30
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio.json   # three scripted-owner Souls, one redirection
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/garden-setup.json  # another world, a setup batch, another cast
-node tools/playtest/runs/run.mjs cleanup  .local/soul-runs/<run> --world-data --controller-state
-node tools/playtest/runs/run.mjs evaluate .local/soul-runs/<run> --question tools/playtest/runs/questions/redirect-honoured.mjs
+node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio-direct.json  # a directed cast: swarm director, scripted-owner seats
+node tools/playtest/runs/run.mjs cleanup  ../souls-runs/<run> --world-data --controller-state
+node tools/playtest/runs/run.mjs evaluate ../souls-runs/<run> --question tools/playtest/runs/questions/redirect-honoured.mjs
 node tools/playtest/runs/run.mjs start    tools/playtest/runs/specs/hamlet-trio-recorded.json   # the trio, recorded: wide, free and follow cameras
-node tools/playtest/runs/run.mjs preview  .local/soul-runs/<run> --camera bo --from 10 --to 40   # a labelled excerpt, never full proof
-node tools/playtest/runs/run.mjs preview  .local/soul-runs/<run> --camera bo --auto              # the same, starting at the run's first act
-node tools/playtest/runs/run.mjs package  .local/soul-runs/<run> --select wide --select bo      # local index + selected projection
-node tools/playtest/runs/run.mjs compare  .local/soul-runs/<run-a> .local/soul-runs/<run-b> [--out dir] [--md]
+node tools/playtest/runs/run.mjs preview  ../souls-runs/<run> --camera bo --from 10 --to 40   # a labelled excerpt, never full proof
+node tools/playtest/runs/run.mjs preview  ../souls-runs/<run> --camera bo --auto              # the same, starting at the run's first act
+node tools/playtest/runs/run.mjs package  ../souls-runs/<run> --select wide --select bo      # local index + selected projection
+node tools/playtest/runs/run.mjs compare  ../souls-runs/<run-a> ../souls-runs/<run-b> [--out dir] [--md]
 ```
 
 Exit codes: 0 completed (or valid), 1 failed, 2 refused, 124 stopped at `limits.maxWallSec`, 130 cancelled.
@@ -37,7 +38,7 @@ flags (`--scenario`, `--cast`, `--port`, `--duration`, `--name`).
 | `name` | scenario name | Run name in the run directory. |
 | `cast` | `scenario` | `scenario` runs its seats; `none` removes seats, god and their script events (world, director, observer and review only); an object `{seats, script}` replaces the scenario's seats and/or scripted direction, each in the scenario's own format (see Composed casts). |
 | `world.port`, `world.slug` | scenario's | Use a free port; a busy port is refused, never taken over. |
-| `world.timeOfDay`, `world.timeScale` | `12`, `0` | The world's time of day (hours 0-24, `"HH:MM"`, `"7pm"`) and clock speed (world hours per real hour; `0` pauses it), set through the god env route (`POST /v1/god/env` as the dev owner) right after provision, before any seat or camera, so every clip of the run is by day. `"keep"` leaves the world's own clock (06:00 at boot, one world day per real hour). The receipt's `worldTime` has what was asked and the clock the world reported; a clock that could not be set is recorded there and the run goes on. |
+| `world.timeOfDay`, `world.timeScale` | `12`, `0` | The world's time of day (hours 0-24, `"HH:MM"`, `"7pm"`) and clock speed (world hours per real hour; `0` pauses it), set through the god env route (`POST /v1/god/env` as the dev owner) right after provision, before any seat or camera, so every clip of the run is by day. `"keep"` leaves the world's own clock (real time in its zone; a set hour or speed puts a dev world on the dev-only accelerated clock, #1649). The receipt's `worldTime` has what was asked and the clock the world reported; a clock that could not be set is recorded there and the run goes on. |
 | `world.genesis` or `world.snapshot` | scenario's | World source: a genesis template or a frozen compiler snapshot (`arena/snapshot-seed.mjs`), a path under the server root. Its sha256 is in the receipt (`spec.effective.world.source`). |
 | `setup` | none | `{batches: [file or {id, ops, note}], maxWallSec: 120}`: god-edit batches applied after provision and before any seat (see Setup). |
 | `durationSec` | scenario's | Play duration override. |
@@ -55,7 +56,7 @@ applies the same preflight as `start`; `start` runs it once and hands the result
 
 ## What a run writes
 
-`.local/soul-runs/<stamp>-<name>/` (or `--out`; `SIM_SCRATCH` moves `.local`):
+`souls-runs/<stamp>-<name>/` beside the checkout, outside every project above it (or `--out`; `SOULS_RUNS_DIR`, or `SIM_SCRATCH`'s `soul-runs`). A live seat's folder is refused inside a repository checkout or under a `CLAUDE.md`/`AGENTS.md`: its Claude Code session would load that project's settings and skills (`arena/seat-home.mjs`, #1098 arm B2):
 
 - `run-receipt.json`: the terminal receipt. `status` is `running` until the end, so a crash never reads as success.
   It records the effective spec and its hash, the scenario path and hash, the source (`source.serverRoot` and
@@ -85,10 +86,20 @@ entry with `command` is refused at validation; end a run by cancelling it.
 world's served `eden.mjs` in the seat folder. Onboarding fetches the CLI from the world and runs `register`, `create` and
 `status`; owner cards reach it through the harness wake loop's `listen`; it answers each with `ack`, the matching rule's
 `eden.mjs` steps and `result done|failed` from those steps' real outcome. A `--wait` step counts as done only when its
-receipt completed or the world shows that receipt's activity under way; output without a readable receipt (the brief
-form drops it past 600 characters) is a failure, never a claimed success. Rules are matched in order by a
+receipt completed or the world shows that receipt's activity under way; output without a readable receipt (CLI 2.8.0
+and earlier drop it from the brief form past 600 characters) is a failure, never a claimed success. When an owner card
+ends the wait while the receipt is still open, the step keeps checking that receipt (`receipt <id>` every 2 s; a `wait`
+returns at once while the card is unacknowledged) for the rest of its window (at most 60 s, as the CLI applies `--wait`) and is judged on that; the card is handled next turn. Rules are matched in order by a
 case-insensitive regular expression on the card text; `close: "open"` leaves a request open while its activity
-continues, and `supersede` closes requests still open as failed when a later rule fires (an owner redirection). It has
+continues, and `supersede` closes requests still open as failed when a later rule fires (an owner redirection).
+A refused or failed step stops its rule and fails the request, unless the step ends with `{"onRefused": "continue"}`
+(default `"fail"`): then the refusal is said in the transcript and the next step runs (#828). A refused final step
+fails the request even with `continue`, since no later step can recover. An argument
+`{{prev.<path>}}` (dots and `[n]`, e.g. `{{prev.did_you_mean[0].id}}`) takes a value from the previous step's JSON
+output, a refusal's included, reading own properties only, so a script can act on the world's own suggestion:
+`[["act", "fly up to the field", {"onRefused": "continue"}], ["act", "{{prev.did_you_mean[0].id}}", "--wait", "60"]]`.
+The transcript shows the resolved command. A placeholder that does not resolve fails its step without running it, and
+that skipped step leaves no JSON for the step after it. It has
 no provider and no cost, and its transcript renders like a model seat's. Each CLI output is kept whole in the
 transcript up to 1 MiB; past that the tool result ends with a `[scripted-owner: output truncated: …]` line and carries
 `truncated: true`, which the scorer's `seatActs` passes on. Live casts stay on `playtest.mjs direct` and
@@ -96,7 +107,28 @@ the souls-director skill.
 
 A step `["resolve", "<words>"]` keeps its first candidate's id as `{resolved}` for the steps after it in that rule, so a
 script can reach offers whose ids differ every run (`give:<soul>`, `accept:<invitation>`) the way an agent does. A resolve
-with no candidate fails the rule.
+with no candidate fails the rule, unless the step says `{"onRefused": "continue"}`.
+
+## Directed casts
+
+A spec can name a swarm cast (`tools/playtest/scenarios/casts/`, the format `playtest.mjs direct` and the
+souls-director skill use) instead of a scenario: `{"soulRun": 1, "cast": {"file": "<cast.json>"}}`. The run executes
+`cmdDirect` headless through the lifecycle hooks: the cast's world, seats and browser are owned and released, the
+cast's `console.script` supplies the direction (broadcasts, per-seat lines, `redirect`, `pause`, `resume`, `end`), and a
+cancel ends play the way the console's `end` does. A session that ran to its end is `completed` whatever its verdict;
+the verdict is in `evidence.verdict`, and the direction journal (`playtest/director/commands.jsonl`, referenced as
+`references.journal`) feeds the `directions` measure. The effective cast is written to `cast.effective.json`
+(`references.cast`).
+
+A directed spec takes `name`, `world` (`port`, `slug` only), `durationSec`, `observer` (`check`, `required`,
+`timeoutMs`, `cameras` as a subset of `follow` and `wide`), `limits`, `controllers`, `retention` and `evaluation`.
+Validation refuses before anything starts: a spec that names both a cast and a scenario, unknown `cast` fields, a
+missing or invalid cast file, an invalid scripted-owner script, `setup` (not supported with a cast yet),
+`diagnostics`, `observer.record`, `recordSize`, `freeComposition` or an `observer.mode` other than `cameras` (scenario
+specs only for now), and
+(`controllers.live-model`) any seat that is not `scripted-owner` or a `planner`, unless `controllers.allowLiveModels`
+is true. `cmdDirect` refuses the same live minds again inside the runner. `specs/hamlet-trio-direct.json` runs three
+scripted-owner Souls in the hamlet pond hall, with one redirection of Bo delivered while Ada speaks.
 
 ## Setup
 
@@ -136,10 +168,25 @@ sha256, never copied; seat working folders (owner identity, credentials) and wor
 - **Standard measures** keep their own family, unit, n, denominator and basis: `request-latency` (owner card to the
   seat's ack and result calls, and the director's own open time), `physical-completion` (receipt phases the world
   returned to the seat's act calls: completed, ongoing such as seated, or started and not observed to end),
-  `seat-claims` (result calls, which are claims), `observed-walking-speed` and the review oracles (only from the
-  observer's evidence packs, through `review/metrics.mjs`), `tick-timing`, `token-cost` and `lifecycle`. Emergence
+  `seat-claims` (result calls, which are claims), `observed-walking-speed`, `observed-physical` and the review oracles
+  (only from the observer's evidence packs, through `review/metrics.mjs`), `tick-timing`, `token-cost`, `lifecycle` and, for directed
+  casts, `direction` (the `directions` measure: the journal's commands by command and outcome, and each redirection
+  with its target, run-relative time, outcome and whether the target spoke afterwards). Emergence
   numbers are labelled `social-heuristic`. A measure without its source is `unavailable` with the reason, never 0
   (for example no seat transcript after `controllerState: "delete"`, or no evidence packs while the observer failed).
+- **Walk measures read world truth.** `walkArrivalRate` follows each walk request's receipt (the seat's act output,
+  else a receipt accepted in the request window) to its last phase anywhere in the run: completed inside the chosen
+  place is an arrival, failed or replaced is not, and a receipt never seen ending is unknown and left out. It is not
+  the at-cutoff `arrival` oracle (a directed request is cut off by the next direction, usually before a walk ends);
+  that count is kept in the basis. `walkMps` is one speed per distinct walk receipt, over world ticks from
+  `firstMotionTick` (when the receipt has it) or `startedTick` to `endedTick`, using the seat's samples from every pack
+  and the receipt's end point, in world seconds at the world's fixed 50 ms tick (not a rate read off wall time, which
+  drifts when the server falls behind); the basis counts which start tick was used.
+- **Owner requests** come from the persona director's `personas/<seat>/decisions.jsonl`. A directed cast has none: its
+  cards are the lines of `director/directions.jsonl` that carry a `requestId` and `messageId` (gather, prepare, go and
+  console redirects alike), and each request's reference points at its line there. Either way they are joined with
+  the seat's transcript and its `personas/<seat>/requests.jsonl` cutoffs. With no requests to join, the
+  physical-completion measures are unavailable, not 0.
 - **Questions** are small named scorer modules (`questions/*.mjs`, default export `{id, version, question,
   assumptions, score(ctx)}`) answering `pass`, `fail` or `unknown` with evidence references and stated uncertainty.
   `ctx` holds the joined requests (director record plus the seat's ack, act, say and result calls), each seat's CLI
@@ -205,6 +252,12 @@ Three limits are stated in the card. Turns come from the seat log even with the 
 displacement (`observedFirstBodyChangeSec` is, with an observer). Under a scripted director M5 is the script's own number and
 cannot move between arms; a `scripted-owner` seat's "turns" are scripted steps at no model cost, so M2 and M3 describe the
 script there.
+
+**Closing without `result`** (#1269, scorer version 4): a client can close a message in the command that finishes it, and its answer says `closed: true`. `ack <id> … --close done|failed` and `say … --for <id>` name the message themselves. An `act` or `wait` the world closed names it through `for` or the act that took the receipt, and the outcome is the receipt's. A `closed: true` that can't be placed counts as nothing. A run with none of these scores as version 3 did. A question reads such a close as the `result` step it replaced, right after the command that made it (`questionSteps`, evaluator version 3), so question files and their hashes don't change.
+
+**The world's record at run end** (#1309, scorer version 5): a directed run reads every owner message the director delivered from the world before it stops it (`GET /v1/edge/inbox/:id`, as that seat), and writes `playtest/final-cards.json`: closed or open, the outcome, and whether the agent or the server closed it. The seat's calls can't show the world's own later closes (#1299: a replaced act's message after 40 ticks, a linked act's at its end), and evidence packs stop at the next owner message. The scorecard's `messages` block reads this file, and each intention gets `final`. Without the file, the block is `unknown`. A read that fails is listed per message, never guessed, and never stops the run. No token, URL or message text is written. For a run that finished earlier, `node tools/playtest/runs/final-cards.mjs <runDir>` builds the same file from its kept world data, read-only.
+
+**A refused `result` closes nothing** (scorer version 5): when the world answers `reported: false` (for instance "its act is still going", #1299), the call counts as a decision but not as a close, in the scorecard and in what questions read (evaluator version 4).
 
 **Predeclared:** `controllability.mjs` holds the definitions and the refusal table. Its sha256 goes into every run's effective
 spec (`scorer`). The card says `predeclared: true` only when that hash still matches at evaluation; otherwise it scores

@@ -60,6 +60,10 @@ export type Environment = {
 export type WorldState = {
   /** Explicit prospective office guard prisms; absent on all earlier worlds. */
   officeStairGuardsV1?:import('./office-stair-guards-v1.ts').OfficeStairGuardsV1;
+  /** #1150 rung 3: rule breaks the world could not repair, kept visible. Each is counted once and leaves when it stops firing. */
+  containedV1?:{code:string;subjects:string[];until?:number}[];
+  /** #1440: bodies held by a standing mark (quarantine/1 `standing`), absent when none. */
+  standingHoldsV1?:Record<string,{pose:{p:[number,number,number];yaw:number;level:number};last:number}>;
   authoredBoundariesV1?:import('./authored-boundaries-v1.ts').AuthoredBoundariesV1;
   schema: string;
   base: BaseRef;

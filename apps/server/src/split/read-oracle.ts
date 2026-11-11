@@ -30,7 +30,7 @@ export function diffFields(live: unknown, replica: unknown, path = '', out: Fiel
 /** The recorded trade-off: a `here` exit the live world refuses (reachable:false, why) that the replica, without the
  *  verdict yet, shows with an ETA. Every other difference is a miss. */
 export function isTradeOff(d: FieldDiff): boolean {
-  if (!/^exits\[\d+\]\.(reachable|why|eta)$/.test(d.path) && !/^(capabilities|caps)\[\d+\]\.(available|why|code|reason)$/.test(d.path)) return false;
+  if (!/^exits\[\d+\]\.(reachable|why|eta)$/.test(d.path) && !/^far\[\d+\]$/.test(d.path) && !/^(capabilities|caps)\[\d+\]\.(available|why|code|reason)$/.test(d.path)) return false;
   return true;
 }
 

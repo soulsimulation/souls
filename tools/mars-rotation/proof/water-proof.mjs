@@ -14,7 +14,7 @@ for (const f of ['field.receipt.json', 'water.receipt.json']) rmSync(`${S}/${f}`
 const ctx = await boot({ port: 5868, template: `${ROOT}/worlds/templates/mars-two.json`, out: `${S}/world` });
 const tokenFile = `${S}/local-god.token`; writeFileSync(tokenFile, ctx.god, { mode: 0o600 });
 // daylight for the pictures: a local-only world edit before the patches (paused at 10:00)
-await ctx.api('/v1/god/act', { body: { note: 'daylight for proof shots', ops: [{ op: 'world', state: { time: { set: { hour: 10, n: 1 }, paused: true } } }] } });
+await ctx.api('/v1/god/act', { body: { note: 'daylight for proof shots', ops: [{ op: 'world', state: { time: { set: { hour: 10, n: 1 }, paused: true, clock: 'accelerated' } } }] } });
 const log = []; const note = (...a) => { const s = a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '); log.push(s); console.log(s); };
 const tool = (spec, receipt, ...flags) => JSON.parse(execFileSync(process.execPath, [`${ROOT}/tools/mars-rotation/add-patch.mjs`, '--spec', `${ROOT}/worlds/patches/${spec}/spec.json`, '--base', ctx.base, '--receipt', `${S}/${receipt}`, ...flags], { encoding: 'utf8', env: { ...process.env, EDEN_GOD_TOKEN_FILE: tokenFile } }));
 const release = await chromeLease('mars', { waitMs: 45 * 60000 }); let browser;

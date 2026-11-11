@@ -7,6 +7,9 @@ import {createHash} from 'node:crypto';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
+import {apiRoute, handlerMsOf, recordApi} from './api-times.ts';
+import {noteAnswer} from './stall-log.ts';
+import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
 export type RouteClass = {cls: Cls; id: string; god: boolean; deadlineMs: number};
@@ -15,7 +18,7 @@ export type Refusal = {status: 429 | 503; code: 'soul.busy' | 'soul.slow-down' |
 const C1_MS = 20_000, GOD_C1_MS = 30_000, C2_MS = 8_000;
 const EDGE_READ = /^\/v1\/edge\/(here|observe|capabilities|view|objects(?:\/[^/]+)?)$/;
 const EDGE_WRITE = /^\/v1\/edge\/(act|say|converse|objects\/[^/]+\/act|plan(?:\/[^/]+)?)$/;
-const PUBLIC = /^\/v1\/(?:edge\/(?:map|rides|items|platforms)|world\/snapshot)$/;
+const PUBLIC = /^\/v1\/(?:edge\/(?:map|rides|items|platforms|catalog|live)|world\/snapshot)$/;
 const GOD_READ = /^\/v1\/god\/(mirror|doctor|trace|recommend|layers|layers\/zone-suggest|defs\/unused)$/;
 const GOD_FREE = /^\/v1\/god\/(?:pair\/|claim$|answer$|inbox\/|pray$|assets$|visitors$)/;   // auth flows, uploads, Souls' prayers
 /** The request class of a route (§2); null = not admitted here (passes straight through). Paths are world-relative. */
@@ -124,6 +127,13 @@ export class Admission {
     return false;
   }
 
+  /** #456: told of each refusal answered to a Soul (key `soul:<token>`), by the HTTP middleware and the read workers' port
+   *  alike, for the public Soul's `slowed`. Never the god's, never `soul.busy` (the Soul overlapping itself). */
+  onRefused?: (token: string, code: SlowedReason, retryAfterS: number) => void;
+  refused(key: string, god: boolean, code: string, retryAfterS: number) {
+    if (god || code === 'soul.busy' || !key.startsWith('soul:') || !this.onRefused) return;
+    try { this.onRefused(key.slice(5), code as SlowedReason, retryAfterS); } catch { /* the answer goes out regardless */ }
+  }
   request(r: {key: string; god: boolean; route: RouteClass; hintMs?: number; closed?: () => boolean}): Ticket {
     const now = this.now(), read = r.route.cls === 'C2';
     const cool = this.cooling(r.key, now);
@@ -257,6 +267,8 @@ function busyRefusal(level: Level): Refusal { return {status: 503, code: 'world.
 export function worldBlock(level: Level, retryAfterS?: number) { const note = NOTE[level]; return {load: level, ...(retryAfterS ? {retry_after_s: retryAfterS} : {}), ...(note ? {note} : {})}; }
 
 const LOAD_KEY = 'simLoad';
+/** Context key: ms this request waited for a running serving warm (http.ts servingWait), before admission. */
+export const WARM_WAIT_KEY = 'simWarmWaitMs';
 /** The level this request was admitted at (routes.ts `wrap` adds the world block from it at amber and above). */
 export const loadOf = (c: Context): Level | undefined => (c.get as (k: string) => unknown)(LOAD_KEY) as Level | undefined;
 
@@ -282,18 +294,30 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (token && account) { const tag = tagOf(token); if (tag) c.header('x-sim-account', tag); }
     if (lv !== 'green' && (c.res.status === 429 || c.res.status === 503) && !c.res.headers.has('Retry-After')) c.header('Retry-After', String(RETRY_S[lv]));
   };
+  // #1724: every answer says how long this world took over it and how much of that was waiting its turn, so a slow call
+  // can be laid beside the client's own clock (Server-Timing: world = arrival to answer, queue = admission wait; ms)
+  // #1750 A2: and the same two numbers go into the route's histograms (api-times.ts), for /healthz and live.json
+  // A serving-warm wait (http.ts servingWait, before this middleware) is part of the world's time and of the wait:
+  // `warm;dur`, counted in `world` and in the route's queue time
+  const timed = (c: Context, t0: number, queued = 0) => {
+    const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
+    c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}`);
+    const route = apiRoute(c.req.method, c.req.path);
+    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k))); noteAnswer(route, t0 + queued, t0 + ms); }
+  };
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');
     if (!edge) return next();
+    const t0 = performance.now();
     const lv = level(); (c.set as (k: string, v: unknown) => void)(LOAD_KEY, lv);
     const r = classify(c.req.method, path), token = bearer(c);
     // admitted already by the MessagePort front end (a read worker's forward, admissionPort below); the env is set
     // only by an in-process app.fetch, never by a client
-    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { await next(); stamp(c, lv, token); return; }
-    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); return; }
+    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { await next(); stamp(c, lv, token); timed(c, t0); return; }
+    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); timed(c, t0); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
-    if (line) { stamp(c, lv, token); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
+    if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); timed(c, t0); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
       return c.json({contract: 'eden-edge/1', error: {code: 'world.crowded', message: crowdedNote(line), position: line.position, eta_s: line.eta_s}, world: worldBlock(lv, Math.max(1, Math.min(line.eta_s, 60)))}, 503); }
     // the body is NOT pre-read here: god/ingestion.ts and edge/body/routes.ts measure/stream the raw body with their own
     // reader, and a stream Hono has already consumed is locked (R2 integration: every POST /v1/god/* answered 500). Body
@@ -301,14 +325,15 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     // the client went away = its socket closed (not `incoming.destroyed`: a fully read request body is destroyed too)
     const env = c.env as {incoming?: {socket?: {destroyed?: boolean}}} | undefined, hint = Number(c.req.header('x-sim-timeout-ms'));
     const t = adm.request({key: r.god ? 'god' : 'soul:' + token, god: r.god, route: r, hintMs: Number.isFinite(hint) ? hint : undefined, closed: () => env?.incoming ? env.incoming.socket?.destroyed === true : c.req.raw.signal?.aborted === true});
-    const refuse = (x: Refusal) => { c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token);
+    const refuse = (x: Refusal) => { adm.refused(r.god ? 'god' : 'soul:' + token, r.god, x.code, x.retryAfterS); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(x.retryAfterS)); stamp(c, lv, token); timed(c, t0, performance.now() - t0);
       return c.json({contract: 'eden-edge/1', error: {code: x.code, message: x.message}, world: worldBlock(lv, x.retryAfterS)}, x.status); };
     if ('refusal' in t) return refuse(t.refusal);
     const v = await t.turn;
     if (v === 'dropped') return c.body(null, 499 as never);
     if (v !== 'run') return refuse(v);
+    const queued = t.waitedMs();
     try { await next(); } finally { t.done(); }
-    stamp(c, lv, token);
+    stamp(c, lv, token); timed(c, t0, queued);
   };
 }
 
@@ -337,11 +362,11 @@ export function admissionPort(adm: Admission | undefined, port: PortLike, run: (
     stats.jobs++;
     if (!adm || !m.route || (m.route.cls !== 'C1' && m.route.cls !== 'C2')) { void go(m); return; }
     const t = adm.request({key: m.key, god: m.god, route: m.route, hintMs: m.hintMs, closed: () => closed.has(m.id)});
-    if ('refusal' in t) { stats.refused++; reply({t: 'done', id: m.id, refusal: t.refusal}); return; }
+    if ('refusal' in t) { stats.refused++; adm.refused(m.key, m.god, t.refusal.code, t.refusal.retryAfterS); reply({t: 'done', id: m.id, refusal: t.refusal}); return; }
     // (a dropped or refused job is already out of `outstanding`: done() is not called, as in the middleware)
     void t.turn.then((v) => {
       if (v === 'dropped') { stats.dropped++; reply({t: 'done', id: m.id, dropped: true}); return; }
-      if (v !== 'run') { stats.refused++; reply({t: 'done', id: m.id, refusal: v}); return; }
+      if (v !== 'run') { stats.refused++; adm.refused(m.key, m.god, v.code, v.retryAfterS); reply({t: 'done', id: m.id, refusal: v}); return; }
       void go(m, t.done);
     });
   });

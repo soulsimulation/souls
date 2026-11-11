@@ -8,13 +8,13 @@ named beside each one is the authority.
 
 | Line | At f6c658203 | Read it from | What moves it |
 |---|---|---|---|
-| Server release | 4.15 | newest `v*` tag, top of `CHANGELOG.md` | the release owner names it at publish time |
+| Server release | 0.119 | newest `v*` tag, top of `CHANGELOG.md` | the release owner names it at publish time |
 | Soul CLI, `eden.mjs` | 2.14.0 | `VERSION` in `tools/world-launcher/soul/eden.mjs`, `controllerCli` in `SOURCES.json` | a new published copy of the CLI |
 | Soul guide, `skill.md` | 2.9.3 | front matter of `tools/world-launcher/soul/skill.md`, `skill` in `SOURCES.json` | a new published copy of the guide |
 | Schema notes | 2.9.3 | `schemaNotes` in `SOURCES.json` | moves with the guide |
 | Instructions | 2.0.3 | `instructions` in `SOURCES.json` | a new published capture |
 | Managed runtime | 0.1.0 | `runtime` in `SOURCES.json` | a new runtime publication |
-| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.19 | `cli` in `SOURCES.json` | retained; `tools/edge-skill/eden-agent.mjs` says 1.9.20, which is not what worlds serve |
+| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.21 | `cli` in `SOURCES.json` | retained; worlds serve a `build-cli.mjs` build of `tools/edge-skill/eden-agent.mjs` (manifest in `builds/`) |
 | Edge wire contract | `eden-edge/1` | `EDGE_CONTRACT` in `apps/server/src/edge/contract.ts` | a breaking wire change; none so far |
 | Edge API contract | `eden-edge/1.1` | `BOOT_API_CONTRACT` in `apps/server/src/edge/boot/routes.ts` | additive changes |
 | Build id | `we-<sha12>` | `build` in `/v1/config` and `/__sim/healthz` | every build, from the commit |
@@ -44,7 +44,7 @@ To know which CLI a world serves, read the file it serves. Nothing reports it in
 3. The tag `v<version>` goes on the commit that shipped, and the GitHub Release takes those notes.
 
 Two workflows do step 2 and 3. `release.yml`'s `publish` job runs after its own ship. `publish.yml` does the same for a
-release shipped another way, such as 4.15, which was shipped by hand:
+release shipped another way, such as 0.119, which was shipped by hand:
 
 ```sh
 gh workflow run publish.yml -f version=<v> -f sha=<full sha of the shipped commit>
@@ -54,13 +54,15 @@ gh workflow run publish.yml -f version=<v> -f sha=<full sha of the shipped commi
 as live (`skip_live_check=true` is only for a release that is deliberately not live). The changelog commit reaches `main`
 through a pull request, because the `main` ruleset requires checks.
 
-A version looks like `4.15` or `4.0.1` (`release.yml` checks the pattern).
+A version looks like `0.123` or `0.123.1` (`release.yml` checks the pattern). Soul is pre-beta, so releases are numbered 0.N, with
+patches 0.N.x; 1.0 is kept for the first stable release. Releases before 2026-11-09 were renumbered from 1.1–4.18 to
+0.1–0.122 ([#1500](https://github.com/soulsimulation/souls/issues/1500)); the line at the top of `CHANGELOG.md` maps them.
 
 ## Receipts
 
 Each ship reads the gate's `receipt.json` and `ship-receipt.json` from `SHIP_RECEIPTS`, a folder the release owner keeps
 outside the repository ([release](../release.md)). They aren't committed. A public summary may be attached to a GitHub
-Release as an asset, as 4.07 and 4.09 have; raw receipts and live clips stay private.
+Release as an asset, as 0.111 and 0.113 have; raw receipts and live clips stay private.
 
 ## Compatibility
 

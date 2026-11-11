@@ -28,6 +28,131 @@
       ],
       "reason": "Intended behaviour change: an uploaded body now travels as a reference (#795 A2). The old assertion (it stays home) is replaced by the travel tests: an unresolvable reference keeps the default look and says why; a resolvable one is pulled and worn; refused and slow sources keep the default look",
       "pr": "#835"
+    },
+    {
+      "step": "V3-mars-engine",
+      "from": "a tall body picnics on a blanket (0.2 m); a 0.2 m seat for eating still does not fit it",
+      "to": "a tall body picnics on a blanket (0.2 m), eats on a 0.1 m stool and on a 1.6 m one: no seat height is refused",
+      "reason": "Same test, reversed by the maintainer's direction that Souls sit on any seat a def declares whatever its height: the 0.2 m eating seat that did not fit now fits, and 0.1 m and 1.6 m seats are added",
+      "pr": "#1087"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "use-check: the sit capability is blocked on a seat too high for the body, from the baked seat top",
+      "to": "use-check: a seat higher than the body's comfortable range is offered and sat on (\\#1083)",
+      "reason": "Same use-check, reversed by #1083: a seat above the old comfortable range is now offered and sat on; the only remaining limit, standing reach, is covered by the new 2.05 m / 2.2 m god stool test",
+      "pr": "#1087"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "use-check: every core seat suits the shortest look, and SEAT_HEIGHTS is what the library revisions store",
+      "to": "use-check: every core seat has a real height, and SEAT_HEIGHTS is what the library revisions store",
+      "reason": "Same test: with no comfortable seat range left (#1083), each core seat is checked for a real height instead of fitting the shortest look; the SEAT_HEIGHTS check is unchanged",
+      "pr": "#1087"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "helpers: full jitter stays under the capped exponential; stated waits spread ±20 %; Retry-After from header or body",
+      "to": "helpers: full jitter stays under the capped exponential; a stated wait is a floor, spread up to 20 % above it; Retry-After from header or body",
+      "reason": "Same test, renamed when a stated Retry-After became a floor (spread up to 20 % above it) instead of ±20 %",
+      "pr": "#1185"
+    },
+    {
+      "step": "V4-web",
+      "from": "it runs from just covering the text to the corners, on any aspect ratio, and the disc is sized to cover them",
+      "to": [
+        "\\#1318: it runs from 55% of just covering the text to 60% of the way to the corners, on any aspect ratio",
+        "\\#1318: no path turns the screen white: the dissolve starts from the light, corners grey"
+      ],
+      "reason": "Replaced when the loading light became smaller and softer: its radius now runs to 60% of the way to the corners, which stay light grey",
+      "pr": "#1320"
+    },
+    {
+      "step": "V4-web",
+      "from": "VF6: a wall behind the camera while dragging pulls it in, and the asked-for distance comes back",
+      "to": "\\#1316: dragging behind a wall decouples the camera: it stays where the viewer put it; Follow again couples it",
+      "reason": "Replaced when a drag behind a wall became a pull out that decouples Follow instead of being pulled back in",
+      "pr": "#1342"
+    },
+    {
+      "step": "V4-web",
+      "from": "Dragging the camera out through a one-sided room wall pulls it back inside",
+      "to": "\\#1316: dragging the camera out through a one-sided room wall keeps it out; Follow again brings it back inside",
+      "reason": "Replaced when a drag out through a room wall became a pull out that keeps the camera outside until Follow is pressed again",
+      "pr": "#1342"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "\\#1150 halted: live.json says the clock stopped; a `halted` problem and status, not wedged and not restarted, gone once a restart boots it",
+      "to": "\\#1150, \\#1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator",
+      "reason": "Intended behaviour change: a halted world now comes back once by itself (one restart per breaker window); a second halt in the window stays up for an operator",
+      "pr": "#1347"
+    },
+    {
+      "step": "V4-web",
+      "from": "desktop shows no More button (no matchMedia, a desktop matchMedia, or forced off)",
+      "to": "desktop shows neither the More button nor the hamburger (no matchMedia, a desktop matchMedia, or forced off)",
+      "reason": "Same test, extended when phone widths got the hamburger: desktop shows neither",
+      "pr": "#1433"
+    },
+    {
+      "step": "V4-web",
+      "from": "small screens show one More button, closed until tapped",
+      "to": [
+        "tablet width shows one More button, closed until tapped, and no hamburger",
+        "phone width shows the hamburger instead of More, closed until tapped"
+      ],
+      "reason": "Split when phone widths got one hamburger instead of More (#1391 part a): tablets keep More, phones get the hamburger",
+      "pr": "#1433"
+    },
+    {
+      "step": "V3-harness",
+      "from": "renames: the committed list validates, and stays in the suite cache key like quarantine.json",
+      "to": "renames: the committed list validates, and is left out of the suite cache key, unlike quarantine.json (\\#1461)",
+      "reason": "Same test, inverted on purpose: renames.json now stays out of the suite-tree fingerprint (#1461)",
+      "pr": "#1464"
+    },
+    {
+      "step": "V4-web",
+      "from": "the radius eases toward the bar: a clump of progress is a swell, not a jump, and it arrives",
+      "to": "a lumpy progress bar gives one continuous bloom: no steps, the speed only bends gently",
+      "reason": "The light is now a clock paced by the expected load time instead of a meter eased toward the bar; the test checks the same smoothness on the new model (#1631)",
+      "pr": "#1632"
+    },
+    {
+      "step": "V4-web",
+      "from": "the radius never shrinks, whatever the target does",
+      "to": "a lumpy progress bar gives one continuous bloom: no steps, the speed only bends gently",
+      "reason": "Never shrinking is asserted inside the new continuous-bloom test, on the clock that replaced the eased meter (#1631)",
+      "pr": "#1632"
+    },
+    {
+      "step": "V4-web",
+      "from": "\\#1318: it runs from 55% of just covering the text to 60% of the way to the corners, on any aspect ratio",
+      "to": "\\#1318: it runs from 33% of just covering the text to 60% of the way to the corners, on any aspect ratio",
+      "reason": "Same test; the light now starts at 60% of its old size, as Gene asked (#1631)",
+      "pr": "#1632"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "routes the coarse search already finds are byte-identical to 3.59.4 (paged ground)",
+      "to": "routes the coarse search already finds are byte-identical to 0.64.4 (paged ground)",
+      "reason": "Release renumbered to 0.x (#1500): 3.59.4 is now 0.64.4; same test, same golden hashes",
+      "pr": "#1500"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "routes the coarse search already finds are byte-identical to 3.59.4 (unpaged ground)",
+      "to": "routes the coarse search already finds are byte-identical to 0.64.4 (unpaged ground)",
+      "reason": "Release renumbered to 0.x (#1500): 3.59.4 is now 0.64.4; same test, same golden hashes",
+      "pr": "#1500"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "writes without an idempotency key are never repeated: ack on world.busy and on unreachable",
+      "to": "\\#1753: ack and result are retried with one key after a busy refusal and a dropped connection",
+      "reason": "#1753: ack and result became keyed writes, retried with one key until answered (safe: the world answers a repeat from the message state); the old test asserted they were never retried",
+      "pr": "#1762"
     }
   ]
 }

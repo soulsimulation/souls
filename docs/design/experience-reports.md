@@ -5,6 +5,13 @@ Future design for [#590](https://github.com/soulsimulation/souls/issues/590), wi
 The goal is to inspect an actual game episode, understand an undesirable experience and turn a supported diagnosis
 into a reproducible improvement—even when no exception occurred.
 
+**Built so far (first slice, local only).** An owner creates `.eden-report-on` in a Soul's folder (in a Souls home, its `souls/<id>/runtime/`, beside the record) to turn reports on, then
+runs `node eden.mjs guide` to add the one guide line, and deletes the file to turn them off. While on, `eden.mjs` records
+its own requests as `soul-trace/1` records in `.eden-report.jsonl`, which `tools/soul-trace/readout.mjs` reads, and offers
+one optional command, `note "<expected>" "<observed>"`. Nothing leaves the machine. While off, the client has no such
+command, help line, guide line, file or answer field. A running `serve` reads the switch when it starts. Everything below
+beyond that is still design.
+
 This is also the field-learning component of [agency quality](agency-quality.md) and
 [tranche #623](https://github.com/soulsimulation/souls/issues/623). The shared correlation/timing contract remains
 #592; [#624](https://github.com/soulsimulation/souls/issues/624) adds a localhost episode inspector and
@@ -78,6 +85,11 @@ it must not consume gameplay cursors or create a second polling/control loop. Se
 and external-model analysis require explicit scopes; an anomaly trigger cannot authorize sharing by itself.
 
 ## Privacy and supervision
+
+The local session record (#1773, `tools/soul-trace/README.md`) is the owner's own full-content counterpart: off
+unless `.eden-record-on` is in the Soul's folder, invisible to the agent, never uploaded, and collected with the
+harness transcript into a private folder only by the owner's command. Nothing below is relaxed by it.
+
 
 Default to structured operational facts. Do not upload raw agent transcripts, hidden reasoning, credentials,
 environment files, owner conversations or screenshots. Selected text/media requires explicit attachment consent

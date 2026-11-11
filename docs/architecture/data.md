@@ -38,7 +38,8 @@ create their own versioned tables (`*_v1`) with `CREATE TABLE IF NOT EXISTS` whe
 ## What is canonical
 
 World metadata, accepted events, accounts and Souls, god edits, and paid-cost reservations. Snapshots and take chunks
-are caches: a world boots from its latest admitted snapshot and replays later events, or replays from genesis. Takes are
+are caches: a world boots from its latest admitted snapshot and replays later events, or replays from genesis. A
+snapshot that won't restore is skipped, loudly, for an older one or genesis; the log decides the head. Takes are
 a pose-keyframe cache for the viewer, not the source of truth.
 
 ## Privacy

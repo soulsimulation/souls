@@ -12,10 +12,12 @@ import { handReachSeconds, handReleaseSeconds, handSwingSeconds, type HandActuat
 import { menuWorldOf, type MenuWorld } from '../split/menu-world.ts';
 import {CATALOG} from '../../../../mars/viewer/engine/world/catalog.ts';
 import {MAX_KG_PER_CARRIER} from '../../../../mars/viewer/engine/carry/formation.ts';
+import {JUGGLE} from '../../../../mars/viewer/engine/items/juggle.ts';
 import { deckRaised, railGaps, rasterOf } from '@souls/generators';
 import { applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
+import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
 import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
@@ -32,10 +34,11 @@ import { fadingIds } from '../art/art.ts';
 import { createWatering, type Watering } from './watering.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
+import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
-import { actuatedState, keepsLeftBy, leftByOf } from './actuators.ts';
+import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -46,6 +49,7 @@ import { releaseBigScratch } from '../../../../mars/viewer/engine/spatial/path.t
 import { MAX_LEVEL_ID } from '../../../../mars/viewer/engine/spatial/types.ts';
 import { pointInObb, type OBB2 } from '../../../../mars/viewer/engine/core/math.ts';
 import { installWorldLore } from './world-lore.ts';
+import { installLecternBooks } from './lectern-books.ts';
 import { installHeld } from './held.ts';
 import { installWorldClock } from './world-clock.ts';
 import { config, KNOWN_WORLD_KEYS } from '../config.ts';
@@ -86,6 +90,7 @@ type Part = NonNullable<WorldEditV1['set'][string]>;
 type EngineV1 = {
   world: { tick: number; entities: Record<string, any>; entityPhysicsV1?: EntityPhysicsV1 };
   applyWorldEditV1(p: WorldEditV1): { hash: string };
+  takeSettledV1?(): string[];
   bodyUsesV1(id: string): { body: string; how: 'occupied' | 'held' } | null;
   reachV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }): { ok: true; length: number; legs: number; levels: number[] } | { ok: false; code: string; message: string };
   standableNearV1(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null;
@@ -220,6 +225,15 @@ export type LoadLevel = keyof typeof PERCEIVE_DIAL;
 /** Build notices that change nothing a Soul perceives (no step label, no closure): they never start a catch-up. */
 const PERCEPTION_QUIET_BUILD = new Set<string>(['alive', 'claimed', 'released', 'taken']);
 const WRITE_BACK_SLICE_MS = 8;
+/** #901: after the first nav build, the tick loop polls the labels this often (ticks, off the writeBack tick) and relabels
+ *  cold ones in slices of at most this many ms a tick (a moving ride invalidates them; the relabel takes ~70-150 ms on Eden
+ *  2026). Past NAV_REWARM_BURST cold slices in a row (the static world keeps moving under the relabel, as under a flying
+ *  carrier, so each build is cancelled), it slices only on poll ticks until warm. That back-off holds only while no Soul
+ *  waits: with a Soul waiting on the relabel (#1499 review), it slices every tick at NAV_WAIT_SLICE_MS, the first build's
+ *  budget, with no burst cap, so a waiting Soul is never left cut off longer than the first-build path would leave it. */
+const NAV_REWARM_POLL_TICKS = 10, NAV_REWARM_POLL_AT = 5, NAV_REWARM_SLICE_MS = 10, NAV_REWARM_BURST = 30, NAV_WAIT_SLICE_MS = 20;
+/** #1548: a Soul waiting this long on cold labels under a changing static world gets one whole relabel, of at most this many ms. */
+const NAV_STUCK_TICKS = 200, NAV_FORCED_MS = 250;
 /** `atomic` (PC14): the ops are one engine edit (moves and the joints they make), never applied one by one. */
 type WriteBackUnit = { key: string; ops: Op[]; body?: string; atomic?: true };
 type WriteBackBody = { pose: string; entity: Entity | undefined };
@@ -239,7 +253,7 @@ export class EngineBridge {
   private levelsNow = new Set<number>();
   private reconciled = false;
   // Readiness observes the ordinary queue/fold; it never steps, drains or changes the projection.
-  private readonly initialEngine: WorldHost['engine'];
+  private initialEngine: WorldHost['engine'];
   private projectionFailure: Error | null = null;
   private projectionDrafts = new Map<WorldEditV1, { applied: boolean }>();
   private completedTicks = 0;
@@ -259,6 +273,8 @@ export class EngineBridge {
   readonly nav: GodNav;
   /** F1: god-built things Souls can see, look at and read (perceive.ts). */
   readonly perceive: GodPerceive;
+  /** PC17 (#696): the world's projects, behind the shared-carry flag. */
+  private projects?: Projects;
   /** R4-INFO: god-built places (areas, waters, buildings and their rooms, landmarks) in the Souls' map (places.ts). */
   readonly places: GodPlaces;
   /** LAYERS: schedules, ownership, zones, relationships, economy for Souls (layers.ts). */
@@ -281,7 +297,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
-    this.nav = new GodNav({ model: this.god.model, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
+    this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
@@ -307,25 +323,39 @@ export class EngineBridge {
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
+      // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
+      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
+      this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
+        for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}
+        states={v:this.model.editSeq,m};return m;};
+      this.edge.thingsVersion=()=>`${this.godEdits}:${this.completedEdits}`;
+      // #1737: the catalog waits for the first whole picture: places published and activity spots derived (sliced after listen)
+      this.edge.structureReady=()=>{try{return this.contextReady()&&!this.activitySpots.pendingFirst();}catch{return false;}};
+      this.edge.levelAt=(x,z,y)=>this.levelAt(x,z,y);
+      this.edge.seatThing=(id)=>{const x=this.engine.world.entities[id] as {def?:string;tags?:string[]}|undefined;return !!x?.def&&!!x.tags?.includes('entity-world')&&!!(this.physics?.assets[x.def] as {slots?:{kind:string}[]}|undefined)?.slots?.some((s)=>s.kind==='seat');};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
     if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
+      settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
-      moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
+      moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
     // #442: repair with a tool in hand (mending.ts): the world changes when the receipt completes, no tick work
-    this.mending = createMending({ model: this.god.model, engine: this.host.engine as never, levelAt: (x, z, y) => this.levelAt(x, z, y), occupied: (id) => this.seatTakers(id).length > 0, denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never),
+    this.mending = createMending({ model: this.god.model, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), occupied: (id) => this.seatTakers(id).length > 0, denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never),
       reserved: (id, actor) => { const rt = (this.host.engine as unknown as { rt?: { holder(r: string): string[]; records: Map<string, { params?: { actor?: string } }> } }).rt; return !!rt?.holder(`entity:${id}`).some((r) => rt.records.get(r)?.params?.actor !== actor); }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     if (this.edge) this.edge.repairEffects = (r) => this.mending?.effects(r) ?? {};
     this.edge?.onReceipt((r) => { try { this.mending?.onReceipt(r); } catch (e) { this.log(`mending: ${(e as Error).message}`); } });
     // Entry 34: the watering-can act (watering.ts): planned for perceive's offers, its moments committed per tick
-    this.watering = createWatering({ model: this.god.model, version: () => this.version, engine: this.host.engine as never, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
+    this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     // Entry 43: the tea acts (tea.ts), the same way
-    this.tea = createTea({ model: this.god.model, version: () => this.version, engine: this.host.engine as never, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, engine: this.host.engine as never, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
+    // #438: the picking acts (harvest.ts), the same way
+    this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
+    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -341,7 +371,7 @@ export class EngineBridge {
     this.god.onBuild((e) => { if (!PERCEPTION_QUIET_BUILD.has(e.kind)) { const ids = this.layers.buildRetag(); if (ids.length) { this.perceive.noteRetag(ids); this.notePerceive([], false); } } });
     if (!R) this.host.listeners.push({
       afterTick: (tick, context) => { try { this.afterTickWork(tick, context?.startedAtMs); } catch (error) { this.failProjection(error); throw error; } },
-      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
+      onApplied: (e) => { this.projectionApplied(e); if (e.kind === 'world-edit') this.noteSettled(); const fact = e.kind === 'rules' ? e.payload as { recovery?: { lastRung?: { contained?: { code: string; subjects: string[] }[] } }; lastRungInPlace?: { contained?: { code: string; subjects: string[] }[] } } | null : null, held = (fact?.recovery?.lastRung ?? fact?.lastRungInPlace)?.contained; if (held?.length) this.log(`after a rewind these still break a rule, and are contained: ${held.map(c => `${c.code} [${c.subjects.join(', ')}]`).join('; ')}`); if (e.kind === 'birth') this.bodyBorn(e.payload as { entityId: string; soulId: string; name: string }); if (e.kind === 'retire') this.bodyRetired(e.payload as { entityId: string }); },
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
@@ -365,11 +395,12 @@ export class EngineBridge {
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
       navNote: (diff, said) => this.navNoteFor(diff, said),
+      framesNote: () => this.framesNote(),
     };
     // R8: residents near a visible map change hear of it once per request; a build near them, at start and at done.
     this.mapNotices = new MapNotices((soulId, text, place) => this.notices.notify(soulId, { text, tick: this.engine.world.tick, native: true, ...(place ? { place } : {}) }), () => this.god.now());
     if (!R) this.god.onBuild(e => this.buildNotice(e));
-    this.activitySpots = new GodActivitySpots({ model: this.god.model, engine: this.host.engine as never, version: () => `${this.godEdits}|${this.engine.world.entityPhysicsV1?.hash ?? ''}`, bodies: () => this.modelBodies(), levelAt: (x, z, y) => this.levelAt(x, z, y),
+    this.activitySpots = new GodActivitySpots({ model: this.god.model, get engine() { return o.host.engine as never; }, version: () => `${this.godEdits}|${this.engine.world.entityPhysicsV1?.hash ?? ''}`, bodies: () => this.modelBodies(), levelAt: (x, z, y) => this.levelAt(x, z, y),
       placeAt: (at, level) => this.places.placeAt(at, level), placeLocator: () => this.places.placeLocator(), prepare: () => this.places.sync(true), catchingUp: () => this.perceiveRunning || !!this.perceive?.pending(), sliced: () => !!this.host.running, placeName: (id) => this.edge?.places.byId.get(id)?.name ?? null });
     if (this.edge && !R) this.edge.spotsProvider = () => { if (!this.reconciled || this.activitySpots.pendingFirst()) return null; this.flush(); const n = this.activitySpots.stats.derives, d = this.activitySpots.data(); if (this.activitySpots.stats.derives !== n) this.logSpots(); return d; };
     if (this.edge) {
@@ -380,11 +411,13 @@ export class EngineBridge {
     }
     if (this.edge) this.hookEdge(this.edge);
     // F3: a god thing in a Soul's hand shows as held (observe, receipts) and can be put down (held.ts)
-    if (this.edge) installHeld(this.edge, { engine: this.host.engine as never, model: this.model, minds: this.host.minds });
+    if (this.edge) installHeld(this.edge, { get engine() { return o.host.engine as never; }, model: this.model, minds: this.host.minds });
     // F3: a god's world keeps time like the live worlds (a logged dayConfig; world-clock.ts)
     if (!R && (o.worldClock ?? (!config.livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey)))) installWorldClock(this.host, this.god, this.log);
     // F3: a god's new world serves its constitution (or a neutral line) as lore, never Eden's (world-lore.ts)
     if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey))) installWorldLore(this.edge, this.god);
+    // #428: a lectern holding a catalogue book reads that book, in every world (lectern-books.ts; after world lore)
+    if (this.edge) installLecternBooks(this.edge, this.god);
   }
   private get engine(): EngineV1 { return this.host.engine as unknown as EngineV1; }
   /** B-facade: the Soul listing (`capabilities`) reads the world through the read-only facade (split/menu-world.ts). */
@@ -395,7 +428,7 @@ export class EngineBridge {
    * Call again immediately before publishing HTTP: a model commit may occur between promise continuations. */
   initialProjectionReady(): boolean {
     if (this.projectionFailure) throw this.projectionFailure;
-    if (this.host.engine !== this.initialEngine) throw new Error('bridge.readiness.engine-replaced');
+    if (this.engineReplaced()) throw new Error('bridge.readiness.engine-replaced');
     if (!this.host.clockAvailable || this.host.engineFault) throw new Error('bridge.readiness.clock-unavailable');
     if (!this.reconciled || this.pending.size || this.projectionDrafts.size ||
         this.completedTicks <= this.lastProjectionFold || this.completedEdits !== this.godEdits) return false;
@@ -455,6 +488,8 @@ export class EngineBridge {
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
+  /** #438: the picking acts; read by perception for a basket's and a vase's compact facts. */
+  harvest?: HarvestFaculty;
   /** Entry 18: when the world day changes, gardens dry by the days passed (capped at 3; time set backwards restarts the count). */
   private gardenDay: number | null = null;
   private gardenTick(tick: number) {
@@ -481,11 +516,17 @@ export class EngineBridge {
     this.projectionDrafts.clear();
     this.checkProjectionSoon();
   }
+  /** #1150: under the repair rules a world goes on from a replaced engine by design, so that engine is the one to read. */
+  private engineReplaced(): boolean {
+    if (this.host.engine === this.initialEngine) return false;
+    if (!this.host.engine.rulesVersion.includes('+souls-repair/')) return true;
+    this.initialEngine = this.host.engine; return false;
+  }
   private projectionApplied(event: LogEvent) {
     if (event.kind !== 'world-edit') return;
     const draft = event.payload as WorldEditV1, pending = this.projectionDrafts.get(draft);
     if (!pending) return;
-    if (this.host.engine !== this.initialEngine || this.engine.world.entityPhysicsV1?.hash !== draft.hash) {
+    if (this.engineReplaced() || this.engine.world.entityPhysicsV1?.hash !== draft.hash) {
       this.failProjection(new Error('bridge.readiness.projection-not-installed')); return;
     }
     pending.applied = true; this.lastProjectionFold = this.completedTicks;
@@ -568,7 +609,7 @@ export class EngineBridge {
     try {
       void this.host.enqueue('world-edit', 'god', draft).then(event => {
         this.projectionDrafts.delete(draft);
-        if (event.payload !== draft || !acceptance.applied || this.host.engine !== this.initialEngine) {
+        if (event.payload !== draft || !acceptance.applied || this.engineReplaced()) {
           this.failProjection(new Error('bridge.readiness.draft-not-accepted')); return;
         }
         this.checkProjectionSoon();
@@ -639,15 +680,33 @@ export class EngineBridge {
     return { code: 'carry.joined', reason: `${nameOf(id)} is joined to ${to.length > 1 ? `${to.slice(0, -1).join(', ')} and ${to.at(-1)}` : to[0]} (${js.map(([c, j]) => `${c} to ${j.at}`).join(', ')}); a joined part is not carried until it is disconnected.` };
   }
 
-  /** The engine physics of one entity: its solids, floors and stairs, or its fixture registration. */
-  derive(e: Entity, assets: Record<string, unknown>, known: Record<string, unknown>): Part | null {
-    const def = this.model.resolvedDef(e.def); if (!def) return null;
-    const baked = this.model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape);
+  private frameOf(e: Entity, def: StoredDef) {
     const wp = this.model.worldPose(e);
     // path/area forms at the root carry world-frame geometry (L3): heights ground-relative unless `abs`
     const worldFrame = def.form !== 'point' && e.in.parent === 'world';
     const toWorld = (x: number, z: number): Vec2 => { if (worldFrame) return [r3(x), r3(z)]; const c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); return [r3(wp.x + (x * c + z * s) * wp.s), r3(wp.z + (-x * s + z * c) * wp.s)]; };
     const heightAt = (y: number, at: Vec2, abs?: boolean) => r3(worldFrame ? (abs ? y : this.model.terrain.sample(at[0], at[1]) + y) : wp.y + y * wp.s);
+    return {wp, worldFrame, toWorld, heightAt};
+  }
+
+  /** The box one opening's gap blocks while it is shut. */
+  private gapBox(o: {at: Vec2; width: number; yaw: number}, def: StoredDef, e: Entity) {
+    const {wp, worldFrame, toWorld} = this.frameOf(e, def), sc = worldFrame ? 1 : wp.s;
+    return {c: toWorld(o.at[0], o.at[1]), half: [r3((o.width / 2) * sc), r3(0.08 * sc)] as Vec2, yaw: r3(-((worldFrame ? 0 : wp.yaw) + o.yaw))};
+  }
+
+  /** #1070: the boxes a door entity's gaps will block once it is shut (`isShut` closes all of them). */
+  private shutGaps(id: string) {
+    const e = this.model.entities.get(id), def = e && this.model.resolvedDef(e.def);if (!e || !def?.components.opening) return [];
+    const baked = this.model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), free = freeDoorOpening(def, baked);
+    return [...(baked.openings ?? []), ...(free ? [free] : [])].map((o) => this.gapBox(o, def, e));
+  }
+
+  /** The engine physics of one entity: its solids, floors and stairs, or its fixture registration. */
+  derive(e: Entity, assets: Record<string, unknown>, known: Record<string, unknown>): Part | null {
+    const def = this.model.resolvedDef(e.def); if (!def) return null;
+    const baked = this.model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape);
+    const {wp, worldFrame, toWorld, heightAt} = this.frameOf(e, def);
     const part: Part = {};
     const walkableKit = def.make.kind === 'gen' && def.make.gen === 'kit/2' && !!def.make.args?.footprint; // XP5 hook
     // PC15 (#694): a deck sheet is an item that is also a floor once laid (below)
@@ -693,8 +752,8 @@ export class EngineBridge {
       const closed = doorState[o.id] === 'closed' || (doorState[o.id] === undefined && o.state === 'closed') || shut;
       if (!closed) continue;
       // a gate of a world-frame wall/fence sits on the ground under it (sill and height are ground-relative)
-      const c = toWorld(o.at[0], o.at[1]), sc = worldFrame ? 1 : wp.s;
-      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb: { c, half: [r3((o.width / 2) * sc), r3(0.08 * sc)], yaw: r3(-((worldFrame ? 0 : wp.yaw) + o.yaw)) }, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)` });
+      const obb = this.gapBox(o, def, e), c = obb.c;
+      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)` });
     }
     // floors: polygons → oriented rectangles on levels
     const surfaces = [...(baked.surfaces ?? [])];
@@ -1054,7 +1113,7 @@ export class EngineBridge {
    *  `[l4] …` line a minute says where the tick thread went (load lane L4 measurements; off: no clock reads). */
   private afterTickWork(tick: number, startedAtMs?: number) {
     // Soul Actions (entries 18, 34): garden drying and the watering can's per-tick moments run before the projection
-    this.gardenTick(tick); const moved = [...(this.watering?.tick() ?? []), ...(this.tea?.tick() ?? [])];
+    this.gardenTick(tick); const moved = [...(this.watering?.tick() ?? []), ...(this.tea?.tick() ?? [])]; this.harvest?.tick();
     if (!this.reconciled) { this.reconcile(); this.projectedEdits = this.godEdits; return; }
     const S = this.loadStats; let t = S ? performance.now() : 0;
     this.flush(); this.projectedEdits = this.godEdits; for (const id of moved) this.writeBackNow(id); if (S) t = S.add('flush', t);
@@ -1064,6 +1123,9 @@ export class EngineBridge {
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
     if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
+    else if (this.navHeld && tick % 10 === 3) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }   // held, the rescue still reads: a Soul that left lets the hold go, and #1548's forced relabel can fire
+    else if ((this.navCold && (this.navColdSlices < NAV_REWARM_BURST || this.navHeld)) || tick % NAV_REWARM_POLL_TICKS === NAV_REWARM_POLL_AT) { this.navRewarmStep(startedAtMs); if (S) t = S.add('navRewarm', t); }
+    else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
     if (this.rescued !== this.editTick && tick - this.editTick >= 10 && (tick - this.editTick >= 20 || tick - this.rescuedAt >= 40)) { this.rescuedAt = tick; this.rescueTrapped(); if (S) t = S.add('rescue', t); }
     if (S && S.due()) this.log(S.line(this));
@@ -1187,6 +1249,30 @@ export class EngineBridge {
     // L4 item 6: a served world derives the spots in slices of the perception budget, one per tick until done
     try { if (this.activitySpots.warm(this.perceiveDial?.sliceMs ?? PERCEIVE_SLICE_MS)) this.logSpots(); } catch (e) { this.log(`activity spots: ${(e as Error).message}`); }
   }
+  /** #901: labels known cold after the first build (a moving ride, or any static change, invalidated them); null after a
+   *  re-warm error (logged once) until the first-build path next completes (an edit re-arms it). */
+  private navCold: boolean | null = false;
+  /** #901: cold slices in a row (NAV_REWARM_BURST). */
+  private navColdSlices = 0;
+  /** #901: after the first build nothing else warmed the labels again: once a moving ride (a balloon, the carousel, the
+   *  ferris wheel) changed the static world, listings, walk goals (RESOLVE2's roofReach, WALK3's main ground) and offerWalk's
+   *  cut check read them cold until some read happened to drain them. Every NAV_REWARM_POLL_TICKS the tick loop polls them
+   *  (warm: a spatial sync and a key compare); once cold, it relabels one slice of at most NAV_REWARM_SLICE_MS a tick, inside
+   *  the nav envelope, until they are warm (past NAV_REWARM_BURST slices, one per poll). The per-tick memos are reset. */
+  private navRewarmStep(tickStartedAtMs?: number) {
+    if (this.navCold === null) return;
+    try {
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
+      if (!E.navWarmV1) { this.navCold = null; return; }
+      const sliceMs = this.navHeld ? NAV_WAIT_SLICE_MS : NAV_REWARM_SLICE_MS;
+      const budgetMs = tickStartedAtMs === undefined ? sliceMs : Math.min(sliceMs, Math.max(0, 40 - (performance.now() - tickStartedAtMs)));
+      const warm = E.navWarmV1(budgetMs);
+      // the per-tick warm memos that may have read cold earlier in this tick read again (a reset; a warm poll did no work)
+      if (warm) { this.nav.forgetWarm(); this.edge?.navRelabelled(); this.navColdSlices = 0; } else this.navColdSlices++;
+      this.navCold = !warm;
+      if (warm && this.navHeld) this.navRescueWaiting();   // the waiting Souls are asked in the tick the labels turn warm
+    } catch (e) { this.navCold = null; this.log(`nav re-warm: ${(e as Error).message}`); }
+  }
   private navStep(tickStartedAtMs?: number) {
     try {
       const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean };
@@ -1200,7 +1286,8 @@ export class EngineBridge {
       this.navWarm = E.navWarmV1(budgetMs);
       if (st) { const ms = performance.now() - t0; if (ms > 50) { const now = this.navProbe(); this.log(`[l4] nav warm slice ${Math.round(ms)} ms: spatial paged ${Math.round(now.paged - st.paged)} grids ${Math.round(now.grids - st.grids)} scan ${Math.round(now.scan - st.scan)} ms; largest unit ${Math.round(now.unit)} ms (${now.phase})`); } }
       if (this.navWarm && this.navPending) {
-        this.navPending = false; const spots = this.navDeferred; this.navDeferred = [];
+        this.navPending = false; if (this.navCold === null) { this.navCold = false; this.navColdSlices = 0; }   // #901: a completed build re-arms the re-warm, with a fresh burst
+        const spots = this.navDeferred; this.navDeferred = [];
         const lines = this.navLines(spots, this.navRescueSouls()); if (lines.length) this.navLater = [...this.navLater, ...lines].slice(-4);
       }
     } catch (e) { this.navWarm = true; this.navPending = false; this.log(`nav warm: ${(e as Error).message}`); }
@@ -1213,25 +1300,94 @@ export class EngineBridge {
   }
   /** Last tick each Soul was stepped out (nav-connect/1): at most once a minute each, as the ledger's walk rescue. */
   private navRescuedAt = new Map<string, number>();
+  /** #1287: Souls a rescue passed over, cut off, because a program was running: asked again once it has ended. */
+  private navWaiting = new Set<string>();
+  /** #1548: since when a rescue has found the labels cold with a Soul waiting, and the navigation epoch then. */
+  private navStuckSince: { tick: number; epoch: number } | null = null;
+  private navForcedAt = -Infinity;
+  /** #1499 review: a rescue read found the labels cold with a Soul waiting; until it is asked again, the re-warm slices every
+   *  tick at the first build's budget (no back-off), so the wait is never longer than the first-build path's. */
+  private navHeld = false;
+  private navRescueWaiting() {
+    try {
+      const E = this.engine as unknown as { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number };
+      const souls = [...this.navWaiting].flatMap((id) => { const m = this.host.minds.get(id); if (!m) this.navWaiting.delete(id); return m && !this.engine.programOf(m.entityId) ? [m] : []; });
+      this.navHeld = false;
+      if (!souls.length) { this.navStuckSince = null; return; }
+      // stale labels answer "not cut off": they stay queued, and the #901 re-warm relabels them, held at the first build's
+      // budget every tick while they wait (navHeld). Marked cold, not unwarmed: navWarm=false would restart the first build
+      // and its completion would sweep every mind (#1499). After a
+      // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
+      // waiting Souls out and re-arms the re-warm.
+      if (!E.navWarmV1?.(0)) {
+        if (this.navCold === null) { this.navWarm = false; this.navPending = true; return; }
+        this.navCold = true; this.navHeld = true;
+        if (!this.navForceRelabel(E, souls.length)) return;
+        this.navHeld = false;
+      }
+      this.navStuckSince = null;
+      this.navRescueSouls(0, souls);
+    } catch (e) { this.log(`nav rescue: ${(e as Error).message}`); }
+  }
+  /** #1548: a relabel spread over ticks is cancelled by each static change, so while the static world keeps changing (Souls
+   *  through a busy door) a waiting Soul could stay cut off for good. Once Souls have waited NAV_STUCK_TICKS with the labels
+   *  cold and the static world has changed in that time, one relabel runs whole in this tick (nothing moves inside one call),
+   *  with a budget of NAV_FORCED_MS (about 250 ms: a slice can run a little past its budget), at most once per NAV_STUCK_TICKS a world, and is logged with its ms. A quiet world never takes it:
+   *  there the re-warm finishes on its own. True when the labels are warm after it. */
+  private navForceRelabel(E: { navWarmV1?: (ms: number) => boolean; navEpochV1?: () => number }, waiting: number): boolean {
+    const tick = this.engine.world.tick, epoch = E.navEpochV1?.() ?? 0;
+    if (!this.navStuckSince) { this.navStuckSince = { tick, epoch }; return false; }
+    // Two rate limits, both needed: the window (waited NAV_STUCK_TICKS since it was opened or last reset) keeps a forced call from
+    // following a fresh cold read, and navForcedAt caps the world at one forced call per NAV_STUCK_TICKS even when several Souls'
+    // waits overlap or a warm read in between reopens the window early.
+    if (tick - this.navStuckSince.tick < NAV_STUCK_TICKS || epoch === this.navStuckSince.epoch || tick - this.navForcedAt < NAV_STUCK_TICKS) return false;
+    const t0 = performance.now(), warm = !!E.navWarmV1?.(NAV_FORCED_MS), ms = Math.round(performance.now() - t0);
+    // the window restarts here, so a call that left the labels cold is not repeated until another NAV_STUCK_TICKS of churn
+    this.navForcedAt = tick; this.navStuckSince = { tick, epoch: E.navEpochV1?.() ?? epoch };
+    this.log(`nav rescue: forced relabel ${ms} ms, ${warm ? 'warm' : 'still cold'}, ${waiting} waiting`);
+    if (warm) { this.nav.forgetWarm(); this.edge?.navRelabelled(); this.navCold = false; this.navColdSlices = 0; }
+    return warm;
+  }
+  /** Is this body off the main walkable area where it stands now? Asked with the labels warm. */
+  private navCutOff(id: string) {
+    const E = this.engine as unknown as { navCheckV1?: (pts: { id: string; p: Vec2; level?: number; tol?: number }[]) => { ok: boolean }[] }, b = this.engine.world.entities[id] as { pose: { p: number[] }; human?: { level?: number } } | undefined;
+    return !!b && E.navCheckV1?.([{ id, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0, tol: 0.6 }])[0]?.ok === false;
+  }
   /** Step every Soul cut off from the main walkable area to open ground (logged). Returns how many were moved. A seated
    *  Soul is judged where it would stand up (its seat's approach): connected there, it stays seated and nothing is
    *  logged; when that spot is closed off it rises and lands on open ground once (a god walk-out, which a plain
    *  relocate cannot do to a held body). Only moves that change where a Soul is are logged or counted. */
-  private navRescueSouls(budgetMs = 0): number {
+  private navRescueSouls(budgetMs = 0, souls: Iterable<{ soulId: string; entityId: string; name: string }> = this.host.minds.values()): number {
     const E = this.engine as unknown as { navRescueV1?: (id: string, budgetMs?: number) => { to: Vec2; code: string; pocket?: number; level: number; seated?: true } | null };
     if (!E.navRescueV1) return 0;
     const tick = this.engine.world.tick;
     let n = 0;
-    for (const m of this.host.minds.values()) {
-      if (isVerificationProbe(m.soulId) || this.engine.programOf(m.entityId)) continue;
+    for (const m of souls) {
+      if (isVerificationProbe(m.soulId)) continue;
+      if (this.engine.programOf(m.entityId)) { if (this.navCutOff(m.entityId)) this.navWaiting.add(m.soulId); else this.navWaiting.delete(m.soulId); continue; }
       if ((this.navRescuedAt.get(m.soulId) ?? -1e9) > tick - 1200) continue;
-      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) continue;
+      const r = E.navRescueV1(m.entityId, budgetMs); if (!r) { this.navWaiting.delete(m.soulId); continue; }
       const where = `${r.seated ? 'sat' : 'stood'} ${r.level ? `upstairs (floor ${r.level}) with no way down` : `in a closed-off ${r.pocket !== undefined ? `${Math.round(r.pocket)} m² ` : ''}pocket`}`;
       this.log(`${m.name} ${where} (${r.code}): steps to open ground at (${r.to.join(', ')})`);
       const payload = { soulId: m.soulId, entityId: m.entityId, to: r.to, why: `nav-connect/1: ${where}, no walk out: ${r.seated ? 'stood up and ' : ''}stepped to the nearest open ground`, policy: 'nav-connect/1', ...(r.seated ? { godWalkout: true, released: [], level: 0 } : {}) };
-      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); n++; } catch { /* clock not ready */ }
+      try { void this.host.enqueue('edge-relocate', `edge:${m.soulId}`, payload).catch(() => { /* best effort */ }); this.navRescuedAt.set(m.soulId, tick); this.navWaiting.delete(m.soulId); n++; } catch { /* clock not ready */ }
     }
     return n;
+  }
+  /** #1250: what each live edit did to frames it may not have touched: the fold stands down a frame that no longer stands on its
+   *  own, and a beam seated in frames that don't stand. Nothing here decides that. It is logged, whoever made the edit. */
+  private settled: string[] = [];
+  private noteSettled() {
+    const ids = this.engine.takeSettledV1?.() ?? []; if (!ids.length) return;
+    const named = (id: string) => { try { return this.model.pathOf(id) ?? id; } catch { return id; } };
+    const line = `frames.settled: ${ids.map(named).join(', ')} no longer stand${ids.length === 1 ? 's' : ''} on what held ${ids.length === 1 ? 'it' : 'them'} up, so ${ids.length === 1 ? 'it stands' : 'they stand'} on the ground now.`;
+    this.log(line); this.settled = [...this.settled, line].slice(-8);
+  }
+  /** Said to the god who made the edit, once it has landed. The edit is durable by now, so a clock that won't take it costs only the line. */
+  private framesNote(): string[] {
+    if (!this.edge?.sharedCarry) return [];
+    try { this.flush(); this.host.drainInputs(); } catch (error) { this.log(`frames.settled: could not read the edit back: ${String(error).slice(0, 200)}`); }
+    return this.settled.splice(0);
   }
   private navNoteFor(diff: Diff, said?: string[]): string[] {
     // buildsafe/1 already gave the god one line for these: not named twice
@@ -1862,6 +2018,8 @@ export class EngineBridge {
     L.intents.planRefusal = (soul, steps, target) => this.layers.constructionRefusal(soul, steps, target);
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
+    L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply
@@ -1888,11 +2046,25 @@ export class EngineBridge {
     L.walkOnDemand = (soul,id,caps,plans) => offer('walk on demand',soul,caps,plans,()=>this.nav.walkOnDemand(soul,id,caps,plans),false);
     L.thingOnDemand = (soul,ask,caps,plans) => offer('thing on demand',soul,caps,plans,()=>this.nav.thingOnDemand(soul,ask,caps,plans,tokenHit),null);
     L.walkRefOnDemand = (soul,ref,caps,plans) => offer('walk ref on demand',soul,caps,plans,()=>this.nav.walkRefOnDemand(soul,ref,caps,plans),false);
+    L.navWarmed = () => this.nav.forgetWarm();   // nav-warm-wait/1 (#884)
     L.floorOnDemand = (soul,q,caps,plans) => offer('floor on demand',soul,caps,plans,()=>this.nav.floorOnDemand(soul,q,caps,plans,tokenHit),null);
     L.floorsNear = (at, radius) => pass('floors near', () => this.floorsNear(at, radius), []);
     L.thingAt = (id) => { const t = this.nav.thingById(id); return t ? [t.at[0], t.at[1]] : null; };
+    // landing/1 (#1324): a building's outside door approach (nav: its first standing point), a room's: its building's front door
+    L.entranceOf = (placeId) => pass('entrance of', () => {
+      const ref = (this.edge?.places.byId.get(placeId) as { ref?: unknown } | undefined)?.ref, t = typeof ref === 'string' ? this.nav.thing(ref) : undefined;
+      if (t?.entry && t.entry.level === 0) return [t.entry.p[0], t.entry.p[1]] as [number, number];
+      return t?.rooms?.length && t.stands?.length ? [t.stands[0][0], t.stands[0][1]] as [number, number] : null;
+    }, null);
     L.thingWords = () => pass('thing words', () => this.nav.thingWords(), [] as string[]);
     L.beforeMap = () => { this.flush(); this.perceiveSync(); };
+    if (L.sharedCarry && !this.readSide) {
+      // a joint a crew made reaches the model within 10 ticks; a god batch in those ticks would re-derive the world without it
+      let settling = false;
+      this.god.beforeBatch = () => { if (settling) return; settling = true; try { this.writeBack(); } finally { settling = false; } };
+      this.projects = new Projects({ db: this.god.db, host: this.host, edge: L as never, world: () => this.mw.world as never, defOf: (id) => this.model.entities.get(id)?.def.replace(/^core-/, 'core/') });
+      L.projects = this.projects;
+    }
     const prev = L.worldProfile;
     L.worldProfile = (soul, caps, plans) => { prev?.(soul, caps, plans); try { this.capabilities(soul, caps, plans as never); } catch (e) { this.log(`capabilities: ${(e as Error).message}`); } };
     L.exactAuthoredWalkRef=ref=>this.nav.exactPlaceWalkRef(ref);
@@ -2031,10 +2203,12 @@ export class EngineBridge {
     // the object scans read every entity of the world (three passes) and perceive/layers scan signs and stalls
     const named = (...verbs: string[]) => !focus || focus.targets.size > 0 || verbs.some((v) => wantsPrefix(focus, v + ':', v));
     if (named('read')) try { this.perceive.capabilities(soul, caps, plans); } catch (e) { this.log(`perceive capabilities: ${(e as Error).message}`); }
+    // PC17 (#696): projects near this Soul, and stock to organize one with (nothing else: a far Soul's menu gains no row)
+    if (this.projects && named('organize', 'volunteer', 'leave-project', 'revise-project')) try { this.projects.capabilities(soul, caps, plans as never); } catch (e) { this.log(`project capabilities: ${(e as Error).message}`); }
     caps.push({ id: 'pray', verb: 'pray', label: 'Pray to the god of this world (params: {"text": "…"}); answers come back under GET /v1/god/prayers/mine', available: true, params: { text: { type: 'string', required: true, maxLength: 2000 } } });
     const ents = this.mw.world.entities as Record<string, any>, me = ents[soul.entityId]; if (!me?.human) return;
     const here: Vec2 = [me.pose.p[0], me.pose.p[2]];
-    if (named('sit', 'lie', 'sleep', 'pick-up', 'put-on', 'put-in', 'search')) {
+    if (named('sit', 'lie', 'sleep', 'pick-up', 'put-on', 'put-in', 'search', 'juggle')) {
       const held = Object.values(ents).find((x: any) => x.tags?.includes('entity-world') && x.support?.kind === 'in-hand' && x.support.by === soul.entityId) as any;
       const name = (id: string) => (this.model.entities.has(id) ? this.model.pathOf(id) : String(ents[id]?.label ?? id));
       // MARSLIVED: a thing resting on a table is reached from the table's floor (its top's height matched Mimos's 0.53 m
@@ -2047,12 +2221,30 @@ export class EngineBridge {
       const seatAsset = (x: any) => !!(this.physics?.assets[x.def] as { slots?: { kind: string }[] } | undefined)?.slots?.some((sl) => sl.kind === 'seat');
       near.push(...(Object.values(ents).filter((x: any) => x.tags?.includes('entity-world') && x.support?.kind !== 'in-hand' && seatAsset(x) && Math.hypot(x.pose.p[0] - here[0], x.pose.p[2] - here[1]) > NEAR && Math.hypot(x.pose.p[0] - here[0], x.pose.p[2] - here[1]) <= FAR_SEAT) as any[])
         .sort((a, b) => Math.hypot(a.pose.p[0] - here[0], a.pose.p[2] - here[1]) - Math.hypot(b.pose.p[0] - here[0], b.pose.p[2] - here[1]) || (a.id < b.id ? -1 : 1)).slice(0, FAR_SEATS));
+      // #1737: a seat asked for by its id (`sit:<thing>`, as the client's catalog names it) is offered wherever it stands:
+      // the act walks there itself, as a far activity spot does
+      if (focus) for (const id of focus.ids) {
+        const x = id.startsWith('sit:') ? ents[id.slice(4)] as any : undefined;
+        if (x?.tags?.includes('entity-world') && x.support?.kind !== 'in-hand' && seatAsset(x) && !near.includes(x)) near.push(x);
+      }
       const approach = (x: any): { verb: string; params: Record<string, unknown> }[] => {
         const level = levelOf(x); if (level === (me.human.level ?? 0) && Math.hypot(x.pose.p[0] - here[0], x.pose.p[2] - here[1]) < 3) return [];
         const at = this.mw.standableNearV1!([x.pose.p[0], x.pose.p[2]], level, soul.entityId, 0.4, 16);
         return at ? [{ verb: 'mars:walk_to', params: { x: at[0], z: at[1], level } }] : [];
       };
       const stand = me.human.activity === 'sit' || me.human.baseActivity === 'sit' || me.human.berth ? [{ verb: 'stand', params: {} }] : [];
+      // #441 (W107): a held set of balls can be juggled, standing up first if seated; only while it is held
+      {
+        const inHands = held ? Object.values(ents).filter((x: any) => x.support?.kind === 'in-hand' && x.support.by === soul.entityId) as any[] : [];
+        const defOf = (x: any) => { const m = this.model.entities.get(x.id); return m && this.model.resolvedDef(m.def); }, set = inHands.find((x) => defOf(x)?.tags.includes('juggling'));
+        const jm = set && this.model.entities.get(set.id), jd = jm && this.model.resolvedDef(jm.def);
+        if (jd) {
+          const second = inHands.length > 1, id = `juggle:${set.id}`, label = `Juggle ${name(set.id)}`;
+          const palette = jd.palette as Record<string, string> | undefined, tint = (k: string) => String(jm!.params?.[k] ?? palette?.[k] ?? '').slice(0, 16), colors = ['one', 'two', 'three'].map(tint);
+          caps.push({ id, verb: 'juggle', label, target: { id: set.id, kind: 'item' }, available: !second, ...(second ? { blocked: { code: 'juggle.hand-full', reason: 'Juggling needs the other hand free; put the other thing down first.' } } : {}), params: { seconds: { type: 'integer', min: JUGGLE.MIN_SECONDS, max: JUGGLE.MAX_SECONDS, default: 20 } } });
+          if (!second) plans.set(id, { label, steps: [...stand, { verb: 'mars:juggle_v1', params: { item: set.id, seconds: 20, ...(colors.every(Boolean) ? { colors } : {}) } }], seconds: true });
+        }
+      }
       // floors (2026-10-26): a seat the body cannot use names the nearest one it can (or the ground)
       const unusable: number[] = [], usable: { id: string; label: string; d: number }[] = [];
       for (const x of near) {
@@ -2152,7 +2344,7 @@ export class EngineBridge {
             if(sdef!.tags.includes('upright')){
               const rid=`raise-with:${x.id}`,rlabel=`Raise ${name(x.id)} upright with other Souls and hold it until one of you stops (asks them first; ${crew[0]}–${crew[1]} people; with: who)`;
               const rblock=sblock??(x.pose.roll?{code:'raise.not-lying',reason:`${name(x.id)} is not lying flat on the ground.`}:null);
-              caps.push({id:rid,verb:'raise-with',label:rlabel,target:{id:x.id,kind:'object'},available:!rblock,...(rblock?{blocked:rblock}:{}),params:{with:{type:'string',maxLength:300,description:'the Souls who raise it with you (names or ids: "Bo and Cy", "Bo, Cy and Dee")'},invite:{type:'string',optional:true,description:'amend your own open proposal'}}});
+              caps.push({id:rid,verb:'raise-with',label:rlabel,target:{id:x.id,kind:'object'},available:!rblock,...(rblock?{blocked:rblock}:{}),params:{with:{type:'string',maxLength:300,description:'the Souls who raise it with you (names or ids: "Bo and Cy", "Bo, Cy and Dee")'},project:{type:'string',optional:true,maxLength:40,description:'a project this is a frame of: it stands where the blueprint says'},invite:{type:'string',optional:true,description:'amend your own open proposal'}}});
               const rplan={label:rlabel,steps:[],together:{kind:'shared' as const,template:'raise-hold' as const,load:x.id,def:sharedDef.def,name:name(x.id),crew,mass:{kg:mass,each:MAX_KG_PER_CARRIER}}};
               if(!rblock)plans.set(rid,rplan);
             }
@@ -2212,7 +2404,8 @@ export class EngineBridge {
           const id = `pick-up:${x.id}`, label = kept ? `Take ${name(x.id)}${note ? ` (${note})` : ''} out of ${kept.label} (${d} m)` : `Pick up ${name(x.id)} (${d} m${levelOf(x) ? `, ${this.floorWord(x)}` : ''})`;
           // PC12 (#691): a small part joined into an assembly is not picked up off its joints either
           const block = (kept ? this.storageRefusal(kept, soul) ?? this.claimRefusal(x.id, soul, d <= FACTS_NEAR) : null) ?? this.joinedRefusal(x.id);
-          caps.push({ id, verb: 'pick-up', label, target: { id: x.id, kind: 'item' }, available: !block, ...(block ? { blocked: block } : {}) });
+          const pm = this.model.entities.get(x.id), juggling = pm && this.model.resolvedDef(pm.def)?.tags.includes('juggling');
+          caps.push({ id, verb: 'pick-up', label, target: { id: x.id, kind: 'item' }, available: !block, ...(block ? { blocked: block } : {}), ...(juggling ? { aliases: ['juggling balls'] } : {}) });
           const precise=(this.physics?.assets[x.def] as {capabilities?:{recordedItemPoseV1?:boolean}})?.capabilities?.recordedItemPoseV1&&levelOf(x)===(me.human.level??0);
           // entry 43: an opted-in pick-up lets an idle gesture go before the hand reaches (entry 41's M04 finding)
           plans.set(id, { label, steps: [...stand, ...(precise?[{ verb: 'mars:let_go_v1', params: {} }]:kept?[]:approach(x)), { verb: 'mars:take_item', params: { item: x.id, hand: 'right' } }] });

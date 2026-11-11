@@ -41,7 +41,10 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 When a PR is ready, label it `merge:ready`. Its heavy CI jobs run only inside the [CI window](../testing.md#ci-window)
 (a ready PR labelled `ci:run` or `merge:ready`), so open the window with `ci:run` and add `merge:ready` once `ci-ok`
 is green. From there the train takes over, one PR at a time, and first picks how
-the PR lands (`landingMode` in `.github/scripts/merge-train.mjs`):
+the PR lands (`landingMode` in `.github/scripts/merge-train.mjs`). The label event only relays: a `pull_request` job
+dispatches `main`'s copy of `merge-train.yml`, which does the work, so a PR never runs its own train (#1597). A fork PR's token
+can't dispatch, and GitHub runs no `pull_request` workflow for a PR with a merge conflict, so such a label waits for
+the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 
 - **Non-strict**: a T0–T2 PR that touches no strict path, whose required checks are green on its current head, which
   GitHub reports mergeable without conflict, and while `main`'s CI is green, is squash-merged as is, even when it is
@@ -78,6 +81,9 @@ The strict steps:
    - **T3** requires coordinator sign-off after the repo steward posts the bar at the current head, except for
      the maintainer-reserved decisions below.
    - **T4 and maintainer-reserved decisions** require Gene's approval.
+   - A change that touches only test files under `apps/server/src/edge*` (plus docs or a fragment) computes T1, not
+     T3 (PROOF-POLICY.yml `when: tests-only`), so it lands on green; its review checks that no assertion was dropped
+     or loosened and no `skip`/`todo` was added.
 
    The maintainer gate lives in the required `proof-ok` check, not only in the train: for a T3 or T4 PR, `proof-ok`
    fails until the maintainer's latest decisive review is an approval or, on a PR the maintainer authored (GitHub

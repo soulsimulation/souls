@@ -30,6 +30,9 @@ Get the tier of the current diff with `node tools/proof/tier.mjs --base origin/m
   would. Do not call app internals from `page.evaluate` to make things happen on camera.
 - **Fake minds, isolated data.** Local worlds only, `BRAIN_MODE=fake`, a fresh data dir. Never record against a
   production world unless the maintainer asks, and never with a signed-in personal browser profile.
+- **No local URL on screen.** A Soul's owner card shows the Reconnect box whenever the Soul reads as disconnected, and
+  the box prints the world's URL and the Soul's id. Keep an agent listening for the whole take. The recorder watches
+  for this and fails a take that shows it (section 3).
 - **Never commit video** (or frames) into the repo. Work under `.e2e/` (gitignored).
 - The clip must show the change. Watch it (or at least extract frames, below) before you attach it.
 
@@ -80,6 +83,10 @@ do the thing, show the result. With the default arrival start the steps begin on
 is 0:00); with `--from-load` they begin right after navigation. `mark('label')` stamps a chapter time into the sidecar
 so the PR can say "the panel opens at 0:07". Keep it to the journey the change affects.
 
+When an owner's card is on screen, set `SOUL_DIR` to the Soul's CLI folder (and `EDEN` to its `eden.mjs` if it isn't this
+checkout's). The example then holds a `listen` from before the page opens until the recorder exits, starting it again
+when the owner's message ends it. Keep that block when you copy the file.
+
 ## 3. Record
 
 ```bash
@@ -90,17 +97,59 @@ node .claude/skills/proof/record.mjs --url '...' --steps .e2e/proof/<slug>/steps
   --out .e2e/proof/<slug>/phone.mp4 --viewport phone
 ```
 
+### Presets: what the clip is for
+
+`--preset` picks the output; `pr-proof` is the default and is what every PR proof uses. Each preset is still one
+uncut, real-speed take with the timecode, so any of them counts as proof.
+
+| Preset | Output | Use it for |
+|---|---|---|
+| `pr-proof` (default) | `--viewport desktop` 1280x720 or `phone` 390x844, the recording's own frame rate | PR proofs: small, quick to upload and load |
+| `social-landscape` | 1920x1080, 30 fps | posts and videos in 16:9 |
+| `social-portrait` | 1080x1920, 30 fps, phone layout | reels, stories and shorts in 9:16 |
+| `highlight` | 1280x720, 30 fps | clips embedded in a highlights page (light enough to autoplay) |
+
+Overrides sit on top of any preset: `--fps 15|30|60` (repeats or drops frames, never changes speed), `--quality low`
+(720 short edge) or `high` (1080), `--size WxH`, `--aspect landscape|portrait`. The page is recorded at the output's own
+aspect, a landscape page at desktop size and a portrait page at phone size, with the browser's scale factor making
+the pixels, so nothing is cropped or upscaled afterwards. The sidecar records `preset` and the resolved `plan`.
+The table lives in `tools/proof/clip-presets.mjs`.
+
+```bash
+node .claude/skills/proof/record.mjs --url '...' --steps .e2e/proof/<slug>/steps.mjs \
+  --out .e2e/proof/<slug>/portrait.mp4 --preset social-portrait --panel on
+```
+
+**Debug panel** (`--panel on`, off by default and off for PR proofs unless a reviewer needs the exchange): a live view
+of what the Soul's agent sent and what the world answered, in time order with clip timestamps: commands `→`, replies
+`←`, receipt phases `•`, notes `·`. It sits beside the world in landscape and below it in portrait. The steps feed it:
+`await ctx.eden(soulDir, ['act', id, params])` runs a Soul CLI command, logs it and its reply, and follows the receipt
+until it ends; `ctx.panel('text')` logs a note; `--panel-log <file.jsonl>` adds lines another process appends
+(`{"at": <epoch ms>, "dir": "cmd|reply|receipt|note", "text": "..."}`). Entries are redacted (URLs, paths, tokens,
+emails, addresses; Soul, receipt and other ids become `soul-1`, `receipt-1`), then the publication checker runs on
+them; a hit fails the take (exit 4, privacy kind `panel-text`) before anything is drawn. The text goes to
+`<clip>.panel.json`, which `upload.mjs` checks like any payload; attach it with the clip.
+
 - Browsers: uses `PLAYWRIGHT_BROWSERS_PATH`, else `/opt/pw-browsers` when present. If Chromium is missing:
   `PLAYWRIGHT_BROWSERS_PATH="$PWD/.e2e/browsers" pnpm --filter mars-campus-viewer exec playwright install chromium`.
 - Playwright is resolved the same way the playtest harness does (`tools/playtest/lib/platform.mjs`: a global
   `playwright`, else `@playwright/test` from `mars/viewer`). No GPU is needed; WebGL runs on SwiftShader.
 - `--max-seconds` defaults to the policy's `max_seconds`. Exit 3 means the journey ran past it: shorten it.
-- With ffmpeg: an mp4 with a progress bar along the bottom and a `hh:mm:ss / total` timecode (the timecode needs an
-  ffmpeg built with drawtext; the sidecar's `timecode` says whether it is there). Without ffmpeg: the raw `.webm`;
-  say so in the PR (players still show their own scrub bar).
-- Each clip gets a `<clip>.json` sidecar: url, viewport, duration, `start`, `startedAt`, marks (`arrived` among them),
-  `worldTime`, console errors, commit and dirty flag. A Playwright without `page.screencast` records from page creation
+- With ffmpeg: an mp4 with a thin progress line along the bottom edge and a small `m:ss.s / total` timecode chip at
+  the bottom left. The recorder's Chromium draws the timecode, so it needs no ffmpeg `drawtext` or fonts; the
+  sidecar's `timecode` says whether it is there. Without ffmpeg: the raw `.webm`; say so in the PR (players still show
+  their own scrub bar).
+- Each clip gets a `<clip>.json` sidecar: url, viewport, `durationSec`, `videoSec` (the recording's own length, about a
+  second longer), `start`, `startedAt`, marks (`arrived` among them), `worldTime`, console errors, `privacy`, commit and
+  dirty flag. Sidecars hold local paths: they stay unpublished, and `upload.mjs` refuses one. A Playwright without `page.screencast` records from page creation
   even without `--from-load`; the sidecar says so in `startFallback`.
+- **Exit 4: the take showed something private.** Every 500 ms the recorder reads the page's visible text, fields
+  included, for the page's own host (any port; `soul.game` is exempt) and the wording of the Reconnect box and the start
+  prompt. The sidecar's `privacy` lists each hit by kind and second, never the text: `page-host`, `reconnect-box`,
+  `start-prompt`, or `not-watched` when no read succeeded. `upload.mjs` refuses the clip. Fix the cause (usually a listen
+  that wasn't held) and record a new take; never delete or edit the sidecar to get past this. It reads text, not
+  pixels, and something on screen for less than the sidecar's `maxGapSec` can slip between reads, so step 4 still
+  stands.
 - The page has `--arrival-seconds` (default 120) to arrive before the take starts; a page that never shows a world fails
   (exit 1) with a hint to use `--from-load`, a still of where it stuck (`<clip>.open-failed.png`) and a sidecar.
   Console errors in the sidecar are findings: explain or fix them.
@@ -131,12 +180,18 @@ node tools/proof/upload.mjs --pr $N --proof .e2e/journal/$ISSUE/proof.json .e2e/
 
 - The default target is the PR's own prerelease `proofs-<n>` (tag on the default branch, created on first use);
   one release per PR keeps each under GitHub's 1000-asset limit, which the old shared `proofs` release reached.
-  `--release <tag>` (or `SIM_PROOF_RELEASE`) names another release. Assets are named
+  `--release <tag>` (or `SIM_PROOF_RELEASE`) names another release. The shared `proofs` release is full: on a branch
+  whose `upload.mjs` still defaults to it, run main's copy (`git show origin/main:tools/proof/upload.mjs > .local/upload-main.mjs`). Assets are named
   `pr-<n>.<file>`, and a re-take gets `-2`, `-3`, so earlier takes, including failed ones, stay linkable.
   `SIM_PROOF_UPLOAD_URL` (+ `SIM_PROOF_UPLOAD_TOKEN`) switches to another endpoint, such as a CDN.
 - With `--proof`, clip and image links are written into proof.json `media[]`, other files (logs, JSON) into
   `files[]`, and proof.json is uploaded last. Paste its link
   and the clip links into the PR's Proof section. The `journal` skill covers proof.json.
+- With `--proof`, a clip's `uncut`, `realSpeed`, `seconds`, `viewport` and caption come from its recorder sidecar where
+  proof.json leaves them unset; what you stated is never overwritten, so write `uncut: false` and it stays. A clip whose
+  `uncut` or `realSpeed` would stay unset is refused before anything is uploaded (`proof.media-incomplete`): keep the
+  sidecar beside the clip, or state both in its media entry.
+- A clip whose sidecar records a privacy hit is refused, with or without `--proof` (`proof.clip-private`).
 - **Inline preview.** GitHub serves release assets as downloads, so an mp4 link never plays in the PR. For each
   video, `upload.mjs` makes a small animated GIF with ffmpeg (`<clip>.preview.gif`: 6 s at real speed from the clip's
   `arrived` mark, or from 0 for a `--from-load` take; at most 5 MB), uploads it beside the clip, records it as `media[].preview` and prints a line like

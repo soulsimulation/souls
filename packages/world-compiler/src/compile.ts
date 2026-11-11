@@ -516,7 +516,8 @@ export function plan(world: WorldModel, input: unknown, by: string, tick: number
         const fields = ['kind', 'intensity', 'rain', 'minutes'].filter((f) => wp?.[f] !== undefined);
         if (wp && fields.length && !(running && fields.every((f) => wp[f] === cw[f]))) {
           const mw = merged.weather as typeof merged.weather & { until?: number | null };
-          mw.until = isWetSetting(mw) ? showerUntil(mw, tick, Number(merged.time.dayTicks)) : null;
+          // #1649: a real-time world's minutes are real minutes (a day of 1,728,000 ticks)
+          mw.until = isWetSetting(mw) ? showerUntil(mw, tick, (merged.time as { clock?: string | null }).clock === 'real' ? 1_728_000 : Number(merged.time.dayTicks)) : null;
         }
         const prevPatch: Record<string, unknown> = {}, changed: Record<string, unknown> = {};
         for (const k of Object.keys(op.state)) {

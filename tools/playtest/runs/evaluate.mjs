@@ -11,11 +11,11 @@ import { pathToFileURL } from 'node:url';
 import { sha256 } from '../lib/hash.mjs';
 import { readJson, readJsonl } from '../lib/jsonl.mjs';
 import { loadRun } from '../review/run.mjs';
-import { computeMetrics, readLedger } from '../review/metrics.mjs';
+import { computeMetrics, readLedger, walkTruth, walkSpeeds } from '../review/metrics.mjs';
 import { runOracles } from '../review/oracles.mjs';
-import { SCORER, scoreRun, scorecardMeasures, renderScorecard } from './controllability.mjs';
+import { SCORER, closureOf, refusedResult, scoreRun, scorecardMeasures, renderScorecard } from './controllability.mjs';
 
-export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '2' }); // v2: the controllability scorecard (#1097)
+export const EVALUATOR = Object.freeze({ name: 'soul-runs/evaluate', version: '4' }); // v2: the controllability scorecard (#1097); v3: questions read a close without `result` (#1269); v4: nor a refused one (#1309)
 export const SCHEMA = 'soul-run-evaluation/1';
 export const INDEX_SCHEMA = 'soul-run-index/1';
 const VERDICTS = ['pass', 'fail', 'unknown'];
@@ -50,7 +50,10 @@ export function indexSources(runDir) {
   return files;
 }
 
-/** One seat transcript as CLI steps with line references: {seat, line, resultLine, turn, cmd, verb, args, atMs, doneMs, out, isError}. */
+/** One seat transcript as CLI steps with line references: {seat, line, resultLine, turn, cmd, verb, args, atMs, doneMs, out, isError}.
+ *  #1736: a shell call that chains several `node eden.mjs` commands (`ack …; act walk:x --wait 60`) is one step per command.
+ *  Their output is split by JSON document when it holds exactly one per command and nothing else; otherwise each of those
+ *  steps keeps `out: null` and `unplaced: true` (its outcome can't be told apart), never dropped. */
 export function seatSteps(file, seat) {
   if (!existsSync(file)) return [];
   const steps = [], open = new Map();
@@ -59,18 +62,70 @@ export function seatSteps(file, seat) {
     let ev; try { ev = JSON.parse(l); } catch { return; }
     for (const c of ev.message?.content ?? []) {
       if (c.type === 'tool_use') {
-        const cmd = String(c.input?.command ?? '');
-        const args = cliArgs(cmd);
-        const s = { seat, line: i + 1, resultLine: null, turn: ev.turn ?? null, cmd, verb: args[0] ?? null, args: args.slice(1), atMs: ev._rx ?? null, doneMs: null, out: null, isError: null };
-        open.set(c.id, s); steps.push(s);
+        const cmd = String(c.input?.command ?? ''), calls = cliCalls(cmd);
+        const make = (args) => ({ seat, line: i + 1, resultLine: null, turn: ev.turn ?? null, cmd, verb: args[0] ?? null, args: args.slice(1), atMs: ev._rx ?? null, doneMs: null, out: null, isError: null });
+        const made = calls.length > 1 ? calls.map(make) : [make(cliArgs(cmd))];
+        open.set(c.id, made); steps.push(...made);
       } else if (c.type === 'tool_result' && open.has(c.tool_use_id)) {
-        const s = open.get(c.tool_use_id), raw = typeof c.content === 'string' ? c.content : JSON.stringify(c.content ?? '');
-        let out = raw; try { out = JSON.parse(raw); } catch { /* plain text */ }
+        const made = open.get(c.tool_use_id), raw = typeof c.content === 'string' ? c.content : JSON.stringify(c.content ?? '');
+        if (made.length > 1) {
+          const docs = jsonDocs(raw), told = docs && docs.length === made.length;
+          made.forEach((s, k) => Object.assign(s, { resultLine: i + 1, doneMs: ev._rx ?? null, out: told ? docs[k] : null, isError: !!c.is_error }, told ? {} : { unplaced: true }));
+          continue;
+        }
+        const s = made[0];
+        let out = raw; try { out = JSON.parse(raw); } catch {
+          // #1098: the CLI can print owner banner lines ("OWNER: 1 message(s) waiting …") before its JSON answer; read the
+          // answer from the first line that opens a JSON object
+          const j = raw.search(/^\{/m); if (j > 0) { try { out = JSON.parse(raw.slice(j)); } catch { /* plain text */ } }
+        }
         Object.assign(s, { resultLine: i + 1, doneMs: ev._rx ?? null, out, isError: !!c.is_error });
       }
     }
   });
   return steps;
+}
+/** #1736: the `node eden.mjs …` commands of one shell call, split at `;`, `&&`, `||` and newlines outside quotes, each cut at
+ *  its first pipe or redirection: `node eden.mjs ack m "ok"; node eden.mjs act walk:x --wait 60` → [['ack', 'm', 'ok'],
+ *  ['act', 'walk:x', '--wait', '60']]. Other commands in the chain are left out. */
+export function cliCalls(cmd) {
+  const parts = []; let cur = '', q = null;
+  for (let k = 0; k < cmd.length; k++) {
+    const ch = cmd[k];
+    if (q) { cur += ch; if (ch === '\\' && q === '"') cur += cmd[++k] ?? ''; else if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === ';' || ch === '\n' || ((ch === '&' || ch === '|') && cmd[k + 1] === ch)) { parts.push(cur); cur = ''; if (ch !== ';' && ch !== '\n') k++; continue; }
+    cur += ch;
+  }
+  parts.push(cur);
+  return parts.map((p) => cliArgs(cutTail(p))).filter((a) => a.length);
+}
+/** A command up to its first unquoted pipe or redirection (`| head`, `2>&1`, `> f`). */
+function cutTail(p) {
+  let q = null;
+  for (let k = 0; k < p.length; k++) {
+    const ch = p[k];
+    if (q) { if (ch === '\\' && q === '"') k++; else if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") q = ch;
+    else if (ch === '|' || ch === '>' || ch === '<' || (/\d/.test(ch) && p[k + 1] === '>' && /\s/.test(p[k - 1] ?? ' '))) return p.slice(0, k);
+  }
+  return p;
+}
+/** Consecutive top-level JSON documents in a call's output, or null when anything else is in it. */
+export function jsonDocs(raw) {
+  const out = []; let k = 0;
+  const ws = () => { while (k < raw.length && /\s/.test(raw[k])) k++; };
+  for (ws(); k < raw.length; ws()) {
+    if (raw[k] !== '{' && raw[k] !== '[') return null;
+    let depth = 0, q = false, start = k;
+    for (; k < raw.length; k++) {
+      const ch = raw[k];
+      if (q) { if (ch === '\\') k++; else if (ch === '"') q = false; continue; }
+      if (ch === '"') q = true; else if (ch === '{' || ch === '[') depth++; else if ((ch === '}' || ch === ']') && --depth === 0) { k++; break; }
+    }
+    try { out.push(JSON.parse(raw.slice(start, k))); } catch { return null; }
+  }
+  return out;
 }
 /** `node eden.mjs ack msg_1 "Walking to the orchard"` → ['ack', 'msg_1', 'Walking to the orchard']; anything else → []. */
 export function cliArgs(cmd) {
@@ -83,6 +138,7 @@ export function cliArgs(cmd) {
 /** The physical outcome one act step reports: completed | failed | ongoing | started (not observed to finish). */
 export function actOutcome(step) {
   const o = step.out && typeof step.out === 'object' ? step.out : null;
+  if (step.unplaced && !step.isError) return { outcome: 'started', why: 'a chained call whose output could not be told apart (#1736)' };
   if (step.isError || !o) return { outcome: 'failed', why: 'CLI error or unparsed output' };
   if (o.accepted === false) return { outcome: 'failed', why: o.code ?? o.reason ?? 'not accepted' };
   const phase = o.receipt?.phase ?? null;
@@ -104,8 +160,16 @@ export function loadSoulRun(dir) {
   const seatIds = playtestDir && existsSync(join(playtestDir, 'seats')) ? readdirSync(join(playtestDir, 'seats')).filter((s) => existsSync(join(playtestDir, 'seats', s, 'seat.json'))).sort() : [];
   const steps = Object.fromEntries(seatIds.map((s) => [s, seatSteps(join(playtestDir, 'seats', s, 'transcript.jsonl'), s).map((x) => ({ ...x, file: at('seats', s, 'transcript.jsonl') }))]));
   const director = {};
-  for (const s of playtestDir && existsSync(join(playtestDir, 'personas')) ? readdirSync(join(playtestDir, 'personas')).sort() : []) {
-    director[s] = { decisions: readJsonl(join(playtestDir, 'personas', s, 'decisions.jsonl')), cutoffs: readJsonl(join(playtestDir, 'personas', s, 'requests.jsonl')), decisionsFile: at('personas', s, 'decisions.jsonl'), cutoffsFile: at('personas', s, 'requests.jsonl') };
+  // A directed cast (#783) writes its owner cards to the direction stream director/directions.jsonl, one line per card
+  // with its seat, requestId and messageId; persona-director runs write personas/<seat>/decisions.jsonl. A seat with no
+  // persona decisions takes its delivered cards from the stream, each keeping its line there as the reference.
+  const stream = playtestDir ? readJsonl(join(playtestDir, 'director', 'directions.jsonl')).map((d, i) => ({ d, line: i + 1 })) : [];
+  const fromStream = (seat) => stream.filter(({ d }) => d.seat === seat && d.requestId && d.messageId)
+    .map(({ d, line }) => ({ t: d.t, seat, mode: 'directed', line, scripted: { channel: d.channel ?? null, text: d.text ?? null, kind: d.kind ?? null, by: d.by ?? null }, delivered: { requestId: d.requestId, channel: d.channel ?? null, messageId: d.messageId } }));
+  const personaSeats = playtestDir && existsSync(join(playtestDir, 'personas')) ? readdirSync(join(playtestDir, 'personas')) : [];
+  for (const s of [...new Set([...personaSeats, ...stream.map(({ d }) => d.seat).filter(Boolean)])].sort()) {
+    const own = readJsonl(join(playtestDir, 'personas', s, 'decisions.jsonl')), directed = !own.length && stream.length;
+    director[s] = { decisions: directed ? fromStream(s) : own, cutoffs: readJsonl(join(playtestDir, 'personas', s, 'requests.jsonl')), decisionsFile: directed ? at('director', 'directions.jsonl') : at('personas', s, 'decisions.jsonl'), cutoffsFile: at('personas', s, 'requests.jsonl'), source: directed ? 'directions' : 'decisions' };
   }
   const scenario = playtestDir ? readJson(join(playtestDir, 'scenario.json'), null) : readJson(join(runDir, 'scenario.effective.json'), null);
   return {
@@ -127,7 +191,8 @@ export function joinRequests(sr) {
       const ci = d.cutoffs.findIndex((c) => c.requestId === del.requestId), cut = ci >= 0 ? d.cutoffs[ci] : null;
       const mine = sr.steps[seat] ?? [], mid = del.messageId;
       const ack = mid ? mine.find((s) => s.verb === 'ack' && s.args[0] === mid) : null;
-      const result = mid ? mine.find((s) => s.verb === 'result' && s.args[0] === mid) : null;
+      const forOfReceipt = receiptsFor(mine);
+      const result = mid ? mine.find((s) => (s.verb === 'result' && !refusedResult(s) && s.args[0] === mid) || closureOf(s, forOfReceipt)?.id === mid) : null;
       // An act belongs to a request when the CLI says so (`for`); a refusal carries no `for`, so an act between this
       // request's ack and result calls in the same transcript belongs to it too.
       const between = (s) => ack && s.line > ack.line && (!result || s.line < result.line);
@@ -135,7 +200,7 @@ export function joinRequests(sr) {
       const say = mine.filter((s) => s.verb === 'say' && between(s));
       const cutMs = cut ? Date.parse(cut.t) : null;
       const physical = acts.map((s) => ({ capability: s.out?.receipt?.capability ?? s.out?.resolved ?? null, waited: s.args.includes('--wait'), ...actOutcome(s), ref: ref(sr, s.file, s.resultLine ?? s.line) }));
-      const seatOutcome = result ? (result.out?.outcome ?? result.args[1] ?? null) : null;
+      const seatOutcome = result ? (result.out?.outcome ?? (result.verb === 'result' ? result.args[1] : closureOf(result, forOfReceipt)?.outcome) ?? null) : null;
       const r = {
         requestId: del.requestId, seat, channel: del.channel ?? dec.scripted?.channel ?? null, text: dec.scripted?.text ?? dec.decision?.text ?? null,
         budgetSec: dec.scripted?.budgetSec ?? null, broadcast: !!dec.scripted?.broadcast, sentAt: dec.t, messageId: mid ?? null,
@@ -144,7 +209,7 @@ export function joinRequests(sr) {
         director: cut ? { cutoffReason: cut.cutoffReason ?? null, openSec: cut.openSec ?? null, state: cut.state ?? null } : null,
         physical, said: say.map((s) => ({ channel: s.out?.said?.channel?.kind ?? null, heardBy: s.out?.said?.heardBy ?? null, ref: ref(sr, s.file, s.resultLine ?? s.line) })),
         conflicts: [],
-        refs: [ref(sr, d.decisionsFile, i + 1), ...(ci >= 0 ? [ref(sr, d.cutoffsFile, ci + 1)] : []), ...(ack ? [ref(sr, ack.file, ack.line)] : []), ...(result ? [ref(sr, result.file, result.line)] : [])],
+        refs: [ref(sr, d.decisionsFile, dec.line ?? i + 1), ...(ci >= 0 ? [ref(sr, d.cutoffsFile, ci + 1)] : []), ...(ack ? [ref(sr, ack.file, ack.line)] : []), ...(result ? [ref(sr, result.file, result.line)] : [])],
       };
       // Keep both records when they disagree: the director watches its latest card and may close an earlier one by
       // budget although the seat already reported a result (SR2 known limit). Neither record is discarded.
@@ -165,9 +230,10 @@ const unavailable = (id, family, unit, reason, basis) => ({ id, family, unit, st
 export function standardMeasures(sr, requests) {
   const M = [];
   const cards = requests.filter((r) => r.channel === 'card');
-  const dirFiles = Object.values(sr.director).flatMap((d) => [d.decisionsFile, d.cutoffsFile]);
+  const dirFiles = [...new Set(Object.values(sr.director).flatMap((d) => [d.decisionsFile, d.cutoffsFile]))];
   const seatFiles = Object.values(sr.steps).map((s) => s[0]?.file).filter(Boolean);
-  const LAT = 'request-latency', LAT_BASIS = 'seconds from the director delivering the owner card (decisions.jsonl t) to the seat\'s own CLI call returning (transcript _rx); both clocks are this machine\'s wall clock';
+  const srcNames = [...new Set(Object.values(sr.director).map((d) => (d.source === 'directions' ? 'director/directions.jsonl' : 'decisions.jsonl')))];
+  const LAT = 'request-latency', LAT_BASIS = `seconds from the director delivering the owner card (${srcNames.join(' and ') || 'decisions.jsonl'} t) to the seat's own CLI call returning (transcript _rx); both clocks are this machine's wall clock`;
   // Seat-side timing exists only for seats whose transcript was retained (controllerState: delete removes them).
   const heard = cards.filter((r) => sr.steps[r.seat]?.length), deaf = [...new Set(cards.filter((r) => !sr.steps[r.seat]?.length).map((r) => r.seat))];
   const missing = deaf.length ? `; no transcript for ${deaf.join(', ')}, whose requests are left out` : '';
@@ -183,7 +249,7 @@ export function standardMeasures(sr, requests) {
     M.push(measured('directorOpenSec', LAT, 's', dist(open).median, { n: dist(open).n, denominator: cards.length, dist: dist(open), basis: 'director\'s own open time per request (requests.jsonl openSec), closed by result or budget; a budget close is not a seat outcome', sources: dirFiles }));
   }
   const PHYS = 'physical-completion', withActs = requests.filter((r) => r.physical.length);
-  if (!seatFiles.length) M.push(unavailable('requestsPhysicallyCompleted', PHYS, 'requests', 'no seat transcripts', 'receipt phases the world returned to the seat\'s act calls'));
+  if (!seatFiles.length || !requests.length) M.push(unavailable('requestsPhysicallyCompleted', PHYS, 'requests', !seatFiles.length ? 'no seat transcripts' : !Object.keys(sr.director).length ? 'no director records to join the seat\'s acts to' : 'no owner requests were delivered', 'receipt phases the world returned to the seat\'s act calls'));
   else {
     const last = (r) => r.physical.at(-1)?.outcome;
     M.push(measured('requestsPhysicallyCompleted', PHYS, 'requests', withActs.filter((r) => last(r) === 'completed').length, { n: withActs.length, denominator: withActs.length, basis: 'requests whose last act call returned a completed receipt (the world\'s phase, not the seat\'s claim); requests without an act are not in the denominator', sources: seatFiles }));
@@ -202,9 +268,11 @@ export function standardMeasures(sr, requests) {
     const oracles = stored.length ? stored : sr.run.evidence.flatMap((ev) => runOracles(ev, { run: sr.run }));
     const m = computeMetrics(sr.run, { ledger, oracles, emergence: readJson(join(sr.playtestDir, 'emergence.json'), null) });
     const src = [sr.at('evidence'), sr.at(stored.length ? 'oracles.jsonl' : 'evidence')];
-    M.push(m.speed.walkMps.n ? measured('walkMps', 'observed-walking-speed', 'm/s', m.speed.walkMps.median, { n: m.speed.walkMps.n, dist: m.speed.walkMps, basis: m.speed.basis, sources: src }) : unavailable('walkMps', 'observed-walking-speed', 'm/s', (() => { const w = sr.run.evidence.flatMap((e) => (e.receipts ?? []).filter((r) => /^(go|walk|visit|goto|stroll)[:.]/i.test(r.capability ?? ''))); return !w.length ? 'the evidence packs hold no walk receipt' : !w.some((r) => r.startedAt) ? `the evidence packs' ${w.length} walk receipt(s) carry no startedAt, which review/metrics.mjs needs to window the samples (an existing gap in the pack, not a zero speed)` : 'no walk receipt has two timely samples in its window'; })(), m.speed.basis));
+    const { skipped: sk, speeds: sb } = walkSpeeds(sr.run);
+    M.push(m.speed.walkMps.n ? measured('walkMps', 'observed-walking-speed', 'm/s', m.speed.walkMps.median, { n: m.speed.walkMps.n, dist: m.speed.walkMps, basis: `${m.speed.basis}; start: ${['firstMotionTick', 'startedTick', 'startedAt'].map((k) => `${k} ${sb.filter((x) => x.startBasis === k).length}`).join(', ')}${sk.length ? `; ${sk.length} receipt(s) not measurable (${sk[0].why})` : ''}`, sources: src }) : unavailable('walkMps', 'observed-walking-speed', 'm/s', !sk.length ? 'the evidence packs hold no walk receipt' : `no walk receipt is measurable: ${[...new Set(sk.map((x) => x.why))].join('; ')} (a missing fact, not a zero speed)`, m.speed.basis));
     M.push(measured('observedFirstBodyChangeSec', 'observed-latency', 's', m.speed.firstBodyChangeSec.median, { n: m.speed.firstBodyChangeSec.n, denominator: packs, dist: m.speed.firstBodyChangeSec, basis: m.speed.basis, sources: src }));
-    M.push(measured('walkArrivalRate', 'observed-physical', 'fraction', m.basics.walkArrivalRate, { n: m.basics.walksArrivalKnown, denominator: m.basics.walkRequests, basis: m.basics.basis, sources: src }));
+    const wt = walkTruth(sr.run), wk = wt.filter((t) => t.arrived !== null);
+    M.push(!wt.length ? unavailable('walkArrivalRate', 'observed-physical', 'fraction', 'no walk request in the evidence packs', 'walk receipts followed to their last phase') : !wk.length ? unavailable('walkArrivalRate', 'observed-physical', 'fraction', `no walk request's receipt reached a terminal phase in the run (${[...new Set(wt.map((t) => t.why))].join('; ')})`, 'walk receipts followed to their last phase') : ({ ...measured('walkArrivalRate', 'observed-physical', 'fraction', m.basics.walkArrivalWorldRate, { n: wk.length, denominator: wt.length, basis: `world truth: each walk request's receipt (seat act output, else accepted in the request window) followed to its last phase anywhere in the run; completed inside the chosen place = arrived, failed or replaced = not, never terminal = unknown and excluded (${wt.length - wk.length}). At the request cutoff the arrival oracle saw ${m.basics.walksArrived}/${m.basics.walksArrivalKnown} there (directed requests are cut off by the next direction)`, sources: src }), walks: wt.map((t) => ({ requestId: t.requestId, receiptId: t.receiptId, phase: t.phase, arrived: t.arrived, why: t.why })) }));
     const ids = [...new Set(oracles.map((o) => o.id))].sort();
     M.push(measured('oracles', 'review-oracles', 'rows', oracles.length, { n: packs, basis: `deterministic oracles per request (${stored.length ? 'stored oracles.jsonl' : 'recomputed offline'}): ${ids.map((id) => `${id} ${['pass', 'fail', 'unknown'].map((s) => oracles.filter((o) => o.id === id && o.status === s).length).join('/')}`).join('; ')} (pass/fail/unknown)`, sources: src }));
   }
@@ -222,10 +290,32 @@ export function standardMeasures(sr, requests) {
     M.push(measured('costUsd', 'token-cost', 'USD', r3(sum('costUsd')), { n: usage.length, basis: 'adapter-reported cost per turn', sources: Object.keys(sr.steps).map((s) => sr.at('seats', s, 'turns.jsonl')) }));
   }
   if (sr.receipt?.cost) M.push(measured('lifecycleOverheadMs', 'lifecycle', 'ms', sr.receipt.cost.lifecycleOverheadMs ?? null, { basis: `run wall ${sr.receipt.cost.wallMs} ms minus scenario execution ${sr.receipt.cost.executeMs} ms`, sources: ['run-receipt.json'] }));
+  M.push(directionsMeasure(sr));
   const em = sr.playtestDir ? readJson(join(sr.playtestDir, 'emergence.json'), null) : null;
   if (!em?.metric?.souls) M.push({ ...unavailable('coLocationRatio', 'social-heuristic', 'ratio', em ? 'emergence.json saw no Souls (it reads observer samples)' : 'no emergence.json', 'review/emergence.mjs'), heuristic: true });
   else M.push({ ...measured('coLocationRatio', 'social-heuristic', 'ratio', em.metric.coLocation?.ratio ?? null, { n: em.metric.souls, basis: `HEURISTIC, not a social outcome: ${em.metric.basis?.coLocation ?? 'co-location'}`, sources: [sr.at('emergence.json')] }), heuristic: true });
   return M;
+}
+
+/** Directed casts (#783): the direction journal (director/commands.jsonl) as counts by command and outcome, and each
+ *  redirection with its target, run-relative time, outcome and whether the target spoke afterwards (director/speech.jsonl,
+ *  world time after the command's wall time; with expect words, whether that speech contained one). */
+export function directionsMeasure(sr) {
+  const BASIS = 'console commands recorded by the swarm orchestrator (typed, scripted or from the lifecycle), with the outcome it applied';
+  const file = sr.playtestDir ? join(sr.playtestDir, 'director', 'commands.jsonl') : null;
+  if (!file || !existsSync(file)) return unavailable('directions', 'direction', 'commands', 'no direction journal (not a directed cast, or recorded before #783)', BASIS);
+  // A torn or unparsed line (a killed run's last write) is skipped and counted, never read as a command.
+  const lines = readJsonl(file), cmds = lines.filter((c) => typeof c?.cmd === 'string' && typeof c?.outcome === 'string');
+  const speech = readJsonl(join(sr.playtestDir, 'director', 'speech.jsonl'));
+  const byCommand = {};
+  for (const c of cmds) { const b = (byCommand[c.cmd] ??= { applied: 0, held: 0, refused: 0 }); b[c.outcome] = (b[c.outcome] ?? 0) + 1; }
+  const redirections = cmds.filter((c) => c.cmd === 'redirect').map((c) => {
+    const after = speech.filter((x) => x.seat === c.target && (x.atMs ?? Date.parse(x.t)) > Date.parse(c.t));
+    const words = Array.isArray(c.expect) ? c.expect.map((w) => String(w).toLowerCase()) : null;
+    return { target: c.target, source: c.source, atSec: c.elapsedSec, outcome: c.outcome, ...(c.reason ? { reason: c.reason } : {}), requestIds: c.requestIds ?? [], spokeAfter: after.length > 0, ...(words ? { expect: words, expectHeard: after.some((x) => words.some((w) => String(x.text ?? '').toLowerCase().includes(w))) } : {}) };
+  });
+  return { ...measured('directions', 'direction', 'commands', cmds.length, { n: cmds.length, basis: BASIS, sources: [sr.at('director', 'commands.jsonl'), ...(speech.length ? [sr.at('director', 'speech.jsonl')] : [])] }),
+    byCommand, refused: cmds.filter((c) => c.outcome === 'refused').length, skipped: lines.length - cmds.length, redirections };
 }
 
 /** Load a question module: default export {id, version, question, assumptions?, score(ctx)}. */
@@ -242,13 +332,28 @@ export async function loadQuestion(file) {
   return { ...q, path, sha256: sha256(readFileSync(path)) };
 }
 
+const receiptsFor = (steps) => new Map(steps.filter((s) => s.verb === 'act' && s.out?.receipt?.id && s.out?.for).map((s) => [s.out.receipt.id, s.out.for]));
+/** The steps as a question reads them (#1269): a close made by the finishing command is followed by the `result` step it replaced,
+ *  so a question written for `result` reads it, with no new question version. The scorer places closes itself and gets the raw steps. */
+export function questionSteps(steps) {
+  const forOfReceipt = receiptsFor(steps), seen = new Set(steps.filter((s) => s.verb === 'result' && !refusedResult(s)).map((s) => s.args[0]));
+  return steps.flatMap((s) => {
+    if (refusedResult(s)) return [{ ...s, verb: 'result-refused' }];   // #1309: the world refused it, so it closed nothing
+    const c = closureOf(s, forOfReceipt); if (!c || seen.has(c.id)) return [s];
+    seen.add(c.id);
+    const text = s.verb === 'ack' ? s.args[1] : s.verb === 'say' ? s.args[0] : undefined;
+    return [s, { ...s, verb: 'result', args: [c.id, c.outcome, ...(text ? [text] : [])], out: { outcome: c.outcome }, viaClose: true }];
+  });
+}
+
 /** The read-only context a question scorer gets. */
 function questionContext(sr, requests, sources) {
-  const packs = sr.run?.evidence ?? [];
+  const packs = sr.run?.evidence ?? [], asRead = new Map();
   return {
     runId: sr.runId, status: sr.status, scenario: sr.scenario, setup: sr.setup, requests, seats: sr.seatIds,
-    steps: (seat) => sr.steps[seat] ?? [],
+    steps: (seat) => { if (!asRead.has(seat)) asRead.set(seat, questionSteps(sr.steps[seat] ?? [])); return asRead.get(seat); },
     hasTranscript: (seat) => (sr.steps[seat]?.length ?? 0) > 0,
+    listens: (seat) => (sr.playtestDir ? readJsonl(join(sr.playtestDir, 'seats', seat, 'listen.jsonl')) : []),
     observer: { packs: packs.length, available: packs.length > 0, receipt: sr.receipt?.observer ?? null },
     evidencePacks: packs,
     ref: (path, line = null) => ({ path, ...(line ? { line } : {}), sha256: sources[path]?.sha256 ?? null }),
@@ -283,7 +388,7 @@ function scenarioAcceptance(sr) {
 export function runIdentity(sr) {
   const sc = sr.scenario ? structuredClone(sr.scenario) : null;
   if (sc) {
-    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot']) delete sc[k]; if (sc.world) delete sc.world.port;
+    for (const k of ['scenarioPath', 'scenarioSha256', 'serverRoot', 'castPath']) delete sc[k]; if (sc.world) delete sc.world.port;
     // A traced seat is a different condition from an untraced one, but its run-specific trace file and ids are not.
     for (const s of sc.seats ?? []) if (s.diagnostics?.trace) s.diagnostics = { trace: true };
   }

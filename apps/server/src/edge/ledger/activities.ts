@@ -126,6 +126,8 @@ export type ActivityWorld = {
   taken(at: V2, spotId?: string): boolean;
   /** Admitted interiors (spots in a closed building are not offered). */
   enterable(place: string | undefined): boolean;
+  /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
+  gone?(spotId: string): boolean;
   /** Nearest free native seat within `radius` m: its sit capability id and plan. */
   /** The nearest free seat within `radius` m; `here` (D2, "sit down" means here): only a seat in the Soul's own room or
    *  within HERE_SEAT_M with no enclosure boundary between (EdgeLedger.seatIsHere). */
@@ -156,7 +158,10 @@ const seatSeconds = () => ({seconds: {type: 'integer', min: 1, max: 600, default
 export const ACTIVITY_SECONDS_MAX = 1800;
 
 /** The activity capabilities and plans for one Soul right now. */
-export function activityCapabilities(data: SpotsData, w: ActivityWorld): {caps: EdgeCapability[]; plans: Map<string, Plan>} {
+/** `want` (#1737): spot ids asked for by id. A spot named by its id is offered wherever the Soul stands, past the listing's
+ *  reach and its nearest-few cap: the catalog publishes every spot, and an act on one walks there. Still refused when it is
+ *  taken, cannot be entered or has no clear ground. */
+export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: ReadonlySet<string>): {caps: EdgeCapability[]; plans: Map<string, Plan>; why: Map<string, {code: string; reason: string}>} {
   const caps: EdgeCapability[] = [], plans = new Map<string, Plan>();
   const add = (cap: EdgeCapability, plan: Plan) => {caps.push(cap); plans.set(cap.id, plan);};
   // CN5 (acceptance): a spot World placed inside an obstacle (the picnic seats inside their table's box) is used from the
@@ -182,8 +187,18 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld): {caps: 
   // only spots within reach are probed for clear ground (a far spot's probe paged in its nav tile for nothing)
   // E-life (big derived worlds, `nearest`): a spot is probed for clear ground only when it is about to be offered (the
   // nearest few per activity), not every spot within reach (1.5 s of a 4 s first sweep on Eden 2026); old worlds unchanged
-  const reach0 = data.spots.filter(s => d2(s.at, w.me) <= SPOT_REACH && w.enterable(s.place)), ok = (s: Spot) => !!clearAt(s);
+  const reach0 = data.spots.filter(s => (d2(s.at, w.me) <= SPOT_REACH || !!want?.has(s.id)) && w.enterable(s.place) && !w.gone?.(s.id)), ok = (s: Spot) => !!clearAt(s);
   const live = data.nearest ? reach0 : reach0.filter(ok);
+  // #1737: why a spot asked for by id is not on offer now; said in the refusal, never a bare "not an offer"
+  const why = new Map<string, {code: string; reason: string}>();
+  if (want?.size) for (const s of data.spots) {
+    if (!want.has(s.id)) continue;
+    const name = s.label ?? 'that spot';
+    if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
+    else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
+    else if (w.taken(s.at, s.id)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
+    else if (!ok(s)) why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}, so nothing was done.`});
+  }
   const spotSteps = (s: Spot, seconds?: number, activity = s.activity, fromLevel = w.level): Program['steps'] => {
     const def = SPOT_ACTIVITIES[activity], body = (activity === s.activity && s.pose) || def.pose || activity, lying = s.base === 'lie', act = lying && !LYING_SPOT.has(body) ? 'lie' : body, prop = s.prop ?? def.prop;
     const reach = s.seat ? {verb: 'sit', params: {on: s.seat, seconds: 1}} : walk(clearAt(s) ?? s.at, s.level, fromLevel);
@@ -298,12 +313,12 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld): {caps: 
   const offered = new Map<string, number>(), ordered = data.nearest ? [...live].sort((a, b) => d2(a.at, w.me) - d2(b.at, w.me) || a.id.localeCompare(b.id)) : live;
   for (const s of ordered) {
     if (s.base === 'lie' && !LYING_SPOT.has(s.activity)) continue;
-    if ((s.base === 'lie' && (s.activity === 'lie' || s.activity === 'nap')) || s.activity in GAME_ACTIVITIES || w.taken(s.at, s.id) || d2(s.at, w.me) > SPOT_REACH) continue;
+    if ((s.base === 'lie' && (s.activity === 'lie' || s.activity === 'nap')) || s.activity in GAME_ACTIVITIES || w.taken(s.at, s.id) || (d2(s.at, w.me) > SPOT_REACH && !want?.has(s.id))) continue;
     for (const activity of [s.activity, ...(s.also ?? [])]) {
       const def = SPOT_ACTIVITIES[activity], id = `${activity}:${s.id}`; if (plans.has(id)) continue;
       // a seat at a group someone is already waiting in ("join them") is always offered, past the nearest-N cap
       const joinable = !!s.together && w.groupSize(s.together.group) > 0;
-      if (data.nearest) {const n = offered.get(activity) ?? 0; if ((n >= data.nearest && !joinable) || !ok(s)) continue; if (!joinable) offered.set(activity, n + 1);}
+      if (data.nearest) {const n = offered.get(activity) ?? 0, asked = !!want?.has(s.id); if ((n >= data.nearest && !joinable && !asked) || !ok(s)) continue; if (!joinable && !asked) offered.set(activity, n + 1);}
       // R5: a listener's seat is offered once someone is telling the story (its required spot is in use)
       const needs = s.requires ? data.spots.find(x => x.id === s.requires) : undefined, missing = !!needs && !w.taken(needs.at, needs.id);
       const waiting = s.together ? w.groupSize(s.together.group) : 0, withWho = s.together ? (waiting ? `; ${waiting} waiting on the other end, join them` : (s.together.alone === 'start' ? `; starts after ${s.together.wait} s, others may join` : `; waits up to ${s.together.wait} s for someone to join`)) : '';
@@ -324,7 +339,7 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld): {caps: 
       {label: def.label, seconds: true, steps: [...standFirst(w), walk(slot.at), pose(court.activity, def.seconds, {group: court.group, waitSeconds: 120, alone: 'fail', need: 1, ...(slot.faceTo ? {face: slot.faceTo} : {}), game: court.game})]});
     }
   }
-  return {caps, plans};
+  return {caps, plans, why};
 }
 
 export type GameSlot = {id: string; spot: Spot; at: V2; faceTo?: V2; label: string;

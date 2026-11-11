@@ -56,14 +56,12 @@ the same scope, privacy and spend controls; do not build a provider bridge as a 
 
 ## Sustaining lanes
 
-These rules bind in every harness. A lane is either running or has a handoff the coordinator will be woken for. On
-every wake, the coordinator reconciles every lane before ending its turn. An idle lane is a coordinator failure,
-not a worker failure.
+These rules bind in every harness. A lane is either working its one task issue or has stopped and handed back. On
+every wake, the coordinator reconciles every lane before ending its turn.
 
-- **Whole queue.** A worker brief gives the lane's whole ordered queue, not one task. After posting a task's
-  checkpoint, the worker continues to the next bounded task. It ends its turn only on a blocker that needs a
-  decision or capability it lacks, on nearing its context limit (after a checkpoint and a handover brief), on a
-  budget gate, or on an empty queue.
+- **One issue.** A worker brief names one task issue. The worker ends its session when the issue's stop rule is
+  met: the acceptance is done, the ceiling is reached, the change needs more than the issue allows, or a declared
+  run has failed twice. The coordinator dispatches the next task; a worker never picks one up itself.
 - **No blocking dialogs.** Workers never open a question dialog that waits for an answer. They decide routine
   questions and record the choice. Scope or ordering questions go to the coordinator as a message while the worker
   continues. The coordinator takes product questions to Gene with a recommendation, parks only the dependent item
@@ -89,6 +87,10 @@ not a worker failure.
   but it is invisible in the sidebar and ends with the coordinator session.
 - The app continues the coordinator only when every child session is idle. The coordinator therefore subscribes to
   each lane's idle notice with `notify_when_idle` on every message it sends.
+- Idle notices are not delivered for sessions the user has open over Remote Control. The reliable wake signals are
+  the workers' own messages to the coordinator, subagent completion and the re-armed `Monitor` heartbeat. On every
+  heartbeat, the coordinator lists its linked sessions and subagents and relaunches any lane that is idle without a
+  handover.
 - The coordinator and the steward each keep a `Monitor` armed on PR-change events as the heartbeat, with a 30-minute
   expiry re-armed each time. No cron, no scheduled agents.
 - Cross-session messages are addressed by session title with a ref; workers address the coordinator by its session

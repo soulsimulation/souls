@@ -20,6 +20,8 @@ User=simworlds
 Group=simworlds
 WorkingDirectory=/srv/sim-worlds/%i
 EnvironmentFile=/etc/sim-worlds/%i.conf
+# #1649: the stage name reaches every world (production.mjs decorateCommand): `production` refuses dev-only world options
+Environment=SIM_STAGE=%i
 ExecStart=/usr/bin/node tools/world-launcher/keeper.mjs --link /srv/sim-worlds/%i $SIM_WORLDS_ARGS
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always

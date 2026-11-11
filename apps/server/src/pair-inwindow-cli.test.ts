@@ -14,10 +14,12 @@ import {buildApp} from './http.ts';
 import type {Hub} from './hub.ts';
 import type {AccountIdentity} from './accounts/store.ts';
 import {fixture as worldFixture} from '../test/native-owner-fixture.ts';
+import {testPort} from '../test/test-port.ts';
+const TEST_PORT=await testPort();
 
 const CLI = process.env.PAIR_CLI ?? new URL('../../../tools/edge-skill/eden-agent.mjs', import.meta.url).pathname;
 const cli = (cwd: string, args: string[], ms = 20000) => new Promise<{status: number | null; out: string; error: string}>((resolve, reject) => {
-  const child = spawn(process.execPath, [CLI, ...args], {cwd, env: {...process.env, BRAIN_MODE: 'fake'}, stdio: ['ignore', 'pipe', 'pipe']});
+  const child = spawn(process.execPath, [CLI, ...args], {cwd, env: {...process.env, BRAIN_MODE: 'fake', HOME: cwd}, stdio: ['ignore', 'pipe', 'pipe']});
   let out = '', error = ''; const timer = setTimeout(() => {child.kill('SIGKILL'); reject(new Error(`CLI ${args[0]} exceeded ${ms} ms: ${out}${error}`));}, ms);
   child.stdout.on('data', v => out += v); child.stderr.on('data', v => error += v);
   child.once('close', status => {clearTimeout(timer); resolve({status, out, error});});
@@ -26,7 +28,7 @@ const cli = (cwd: string, args: string[], ms = 20000) => new Promise<{status: nu
 test('pair-soul <id> from a fresh folder: owner window within one poll, real name, nobody else, Approve connects', {timeout: 90000}, async t => {
   const f = worldFixture(':memory:', await marsFactory({...GREEN_FIELD_WORLD, safeCrewRemoval: true})); f.brain.quiesce(); f.souls.enableLifecycle();
   f.souls.cfg.accountAuthRequired = true; f.souls.cfg.inviteRequired = false;
-  const port = 7521, wp = '/w/pairtest', base = `http://127.0.0.1:${port}${wp}`; Object.assign(f.souls.cfg, {publicUrl: base, worldPath: wp});
+  const port = TEST_PORT, wp = '/w/pairtest', base = `http://127.0.0.1:${port}${wp}`; Object.assign(f.souls.cfg, {publicUrl: base, worldPath: wp});
   const ids = new Map<string, AccountIdentity>();
   for (const name of ['gene', 'other']) { const id = 'did:privy:' + name; f.db.upsertUser({id, email: null, wallet: null, role: 'user'}); ids.set(name, {id, issuer: 'privy.io/test-app', subject: id, verifiedAt: Date.now(), expiresAt: Date.now() + 600_000}); }
   f.auth.accountFromToken = async token => { const identity = ids.get(token ?? ''); return identity ? {identity, user: f.db.user(identity.id)!} : null; };
@@ -53,6 +55,12 @@ test('pair-soul <id> from a fresh folder: owner window within one poll, real nam
   // Gene's path: a fresh folder knows only the ID
   const fresh = join(root, 'fresh'); (await import('node:fs')).mkdirSync(fresh);
   assert.equal((await cli(fresh, ['register', base])).status, 0);
+  // #1875: while the first folder still holds the Soul, the world refuses to hand it to another folder unasked; this
+  // legacy client can't say --move, so its owner revokes the old folder first (a lost folder), then the path is open.
+  const held = await cli(fresh, ['pair-soul', soulId]); assert.notEqual(held.status, 0); assert.match(held.out + held.error, /soul\.held-elsewhere/);
+  const before = (await call(`/v1/account/approvals`, 'gene')).data?.approvals; assert.ok(Array.isArray(before));
+  assert.equal(before.some((a: {soulId?: string}) => a.soulId === soulId), false, 'no request reached the window');
+  assert.equal((await call(`/v1/account/souls/${soulId}/revoke`, 'gene', {})).status, 200);
   const t0 = Date.now(), pair = await cli(fresh, ['pair-soul', soulId]);
   assert.equal(pair.status, 0, pair.out + pair.error);
   const printed = JSON.parse(pair.out);

@@ -213,6 +213,8 @@ test('together: pick up, carry, give (accepted), put down, pick up again, eat; h
   assert.equal(w.body(b).human.prop, 'book'); assert.equal(w.body(a).human.prop, undefined);
   // b puts it down away from the shelves: it lies there; a sees it and picks it up
   const away = await w.act(b, 'walk:commons-kitchen'); await w.run([{soulId: b.soulId, id: away.receipt.id}], 8000);
+  // #1261 review: a visit phrase that starts with "drop" never puts the thing down
+  for (const words of ['drop by the bakery', 'drop in on Ada', 'drop over later', 'drop off at the pond']) {const v: any = await (w as any).act(b, words, undefined, false); assert.notEqual(v.resolved?.to ?? v.receipt?.capability, 'put-down:here', `${words}: ${JSON.stringify(v).slice(0, 300)}`);}
   const pd = await w.act(b, 'put it down'); assert.equal(pd.resolved?.to, 'put-down:here');
   await w.run([{soulId: b.soulId, id: pd.receipt.id}], 400);
   const lying = w.ledger.together.placed(); assert.equal(lying.length, 1); assert.equal(lying[0].kind, 'book'); assert.equal(w.body(b).human.prop, undefined);

@@ -3,6 +3,7 @@
 // world process, persists commits, hands out god tokens by the same pairing
 // pattern Souls use, keeps undo/redo, routes prayers, and publishes diffs to
 // viewers (hub) and to gods (SSE).
+import { productionWorld, realTimeEnabled } from './real-clock.ts';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { TILE_M, tileOf } from '@souls/ground';
 import { WorldModel, correctKitDefines, type PlanOptions, creationInputFailure, definitionRefs, coreLibrary, libraryRef, applyBatch, padResettle, plan, batchSchema, hashOf, type Batch, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type UsesHook, type ResidentMove } from '@souls/world-compiler';
@@ -24,6 +25,18 @@ import { definitionUseClosure } from './unused-defs.ts';
 import { rewindChanges, rewindDependents } from './rewind.ts';
 import { GodTrace } from './trace.ts';
 import { repairBatch, tagPlaces, untagPlaces, type Repair } from './buildsafe.ts';
+/** #1649: a `world` op's time patch is held to the clock rules wherever it comes from (act, preview, env): on a production
+ *  world the clock is real time (no accelerated clock, no set hour, no day length); `clock: 'real'` needs real time on. */
+function worldClockFailure(ops: readonly { op: string; state?: unknown }[]) {
+  const realTime = realTimeEnabled(), production = productionWorld();
+  for (const [i, o] of ops.entries()) {
+    const t = o.op === 'world' ? (o.state as { time?: Record<string, unknown> } | undefined)?.time : undefined; if (!t) continue;
+    if (t.clock === 'real' && !realTime) return { op: i, code: 'time.real-clock-off', field: 'state.time.clock', detail: 'Real time is not on for this server.', fix: 'Leave time.clock unset.' };
+    if (realTime && production && (t.clock === 'accelerated' || t.set != null || t.dayTicks !== undefined))
+      return { op: i, code: 'time.accelerated-production', field: 'state.time', detail: "This world runs on real time; a set hour, a day length or the accelerated clock is a dev-world option only.", fix: "Preview another hour in the viewer (or look --hour); pause with POST /v1/god/env {timeScale: 0}." };
+  }
+  return null;
+}
 export type { WorldBuildMessage } from './builds.ts';
 const previewBatchSchema = batchSchema.extend({ build: buildFieldSchema.optional() });
 
@@ -108,7 +121,7 @@ export class GodMode {
    *  G1 "god rules": `prepare` plans, on the would-be world, the residents an accepted edit/undo/redo walks out of its
    *  way (listed as `moved` in the durable receipt), and `apply` moves them after the SQL commit in the same request.
    *  Null in worlds without the engine. */
-  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; navNote?: (diff: Diff, said?: string[]) => string[] } | null = null;
+  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[] } | null = null;
   /** Bridge admission/decoration must run before the accepted receipt is persisted, and never on replay. */
   actGuard: ((batch: unknown) => Result | null) | null = null;
   finalizeAct: ((result: Result, after: WorldModel) => Result) | null = null;
@@ -118,6 +131,8 @@ export class GodMode {
   private eventSeq = 0;
 
   readonly db: Db; readonly opts: GodOptions;
+  /** PC17 (#696): settles what the engine has done and the model hasn't heard yet, so a batch can't undo it (the engine bridge's). */
+  beforeBatch?: () => void;
   // Existing diff-only embedders remain source compatible; new consumers can explicitly accept both feeds.
   constructor(db: Db, opts: Omit<GodOptions, 'emit'> & { emit: (m: WorldDiffMessage) => void });
   constructor(db: Db, opts: GodOptions);
@@ -160,7 +175,7 @@ export class GodMode {
   /**
    * pad/2 (lane RT, 2026-10-20): a foundation pad stored before pad/2 (no `grade`: a 1.5 m smoothstep blend that can cut an
    * unwalkable bank across a door on a slope) is re-cut once, at boot, as a graded pad with door landings.
-   * pad/2b (lane PADFIX, 2026-10-21): pad/2 banks folded one after another, so the 3.59.1 re-cut let a later building's
+   * pad/2b (lane PADFIX, 2026-10-21): pad/2 banks folded one after another, so the 0.64.1 re-cut let a later building's
    * bank (up to 16 m) cut the ground under a neighbour's flat (the alpine mountain station hung 6.6 m in the air) and a
    * re-cut that found a neighbour's bank within the skirt dropped its pad. Every pad cut now is pad/2b ("flats win",
    * ground height.ts padsFlatsWin), and once, at boot, the pads whose flat is off its level, the pad-less buildings left
@@ -377,6 +392,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   }
   /** Only server-owned genesis import can request trusted library adoption; request JSON cannot enable it. */
   private commitBatch(batch: unknown, note?: string, trusted = false): Result {
+    this.beforeBatch?.();
     this.builds.sweep();
     const inputFailure = creationInputFailure(batch); if (inputFailure) return { accepted: false, failures: [inputFailure] };
     const kit = correctKitDefines(batch); batch = kit.batch; // harvest fix kitlenient: the corrected ops are the ones stored
@@ -398,6 +414,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const field = preview ? preview.build : this.callerField(input.build);
     const gate = this.helperGate(field, normalized.ops); if (gate) return { accepted: false, failures: [gate] };
     const retirement = this.retirementFailure(normalized.ops); if (retirement) return { accepted: false, failures: [retirement] };
+    if (!trusted) { const clock = worldClockFailure(normalized.ops); if (clock) return { accepted: false, failures: [clock] }; }
     const stale = [...this.stale(preview?.expect ?? {}), ...this.staleSubtrees(preview), ...this.stale(input.expect ?? {})];
     for (const expected of [input.expectWorldAbout, preview?.expectWorldAbout]) if (expected !== undefined && expected !== hashOf(this.model.state.about ?? null)) stale.push({ op: -1, code: 'revision.stale', field: 'expectWorldAbout', detail: 'World meaning changed since it was read. Read it again before replacing it.' });
     if (stale.length) return { accepted: false, failures: [...new Map(stale.map(f => [f.entity, f])).values()] };
@@ -471,7 +488,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const arrival = this.bodies?.arrivalNote?.(r.diff!) ?? [];
     // nav-connect/1 (lane NAV): an edit that cuts Souls off from the walkable world steps them to open ground (logged);
     // things it leaves with no walk to them are named in one line
-    const nav = this.bodies?.navNote?.(r.diff!, repair?.named) ?? [];
+    const nav = [...this.bodies?.navNote?.(r.diff!, repair?.named) ?? [], ...this.bodies?.framesNote?.() ?? []];
     if (arrival.length || nav.length) { result.warnings.push(...arrival, ...nav); if (clientRef !== undefined) this.store.amendReceipt(clientRef, result); }
     return result;
   }
@@ -553,6 +570,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     this.notify(r.result.seq, r.diff!, kind, target.grp ?? undefined);
     this.publish(r.result.seq, tick, r.diff!, kind, deltas);
     this.builds.announceCommitted(updates.writes);
+    r.result.warnings.push(...this.bodies?.framesNote?.() ?? []);
     return { ...r.result, reverted: target.seq };
   }
 

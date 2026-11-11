@@ -6,6 +6,7 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {delegatedOwnerPath} from './client-account.mjs';
 import {assertLiveDispatch} from './client-dispatch-authority.mjs';
+import {shedReadWaitMs,READ_BUSY_WAITS} from './eden-agent.mjs';
 const source=readFileSync(new URL('./eden-agent.mjs',import.meta.url),'utf8');
 const start=source.indexOf('async function call(path,');
 const stop=source.indexOf('/** EVENTS-v1:',start);
@@ -19,6 +20,8 @@ function fixture(live,paused,verdict={accepted:false,code:'canonical-refusal'}){
   need:(state,key)=>state[key],AbortSignal,Buffer,telemetry:null,
   // the inbox lane's response hooks (client-inbox.mjs), imported by eden-agent.mjs; this harness only reads the dispatch
   noticeInboxHeader:()=>false,noticeOwnerInbox:()=>{},
+  // #1372: the caller's polite wait for a shed read (none of these fixtures sheds)
+  shedReadWaitMs,READ_BUSY_WAITS,sleep:async()=>{},process,
   fetch:async(url,options)=>{sent.push({url,options});return {status:200,text:async()=>JSON.stringify(verdict),headers:new Headers()};},
  });
  return {call,sent,loads:()=>loads};

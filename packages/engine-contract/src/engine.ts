@@ -14,6 +14,7 @@ import type {NativeBoatControlsV1} from './boat.ts';
 import type {BodyLocationV1} from './body-location.ts';
 import type {CampExpansionV1,CampExpansionAdmissionV1} from './camp-expansion.ts';
 import type {CrewRemovalTransitionV1,CrewRemovalTransitionAdmissionV1} from './crew-removal-transition.ts';
+import type {SoulsRepairAdoptionV1,SoulsRepairAdoptionAdmissionV1} from './souls-repair-adoption.ts';
 export type {RenderScene} from './scene-capture.ts';
 
 /** A feasible activity for an actor, params already bound. The brain picks by id only. */
@@ -86,7 +87,32 @@ export type EngineCheckpointCapture = {
 
 /** #1150 rung 1: moves this step did not apply, by rule. Present only on a step that refused one. The log keeps them as
  *  evidence; a replay recomputes them from world state and the rules, so nothing here is an input. */
-export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }> };
+export type EngineRefusalV1 = { tick: number; rule: string; bodies: string[]; programs: string[]; poses: Record<string, { p: [number, number, number]; yaw: number; level?: number }>; relocated?: true; /** What threw, for `engine.action-threw`. */ why?: string; /** The frames that stood down with it. */ settled?: string[] };
+
+/** #1150 decision 1: the world landed on a body, so there is no pose to go back to. The one named exception to "never teleport". */
+export const RELOCATED = { code: 'world.relocated', message: 'The world changed where you stood, so you were moved to the nearest free spot. Nothing else changed.' };
+/** #1150 rung 3: what a Soul is told when the world went back. */
+export const STEP_FAILING = { code: 'world.step-failing', message: 'The world is failing to move anything right now, so nothing you try can happen yet. You can still speak.' };
+export const ACTION_THREW = { code: 'engine.action-threw', message: 'What you were doing broke, so it ended here and anything held was let go. You can act again.' };
+/** #1150, #1250: a stop that couldn't finish, past its bound. Nothing broke: the world freed the hands it held. */
+export const STOP_GAVE_UP = { code: 'world.stop-gave-up', message: 'What you asked to stop could not finish, so your hands were freed: what you held stays where it is, standing if it is joined to something. You can act again.' };
+/** #1150, #1250: a crew on the same joined frame let go, so this one can't finish it either. */
+export const FRAME_LET_GO = { code: 'world.frame-let-go', message: 'A crew on the same frame let go, so nobody can finish it with you now: your hands were freed, and the part stands where it is. You can act again.' };
+/** #1369 quarantine/1: the ladder could not go back, so this body alone was stopped (and set down clear if it was inside something or broken), and the world went on. */
+/** #1521 stand-height/2: a body left standing in the air was stood on its floor, once, at the policy's adoption. */
+export const STOOD_ON_FLOOR = { code: 'world.stood-on-floor', message: 'Your body was standing a little above the floor, which kept every walk from starting. The world stood you on the floor; you can walk again.' };
+export const QUARANTINED = { code: 'world.quarantined', message: 'Something about you broke a rule the world could not undo, so it stopped what you were doing; if you were inside something, or your body had broken, it set you down clear. Everyone else carried on. You can act again.' };
+/** #1496 nonfinite-hold/1: a number in the world went bad (NaN, Infinity) and was put back; what it touched was stopped. */
+export const NONFINITE_HELD = { code: 'state.non-finite', message: 'A number in the world near you broke, so the world put it back to its last good value and stopped what you were doing with it. Everyone else carried on. You can act again.' };
+export const REWOUND = { code: 'world.rewound', message: 'The world went back to its last clean moment, and what you were doing did not happen. You can act again once your hands are free.' };
+
+/** #1150: a violation by name. `subjects: ['*']` is the whole rule, once it has named too many bodies to list. */
+export type ContainedKeyV1 = { code: string; subjects: string[] };
+/** #1496 nonfinite-hold/1: one thing put right, as logged. `path` runs from its root (`world`: the engine's world, every
+ *  entity included; `programme`: a programme by id, then its fields). `from`: where it came from, the last good snapshot
+ *  (`baseline`: a number, or an entity's whole `pose`) or the named fallback (`zero`; `arrival`: a free item set down at a
+ *  free spot by the world's arrival, `place` carrying its pose and `release` the bodies that held it: the eject). */
+export type NonFinitePatchV1 = { root: 'world' | 'programme'; path: string[]; from: 'baseline' | 'zero' | 'arrival'; value?: number; pose?: Record<string, unknown>; place?: { p: [number, number, number]; yaw: number }; release?: string[] };
 
 export interface Engine {
   readonly rulesVersion: string;
@@ -113,6 +139,30 @@ export interface Engine {
    * same state. Read-only: no IDs consumed, cancellation, execution or events.
    * Optional; the sequencer otherwise requires an exact resumable checkpoint. */
   previewAdmission?(program: Program): ProgramAdmission;
+  /** #1150 rung 3, for an engine that declares rules. None of these steps the world, so no rule can fire during them. */
+  /** `from`: the tick a ladder's stop starts counting from, when the clock is about to move there. */
+  stopAllV1?(why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
+  /** #1369 quarantine/1: as `stopAllV1`, for these bodies' programmes alone. */
+  stopBodiesV1?(bodies: string[], why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
+  /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
+  corruptBodiesV1?(): ContainedKeyV1[];
+  /** #1521 stand-height/2's one-time repair: the bodies on level 0 of a world with no ground field standing more than a step above
+   *  their floor, and where each can stand (a pure read; the host logs it), and standing them there (as logged). */
+  planAboveFloorV2?(): { id: string; p: [number, number, number] }[];
+  standOnFloorV2?(bodies: { id: string; p: [number, number, number] }[]): string[];
+  holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
+  /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick. */
+  markStandingV1?(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void;
+  /** #1496 nonfinite-hold/1: every non-finite number in the world and the programmes, and what each is put back to: its value in
+   *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A body's
+   *  pose and human state are left out (quarantine/1's). Empty when anything can't be put back legally: that halts by name. */
+  planNonFiniteV1?(baseline?: Engine | null): NonFinitePatchV1[];
+  /** #1496: writes those patches (as logged; a replay passes the same ones back and reads nothing) and stops, with `why`, the
+   *  programmes they touched: a programme whose own state was patched, and those of a body patched or holding a set-down object. */
+  applyNonFiniteV1?(patches: NonFinitePatchV1[], why: { code: string; message: string }): { stopped: number; deadlines: number; bodies: string[]; programmes: string[] };
+  setClockV1?(tick: number): void;
+  /** Takes the fault's own named violations and returns the keys it kept, which go in the log: a replay passes those back. */
+  containV1?(keys: ContainedKeyV1[]): { contained: ContainedKeyV1[]; relocated: string[] };
   /** Stop a running program (the actor is left idle where it is). */
   /** `untilSafe` (PC08, a shared carry's stop): the programme stays until its native cleanup has finished, retrying a
    *  refused cancel each tick the action moves (not while it is held up), as a physical runtime does; without it,
@@ -155,7 +205,7 @@ export interface Engine {
   canSnapshot?(): boolean;
   groundReclaimEnabledV1?(): boolean;
   enableGroundReclaimV1?(): void;
-  configureRuntimePolicy?(policy: {sleepBlockTicks:number;quietSeatCourtesy?:boolean;nativeArrivalWitnessV1?:boolean;quietLandingCourtesyV1?:boolean;walkSettleWaitV1?:boolean;occupiedLinkRoutingV1?:boolean;concurrentLinkEgressV1?:boolean;stairLandingClearanceV1?:boolean}): void;
+  configureRuntimePolicy?(policy: {sleepBlockTicks:number;quietSeatCourtesy?:boolean;nativeArrivalWitnessV1?:boolean;quietLandingCourtesyV1?:boolean;walkSettleWaitV1?:boolean;occupiedLinkRoutingV1?:boolean;concurrentLinkEgressV1?:boolean;stairLandingClearanceV1?:boolean;routeReachV1?:boolean}): void;
   configureClock?(clock: { origin: number; dayTicks: number }): void;
   beginQuiet?(): void;
   isQuiet?(): boolean;
@@ -183,6 +233,11 @@ export interface Engine {
   adoptCommonsProvisionsV1?(transition:unknown):void;
   previewCrewRemovalTransitionV1?():CrewRemovalTransitionAdmissionV1;
   adoptCrewRemovalTransitionV1?(transition:CrewRemovalTransitionV1):void;
+  /** #1323: the repair rules adopted at a history's head (a reader that allows it only). */
+  previewSoulsRepairAdoptionV1?():SoulsRepairAdoptionAdmissionV1;
+  adoptSoulsRepairV1?(transition:SoulsRepairAdoptionV1):void;
+  /** #1323: a history that began under the repair rules, with no adoption fact: its genesis engine runs them. */
+  bornUnderSoulsRepairV1?():void;
   previewCampExpansionV1?():CampExpansionAdmissionV1;
   adoptCampExpansionV1?(transition:CampExpansionV1):void;
   campAnchors?(): Anchor[];

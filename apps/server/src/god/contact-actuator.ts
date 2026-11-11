@@ -4,7 +4,7 @@ import {actuatorPoint,actuatorHand,tugPoint,opPoint,slidePoint,strokePoint,strok
 import { createHash } from 'node:crypto';
 import { isDry, stageWord } from './garden.ts';
 import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
-import { opSchema, contactStateKey, CONTACT_EXTRA_FIELDS, DRAWER_TRAVEL, containerInside, containerOpen, containerHidden, pinSlot, signupSlot, signupCapacity, signupPageStart, SIGNUP_MAX, pollSlot, gameSquare, gameSquareOf, gameStatus, checkersCellOf, checkersSquare, checkersStatus, checkersRows, posterSlot, posterList, posterPaper, wantedSlot, wantedList, POSTER_W, POSTER_H, type WorldModel, type Op, type StoredDef } from '@souls/world-compiler';
+import { NOTEBOOK_LINES_MAX, NOTEBOOK_TILT, notebookLine, opSchema, contactStateKey, CONTACT_EXTRA_FIELDS, DRAWER_TRAVEL, containerInside, containerOpen, containerHidden, pinSlot, signupSlot, signupCapacity, signupPageStart, SIGNUP_MAX, pollSlot, gameSquare, gameSquareOf, gameStatus, checkersCellOf, checkersSquare, checkersStatus, checkersRows, posterSlot, posterList, posterPaper, wantedSlot, wantedList, POSTER_W, POSTER_H, type WorldModel, type Op, type StoredDef } from '@souls/world-compiler';
 import { posterName, posterFreeSlot, posterTarget, posterAge, posterStale, wantedColumn, wantedFreeRow, wantedTarget } from './poster-boards.ts';
 import type { EdgeSoul } from '../edge/contract.ts';
 import { actionPatch, actionsOf, actuatedState, keepsLeftBy, boardTextProblem, enumParamProblem, gamePatch, gameProblem, isGameAction, isListAction, listProblem, pinNotes, pollChoice, pollLines, whenRefusal } from './actuators.ts';
@@ -26,7 +26,9 @@ const LOCK_OPS=new Set(['lock','unlock','knock']);
 type Refusal={code:string;reason:string};
 export const isContactActuator = (def:StoredDef, action:{name:string}) => contactStateKey(def,action.name)!==null;
 const fail=(code:string,reason:string)=>({ok:false as const,code,reason});
-export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:number)=>number;clearance?:(x:number,z:number,level?:number)=>number;model:()=>WorldModel;body:(id:string)=>{pose:{p:number[]};human?:{hands?:{left?:number[];right?:number[]};handActuator?:import('../../../../mars/viewer/engine/social/hand-actuator.ts').HandActuatorMotion}}|undefined;access:(id:string,soul:EdgeSoul)=>{code:string;reason:string}|null;
+export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:number)=>number;clearance?:(x:number,z:number,level?:number)=>number;
+ /** #1070: how far this body must ease from `to` to stay clear of the thing's gap once it is shut; undefined when it's clear, null when no place is */ settle?:(actor:string,target:string,to:[number,number],level:number)=>[number,number]|null|undefined;
+ model:()=>WorldModel;body:(id:string)=>{pose:{p:number[]};human?:{hands?:{left?:number[];right?:number[]};handActuator?:import('../../../../mars/viewer/engine/social/hand-actuator.ts').HandActuatorMotion}}|undefined;access:(id:string,soul:EdgeSoul)=>{code:string;reason:string}|null;
  /** entry 32: the thing's owner (a name) and whether it is this Soul; null when nobody owns it */ owner?:(id:string,soul:EdgeSoul)=>{name:string;mine:boolean}|null;
  /** entry 32: a knock on the leaf landed (the first rap): tell those who hear it */ knock?:(soul:EdgeSoul,id:string)=>void;
  /** Entry 43: compact facts of things that are not contact actuators (a kettle, a cup of tea), or null. */ moreFacts?:(id:string)=>Record<string,unknown>|null;
@@ -39,10 +41,22 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
   plan(soul:EdgeSoul,target:string,action:string,input:Record<string,unknown>={},opts?:{from?:[number,number];open?:boolean}){
    const m=d.model(),e=m.entities.get(target),def=e&&m.resolvedDef(e.def),body=d.body(soul.entityId);if(!e||!def||!body)return null;
    const wp=m.worldPose(e),me=opts?.from?[opts.from[0],body.pose.p[1],opts.from[1]]:body.pose.p,at:[number,number,number]=[wp.x,wp.y+1.04*wp.s,wp.z];
-   const params:Omit<HandActuatorParams,'actor'>={target,at};let root:[number,number,number],face:[number,number]|undefined,faceTo:[number,number]|undefined;
+   const params:Omit<HandActuatorParams,'actor'>={target,at};let root:[number,number,number],face:[number,number]|undefined,faceTo:[number,number]|undefined,noRoom=false;
    if(contactStateKey(def,action)==='text'){
     // Stand square in front of the board's face; the hand works across the face from its centre.
-    const face=(def.make.kind==='gen'?(def.make.args as {faces?:{at?:number[];w?:number;h?:number}[]})?.faces?.[0]:undefined);if(!face?.at)return null;
+    const face=(def.make.kind==='gen'?(def.make.args as {faces?:{at?:number[];w?:number;h?:number;pitch?:number}[]})?.faces?.[0]:undefined);if(!face?.at)return null;
+    if(def.tags.includes('notebook')&&(action==='pin'||action==='unpin')){
+     // #428: a notebook's page lies on a lectern, sloped NOTEBOOK_TILT from vertical. The hand writes at (or crosses out)
+     // the line's own place on the page (notebookLine, shared with the viewer), 3 cm off the page; the body stands in
+     // front of the lectern, clear of its footprint, whatever the line.
+     const c=Math.cos(wp.yaw),s=Math.sin(wp.yaw),t=NOTEBOOK_TILT,S=wp.s,[fx,fy,fz]=face.at.map(v=>v*S);
+     const local=(dx:number,dy:number,o:number):[number,number,number]=>{const along=-Math.sin(t)*dy*S+Math.cos(t)*o;return [wp.x+fx*c+fz*s+dx*S*c+along*s,wp.y+fy+Math.cos(t)*dy*S+Math.sin(t)*o,wp.z-fx*s+fz*c-dx*S*s+along*c];};
+     const notes=pinNotes(actuatedState(e,def)),i=action==='pin'?notes.length:notes.map(n=>n.by).lastIndexOf(soul.soulId),[dx,dy]=notebookLine(Math.max(0,Math.min(NOTEBOOK_LINES_MAX-1,i)));
+     params.at=local(dx,dy,.03);
+     const atZ=(params.at[0]-wp.x)*s+(params.at[2]-wp.z)*c,stand=Math.min(.7,Math.max(.3,def.size.box[2]/2*S+HUMAN_RADIUS+.03-atZ));
+     params.stroke={kind:action==='unpin'?'wipe':'write',yaw:wp.yaw,tilt:t,stand,width:action==='unpin'?.12:.2,height:.05,lines:1,seconds:action==='unpin'?1.2:2};
+     root=strokeRoot(params.at,params.stroke,wp.y);
+    }else{
     const c=Math.cos(wp.yaw),s=Math.sin(wp.yaw),[fx,fy,fz]=face.at.map(v=>v*wp.s),centre:[number,number,number]=[wp.x+fx*c+fz*s,wp.y+fy,wp.z-fx*s+fz*c];
     const text=typeof input.text==='string'?input.text.trim():'',lines=action==='write'?Math.min(3,Math.max(text.split('\n').length,Math.ceil(text.length/34),1)):1,pin=action==='pin'||action==='unpin',list=['sign','unsign','vote'].includes(action);
     // Work across the upper part of the face, near shoulder height, not at the hip.
@@ -83,6 +97,7 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
     // Entry 38 (take 2): a Soul arriving along the wall turned to it during the reach and swung an arm out wide; posters and
     // wanted/offered notes turn to face the board on arrival first (entry 33's turn-then-reach), then the hands come up
     if(posters||wanted)faceTo=[params.at[0],params.at[2]];
+    }
    }else if(def.tags.includes('hand-drawer')){
     // a drawer slides straight out of the front (+z): the hand takes its knob, the body stands half a metre in front
     const shapes=def.make.kind==='gen'?(def.make.args as {shapes?:{role?:string;at?:number[];tint?:string}[]})?.shapes:undefined,knob=shapes?.find(s=>s.role==='drawer'&&s.tint==='brass'&&s.at);if(!knob?.at)return null;
@@ -105,6 +120,8 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
     params.opening={bodyPolicy:'door-natural-v2',...(def.tags.includes('wall-window')?{floorY:me[1]}:{}),hinge:[wp.x+hx*c+hz*s,wp.y,wp.z-hx*s+hz*c],yaw:wp.yaw,radius:((knob?.at?.[0]??(Number(def.components.opening?.width??leaf.size?.[0]??.8)/2-.1))-leaf.pivot[0])*sx,height:Number(def.components.opening?.height??leaf.size?.[1]??1.8)*sy,handleY:(knob?.at?.[1]??.85)*sy,from:(opts?.open??actuatedState(e,def).open===true)?HAND_OPEN_ANGLE:0,to:action==='open'?HAND_OPEN_ANGLE:0,side:def.tags.some(t=>['wall-window','hand-cabinet'].includes(t))?1:localZ<0?-1:1};
     if(def.tags.includes('wall-window')&&(wp.y+params.opening.handleY-me[1]>1.65||wp.y+params.opening.handleY-me[1]<.35))return null;
     root=actuatorPoint(params.opening,params.opening.from).root;
+    // #1070: the gap turns solid at the contact, so a close that would end too near it eases clear on the way. Most end clear and change nothing.
+    if(params.opening.from!==0&&params.opening.to===0&&!params.op){const end=actuatorPoint(params.opening,0).root,settle=d.settle?.(soul.entityId,target,[end[0],end[2]],d.levelAt?.(end[0],end[2],end[1])??0);if(settle===null)noRoom=true;else if(settle)params.opening.settle=settle;}
    }else if(def.components.bell&&def.tags.includes('hand-rung')){
     const [x,y,z]=def.components.bell.gripAt,stretch=(key:string)=>Number(e.params?.[key]??def.params[key]?.default??1),sx=wp.s*stretch('sx'),sy=wp.s*stretch('sy'),sz=wp.s*stretch('sz'),c=Math.cos(wp.yaw),s=Math.sin(wp.yaw);
     at[0]=wp.x+x*sx*c+z*sz*s;at[1]=wp.y+y*sy;at[2]=wp.z-x*sx*s+z*sz*c;params.tug={length:.45*sy,angle:def.components.bell.pullAngle,yaw:wp.yaw,seconds:.6};
@@ -164,7 +181,7 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
    const busy=body.human?.hands,usual=actuatorHand(params.opening),other=usual==='left'?'right':'left';
    if(busy&&(busy.left||busy.right)&&!body.human?.handActuator&&!(busy[usual]&&busy[other]))params.hand=busy[usual]?other:usual;
    const o=params.opening,after:[number,number]|undefined=params.op==='knock'&&o?[+(wp.x+Math.cos(wp.yaw)*1.35+Math.sin(wp.yaw)*o.side*1.3).toFixed(3),+(wp.z-Math.sin(wp.yaw)*1.35+Math.cos(wp.yaw)*o.side*1.3).toFixed(3)]:undefined;
-   return {params,root,level:d.levelAt?.(root[0],root[2],root[1])??0,...(face?{face}:faceTo?{face:faceTo}:{}),...(after?{after}:{})};
+   return {params,root,level:d.levelAt?.(root[0],root[2],root[1])??0,...(face?{face}:faceTo?{face:faceTo}:{}),...(after?{after}:{}),...(noRoom?{noRoom}:{})};
   },
   /** What a Soul reads when it completes `read:<sign>` (never in ambient perception for Soul-written boards). */
   sign(target:string){
@@ -179,7 +196,7 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
     const count=(m:'X'|'O')=>`${m} ${st.men[m]+st.kings[m]} piece${st.men[m]+st.kings[m]===1?'':'s'}${st.kings[m]?` (${st.kings[m]} king${st.kings[m]===1?'':'s'})`:''}`;
     const head=st.fresh?'Checkers: a new game, X (the bottom side) to move':`Checkers: ${who('X')} (X)${names[1]?` against ${names[1]} (O)`:''}; ${st.winner?`${who(st.winner)} won`:`${who(st.turn)} to move${st.chain>=0?', jumping on':''}`}; ${count('X')}, ${count('O')}`;
     return {id:e.id,name:e.name??def.name.replace(/^core-/,''),text:[head,...checkersRows(e.state?.text)].join('\n'),by:null,writable:true};}
-   return {id:e.id,name:e.name??def.name.replace(/^core-/,''),text,...(def.tags?.includes('pinboard')?{notes:pinNotes(e.state??{})}:{}),...(def.tags?.includes('signup')?{title:String(e.state?.title??''),signups:pinNotes(e.state??{}),text:[String(e.state?.title??'Sign up'),...pinNotes(e.state??{}).map((n,i)=>`${i+1}. ${n.text}`)].join('\n')}:{}),...(def.tags?.includes('poll')?{title:String(e.state?.title??''),text:[String(e.state?.title??''),pollLines(e.state??{})].join('\n')}:{}),...(def.tags?.includes('posters')?{posters:posterList(e.state??{}).map(p=>({...p,age:posterAge(p),stale:posterStale(p)}))}:{}),...(def.tags?.includes('wanted')?{wanted:wantedList(e.state??{})}:{}),by:typeof e.state?.textBy==='string'&&e.state.textBy&&!def.tags?.some(t=>t==='poll'||t==='signup'||t==='posters'||t==='wanted')?e.state.textBy:null,writable:!!def.tags?.includes('hand-writable')};
+   return {id:e.id,name:e.name??def.name.replace(/^core-/,''),text,...(def.tags?.includes('pinboard')?{notes:pinNotes(e.state??{}),...(def.tags.includes('notebook')?{notebook:true}:{})}:{}),...(def.tags?.includes('signup')?{title:String(e.state?.title??''),signups:pinNotes(e.state??{}),text:[String(e.state?.title??'Sign up'),...pinNotes(e.state??{}).map((n,i)=>`${i+1}. ${n.text}`)].join('\n')}:{}),...(def.tags?.includes('poll')?{title:String(e.state?.title??''),text:[String(e.state?.title??''),pollLines(e.state??{})].join('\n')}:{}),...(def.tags?.includes('posters')?{posters:posterList(e.state??{}).map(p=>({...p,age:posterAge(p),stale:posterStale(p)}))}:{}),...(def.tags?.includes('wanted')?{wanted:wantedList(e.state??{})}:{}),by:typeof e.state?.textBy==='string'&&e.state.textBy&&!def.tags?.some(t=>t==='poll'||t==='signup'||t==='posters'||t==='wanted')?e.state.textBy:null,writable:!!def.tags?.includes('hand-writable')};
   },
   /** Entry 32: who may lock, unlock and knock on a lockable door. Its owner locks and unlocks it (key outside, thumb-turn
    *  inside); a door nobody owns locks for anyone. Knocking is for the outside (the front) of a closed door. A non-owner
@@ -220,6 +237,11 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
    const ins=containerOpen(def,state)&&!containerHidden(def)?containerInside(def):null,noted=keepsLeftBy(def); // #435: a hiding place says nothing of what it holds
    if(ins){const slots=new Set(ins.slots.map(s=>s.id)),holds:string[]=[];for(const c of m.children.get(target)??[]){const x=m.entities.get(c);if(!x||!slots.has(x.in.slot??''))continue;const n=x.name??(m.resolvedDef(x.def)?.name.replace(/^core-/,'')??'something'),note=noted?d.keptNote?.(target,c,soul):null;holds.push(note?`${n} (${note})`:n);}if(holds.length)facts.holds=holds.sort();}
    return facts;
+  },
+  /** #427: how far (m) this thing shades this Soul's ground now: 0 unless it has a shade, it is open and she is on its level. */
+  shade(target:string,soul:EdgeSoul){
+   const m=d.model(),e=m.entities.get(target),def=e&&m.resolvedDef(e.def),radius=def?.components.shade?.radius,b=d.body(soul.entityId);if(!e||!def||!radius||!b||actuatedState(e,def).open!==true)return 0;
+   const wp=m.worldPose(e);return Math.abs(b.pose.p[1]-wp.y)<1?radius*wp.s:0;
   },
   searched:(soul:EdgeSoul,spot:string,failed?:boolean,overlapped?:boolean)=>d.searchOutcome?.(soul,spot,failed,overlapped)??null,
   /** Entry 33: a neon sign's words for a Soul near it (the same nearby rule as `facts`): its owner's text, at most 32

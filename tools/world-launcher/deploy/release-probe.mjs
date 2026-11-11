@@ -28,14 +28,25 @@
 // Builds: every world socket records the build its welcome names. --expect-build (the release id; a legacy root's
 // -root suffix matches too) checks every page ends on it; without it, a page whose build did not change is reported.
 // A release that rolled back (activate.sh put the previous build back) is flagged ROLLED BACK even when visitors were
-// fine: the visitor bar can pass while the release did not land (exit 3).
+// fine: the visitor bar can pass while the release did not land (exit 3). Only a page that ENDED ON ANOTHER BUILD counts
+// as rolled back. A watched page whose document did not load (a world that is down when the probe starts, the state a
+// fixing release starts from) is retried every --retry-s seconds (default 5), after READY too, and marked when it first
+// loads; one that never loads is `notLoaded`, one that loaded but never got a build-naming welcome is `noBuild`. Both
+// fail the visitor bar (exit 1) and neither is a rollback (#1414). A watcher's error pages before it is watched (READY,
+// or its first load) are reported (errorPagesBeforeReady) and do not count against the release; arrivals always count.
 //
-// Bar (G9): errorPages 0, every arrival loaded (document 2xx/3xx within 30 s), lost 0, unclean 0, every reconnect <= 5000 ms,
-// no page reloaded, watched >= --after-s after the release ended.
+// Bar (G9): errorPages 0, every arrival loaded (document 2xx/3xx within 30 s), lost 0, unclean 0, every reconnect <= 6500 ms
+// (RECONNECT_BAR_MS), no page reloaded, watched >= --after-s after the release ended.
+// A reconnect is close -> first message on the next socket, in two parts (#1583): retryMs, the page's own wait before it
+// tries again (50-150 ms after a 1001 handover close), and heldMs, the launcher holding that upgrade until the new world
+// answers. On 0.123, 4.17 and 4.18 retryMs was 67-121 ms and heldMs 3.6-5.1 s: the activation's world boot, not the probe.
+// The bar was 5000 ms, inside that boot's own spread; it is 6500 until the boot is made faster. The machine's load is kept
+// at the start and the end (report.host), so a loaded workstation can be told apart from a slower release.
 import { createRequire } from 'node:module';
 import { recordWorldSockets } from './socket-observer.mjs';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpus, loadavg } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,6 +66,7 @@ const afterMs = Number(flag('after-s', 60)) * 1000;   // watch this long after <
 const expectBuild = flag('expect-build', null);
 const keepEdits = argv.includes('--keep-edits');
 const cliEvery = Number(flag('cli-every', 1)) * 1000;   // one edit per second per god, under the world's edit rate limit
+const retryMs = Number(flag('retry-s', 5)) * 1000;   // a watched page that did not load is retried this often
 const sharedLease = process.env.SIM_CHROME_LEASE;   // optional machine-wide lease module (see ship/browser.mjs)
 const leasePath = flag('lease', sharedLease && existsSync(sharedLease) ? sharedLease : null);
 if (!origin || !pages.length || !out) { console.error('usage: release-probe.mjs --origin <url> --pages <path,…> --out <dir> [--phone-pages …] [--cli <dir,…>]'); process.exit(2); }
@@ -68,7 +80,9 @@ const ERROR_TEXT = /Bad Gateway|Service Unavailable|Gateway Time-?out|"code":\s*
 const RECORDER = recordWorldSockets;
 const isWorldSocket = (u) => /\/ws(\?|$)/.test(u);
 
-const report = { origin, startedAt: iso(), pages, phonePages, watchers: [], arrivals: [], cli: [], bar: null };
+const RECONNECT_BAR_MS = 6500;
+const hostLoad = () => ({ at: iso(), load1: Math.round(loadavg()[0] * 100) / 100, cpus: cpus().length });
+const report = { origin, startedAt: iso(), host: { start: hostLoad(), end: null }, pages, phonePages, watchers: [], arrivals: [], cli: [], bar: null };
 const browsers = []; let release = () => {};
 async function openBrowser() {
   if (leasePath && !browsers.length) { const { chromeLease } = await import(leasePath); release = await chromeLease('release-probe'); }   // one lease for the run
@@ -94,12 +108,21 @@ async function watch(ctx, device, path) {
   page.on('framenavigated', (f) => { if (f === page.mainFrame()) w.navigations++; });
   page.on('response', (r) => { if (r.status() >= 500) w.errors5xx.push({ at: at(), status: r.status(), url: r.url().slice(0, 160) }); });
   page.on('pageerror', (e) => w.pageErrors.push({ at: at(), message: e.message.slice(0, 160) }));
-  const r = await page.goto(origin + path, { waitUntil: 'load', timeout: 120_000 }).catch((e) => ({ status: () => `goto: ${e.message.slice(0, 80)}` }));
-  w.status = r?.status?.() ?? null;
-  w.page = page;
+  w.page = page; w.loads = 0;
+  await load(w, 120_000);
+  w.firstStatus = w.status;
   return w;
 }
+const okStatus = (s) => typeof s === 'number' && s >= 200 && s < 400;
+// one navigation of a watched page; it counts as loaded once its document is 2xx/3xx
+async function load(w, timeout = 30_000) {
+  const r = await w.page.goto(origin + w.path, { waitUntil: 'load', timeout }).catch((e) => ({ status: () => `goto: ${e.message.slice(0, 80)}` }));
+  w.loads++; w.status = r?.status?.() ?? null; w.lastTryAt = at();
+  if (okStatus(w.status) && w.loadedAt == null) w.loadedAt = at();
+  return okStatus(w.status);
+}
 async function mark(w) {
+  w.markAt = at();
   await w.page.evaluate(() => { window.__z1mark = 'arrived'; }).catch(() => {});
   w.marked = true; w.navigationsAtMark = w.navigations;
   await w.page.screenshot({ path: join(out, `${w.device}-${slugOf(w.path)}-1-before.png`) }).catch(() => {});
@@ -111,7 +134,8 @@ async function sample(w) {
   const rc = txt.match(/Reconnecting[^\n]*/); if (rc) w.reconnectingText.push({ at: at(), text: rc[0].slice(0, 80) });
 }
 async function finish(w) {
-  w.reloaded = (await w.page.evaluate(() => window.__z1mark).catch(() => null)) !== 'arrived' || w.navigations !== w.navigationsAtMark;
+  // a page that was never marked (it never loaded) was not reloaded: it is reported as notLoaded instead
+  w.reloaded = w.marked && ((await w.page.evaluate(() => window.__z1mark).catch(() => null)) !== 'arrived' || w.navigations !== w.navigationsAtMark);
   w.canvas = await w.page.evaluate(() => [...document.querySelectorAll('canvas')].some((c) => c.width > 0 && c.height > 0)).catch(() => false);
   const socks = (await w.page.evaluate(() => window.__z1ws).catch(() => [])).filter((s) => isWorldSocketIn(s.url));
   w.stalls = ((await w.page.evaluate(() => window.__z1stalls).catch(() => null)) ?? []).map(([a, b]) => [a - t0, b - t0]);
@@ -120,14 +144,15 @@ async function finish(w) {
   w.sockets = socks.map((s) => ({ ...s, sent: (s.sent ?? []).map(x => ({ ...x, at: x.at - t0 })), made: s.made - t0, open: s.open && s.open - t0, first: s.first && s.first - t0, last: s.last && s.last - t0, close: s.close && s.close - t0 }));
   w.drops = [];
   for (let i = 0; i < w.sockets.length; i++) {
-    const s = w.sockets[i]; if (s.close === null || s.close < w.markAt || s.close > stoppedAt) continue;   // a close while collecting is not watched
+    const s = w.sockets[i]; if (s.close === null || !w.marked || s.close < w.markAt || s.close > stoppedAt) continue;   // a close while collecting is not watched
     const next = w.sockets.slice(i + 1).find((n) => n.first !== null && n.first >= s.close);
     w.drops.push({ closeAt: s.close, code: s.code, reason: s.reason ?? null, sentLast10s: (s.sent ?? []).filter(x => x.at >= s.close - 10000 && x.at <= s.close), resumedAt: next?.first ?? null, reconnectMs: next ? next.first - s.close : null,
+      retryMs: next ? next.made - s.close : null, heldMs: next?.open != null ? next.open - next.made : null,
       pageStallMs: stallIn(s.close - 1000, next?.first ?? at()) });
   }
   // the build each page saw when it was marked, and at the end (the welcome of its last socket that had one)
   const built = w.sockets.filter((s) => s.build != null);
-  w.buildAtMark = built.filter((s) => s.first !== null && s.first <= w.markAt).at(-1)?.build ?? null;
+  w.buildAtMark = w.marked ? built.filter((s) => s.first !== null && s.first <= w.markAt).at(-1)?.build ?? null : null;
   w.buildAtEnd = built.at(-1)?.build ?? null;
   await w.page.screenshot({ path: join(out, `${w.device}-${slugOf(w.path)}-2-after.png`) }).catch(() => {});
   delete w.page;
@@ -209,7 +234,7 @@ async function cliLoop(dir, runId, stopped) {
 
 // ---------- main
 let stopping = false;
-let releasedAt = null, stoppedAt = null;
+let releasedAt = null, stoppedAt = null, readyAt = null;
 const stopped = () => {
   if (stoppedAt !== null) return true;
   if (releasedAt === null && existsSync(RELEASED)) { releasedAt = at(); say(`released: watching ${afterMs / 1000} s more`); }
@@ -225,7 +250,8 @@ try {
   for (const p of phonePages) report.watchers.push(await watch(await context('phone'), 'phone', p));
   say(`${report.watchers.length} watchers open; arriving for ${settleMs / 1000} s`);
   await new Promise((r) => setTimeout(r, settleMs));
-  for (const w of report.watchers) { await mark(w); w.markAt = at(); }
+  for (const w of report.watchers) if (okStatus(w.status)) await mark(w); else say(`${w.device} ${w.path}: answered ${w.status}; retrying every ${retryMs / 1000} s`);
+  readyAt = at();
   const runId = Date.now().toString(36);
   const clis = cliDirs.map((d) => cliLoop(resolve(d), runId, stopped));
   writeFileSync(join(out, 'ready'), iso());
@@ -233,7 +259,10 @@ try {
   const targets = [...pages.map((p) => ['desktop', p]), ...(ctxs.phone ? phonePages.map((p) => ['phone', p]) : [])];
   let k = 0, nextArrive = Date.now(); const inflight = [];
   while (!stopped()) {
-    for (const w of report.watchers) await sample(w);
+    for (const w of report.watchers) {
+      if (w.marked) { await sample(w); continue; }
+      if (at() - w.lastTryAt >= retryMs && await load(w)) { await mark(w); say(`${w.device} ${w.path}: loaded at last (${w.status})`); }
+    }
     if (Date.now() >= nextArrive) { const [d, p] = targets[k++ % targets.length]; inflight.push(arrive(ctxs[d], d, p).then((a) => report.arrivals.push(a))); nextArrive = Date.now() + arriveEvery; }
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -247,15 +276,20 @@ try {
 
 // ---------- verdict
 const drops = report.watchers.flatMap((w) => (w.drops ?? []).map((d) => ({ ...d, device: w.device, path: w.path })));
-const errorPages = report.watchers.reduce((n, w) => n + w.errorText.length + w.errors5xx.filter((e) => /\.html|\/$|\/\?/.test(e.url)).length, 0)
+// A watcher's own error pages count from the moment it is watched (marked, at READY or when it first loads); before that
+// they are the state the release starts from, reported apart. Fresh arrivals always count: they are the visitors.
+const pageError = (e) => /\.html|\/$|\/\?/.test(e.url), watched = (w) => (e) => w.marked && e.at >= w.markAt;
+const errorPagesBeforeReady = report.watchers.reduce((n, w) => n + w.errors5xx.filter((e) => pageError(e) && !watched(w)(e)).length, 0);
+const errorPages = report.watchers.reduce((n, w) => n + w.errorText.filter(watched(w)).length + w.errors5xx.filter((e) => pageError(e) && watched(w)(e)).length, 0)
   + report.arrivals.filter((a) => a.errorText || (a.status !== null && !(a.status >= 200 && a.status < 400))).length;
 report.bar = {
-  errorPages,
+  errorPages, errorPagesBeforeReady,
   responses5xx: report.watchers.reduce((n, w) => n + w.errors5xx.length, 0),
   reloaded: report.watchers.filter((w) => w.reloaded).map((w) => `${w.device} ${w.path}`),
   reconnectingShown: report.watchers.filter((w) => w.reconnectingText.length).map((w) => `${w.device} ${w.path} ${w.reconnectingText.length}x`),
   drops: drops.length,
-  reconnectMaxMs: drops.length ? Math.max(...drops.map((d) => d.reconnectMs ?? Infinity)) : 0,
+  reconnectMaxMs: drops.length ? Math.max(...drops.map((d) => d.reconnectMs ?? Infinity)) : 0, reconnectBarMs: RECONNECT_BAR_MS,
+  reconnectRetryMaxMs: Math.max(0, ...drops.map((d) => d.retryMs ?? 0)), reconnectHeldMaxMs: Math.max(0, ...drops.map((d) => d.heldMs ?? 0)),
   notResumed: drops.filter((d) => d.reconnectMs === null).length,
   arrivals: report.arrivals.length, arrivalsSlowestGotoMs: Math.max(0, ...report.arrivals.map((a) => a.gotoMs ?? 0)),
   arrivalsBusy: report.arrivals.filter((a) => a.busy).length, arrivalsNotLoaded: report.arrivals.filter((a) => a.error).map((a) => `${a.device} ${a.path} +${(a.at / 1000).toFixed(1)}s: ${a.error}`),
@@ -269,18 +303,23 @@ report.bar = {
 };
 const b = report.bar;
 // the release landed only if every page ends on the expected build (or, without --expect-build, on a new one)
-const landed = (w) => (expectBuild ? !!w.buildAtEnd?.startsWith(expectBuild) : !!w.buildAtEnd && w.buildAtEnd !== w.buildAtMark);
-b.rolledBack = report.watchers.filter((w) => !landed(w)).map((w) => `${w.device} ${w.path}: serves ${w.buildAtEnd}${expectBuild ? `, not ${expectBuild}` : ' (unchanged)'}`);
-b.pass = b.errorPages === 0 && b.arrivalsNotLoaded.length === 0 && b.lost === 0 && b.unclean === 0 && b.notResumed === 0 && b.reconnectMaxMs <= 5000 && b.reloaded.length === 0
+// A page with no build seen is unknown, never a rollback (#1414): it never loaded, or no welcome named a build.
+const landed = (w) => (expectBuild ? !!w.buildAtEnd?.startsWith(expectBuild) : w.buildAtEnd !== w.buildAtMark);
+b.notLoaded = report.watchers.filter((w) => !w.marked).map((w) => `${w.device} ${w.path}: never loaded (first ${w.firstStatus}, last ${w.status}, ${w.loads} tries)`);
+b.noBuild = report.watchers.filter((w) => w.marked && w.buildAtEnd == null).map((w) => `${w.device} ${w.path}: loaded${w.loadedAt > (readyAt ?? 0) ? ` late (+${(w.loadedAt / 1000).toFixed(1)}s)` : ''}, but no world socket welcome named a build`);
+b.rolledBack = report.watchers.filter((w) => w.buildAtEnd != null && !landed(w)).map((w) => `${w.device} ${w.path}: serves ${w.buildAtEnd}${expectBuild ? `, not ${expectBuild}` : ' (unchanged)'}`);
+b.pass = b.errorPages === 0 && b.notLoaded.length === 0 && b.noBuild.length === 0 && b.arrivalsNotLoaded.length === 0 && b.lost === 0 && b.unclean === 0 && b.notResumed === 0 && b.reconnectMaxMs <= RECONNECT_BAR_MS && b.reloaded.length === 0
   && b.watchedAfterReleaseMs !== null && b.watchedAfterReleaseMs >= afterMs;
-report.endedAt = iso();
+report.endedAt = iso(); report.host.end = hostLoad(); b.hostLoad = [report.host.start.load1, report.host.end.load1];
 writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(b, null, 1));
-for (const d of drops) console.log(`  ${d.device} ${d.path}: socket closed (${d.code}) at +${(d.closeAt / 1000).toFixed(1)}s, ${d.reconnectMs === null ? 'NOT resumed' : `resumed in ${d.reconnectMs} ms`}${d.pageStallMs ? ` (page main thread stalled ${d.pageStallMs} ms of it)` : ''}`);
+for (const d of drops) console.log(`  ${d.device} ${d.path}: socket closed (${d.code}) at +${(d.closeAt / 1000).toFixed(1)}s, ${d.reconnectMs === null ? 'NOT resumed' : `resumed in ${d.reconnectMs} ms (page retried after ${d.retryMs} ms, upgrade held ${d.heldMs} ms)`}${d.pageStallMs ? ` (page main thread stalled ${d.pageStallMs} ms of it)` : ''}`);
 for (const w of report.watchers) { const [x, y] = (w.stalls ?? []).reduce((m, s) => (s[1] - s[0] > m[1] - m[0] ? s : m), [0, 0]);
   if (y - x > 5000) console.log(`  ${w.device} ${w.path}: page main thread stalled ${y - x} ms (+${(x / 1000).toFixed(1)}s..+${(y / 1000).toFixed(1)}s); its socket events are late by as much`); }
 if (b.watchedAfterReleaseMs === null) console.log(`  never told the release ended (touch ${RELEASED}): late drops unwatched`);
 else if (b.watchedAfterReleaseMs < afterMs) console.log(`  watched only ${b.watchedAfterReleaseMs} ms after the release (need ${afterMs})`);
+for (const r of [...b.notLoaded, ...b.noBuild]) console.log(`  UNKNOWN BUILD: ${r}`);
 if (b.rolledBack.length) { console.log('  ROLLED BACK: the release did not land on every page'); for (const r of b.rolledBack) console.log(`    ${r}`); }
 say(`${b.pass ? 'PASS' : 'FAIL'}${b.rolledBack.length ? ' (visitors), but the release ROLLED BACK' : ''}`);
-process.exit(!b.pass ? 1 : b.rolledBack.length ? 3 : 0);
+// a rollback wins over any visitor failure: ship.sh stops on 3, and records 1 as "the release is live"
+process.exit(b.rolledBack.length ? 3 : !b.pass ? 1 : 0);

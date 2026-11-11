@@ -1,6 +1,7 @@
 export * from './load.ts';
 export * from './engine.ts';
 export * from './crew-removal-engine.ts';
+export * from './souls-repair-reader.ts';
 export * from './commons-provisions-engine.ts';
 export * from './commons-provisions.ts';
 export * from './terrain.ts';
@@ -34,6 +35,7 @@ export * from './mars-2026-map.ts';
 export * from './entity-physics.ts';
 export * from './catalog-adapter.ts';
 export { beamBays, type BeamBay } from './beam-connect.ts';
+export { PROCEDURES, atSite, bindStock, inSite, maneuversOf, offerFor, progressOf, spotAt, standAt, type Blueprint, type Bound, type Maneuver, type ManeuverState, type Procedure, type Progress, type Site, type Stock } from './project/project.ts';
 export { joistBays, sheetBays, type JoistBay } from './deck-install.ts';
 export { flightBays, flightUnfit, treadTarget, treadsPhrase, type FlightBay } from './stair-install.ts';
 export * from './ground-bridge.ts';

@@ -1,6 +1,8 @@
 import {closeContextViews} from './god/context-views.ts';
 import { Attention, unwatchedPace } from './attention.ts';
 import { ClockCatchUp } from './clock-catchup.ts';
+import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
+import { cutOverReminders } from './god/clock-cutover.ts';
 import { bootPhase } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
@@ -8,17 +10,16 @@ import { createServer } from 'node:http';
 import { existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getRequestListener } from '@hono/node-server';
-import { recordedToyFactory } from './toy-takes.ts';
 import { Auth } from './auth.ts';
 import { Brain } from './brain.ts';
-import { config, KNOWN_WORLD_KEYS } from './config.ts';
+import { config } from './config.ts';
 import { Db } from './db.ts';
 import { buildApp } from './http.ts';
 import { Hub } from './hub.ts';
 import { handleMcp } from './mcp.ts';
 import { Souls } from './souls.ts';
 import { WorldHost } from './world.ts';
-import { enableEdgeRuntimeRules } from './edge-runtime-rules.ts';
+import { adoptBootRuntimePoliciesV1 } from './edge-runtime-rules.ts';
 import { LivingWorld } from './living.ts';
 import { CampCards } from './camp.ts';
 import {FloaterCards} from './floaters.ts';
@@ -30,7 +31,8 @@ import { installLightning } from './god/lightning.ts';
 import { installGovernance } from './god/governance-edge.ts';
 import { GroundHost, installGroundCapabilities, loadGroundRecipes, registerGroundRecipes } from './god/ground-host.ts';
 import { stripWorldRequestPath } from './world-request-path.ts';
-import {edenCoreRequested,edenHistoryFactory,installEdenCore,settleEmptyEden,drainEdenThought,installEdenLifeV1,installEdenExpansionV1} from './eden-bootstrap.ts';
+import {worldFactory,plainWorldFactory} from './world-factory.ts';
+import {edenCoreRequested,installEdenCore,settleEmptyEden,drainEdenThought,installEdenLifeV1,installEdenExpansionV1} from './eden-bootstrap.ts';
 import {IntentControlV2} from './intent-control.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {installPuntActivities} from './punt-install.ts';
@@ -39,7 +41,8 @@ import {installBirthLooks} from './god/birth-look.ts';
 import { setKitViewerContract } from '@souls/generators';
 import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
-import { startWatchdog, writeLiveNow } from './load/watchdog.ts';
+import { stallConfig, startWatchdog, writeLiveNow } from './load/watchdog.ts';
+import { StallLog } from './load/stall-log.ts';
 import { sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
@@ -60,7 +63,7 @@ await standby(async () => {
 bootAt.go = performance.now();
 // srv-load (LOAD-CONTRACT §4): the watchdog thread first, before the database opens, so <DATA_DIR>/live.json reports the
 // whole boot. Not during a standby wait (the serving process still owns the file then). SIM_HEALTH_PORT: its own /healthz.
-if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined });
+if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir) });
 bootPhase('boot:restore');
 
 // K1 / NT5: new kit fields are admitted only with the viewer that can draw them.
@@ -96,14 +99,11 @@ const applyExpansion=process.env.APPLY_EDEN_EXPANSION_CHECKPOINT==='1';
 if(applyExpansion&&(!edenLife||!newcomerResources||!sleepSnapshot||!lecture||!expansionGround||process.env.EDEN_CORE_RETAIN_READER==='1'))throw Error('eden-bootstrap.expansion-requires-complete-explicit-readers-and-install-mode');
 // Launcher (entity) worlds opt into native Soul arrivals and removal (SOUL_LIFECYCLE=1), so account approvals create Souls as live does. Lane P2.
 const accountLifecycle=config.worldEngine&&!edenCore&&process.env.SOUL_LIFECYCLE==='1';
-const factory=edenCore?await edenHistoryFactory(db,config.worldId,{lifeV1:edenLife,newcomerResourcesV1:newcomerResources,sleepSnapshotV1:sleepSnapshot,lectureV1:lecture,groundV1:expansionGround}):warmFactory??await plainFactory();
+// #1323: the repair rules are on by default; a world whose history began without them adopts them at its head (one way)
+const factory=edenCore?await worldFactory(db,config,process.env):warmFactory??await plainFactory();
 /** A world's engine factory when it is not Eden core (that one reads its history from the database). Each process owns
  *  one world and imports its engine from this release. */
-async function plainFactory() {
-  const mars = config.engine === 'mars' ? await import('@souls/engine-mars') : null;
-  const accountLifecycle = config.worldEngine && !edenCoreRequested(config, process.env) && process.env.SOUL_LIFECYCLE === '1';
-  return mars?await mars.marsFactory(config.worldKey==='littlemartians'?mars.LITTLE_MARTIANS_WORLD:config.worldKey==='eden'||!KNOWN_WORLD_KEYS.includes(config.worldKey as never)?(accountLifecycle?{...mars.GREEN_FIELD_WORLD,safeCrewRemoval:true}:mars.GREEN_FIELD_WORLD):undefined):recordedToyFactory;
-}
+function plainFactory() { return plainWorldFactory(config, process.env); }
 // ground/1 (lane L8): every terrain recipe this entity world logged resolves by hash before the engine replays
 if (config.worldEngine) loadGroundRecipes(db, config.worldId);
 const host = new WorldHost(db, factory, config.worldSeed, config.snapshotEveryTicks, config.worldId,edenCore?{durableClockV1:true}:undefined);
@@ -111,6 +111,11 @@ const host = new WorldHost(db, factory, config.worldSeed, config.snapshotEveryTi
 host.snapshotDebtMs = config.snapshotDebtMs; host.snapshotMinGapMs = config.snapshotMinGapMs; host.snapshotAfterReplayTicks = config.snapshotAfterReplayTicks;
 bootAt.open = performance.now();
 const boot = host.boot();
+// #1323: after replay and the clock check, before the first live tick: the one logged adoption, or nothing
+{ const adoption = host.adoptSoulsRepairV1('operator:souls-repair-default'); host.drainInputs();
+  const fact = await adoption.catch((e) => { console.error('[world] the repair rules could not be adopted; the world runs under its own rules:', String(e).slice(0, 300)); return null; });
+  if (fact) console.log(`[world] adopted the repair rules at tick ${fact.tick} (one way): rules ${host.engine.rulesVersion}`);
+  if (process.env.SIM_SOULS_REPAIR === '0' && host.engine.rulesVersion.includes('+souls-repair/')) console.warn('[world] SIM_SOULS_REPAIR=0 is ignored for this world: it has adopted the repair rules, and that is one way'); }
 bootAt.engine = performance.now();
 if(edenCore)await installEdenCore(host,{applyCrew:process.env.APPLY_EDEN_CREW_CHECKPOINT==='1',applyCommons:process.env.APPLY_EDEN_COMMONS_CHECKPOINT==='1',retainReader:process.env.EDEN_CORE_RETAIN_READER==='1'});
 const edenCapabilities=edenCore&&host.engine.rulesVersion.includes('+crew-removal/1');
@@ -122,10 +127,11 @@ if(config.accountAuthRequired&&!auth.ready)throw Error('Account authentication v
 
 const living = config.worldKey !== 'toy' && config.livingWorld ? new LivingWorld(host) : null;
 if(edenCore)await settleEmptyEden(host,living,definition.customs);
-else if (living) { living.camp = config.worldKey === 'mars'; void living.install(definition.customs); }
+else if (living) { living.camp = config.worldKey === 'mars'; if (!realTimeEnabled()) void living.install(definition.customs); /* on real time the keeper below starts the clock, with these customs */ }
 const runtimePolicy = host.extra.runtimePolicy as { sleepBlockTicks: number; quietSeatCourtesy?: boolean } | undefined;
+let courtesy: Promise<unknown> = Promise.resolve();
 if (living && host.engine.configureRuntimePolicy && !runtimePolicy?.quietSeatCourtesy) {
-  void host.enqueue('rules','world',{runtimePolicy:{sleepBlockTicks:1200,...host.extra.runtimePolicy as object,quietSeatCourtesy:true},why:'enable ordinary idle-bystander courtesy at quiet seat exits prospectively; retain historical replay before this event'});
+  courtesy = host.enqueue('rules','world',{runtimePolicy:{sleepBlockTicks:1200,...host.extra.runtimePolicy as object,quietSeatCourtesy:true},why:'enable ordinary idle-bystander courtesy at quiet seat exits prospectively; retain historical replay before this event'});
 }
 const campCards = living?.camp ? new CampCards(host) : null;
 if(config.worldKey==='littlemartians')new FloaterCards(host);
@@ -160,7 +166,9 @@ hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPers
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
 const edge = config.mindDriver === 'edge' ? new EdgeLedger(host, db, process.env.PLACE_DATA ? JSON.parse(readFileSync(process.env.PLACE_DATA, 'utf8')) : undefined) : undefined;
-if (edge && host.engine.configureRuntimePolicy) void enableEdgeRuntimeRules(host, config.worldKey);  // not the stair-traffic rules on the Little Martians worlds
+// Boot runtime policies one after another (edge-runtime-rules.ts): the edge rules after the courtesy event, then #1332 body-step-guard/1
+// (Eden core too: its physical-binding readers take the rule as a runtime policy, #1362).
+if (host.engine.configureRuntimePolicy) void adoptBootRuntimePoliciesV1(host, { after: courtesy, edge: !!edge, worldKey: config.worldKey }).catch((e) => console.error('[world] a boot runtime policy could not be adopted:', String(e).slice(0, 300)));
 // God mode + entity world (spec eden4/28): the owner's edge agent builds the world; viewers get diffs over the hub.
 const genesis = process.env.GENESIS_FILE ? JSON.parse(readFileSync(process.env.GENESIS_FILE, 'utf8')) : undefined;
 const god = config.worldEngine ? new GodMode(db, { genesis, worldId: host.worldId, ownerId: process.env.WORLD_OWNER_ID || null /* explicit only: on a fresh world the first person to claim it becomes its god */, tick: () => host.engine.world.tick, emit: (m) => hub.broadcast(m as never), cobuilders: process.env.SIM_COBUILDERS === '1' /* off: one god per world (Gene 2026-10-16) */ }) : undefined;
@@ -169,6 +177,9 @@ const groundHost = god && (host.engine as unknown as {installGroundV1?:unknown})
 if (groundHost && edge) installGroundCapabilities(edge as never, god!, host);
 // Stage B (lane L9): Souls live among god-built things — entity physics into the engine, fixtures usable, bodies as entities.
 const engineBridge = god && config.engine === 'mars' && process.env.ENTITY_BRIDGE !== '0' ? installEngineBridge({ host, god, edge }) : undefined;
+// #1649: real time for every world through the one keeper. God worlds got theirs from the bridge (god/world-clock.ts);
+// an authored world (eden, mars, littlemartians) keeps the local time of its migration zone. Not the toy world.
+if (realTimeEnabled() && config.worldKey !== 'toy' && !hasRealClock(host)) installRealClock(host, { zone: () => defaultTimeZone(config.worldSlug ?? config.worldKey), customs: definition.customs, log: (m) => console.log(m), onCutOver: (c) => console.log(`world clock: cut-over to real time: ${cutOverReminders(db.db, host.worldId, c)} reminder(s) mapped`) });
 if (god && process.env.BIRTH_LOOKS !== '0') installBirthLooks(host, edge);  // lane LOOKS: new Souls in new worlds get a varied kit look
 if (god) installWorldEnv(host, god, edge);  // R4-LIVE: Souls perceive the god's weather
 if (god) installLightning(god, edge, () => host.engine.world.tick);  // GOD-ENV: Souls see the bolts and hear the thunder
@@ -186,6 +197,8 @@ const monitor = new LoadMonitor({ host, drill: drill && ['amber', 'red', 'black'
   requestMs: () => admission?.spentMs ?? 0, baselineMs: process.env.SIM_LOAD_BASELINE_MS !== undefined && process.env.SIM_LOAD_BASELINE_MS !== '' ? Number(process.env.SIM_LOAD_BASELINE_MS) : undefined,
   souls: () => { let awake = 0, connected = 0; for (const id of host.minds.keys()) { const st = host.publicBodyOf?.(id)?.state; if (st === 'awake') awake++; if (st && st !== 'asleep') connected++; } return { awake, waiting: waking?.waiting() ?? 0, connected }; },
   onBlackTooLong: () => { console.log(`[load] black for ${Math.round((Number(process.env.SIM_LOAD_BLACK_MS) || 60_000) / 1000)} s: planned restart (snapshot, exit 75)`); plannedSnapshot('load:black: planned restart'); void shutdown('load:black', 75).catch(() => process.exit(75)); } });
+// #1750 A3: a main-thread stall over 1 s is logged with its time, length and what ran in it (SIM_STALL_LOG=0 turns it off)
+const stallLog = process.env.SIM_STALL_LOG === '0' ? undefined : new StallLog({ ticks: () => ({ tick: host.engine.world.tick, tickMs: host.tickMs }) });
 if (admission) monitor.register('admission', (l) => admission.setLoadLevel(l));
 monitor.register('hub', (l) => hub.setLoadLevel(l));
 // L4's perception dial (lane srv-spatial, god/engine-bridge.ts PERCEIVE_DIAL); guarded until that lane merges
@@ -210,7 +223,7 @@ const SERVING_STEP_MS = 20;
 // is served (EdgeLedger.warmForServing); rich edge reads wait for it. Before listening, release 404 held Eden 2026's
 // handover ~4 s longer (8.5 s "Reconnecting…"). An optimisation only: a failure is logged and Souls build them on demand.
 const servingWarm=(why:'boot'|'activities')=>{if(closing||!edge||!engineBridge)return;const tick=host.engine.world.tick;
-  void edge.warmForServing({pre:s=>engineBridge.servingWarmGen(s,SERVING_STEP_MS),stop:()=>closing}).then(w=>console.log(`[${why}] edge capability caches ${w.stopped?'stopped':'warm'} after listen: ${w.ms} ms: ${w.slices} slices (longest ${w.maxStepMs} ms) and the listing ${w.listingMs} ms, over ${w.wallMs} ms for ${w.souls} Souls${w.failed?` (${w.failed} failed)`:''} from tick ${tick}`));};
+  void edge.warmForServing({pre:s=>engineBridge.servingWarmGen(s,SERVING_STEP_MS),stop:()=>closing,kind:why==='boot'?'boot':'rewarm'}).then(w=>console.log(`[${why}] edge capability caches ${w.stopped?'stopped':'warm'} after listen: ${w.ms} ms: ${w.slices} slices (longest ${w.maxStepMs} ms) and the listing ${w.listingMs} ms, over ${w.wallMs} ms for ${w.souls} Souls${w.failed?` (${w.failed} failed)`:''} from tick ${tick}`));};
 // A punt install moves the static world (new carriers and rides): its caches are rebuilt the same way shortly after.
 if(edge)installPuntActivities(host,edge,m=>console.log(`[activities] ${m}`),engineBridge?()=>{setTimeout(()=>servingWarm('activities'),1000).unref();}:undefined);
 // Stage B (lane B-port): the read-worker pool, DARK unless SIM_READ_WORKER=1 (split/read-pool.ts; nothing is imported
@@ -241,9 +254,16 @@ const listener = getRequestListener(app.fetch);
 // opens the database only after this one has exited.
 const writesInFlight = new Set<Promise<void>>();
 const WRITE_DRAIN_MS = Number(process.env.WRITE_DRAIN_MS ?? 2000);
+// Tests only (write-drain.test.ts): one stdout line as each write is counted in flight and as it closes, so a test can stop
+// the world exactly while one is in flight (#1778: a client-side signal such as 100 Continue did not prove the count).
+const WRITE_DRAIN_TRACE = process.env.WRITE_DRAIN_TRACE === '1';
 server.on('request', (req, res) => {
   if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') { const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done); void done.then(() => writesInFlight.delete(done)); }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+    const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
+    if (WRITE_DRAIN_TRACE) console.log(`[world] write in flight: ${writesInFlight.size}`);
+    void done.then(() => { writesInFlight.delete(done); if (WRITE_DRAIN_TRACE) console.log(`[world] write closed: ${writesInFlight.size} in flight`); });
+  }
   req.url = stripWorldPath(req.url);
   if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
   void listener(req, res);
@@ -253,7 +273,8 @@ server.on('request', (req, res) => {
 // ...and when somebody comes back, the world's time of day jumps to now (clock-catchup.ts; lane SLEEP): also after the
 // launcher let the world exit while asleep, so this boot may itself be the return. Not in LivingWorld worlds (their
 // dayConfig also restarts the day's events), which the launcher never runs.
-const catchUp = process.env.SIM_UNWATCHED_PACE && !living ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
+// #1649: a real-time clock re-aligns itself to the wall when the world is watched again (god/world-clock.ts), so no catch-up.
+const catchUp = process.env.SIM_UNWATCHED_PACE && !living && !realTimeEnabled() ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
 if (process.env.SIM_UNWATCHED_PACE) new Attention((watched) => { host.setPace(watched ? 1 : unwatchedPace()); if (watched) void catchUp?.watched()?.catch(() => {}); else catchUp?.unwatched(); }).watch(server);
 // SIM_BOOT_HASH=1 (measurement only): the engine state this boot restored, to compare with the one its last stop saved
 if (process.env.SIM_BOOT_HASH === '1') console.log(`[boot] state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
@@ -318,7 +339,7 @@ if (engineBridge) {
   }
 }
 server.listen(config.port, config.host, () => {
-  bootPhase('serving', host.engine.world.tick); monitor.start(); servingWarm('boot');
+  bootPhase('serving', host.engine.world.tick); monitor.start(); stallLog?.start(); servingWarm('boot');
   console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
   const s = (ms: number) => (ms / 1000).toFixed(2);
   console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);

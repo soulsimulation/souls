@@ -2,8 +2,16 @@
 // One connection is retained between pages. No token, header or URL is logged.
 // A live stream is one that keeps sending: any bytes, keepalives included, within
 // IDLE_BEATS heartbeats (the rate hello states) or idleMs until a hello says.
+// The world states the rate, so its limit is clamped (#466 review): a tiny one would reconnect constantly, and one past
+// setTimeout's range, Infinity or a non-number would fire at once. A rate that isn't a positive number keeps idleMs.
 const IDLE_BEATS=3;
-export function createEventReader({open,validateHello,idleMs=45000}){
+export const IDLE_MIN_MS=15000,IDLE_MAX_MS=600000;
+export function idleFromHello(heartbeatSeconds,fallback,{min=IDLE_MIN_MS,max=IDLE_MAX_MS}={}){
+ const beat=typeof heartbeatSeconds==='number'?heartbeatSeconds:NaN;
+ if(!(beat>0))return fallback;
+ return Math.min(max,Math.max(min,beat*1000*IDLE_BEATS));
+}
+export function createEventReader({open,validateHello,idleMs=45000,minIdleMs=IDLE_MIN_MS,maxIdleMs=IDLE_MAX_MS}){
  let reader=null,buffer='',decoder=new TextDecoder(),expected=null,adopted=false,idle=idleMs;
  const close=()=>{const old=reader;reader=null;buffer='';decoder=new TextDecoder();adopted=false;idle=idleMs;try{void old?.cancel().catch(()=>{});}catch{}};
  return async function page({after,signal,onReady}){
@@ -19,7 +27,7 @@ export function createEventReader({open,validateHello,idleMs=45000}){
     if(!data.length)continue;
     const value=JSON.parse(data.join('\n'));
     if(kind==='hello'){
-     if(value?.heartbeatSeconds>0)idle=value.heartbeatSeconds*1000*IDLE_BEATS;
+     idle=idleFromHello(value?.heartbeatSeconds,idle,{min:minIdleMs,max:maxIdleMs});
      // Native SSE admits the authenticated connection before sending hello.
      // Readiness is observation only: no page/cursor or synthetic event added.
      if(validateHello){validateHello(value,{after});adopted=true;if(!signal?.aborted)onReady?.({mode:'stream-adopted',successful:true,at:Date.now()});}

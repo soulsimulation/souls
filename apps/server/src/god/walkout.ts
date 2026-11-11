@@ -281,6 +281,12 @@ export function planWalkouts(engine: WalkoutEngine, before: WorldModel, after: W
   const moved: ResidentMove[] = [], stuck: StuckResident[] = [], reserved: Vec2[] = [], budget = { routes: ROUTE_BUDGET };
   for (const m of minds) {
     const b = engine.world.entities[m.entityId], h = b?.human; if (!h) continue;
+    // #1339: a rider in a carrier in flight is in the air, not in what is built under it: it stays aboard, and the ride checks
+    // its landing again on the way down (carrier.ts landing/1). Walking it out moved it from its seat to the ground mid-air.
+    const ride = (h as { carrier?: { id?: string } }).carrier?.id;
+    // (A punt afloat is 'aloft' too, but water edits under it are the punt's bank rules' business, as before.)
+    const rc = ride ? (engine.world.entities[ride] as { carrier?: { phase?: string; bank?: unknown } } | undefined)?.carrier : undefined;
+    if (rc?.phase === 'aloft' && !rc.bank) continue;
     const p: Vec2 = [b.pose.p[0], b.pose.p[2]], level = h.level ?? 0;
     const inside = [...zoneOf].filter(([, zs]) => zs.some(z => inSite(z, p, .35))).map(([id]) => id);
     // The ground rises over the body, or drops away from under it (left standing on air), by more than a step.

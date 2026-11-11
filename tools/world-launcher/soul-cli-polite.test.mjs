@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { fullJitter, statedJitter, retryClass, retryAfterMs } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
-const SCALE = 0.05;   // EDEN_TIME_SCALE: a stated 4 s wait takes 160–240 ms here
+const SCALE = 0.05;   // EDEN_TIME_SCALE: a stated 4 s wait takes 200–240 ms here
 const json = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(body)); };
 const busy = (res, code = 'world.busy', after = 4, status = code.startsWith('soul.') ? 429 : 503) =>
   json(res, status, { error: { code, message: 'synthetic busy' }, world: { load: 'red', retry_after_s: after, note: 'It is crowded here right now; things take a little longer.' } }, { 'retry-after': String(after), 'x-sim-load': 'red' });
@@ -37,15 +37,18 @@ async function fixture(t, respond) {
   return { dir, seen, start, run: (...args) => start(...args).done };
 }
 
-test('helpers: full jitter stays under the capped exponential; stated waits spread ±20 %; Retry-After from header or body', () => {
+test('helpers: full jitter stays under the capped exponential; a stated wait is a floor, spread up to 20 % above it; Retry-After from header or body', () => {
   assert.equal(fullJitter(0, () => 1), 1000); assert.equal(fullJitter(3, () => 0.5), 4000); assert.equal(fullJitter(10, () => 1), 60_000);
-  assert.equal(Math.round(statedJitter(4000, () => 0)), 3200); assert.equal(Math.round(statedJitter(4000, () => 1)), 4800);
+  assert.equal(Math.round(statedJitter(4000, () => 0)), 4000); assert.equal(Math.round(statedJitter(4000, () => 1)), 4800);
+  assert.equal(Math.round(statedJitter(120_000, () => 0)), 60_000, 'the cap holds');
   assert.equal(retryAfterMs(new Headers({ 'retry-after': '3' }), {}), 3000);
   assert.equal(retryAfterMs(new Headers(), { world: { retry_after_s: 2 } }), 2000); assert.equal(retryAfterMs(new Headers(), { retry_after: 7 }), 7000);
   assert.equal(retryAfterMs(new Headers(), {}), null);
   assert.equal(retryClass('GET', '/v1/edge/here?include=doHere'), 'read'); assert.equal(retryClass('POST', '/v1/edge/resolve'), 'read');
   for (const p of ['/v1/edge/act', '/v1/edge/say', '/v1/edge/converse', '/v1/edge/objects/o1/act']) assert.equal(retryClass('POST', p), 'keyed', p);
-  for (const p of ['/v1/edge/inbox/m1/ack', '/v1/edge/inbox/m1/result', '/v1/agent/create']) assert.equal(retryClass('POST', p), 'none', p);
+  assert.equal(retryClass('POST', '/v1/agent/create'), 'none');
+  // #1753: an ack or result is answered the same however often it is sent, so it is retried with one key until answered
+  for (const p of ['/v1/edge/inbox/m1/ack', '/v1/edge/inbox/m1/result']) assert.equal(retryClass('POST', p), 'keyed', p);
 });
 
 test('a read honours Retry-After: one calm line, the stated wait, then the answer', { timeout: 8_000 }, async t => {
@@ -67,12 +70,17 @@ test('a world that stays busy: the CLI waits 3 times, then exits 75 with a clean
   assert.match(got.stderr, /world\.busy — the world is busy\. Try once again in 2 s; do not loop/);
 });
 
-test('writes without an idempotency key are never repeated: ack on world.busy and on unreachable', { timeout: 8_000 }, async t => {
-  const f = await fixture(t, (_req, res, n) => n === 1 ? busy(res) : res.socket.destroy());
+test('#1753: ack and result are retried with one key after a busy refusal and a dropped connection', { timeout: 15_000 }, async t => {
+  const ok = (res, body) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+  const f = await fixture(t, (req, res, n) => n === 1 ? busy(res, 'world.busy', 0) : n === 3 ? res.socket.destroy() : req.url.includes('/inbox/m1/') && req.method === 'POST' ? ok(res, { inbox: { latest: { id: 'm1', state: 'acknowledged' } } }) : ok(res, { message: { id: 'm1', state: 'acknowledged' } }));
   const a = await f.run('ack', 'm1', 'Got it.');
-  assert.equal(a.code, 75); assert.equal(f.seen.length, 1); assert.match(a.stderr, /world\.busy/);
+  assert.equal(a.code, 0, a.stderr);
+  const acks = f.seen.filter((x) => x.url.endsWith('/ack'));
+  assert.equal(acks.length, 2); assert.ok(acks[0].key); assert.equal(acks[1].key, acks[0].key, 'one key for every try');
   const b = await f.run('result', 'm1', 'done', 'Waved.');
-  assert.equal(b.code, 75); assert.equal(f.seen.length, 2); assert.match(b.stderr, /Not retried: this write has no safe retry/);
+  assert.equal(b.code, 0, b.stderr);
+  const results = f.seen.filter((x) => x.url.endsWith('/result'));
+  assert.equal(results.length, 2); assert.equal(results[1].key, results[0].key);
 });
 
 test('act and say retry with the same Idempotency-Key and body after a busy refusal and a dropped connection', { timeout: 8_000 }, async t => {
@@ -105,8 +113,9 @@ test('unreachable reads back off with full jitter, 6 tries, then exit 75', { tim
 test('one listener per Soul: a second listen exits 0 at once; a stale lock is taken over; the lock goes with the listener', { timeout: 10_000 }, async t => {
   const f = await fixture(t, () => { /* hold every long-poll open */ });
   const first = f.start('listen');
-  const lock = join(f.dir, '.listen.lock');
-  for (let i = 0; i < 100 && !existsSync(lock); i++) await new Promise(r => setTimeout(r, 20));
+  // a takeover renames the old lock away, then creates the new one before writing it: missing or empty means "not yet"
+  const lock = join(f.dir, '.listen.lock'), holder = () => { try { return JSON.parse(readFileSync(lock, 'utf8')); } catch { return null; } };
+  for (let i = 0; i < 100 && holder()?.pid !== first.pid; i++) await new Promise(r => setTimeout(r, 20));
   assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, first.pid);
   const second = await f.run('listen');
   assert.equal(second.code, 0);
@@ -116,7 +125,7 @@ test('one listener per Soul: a second listen exits 0 at once; a stale lock is ta
   assert.ok(!existsSync(lock), 'released on SIGTERM');
   writeFileSync(lock, JSON.stringify({ pid: 2 ** 22 + 12345, start: 'long ago' }));   // a dead pid (SIGKILLed listener)
   const third = f.start('listen');
-  for (let i = 0; i < 100 && JSON.parse(readFileSync(lock, 'utf8')).pid !== third.pid; i++) await new Promise(r => setTimeout(r, 20));
+  for (let i = 0; i < 100 && holder()?.pid !== third.pid; i++) await new Promise(r => setTimeout(r, 20));
   assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, third.pid, 'stale lock taken over');
   const listens = () => f.seen.filter(s => s.url.startsWith('/v1/edge/inbox/listen')).length;
   for (let i = 0; i < 100 && listens() < 2; i++) await new Promise(r => setTimeout(r, 20));
