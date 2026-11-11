@@ -65,7 +65,7 @@ test('policy: the deck and both landings full, nothing is released: the body sta
   assert.deepEqual(after(e,100),[]);assert.equal(e.stallProbeV1('mover')!.held,true,'still held, for the guard to name');
 });
 
-test('policy is prospective and hashed: a world without it keeps its hash, and a restore keeps it on',()=>{
+test('policy is hashed: adopting it changes the state hash, and a restore keeps it on',()=>{
   const e=factory.create(factory.genesis('stall-support-policy')) as E,before=e.stateHash();
   e.configureRuntimePolicy({sleepBlockTicks:1200,stallReleaseSupportV1:true} as never);const on=e.stateHash();assert.notEqual(on,before);
   const copy=factory.restore(e.snapshot()) as E;assert.equal((copy.snapshot() as any).cfg.stallReleaseSupportV1,true);assert.equal(copy.stateHash(),on);
