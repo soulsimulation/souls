@@ -61,6 +61,18 @@ test('a basket on the ground is picked up from any distance', {timeout: 120000},
  });
 });
 
+test('a thing fenced in on the ground is refused item.unreachable: no hand reaches through the fence', {timeout: 120000}, async t => {
+ for (const [def, w] of [['core/harvest-basket@1', 0.3], ['core/harvest-basket@1', 0.35], ['core/apple@1', 0.3], ['core/apple@1', 0.35]]) await t.test(`${def} in a pen ${w} m across from its middle`, async t => {
+  const g = await world(t, (ax, az) => { const x = ax + 2.5, z = az;
+   return [{op: 'place', def, name: 'thing', p: [x, z]},
+    {op: 'place', def: 'core/fence@1', name: 'pen', shape: {path: [[x - w, z - w], [x + w, z - w], [x + w, z + w], [x - w, z + w], [x - w, z - w]]}}]; });
+  const r = await g.act(g.ana, 'thing');
+  const x = r.id ? (await g.end([r], 3000))[0] : r;
+  assert.equal(x.code, 'item.unreachable', JSON.stringify(x).slice(0, 400));
+  assert.notEqual(g.W().entities[g.id('thing')].support?.kind, 'in-hand');
+ });
+});
+
 test('a basket walled in on the ground is refused item.unreachable, never left started', {timeout: 120000}, async t => {
  const g = await world(t, (ax, az) => { const x = ax + 2.5, z = az, w = 0.45;
   return [{op: 'place', def: 'core/harvest-basket@1', name: 'basket', p: [x, z]},
