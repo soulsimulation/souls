@@ -2,8 +2,16 @@
 // previewed on a detached copy of the world, the check-on-a-copy path authored installs already use (engine.ts
 // previewCommonsFoodDeliveryV1: snapshot, restore detached, run every invariant). A preview and nothing else: it refuses
 // nothing, and `commitBatch`, BUILDSAFE and the walk-outs are unchanged. 1b reads it to refuse.
-import type { WorldEditV1 } from '@souls/engine-mars';
+// #2140: on Eden 2026 one preview costs most of a second, three quarters of it the copy, so the world's own entry point
+// (previewWorldEditOffThreadV1) runs it in a worker: the world takes the checkpoint with the stepped capture its periodic
+// snapshots use, and the worker restores and previews it with the code below. The caller awaits the result.
+import { setImmediate } from 'node:timers/promises';
+import { Worker } from 'node:worker_threads';
+import type { EngineCheckpoint, EngineSnapshot } from '@souls/engine-contract';
+import { groundRecipe, type WorldEditV1 } from '@souls/engine-mars';
 import type { WorldHost } from '../world.ts';
+import { factoryDescriptorV1 } from '../world-factory.ts';
+import type { PreviewJobV1, PreviewReplyV1 } from './edit-preview-worker.ts';
 
 type Vec2 = [number, number];
 type Diagnostic = { code: string; message: string; subjects?: string[] };
@@ -21,7 +29,9 @@ export type PreviewBodyV1 = { id: string; level: number; at: Vec2; alternative: 
 export type PreviewViolationV1 = { rule: string; subjects: string[]; bodies: PreviewBodyV1[]; message: string };
 export type EditPreviewV1 =
   | { ok: true; violations: PreviewViolationV1[]; relocated: string[]; trapped: string[] }
-  | { ok: false; code: 'edit-preview.resumable-boundary-required' };
+  | { ok: false; code: 'edit-preview.resumable-boundary-required' }
+  /** off-thread only: the factory has no descriptor (Eden core), or the worker failed; the message names why */
+  | { ok: false; code: 'edit-preview.worker-unavailable'; message: string };
 
 /** A detached copy of the host's engine, restored from its snapshot as an authored install checks its own; null off a
  *  resumable boundary. Nothing done to the copy reaches the world. */
@@ -65,4 +75,53 @@ export function previewWorldEditV1(engine: WorldHost['engine'] | null, edit: Wor
     return { rule: d.code, subjects, bodies, message: d.message };
   });
   return { ok: true, violations, relocated, trapped };
+}
+
+/** The world's checkpoint, taken as its periodic snapshot takes one (world.ts schedulePeriodicSnapshot): the capture owns
+ *  its boundary synchronously, then the remaining steps run in slices of at most 4 ms between ticks. */
+async function steppedSnapshotV1(engine: WorldHost['engine']): Promise<EngineSnapshot> {
+  const captured = engine.captureCheckpoint?.() ?? engine.captureSnapshot?.();
+  if (!captured) return engine.snapshot();
+  const steps = (captured.steps as () => Generator<void, EngineCheckpoint | EngineSnapshot, void>)();
+  for (;;) {
+    const start = performance.now();
+    let r: IteratorResult<void, EngineCheckpoint | EngineSnapshot>;
+    do r = steps.next(); while (!r.done && performance.now() - start < 4);
+    if (r.done) return 'physicalHash' in r.value ? r.value.snapshot : r.value;
+    await setImmediate();
+  }
+}
+
+let worker: Worker | null = null, nextId = 0;
+const waiting = new Map<number, (r: EditPreviewV1) => void>();
+const unavailable = (message: string): EditPreviewV1 => ({ ok: false, code: 'edit-preview.worker-unavailable', message });
+function previewWorker(): Worker {
+  if (worker) return worker;
+  const w = new Worker(new URL('./edit-preview-worker.ts', import.meta.url), { execArgv: [] });
+  w.unref();
+  const fail = (message: string) => { if (worker === w) worker = null; for (const done of waiting.values()) done(unavailable(message)); waiting.clear(); };
+  w.on('message', (m: PreviewReplyV1) => { const done = waiting.get(m.id); waiting.delete(m.id); if (!waiting.size) w.unref(); done?.('error' in m ? unavailable(m.error) : m.result); });
+  w.on('error', e => fail(e.message));
+  w.on('exit', code => fail(`the preview worker exited (${code})`));
+  return (worker = w);
+}
+
+/**
+ * The preview of `edit` on the world as it stands now, off the world's tick thread: the same result previewWorldEditV1
+ * gives on detachedEngineV1(host) at this tick. Only the stepped checkpoint runs on the world's thread.
+ */
+export async function previewWorldEditOffThreadV1(host: Pick<WorldHost, 'engine' | 'factory'>, edit: WorldEditV1): Promise<EditPreviewV1> {
+  const engine = host.engine;
+  if (engine.canSnapshot?.() === false) return { ok: false, code: 'edit-preview.resumable-boundary-required' };
+  const descriptor = factoryDescriptorV1(host.factory);
+  if (!descriptor) return unavailable('the world\'s engine factory has no descriptor');
+  const hash = (engine.world as { groundV1?: { recipeHash?: string } }).groundV1?.recipeHash;
+  const recipe = hash ? groundRecipe(hash) ?? null : null;
+  const snapshot = await steppedSnapshotV1(engine);
+  const id = ++nextId, w = previewWorker();
+  return new Promise<EditPreviewV1>(resolve => {
+    waiting.set(id, resolve); w.ref();
+    try { w.postMessage({ id, descriptor, recipe, snapshot, edit } satisfies PreviewJobV1); }
+    catch (e) { waiting.delete(id); resolve(unavailable((e as Error).message)); }
+  });
 }
