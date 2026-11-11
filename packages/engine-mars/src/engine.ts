@@ -982,7 +982,13 @@ export class MarsEngine implements Engine {
         if (rec) {
           if (this.cfg.waitBoundV1 === true && rec.verb === 'walk_to' && this.rt.isActive(rec.id)) {
             const why = this.waitBoundV1(p, rec);
-            if (why) { this.rt.cancel(rec.id, why); if (this.rt.isActive(rec.id)) { p.walkStopping = why; return; } return this.end(p, 'failed', why); }
+            if (why) {
+              // as the other timeouts here: a spread or shared-water step re-chooses (each under its own cap), with a fresh bound
+              const water = this.sharedWaterBlockingAction(p, rec); this.rt.cancel(rec.id, why);
+              if (this.rt.isActive(rec.id)) { p.walkStopping = why; if (water) p.waterStopRetry = water; return; }
+              if ((water && this.retrySharedWaterV1(p, water)) || this.spreadRetry(p, 'route.occupied')) { p.action = undefined; p.settle = undefined; p.soft = undefined; p.waitBoundV1 = undefined; return; }
+              return this.end(p, 'failed', why);
+            }
           }
           const walkBlocked = this.cfg.walkBlockV1 && (rec.verb === 'walk_to'||this.physical&&rec.verb==='commons_shore_travel');
           const routeBlocked = /deadlock\.|walk.goal-occupied/.test(rec.diagnostic?.code ?? '');
@@ -1248,7 +1254,6 @@ export class MarsEngine implements Engine {
     }
     return legs ? ops : { code: 'route.region-full', message: 'there is no free ground to stroll on nearby' };
   }
-  /** edgeMotionV1: the actor's own walk (its current task) is held by other people in traffic. */
   /** #1952 wait-bound/1: a walk_to whose body has not left a 0.5 m disc or changed level for 1,200 ticks of this programme step
    *  ends route.blocked, naming the last wait and whom it was for. Named waits do not pause it (the watchdog's do), so a body
    *  rocking by millimetres beside a wall, which restarts the persistent-wait detector, still ends. A body on a stair flight
@@ -1262,6 +1267,7 @@ export class MarsEngine implements Engine {
     const by = w.by ?? [];
     return { code: 'route.blocked', message: `${WAIT_BOUND_V1}: the walk made no headway for a minute${w.code ? `: ${w.code}${by.length ? ` (waiting for ${by.join(', ')})` : ''}` : ''}`, subjects: [p.actor, ...by] };
   }
+  /** edgeMotionV1: the actor's own walk (its current task) is held by other people in traffic. */
   private trafficHeld(actor: string): boolean {
     const t = this.ents[actor]?.human?.task, r = t ? this.rt.records.get(t) : undefined;
     return !!r && r.status === 'blocked' && (r.verb === 'walk_to' || r.verb === 'commons_shore_travel') && /^traffic\./.test(r.diagnostic?.code ?? '');

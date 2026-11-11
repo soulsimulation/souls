@@ -52,7 +52,7 @@ test('#1952 A1/A2 wait-bound/1: the same walk ends route.blocked within 1,200 ti
   const {e,id}=yieldBesideWall({waitBoundV1:true}),{events,headway}=run(e,1500);
   const failed=events.filter(x=>x.id===id&&x.kind==='failed');assert.equal(failed.length,1);
   assert.equal(failed[0].code,'route.blocked');assert.match(failed[0].message!,/wait-bound\/1/);assert.match(failed[0].message!,new RegExp(`traffic\\.yield.*${B}`));
-  assert.ok(failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
+  assert.ok(failed[0].tick>=headway+1199&&failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
   assert.equal(e.programOf(W),null);assert.equal(execOf(e,W),undefined,'nothing left behind');assert.deepEqual(e.runtime.violations,[]);
 });
 
@@ -62,7 +62,7 @@ test('#1952 A2 wait-bound/1 counts per programme step: step-backs (edge motion) 
   const {e,id}=yieldBesideWall({edgeMotionV1:true,waitBoundV1:true}),{events,headway,actions}=run(e,1500);
   assert.ok(actions.size>1,'the walk was re-issued');
   const failed=events.filter(x=>x.id===id&&x.kind==='failed');assert.equal(failed.length,1);assert.match(failed[0].message!,/wait-bound\/1/);
-  assert.ok(failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
+  assert.ok(failed[0].tick>=headway+1199&&failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
   const offEnd=offRun.events.find(x=>x.id===off.id&&x.kind==='failed');assert.ok(!offEnd||offEnd.tick>failed[0].tick,'without the bound the step-backs ran longer');
 });
 
