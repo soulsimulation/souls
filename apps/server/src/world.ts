@@ -1,3 +1,4 @@
+import {appendFileSync} from 'node:fs';
 import {tx} from './edge/comms/store.ts';
 import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
@@ -180,6 +181,11 @@ export class WorldHost {
   lastSnapshotCostMs = 0;
   extra: Record<string, unknown> = {};       // module state persisted with snapshots (narrator schedule etc.)
   tickMs: number[] = [];
+  /** #1961: span timers of each live tick, off unless SOULS_TICK_SPANS names a file. One JSON line per tick, appended
+   *  every 100 ticks after the tick ends: [tick, total, drain, step, clock, listeners, broadcast, snapshot 0|1], ms.
+   *  drain = queued inputs (both drains), step = the engine's step, clock = the durable clock write, listeners = runtime
+   *  events, afterTick and afterTickComplete, broadcast = flush and heartbeat; everything else is total minus those. */
+  tickSpans: { file: string; rows: string[] } | null = process.env.SOULS_TICK_SPANS ? { file: process.env.SOULS_TICK_SPANS, rows: [] } : null;
   /** The last boot's phases (lane L5): restore = snapshot read + decode + engine restore; replay = stepping logged history to its head. */
   bootStats: BootStats | null = null;
   private queue: Pending[] = [];
@@ -605,14 +611,17 @@ export class WorldHost {
     const t0 = performance.now();
     const tick = this.engine.world.tick;
     if (this.recoveryForEdge) this.validPoses = { tick, poses: this.soulPoses() };
+    const sp = this.tickSpans, span = sp ? [0, 0, 0, 0, 0, 0] : null;   // #1961: drain, step, clock, listeners, broadcast, snapshot
+    let ts = sp ? performance.now() : 0;
     // 1. apply queued inputs at this tick, logging them
     this.drainInputs();
+    if (span) span[0] += performance.now() - ts;
     if (this.repairRules && !this.clockAvailable) return;   // a repair in that drain couldn't be written: a named halt, not a throw
     // 2. step the engine
     let out: ReturnType<Engine['step']>;
     const previousViolations = this.engine.runtime.violations.length;
     const tStep = performance.now();
-    try { out = this.stepEngine(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
+    try { out = this.stepEngine(); if (span) span[1] = performance.now() - tStep; if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
     catch (error) { for (const r of out!?.refusals ?? []) if (glitchy(r)) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
     this.noteCleanTick();
     this.advanceLives();
@@ -631,22 +640,35 @@ export class WorldHost {
     if(this.durableClockV1){
       // Derived effects become durable before this elapsed body tick is sent.
       // Listener-generated next inputs retain their ordinary queue semantics.
+      if (span) ts = performance.now();
       this.drainInputs();
+      if (span) span[0] += performance.now() - ts;
       if(this.repairRules&&!this.clockAvailable)return;
+      if (span) ts = performance.now();
       this.persistClockFrontier();
+      if (span) span[2] = performance.now() - ts;
     }
+    if (span) ts = performance.now();
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
     const tickContext = Object.freeze({ startedAtMs: t0 });
     for (const l of this.listeners) l.afterTick?.(now, tickContext);
+    if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
     if (now % BATCH_TICKS === 0) this.flush();
     if (now % HEARTBEAT_TICKS === 0) this.heartbeat();
-    if (this.snapshotDue(now)) this.schedulePeriodicSnapshot();
+    if (span) span[4] = performance.now() - ts;
+    if (this.snapshotDue(now)) { if (span) span[5] = 1; this.schedulePeriodicSnapshot(); }
     this.tickMs.push(performance.now() - t0);
     if (this.tickMs.length > 400) this.tickMs.splice(0, 200);
     if (this.splitTap) this.splitTap(now, out); // never throws (DeltaTap.onTick); reads only
+    if (span) ts = performance.now();
     for (const l of this.listeners) { try { l.afterTickComplete?.(now); } catch { /* observers cannot undo a completed tick */ } }
+    if (sp && span) {
+      const end = performance.now(); span[3] += end - ts;
+      sp.rows.push(JSON.stringify([now, end - t0, ...span].map((x) => Math.round(x * 1000) / 1000)));
+      if (sp.rows.length >= 100) { try { appendFileSync(sp.file, sp.rows.join('\n') + '\n'); } catch { /* a measurement never stops the clock */ } sp.rows.length = 0; }
+    }
   }
 
   /** Accept queued inputs without advancing the engine or starting new mind work. */

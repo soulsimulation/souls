@@ -57,7 +57,7 @@ export function marsWebDir(serverRoot, { env = process.env, exists = existsSync 
 }
 
 /** startWorld({serverRoot, slug, port, genesis, dataDir, log, fresh, onSpawn}) → {base, pid, build, healthz, child, dataDir} */
-export async function startWorld({ serverRoot, slug, port, genesis, snapshot, dataDir, log, fresh = true, kind = 'dev', bootTimeoutMs = 900000, natives = false, onSpawn = null }) {
+export async function startWorld({ serverRoot, slug, port, genesis, snapshot, dataDir, log, fresh = true, kind = 'dev', bootTimeoutMs = 900000, natives = false, onSpawn = null, requestRecord = null }) {
   assertKind(kind);
   const root = resolve(serverRoot);
   if (!existsSync(join(root, 'apps/server/src/main.ts'))) throw new Error(`no server under ${root}`);
@@ -76,6 +76,9 @@ export async function startWorld({ serverRoot, slug, port, genesis, snapshot, da
   // The same environment tools/god-skill/dev-world.mjs sets, plus §0, with a boot wait long enough for a loaded
   // machine and a large genesis (dev-world.mjs gives up after 180 s; Eden 2026 under load 19 took longer).
   const worldEnvironment = { ...process.env, ...env, WORLD_KEY: slug, WORLD_ID: `${slug}-1`, ENGINE: 'mars', PORT: String(port), DEV_AUTH: '1', BRAIN_MODE: 'fake', SEED_NATIVES: natives ? '1' : '0', EDGE_FADING: '1', DATA_DIR: data, PUBLIC_URL: `http://127.0.0.1:${port}`, ...(existsSync(marsWeb) ? { MARS_WEB_DIR: marsWeb } : {}), ...(genesis ? { GENESIS_FILE: resolve(root, genesis) } : {}) };
+  // #1774 A4: the world's own per-request record (apps/server/src/load/request-record.ts), laid beside the client's in a run
+  delete worldEnvironment.SIM_REQUEST_RECORD;
+  if (requestRecord) { mkdirSync(resolve(requestRecord, '..'), { recursive: true }); worldEnvironment.SIM_REQUEST_RECORD = resolve(requestRecord); }
   if (log) mkdirSync(resolve(log, '..'), { recursive: true });
   const out = log ? openSync(resolve(log), 'a') : 'ignore';
   const child = spawn(process.execPath, ['apps/server/src/main.ts'], { cwd: root, env: worldEnvironment, stdio: ['ignore', out, out], detached: true });
