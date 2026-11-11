@@ -183,7 +183,7 @@ export class Admission {
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
       settle('run'); ranAt = now;
-      return {turn, waitedMs: () => 0, diag: () => ({fast: true}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
+      return {turn, waitedMs: () => 0, diag: () => ({fast: true}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now, 'fast'); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
     return {turn, waitedMs: () => (ranAt || this.now()) - now, diag: () => ({held: job.diag.held, atRun: job.diag.atRun}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
@@ -191,7 +191,8 @@ export class Admission {
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
-  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number) {
+  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, how = 'drain') {
+    if (ACT_LOG) actLines.push(JSON.stringify({at: Date.now(), charge: id, how, ms: Math.round(ms * 10) / 10, level: this.level, budget: Math.round(this.frameBudget() * 10) / 10, quietTick: Math.round(this.quietTick() * 10) / 10, depth: this.queue.length, outstanding: this.outstanding.size}) + '\n');
     this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
