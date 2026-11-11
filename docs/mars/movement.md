@@ -55,7 +55,9 @@ hit, so the hard separation layer rarely fires.
 - A mutual single-file wait is released once both sides have waited `RELEASE_AFTER` (3 s).
 - **wait-bound/1** (#1952, a logged runtime policy adopted at boot): off a stair flight, a programme step's walk whose body
   has not left a 0.5 m disc or changed level for 1,200 ticks (a minute) ends `route.blocked`, naming the last wait and whom
-  it was for. Named waits (`traffic.yield` included) do not pause it, and a walk re-issued for the same step keeps its clock.
+  it was for. Named waits (`traffic.yield` included) do not pause it, and a walk re-issued for the same step (a step-back)
+  keeps its clock. A body held at a flight's foot (`climb`, climbT 0) counts as off the flight (#2032), and a walk a
+  timeout's retry issues (quiet, walk-block, failed spread, shared water) starts its own clock.
 
 ## Speed limits and invariants
 

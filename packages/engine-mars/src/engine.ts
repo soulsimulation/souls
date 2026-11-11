@@ -146,7 +146,8 @@ type Prog = {
   /** #1150: the ticks the world refused this programme's moves; it then ends `failed`, not `cancelled`. */
   refusalsV1?: number[];
   /** #1952 wait-bound/1: where this programme step's walking body last made headway (left a 0.5 m disc or changed level), and
-   *  since when; the last wait its walk named. Kept per step, so a walk re-issued for the same step (a step-back) keeps it. */
+   *  since when; the last wait its walk named. Kept per step, so a walk re-issued for the same step (a step-back) keeps it;
+   *  #2032: a timeout's retry (quiet, walk-block, failed spread, shared water) clears it, so the retried walk starts its own. */
   waitBoundV1?: { step: number; at: [number, number]; level: number; since: number; code?: string; by?: string[] };
   ops: Op[]; action?: string; settle?: 'done' | 'held'; soft?: boolean; until?: number;
   controlOf?:string;
@@ -975,7 +976,7 @@ export class MarsEngine implements Engine {
         // program until native cancellation actually reaches a safe landing.
         if (p.walkStopping) {
           if (rec && this.rt.isActive(rec.id)) { this.rt.cancel(rec.id, p.walkStopping); return; }
-          if(p.waterStopRetry){const retry=p.waterStopRetry;p.waterStopRetry=undefined;p.walkStopping=undefined;p.action=undefined;p.settle=undefined;p.soft=undefined;p.blockedSince=undefined;p.quietHeldSince=undefined;if(this.retrySharedWaterV1(p,retry))return;return this.end(p,'failed',retry);}
+          if(p.waterStopRetry){const retry=p.waterStopRetry;p.waterStopRetry=undefined;p.walkStopping=undefined;p.action=undefined;p.settle=undefined;p.soft=undefined;p.blockedSince=undefined;p.quietHeldSince=undefined;p.waitBoundV1=undefined;if(this.retrySharedWaterV1(p,retry))return;return this.end(p,'failed',retry);}
           if (p.walkResume) { const why = p.walkStopping; p.walkStopping = undefined; p.walkResume = undefined; return this.trafficStepBack(p, why); }
           return this.end(p, 'failed', p.walkStopping);
         }
@@ -1025,8 +1026,8 @@ export class MarsEngine implements Engine {
               const why = {code:'route.blocked',message:this.quiet?'quiet checkpoint: this walk stayed held waiting on other people for 30 seconds':'this walk stayed held waiting on other people for a minute'};
               const water=this.sharedWaterBlockingAction(p,rec);this.rt.cancel(rec.id, why);
               if (this.rt.isActive(rec.id)) { p.walkStopping = why;if(water)p.waterStopRetry=water;return; }
-              if(water&&this.retrySharedWaterV1(p,water)){p.action=undefined;p.settle=undefined;p.soft=undefined;p.quietHeldSince=undefined;return;}
-              if (this.spreadRetry(p, 'route.occupied')) { p.action = undefined; p.settle = undefined; p.soft = undefined; p.quietHeldSince = undefined; return; }
+              if(water&&this.retrySharedWaterV1(p,water)){p.action=undefined;p.settle=undefined;p.soft=undefined;p.quietHeldSince=undefined;p.waitBoundV1=undefined;return;}
+              if (this.spreadRetry(p, 'route.occupied')) { p.action = undefined; p.settle = undefined; p.soft = undefined; p.quietHeldSince = undefined; p.waitBoundV1 = undefined; return; }
               return this.end(p, 'failed', why);
             }
           } else p.quietHeldSince = undefined;
@@ -1036,12 +1037,12 @@ export class MarsEngine implements Engine {
               const why = walkBlocked ? {code:'route.blocked',message:`walking has remained blocked for a minute: ${rec.diagnostic?.code ?? 'action.blocked'}`} : routeBlocked ? {code:'route.blocked',message:'the route has remained blocked for a minute'} : {code:'activity.blocked',message:`sleep has remained blocked for a minute: ${rec.diagnostic?.code}`};
               const water=this.sharedWaterBlockingAction(p,rec);this.rt.cancel(rec.id,why);
               if (walkBlocked && this.rt.isActive(rec.id)) { p.walkStopping = why;if(water)p.waterStopRetry=water;return; }
-              if(water&&this.retrySharedWaterV1(p,water)){p.action=undefined;p.settle=undefined;p.soft=undefined;p.blockedSince=undefined;return;}
-              if (walkBlocked && this.spreadRetry(p, 'route.occupied')) { p.action = undefined; p.settle = undefined; p.soft = undefined; p.blockedSince = undefined; return; }
+              if(water&&this.retrySharedWaterV1(p,water)){p.action=undefined;p.settle=undefined;p.soft=undefined;p.blockedSince=undefined;p.waitBoundV1=undefined;return;}
+              if (walkBlocked && this.spreadRetry(p, 'route.occupied')) { p.action = undefined; p.settle = undefined; p.soft = undefined; p.blockedSince = undefined; p.waitBoundV1 = undefined; return; }
               return this.end(p,'failed',why);
             }
           } else p.blockedSince = undefined;
-          if (rec.status === 'failed' && this.spreadRetry(p, rec.diagnostic?.code,rec.diagnostic)) { p.action = undefined; p.settle = undefined; p.soft = undefined; continue; }
+          if (rec.status === 'failed' && this.spreadRetry(p, rec.diagnostic?.code,rec.diagnostic)) { p.action = undefined; p.settle = undefined; p.soft = undefined; p.waitBoundV1 = undefined; continue; }
           if (rec.status === 'failed') { if (!p.soft || this.sharedWaterStep(p.steps[p.index]) && !!rec.diagnostic && this.waterBodyObstruction(rec.diagnostic,p.actor)) return this.end(p, 'failed', { code: rec.diagnostic?.code ?? 'action.failed', message: rec.diagnostic?.message ?? 'failed' }); }
           else if (rec.status === 'cancelled') { if (!p.soft) return this.end(p, 'failed', { code: rec.diagnostic?.code ?? 'action.interrupted', message: rec.diagnostic?.message ?? 'interrupted' }); }
           else if (rec.status !== 'completed' && !(p.settle === 'held' && SETTLED.has(rec.phase))) return; // still under way
@@ -1257,11 +1258,12 @@ export class MarsEngine implements Engine {
   /** #1952 wait-bound/1: a walk_to whose body has not left a 0.5 m disc or changed level for 1,200 ticks of this programme step
    *  ends route.blocked, naming the last wait and whom it was for. Named waits do not pause it (the watchdog's do), so a body
    *  rocking by millimetres beside a wall, which restarts the persistent-wait detector, still ends. A body on a stair flight
-   *  (climbing, or finishing a cancelled climb) is left out until flight resume (#1453) can set it down there. */
+   *  (climbT > 0, or finishing a cancelled climb) is left out until flight resume (#1453) can set it down there. #2032: a
+   *  body held at a flight's foot (`climb`, climbT 0) is not on it: walk.ts `cancel` ends that walk at once, where it stands. */
   private waitBoundV1(p: Prog, rec: { id: string; status: string; diagnostic?: Diag }): Diag | null {
-    const a = this.ents[p.actor], ex = this.rt.live.get(rec.id)?.exec as { phase?: string; cancelTo?: string } | undefined, tick = this.rt.tick;
+    const a = this.ents[p.actor], ex = this.rt.live.get(rec.id)?.exec as { phase?: string; climbT?: number; cancelTo?: string } | undefined, tick = this.rt.tick;
     const at: [number, number] = [a.pose.p[0], a.pose.p[2]], level: number = a.human?.level ?? 0, w = p.waitBoundV1;
-    if (!w || w.step !== p.index || ex?.phase === 'climb' || ex?.cancelTo || level !== w.level || hypot(at[0] - w.at[0], at[1] - w.at[1]) > WAIT_BOUND_M) { p.waitBoundV1 = { step: p.index, at, level, since: tick }; return null; }
+    if (!w || w.step !== p.index || (ex?.phase === 'climb' && (ex.climbT ?? 0) > 1e-9) || ex?.cancelTo || level !== w.level || hypot(at[0] - w.at[0], at[1] - w.at[1]) > WAIT_BOUND_M) { p.waitBoundV1 = { step: p.index, at, level, since: tick }; return null; }
     if (rec.status === 'blocked' && rec.diagnostic) { w.code = rec.diagnostic.code; w.by = (rec.diagnostic.subjects ?? []).filter((s) => s !== p.actor); }
     if (tick - w.since < WAIT_BOUND_TICKS) return null;
     const by = w.by ?? [];
