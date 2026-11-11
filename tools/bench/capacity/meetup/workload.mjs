@@ -7,6 +7,7 @@
 // a call still queued when the activity window closes is unissued. End-to-end latency is measured from the scheduled
 // time, so client queueing, Retry-After waits and backoff are inside it.
 import { createHash } from 'node:crypto';
+import { CADENCE, firstMs, gapMs, kindOf } from './client-soul.mjs';
 
 export const WORKLOAD = 'cw1-meetup/1';
 export const TICK_HZ = 20;
@@ -27,19 +28,24 @@ export const FIXTURES = Object.freeze([
   { slug: 'mw9', template: 'eden-2026' },
 ]);
 
-/** Souls per world, in FIXTURES order. Both profiles total 50. */
+/** Souls per world, in FIXTURES order. even and meetup total 50; real100 (#1972) is 100, ten in every world. */
 export const PROFILES = Object.freeze({
   even: Object.freeze([5, 5, 5, 5, 5, 5, 5, 5, 5, 5]),
   meetup: Object.freeze([20, 4, 4, 4, 3, 3, 3, 3, 3, 3]),
+  real100: Object.freeze([10, 10, 10, 10, 10, 10, 10, 10, 10, 10]),
 });
+/** #1972: a profile paced by a cadence of #1945 (../profiles/cadence.json) instead of DEMAND's fixed rates: per Soul the
+ *  first act after an instruction-like delay, then act start to act start drawn from the live gap quantiles, the act's
+ *  kind from the live mix; each act's receipt is read once after it (the driver's, not a scheduled read). The meetups stay. */
+export const CADENCE_OF = Object.freeze({ real100: 'real' });
 
 // The declared planning workload (#735 A3): not measured usage. Compared before freezing with the existing Stage B
 // mix (tools/bench/capacity/bench.mjs --load stageb: a read every 3–5 s, an act every 15–30 s), which it matches.
 export const DEMAND = Object.freeze({
   readEveryMs: 4000,
   actEveryMs: 20_000,
-  // the pinned rich-read mix, cycled per Soul from a seeded offset (observe is the richest; it leads)
-  readMix: Object.freeze(['observe', 'here', 'capabilities', 'observe', 'resolve', 'here']),
+  // the pinned rich-read mix, cycled per Soul from a seeded offset (observe is the richest; it leads); #1972: no resolve
+  readMix: Object.freeze(['observe', 'here', 'capabilities', 'observe', 'here']),
   // movement, attention, speech, a gesture, an interruption (a walk replaced 3 s later by a stand) and a shared action
   // (an invitation to the next Soul in the same world, which that Soul's driver accepts from its own event stream)
   actMix: Object.freeze(['walk', 'attention', 'say', 'gesture', 'interrupt', 'shared']),
@@ -78,7 +84,7 @@ export function rng(seed) {
  *  A), another runs one Soul in each of worlds 1–3 (shared account B), and five Souls in worlds 4–8 sit behind one
  *  network address (a household or venue). All of it stays inside the launcher's SOUL_CEILINGS. */
 export function souls(profile) {
-  const per = PROFILES[profile]; if (!per) throw new Error(`profile ${profile}: even | meetup`);
+  const per = PROFILES[profile]; if (!per) throw new Error(`profile ${profile}: ${Object.keys(PROFILES).join(' | ')}`);
   const out = [];
   per.forEach((n, w) => { for (let k = 0; k < n; k++) out.push({ i: out.length, world: w, slug: FIXTURES[w].slug, k }); });
   for (const s of out) {
@@ -89,7 +95,8 @@ export function souls(profile) {
 }
 
 /** Every scheduled call of the activity window, sorted by (soul, atMs, seq). atMs is relative to the window start.
- *  Kinds: reads observe|here|capabilities|resolve; acts walk|attention|say|gesture|stand|shared|meetup. Accepting an
+ *  Kinds: reads observe|here|capabilities; acts walk|attention|say|gesture|stand|shared|meetup, or for a CADENCE_OF
+ *  profile the cadence mix's kinds (walk|sit|sit-ground|read|eat|play-music|swim) and meetup. Accepting an
  *  invitation is reactive demand (it follows another Soul's act), counted apart by the runner. A Soul's targets
  *  (which place to walk to) are chosen at run time from its own world's menu by `pick`, so the same seed is valid in
  *  any template. */
@@ -98,6 +105,14 @@ export function schedule(profile, seed, ph = phases()) {
   for (const s of souls(profile)) {
     const r = rng(`${seed}|${profile}|${s.i}`), mine = [];
     const add = (atMs, cls, kind, burst = null) => { if (atMs >= 0 && atMs < ph.activeMs) mine.push({ soul: s.i, world: s.world, atMs: Math.round(atMs), cls, kind, burst, pick: Math.floor(r() * 1e6) }); };
+    const cad = CADENCE[CADENCE_OF[profile]];
+    if (cad) {
+      for (let t = firstMs(cad, r()); t < ph.activeMs; t += gapMs(cad, r())) add(t, 'act', kindOf(cad, r()));
+      ph.meetupsMs.forEach((m, b) => add(m + r() * DEMAND.burstActWithinMs, 'act', 'meetup', b));
+      mine.sort((a, b) => a.atMs - b.atMs);
+      mine.forEach((o, n) => ops.push({ id: `s${s.i}-${n}`, seq: n, ...o }));
+      continue;
+    }
     const ro = Math.floor(r() * DEMAND.readMix.length), rt = r() * DEMAND.readEveryMs;
     for (let k = 0, t = rt; t < ph.activeMs; k++, t += DEMAND.readEveryMs) add(t, 'read', DEMAND.readMix[(ro + k) % DEMAND.readMix.length]);
     const ao = Math.floor(r() * DEMAND.actMix.length), at = r() * DEMAND.actEveryMs;
