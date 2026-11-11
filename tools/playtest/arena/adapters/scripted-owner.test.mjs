@@ -15,7 +15,7 @@ import { wakeText, onboardingText } from '../seat.mjs';
 
 const STANDIN = `import { appendFileSync } from 'node:fs';
 const a = process.argv.slice(2); appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
-if (a[0] === 'resolve') console.log(JSON.stringify({ candidates: a[1].includes('nothing') ? [] : [{ id: 'give:s_123' }, { id: 'give:s_456' }] }));
+if (a[0] === 'find') console.log(JSON.stringify({ found: a[1].includes('nothing') ? [] : [{ type: 'thing', act: 'give:s_123' }, { type: 'thing', act: 'give:s_456' }] }));
 else if (a[0] === 'act') { if (a[1].includes('swim')) { console.log(JSON.stringify({ accepted: false, code: 'no-offer' })); } else console.log(JSON.stringify({ accepted: true, receipt: { id: 'r1', phase: a.includes('--wait') ? 'completed' : 'running' } })); }
 else if (a[0] === 'status') console.log(JSON.stringify({ paired: true, soul: { id: 's1' } }));
 else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
@@ -293,8 +293,8 @@ else console.log(JSON.stringify({ ok: true }));`);
   assert.deepEqual(keptOutput('abcdef', 4), { content: 'abcd\n[scripted-owner: output truncated: 4 of 6 characters kept]', truncated: true });
 });
 
-test('#1268: a refused resolve names its first id under did_you_mean, a found one under candidates', () => {
-  assert.equal(firstCandidate({ stdout: JSON.stringify({ candidates: [{ id: 'walk:a' }] }) }), 'walk:a');
-  assert.equal(firstCandidate({ stdout: JSON.stringify({ ok: false, did_you_mean: [{ id: 'walk:b', label: 'B' }] }) }), 'walk:b');
+test('#1921: a resolve step names the first find row with an act', () => {
+  assert.equal(firstCandidate({ stdout: JSON.stringify({ found: [{ type: 'place', act: null }, { type: 'act', act: 'walk:a' }] }) }), 'walk:a');
+  assert.equal(firstCandidate({ stdout: JSON.stringify({ found: [] }) }), '');
   assert.equal(firstCandidate({ stdout: '{"ok":false}' }), ''); assert.equal(firstCandidate({ stdout: 'not json' }), '');
 });

@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
+import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, reconcileMessages, sseFrames, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -16,7 +16,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *  acknowledged after its cursor, and with no cursor every message not acknowledged. */
 async function world(t) {
   const dir = mkdtempSync(join(tmpdir(), 'souls-serve-'));
-  const w = { dir, inbox: [], events: [], calls: [], acts: 0, keys: [], busyNext: 0, heavyNow: 0, heavyMax: 0, listens: 0, parked: [], bodies: [], refuse: {}, results: [], byRef: new Map(), cut: new Set(), offers: { 'sit:bench': { seconds: { type: 'integer', optional: true, min: 1, max: 600 } } } };
+  const w = { dir, inbox: [], events: [], calls: [], resolverCalls: 0, acts: 0, keys: [], busyNext: 0, heavyNow: 0, heavyMax: 0, listens: 0, parked: [], bodies: [], refuse: {}, results: [], byRef: new Map(), cut: new Set(), offers: { 'sit:bench': { seconds: { type: 'integer', optional: true, min: 1, max: 600 } } } };
   w.said = []; w.listeners = new Set(); w.streams = 0; w.streamAfter = [];
   w.say = (text, kind = 'speech.to-me') => { const e = { id: `c_${w.said.length + 1}`, kind, about: { soulId: 's_bo', name: 'Bo' }, text: `Bo: "${text}"`, untrusted: true, data: { text } }; w.said.push(e); for (const f of w.listeners) f(e); };
   const flush = () => { const p = w.parked; w.parked = []; for (const f of p) f(); };
@@ -29,6 +29,8 @@ async function world(t) {
     const p = url.pathname.slice('/w/test'.length);
     let body = ''; for await (const c of req) body += c;
     w.calls.push([req.method, p]);
+    // #1921: the client never asks the world's resolver or its search; every test's world counts them, and ends at zero
+    if (p === '/v1/edge/resolve' || (p === '/v1/edge/capabilities' && url.searchParams.has('search'))) w.resolverCalls++;
     if (w.cut.delete(p)) { res.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' }); res.write('{"accepted":tr'); setTimeout(() => res.destroy(), 10); return undefined; }
     const json = (status, v, h = {}) => { if (res.destroyed) return; res.writeHead(status, { 'content-type': 'application/json', ...h }); res.end(JSON.stringify(v)); };
     if (p === '/v1/edge/inbox/listen') {
@@ -81,12 +83,6 @@ async function world(t) {
       if (w.endsBeforeAnswer) { w.endsBeforeAnswer = false; w.event({ kind: 'receipt', receipt: { id: out.receipt.id, capability: cap, phase: 'completed' } }); await sleep(250); }
       return json(200, out);
     }
-    if (p === '/v1/edge/resolve') {
-      const b = JSON.parse(body), id = b.capability;
-      if (id.includes('nowhere')) return json(200, { resolve: { ok: false, code: 'capability.unknown', reason: 'no such offer', did_you_mean: [{ id: 'walk:mill', label: 'Walk to the mill' }], candidates: [{ id: 'walk:mill' }] } });
-      if (id.includes('taken')) return json(200, { resolve: { ok: false, code: 'seat.taken', reason: 'someone is there' } });
-      return json(200, { resolve: { ok: true, would: { capability: id, available: true }, candidates: [{ id, params: w.offers[id] }] } });
-    }
     if (p === '/v1/edge/say') return json(200, { said: { id: 'sp_1', heardBy: 0 } });
     if (/^\/v1\/edge\/inbox\/msg_[^/]+$/.test(p) && req.method === 'GET') return json(200, { message: { id: decodeURIComponent(p.split('/').at(-1)), ...(w.results.some((r) => r.id === decodeURIComponent(p.split('/').at(-1))) ? { result: 'x', outcome: 'done' } : {}) } });
     if (/\/result$/.test(p) && w.resultDown) return json(500, { error: { code: 'down', message: 'down' } });
@@ -106,7 +102,7 @@ async function world(t) {
     child.on('exit', (code) => { let json = null; try { json = JSON.parse(out); } catch { /* text */ } done({ code, out, err, json }); });
   });
   w.cli = (...args) => w.cliEnv(null, ...args);
-  t.after(async () => { await w.cli('serve', '--stop'); await sleep(50); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
+  t.after(async () => { await w.cli('serve', '--stop'); await sleep(50); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); assert.equal(w.resolverCalls, 0, 'no call on the resolver'); });
   return w;
 }
 const flushWorld = (w) => { const p = w.parked; w.parked = []; for (const f of p) f(); };
@@ -471,21 +467,24 @@ const ended = (w, id, phase = 'completed') => w.event({ kind: 'receipt', receipt
 const planNow = async (w, want) => until(async () => { const p = (await w.cli('plan', '--status')).json; return want(p) ? p : null; });
 const steps3 = JSON.stringify(['walk:mill', { id: 'sit:bench', params: { seconds: 30 } }, 'walk:pond']);
 
-test('plan A1: nothing runs until every step is an offer whose params fit', async (t) => {
+test('plan #1921: no step is asked of the world first; one the catalog cannot vouch for runs, and its refusal mid-plan stops the plan and wakes listen', async (t) => {
   const w = await world(t);
   assert.match((await w.cli('plan', steps3)).err, /none is up in this folder/);
-  await w.cli('serve');
-  const unknown = await w.cli('plan', JSON.stringify(['walk:mill', 'walk:nowhere']));
-  assert.equal(unknown.code, 2);
-  assert.equal(unknown.json.accepted, false);
-  assert.equal(unknown.json.code, 'capability.unknown');
-  assert.equal(unknown.json.problems[0].did_you_mean[0].id, 'walk:mill');
-  const params = await w.cli('plan', JSON.stringify(['walk:mill', { id: 'sit:bench', params: { seconds: 9000 } }]));
-  assert.equal(params.json.code, 'capability.params');
   assert.match((await w.cli('plan', '["walk to the mill"]')).err, /not an offered id/);
-  await sleep(100);
-  assert.equal(w.acts, 0, 'no step ran');
-  assert.equal((await w.cli('plan', JSON.stringify(['sit:taken']))).json.accepted, true, 'a state refusal now may be open by its turn: the step finds out');
+  await w.cli('serve');
+  const held = w.cli('listen');
+  await sleep(150);
+  w.refuse['walk:nowhere'] = 'capability.unknown';
+  const r = await w.cli('plan', JSON.stringify(['walk:mill', 'walk:nowhere']), '--for', 'none');
+  assert.equal(r.json.accepted, true, r.err);
+  assert.deepEqual(r.json.unchecked, ['walk:mill', 'walk:nowhere'], 'this world publishes no catalog, so no step is vouched for');
+  assert.ok(await until(() => w.acts === 1), 'the first step runs');
+  ended(w, 'r_1');
+  const woke = await held;
+  assert.equal(woke.json.plan.state, 'stopped', woke.out);
+  assert.equal(woke.json.plan.steps[1].code, 'capability.unknown', 'the act refused the second step');
+  assert.match(woke.json.next, /fixes":2/);
+  assert.equal(w.acts, 1, 'nothing ran after it');
 });
 
 test('plan A1: serve runs the steps in order with no CLI call between them, links each to the message, and closes it', async (t) => {
@@ -847,15 +846,6 @@ test('plan: pure: parsing, params and transitions', () => {
   assert.deepEqual(parsePlanSteps('["walk:a",{"id":"sit:b","params":{"seconds":3}}]').steps, [{ id: 'walk:a' }, { id: 'sit:b', params: { seconds: 3 } }]);
   assert.equal(parsePlanSteps('[{"id":"walk:a","fixes":2}]').fixes, 2);
   for (const bad of ['', 'x', '[]', '{}', '[1]', '["two words"]', '[{"id":"walk:a","params":[]}]', '[{"id":"a:b","fixes":1},"c:d"]', JSON.stringify(Array(25).fill('walk:a'))]) assert.throws(() => parsePlanSteps(bad), undefined, bad);
-  assert.equal(stepParamsProblem({ n: { type: 'integer', min: 1, max: 5 } }, { n: 3 }), null);
-  assert.match(stepParamsProblem({ n: { type: 'integer' } }, { n: 1.5 }), /integer/);
-  assert.match(stepParamsProblem({ n: { type: 'integer', max: 5 } }, { n: 6 }), /\.\.5/);
-  assert.match(stepParamsProblem({ k: { type: 'string', enum: ['a'] } }, { k: 'b' }), /one of a/);
-  assert.match(stepParamsProblem({ k: { type: 'string', required: true } }, {}), /needs k/);
-  assert.equal(stepParamsProblem(undefined, { any: 1 }), null);
-  assert.equal(planStepProblem({ id: 'sit:b' }, { ok: false, code: 'seat.taken' }), null, 'state is for the step to find out');
-  assert.equal(planStepProblem({ id: 'sit:b' }, { ok: false, code: 'capability.unavailable' }), null, 'so is an offer that is unavailable right now');
-  assert.equal(planStepProblem({ id: 'walk:a' }, { ok: true, would: { capability: 'walk:b' } }).code, 'capability.unknown', 'an id read as something else is not that offer');
   const p = newPlan([{ id: 'walk:a' }, { id: 'walk:b' }], 'msg', 0);
   const a = p.steps[0].clientRef; assert.ok(a); assert.notEqual(a, p.steps[1].clientRef);
   planAnswer(p, { accepted: true, receipt: { id: 'r1', phase: 'started' } }, 1);

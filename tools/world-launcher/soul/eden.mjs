@@ -3499,7 +3499,7 @@ export function refusalList({ code, did_you_mean, candidates }) {
     const blocked = c?.blocked ?? d?.blocked ?? (off && d?.reason ? { reason: d.reason } : undefined); // a choice says why on its own entry
     return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
   });
-  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
+  return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `--json shows all ${ids.length}` } : {}) };
 }
 const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
 
@@ -3527,7 +3527,7 @@ async function caps(...args) {
   const filtered = verb ? `--verb ${verb}` : "available offers (--all lists the rest)";
   const note = seen?.note ?? (seen && !list.length ? (seen.placesMatched > 0
     ? `The world knows ${seen.placesMatched === 1 ? "a place" : `${seen.placesMatched} places`} named "${search}", but none is among ${filtered}.`
-    : `Nothing here or on the menu matches "${search}". Try other words, or resolve "walk to ${search}".`) : undefined);
+    : `Nothing here or on the menu matches "${search}". Try other words, or find "${search}".`) : undefined);
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
     ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
@@ -3544,7 +3544,7 @@ async function around(...args) {
   const d = clean(ok(await call("/v1/edge/around" + q), "around"));
   // Directions are a sibling of the local surroundings, not part of them.
   // Never silently discard a requested destination on an older server either.
-  const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use resolve "walk to <destination>" or caps --verb walk --search "<destination>".' } : undefined);
+  const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use find "<destination>" --verb walk or caps --verb walk --search "<destination>".' } : undefined);
   return { ...d.around, ...(route ? { route } : {}) };
 }
 
@@ -3644,22 +3644,21 @@ export function parseActionArgs(input) {
 }
 
 // act <offer-id> [params-json] [--wait [seconds]]
-// CTRL-1 (#1093): the world executes offered ids only. Words are not sent to act: they print what `resolve` reads them as
-// and exit 2, and the agent sends the id it chooses. With --wait it then long-polls until the receipt ends or an
-// owner/social notification interrupts.
-const OFFER_ID = /^[a-z][\w-]*:\S+$/i;
+// CTRL-1 (#1093): the world executes offered ids only. Words are not sent to act: #1921: the local catalog's `find` reads
+// them, with no call on the world, and act exits 2 with its ids; the agent sends the id it chooses. One word shaped like an
+// id is an id, as a plan step is: an offer with no target (`pray`) has no colon, and the world refuses an id it does not
+// offer. With --wait it then long-polls until the receipt ends or an owner/social notification interrupts.
+const OFFER_ID = /^[a-z][\w-]*(?::\S+)?$/i;
 async function act(...argv) {
   const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
   if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
   const parsed = parseActionArgs(args);
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
-    const r = ok(await call("/v1/edge/resolve", { body: parsed }), "resolve").resolve;
-    // the world's rollback (EDGE_FREE_TEXT_ACT=1): it says so here, and the words go to act as they used to. An offer whose
-    // id has no target (`pray`) reads as an id with no colon: when it is exactly a candidate's id, it is an id.
-    if (!r.freeTextAct && !r.candidates?.some((c) => c.id === parsed.capability.trim())) {
-      process.exitCode = 2;
-      return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`, candidates: r.candidates ?? [], ...(r.ok === false && r.reason ? { why: r.reason } : {}) };
-    }
+    const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
+    const r = soulCatalog.find(ix, parsed.capability, { at: me?.at, states: live?.live?.things }), said = r.note ?? note;
+    process.exitCode = 2;
+    return { accepted: false, code: "act.not-an-id", reason: `act takes an offered id, so "${parsed.capability}" was not acted on. Send one of these ids, or report that nothing fits.`,
+      candidates: r.found.filter((x) => x.act).map((x) => ({ id: x.act, label: x.label ?? x.name, ...(x.in ? { in: x.in } : {}) })), ...(said ? { note: said } : {}) };
   }
   // #1337 (P9): a ride steer the world would refuse is answered here, in the world's words, and never sent
   const early = await steerPreflight(parsed);
@@ -3886,15 +3885,6 @@ function waitOption(argv) {
     else args.push(argv[i]);
   }
   return { args, wait, json, for: forId, key };
-}
-
-async function resolve(...args) {
-  const words = args.filter((a) => a !== "--json");
-  if (!words.length) throw new Error('usage: resolve "<what to do>" [params-json] [--json]');
-  const r = ok(await call("/v1/edge/resolve", { body: parseActionArgs(words) }), "resolve").resolve;
-  if (r.ok !== false || words.length !== args.length) return r;
-  const { did_you_mean, candidates, discovery, alternatives, ...rest } = r;
-  return { ...rest, ...(alternatives?.length ? { alternatives: shortAlternatives(alternatives) } : {}), ...refusalList(r) };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
@@ -4842,28 +4832,6 @@ export function parsePlanSteps(text) {
   });
   return { steps, ...(fixes ? { fixes } : {}) };
 }
-/** The offer's published schema against these params, for the checks a client can make. The world still decides at the step. */
-export function stepParamsProblem(schema, params = {}) {
-  for (const [name, spec] of Object.entries(schema ?? {})) if (spec?.required && params[name] == null) return `needs ${name}`;
-  for (const [name, v] of Object.entries(params)) {
-    const spec = schema?.[name]; if (!spec || v == null) continue;
-    const kind = { integer: Number.isInteger(v), number: typeof v === "number", string: typeof v === "string", boolean: typeof v === "boolean", array: Array.isArray(v) }[spec.type];
-    if (kind === false) return `${name} must be ${spec.type === "integer" ? "an integer" : `a ${spec.type}`}`;
-    if (spec.enum && !spec.enum.includes(v)) return `${name} must be one of ${spec.enum.join(", ")}`;
-    if (typeof v === "number" && ((spec.min != null && v < spec.min) || (spec.max != null && v > spec.max))) return `${name} must be ${spec.min ?? "any"}..${spec.max ?? "any"}`;
-    if (typeof v === "string" && spec.maxLength != null && v.length > spec.maxLength) return `${name} takes at most ${spec.maxLength} characters`;
-    if (Array.isArray(v) && spec.maxItems != null && v.length > spec.maxItems) return `${name} takes at most ${spec.maxItems}`;
-  }
-  return null;
-}
-/** Pure: what `resolve` says about one step, before anything runs. A step the world's state blocks now may be open by its turn,
- *  so only an id on no offer or params that don't fit stop the plan here. */
-export function planStepProblem(step, r) {
-  if (r?.ok === false && String(r.code ?? "").startsWith("capability.") && r.code !== "capability.unavailable") return { id: step.id, code: r.code, reason: r.reason ?? null, ...(r.did_you_mean?.length ? { did_you_mean: r.did_you_mean.slice(0, 5) } : {}), ...(r.candidates?.length ? { candidates: r.candidates.slice(0, 5) } : {}) };
-  if (r?.ok !== false && r?.would?.capability && r.would.capability !== step.id) return { id: step.id, code: "capability.unknown", reason: `"${step.id}" is not an offer on this Soul right now.`, ...(r.candidates?.length ? { candidates: r.candidates.slice(0, 5) } : {}) };
-  const c = r?.candidates?.find((x) => x.id === step.id), problem = c ? stepParamsProblem(c.params, step.params) : null;
-  return problem ? { id: step.id, code: "capability.params", reason: `${step.id}: ${problem}`, ...(c.params ? { params: c.params } : {}) } : null;
-}
 export function newPlan(steps, forId, at = Date.now()) {
   return { id: `p_${randomUUID()}`, for: forId ?? null, state: "running", at: 0, since: at, steps: steps.map((s) => ({ ...s, clientRef: randomUUID(), state: "pending", receipt: null })) };
 }
@@ -5368,7 +5336,9 @@ async function pending() {
   return { ...a, ...briefNow() };
 }
 
-// plan '<ordered offered ids>' [--for <id>|none]: checked here before any step runs, then run by the serve.
+// plan '<ordered offered ids>' [--for <id>|none]: run by the serve, one step after another. #1921: no step is read back
+// through the world: each id is checked against the local catalog, and a step it cannot vouch for (a Soul target, a thing's
+// own offers, a step with params) is listed in `unchecked` and still runs; the act refuses it if it must, and that stops the plan.
 async function plan(...argv) {
   if (argv[0] === "--status") {
     const a = await askServe({ op: "planStatus" });
@@ -5379,27 +5349,15 @@ async function plan(...argv) {
   const { steps, fixes } = parsePlanSteps(args[0] ?? "");
   const up = await askServe({ op: "status" });
   if (!up?.serving) throw new Error(`A plan runs in serve, and none is up in this folder. Start one: ${CLI} serve`);
-  const problems = [];
-  let known = null; try { known = (await worldCopy()).ix; } catch { /* no local copy: every step is checked by the world */ }
-  for (const step of steps) {
-    // #1737: an id the local catalog vouches for is not read back through resolve (each such read is a call on the world;
-    // two plans cost 15 of them in #1724). Any other step, and any step with params, is still checked by the world first.
-    if (known && !step.params && known.knows(step.id)) continue;
-    const r = ok(await call("/v1/edge/resolve", { body: { capability: step.id, ...(step.params ? { params: step.params } : {}) } }), "resolve").resolve;
-    const no = planStepProblem(step, r);
-    if (no) problems.push(no);
-  }
-  if (problems.length) {
-    process.exitCode = 2;
-    return { accepted: false, code: problems[0].code, reason: `No step ran: ${problems[0].reason ?? problems[0].id}`, problems, note: "Every step is checked against what is offered from here, before anything moves. A step offered only once an earlier one is done can't be checked yet: plan up to there, and send it after." };
-  }
+  let known = null; try { known = (await worldCopy()).ix; } catch { /* no local copy: no step is vouched for */ }
+  const unchecked = steps.filter((x) => x.params || !known?.knows(x.id)).map((x) => x.id);
   const s = load(), implicit = forArg === undefined && s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS;
   const forId = forArg === "none" ? undefined : forArg ?? (implicit ? s.lastAcked : undefined);
   const a = await askServe({ op: "plan", steps, ...(fixes ? { fixes } : {}), ...(forId ? { for: forId } : {}) }, 45_000);
   if (!a || a.lost) throw new Error("the serve process stopped before it took the plan");
   if (!a.accepted) process.exitCode = 2;
   else if (implicit) save({ lastAckedActed: true });
-  return a;
+  return a.accepted && unchecked.length ? { ...a, unchecked } : a;
 }
 
 // batch '[{"here":{}},{"receipt":"r_1"}]': several reads in one call; each answer or error stands on its own.
@@ -5483,7 +5441,6 @@ const HELP = [
   ],
   ["do",
     `act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]`,
-    `resolve "<words>" [--json] (candidate ids)`,
     `inspect <id> [--all]`,
     `wait [s] [receiptId] [--json]`,
   ],
@@ -5792,7 +5749,6 @@ const commands = {
   conversations,
   act,
   stop,
-  resolve,
   wait,
   say,
   converse,
