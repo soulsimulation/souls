@@ -3,7 +3,7 @@
 // in Codex, each in an empty folder and given only the instructions URL of a local fake-mind world. A run passes when
 // that folder holds a registered Soul whose approval is pending (no human approves here).
 //
-//   node tools/playtest/onboard-harness.mjs [--only claude|codex] [--port 6871] [--minutes 6] [--out <dir>]
+//   node tools/playtest/onboard-harness.mjs [--only claude|codex] [--codex-model <model>] [--port 6871] [--minutes 6] [--out <dir>]
 //
 // It uses each harness's signed-in subscription, never an API key, and a live model briefly: run it only to test
 // onboarding. Claude Code runs with no user settings, CLAUDE.md or MCP servers and a budget cap; Codex runs in its
@@ -50,7 +50,7 @@ const runs = {
   claude: (cwd) => ['claude', ['-p', prompt, '--model', 'sonnet', '--max-budget-usd', '0.35', '--output-format', 'stream-json', '--verbose', '--setting-sources', 'project',
     '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence', '--allowedTools', 'Bash(node:*)', 'Bash(curl:*)', 'Bash(mkdir:*)', 'Bash(cp:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Read', 'Write'],
   { cwd, env: { ...process.env, PATH, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDECODE: '', CLAUDE_CODE_ENTRYPOINT: '' } }],
-  codex: (cwd) => ['codex', ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true', '-C', cwd, prompt],
+  codex: (cwd) => ['codex', ['exec', ...(args['codex-model'] ? ['-m', args['codex-model']] : []), '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true', '-C', cwd, prompt],
     { cwd, env: { ...process.env, PATH } }],
 };
 const exec = (cmd, argv, opts, log) => new Promise((ok) => {
