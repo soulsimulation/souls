@@ -1360,6 +1360,9 @@ export class WorldHost {
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
    *  Its adoption also stands, once, any free body already left more than a step above its floor (the plan is read when the event
    *  is accepted and logged in it, with each body's Soul, so a replay stands the same bodies in the same places). */
+  /** #2133 stall-release-support/1 (prospective): a stall release upstairs stands a body only on a floor (its own, else its flight's
+   *  nearer clear landing), else leaves it held; never where it stands mid-flight. */
+  enableStallReleaseSupportV1(author='operator:stall-release-support'){if((this.extra.runtimePolicy as {stallReleaseSupportV1?:boolean}|undefined)?.stallReleaseSupportV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stallReleaseSupportV1:true},why:'stall-release-support/1 (#2133): a stall release upstairs stands a body on its own floor near it, else on the nearer clear landing of the flight it is on, else leaves it held and says so; never where it stands mid-flight (#447: the next tick faulted collision.human-static); retain historical replay before this event'});}
   enableStandHeightV2(author='operator:stand-height'){
     if((this.extra.runtimePolicy as {standHeightV2?:boolean}|undefined)?.standHeightV2)return Promise.resolve();
     const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV2:true},why:'stand-height/2 (#1521): a body the engine sets down on the ground floor of a world without a ground field stands at its floor height, never in the air at the height it had; any body already left in the air is stood on its floor once; retain historical replay before this event'};

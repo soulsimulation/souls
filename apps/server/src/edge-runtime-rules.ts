@@ -23,7 +23,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued
  *  together would drop the earlier one's flag from the host's record and log it again at the next boot. After `after` (main's
  *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1, #1369
- *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1 and #1521 stand-height/2 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
+ *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2 and #2133 stall-release-support/1 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
  *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
  *  already logged in that place. */
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string }): Promise<void> {
@@ -36,5 +36,6 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   await host.enableQuarantineMarkV1('world').catch((e) => console.error('[world] quarantine-mark/1 could not be adopted:', String(e).slice(0, 300)));   // #1440
   await host.enableStandHeightV1('world');   // #1454: each event copies the policy before it
   await host.enableNonFiniteHoldV1('world').catch((e) => console.error('[world] nonfinite-hold/1 could not be adopted:', String(e).slice(0, 300)));   // #1496
-  await host.enableStandHeightV2('world').catch((e) => console.error('[world] stand-height/2 could not be adopted:', String(e).slice(0, 300)));   // #1521, last
+  await host.enableStandHeightV2('world').catch((e) => console.error('[world] stand-height/2 could not be adopted:', String(e).slice(0, 300)));   // #1521
+  await host.enableStallReleaseSupportV1('world').catch((e) => console.error('[world] stall-release-support/1 could not be adopted:', String(e).slice(0, 300)));   // #2133, last
 }
