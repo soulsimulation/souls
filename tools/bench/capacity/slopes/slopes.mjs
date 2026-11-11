@@ -12,7 +12,9 @@
 //
 // The walkers axis (#1961) is not in the default list: Eden 2026 quiet and with 25/50/100 scripted walkers, WALK_TICKS
 // ticks each with the world's tick span timers on (SOULS_TICK_SPANS, world.ts) and, with --cpu-prof, a CPU profile of
-// those ticks (tick-spans.jsonl, profile-walk.cpuprofile).
+// those ticks (tick-spans.jsonl, profile-walk.cpuprofile). The memory axis (#1973) is that quiet arm, then the world's
+// memory: memory.json (process.memoryUsage() of the main thread and each worker thread, V8 heap spaces, a content hash of
+// every ArrayBuffer by heap snapshot id) and main.heapsnapshot. `--axis memory --repeats 2`: two worlds, one template.
 // Per arm and repeat: <out>/<arm>-r<k>/{result.json, calls.jsonl, live.jsonl, world.log, profile-*.cpuprofile}.
 // <out>/{receipt.json, results.json, REPORT.md}. No host name, user, home path or token in receipt/results/REPORT.
 import { spawn, execFileSync } from 'node:child_process';
@@ -33,7 +35,7 @@ const QUIET_N = Number(opt('quiet-worlds', 9)), PROBE_N = Number(opt('probe-n', 
 const WARM_S = Number(opt('warm-s', SHORT ? 10 : 30)), QUIET_S = Number(opt('quiet-s', SHORT ? 20 : 60)), ACTIVE_S = Number(opt('active-s', SHORT ? 40 : 180));
 const HOST_CLASS = opt('host-class', 'laptop'), QUIET = flag('quiet-host'), QUALIFYING = qualifies({ executor: flag('qualifying-executor'), quiet: QUIET, short: SHORT, repeats: REPEATS });
 const AXIS_LIST = opt('axis', 'inventory,activity,quiet').split(',');
-for (const a of AXIS_LIST) if (!AXES[a]) throw new Error(`--axis ${a}: inventory | activity | quiet`);
+for (const a of AXIS_LIST) if (!AXES[a]) throw new Error(`--axis ${a}: ${Object.keys(AXES).join(' | ')}`);
 const OUT = resolve(opt('out', join(ROOT, '.local/bench/slopes', new Date().toISOString().replace(/[:.]/g, '-'))));
 const { defaultCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/children.mjs')).href);
 const { decorateCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/production.mjs')).href);
@@ -100,12 +102,51 @@ const liveOf = (w) => { try { return JSON.parse(readFileSync(join(w.data, 'live.
 
 // ------------------------------------------------------------------ the inspector: CPU profiles of the main thread
 async function inspector(port) {
-  const list = (await getJ(`http://127.0.0.1:${port}/json/list`)).j, ws = new WebSocket(list[0].webSocketDebuggerUrl), wait = new Map(); let id = 0;
+  const list = (await getJ(`http://127.0.0.1:${port}/json/list`)).j, ws = new WebSocket(list[0].webSocketDebuggerUrl), wait = new Map(), events = new Map(); let id = 0;
   await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; });
-  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } const done = typeof m?.id === 'number' ? wait.get(m.id) : undefined; if (typeof done === 'function') { wait.delete(m.id); done(m); } };
+  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m?.method) events.get(m.method)?.(m.params); const done = typeof m?.id === 'number' ? wait.get(m.id) : undefined; if (typeof done === 'function') { wait.delete(m.id); done(m); } };
+  ws.onclose = () => { for (const done of wait.values()) done({ error: 'inspector closed' }); wait.clear(); };
   const send = (method, params = {}) => new Promise((ok) => { const i = ++id; wait.set(i, ok); ws.send(JSON.stringify({ id: i, method, params })); });
   await send('Profiler.enable'); await send('Profiler.setSamplingInterval', { interval: 1000 });
-  return { start: () => send('Profiler.start'), stop: async () => (await send('Profiler.stop')).result?.profile ?? null, close: () => ws.close() };
+  return { send, on: (method, f) => events.set(method, f), start: () => send('Profiler.start'), stop: async () => (await send('Profiler.stop')).result?.profile ?? null, close: () => ws.close() };
+}
+
+// ------------------------------------------------------------------ #1973: what a world holds
+const HASH_BUFFERS = `function () { return this.map((b) => { const u = new Uint8Array(b); let h = 0x811c9dc5, g = 0;
+  for (let i = 0; i < u.length; i++) { h = Math.imul(h ^ u[i], 16777619); g = (g + Math.imul(u[i], i + 1)) | 0; } return [u.length, (h >>> 0).toString(16) + (g >>> 0).toString(16)]; }); }`;
+async function memoryOf(insp, dir) {
+  const value = async (expression) => JSON.parse((await insp.send('Runtime.evaluate', { expression, returnByValue: true })).result?.result?.value ?? 'null');
+  const usage = 'JSON.stringify(process.memoryUsage())', spaces = "JSON.stringify(process.getBuiltinModule('v8').getHeapSpaceStatistics())";
+  const out = { before: await value(usage), workers: [] };
+  // each worker thread's own heap (its isolate), through the main session's NodeWorker domain
+  const sessions = []; let wid = 0; const wwait = new Map();
+  insp.on('NodeWorker.attachedToWorker', (p) => sessions.push({ id: p.sessionId, title: p.workerInfo?.title ?? '' }));
+  insp.on('NodeWorker.receivedMessageFromWorker', (p) => { let m; try { m = JSON.parse(p.message); } catch { return; } wwait.get(m.id)?.(m); wwait.delete(m.id); });
+  await insp.send('NodeWorker.enable', { waitForDebuggerOnStart: false }); await sleep(1000);
+  for (const w of sessions) {
+    const r = await Promise.race([sleep(10_000), new Promise((ok) => { const i = ++wid; wwait.set(i, ok); insp.send('NodeWorker.sendMessageToWorker', { sessionId: w.id, message: JSON.stringify({ id: i, method: 'Runtime.evaluate', params: { expression: usage, returnByValue: true } }) }); })]);
+    out.workers.push({ title: w.title.split(ROOT).join('.'), usage: r ? JSON.parse(r.result?.result?.value ?? 'null') : null });
+  }
+  await insp.send('NodeWorker.disable');
+  out.heapSpaces = await value(spaces);
+  // the main thread's heap snapshot (it collects garbage first), then what is left after that collection
+  await insp.send('HeapProfiler.enable'); const file = join(dir, 'main.heapsnapshot'); writeFileSync(file, '');
+  insp.on('HeapProfiler.addHeapSnapshotChunk', (p) => appendFileSync(file, p.chunk));
+  await insp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+  out.after = await value(usage); out.heapSpacesAfter = await value(spaces);
+  // every ArrayBuffer and SharedArrayBuffer of the main thread: bytes, a content hash, and its node id in the snapshot
+  out.buffers = [];
+  for (const proto of ['ArrayBuffer.prototype', 'SharedArrayBuffer.prototype']) {
+    const p = (await insp.send('Runtime.evaluate', { expression: proto, objectGroup: 'mem' })).result.result.objectId;
+    const arr = (await insp.send('Runtime.queryObjects', { prototypeObjectId: p, objectGroup: 'mem' })).result.objects.objectId;
+    const hashes = (await insp.send('Runtime.callFunctionOn', { objectId: arr, functionDeclaration: HASH_BUFFERS, returnByValue: true })).result.result.value;
+    const props = (await insp.send('Runtime.getProperties', { objectId: arr, ownProperties: true })).result.result.filter((x) => /^\d+$/.test(x.name));
+    for (const x of props) out.buffers.push({ kind: proto.split('.')[0], node: Number((await insp.send('HeapProfiler.getHeapObjectId', { objectId: x.value.objectId })).result.heapSnapshotObjectId), bytes: hashes[x.name][0], hash: hashes[x.name][1] });
+  }
+  await insp.send('Runtime.releaseObjectGroup', { objectGroup: 'mem' });
+  writeFileSync(join(dir, 'memory.json'), JSON.stringify(out, null, 1) + '\n');
+  return { rssMb: +(out.before.rss / 2 ** 20).toFixed(1), heapUsedMb: +(out.before.heapUsed / 2 ** 20).toFixed(1), externalMb: +(out.before.external / 2 ** 20).toFixed(1), arrayBuffersMb: +(out.before.arrayBuffers / 2 ** 20).toFixed(1),
+    workers: out.workers.length, buffers: out.buffers.length, snapshotMb: +(statSync(file).size / 2 ** 20).toFixed(1) };
 }
 
 // ------------------------------------------------------------------ Souls (the checkout's own CLI, dev identity)
@@ -174,7 +215,9 @@ async function walkRun(arm, rep) {
   let W = null, jp = null, prof = null, walking = false, walkers = null;
   try {
     log(`${run.id}: boot Eden 2026 (span timers on)`);
-    W = await bootWorld(join(dir, 'w0'), { slug: 'sw0', templateFile: join(ROOT, 'worlds/templates/eden-2026.json'), port: PORT, inspect: PROF ? INSPECT : 0, extraEnv: { SOULS_TICK_SPANS: spans } }); LIVE.add(W);
+    W = await bootWorld(join(dir, 'w0'), { slug: 'sw0', templateFile: join(ROOT, 'worlds/templates/eden-2026.json'), port: PORT, inspect: PROF || arm.memory ? INSPECT : 0,
+      // a heap snapshot holds the main thread for seconds: the stall stack (#457) would pause it in the debugger, which aborts V8
+      extraEnv: { SOULS_TICK_SPANS: spans, ...(arm.memory ? { SIM_STALL_STACK: '0' } : {}) } }); LIVE.add(W);
     const souls = []; jp = await joinProxy(W, PORT + 40); run.joinUrl = jp.url;
     // joins come from one address, and the world pairs at most 20 a minute per address (http.ts `pair`): 16 a minute here
     for (let i = 0, started = []; i < arm.walkers; i += 4) {
@@ -205,6 +248,7 @@ async function walkRun(arm, rep) {
     const result = { arm, rep, facts: { walkers: souls.length, places: places.length, ticksPerS: +(WALK_TICKS / windowS).toFixed(1) }, ticks: tickSpanTable(rows), stepProfile: subtreeTop(profile, ROOT),
       walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
     if (result.ticks?.ticks !== WALK_TICKS) throw new Error(`${result.ticks?.ticks ?? 0} of ${WALK_TICKS} ticks recorded`);
+    if (arm.memory) { const insp = await inspector(INSPECT); try { result.memory = await memoryOf(insp, dir); } finally { insp.close(); } }
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
     log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}`);
     return result;
