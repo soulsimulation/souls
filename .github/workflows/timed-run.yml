@@ -9,6 +9,7 @@
 # fails if the job wrote files outside its per-run directory. See docs/testing/playtests.md ("Timed runs").
 name: timed-run
 on:
+  push: { branches: [agent/1943-timed-run] }   # TEMPORARY proving trigger (#1943 A5); removed before review
   workflow_dispatch:
     inputs:
       ref:
@@ -34,9 +35,9 @@ jobs:
     runs-on: [self-hosted, souls-timed]
     timeout-minutes: 120
     env:
-      INPUT_REF: ${{ inputs.ref }}
-      INPUT_COMMAND: ${{ inputs.command }}
-      INPUT_REPEATS: ${{ inputs.repeats }}
+      INPUT_REF: ${{ inputs.ref || 'main' }}
+      INPUT_COMMAND: ${{ inputs.command || 'walk' }}
+      INPUT_REPEATS: ${{ inputs.repeats || '1' }}
       INPUT_ARGS: ${{ inputs.args }}
       CTL: ../ctl/.github/scripts/timed-run.mjs
     steps:
@@ -90,7 +91,7 @@ jobs:
           if [ "$INPUT_COMMAND" = walk ]; then sets=runtime,test; else sets=web,runtime; fi
           timeout 840 pnpm assets:pull --quiet --set "$sets"
       - name: Build the web bundle
-        if: inputs.command == 'eval-scripted'
+        if: env.INPUT_COMMAND == 'eval-scripted'
         working-directory: src
         run: pnpm --filter @souls/web build
       - name: Start load
@@ -107,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: timed-run-${{ inputs.command }}-${{ github.run_id }}
+          name: timed-run-${{ env.INPUT_COMMAND }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT }}/
           if-no-files-found: warn
           retention-days: 30
