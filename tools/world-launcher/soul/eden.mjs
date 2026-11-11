@@ -3455,30 +3455,6 @@ async function observe() {
   return d;
 }
 
-/** Phrase and all-term matches precede the legacy partial-term fallback, and each ranks a word in the offer's id or name
- *  (the label before its `[id]`, `(` or first comma) above a word only in its description. */
-export function rankCapabilities(list, search) {
-  const terms = [...new Set(search.toLowerCase().split(/[\s,|]+/).filter(Boolean))];
-  const normalize = value => String(value ?? '').toLowerCase().replace(/[-_/]+/g, ' ').replace(/\s+/g, ' ');
-  const phrase = normalize(search).trim();
-  const hits = hay => terms.filter(t => hay.includes(normalize(t))).length;
-  const tierOf = hay => phrase && hay.includes(phrase) ? 2 : terms.length && hits(hay) === terms.length ? 1 : 0;
-  return list.map((c, i) => {
-    const hay = normalize([c.id, c.label, c.verb, ...(c.aliases ?? [])].join(' '));
-    const name = normalize([c.id, String(c.label ?? '').split(/[[(,]/)[0], c.verb, ...(c.aliases ?? [])].join(' ')), named = tierOf(name);
-    return {c, i, count: hits(hay), names: hits(name), tier: named ? named + 2 : tierOf(hay)};
-  }).filter(x => x.count > 0).sort((a,b) => b.tier-a.tier || b.names-a.names || b.count-a.count || a.i-b.i).map(x => x.c);
-}
-
-/** 2.24.7 (#1412): the places the world reads the words as (`search.places`, resolve's own reading, best first) lead, in
- *  the world's order, then the client's own ranking without repeats. A world without `search` gets today's ranking. */
-export function searchOrder(list, search, answer) {
-  const ranked = rankCapabilities(list, search), places = Array.isArray(answer?.places) ? answer.places : [];
-  if (!places.length) return ranked;
-  const byId = new Map(list.map((c) => [c.id, c])), first = [...new Set(places)].map((id) => byId.get(id)).filter(Boolean), lead = new Set(first.map((c) => c.id));
-  return [...first, ...ranked.filter((c) => !lead.has(c.id))];
-}
-
 /** A label for a lookup: no `[id]` the row already has, at most LABEL_MAX characters, the distance kept. `inspect` has the rest. */
 const LABEL_MAX = 80;
 export function shortLabel(id, label) {
@@ -3515,27 +3491,25 @@ async function caps(...args) {
   }
   // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
   limit ??= search && !all ? 12 : 60;
-  // The plain listing is the world's page (what is near); search and verb filters read the whole menu. 2.24.7 (#1412):
-  // a search sends its words too, and a world that reads them answers `search` with resolve's own place reading.
-  const d = ok(await call("/v1/edge/capabilities" + (search || verb || all ? "?all=1" : "") + (search ? "&search=" + encodeURIComponent(search) : "")), "capabilities");
+  // #1921: a search is the local catalog's `find`, with no call on the world; a row with no act (a fixed place) is left out.
+  if (search) {
+    const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
+    const r = soulCatalog.find(ix, search, { verb, at: me?.at, states: live?.live?.things, limit: Infinity }), list = r.found.filter((x) => x.act);
+    const said = r.note ?? (list.length ? note : `Nothing in this world's catalog matches "${search}"${verb ? ` with --verb ${verb}` : ""}. Try other words.`);
+    return {
+      matching: list.length, shown: Math.min(list.length, limit), ...(list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}), ...(said ? { note: said } : {}),
+      offers: list.slice(0, limit).map((x) => { const label = x.label ?? x.name; return { id: x.act, label: json ? label : shortLabel(x.act, label), ...(x.in ? { in: x.in } : {}), ...(x.metres != null ? { metres: x.metres } : {}) }; }),
+    };
+  }
+  // The plain listing is the world's page (what is near); --verb and --all read the whole menu.
+  const d = ok(await call("/v1/edge/capabilities" + (verb || all ? "?all=1" : "")), "capabilities");
   let list = d.capabilities ?? [];
   if (!all) list = list.filter((c) => c.available);
   if (verb) list = list.filter((c) => c.verb === verb);
-  if (search) list = searchOrder(list, search, d.search);
-  const seen = search && d.search && typeof d.search === "object" ? d.search : null;
-  // the world's own note first; with none and nothing listed, say why: the world knew the place but a filter left it out, or nothing matched
-  const filtered = verb ? `--verb ${verb}` : "available offers (--all lists the rest)";
-  const note = seen?.note ?? (seen && !list.length ? (seen.placesMatched > 0
-    ? `The world knows ${seen.placesMatched === 1 ? "a place" : `${seen.placesMatched} places`} named "${search}", but none is among ${filtered}.`
-    : `Nothing here or on the menu matches "${search}". Try other words, or find "${search}".`) : undefined);
   return {
     total: (d.capabilities ?? []).length, matching: list.length, shown: Math.min(list.length, limit),
-    ...(search && list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}),
-    ...(d.omitted ? { notListed: d.omitted.count } : {}),
-    ...(seen && Number.isFinite(seen.placesMatched) ? { placesMatched: seen.placesMatched } : {}),
-    // #1445 review: a page's omitted note and a search note are both kept, joined, the page's first
-    ...((d.omitted?.note || note) ? { note: [d.omitted?.note, note].filter(Boolean).join(" ") } : {}),
-    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: search && !json ? shortLabel(c.id, c.label) : c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
+    ...(d.omitted ? { notListed: d.omitted.count } : {}), ...(d.omitted?.note ? { note: d.omitted.note } : {}),
+    offers: list.slice(0, limit).map((c) => ({ id: c.id, label: c.label, ...(c.params && Object.keys(c.params).length ? { params: Object.keys(c.params) } : {}), ...(c.verb === "paint" && c.params?.painting ? { painting: c.params.painting } : {}), ...(c.available ? {} : { available: false }) })),
   };
 }
 
