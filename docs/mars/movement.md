@@ -56,6 +56,8 @@ hit, so the hard separation layer rarely fires.
 - **wait-bound/1** (#1952, a logged runtime policy adopted at boot): off a stair flight, a programme step's walk whose body
   has not left a 0.5 m disc or changed level for 1,200 ticks (a minute) ends `route.blocked`, naming the last wait and whom
   it was for. Named waits (`traffic.yield` included) do not pause it, and a walk re-issued for the same step keeps its clock.
+  Under flight-resume/1 (#1367) a walk on a stair flight is bounded too: a body whose cancelled climb cannot reach a landing
+  is released by the stall guard onto a landing, or left on the flight, where its next walk resumes it.
 
 ## Speed limits and invariants
 

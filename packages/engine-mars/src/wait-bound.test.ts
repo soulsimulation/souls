@@ -93,6 +93,38 @@ test('#1952 A3 a body blocked on a stair flight is not ended by wait-bound/1',as
   assert.equal((e as any).rt.isCancelling(ex.id),false);assert.equal(e.programOf('walker'),r.id);assert.deepEqual(e.runtime.violations,[]);
 });
 
+test('#1367 A2 under flight-resume/1 wait-bound/1 bounds a walk blocked on a stair flight, and the body force-ended there walks again',async()=>{
+  // The A3 fixture: a reserved standing slot holds the far landing, so the climber waits on the flight.
+  const f=await marsFactory(EDEN_SAFE_COMMONS_WORLD),m=await loadMars(),w=f.genesis('wait-bound-flight'),z=-1.7;
+  const region={id:'hold',label:'Hypothetical landing hold',provenance:{origin:'test-fixture' as const,confidence:'hypothetical' as const},kind:'place' as const,level:1,polygon:[[8.9,z-1.01],[9.1,z-1.01],[9.1,z+1],[8.9,z+1]] as [number,number][],layout:{focus:[9,1] as [number,number],kind:'stand' as const}};
+  (w.regions as any).hold=region;
+  const rt0=new m.Runtime(w,m.createRegistry(),m.servicesFor(m.scenes)(w),m.invariants);
+  const slot=regionSlots(rt0,region as any).find(s=>Math.abs(s.p[1]-z)<1e-9)!;assert.ok(slot);
+  w.entities.blocker=m.human('blocker',slot.p[0],slot.p[1],{level:1,y:.24,yaw:slot.yaw});w.entities.walker=m.human('walker',9,.8,{yaw:-Math.PI/2});
+  const e=f.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true,flightResumeV1:true} as never);
+  const hold=e.submit('take_slot',{actor:'blocker',slot:slot.id});for(let i=0;i<20;i++)e.step();assert.equal(hold.phase,'occupied');
+  const r=e.perform({actor:'walker',label:'walk onto presentation deck',steps:[{verb:'walk_to',params:{to:'commons-deck',standoff:0}}]});assert.equal(r.ok,true);
+  const events:ProgramEvent[]=[];let firstBlocked:number|undefined,stopped:string|undefined;
+  for(let i=0;i<1500&&(firstBlocked===undefined||e.world.tick<firstBlocked+1300)&&!stopped;i++){
+    events.push(...e.step().programs);const ex=execOf(e,'walker'),rec=ex?e.runtime.records.get(ex.id):undefined;
+    if(rec?.status==='blocked'&&firstBlocked===undefined){firstBlocked=e.world.tick;assert.equal(ex.phase,'climb','blocked on the flight');}
+    stopped=((e as any).programs.get(r.id)?.walkStopping as {message?:string}|undefined)?.message??events.find(v=>v.id===r.id&&v.kind==='failed')?.message;
+  }
+  assert.ok(firstBlocked!==undefined&&stopped?.includes('wait-bound/1'),`the bound ends the walk on the flight: ${stopped}`);
+  assert.ok(e.world.tick<=firstBlocked!+1210,'within a minute of stopping');
+  const c=e.world.entities.walker;
+  assert.ok(c.human!.task,'still on the flight, cancelling');assert.ok((e as any).rt.forceCancel(c.human!.task,{code:'stall.released',message:'test: force-ended on the flight'}),'its cancel waits on the held landing; force-ended there, as stall-guard/1 does');
+  for(let i=0;i<5;i++)events.push(...e.step().programs);
+  assert.equal(c.human!.level,0);assert.ok(c.pose.p[1]>.2&&c.human!.task===undefined,'left standing on the flight, above its floor, with no walk');
+  const again=e.perform({actor:'walker',label:'back down',steps:[{verb:'mars:walk_to',params:{x:9,z:1.2,level:0}}]});assert.equal(again.ok,true,JSON.stringify(again));
+  for(let i=0;i<600&&!events.some(v=>v.id===again.id&&v.kind!=='step');i++)events.push(...e.step().programs);
+  const end=events.find(v=>v.id===again.id&&v.kind!=='step');
+  assert.equal(end?.kind,'completed',JSON.stringify(end));
+  assert.equal(c.human!.level,0);assert.ok(Math.abs(c.pose.p[1])<.05,'on the floor below');
+  assert.equal(events.filter(v=>/motion\.teleport/.test(JSON.stringify(v))).length,0,'no motion.teleport');
+  assert.deepEqual(e.runtime.violations,[]);
+});
+
 test('#1952 A4 under wait-bound/1 a forced cancel and a normal release both remove the walk exec',()=>{
   for(const policy of [false,true]){
     const forced=yieldBesideWall(policy?{waitBoundV1:true}:{});run(forced.e,120);

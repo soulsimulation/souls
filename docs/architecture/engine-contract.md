@@ -121,8 +121,8 @@ stall release with nothing clear near leaves the body where it stands. Under `st
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
-Under `wait-bound/1` (#1952), adopted at boot after stand-height/2, a walk going nowhere off a stair flight ends `route.blocked` within a
-minute ([movement](../mars/movement.md)), and an action ended without its def (a stall release's `forceCancel`) leaves no
+Under `wait-bound/1` (#1952), adopted at boot after stand-height/2, a walk going nowhere off a stair flight (on one too, under `flight-resume/1`) ends
+`route.blocked` within a minute ([movement](../mars/movement.md)), and an action ended without its def (a stall release's `forceCancel`) leaves no
 walk exec behind.
 
 ## Refusal

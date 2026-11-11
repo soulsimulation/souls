@@ -1260,12 +1260,13 @@ export class MarsEngine implements Engine {
   }
   /** #1952 wait-bound/1: a walk_to whose body has not left a 0.5 m disc or changed level for 1,200 ticks of this programme step
    *  ends route.blocked, naming the last wait and whom it was for. Named waits do not pause it (the watchdog's do), so a body
-   *  rocking by millimetres beside a wall, which restarts the persistent-wait detector, still ends. A body on a stair flight
-   *  (climbing, or finishing a cancelled climb) is left out until flight resume (#1453) can set it down there. */
+   *  rocking by millimetres beside a wall, which restarts the persistent-wait detector, still ends. Without flight-resume/1 a
+   *  body on a stair flight (climbing, or finishing a cancelled climb) is left out; under it (#1367) a flight is bounded too,
+   *  since a body force-ended there walks again. */
   private waitBoundV1(p: Prog, rec: { id: string; status: string; diagnostic?: Diag }): Diag | null {
     const a = this.ents[p.actor], ex = this.rt.live.get(rec.id)?.exec as { phase?: string; cancelTo?: string } | undefined, tick = this.rt.tick;
     const at: [number, number] = [a.pose.p[0], a.pose.p[2]], level: number = a.human?.level ?? 0, w = p.waitBoundV1;
-    if (!w || w.step !== p.index || ex?.phase === 'climb' || ex?.cancelTo || level !== w.level || hypot(at[0] - w.at[0], at[1] - w.at[1]) > WAIT_BOUND_M) { p.waitBoundV1 = { step: p.index, at, level, since: tick }; return null; }
+    if (!w || w.step !== p.index || (this.cfg.flightResumeV1 !== true && (ex?.phase === 'climb' || ex?.cancelTo)) || level !== w.level || hypot(at[0] - w.at[0], at[1] - w.at[1]) > WAIT_BOUND_M) { p.waitBoundV1 = { step: p.index, at, level, since: tick }; return null; }
     if (rec.status === 'blocked' && rec.diagnostic) { w.code = rec.diagnostic.code; w.by = (rec.diagnostic.subjects ?? []).filter((s) => s !== p.actor); }
     if (tick - w.since < WAIT_BOUND_TICKS) return null;
     const by = w.by ?? [];
