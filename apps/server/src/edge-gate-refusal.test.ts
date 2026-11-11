@@ -36,7 +36,10 @@ test('Eden: an unknown id is refused without building a menu; on-demand ids are 
     const far = cat.places.filter(p => !p.level && p.parent && !p.fixed).sort((a, b) => away(b.at) - away(a.at)).slice(0, 2);
     const seats = cat.things.filter(x => x.seat && away(x.at) > SPOT_REACH + 100).sort((a, b) => away(b.at) - away(a.at)).slice(0, 2);
     assert.equal(far.length, 2, 'two far places'); assert.equal(seats.length, 2, 'two far seats');
-    ids.push(...far.map(p => `walk:${p.id}`), ...seats.map(s => `sit:${s.id}`));
+    // and a far room by its walk ref, which only resolve's on-demand makers know (not on the menu, not an id in the world)
+    const room = 'walk:region-alpine-mountain-station/hall';
+    assert.ok(!L.coreA.binds(soul).caps.some((c: {id: string}) => c.id === room) && !L.bindOne(soul, room), `${room} is off the menu here`);
+    ids.push(...far.map(p => `walk:${p.id}`), ...seats.map(s => `sit:${s.id}`), room);
     assert.deepEqual(ids.map(id => [id, gate(id)?.code ?? 'ok']).filter(([, code]) => code !== 'ok'), []);
   });
 });
