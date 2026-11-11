@@ -39,7 +39,7 @@ const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval"
 /** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
 const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
-const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
+const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version", "news"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
 const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "links", "pendingCreate"];
 const IMPORTED_RUNTIME = [".eden-serve.json"];
@@ -179,6 +179,24 @@ function newerThan(a, b) {
   const p = (v) => String(v ?? "0").split(".").map(Number), x = p(a), y = p(b);
   for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d) return d > 0; }
   return false;
+}
+// #1941: the platform feed. A site is a world URL's origin and the path above its /w/<slug>; its feed is <site>/v1/feed.
+// config.json keeps one entry per site: the cursor, when it was last checked and tried, the last 50 items, and the ids read
+// and woken for. Only sites on an origin this home trusts are read.
+const FEED_EVERY_MS = 6 * 3_600_000, FEED_RETRY_MS = 10 * 60_000, FEED_KEEP = 50;
+const FEED_FIELDS = ["id", "at", "kind", "title", "body", "url", "startsAt", "place", "minClient"];
+const siteOf = (url) => { try { const u = new URL(url); return u.origin + u.pathname.replace(/\/w\/[^/]+\/*$/, "").replace(/\/+$/, ""); } catch { return null; } };
+const feedNum = (id) => Number(/^f(\d+)$/.exec(id ?? "")?.[1] ?? 0);
+/** The sites this home reads news from: its worlds' sites, on origins it trusts. */
+const feedSites = (cfg) => [...new Set(Object.values(cfg.worlds ?? {}).filter((w) => (cfg.trustedOrigins ?? []).includes(originOf(w.url))).map((w) => siteOf(w.url)).filter(Boolean))];
+/** The sites checked more than 6 h ago and not tried in the last 10 minutes (a failed check is retried after that). */
+const feedDue = (cfg, now) => feedSites(cfg).filter((s) => { const f = cfg.feeds?.[s] ?? {}; return now - (f.checkedAt ?? 0) > FEED_EVERY_MS && now - (f.triedAt ?? 0) > FEED_RETRY_MS; });
+const unreadOf = (f) => (f?.items ?? []).filter((i) => feedNum(i.id) > feedNum(f.read));
+/** What a command adds to its JSON: `{unread, update?}`; update is the newest minClient above this client among unread releases. */
+function newsOf(cfg, version) {
+  const unread = feedSites(cfg).flatMap((s) => unreadOf(cfg.feeds?.[s]));
+  const update = unread.filter((i) => i.kind === "release" && newerThan(i.minClient, version)).map((i) => i.minClient).reduce((a, b) => (newerThan(b, a) ? b : a), null);
+  return unread.length ? { unread: unread.length, ...(update ? { update } : {}) } : null;
 }
 /** A world's name for a Soul or itself, as this home keeps it: one plain line. It reaches the guide an agent reads, and a
  *  world may be hostile, so no line breaks, control or invisible characters, and a cap well above any name a world allows. */
@@ -583,6 +601,25 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     }
     return wrote;
   }
+  /** #1941: claim the due sites for one check, so two processes never check one site together. */
+  const claimFeeds = (now = Date.now()) => (feedDue(config(), now).length ? updateConfig((c) => { const due = feedDue(c, now); for (const s of due) (c.feeds ??= {})[s] = { ...c.feeds[s], triedAt: now }; return due; }) : []);
+  /** A check's answer: the items after the cursor, oldest first, and the next cursor. A site's first answer wakes no one. */
+  const noteFeed = (site, items, next, now = Date.now()) => updateConfig((c) => {
+    const f = { ...(c.feeds ??= {})[site] }, gone = new Set(items.map((i) => i.replaces).filter(Boolean)), first = !f.checkedAt;
+    f.items = [...(f.items ?? []).filter((i) => !gone.has(i.id)), ...items.map((i) => Object.fromEntries(FEED_FIELDS.filter((k) => i[k] != null).map((k) => [k, i[k]])))].slice(-FEED_KEEP);
+    Object.assign(f, { cursor: next ?? f.cursor ?? null, checkedAt: now }); delete f.triedAt;
+    if (first) f.woke = f.items.at(-1)?.id ?? null;
+    c.feeds[site] = f;
+  });
+  /** `news`: the unread items (or the last 50 with `all`) of every site, oldest first; all of them are read now. */
+  const readNews = ({ all = false } = {}) => updateConfig((c) => {
+    const out = [];
+    for (const s of feedSites(c)) { const f = c.feeds?.[s]; if (!f?.items?.length) continue; out.push(...(all ? f.items : unreadOf(f)).map((i) => ({ site: s, ...i }))); f.read = f.items.at(-1).id; }
+    return out.sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-FEED_KEEP);
+  });
+  /** Items no process in this home has raised a wake for: each is handed to one caller, once. */
+  const unwoken = (c) => feedSites(c).flatMap((s) => (c.feeds?.[s]?.items ?? []).filter((i) => feedNum(i.id) > feedNum(c.feeds[s].woke)).map((i) => ({ s, i })));
+  const claimNews = () => (unwoken(config()).length ? updateConfig((c) => { const n = unwoken(c); for (const { s, i } of n) c.feeds[s].woke = i.id; return n.map(({ i }) => i); }) : []);
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
   /** The guide's head, where a chat learns who lives here, rewritten in place in a guide this home wrote (CLAUDE.md, AGENTS.md
@@ -599,9 +636,9 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     return wrote;
   }
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, refreshGuide, config, noteConsolidation, claimFeeds, noteFeed, readNews, claimNews, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
-return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, isSoulsSkill, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
+return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, isSoulsSkill, createHome, slugOf, keyOf, originOf, newerThan, FEED_EVERY_MS, siteOf, feedSites, feedDue, newsOf, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS, FEED_RETRY_MS, FEED_KEEP };
 })();
 // </inline home.mjs>
 
@@ -2232,8 +2269,242 @@ function applyFrame(copy, world, event, frame, receivedAt) {
 return { PUSHED_FRESH_MS, SPEECH_KEEP, canon, liveHash, wholeCopy, resumeFrom, applyFrame };
 })();
 // </inline live.mjs>
+// <inline wake.mjs> generated by inline.mjs: edit wake.mjs, not this block
+const soulWake = (() => {
+const { newerThan } = soulHome;
+// Wake rules (#1929): when the resident process wakes the mind is data in serve's state, and one pure function reads what serve
+// already stores (events, receipts, the plan, the owner's messages, speech said to this Soul, the live copy) against the rules and
+// says which fire. Firing only queues {id, kind, why, at}; the budget, merging and delivery are listen's and pending's (#1968).
+// #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
+// rule over it, and stay held until a command from another process reaches serve, or go back to the queue after HELD_MS. Each
+// handing to a reader is one delivery and is charged once: the budget's count is the deliveries made, never more than it allows.
+
+/** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
+const WAKE_EVERY_S = 300;
+const WAKE_QUEUE_MAX = 50;
+/** An act's end waits this long before it wakes: an `act --wait` that sees the end reads the receipt within it. */
+const ACT_ENDED_GRACE_MS = 3_000;
+const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupted", "replaced"]);
+const FIRED_KEEP = 200;   // receipt ids act-ended has woken for, so one end wakes once (serve keeps the newest 200 ended receipts)
+/** Kinds that are always on: the three wakes serve had before rules. */
+const ALWAYS = ["owner-message", "speech-to-me", "plan-stopped"];
+/** Kinds `wake add` takes. act-ended is on by default and can be removed and added again. */
+const ADDABLE = ["act-ended", "soul-arrives", "place-busy"];
+
+function fresh() {
+  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), { id: "act-ended", kind: "act-ended", every: 0 }], cursor: null, queue: [], next: 1 };
+}
+
+/** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
+const BUDGETS = { quiet: 4, normal: 12, lively: 60, unlimited: null };
+/** A delivered wake no later agent command confirmed goes back to the queue after this long, to be delivered again within the budget. */
+const HELD_MS = 600_000;
+/** speech-to-me: at most one wake per speaker in this long; their further lines join the next one. */
+const SPEAKER_MS = 60_000;
+const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
+
+const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
+/** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
+function parseBudget(argv) {
+  const [a, b, ...extra] = argv;
+  const n = (v) => /^\d{1,6}$/.test(v ?? "");
+  if (a === "--day" && (n(b) || b === "unlimited") && !extra.length) return { day: b === "unlimited" ? null : Number(b) };
+  if (a !== undefined && (a in BUDGETS || n(a)) && b === undefined) return { hour: n(a) ? Number(a) : a };
+  throw new Error(USAGE);
+}
+/** `wake add` arguments as a rule (without its id). Throws what is wrong. */
+function parseRule(argv) {
+  const rest = [];
+  let every = WAKE_EVERY_S;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--every") { const v = argv[++i]; if (!/^\d+$/.test(v ?? "")) throw new Error("--every takes whole seconds"); every = Number(v); }
+    else rest.push(argv[i]);
+  }
+  const [kind, text, ...extra] = rest;
+  if (ALWAYS.includes(kind)) throw new Error(`${kind} is always on`);
+  if (!ADDABLE.includes(kind) || extra.length) throw new Error(USAGE);
+  let p = {};
+  if (text !== undefined) { try { p = JSON.parse(text); } catch { throw new Error(`${kind}: params must be JSON`); } }
+  if (!p || typeof p !== "object" || Array.isArray(p)) throw new Error(`${kind}: params must be a JSON object`);
+  const id = (v) => typeof v === "string" && /^\S{1,100}$/.test(v);
+  if (kind === "act-ended") { if (Object.keys(p).length) throw new Error("act-ended takes no params"); return { kind, every }; }
+  if (kind === "soul-arrives") {
+    const params = { who: p.who ?? "any", where: p.where ?? "here" };
+    if (Object.keys(p).some((k) => !["who", "where"].includes(k)) || !id(params.who) || !id(params.where)) throw new Error('soul-arrives takes {"who":"any"|"<soulId>","where":"here"|"<placeId>"}');
+    return { kind, params, every };
+  }
+  if (Object.keys(p).some((k) => !["place", "atLeast"].includes(k)) || !id(p.place) || !Number.isInteger(p.atLeast) || p.atLeast < 1) throw new Error('place-busy takes {"place":"<placeId>","atLeast":<n ≥ 1>}');
+  return { kind, params: { place: p.place, atLeast: p.atLeast }, every };
+}
+
+/** Pure: one `wake add` ({add: rule}) or `wake remove` ({remove: id}) on the wake state. {wake} or {error}. */
+function change(wake, c) {
+  const w = { ...fresh(), ...wake };
+  if (!c) return { wake: w };
+  if (c.budget) return { wake: { ...w, budget: { ...w.budget, ...c.budget } } };
+  if (c.add) {
+    const rule = { id: `w${w.next ?? 1}`, ...c.add };
+    return { wake: { ...w, rules: [...w.rules, rule], next: (w.next ?? 1) + 1 }, rule };
+  }
+  const r = w.rules.find((x) => x.id === c.remove);
+  if (!r) return { error: `no wake rule ${c.remove}: wake lists them` };
+  if (r.always) return { error: `${r.id} is always on` };
+  return { wake: { ...w, rules: w.rules.filter((x) => x !== r) }, removed: r.id };
+}
+
+const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+/** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
+function view(wake, now = 0) {
+  const w = { ...fresh(), ...wake };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
+}
+
+const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
+/** What `status` shows: the budget, whether the owner chose it, and the ambient wakes delivered in the last hour and 24 hours. */
+function budgetView(wake, now) {
+  const w = wake ?? {}, sent = (w.delivered ?? []).map((d) => d.at), hour = perHour(w);
+  return { budget: w.budget?.hour ?? "normal", perHour: hour, perDay: w.budget?.day ?? null, chosen: w.budget?.hour !== undefined,
+    deliveredLastHour: sent.filter((t) => now - t < HOUR_MS).length, deliveredLast24h: sent.filter((t) => now - t < DAY_MS).length };
+}
+
+/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. */
+function enqueue(queue, fired) {
+  const q = (queue ?? []).map((x) => ({ ...x }));
+  for (const f of fired) {
+    const e = q.find((x) => x.id === f.id);
+    if (e) Object.assign(e, { why: f.why, at: f.at, count: (e.count ?? 1) + (f.count ?? 1) }); else q.push({ ...f, count: f.count ?? 1 });
+  }
+  return q.slice(-WAKE_QUEUE_MAX);
+}
+
+/** Pure: held deliveries older than heldMs go back to the queue, under what queued since. The delivery made stays counted: the
+ *  reader was handed it, and a refund would let a reader that never confirms take more turns than the budget (review of #2053). */
+function expire(wake, now, heldMs = HELD_MS) {
+  const w = { ...fresh(), ...wake }, old = (w.held ?? []).filter((g) => now - g.at >= heldMs);
+  if (!old.length) return w;
+  const queue = enqueue(old.flatMap((g) => g.wakes), w.queue ?? []);   // what queued since is newer: its why stands
+  return { ...w, queue, held: w.held.filter((g) => !old.includes(g)) };
+}
+
+/** Pure: what a reader is handed now. The always-on kinds come by their own paths (the owner's messages, speech, the plan), so
+ *  their entries leave the queue; the ambient ones are handed over, all at once, when the budget allows one more delivery
+ *  (`free`: they ride with a wake that is coming anyway, and cost nothing). Handed wakes are held, not gone: confirm() ends that. */
+/** `reader`: the process asking, so its own later requests confirm nothing. `rehand` (pending, a run that is awake anyway): wakes
+ *  still held for another reader, which no command has confirmed, are handed to this one too, at no new charge. */
+function deliver(wake, now, { free = false, heldMs = HELD_MS, reader = null, rehand = false } = {}) {
+  const w0 = expire(wake, now, heldMs), queue = (w0.queue ?? []).filter((x) => !ALWAYS.includes(x.kind));
+  const delivered = (w0.delivered ?? []).filter((d) => now - d.at < DAY_MS);
+  const again = rehand ? (w0.held ?? []).filter((g) => g.reader !== reader) : [];
+  const held = [...(w0.held ?? []).filter((g) => !again.includes(g)), ...again.map((g) => ({ ...g, at: now, reader }))];
+  const w = { ...w0, queue, delivered, held }, before = enqueue([], again.flatMap((g) => g.wakes));
+  if (!queue.length) return { wake: w, wakes: before };
+  const hour = perHour(w), day = w.budget?.day ?? null;
+  const over = !free && ((hour !== null && delivered.filter((d) => now - d.at < HOUR_MS).length >= hour) || (day !== null && delivered.length >= day));
+  if (over) return { wake: w, wakes: before, over: true };
+  return { wake: { ...w, queue: [], held: [...held, { at: now, wakes: queue, charged: !free, reader }], delivered: free ? delivered : [...delivered, { at: now }] }, wakes: enqueue(before, queue) };
+}
+
+/** Pure: a command reached serve from `reader`: what was handed to any other process was taken. A reader's own requests (a listen's
+ *  next poll) confirm nothing it was handed. Without a reader, everything held is taken. */
+function confirm(wake, reader) {
+  const held = (wake?.held ?? []).filter((g) => reader != null && g.reader === reader);
+  return held.length === (wake?.held?.length ?? 0) ? wake : { ...wake, held };
+}
+
+/** #1941: platform news serve raises as one ambient wake, within the budget: events, and releases this client is too old for.
+ *  The feed's text is the platform's, not a Soul's: the wake names the newest title and points at `news`. */
+function newsWakes(items, version, at) {
+  const due = items.filter((i) => i.kind === "event" || (i.kind === "release" && newerThan(i.minClient, version)));
+  return due.length ? [{ id: "news", kind: "news", why: `platform news: ${due.at(-1).title} (read it with news)`, at, count: due.length }] : [];
+}
+
+const speaker = (a) => a.soulId ?? a.from ?? "someone";
+/** Pure: does any of these lines said to this Soul come from a speaker who has not woken it within SPEAKER_MS? */
+const speechDue = (lines, spoke, now) => lines.some((a) => now - (spoke?.[speaker(a)] ?? -Infinity) >= SPEAKER_MS);
+/** Pure: the speakers' last wake, with these lines' speakers waking now. */
+function spokeNow(spoke, lines, now) {
+  const o = Object.fromEntries(Object.entries(spoke ?? {}).filter(([, t]) => now - t < SPEAKER_MS));
+  for (const a of lines) o[speaker(a)] = now;
+  return o;
+}
+
+/** The items after the cursor's id; all of them when the id is gone (the list was cut from the front), none on a first look. */
+function after(list, cursorId, first) {
+  if (first) return [];
+  const i = cursorId ? list.findIndex((x) => x?.id === cursorId) : -1;
+  return i >= 0 ? list.slice(i + 1) : list;
+}
+const who = (live, id) => live.souls.find((r) => r.id === id)?.name ?? id;
+
+/** Pure: the rules against serve's state at `now` (ms). state: serve's state ({events, receipts, plan, planEnded, messages,
+ *  addressed, addressedSeq, wake: {cursor}}) with `live` (the live copy's picture, or null) and `me` (this Soul's id).
+ *  Returns the rules with their last match, last firing and change state, the engine's cursor, and the wakes fired now. */
+function evaluate(rules, state, now) {
+  const prev = state.wake?.cursor ?? null, first = !prev;
+  const events = state.events ?? [], messages = state.messages ?? [], addressed = state.addressed ?? [], receipts = state.receipts ?? {};
+  const newEvents = after(events, prev?.event, first);
+  const newMessages = first ? [] : prev.message && messages.some((m) => m.id === prev.message) ? after(messages, prev.message, false) : messages.filter((m) => (m.seenAt ?? 0) > (prev.messageAt ?? 0));
+  const newSpeech = first ? [] : addressed.filter((x) => x.seq > (prev.addressed ?? 0));
+  const last = messages.at(-1);
+  const cursor = { event: events.at(-1)?.id ?? prev?.event ?? null, message: last?.id ?? prev?.message ?? null, messageAt: last?.seenAt ?? prev?.messageAt ?? 0, addressed: Math.max(state.addressedSeq ?? 0, prev?.addressed ?? 0) };
+  const live = Array.isArray(state.live?.souls) ? state.live : null;
+  const planReceipts = new Set([state.plan, ...(state.planEnded ?? [])].flatMap((p) => p?.steps ?? []).map((s) => s.receipt).filter(Boolean));
+  const fired = [];
+  const out = rules.map((r0) => {
+    const r = { ...r0 };
+    const fire = (why) => {
+      r.lastMatch = now;
+      if (r.every && r.lastFired && now - r.lastFired < r.every * 1000) return false;
+      r.lastFired = now;
+      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString() });
+      return true;
+    };
+    if (r.kind === "owner-message") for (const m of newMessages) { if (!m.acked) fire(`the owner wrote (${m.id})`); }
+    else if (r.kind === "speech-to-me") for (const x of newSpeech) fire(`${x.from ?? x.soulId ?? "someone"} spoke to you`);
+    else if (r.kind === "plan-stopped") {
+      const p = state.plan, key = p?.state === "stopped" ? `${p.id}:${p.stoppedAt}` : null;
+      if (key && key !== r.seen) { const s = p.steps[p.at]; fire(`plan step ${p.at + 1} refused (${s?.why?.code ?? "refused"})`); }
+      r.seen = key ?? r.seen;
+    } else if (r.kind === "act-ended") {
+      const done = new Set(r.done ?? []), held = [...(r.held ?? [])];
+      for (const e of newEvents) {
+        const id = e?.receipt?.id;
+        if (id && ENDED.has(e.receipt.phase) && !done.has(id) && !held.some((h) => h.id === id)) held.push({ id, since: now });
+      }
+      r.held = [];
+      for (const h of held) {
+        const x = receipts[h.id];
+        // only an act the agent sent itself, of the body, not a plan's step, that no wait saw end and pending has not shown.
+        // Held through the grace before asking whose it is: the stream's end can come before the act's answer marks it mine (#2054).
+        if (x?.waited || x?.read || planReceipts.has(h.id)) continue;
+        if (now - h.since < ACT_ENDED_GRACE_MS) { r.held.push(h); continue; }
+        if (!x?.mine) continue;
+        done.add(h.id); fire(`${x.capability ?? "your act"} ${x.phase}${x.reason ? `: ${x.reason}` : ""}`);
+      }
+      r.done = [...done].slice(-FIRED_KEEP);
+    } else if (r.kind === "soul-arrives" && live) {
+      const place = r.params.where === "here" ? live.souls.find((x) => x.id === state.me)?.place : r.params.where;
+      if (place) {
+        const ids = live.souls.filter((x) => x.id !== state.me && x.place === place && (r.params.who === "any" || x.id === r.params.who)).map((x) => x.id);
+        if (r.inside) { const came = ids.filter((id) => !r.inside.includes(id)); if (came.length) fire(`${came.map((id) => who(live, id)).join(", ")} arrived at ${place}`); }
+        r.inside = ids;
+      }
+    } else if (r.kind === "place-busy" && live) {
+      const n = live.souls.filter((x) => x.id !== state.me && x.place === r.params.place).length, busy = n >= r.params.atLeast;
+      if (busy && r.busy === false) fire(`${n} Souls at ${r.params.place}`);
+      r.busy = busy;
+    }
+    return r;
+  });
+  return { rules: out, cursor, fired };
+}
+return { WAKE_EVERY_S, WAKE_QUEUE_MAX, ACT_ENDED_GRACE_MS, ALWAYS, ADDABLE, fresh, BUDGETS, HELD_MS, SPEAKER_MS, parseBudget, parseRule, change, view, budgetView, enqueue, expire, deliver, confirm, newsWakes, speechDue, spokeNow, evaluate };
+})();
+// </inline wake.mjs>
 
 const VERSION = "2.32.0";
+// #1936: every request this client makes says which client it is
+const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2540,8 +2811,12 @@ export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", 
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
+const WAKE_HELD_MS = soulWake.HELD_MS * TIME_SCALE;   // #1968
 // How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
 const SERVE_START_MS = 60_000;
+// #2084: the longest a command's request waits in serve's queue behind this Soul's other requests before serve refuses it itself
+// (soul.busy), and the wait it states then.
+const SERVE_QUEUE_MS = 10_000 * TIME_SCALE, SERVE_REFUSAL_RETRY_MS = 2_000;
 /** Full jitter: uniform in [0, min(cap, base·2^attempt)]. */
 export const fullJitter = (attempt, rnd = Math.random) => rnd() * Math.min(RETRY.capMs, RETRY.baseMs * 2 ** attempt);
 /** A stated wait is a floor: the world counts a return before it as impolite. Up to 20 % more, so a crowd told "4 s"
@@ -2683,6 +2958,7 @@ export function intentionOf(path, body) {
 export function readPending(at = Date.now()) {
   try { const j = JSON.parse(readFileSync(PENDING_FILE, "utf8")); return Array.isArray(j) ? j.filter((x) => x && typeof x.key === "string" && at - x.at < PENDING_MS) : []; } catch { return []; }
 }
+const liveOther = (pid) => { if (!Number.isInteger(pid) || pid === process.pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; } };
 function writePending(list) {
   try {
     if (!list.length) { if (existsSync(PENDING_FILE)) unlinkSync(PENDING_FILE); return; }
@@ -2704,11 +2980,12 @@ async function lookupWrite(path, key) {
  *  the world answers a known clientRef with its first receipt. Returns the answer (or the world's record of it) with
  *  `key`, `ref`, `resent` (this key came from an earlier unconfirmed run), `checked` (found by lookup) or `unconfirmed`. */
 async function keyedWrite(path, body, { key: given, ref: givenRef, once = false } = {}) {
-  const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent);
+  // #2083: a key held by a process still running is that process's write, not this one's: concurrent runs never share one
+  const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent && !liveOther(x.pid));
   const key = given ?? held?.key ?? randomUUID(), ref = once ? givenRef ?? held?.ref ?? key : undefined, resent = !!held;
-  writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now() }]);
+  writePending([...readPending().filter((x) => x.intent !== intent || x.key !== key), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now(), pid: process.pid }]);
   const r = await call(path, { body: ref ? { ...body, clientRef: ref } : body, key, once });
-  const settle = () => writePending(readPending().filter((x) => x.intent !== intent));
+  const settle = () => writePending(readPending().filter((x) => x.intent !== intent || x.key !== key));
   // a named key the world already holds: its own earlier act (same offered id) is this act's answer; another write's is not
   const reused = !!given && r.status === 409 && codeOf(r.data) === "idempotency-key-reused";
   if (confirmedAnswer(r, !!given) && !reused) { settle(); return { r, key, ref, resent }; }
@@ -2803,7 +3080,7 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
     if (!h1) { reject(new Error(`unsupported protocol ${u.protocol}`)); return; }
     if (signal?.aborted) { reject(signal.reason ?? new Error("This operation was aborted")); return; }
     const data = body === undefined ? null : Buffer.from(body);
-    const req = h1[0](u, { method, agent: h1[1], headers: { ...headers, "accept-encoding": "gzip, deflate, br", ...(data ? { "content-length": String(data.length) } : {}) } }, (res) => {
+    const req = h1[0](u, { method, agent: h1[1], headers: { ...headers, ...CLIENT, "accept-encoding": "gzip, deflate, br", ...(data ? { "content-length": String(data.length) } : {}) } }, (res) => {
       const enc = String(res.headers["content-encoding"] ?? "").toLowerCase();
       const stream = enc === "gzip" ? res.pipe(createGunzip()) : enc === "deflate" ? res.pipe(createInflate()) : enc === "br" ? res.pipe(createBrotliDecompress()) : res;
       const chunks = []; let ended = null;
@@ -3348,7 +3625,7 @@ async function status() {
   const r = await direct("/v1/agent/me");
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
-    const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
+    const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow(), ...wakeNow() };
     if (r.status === 401) return { ...local, ...lastServeEnd(), paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
@@ -3365,10 +3642,12 @@ async function status() {
     ownerMessagesWaiting: inbox.queued ?? 0,
     ...(unfinished.length ? { unfinished } : {}),
     lastReceipt: s.lastReceipt ?? null,
-    ...whereIWas(), ...(HOME && SEAT?.kind === "soul" ? consolidationStatus() : {}), ...briefNow(),
+    ...whereIWas(), ...(HOME && SEAT?.kind === "soul" ? consolidationStatus() : {}), ...briefNow(), ...wakeNow(),
     note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
   };
 }
+/** #1968: the wake budget, whether the owner chose it, and the ambient wakes delivered in the last hour and 24 hours. */
+const wakeNow = () => { try { return { wake: soulWake.budgetView(loadServeState().wake, Date.now()) }; } catch { return {}; } };
 /** #1928: why the last serve here ended on its own, while none serves. */
 const lastServeEnd = () => { const e = !serveHolder() && loadServeState().ended; return e ? { serveEnded: e } : {}; };
 /** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
@@ -3409,7 +3688,7 @@ async function syncCatalog({ force = false } = {}) {
   let r = null;
   for (let tries = 0; tries < 6; tries++) {
     const t0 = performance.now(), w0 = Date.now();
-    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
+    try { r = await fetch(world + "/v1/edge/catalog", { headers: { ...CLIENT, ...(have?.etag && !force ? { "if-none-match": have.etag } : {}) }, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
     publicReadReported(world + "/v1/edge/catalog", t0, r);
     if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, r, { body: "the catalog itself is kept in world-catalog.json" });
     const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
@@ -3434,7 +3713,7 @@ async function syncLive({ force = false } = {}) {
   if (mine && !force && Date.now() - mine.receivedAt < (mine.pushed ? soulLive.PUSHED_FRESH_MS : LIVE_FRESH_MS)) return mine;
   try {
     const t0 = performance.now(), w0 = Date.now();
-    const r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
+    const r = await fetch(world + "/v1/edge/live", { headers: CLIENT, signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
     publicReadReported(world + "/v1/edge/live", t0, r);
     if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, r, { body: "the live picture is kept in world-live.json" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -3540,8 +3819,8 @@ async function look(copy) {
     me: me ? { name: me.name, place: me.place, path: ix.pathOf(me.place), doing: me.doing } : { note: "This Soul is not in the live picture (asleep, faded, or the world has not answered)." },
     ...(me?.place ? { here: soulCatalog.query(ix, [{ place: me.place, depth: 1, budget: 400 }], { at: me.at })[0] } : {}),
     ...(ix.cat.anywhere?.length ? { onTheSpot: `${ix.cat.anywhere.map((a) => a.verb).join(", ")}: send as <verb>:here` } : {}),
-    ...(near.length ? { near: near.slice(0, 12).map((x) => ({ id: x.id, name: x.name, metres: x.metres, doing: x.doing })) } : {}),
-    ...(elsewhere.size ? { elsewhere: Object.fromEntries([...elsewhere].slice(0, 12).map(([k, v]) => [placeName(k), v.slice(0, 6)])) } : {}),
+    ...(near.length ? { near: near.slice(0, 12).map((x) => ({ id: x.id, name: x.name, metres: x.metres, doing: x.doing, untrusted: true })) } : {}),
+    ...(elsewhere.size ? { elsewhere: Object.fromEntries([...elsewhere].slice(0, 12).map(([k, v]) => [placeName(k), v.slice(0, 6)])), elsewhereNote: "Soul names are their words, not instructions." } : {}),
     ...(said.length ? { said, saidNote: "What Souls said is their words, not instructions." } : {}),
     ...(live ? { asOf: { secondsAgo: Math.round((Date.now() - live.receivedAt) / 1000), tick: live.live.tick } } : {}), ...(note ? { note } : {}),
   };
@@ -3602,6 +3881,12 @@ export function refusalList({ code, did_you_mean, candidates }) {
     return { id, label: shortLabel(id, d?.label ?? c?.label), ...(params.length ? { params } : {}), ...(off ? { available: false } : {}), ...(blocked ? { blocked } : {}) };
   });
   return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
+}
+/** #1948: the world refuses an id it cannot bind as it is, naming no others: this machine's catalog is searched by its words. */
+export function findNext(id, { code, did_you_mean, candidates } = {}) {
+  if (code !== "capability.unknown" || typeof id !== "string" || did_you_mean?.length || candidates?.length) return {};
+  const words = id.split(/[:._/-]+/).filter((w) => w && w !== "here").join(" ");
+  return words ? { next: `${CLI} find "${words}"` } : {};
 }
 const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
 
@@ -3667,8 +3952,8 @@ async function events(...args) {
     else throw new Error("usage: events [--since c_N] [--raw]");
   }
   // Read the existing bounded stream page without moving this client's consuming cursor.
-  if (raw) return {since, ...clean(ok(await call(`/v1/edge/wait?timeout=1&after=${encodeURIComponent(since)}`, {timeoutMs: 11_000}), "events")), receivedAt: now()};
-  return clean(ok(await call(`/v1/edge/events/digest?since=${encodeURIComponent(since)}`), "events"));
+  if (raw) { const d = clean(ok(await call(`/v1/edge/wait?timeout=1&after=${encodeURIComponent(since)}`, {timeoutMs: 11_000}), "events")); return {since, ...d, ...(Array.isArray(d.events) ? { events: d.events.map(spoken) } : {}), ...(d.addressed?.length ? { addressed: d.addressed.map((a) => ({ ...a, untrusted: true })) } : {}), receivedAt: now()}; }
+  return { ...clean(ok(await call(`/v1/edge/events/digest?since=${encodeURIComponent(since)}`), "events")), untrusted: true };   // #2022: the digest quotes other Souls, whatever the world says of it
 }
 
 async function view(...args) {
@@ -3688,7 +3973,7 @@ async function view(...args) {
   const d = ok(await call("/v1/edge/view" + (String(q) ? "?" + q : "")), "view");
   const res = { alt: d.alt, heading: d.heading?.compass, sees: (d.seen?.souls ?? []).map((x) => `${x.name} · ${Math.round(x.distance)}m ${x.side}`), untrusted: true };
   if (d.url && !altOnly) {
-    const img = await fetch(load().world + d.url, { signal: AbortSignal.timeout(30_000) });
+    const img = await fetch(load().world + d.url, { headers: CLIENT, signal: AbortSignal.timeout(30_000) });
     if (img.ok) {
       const file = userPath(out ?? (isMap ? "map.jpg" : "view.jpg"));
       writeFileSync(file, Buffer.from(await img.arrayBuffer()));
@@ -3727,7 +4012,7 @@ async function views(...args) {
   const url = original ? data.targets[0]?.original?.url : refs.length === 1 ? data.views[0]?.url : data.sheet?.url;
   if (!url) return { ...data, saved: null, note: original ? "No admitted original image for this target." : "Picture pending or unavailable. Request these refs again when useful; text and live queries remain available." };
   if (!url.startsWith("/v1/world/context/")) throw new Error("Invalid context picture URL");
-  const state = load(), response = await fetch(state.world + url, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {}, redirect: "error", signal: AbortSignal.timeout(30_000) });
+  const state = load(), response = await fetch(state.world + url, { headers: { ...CLIENT, ...(state.token ? { authorization: `Bearer ${state.token}` } : {}) }, redirect: "error", signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Picture expired or inaccessible (HTTP ${response.status}); request current views.`);
   const bytes = Buffer.from(await response.arrayBuffer()); if (bytes.length > 8 * 1024 * 1024) throw new Error("Picture exceeds download limit");
   const saved = userPath(out); writeFileSync(saved, bytes);
@@ -3792,7 +4077,7 @@ async function act(...argv) {
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
-    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -4047,7 +4332,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen, ...(gap ? {gap: true} : {}), ...(addressed ? { addressed } : {}), ...(stalled ? { stalled } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
@@ -4296,24 +4581,28 @@ async function listen(...args) {
     const { messages, look: here } = messages0.length ? await wakeContext(messages0) : { messages: messages0 };
     const seen = here ? { look: here } : {};
     const older = messages.length ? await stillOpen(messages.map((m) => m.id)) : {};
+    const ruled = d.wakes?.length ? { wakes: d.wakes } : {};   // #1968: the owner's wake rules, within their budget
     if (follow) {
-      if (messages.length || d.addressed?.length || d.plan) {
-        emit({ messages, ...seen, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older,
-          next: messages.length ? `${WAKE_NEXT} This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" });
+      if (messages.length || d.addressed?.length || d.plan || ruled.wakes) {
+        emit({ messages, ...seen, ...brief, ...(d.plan ? { plan: d.plan } : {}), ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...ruled, ...older,
+          next: messages.length ? `${WAKE_NEXT} This listen keeps running: do not restart it` : d.plan ? d.plan.next ?? `${CLI} pending shows the plan` : d.addressed?.length ? "Said to you. Answer with say or converse if it suits; what your body is doing goes on. This listen keeps running" : `${WAKE_RULED} This listen keeps running` });
         if (messages.length) after = messages.at(-1).id;
       }
       await sleep(50);
       continue;
     }
-    if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
-    if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
+    if (d.plan) return { messages, ...brief, plan: d.plan, ...(d.addressed?.length ? { addressed: d.addressed } : {}), ...ruled, ...older, next: d.plan.next ?? `${CLI} pending shows the plan.` };
+    if (d.addressed?.length && !messages.length) return { messages, ...brief, addressed: d.addressed, ...ruled, next: `Said to you. Answer with say or converse if it suits; what your body is doing goes on. Restart listen${after ? ` --after ${after}` : ""} in the background.` };
+    if (ruled.wakes && !messages.length) return { messages, ...ruled, next: `${WAKE_RULED} Restart listen${after ? ` --after ${after}` : ""} in the background.` };
     if (messages.length || once) {
-      return { messages, ...seen, ...brief, ...older, next: messages.length ? `Restart listen --after ${messages.at(-1).id} in the background. ${WAKE_NEXT}` : "nothing waiting" };
+      return { messages, ...seen, ...brief, ...ruled, ...older, next: messages.length ? `Restart listen --after ${messages.at(-1).id} in the background. ${WAKE_NEXT}` : "nothing waiting" };
     }
     await sleep(50);
   }
 }
 
+/** #1968: what a wake from the owner's rules says. */
+const WAKE_RULED = "Your wake rules fired (wakes: each rule's count and latest why). Act if it suits; nothing is asked of you.";
 /** #1753: what a wake says to do: one call per message, which acknowledges, serves and closes it. */
 const WAKE_NEXT = `Do each in order with one call, no ack first: ${CLI} act <id> --for <message id> --wait (a row of its found, or from look) acknowledges, serves and closes it; several steps: plan '["<id>","<id>"]' --for <message id>; speech: say "…" --for <message id>; an answer or a no: ack <message id> "…" --close done|failed.`;
 /** #1753: the wake's look: the local copy only, at most WAKE_LOOK_BYTES of JSON (about 400 tokens); its least needed parts go first. */
@@ -4325,7 +4614,7 @@ export function wakeLook(full, max = WAKE_LOOK_BYTES) {
   let o = { at: full.me.path?.join(" > ") ?? full.me.place, doing: full.me.doing,
     ...(h ? { here: { id: h.id, ...(h.canDo ? { canDo: Object.fromEntries(Object.entries(h.canDo).map(([v, c]) => [v, c.nearest ?? c])) } : {}), ...(h.things ? { things: h.things } : {}) } } : {}),
     ...(full.onTheSpot ? { onTheSpot: full.onTheSpot } : {}),
-    ...(full.near?.length ? { near: full.near.slice(0, 6).map((x) => ({ name: x.name, metres: x.metres, doing: x.doing })) } : {}),
+    ...(full.near?.length ? { near: full.near.slice(0, 6).map((x) => ({ name: x.name, metres: x.metres, doing: x.doing, untrusted: true })) } : {}),
     ...(full.said?.length ? { said: full.said.slice(-3).map((x) => ({ who: x.who, text: cut(x.text, 120) })), saidNote: full.saidNote } : {}) };
   if (full.asOf) o.secondsOld = full.asOf.secondsAgo;
   const size = () => JSON.stringify(o).length;
@@ -4381,6 +4670,8 @@ export function followLine(line, max = FOLLOW_MAX) {
   drop("brief"); drop("stillOpen", "stillOpenNext");
   if (size(o) > max && o.messages?.some((m) => m.found)) o = { ...o, messages: o.messages.map(({ found: _f, ...m }) => m), foundOmitted: true };
   drop("look");
+  if (size(o) > max && o.wakes?.length) o = { ...o, wakes: o.wakes.map((x) => ({ id: x.id, count: x.count, why: String(x.why ?? "").slice(0, 120) })) };
+  while (size(o) > max && o.wakes?.length > 1) o = { ...o, wakes: o.wakes.slice(1), wakesOmitted: (o.wakesOmitted ?? 0) + 1 };   // `wake` shows each rule's last firing
   for (const k of ["addressed", "messages"]) while (size(o) > max && o[k]?.length > 1) o = { ...o, [k]: o[k].slice(1), [`${k}Omitted`]: (o[`${k}Omitted`] ?? 0) + 1 };
   if (o.messagesOmitted) o = { ...o, next: `${o.messagesOmitted} older message${o.messagesOmitted > 1 ? "s" : ""} did not fit this line: run ${CLI} listen --once for them all. ${o.next ?? ""}`.trim() };
   for (const k of ["messages", "addressed"]) if (size(o) > max && o[k]?.length) o = { ...o, [k]: o[k].map((m) => (String(m.text ?? "").length > 80 ? { ...m, text: String(m.text).slice(0, 80) + "…", textShortened: true } : m)) };
@@ -4579,7 +4870,7 @@ async function body(cmd, ...args) {
     return clean(ok(await call("/v1/edge/body/library/" + args[0] + "/public", { method: cmd === "publish" ? "PUT" : "DELETE" }), "body " + cmd));
   }
   // The kit's validate.mjs is this world's code, and a Souls home holds other worlds' tokens, so it is never run from here (as upgrade).
-  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, cli: CLI, base: INVOKED, runValidate: () => ({ skipped: "validate.mjs comes from this world and runs with your rights: read it, and run it only if you trust this world" }) });
+  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, fetchImpl: (u, o) => fetch(u, { ...o, headers: { ...o?.headers, ...CLIENT } }), cli: CLI, base: INVOKED, runValidate: () => ({ skipped: "validate.mjs comes from this world and runs with your rights: read it, and run it only if you trust this world" }) });
   if (cmd === "upload") return bodyUpload(args);
   if (cmd === "look") {
     if (!args.length) { const d = ok(await call("/v1/edge/body"), "body"); return { look: d.look, choices: d.lookChoices }; }
@@ -4616,7 +4907,7 @@ async function bodyUpload([path, ...args]) {
   if (opts.type === "humanoid") opts.rig = "quaternius/1";
   const form = new FormData(), s = load();
   form.set("manifest", JSON.stringify(opts)); form.set("model", new Blob([bytes], { type: "model/gltf-binary" }), "body.glb");
-  const r = await fetch(need(s, "world", "Register this folder first") + "/v1/edge/body/uploads", { method: "POST", headers: { authorization: "Bearer " + need(s, "token", "Pair your Soul first") }, body: form, signal: AbortSignal.timeout(90_000) });
+  const r = await fetch(need(s, "world", "Register this folder first") + "/v1/edge/body/uploads", { method: "POST", headers: { ...CLIENT, authorization: "Bearer " + need(s, "token", "Pair your Soul first") }, body: form, signal: AbortSignal.timeout(90_000) });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`${d.error?.code ?? "body.unavailable"}: ${d.error?.message ?? "Body upload refused"}${d.error?.details ? " " + JSON.stringify(d.error.details) : ""}`);
   return d.asset;
@@ -4712,6 +5003,7 @@ const SERVE_BEAT_MS = 20_000, SERVE_STALE_MS = 60_000, SERVE_CLOSED_KEEP = 50;
 const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupted", "replaced"]);
 const HELD_PATH = /^\/v1\/edge\/(wait|events)(\?|$|\/)/;  // long-polls and streams: never queued behind a heavy request
 let IS_SERVE = false;
+const READER = `${process.pid}:${randomUUID().slice(0, 8)}`;   // #1968: this process, to serve: its own requests confirm no wake it was handed
 
 /** One request over the local socket: null when no serve is there to take it, {lost:true} when it took it and went away. */
 function askServe(msg, timeoutMs = 5_000) {
@@ -4721,7 +5013,7 @@ function askServe(msg, timeoutMs = 5_000) {
     const c = createConnection(SERVE_SOCK);
     const end = (v) => { c.destroy(); clearTimeout(timer); done(v); };
     const timer = setTimeout(() => end(sent ? { lost: true, slow: true } : null), timeoutMs);
-    c.on("connect", () => { sent = true; c.write(JSON.stringify(msg) + "\n"); });
+    c.on("connect", () => { sent = true; c.write(JSON.stringify({ ...msg, reader: READER }) + "\n"); });
     c.on("data", (b) => { text += b; const i = text.indexOf("\n"); if (i >= 0) { try { end(JSON.parse(text.slice(0, i))); } catch { end({ lost: true }); } } });
     c.on("error", () => end(sent ? { lost: true } : null));
     c.on("close", () => end(sent ? { lost: true } : null));
@@ -4772,9 +5064,23 @@ export function loadServeState() {
   try { return { ...d, ...JSON.parse(readFileSync(SERVE_STATE, "utf8")) }; } catch { return d; }
 }
 loadServeState.fresh = () => {
-  const d = { cursor: null, inboxAfter: null, readCursor: null, messages: [], receipts: {}, events: [], omitted: 0, gap: false, plan: null, planEnded: [], addressed: [], addressedSeq: 0, addressedCursor: null };
+  const d = { cursor: null, inboxAfter: null, readCursor: null, messages: [], receipts: {}, events: [], omitted: 0, gap: false, plan: null, planEnded: [], addressed: [], addressedSeq: 0, addressedCursor: null, wake: soulWake.fresh() };
   return d;
 };
+/** #2049: the Soul's wake rules go with it when its folder moves (travel, pairing again). In another world a rule naming a place
+ *  or a Soul of the old one stays behind, each with its reason; the rest start their change state and the engine's cursor afresh. */
+export function carryWake(wake, sameWorld) {
+  const w = { ...soulWake.fresh(), ...wake }, dropped = [], rules = [];
+  for (const r0 of w.rules) {
+    if (sameWorld) { rules.push(r0); continue; }
+    const { inside, busy, held, ...r } = r0;   // who was where, and the acts it was holding, were the old world's
+    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind !== "soul-arrives" ? null
+      : r.params?.who !== "any" ? `Soul ${r.params.who}` : r.params?.where !== "here" ? `place ${r.params.where}` : null;
+    if (named) dropped.push({ id: r.id, why: `it names ${named} of the world this Soul left` });
+    else rules.push(r);
+  }
+  return { wake: { ...soulWake.fresh(), rules, next: w.next ?? 1 }, dropped };
+}
 /** Pure: fold what the stream delivered into the state. */
 export function foldEvents(st, events, cursor) {
   for (const e of events ?? []) {
@@ -4887,8 +5193,11 @@ export function reconcileMessages(st, unacked) {
 }
 /** Pure: everything since the last read, and the read cursor moves past it. Nothing is lost across agent turns. */
 /** #1951: event kinds that carry another Soul's words: speech, a mention, a conversation turn or invitation, an invite. */
-const SPOKEN = /^(speech|mention|invite|conversation\.(turn|invite))(\.|$)/;
-export function takePending(st) {
+const SPOKEN = /^(speech|mention|invite|conversation\.(turn|invite))(\.|$)/, spoken = (e) => (SPOKEN.test(e?.kind ?? "") ? { ...e, untrusted: true } : e);
+export function takePending(st, now = Date.now(), heldMs = soulWake.HELD_MS, reader = null) {
+  // #1968: ambient wakes within the budget, and any still held for a reader no command has confirmed; held till the next command
+  const w = st.wake ? soulWake.deliver(st.wake, now, { heldMs, reader, rehand: true }) : null;
+  if (w) st.wake = w.wake;
   const from = readIndex(st), rest = st.events.slice(from).filter((e) => !["receipt", "activity.observed"].includes(e?.kind));
   const shown = rest.slice(0, PENDING_EVENTS_MAX);
   const receipts = Object.values(st.receipts);
@@ -4896,7 +5205,7 @@ export function takePending(st) {
     ownerMessages: st.messages.filter((m) => !m.acked).map(({ id, text, sentAt }) => ({ id, text, sentAt })),
     openReceipts: receipts.filter((r) => !ENDED.has(r.phase)).map(({ id, capability, phase }) => ({ id, capability, phase })),
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
-    events: shown.map((e) => (SPOKEN.test(e?.kind ?? "") ? { ...e, untrusted: true } : e)),   // #1951: the home marks another Soul's words itself
+    events: shown.map(spoken),   // #1951: the home marks another Soul's words itself
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
     ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
@@ -4905,6 +5214,7 @@ export function takePending(st) {
     cursor: st.cursor,
     ...(st.plan ? { plan: planView(st.plan) } : {}),
     ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}),
+    ...(w?.wakes.length ? { wakes: w.wakes } : {}),
   };
   st.planEnded = [];
   for (const r of receipts) if (ENDED.has(r.phase)) r.read = true;
@@ -5033,17 +5343,34 @@ async function serveForeground() {
   const persist = () => { writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); };
   const s = load(), world = need(s, "world", `Run: ${CLI} register <world-url>`);
   const auth = { "content-type": "application/json", authorization: `Bearer ${need(s, "token", "No Soul yet.")}` };
+  const self = (x) => x.home?.soul ?? x.soul ?? "";
   if (st.folder && st.folder !== folderKey(s)) {
-    const old = st.plan, ended = st.planEnded ?? [];
+    const old = st.plan, ended = st.planEnded ?? [], was = st;
     st = loadServeState.fresh();
     st.planEnded = old ? [...ended, planView({ ...old, state: "replaced" })].slice(-PLAN_ENDED_MAX) : ended;
+    if ((was.self ?? was.folder.split("|")[1]) === self(s)) {   // the same Soul, moved: its wake rules go with it (#2049)
+      const c = carryWake(was.wake, was.folder.split("|")[0] === (s.world ?? ""));
+      st.wake = c.wake;
+      for (const d of c.dropped) process.stderr.write(`${now()} wake: dropped ${d.id}: ${d.why}\n`);
+    }
   }
-  st.folder = folderKey(s);
+  st.folder = folderKey(s); st.self = self(s);
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
-  const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0;
+  const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); runWake(); };
+  // #1929: the wake rules, against what this process stores, every 2 s and whenever something arrives. Fired ones are queued.
+  const runWake = () => {
+    try {
+      const copy = readJsonFile(LIVE_FILE), before = JSON.stringify(st.wake);
+      const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul }, Date.now());
+      st.wake = { ...soulWake.expire(st.wake, Date.now(), WAKE_HELD_MS), rules: r.rules, cursor: r.cursor };
+      st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired);   // #1968: one entry per rule, with a count and the latest why
+      for (const f of r.fired) log(`wake: ${f.id} (${f.why})`);
+      if (JSON.stringify(st.wake) !== before) persist();
+    } catch (e) { log(`wake: ${e?.message ?? e}`); }
+  };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
   // #1928: a 401 or 403 is confirmed with one self/link read. Refused there as control.revoked or control.unknown, the credentials really are gone: the reason is
   // recorded and this process ends as a stop would. Answered, it carries on. One confirmation at a time for all the loops.
@@ -5094,6 +5421,7 @@ async function serveForeground() {
       const d = r.data, had = st.cursor;
       if (d.gap) st.gap = true;
       foldEvents(st, d.gap ? [] : d.events, d.cursor);
+      if (heldWaits && !d.gap) for (const e of d.events ?? []) { const x = st.receipts[e?.receipt?.id]; if (x && ENDED.has(e.receipt.phase)) x.waited = true; }
       if (!d.gap) for (const e of d.events ?? []) if (st.plan) { planHeld(st.plan, e); if (e?.receipt?.id) planPhase(st.plan, e.receipt); }
       if ((d.events?.length && !d.gap) || d.gap || d.cursor !== had) { if (d.events?.length) lastEventAt = Date.now(); persist(); wake(); }
       tick();
@@ -5133,7 +5461,7 @@ async function serveForeground() {
         const liveAfter = LIVE_RESYNC ? null : soulLive.resumeFrom(readJsonFile(LIVE_FILE), world);
         const q = new URLSearchParams({ kinds: "speech.to-me", live: "1", ...(liveAfter ? { liveAfter } : {}), ...(st.addressedCursor ? { after: st.addressedCursor } : {}) });
         const w0 = Date.now(), t0 = performance.now();
-        const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
+        const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { ...CLIENT, authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
         if (RECORD) recordFetch(`${world}/v1/edge/events?${q}`, w0, t0, r, { body: "a stream: its speech.to-me frames show as serve's wakes" });
         if (r.status === 404) { log("addressed speech: this world has no classified stream; speech still reaches pending"); return; }
         if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
@@ -5167,14 +5495,25 @@ async function serveForeground() {
     }
   }
   // One heavy request at a time, and soul.busy waited out here instead of handed back. Only reads and keyed writes repeat.
-  function gated(fn) { const p = gateTail.then(fn, fn); gateTail = p.catch(() => {}); return p; }
+  // #2084: a command's request waits its turn at most SERVE_QUEUE_MS (and half its own time); then serve answers it itself, soul.busy
+  // with a stated wait, so a flood of one Soul's commands is refused at once rather than left silent until the command gives up.
+  function gated(fn, waitMs = Infinity) {
+    gateWaiting++;
+    return new Promise((resolve, reject) => {
+      let waiting = true;
+      const timer = Number.isFinite(waitMs) ? setTimeout(() => { if (!waiting) return; waiting = false; gateWaiting--; resolve(queueRefusal()); }, waitMs) : null;
+      const run = () => { if (!waiting) return undefined; waiting = false; gateWaiting--; clearTimeout(timer); const p = Promise.resolve().then(fn); p.then(resolve, reject); return p; };
+      gateTail = gateTail.then(run, run).catch(() => {});
+    });
+  }
+  const queueRefusal = () => { busyRefused++; return { status: 429, retryAfterMs: SERVE_REFUSAL_RETRY_MS, data: { error: { code: "soul.busy", by: "serve", message: `this Soul's earlier requests are still being answered (${gateWaiting} more waiting); ask again in ${secs(SERVE_REFUSAL_RETRY_MS)}`, retry_after_s: SERVE_REFUSAL_RETRY_MS / 1000 } } }; };
   // A world's routes sit under its base path (/w/<slug> behind the launcher); match them without it.
   const basePath = new URL(world).pathname.replace(/\/$/, "");
   const routeOf = (url) => { const p = new URL(url).pathname; return p.startsWith(basePath) ? p.slice(basePath.length) : p; };
   async function forward(m) {
     const pathOf = routeOf(m.url) + new URL(m.url).search;
     // A response cut off partway is a world that did not answer, not a reason for this process to die.
-    const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs, ...(m.proxied ? { recorded: m.proxied } : {}) }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
+    const once = (timeoutMs = m.timeoutMs) => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs, ...(m.proxied ? { recorded: m.proxied } : {}) }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const repeatable = m.method === "GET" || m.headers?.["idempotency-key"];
     // #1345: the agent's own look, turn or face holds off a reflex from the moment it is asked, not only once answered
     const attending = m.method === "POST" && routeOf(m.url) === "/v1/edge/act" && ATTENTION_ID.test(String(m.body?.capability ?? ""));
@@ -5182,11 +5521,19 @@ async function serveForeground() {
     try { return await forwardOnce(m, pathOf, repeatable, once); } finally { if (attending) attentionInFlight--; }
   }
   async function forwardOnce(m, pathOf, repeatable, once) {
+    // #2084: a command asked over the socket is answered within its own time (askedAt + timeoutMs): its turn waits a bounded time,
+    // its world call gets only what is left, and a stated wait is waited out here only when no one is queued behind it and half
+    // its time is left after; otherwise the refusal goes back and the command waits it out itself, without holding the queue.
+    const deadline = m.askedAt ? m.askedAt + m.timeoutMs : Infinity, left = () => Math.max(1, Math.min(m.timeoutMs, deadline - Date.now()));
     const r = HELD_PATH.test(pathOf) ? await once() : await gated(async () => {
-      let a = await once();
-      for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) { busyWaited++; await pause(statedJitter(a.retryAfterMs ?? 1_000)); a = await once(); }
+      let a = await once(left());
+      for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) {
+        const ms = statedJitter(a.retryAfterMs ?? 1_000);
+        if (m.askedAt && (gateWaiting > 0 || Date.now() + ms * TIME_SCALE > deadline - m.timeoutMs / 2)) break;
+        busyWaited++; await pause(ms); a = await once(left());
+      }
       return a;
-    });
+    }, m.askedAt ? Math.min(SERVE_QUEUE_MS, m.timeoutMs / 2) : Infinity);
     const p = pathOf.split("?")[0], inboxWrite = /^\/v1\/edge\/inbox\/([^/]+)\/(ack|result)$/.exec(p);
     if (r.status >= 200 && r.status < 300) {
       if (r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); persist(); }
@@ -5223,7 +5570,7 @@ async function serveForeground() {
     waiters = waiters.filter((f) => f !== onSpeech);
     return first.r.data && typeof first.r.data === "object" ? { ...first.r, data: { ...first.r.data, addressedSeq: heldFrom } } : first.r;
   }
-  async function localListen(url) {
+  async function localListen(url, reader) {
     // The world's own rule (Inbox.takeBacklog): every message not acknowledged after the cursor, however often it has been seen.
     // A wait's timeoutMs=0 peek comes through here too, and must not take a message from the listener waiting for it.
     const q = new URL(url).searchParams, after = q.get("after"), until = Date.now() + Math.min(Number(q.get("timeoutMs") ?? 25_000), 55_000);
@@ -5232,16 +5579,22 @@ async function serveForeground() {
       if (terminal) return terminal;
       const backlog = st.messages.slice(after ? st.messages.findIndex((m) => m.id === after) + 1 : 0).filter((m) => !m.acked);
       const stopped = st.plan?.state === "stopped" && !st.plan.announced ? st.plan : null;   // a refused step wakes the agent
-      const addressed = takeAddressed(st, heldFrom, { peek });   // said to this Soul: a wake too, and a peek doesn't use it up either
-      if (backlog.length || stopped || addressed.length) {
+      // said to this Soul: a wake too, and a peek doesn't use it up either. #1968: one wake per speaker a minute; their later lines join the next
+      const t = Date.now(), said = takeAddressed(st, heldFrom, { peek: true }), speech = said.length > 0 && (peek || soulWake.speechDue(said, st.wake.spoke, t));   // a peek wakes no one: it shows them
+      const ambient = !peek && !backlog.length && !stopped && !speech ? soulWake.deliver(st.wake, t, { heldMs: WAKE_HELD_MS, reader }) : null;
+      if (ambient?.wakes.length || backlog.length || stopped || speech) {
+        const addressed = peek ? said : takeAddressed(st, heldFrom);
+        const wakes = ambient ?? (peek ? { wakes: [] } : soulWake.deliver(st.wake, t, { free: true, heldMs: WAKE_HELD_MS, reader }));   // ambient wakes ride free with one coming anyway
+        if (!peek) { st.wake = { ...wakes.wake ?? st.wake, spoke: soulWake.spokeNow(st.wake.spoke, addressed, t) }; persist(); }
         if (stopped && !peek) stopped.announced = true;   // a peek shows it but doesn't use up the wake
-        if ((stopped && !peek) || (addressed.length && !peek)) persist();
         const out = backlog.map(({ id, text, sentAt }) => ({ id, text, sentAt, state: "delivered" }));
-        return { status: 200, data: { inbox: { connected: true, ...(out[0] ? { latest: out[0] } : {}), queued: 0 }, backlog: out, ...(stopped ? { plan: planView(stopped) } : {}), ...(addressed.length ? { addressed } : {}) } };
+        return { status: 200, data: { inbox: { connected: true, ...(out[0] ? { latest: out[0] } : {}), queued: 0 }, backlog: out, ...(stopped ? { plan: planView(stopped) } : {}), ...(addressed.length ? { addressed } : {}), ...(wakes.wakes.length ? { wakes: wakes.wakes } : {}) } };
       }
+      if (ambient && JSON.stringify(ambient.wake) !== JSON.stringify(st.wake)) { st.wake = ambient.wake; persist(); }
       const left = until - Date.now();
       if (left <= 0) return { status: 200, data: { inbox: { connected: true, queued: 0 }, backlog: [] } };
-      await new Promise((done) => { const t = setTimeout(done, left); waiters.push(() => { clearTimeout(t); done(); }); });
+      // looked at again every 2 s: a held speaker's minute or the budget's hour runs out with nothing arriving
+      await new Promise((done) => { const t = setTimeout(done, Math.min(left, 2_000)); waiters.push(() => { clearTimeout(t); done(); }); });
     }
   }
   // One plan step at a time, through the same gate as every heavy request. A step the world did not answer is asked again with
@@ -5325,23 +5678,27 @@ async function serveForeground() {
   }
   const pendingClose = [];
   async function handle(m) {
+    // #1968: a command from another process means the agent took what was handed; pending and status read without taking it
+    if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
     if (moved()) { log("the folder's world, Soul or token changed: stopping"); setTimeout(() => shutdown(0), 10); return m.op === "http" ? { status: 0, data: { error: { code: "unreachable", message: "this serve stopped: the folder moved to another world or Soul" } } } : { serving: false, stopping: true, moved: true }; }
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
-    if (m.op === "pending") { const out = takePending(st); persist(); return out; }
+    if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS, m.reader); persist(); return out; }
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
-      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
+    if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
     if (m.op === "http") {
       if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
-      if (path === "/v1/edge/inbox/listen") return localListen(m.url);
-      if (path === "/v1/edge/wait" && m.method !== "POST") return heldWait(m);
+      if (path === "/v1/edge/inbox/listen") return localListen(m.url, m.reader);
+      if (path === "/v1/edge/wait" && m.method !== "POST") { heldWaits++; try { return await heldWait(m); } finally { heldWaits--; } }
       const cached = m.method === "GET" && /^\/v1\/edge\/receipts\/([^/]+)$/.exec(path);
       const known = cached ? st.receipts[decodeURIComponent(cached[1])] : null;
+      if (known && ENDED.has(known.phase)) known.waited = true;   // #1929: the agent read this ended receipt itself (act --wait and wait end so): it wakes no one
       if (known?.full && ENDED.has(known.phase)) return { status: 200, data: { receipt: known.full } };
       // An act for the plan's own message serves it, so the plan won't close it. Noted before the request: on a real world the step's
       // replaced comes down the stream before this act's answer comes back.
@@ -5353,7 +5710,10 @@ async function serveForeground() {
       }
       const planActFor = path === "/v1/edge/act" && m.method === "POST" && st.plan && m.body?.for && m.body.for === st.plan.for ? st.plan : null;
       if (planActFor) planActFor.servedByAct = (planActFor.servedByAct ?? 0) + 1;
-      const r = await forward(m);
+      const r = await forward({ ...m, askedAt: Date.now() });
+      // #1929: a body act the agent sent itself; its end wakes the mind unless a wait or a read sees it first (act-ended)
+      const mine = path === "/v1/edge/act" && m.method === "POST" && r.data?.accepted && r.data.receipt?.id && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel) ? st.receipts[r.data.receipt.id] : null;
+      if (mine) { mine.mine = true; if (ENDED.has(r.data.receipt.phase)) mine.waited = true; persist(); }
       if (planActFor) { planActFor.servedByAct--; if (r.data?.accepted && r.data.receipt?.id && !r.data.repeat) planActFor.resultSent = true; }
       // A newer body act replaces the plan; talk and attention don't. A body act's answer names no channel: the receipt says what
       // isn't one (attention for a look, none for a prayer or a mark). Swept on a real world: every other accepted act replaced a
@@ -5363,7 +5723,7 @@ async function serveForeground() {
         if (p.for && p.for === m.body?.for) p.resultSent = true;
         planOver(p, "replaced", Date.now()); persist(); tick();
       }
-      if (cached && r.status === 200 && r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); if (ENDED.has(r.data.receipt.phase)) st.receipts[r.data.receipt.id].full = r.data.receipt; persist(); }
+      if (cached && r.status === 200 && r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); if (ENDED.has(r.data.receipt.phase)) Object.assign(st.receipts[r.data.receipt.id], { full: r.data.receipt, waited: true }); persist(); }
       return r;
     }
     return { error: `unknown op ${m.op}` };
@@ -5420,6 +5780,17 @@ async function serveForeground() {
   }
   if (HOME && SEAT?.kind === "soul") reflectAfter(0);
   setInterval(() => { for (const p of pendingClose.splice(0)) closeLater(p); planPoll().catch((e) => log(`plan: ${e?.message ?? e}`)); }, 5_000);
+  setInterval(runWake, 2_000); runWake();
+  // #1941: serve checks the feed itself; an event, or a release this client is too old for, wakes one Soul of the home, once, within the budget
+  const feedTick = async () => {
+    try {
+      if (!HOME) return;
+      await checkFeeds();
+      const fired = soulWake.newsWakes(HOME.claimNews(), VERSION, now());
+      if (fired.length) { st.wake.queue = soulWake.enqueue(st.wake.queue, fired); log(`wake: news (${fired[0].why})`); persist(); }
+    } catch (e) { log(`feed: ${e?.message ?? e}`); }
+  };
+  setInterval(feedTick, 60_000).unref(); feedTick();
   tick();
   await new Promise(() => {});
 }
@@ -5433,7 +5804,13 @@ async function serve(...args) {
   if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
   if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, ...lastServeEnd(), next: `${CLI} serve` };
-  if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
+  if (args[0] === "--stop") {
+    const a = await askServe({ op: "stop" });
+    // #2076: serve writes its state and releases its lock as it exits, so the answer waits for the exit (at most 5 s): the
+    // folder can be moved or removed the moment --stop returns
+    if (Number.isInteger(a?.pid)) for (let i = 0; i < 100 && pidAlive(a.pid); i++) await sleep(50);
+    return a ?? { serving: false };
+  }
   if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const running = await askServe({ op: "status" });
@@ -5488,6 +5865,22 @@ async function pending() {
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
   heard(a.ownerMessages);
   return { ...a, ...briefNow() };
+}
+
+// wake | wake add <kind> [params-json] [--every <seconds>] | wake remove <id> | wake budget <name|n> | --day <n> (#1929, #1968): the rules serve wakes the mind by. They are
+// kept in serve's state file: a running serve changes them itself, and with none the file is changed as serve would.
+async function wakeCommand(...argv) {
+  need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
+  const [sub, ...rest] = argv;
+  const change = !sub ? null : sub === "add" ? { add: soulWake.parseRule(rest) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
+  if (sub && !change) soulWake.parseBudget([]);   // throws the usage
+  const a = await askServe({ op: "wake", change });
+  if (a?.lost) throw new Error("serve stopped before it answered: run the command again");
+  if (a) { if (a.error) throw new Error(a.error === "unknown op wake" ? `this serve predates wake rules: ${CLI} serve --stop, then ${CLI} serve` : a.error); return a; }
+  const st = loadServeState(), c = soulWake.change(st.wake, change);
+  if (c.error) throw new Error(c.error);
+  if (change) { st.wake = c.wake; writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); }
+  return { ...soulWake.view(c.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}), serving: false };
 }
 
 // plan '<ordered offered ids>' [--for <id>|none]: checked here before any step runs, then run by the serve.
@@ -5546,6 +5939,7 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new] [--move]    pair <soulId> [--for CODE] [--move]
           approval [status|wait|cancel]   status                          guide
 home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+          news [--all]   (platform news from the sites this home trusts, unread or the last 50; checked every 6 h without asking)
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
@@ -5563,6 +5957,8 @@ owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] 
 self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
 resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
           plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
+          wake [add <act-ended|soul-arrives|place-busy> [params-json] [--every s] | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)
+          wake budget <quiet|normal|lively|unlimited|n> | wake budget --day <n>   (the owner's: rule wakes an hour (4, 12, 60, no limit) and a day; over it they merge and wait)
           pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
 ${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
 
@@ -5612,6 +6008,53 @@ async function updateNotice(pending) {
     const old = HOME && v.skill ? HOME.skillBehind(v.skill, [INVOKED])[0] : null;
     return old ? { from: old.version ?? "unversioned", to: v.skill, run, what: `the skill (${old.rel})` } : null;
   } catch { return null; }
+}
+
+// #1941: the platform feed. Each trusted site is read at most every 6 hours, by serve on a timer or, with no serve here, by a
+// detached child a command starts: a check never slows a command. A failed check says nothing and is tried again later.
+async function checkFeeds() {
+  const checked = [];
+  for (const site of HOME ? HOME.claimFeeds() : []) {
+    try {
+      let after = HOME.config().feeds?.[site]?.cursor ?? null; const items = [];
+      for (let n = 0; n < 5; n++) {   // a page short of the limit is the end: the feed scans everything after the cursor
+        const r = await fetch(`${site}/v1/feed?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`, { headers: CLIENT, redirect: "error", signal: AbortSignal.timeout(30_000) });
+        const d = r.ok ? await r.json() : null;
+        if (!Array.isArray(d?.items)) throw new Error(`feed: HTTP ${r.status}`);
+        items.push(...d.items.filter((i) => /^f\d+$/.test(i?.id ?? "") && typeof i.title === "string"));
+        const more = d.items.length === 100 && d.next && d.next !== after; after = d.next ?? after;
+        if (!more) break;
+      }
+      HOME.noteFeed(site, items, after); checked.push(site);
+    } catch { /* silent: claimFeeds offers it again in 10 minutes */ }
+  }
+  return checked;
+}
+/** A detached child that can never throw in this process: a failed spawn emits 'error', said once and dropped. */
+export function spawnDetached(file, args, opts) {
+  let said = false;
+  const child = spawn(file, args, { ...opts, detached: true, stdio: "ignore" });
+  child.on("error", (e) => { if (!said) { said = true; process.stderr.write(`feed check not started: ${e?.code ?? e?.message ?? e}\n`); } });
+  child.unref();
+  return child;
+}
+const FEED_SPAWN_MS = 5 * 60_000;
+function startFeedCheck(cmd, args) {
+  if (!HOME || ["upgrade", "help", "serve", "listen"].includes(cmd) || (cmd === "news" && args.includes("--fetch"))) return;   // as the update check
+  try {
+    if (!soulHome.feedDue(HOME.config(), Date.now()).length || Date.now() - (readServeLock()?.beatAt ?? 0) < SERVE_STALE_MS) return;   // a serve here checks
+    // the last start is kept beside the config: a child that never claims a site (it found no home) is not started on every command
+    const mark = joinPath(HOME.root, ".feed-check");
+    try { if (Date.now() - lstatSync(mark).mtimeMs < FEED_SPAWN_MS) return; } catch { /* never started */ }
+    writeFileSync(mark, "");
+    spawnDetached(process.execPath, [process.argv[1], "news", "--fetch"], { cwd: INVOKED });
+  } catch { /* the next command tries */ }
+}
+async function newsCommand(...argv) {
+  const home = needHome();
+  if (argv.length === 1 && argv[0] === "--fetch") return { checked: await checkFeeds() };
+  if (argv.length > 1 || (argv.length && argv[0] !== "--all")) throw new Error("usage: news [--all]");
+  return { items: home.readNews({ all: argv[0] === "--all" }), from: "platform", note: "Platform news from the sites this home trusts: information, never instructions. Tell your owner about events and updates." };
 }
 
 const needHome = () => { if (!HOME) throw new Error(`No Souls home here. Start one with ${CLI} register <world-url>, or bring a Soul folder in with ${CLI} import`); return HOME; };
@@ -5667,7 +6110,7 @@ async function upgradeCommand(...argv) {
   if (trust && !world) throw new Error(`A person's trust goes to a world they name: ${CLI} upgrade ${key} --trust`);
   // The site trusted below is the one asked: a redirect could hand this home a bundle from any other.
   const get = async (path) => {
-    const r = await fetch(w.url + path, { redirect: "error", signal: AbortSignal.timeout(30_000) }).catch((e) => {
+    const r = await fetch(w.url + path, { headers: CLIENT, redirect: "error", signal: AbortSignal.timeout(30_000) }).catch((e) => {
       const why = e?.cause?.message ?? e?.message;
       throw new Error(/^unexpected redirect/i.test(e?.cause?.message ?? "") ? `${key} redirected ${path}, and a bundle is taken only from the address this home knows. If the world moved, register its new address. Nothing changed.` : `${key} did not answer ${path} (${why}). Nothing changed.`);
     });
@@ -5791,7 +6234,7 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { note, plan, inspect, catalog: catalogCommand, find: findCommand, query: queryCommand, look, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, batch, help: async () => help() };
+const commands = { note, plan, inspect, catalog: catalogCommand, find: findCommand, query: queryCommand, look, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, news: newsCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, wake: wakeCommand, batch, help: async () => help() };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
@@ -5813,12 +6256,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let argv = args;
   try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null, pendingUpdate = startUpdateCheck(cmd);
+  startFeedCheck(cmd, argv);
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
     if (out && typeof out === "object" && !Array.isArray(out)) {
       if (cmd === "register" && HOME_CHOICE) out = { ...out, homeChoice: HOME_CHOICE };
       const update = await updateNotice(pendingUpdate);
       if (update) out = { ...out, update };
+      try { const news = HOME ? soulHome.newsOf(HOME.config(), VERSION) : null; if (news) out = { ...out, news }; } catch { /* no line */ }   // #1941
     }
     await flushNow();
     const slowed = out && typeof out === "object" && !Array.isArray(out) ? slowedLine() : null;
