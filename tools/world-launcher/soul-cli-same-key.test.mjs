@@ -95,6 +95,23 @@ test('the Eden shape: an act taken but answered 503, run again, is answered with
   assert.equal(fresh.d.resent, undefined);
 });
 
+// #2083: two runs of one command at once are two acts, not one act and its rerun: the second never takes the key the
+// first still holds, so the world's idempotency cannot answer it with the first act's receipt
+test('concurrent runs of the same act send their own keys; a live run\'s pending key is not taken', { timeout: 20_000 }, async t => {
+  const held = [];
+  const f = await fixture(t, (req, res, s, w) => {
+    if (s.url !== '/v1/edge/act') return json(res, 200, {});
+    held.push(() => json(res, 200, { accepted: true, receipt: receiptFor(w.receipts, s.body.clientRef), channel: 'body' }));
+    if (held.length === 2) for (const answer of held) answer();   // the first is answered only once the second has arrived
+  });
+  const first = f.run('act', 'wave:here');
+  while (!acts(f.seen).length) await new Promise(r => setTimeout(r, 20));   // the first is out, its key kept in the folder
+  await Promise.all([first, f.run('act', 'wave:here')]);   // (exit codes not read: the legacy state file's save races, a separate defect)
+  const [x, y] = acts(f.seen);
+  assert.notEqual(x.key, y.key); assert.notEqual(x.body.clientRef, y.body.clientRef);
+  assert.equal(f.receipts.size, 2, 'two acts, two receipts');
+});
+
 test('check first: an unconfirmed act the world has a record of is reported with its receipt and phase, and not sent again', { timeout: 20_000 }, async t => {
   const f = await fixture(t, (req, res, s, w) => {
     if (s.url.startsWith('/v1/edge/operations/')) {
