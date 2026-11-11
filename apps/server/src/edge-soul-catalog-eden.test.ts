@@ -146,14 +146,17 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     const before = await get('/v1/edge/catalog');
     assert.equal((L.spots.spots as Spot[]).filter(s => L.spotThingGone(s.id)).length, 0, 'every spot of a thing names a thing the world has (a pond is the god\'s)');
     // a thing with acts of its own, away from the Soul, that the world offers by id now
-    const pick = before.body.things.find((x: any) => w.god.model.entities.has(x.id) && before.body.acts.some((a: any) => a.thing === x.id && !a.with && gate(a.id) === 'ok'));
-    assert.ok(pick, 'a god thing with an act on offer by id');
-    const act = before.body.acts.find((a: any) => a.thing === pick.id && !a.with && gate(a.id) === 'ok').id as string;
+    const picks = before.body.things.filter((x: any) => w.god.model.entities.has(x.id) && before.body.acts.some((a: any) => a.thing === x.id && !a.with && gate(a.id) === 'ok'));
+    assert.ok(picks.length, 'a god thing with an act on offer by id');
     const edit = async (op: object) => {const r = w.god.act({ops: [op]} as never); assert.equal(r.accepted, true, JSON.stringify(r)); await run(4); return get('/v1/edge/catalog');};
 
-    const p0 = (w.god.model.entities.get(pick.id) as any).p as number[];   // in its slot's frame when it has one
-    const dx = p0[0]! > 0 ? -1 : 1;   // a metre toward its slot's origin, so it stays inside
-    const moved = await edit({op: 'move', id: pick.id, p: [p0[0]! + dx, ...p0.slice(1)]});
+    // a metre toward its slot's origin, so it stays inside (p is in its slot's frame when it has one). The first such thing the god
+    // may move a metre: one beside a solid (a kitchen counter by its house's stairs, #628) is refused overlap.solid, rightly
+    const nudge = (id: string) => {const p0 = (w.god.model.entities.get(id) as any).p as number[]; return {op: 'move', id, p: [p0[0]! + (p0[0]! > 0 ? -1 : 1), ...p0.slice(1)]};};
+    const pick = picks.find((x: any) => w.god.preview({ops: [nudge(x.id)]} as never).accepted);   // a dry run
+    assert.ok(pick, 'a god thing on offer by id that can be moved a metre');
+    const act = before.body.acts.find((a: any) => a.thing === pick.id && !a.with && gate(a.id) === 'ok').id as string;
+    const moved = await edit(nudge(pick.id));
     assert.notEqual(moved.etag, before.etag, 'a move is a new version');
     const at = moved.body.things.find((x: any) => x.id === pick.id).at;
     assert.ok(Math.abs(Math.hypot(at[0] - pick.at[0], at[1] - pick.at[1]) - 1) < 0.2 , `the thing moved a metre, where the god put it: ${JSON.stringify([pick.at, at])}`);

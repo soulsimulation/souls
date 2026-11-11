@@ -95,6 +95,7 @@ import { Agent, createServer, request } from 'node:http';
 const WORLD_AGENT = new Agent({ keepAlive: false });
 const hopless = (h) => { const { connection: _c, 'keep-alive': _k, ...rest } = h; return rest; };
 import { clientErrors } from './client-errors.mjs';
+import { platformFeed } from './feed.mjs';
 import { healthDash } from './health-dash.mjs';
 import { readGlitches } from './glitches.mjs';
 import { ownerOverview } from './owner-overview.mjs';
@@ -231,6 +232,7 @@ export async function openLauncher(cfg = {}) {
   const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log });
   const c3 = new MicroCache();
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
+  const feed = platformFeed({ dataDir, log });   // #1876: the platform feed, feed.mjs
   const origin = `http://127.0.0.1:${port}`;
   const publicOrigin = (cfg.publicOrigin ?? origin).replace(/\/$/, '');
   const authEnvFile = cfg.authEnvFile ?? process.env.SIM_AUTH_ENV_FILE;
@@ -925,6 +927,8 @@ export async function openLauncher(cfg = {}) {
         if (req.method === 'GET' && direct(req)) { json(res, 200, errors.summary({ limit: url.searchParams.get('limit'), world: url.searchParams.get('world') || undefined })); return; }
         json(res, 404, { ok: false, code: 'not-found' }); return;
       }
+      if (path === '/v1/feed' && (req.method === 'GET' || req.method === 'HEAD')) { feed.serve(req, res, url); return; }   // #1876: public, no credentials
+      if ((path === '/__sim/op/feed-post' || path === '/__sim/op/feed-stats') && req.method === 'POST') { await feed.op(req, res, path.slice('/__sim/op/'.length), direct(req)); return; }
       if (path === '/__sim/health' && (req.method === 'GET' || req.method === 'HEAD')) {
         // lane DASH: the page shell for anyone (no data in it); ?json=1 for the operator on loopback or a site owner's session
         if (!url.searchParams.has('json')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' }).end(req.method === 'HEAD' ? undefined : dash.shell()); return; }
