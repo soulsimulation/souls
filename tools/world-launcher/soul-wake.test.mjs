@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -147,7 +147,12 @@ async function world(t) {
     child.on('exit', (code) => { let j = null; try { j = JSON.parse(out); } catch { /* text */ } done({ code, err, json: j }); });
   });
   w.state = () => JSON.parse(readFileSync(join(dir, '.eden-serve.json'), 'utf8'));
-  t.after(async () => { await w.cli('serve', '--stop'); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
+  t.after(async () => {
+    await w.cli('serve', '--stop');
+    // --stop answers before serve has exited, and serve writes its state as it goes: removing the folder under it fails with ENOTEMPTY
+    for (let i = 0; i < 100 && existsSync(join(dir, '.eden-serve.lock')); i++) await new Promise((r) => setTimeout(r, 50));
+    server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
   return w;
 }
 const until = async (f, ms = 8_000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await f(); if (v) return v; await new Promise((r) => setTimeout(r, 50)); } return null; };
