@@ -80,7 +80,7 @@ import {EDEN_LIBRARY_CATALOGUE} from '../content/eden-library-catalogue.ts';
 import {isVerificationProbe, PROBE_OWNER} from '../../verification-probe.ts';
 import {tx,afterCommit} from '../comms/store.ts';
 import {PlaceKnowledge} from '../perception/knowledge.ts';
-import {menuStats, countClear, cpuNow, MENU_ORACLE} from './menu-stats.ts';
+import {menuStats, countClear, cpuNow, MENU_ORACLE, PLAN_ONCE, PLAN_ONCE_ORACLE} from './menu-stats.ts';
 import {pageCapabilities, pageObjects, type LoadLevel, type Omitted, type Where} from './listing.ts';
 import {focusFor, focusObjects, focusSig, wants, type MenuFocus} from './focus.ts';
 import {BodyRule, BODY_PATH_SAMPLE_M, type BodyKnobs, type BodySoul, type Posture} from './body-rule.ts';
@@ -223,6 +223,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
   contactActuator?: ContactActuatorService;
   /** CTRL-2 (#1094): a thing its container keeps out of sight (shut, or a hiding place); set by the engine bridge. */
   concealedThing?: (id: string) => boolean;
+  /** #1751: a built thing's acts as the catalog publishes them (its def's own action list), or null; set by the engine bridge. */
+  thingActs?: (id: string) => {acts: import('../../god/actuators.ts').CatalogKindAct[]; state: Record<string, unknown>} | null;
+  /** #1751: every built thing whose acted-on state differs from its def's defaults, with only the fields that differ. */
+  thingStates?: () => ReadonlyMap<string, Record<string, unknown>>;
   /** #1095 A5: what a built thing's author said about it; set by the engine bridge. */
   thingAbout?: (id: string) => {title?: string; what?: string; aliases?: string[]} | null;
   /** CTRL-2 (#1094): a built thing's own name, as offers call it; set by the engine bridge. */
@@ -1109,8 +1113,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (ms > 0 && warm) {this.navSeen = null; this.navWarmed?.();}
     return warm;
   }
-  /** nav-warm-wait/1: while walks wait for navigation, one slice of labelling per tick (after the first build the engine-bridge
-   *  stops warming, and a moving ride invalidates the labels until some read relabels them). */
+  /** nav-warm-wait/1: while walks wait for navigation, one slice of labelling per tick. After the first build the engine-bridge
+   *  only re-warms (#901: a poll every 10 ticks, then a burst of slices, then one per poll while the world keeps moving), so a
+   *  walk waiting on labels a moving ride made cold is not left to that cadence. */
   private navWarmTick(tick: number): boolean {
     if (this.navWarmSeen?.tick === tick) return this.navWarmSeen.warm;
     // #1502: while walks are held by the re-plan budget, relabel in budget-sized slices (a relabel after a ride moved is
@@ -1286,10 +1291,22 @@ export class EdgeLedger implements EdgeLedgerHooks {
    * from itself; otherwise a focused build (`focusFor`) runs only the sections that can produce `id`. Undefined: not offered.
    */
   bindOne(soul: EdgeSoul, id: string): {cap: EdgeCapability; plan: ReturnType<Plans["get"]>} | undefined {
+    // #1770 plan-once: the strict gate's bind answers the act's own bind in the same synchronous turn (one request, before
+    // its first await: no tick, no other request and no fold can run in between), under the same tick and same-tick
+    // signature. Any await ends the turn (the microtask below forgets it), so the act's later binds are built as before.
+    const turn = this.oneTurn, tick = this.mw.world.tick;
+    if (PLAN_ONCE && turn && turn.soulId === soul.soulId && turn.id === id && turn.tick === tick && turn.sig === this.sameTickSig()) {
+      menuStats.one.turn++;
+      if (PLAN_ONCE_ORACLE) {const fresh = this.bindOneRaw(soul, id), a = JSON.stringify(turn.out ? [turn.out.cap, turn.out.plan] : null), b = JSON.stringify(fresh ? [fresh.cap, fresh.plan] : null); if (a !== b) {menuStats.one.oracleMiss++; console.error('[plan-once-oracle] bindOne', soul.soulId, id);}}
+      return turn.out;
+    }
     const c0 = cpuNow(), out = this.bindOneRaw(soul, id); menuStats.one.n++; menuStats.one.cpuUs += cpuNow() - c0;
     if (MENU_ORACLE) {const diff = this.bindOneOracleV1(soul, id, out); if (diff) {menuStats.one.oracleMiss++; console.error('[bind-one-oracle]', soul.soulId, id, diff);}}
+    if (PLAN_ONCE) {const kept = {soulId: soul.soulId, id, tick, sig: this.sameTickSig(), out}; this.oneTurn = kept; queueMicrotask(() => {if (this.oneTurn === kept) this.oneTurn = null;});}
     return out;
   }
+  /** #1770: the last offer bound in this synchronous turn (forgotten at the turn's end). */
+  private oneTurn: {soulId: string; id: string; tick: number; sig: string; out: ReturnType<EdgeLedger['bindOneRaw']>} | null = null;
   private bindOneRaw(soul: EdgeSoul, id: string) {
     const b = this.bindFocus(soul, focusFor(id)), cap = b.caps.find(c => c.id === id);
     return cap ? {cap, plan: b.plans.get(id)} : undefined;
@@ -1305,9 +1322,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // #1737: a spot asked for by its id may lie beyond what the whole menu lists (its reach, its nearest few). A whole menu
     // that does not hold it cannot answer for it, and a kept build cannot either: what makes a far spot taken or free
     // happens outside the cells this Soul's menus are keyed on. Such an id is always built now.
-    const spot = this.asksSpot(focus), has = (b: {caps: EdgeCapability[]}) => [...focus.ids].every(id => b.caps.some(c => c.id === id));
-    if (hit?.last?.tick === tick && hit.last.sig === this.sameTickSig()) {const v = only(hit.last.value); if (!spot || has(v)) {menuStats.one.sameTick++; return v;}}
-    else if (hit && hit.key === this.menuKey(soul, tick) && tick - hit.tick < MENU_MAX_AGE_TICKS && this.readsHold(soul, hit.reads)) {const v = only(this.bindsTail(soul, only(hit.value), focus)); if (!spot || has(v)) {menuStats.one.kept++; return v;}}
+    // #1751: so may a thing worked by hand: a whole menu lists only those within sight, so one it does not hold is built by id
+    const spot = this.asksSpot(focus), far = spot || [...focus.ids].some(id => id.startsWith('object:')), has = (b: {caps: EdgeCapability[]}) => [...focus.ids].every(id => b.caps.some(c => c.id === id));
+    if (hit?.last?.tick === tick && hit.last.sig === this.sameTickSig()) {const v = only(hit.last.value); if (!far || has(v)) {menuStats.one.sameTick++; return v;}}
+    else if (hit && hit.key === this.menuKey(soul, tick) && tick - hit.tick < MENU_MAX_AGE_TICKS && this.readsHold(soul, hit.reads)) {const v = only(this.bindsTail(soul, only(hit.value), focus)); if (!far || has(v)) {menuStats.one.kept++; return v;}}
     if (spot) {menuStats.one.built++; return only(this.bindsTail(soul, only(this.bindsCore(soul, focus)), focus));}
     // a focused build is kept like a whole menu (same key, same reads), per focus: `here` asks the same one every frame
     const sig = focusSig(focus), mine = this.focusCache.get(soul.soulId), kept = mine?.get(sig), key = this.menuKey(soul, tick, focus);
@@ -3000,6 +3018,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const level = me.human?.level ?? 0, h = me.human;
     return {me: here, level, seated: !!h && (h.activity === 'sit' || h.baseActivity === 'sit'),
       gone: (spotId: string) => this.spotThingGone(spotId),
+      // #628 (knowledge/1): a spot in a secret place this Soul does not know, by its place or where it stands (as secretOffer and the catalog)
+      hidden: (spotId: string, at: [number, number]) => {if (!this.knowledge.marked().size) return false; const place = this.spotPlace(spotId); return (!!place && !this.knowledge.knows(soul.soulId, place)) || this.knowledge.hidesPoint(soul.soulId, at);},
       // read only against standing-room thresholds (≤ 0.95 m): capped at 1 m, answered without building far nav tiles (L1)
       clearance: (x: number, z: number) => level === 0 && engine.clearanceAtV1 ? (engine.clearanceUpToV1 ? engine.clearanceUpToV1(x, z, 1) : engine.clearanceAtV1(x, z)) : 0,
       open: (at: [number, number], min: number, rings: number) => level === 0 && engine.nearestStandableV1 ? engine.nearestStandableV1(at, soul.entityId, min, rings) : null,
