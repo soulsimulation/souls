@@ -973,8 +973,12 @@ export class MarsEngine implements Engine {
           return this.end(p, 'failed', p.walkStopping);
         }
         if (rec) {
-          const walkBlocked = this.cfg.walkBlockV1 && (rec.verb === 'walk_to'||this.physical&&rec.verb==='commons_shore_travel');
-          const routeBlocked = /deadlock\.|walk.goal-occupied/.test(rec.diagnostic?.code ?? '');
+          // #1216: take_item and put_item walk to their stand as a child walk_to, and their own record reads running the
+          // while; the blocked-walk limit reads that walk, and stopping it fails the item step with the walk's reason
+          const approach = (rec.verb === 'take_item' || rec.verb === 'put_item') && rec.phase === 'approach' ? this.holders(p.actor).map((id) => this.rt.records.get(id)).find((r) => r?.verb === 'walk_to' && r.parent === rec.id) : undefined;
+          const lim = approach ?? rec;
+          const walkBlocked = this.cfg.walkBlockV1 && (lim.verb === 'walk_to'||this.physical&&rec.verb==='commons_shore_travel');
+          const routeBlocked = /deadlock\.|walk.goal-occupied/.test(lim.diagnostic?.code ?? '');
           // Native sleep retains a failed/directed-away purpose for an explicit
           // Resume in the finite Lab. A living card must instead report blockage
           // and let the Soul choose again, so it cannot hold the daily barrier.
@@ -1013,10 +1017,11 @@ export class MarsEngine implements Engine {
               return this.end(p, 'failed', why);
             }
           } else p.quietHeldSince = undefined;
-          if (rec.status === 'blocked' && (walkBlocked || routeBlocked || sleepBlocked)) {
+          if (lim.status === 'blocked' && (walkBlocked || routeBlocked || sleepBlocked)) {
             p.blockedSince ??= tick;
             if (tick-p.blockedSince > (sleepBlocked ? this.cfg.sleepBlockTicks! : 1200)) {
-              const why = walkBlocked ? {code:'route.blocked',message:`walking has remained blocked for a minute: ${rec.diagnostic?.code ?? 'action.blocked'}`} : routeBlocked ? {code:'route.blocked',message:'the route has remained blocked for a minute'} : {code:'activity.blocked',message:`sleep has remained blocked for a minute: ${rec.diagnostic?.code}`};
+              const why = walkBlocked ? {code:'route.blocked',message:`walking has remained blocked for a minute: ${lim.diagnostic?.code ?? 'action.blocked'}`} : routeBlocked ? {code:'route.blocked',message:'the route has remained blocked for a minute'} : {code:'activity.blocked',message:`sleep has remained blocked for a minute: ${rec.diagnostic?.code}`};
+              if (approach) { this.rt.cancel(approach.id, why); return; }   // a landing first if it is between levels
               const water=this.sharedWaterBlockingAction(p,rec);this.rt.cancel(rec.id,why);
               if (walkBlocked && this.rt.isActive(rec.id)) { p.walkStopping = why;if(water)p.waterStopRetry=water;return; }
               if(water&&this.retrySharedWaterV1(p,water)){p.action=undefined;p.settle=undefined;p.soft=undefined;p.blockedSince=undefined;return;}
