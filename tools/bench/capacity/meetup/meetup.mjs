@@ -2,13 +2,16 @@
 // CW1 (#735): run the 50-Soul / 10-world meetup workload (workload.mjs) through the checkout's own launcher, on
 // isolated fake-mind data, and write a sanitized receipt, every call's record and a report. Read README.md
 // ("Meetup workload") first. Tools-only; never gated, never on Modal; indicative unless run on the qualifying executor.
+// #1972: every Soul is the raw-HTTP client Soul of #1945 (client-soul.mjs): the catalog and live picture once, acts by
+// catalog id (strict, keyed), each act's receipt read once, the client's headers and retry rules; no resolve.
 //
-//   node tools/bench/capacity/meetup/meetup.mjs [--profile even|meetup|even,meetup] [--seed cw1] [--repeats 1]
+//   node tools/bench/capacity/meetup/meetup.mjs [--profile even|meetup|real100|even,meetup] [--seed cw1] [--repeats 1]
 //        [--out .local/bench/meetup/<stamp>] [--root <checkout>] [--port 4400] [--range 4401-4430] [--heap-mb 2048]
 //        [--host-class laptop] [--quiet-host] [--short] [--browser] [--join-concurrency 4]
 //        [--active-min 20] [--warmup-min 10] [--telemetry]
 //
 // --short: the same shape with 1 min quiet / 3 min activity (a smoke, never a measuring window).
+// --profile real100 (#1972): 100 Souls, ten per world, paced by the `real` cadence of #1945 (workload.mjs CADENCE_OF).
 // --quiet-host: the operator asserts the host runs nothing else; without it every number is labelled not-quiet.
 // --browser: one real browser (Playwright Chromium, headless) holds world 0's page for the whole run.
 // --active-min N (CW8 A2, #955): an activity window of N minutes (20-240; default 20, the CW2 schedule unchanged), the same
@@ -28,6 +31,7 @@ import { report, verdictReport, OBJECTIVES } from './report.mjs';
 import { probe, threads, between, hotThreads, resourceSample } from './host.mjs';
 import { verdict, headroom, evidence } from './verdict.mjs';
 import { growth as growthOf } from './growth.mjs';
+import { actBody, catalogIds, clientCall, clientHeaders, startPicture } from './client-soul.mjs';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; }, flag = (k) => argv.includes(`--${k}`);
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short'), SEED = opt('seed', 'cw1');
@@ -45,7 +49,7 @@ if (flag('active-min') && !/^\d+$/.test(opt('active-min') ?? '')) throw new Erro
 const ACTIVE_MIN = flag('active-min') ? Number(opt('active-min')) : null, WARMUP_MS = Number(opt('warmup-min', 10)) * 60_000, TELEMETRY = flag('telemetry');
 if (!(WARMUP_MS >= 0)) throw new Error('--warmup-min: minutes, 0 or more');
 const PH = phases(SHORT, ACTIVE_MIN), WARM_MS = SHORT ? 20_000 : 60_000, DRAIN_MS = 30_000, BASE = `http://127.0.0.1:${PORT}`;
-for (const p of PROFILE_LIST) if (!PROFILES[p]) throw new Error(`--profile ${p}: even | meetup`);
+for (const p of PROFILE_LIST) if (!PROFILES[p]) throw new Error(`--profile ${p}: ${Object.keys(PROFILES).join(' | ')}`);
 const { SOUL_CEILINGS } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/flood.mjs')).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 const mono = () => performance.now();
@@ -173,57 +177,44 @@ async function joinSoul(run, s) {
   s.joinMs = Math.round(mono() - t0); s.joinTries = tries.map(({ cmd, code, ms, err }) => ({ cmd, code, ms, ...(code ? { err } : {}) }));
   return s;
 }
-const headersOf = (s) => ({ authorization: `Bearer ${s.token}`, 'content-type': 'application/json', 'x-forwarded-for': s.address });
-const BUSY = /\b(world\.busy|world\.crowded|world\.starting|soul\.busy|soul\.slow-down|rate-limited|client\.rate|account\.rate)\b/;
+const headersOf = (s, key = null) => clientHeaders(s, { key });
 function refusalTag(code, d) { return `${d?.slug ? 'launcher' : 'world'}:${code}`; }
-const RESOLVE = ['sit down', 'wave', 'look around', 'go for a walk'], LOOK = ['look left', 'look right'], GESTURE = ['wave', 'nod', 'clap', 'cheer', 'bow'];
+// catalog ids only (the client is strict): attention is a point, a gesture one of the catalog's anywhere acts
+const ATTENTION = ['point:here'], GESTURE = ['wave:here', 'nod:here', 'clap:here', 'cheer:here', 'bow:here'];
 function requestOf(run, s, op) {
-  const W = run.worlds[s.world], act = (capability) => ['POST', '/v1/edge/act', { capability, params: {}, clientRef: `${run.id}-${op.id}` }];
+  const W = run.worlds[s.world], act = (capability) => ['POST', '/v1/edge/act', actBody(capability, `${run.id}-${op.id}`)];
   switch (op.kind) {
     case 'observe': return ['GET', '/v1/edge/observe'];
     case 'here': return ['GET', '/v1/edge/here?include=doHere'];
     case 'capabilities': return ['GET', '/v1/edge/capabilities'];
-    case 'resolve': return ['POST', '/v1/edge/resolve', { capability: RESOLVE[op.pick % RESOLVE.length], params: {} }];
-    case 'walk': return act(`walk:${W.places[op.pick % W.places.length]}`);
-    case 'meetup': return act(`walk:${W.meetup}`);
-    case 'attention': return act(LOOK[op.pick % LOOK.length]);
+    case 'walk': return act(W.places[op.pick % W.places.length]);
+    case 'meetup': return act(W.meetup);
+    case 'attention': return act(ATTENTION[op.pick % ATTENTION.length]);
     case 'gesture': return act(GESTURE[op.pick % GESTURE.length]);
-    case 'stand': return act('stand');
+    case 'stand': return act('stand:here');
+    // the cadence mix's kinds (real100): an id of that kind from the world's catalog; a kind it does not offer is sent as a walk and counted
+    case 'sit': case 'sit-ground': case 'read': case 'eat': case 'play-music': case 'swim': {
+      const ids = W.ids[op.kind]; if (ids?.length) return act(ids[op.pick % ids.length]);
+      run.mixFallback[op.kind] = (run.mixFallback[op.kind] ?? 0) + 1; return act(W.places[op.pick % W.places.length]); }
     case 'shared': { const mates = run.souls.filter((x) => x.world === s.world && x.i !== s.i && x.soulId), m = mates.find((x) => x.k > s.k) ?? mates[0];
-      const verbs = W.sharedVerbs.length ? W.sharedVerbs : DEMAND.sharedVerbs;
+      const verbs = DEMAND.sharedVerbs;
       return act(m ? `${verbs[op.pick % verbs.length]}:${m.soulId}` : 'wave'); }
     case 'accept': return act(op.capability);
     case 'say': return ['POST', '/v1/edge/say', { text: 'hello from the meetup workload' }];
     default: throw new Error(`op kind ${op.kind}`);
   }
 }
-// One call with the CLI's etiquette: up to 3 waits of a designed busy answer's Retry-After, up to 6 tries with full
-// jitter when nothing answers; deadline 60 s for a read, 90 s for an act. Every wait is inside the call's time.
+// One call with the client's etiquette (client-soul.mjs clientCall): up to 3 waits of a designed busy or stalled
+// answer's Retry-After, up to 6 tries with full jitter when nothing answers, 25 s per read try and 40 s per act try;
+// deadline 60 s for a read, 90 s for an act. Every wait is inside the call's time. Acts and says are keyed.
 async function perform(run, s, op, jitter) {
-  const [method, path, body] = requestOf(run, s, op), deadline = op.cls === 'act' ? 90_000 : 60_000, t = mono(), ac = new AbortController(); run.opAborts.add(ac);
-  const headers = { ...headersOf(s), ...(op.kind === 'say' ? { 'idempotency-key': `${run.id}-${op.id}` } : {}) };
-  let status = 0, code = null, d = null, busy = 0, failed = 0, waitMs = 0; const refusals = [];
-  try {
-    for (;;) {
-      const left = deadline - (mono() - t); if (left <= 0 || run.cut) { status = -1; break; }
-      try {
-        const r = await fetch(`${BASE}/w/${s.slug}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.any([ac.signal, AbortSignal.timeout(Math.min(left, 40_000))]) });
-        d = await r.json().catch(() => null); status = r.status; code = d?.error?.code ?? d?.code ?? null;
-        if ((status === 429 || status === 503) && BUSY.test(String(code))) {
-          refusals.push(refusalTag(code, d));
-          if (busy < 3) { busy++; const ra = Number(r.headers.get('retry-after')), w0 = mono(); await sleep(Math.min(left, (ra > 0 ? ra * 1000 : 1000 * 2 ** busy) * (1 + 0.2 * jitter()))); waitMs += mono() - w0; continue; }
-        }
-        break;
-      } catch {
-        if (mono() - t >= deadline || run.cut) { status = -1; break; }
-        if (++failed >= 6) { status = 0; break; }
-        await sleep(Math.min(deadline - (mono() - t), jitter() * Math.min(60_000, 1000 * 2 ** (failed - 1))));
-      }
-    }
-  } finally { run.opAborts.delete(ac); }
-  const accepted = op.kind === 'resolve' ? d?.resolve?.ok : d?.accepted;
-  const rec = { ...(body?.capability && op.cls === 'act' ? { capability: body.capability.replace(/:s_[\w-]+$/, ':<soul>') } : {}), status, outcome: outcomeOf({ status, code, accepted }), ...(busy ? { busyWaits: busy, waitMs: Math.round(waitMs) } : {}), ...(failed ? { netFailures: failed } : {}), ...(refusals.length ? { refusals } : {}) };
-  if (rec.outcome === 'gameplay-refused') { rec.code = d?.code ?? d?.resolve?.code ?? null; rec.reason = clean(String(d?.reason ?? d?.resolve?.reason ?? '')).replace(/s_[\w-]+/g, '<soul>').slice(0, 160); }
+  const [method, path, body] = requestOf(run, s, op), ac = new AbortController(); run.opAborts.add(ac);
+  const key = op.cls === 'act' ? `${run.id}-${op.id}` : null;
+  let x; try { x = await clientCall(`${BASE}/w/${s.slug}${path}`, { method, headers: headersOf(s, key), body, jitter, deadlineMs: op.cls === 'act' ? 90_000 : 60_000, signal: ac.signal }); }
+  finally { run.opAborts.delete(ac); }
+  const { status, code, data: d, busy, failed, waitMs } = x, refusals = x.refusals.map((c) => refusalTag(c, d));
+  const rec = { ...(body?.capability && op.cls === 'act' ? { capability: body.capability.replace(/:s_[\w-]+$/, ':<soul>') } : {}), status, outcome: outcomeOf({ status, code, accepted: d?.accepted }), ...(busy ? { busyWaits: busy, waitMs } : {}), ...(failed ? { netFailures: failed } : {}), ...(refusals.length ? { refusals } : {}) };
+  if (rec.outcome === 'gameplay-refused') { rec.code = d?.code ?? null; rec.reason = clean(String(d?.reason ?? '')).replace(/s_[\w-]+/g, '<soul>').slice(0, 160); }
   if (rec.outcome === 'error') rec.code = `${status} ${code ?? ''}`.trim();
   if (d?.receipt?.id) { rec.receipt = d.receipt.id; rec.phase = d.receipt.phase; }
   return rec;
@@ -284,7 +275,7 @@ async function oneRun(profile, rep) {
   const dir = join(OUT, `${profile}-r${rep}`); mkdirSync(dir, { recursive: true });
   const ss = soulsOf(profile).map((s) => Object.assign(s, { reactive: Object.assign([], { n: 0 }) })), ops = schedule(profile, SEED, PH), opsBySoul = ss.map((s) => ops.filter((o) => o.soul === s.i));
   const run = { id: createHash('sha256').update(`${SEED}|${profile}|${rep}|${Date.now()}`).digest('hex').slice(0, 10), dir, stopped: false, cut: false, sockets: [], procs: new Set(), aborts: new Set(), opAborts: new Set(), viewers: {},
-    souls: ss, receipts: new Map(), stream: { responses: 0, events: 0, batches: [], gaps: 0, failures: 0, non200: {} }, worlds: [], samples: [], marks: {}, epochs: {}, probes: {} };
+    souls: ss, receipts: new Map(), mixFallback: {}, stream: { responses: 0, events: 0, batches: [], gaps: 0, failures: 0, non200: {} }, worlds: [], samples: [], marks: {}, epochs: {}, probes: {} };
   const tag = `${profile} r${rep}`, mark = (name) => { run.marks[name] = mono(); run.epochs[name] = Date.now(); log(`${tag}: ${name}`);
     // the allocation the worlds live in (the launcher's cgroup; its children share it) and each world's threads, per mark
     if (run.launcher) { const k = children(run.launcher.ldata); run.probes[name] = { t: mono(), alloc: probe(run.launcher.child.pid), driver: probe('self'),
@@ -346,17 +337,16 @@ async function oneRun(profile, rep) {
     for (let i = 0; i < ss.length; i += JOIN_PAR) await Promise.all(ss.slice(i, i + JOIN_PAR).map((s) => joinSoul(run, s)));
     const missing = ss.filter((s) => !s.token);
     log(`${tag}: joined ${ss.length - missing.length}/${ss.length} Souls${missing.length ? ` (missing ${missing.map((s) => s.i).join(',')})` : ''}`);
-    // per world: the meetup place and walk targets, from a joined Soul's own menu (setup reads, not measured)
+    // the client's start (#1945): every Soul reads the catalog and the live picture once (setup reads, not measured)
+    for (let i = 0; i < ss.length; i += JOIN_PAR) await Promise.all(ss.slice(i, i + JOIN_PAR).filter((s) => s.token).map(async (s) => { const p = await startPicture(`${BASE}/w/${s.slug}`, s); s.catalog = p.catalog; s.start = { catalog: p.catalogStatus, live: p.liveStatus }; }));
+    // per world: the meetup place, walk targets and ids by kind, from a joined Soul's catalog. Shared actions use the
+    // full verb list: a world that does not offer one to that pair refuses it, a classified gameplay refusal.
     for (const [w, f] of FIXTURES.entries()) {
-      const s = ss.find((x) => x.world === w && x.token), r = rng(`${SEED}|${f.slug}|places`);
-      const caps = s ? (await getJ(`${BASE}/w/${f.slug}/v1/edge/capabilities?all=1`, { headers: headersOf(s), ms: 60_000 })).j?.capabilities ?? [] : [];
-      const places = caps.filter((c) => c.verb === 'walk' && c.available && c.id.startsWith('walk:')).map((c) => c.id.slice(5)).sort();
+      const s = ss.find((x) => x.world === w && x.catalog), r = rng(`${SEED}|${f.slug}|places`), ids = catalogIds(s?.catalog), places = [...ids.walk].sort();
       const pick = Array.from({ length: Math.min(8, places.length) }, () => places[Math.floor(r() * places.length)]);
-      // shared actions this world offers (its menu's verbs); a template without them falls back to the full list, and
-      // the world's refusal is then a classified gameplay refusal
-      const verbs = new Set(caps.map((c) => c.verb)), sharedVerbs = DEMAND.sharedVerbs.filter((v) => verbs.has(v));
-      run.worlds[w] = { slug: f.slug, sharedVerbs, placesInMenu: places.length, places: pick.length ? pick : ['here'], meetup: places.length ? places[Math.floor(r() * places.length)] : 'here' };
+      run.worlds[w] = { slug: f.slug, placesInCatalog: places.length, ids, places: pick.length ? pick : ['sit-ground:here'], meetup: places.length ? places[Math.floor(r() * places.length)] : 'sit-ground:here' };
     }
+    for (const s of ss) delete s.catalog;
     const hello = await viewerHello();
     for (const s of ss) if (s.token) holdStream(run, s);
     for (const f of FIXTURES) viewer(run, f.slug, hello);
@@ -372,6 +362,8 @@ async function oneRun(profile, rep) {
       const jitter = rng(`${SEED}|jitter|${s.i}`), closed = () => mono() - t0 >= PH.activeMs || run.cut;
       const send = async (op) => {
         const issuedAt = mono() - t0, r = await perform(run, s, op, jitter), doneAt = mono() - t0;
+        // the client reads the act's receipt once, after it (its own time, not inside the act's)
+        if (r.receipt && !run.cut) { const t1 = mono(), x = await clientCall(`${BASE}/w/${s.slug}/v1/edge/receipts/${encodeURIComponent(r.receipt)}`, { headers: headersOf(s), jitter, deadlineMs: 60_000 }); r.receiptRead = { status: x.status, ms: Math.round(mono() - t1), phase: x.data?.receipt?.phase ?? null }; }
         const rec = { id: op.id, soul: s.i, world: s.world, kind: op.kind, cls: op.cls, burst: op.burst, atMs: op.atMs, issuedAt: Math.round(issuedAt), doneAt: Math.round(doneAt), ...(op.reactive ? { reactive: true, inviteDeliveryMs: op.delivery } : {}), ...r };
         (op.reactive ? reactive : records).push(rec); appendFileSync(opsFile, JSON.stringify(rec) + '\n');
       };
@@ -475,7 +467,9 @@ function summarize({ profile, rep, ss, ops, records, run, rates, views, cleanup,
   const grown = growthOf(run.samples, { active: [run.marks.active, run.marks.drain], warmupMs: WARMUP_MS, slugs: FIXTURES.map((f) => f.slug) });
   return { profile, rep, headline, qualification, growth: grown, marksS: Object.fromEntries(Object.entries(run.marks).map(([k, v]) => [k, +((v - run.marks.boot) / 1000).toFixed(1)])), bootS: run.launcher.bootS, rates,
     join: { ms: quantiles(ss.filter((s) => s.joinMs != null).map((s) => s.joinMs)), failed: ss.filter((s) => !s.token).map((s) => ({ soul: s.i, tries: s.joinTries })), retries: ss.reduce((n, s) => n + Math.max(0, (s.joinTries?.length ?? 1) - 2), 0) },
-    worlds: run.worlds.map((w) => ({ slug: w.slug, placesInMenu: w.placesInMenu, meetup: w.meetup, sharedVerbs: w.sharedVerbs })), accounting, reactiveDemand, actionStartMs: q(start), sharedActionStartMs: quantiles(sharedStart.map(Math.round)), receiptDeliveryMs: q(delivery), plannedActivityMs: q(activity), actsWithoutStart: never,
+    worlds: run.worlds.map((w) => ({ slug: w.slug, placesInCatalog: w.placesInCatalog, meetup: w.meetup, idsByKind: Object.fromEntries(Object.entries(w.ids).map(([k, v]) => [k, v.length])) })), mixFallback: run.mixFallback,
+    start: { catalog: ss.filter((s) => s.start?.catalog === 200).length, live: ss.filter((s) => s.start?.live === 200).length, of: ss.filter((s) => s.token).length },
+    receiptReads: quantiles([...records, ...rx].filter((x) => x.receiptRead?.status === 200).map((x) => x.receiptRead.ms)), accounting, reactiveDemand, actionStartMs: q(start), sharedActionStartMs: quantiles(sharedStart.map(Math.round)), receiptDeliveryMs: q(delivery), plannedActivityMs: q(activity), actsWithoutStart: never,
     stream: { ...run.stream, batches: quantiles(run.stream.batches) }, viewers: run.viewers, browser: BROWSER ? { ...browser, ...run.browserStats } : null,
     clock, healthzMisses: hzMiss, levels, pausedSamples: paused, dilatedSamples: dilated, resources, worldPidChanges: pidChanges, launcher: views, restarts, gameplayRefusals: gameplay, refusalTags,
     driverCpuS: +driverCpuS.toFixed(1), load, cleanup };
