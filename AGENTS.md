@@ -132,6 +132,9 @@ re-read the agenda issue before dispatching anything.
 - After each wave of dispatches and each release, post a checkpoint on the agenda issue; with each release, the
   table of tasks merged since the last one, with ceiling, hours taken and how each ended. A successor starts from
   that issue, so a handoff packet carries state (pull requests, heads, what is running) and never rules.
+- Nothing stays unfiled or stale: at each release the steward gives every open issue without a milestone, and
+  every pull request untouched for seven days, an outcome (close with a reason, park, backlog, or propose as a
+  task). An issue where a Soul or a world can get stuck goes to the top whatever its age.
 - Gene alone decides scope, priority, spend and production machines. Do not re-ask what the agenda lists as
   decided. [Coordinator contract](docs/process/development-coordinator.md)
 
