@@ -89,4 +89,5 @@ test('#1921: bare words are a search too; a search that matches nothing says so;
 
   const sit = await run('caps', '--search', 'library', '--verb', 'sit');
   assert.deepEqual(sit.offers, [], '--verb still filters the places out');
+  assert.deepEqual((await run('caps', '--verb', 'walk', '--search', 'library')).offers.map(o => o.id), ['walk:eden-library-1'], 'and --verb walk keeps the walks to them');
 });

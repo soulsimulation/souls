@@ -3492,9 +3492,12 @@ async function caps(...args) {
   // A search is an answer, not a catalogue: the best dozen, short. The plain listing and --verb stay catalogues.
   limit ??= search && !all ? 12 : 60;
   // #1921: a search is the local catalog's `find`, with no call on the world; a row with no act (a fixed place) is left out.
+  // --verb filters the rows by their act's verb: find given a verb leaves places out, and a walk is a place's act.
   if (search) {
     const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
-    const r = soulCatalog.find(ix, search, { verb, at: me?.at, states: live?.live?.things, limit: Infinity }), list = r.found.filter((x) => x.act);
+    const r = soulCatalog.find(ix, search, { at: me?.at, states: live?.live?.things, limit: Infinity });
+    const verbOf = (id) => (id.startsWith("object:") ? id.split(":").pop() : id.slice(0, id.indexOf(":")));
+    const list = r.found.filter((x) => x.act && (!verb || verbOf(x.act) === verb));
     const said = r.note ?? (list.length ? note : `Nothing in this world's catalog matches "${search}"${verb ? ` with --verb ${verb}` : ""}. Try other words.`);
     return {
       matching: list.length, shown: Math.min(list.length, limit), ...(list.length > limit ? { more: `--limit ${list.length} shows all ${list.length}` } : {}), ...(said ? { note: said } : {}),
@@ -3518,7 +3521,7 @@ async function around(...args) {
   const d = clean(ok(await call("/v1/edge/around" + q), "around"));
   // Directions are a sibling of the local surroundings, not part of them.
   // Never silently discard a requested destination on an older server either.
-  const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use find "<destination>" --verb walk or caps --verb walk --search "<destination>".' } : undefined);
+  const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use find "<destination>" or caps --verb walk --search "<destination>".' } : undefined);
   return { ...d.around, ...(route ? { route } : {}) };
 }
 
