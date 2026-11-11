@@ -4,6 +4,9 @@
 // with 9 quiet ticking worlds beside it. Each world is booted directly with the checkout's own launcher command and
 // production decoration (fake minds, Eyes off), in an isolated data dir under the run. Tools-only; never gated, never
 // on Modal; indicative unless run on the qualifying executor (--qualifying-executor --quiet-host).
+// Limit (#2039): a world this bench sends JavaScript over the inspector (Runtime.evaluate or callFunctionOn: the memory
+// axis) boots with stall stacks off (SIM_STALL_STACK=0). The stall-stack watchdog's Debugger.pause followed by such a call
+// aborts the world on a V8 check. Profiler calls (--cpu-prof) run no JavaScript and keep stall stacks on.
 //
 //   node tools/bench/capacity/slopes/slopes.mjs [--axis inventory,activity,quiet,walkers] [--repeats 1] [--out <dir>]
 //        [--root <checkout>] [--port 4600] [--heap-mb 2048] [--quiet-worlds 9] [--warm-s 30] [--quiet-s 60]
