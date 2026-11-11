@@ -78,7 +78,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
       return c.json({contract: EDGE_CONTRACT, error: {code: 'unavailable', message: 'the ledger could not answer; retry'}}, 503);
     }
   };
-  const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
+  // #2083: an act over its limit is refused naming the limit, so a flooding agent sees which act was not taken
+  const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw key === 'act' ? new EdgeError(429, 'rate-limited', `more than ${n} acts a minute: this act was not taken`, {limit: n, window_s: 60}) : new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
   app.get('/v1/edge/observe', wrap(c => {const s = deps.soul(c); limit(s, 'observe', 240); return L.observe(s, new Set((c.req.query('include') ?? '').split(',').filter(Boolean)));}));
   // #1329 part 4 follow-up: a search builds the whole menu and up to 12 walks on main (up to ~0.5 s), so it has its own
   // budget, as around does; a plain listing keeps the capabilities budget
