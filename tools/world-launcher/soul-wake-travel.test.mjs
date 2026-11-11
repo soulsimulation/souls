@@ -47,7 +47,7 @@ test('#2049: wake rules survive pairing again whole, and travel without the ones
     assert.equal(r.code, 0, r.err);
   }
   let r = await w.cli('wake');
-  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w1', 'w2', 'w3', 'w4', 'w5']);
+  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w1', 'w2', 'w3', 'w4', 'w5']);
 
   // Paired again: the old token stopped working, so pairing mints a new one for the same Soul in the same world. The serve
   // restarts for it and every rule is kept.
@@ -56,14 +56,14 @@ test('#2049: wake rules survive pairing again whole, and travel without the ones
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json.serve?.restarted, true, JSON.stringify(r.json));
   r = await w.cli('wake');
-  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w1', 'w2', 'w3', 'w4', 'w5'], 'kept across pairing again');
+  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w1', 'w2', 'w3', 'w4', 'w5'], 'kept across pairing again');
 
   // Travel: the rules go along, except w2 (a Soul of the old world), w3 and w5 (its places); each drop is logged with why.
   r = await w.cli('travel', 'other');
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json.serve?.restarted, true, JSON.stringify(r.json));
   r = await w.cli('wake');
-  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w1', 'w4'], 'kept across travel');
+  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w1', 'w4'], 'kept across travel');
   assert.deepEqual(r.json.rules.find((x) => x.id === 'w4').params, { who: 'any', where: 'here' });
   const log = await until(() => (/dropped w5/.test(w.log()) ? w.log() : null));
   assert.match(log, /wake: dropped w2: it names Soul s_mira of the world this Soul left/);
