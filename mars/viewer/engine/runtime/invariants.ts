@@ -10,7 +10,7 @@ import { def } from '../world/catalog.ts';
 import { angleDelta, rot2, sub2, type OBB2, type Vec2, type Vec3, hypot } from '../core/math.ts';
 import { isCarryLoad } from '../carry/formation.ts';
 import type { WorldState } from '../world/types.ts';
-import { CLIMB_SPEED, WALK_MIN, WALK_SPEED_CAP, JOG_SPEED_CAP, RUN_SPEED_CAP, CYCLE_SPEED_CAP } from '../locomotion/walk.ts';
+import { onFlightFootprint, CLIMB_SPEED, WALK_MIN, WALK_SPEED_CAP, JOG_SPEED_CAP, RUN_SPEED_CAP, CYCLE_SPEED_CAP } from '../locomotion/walk.ts';
 import { sleepSafetyIssue } from '../activities/sleep.ts';
 import { relevantEntities } from '../world/relevant.ts';
 
@@ -48,7 +48,9 @@ export function humanStaticClearanceWithOverlay(qualified:(rt:Runtime,e:import('
     if (!g) continue;
     const c = clearanceAt(g, [e.pose.p[0], e.pose.p[2]]);
     const radius=isFloater(e)?floaterBody(e.body).radius:humanRadius(e);
-    if (c < radius - TOL)
+    // #1367 flight-resume/1 (logged policy only: strandedOnFlight is null while it is off): a body left standing on a flight, all
+    // of it within the flight's width and on its profile, is checked as a climber is; its next walk resumes the flight
+    if (c < radius - TOL && !onFlightFootprint(rt, e, radius))
       out.push({
         code: 'collision.human-static',
         message: `${e.id} body overlaps static geometry (clearance ${c.toFixed(2)} m < ${radius} m) near ${nearestBlocker(g, [e.pose.p[0], e.pose.p[2]]) ?? 'the floor edge'} at (${e.pose.p[0].toFixed(2)}, ${e.pose.p[2].toFixed(2)}) level ${e.human.level} activity ${e.human.activity}`,
