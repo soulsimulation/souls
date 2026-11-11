@@ -50,8 +50,9 @@ export async function prepareFolder(seat, { name }) {
   await cli(f, ['serve', '--stop']).catch(() => {});
   const sv = await cli(f, ['serve']);
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
-  for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { const l = await cli(f, ['look']); if (!l.data) break; await sleep(500); }   // the world copy (a client before 2.25 has no look)
-  return { soulId, createdAt, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
+  let lookFailed = null;   // #2047: why the client has no world copy, for the episode's error
+  for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { const l = await cli(f, ['look']); if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; break; } await sleep(500); }   // the world copy (a client before 2.25 has no look)
+  return { soulId, createdAt, lookFailed, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
 
 /** Read the client's world copy (soul-catalog/1) from the Soul's runtime folder, or null. */
@@ -105,7 +106,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     // A client before 2.25 keeps no world copy; it is then checked and judged against a saved copy of the same template's
     // catalog (--catalog), never against nothing.
     const own = readCatalog(seat.folder, setup.soulId), catalogFrom = own ? 'client' : catalogRef ? 'reference' : null;
-    if (!catalogFrom) throw new Error('the client keeps no world copy (world-catalog.json); pass --catalog <a saved copy of this template\'s catalog>');
+    if (!catalogFrom) throw new Error(`the client keeps no world copy (world-catalog.json)${setup.lookFailed ? ` (${setup.lookFailed})` : ''}; pass --catalog <a saved copy of this template's catalog>`);
     const catalog = catalogIndex(own ?? catalogRef);
     const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
     if (bad.length) throw new Error(bad.join('; '));

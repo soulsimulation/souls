@@ -94,6 +94,17 @@ export async function runEval(o) {
   return { out, result };
 }
 
+/** #2047: the share of episodes that may error before a run counts as having measured nothing (declared, not tuned). */
+export const MAX_ERRORED_SHARE = 0.2;
+/** Why this run measured too little to pass (every episode errored, or more than MAX_ERRORED_SHARE did), or null. */
+export function unmeasured(episodes) {
+  const errored = episodes.filter((e) => e.error).length;
+  if (!episodes.length) return 'the run measured nothing: no episode ran';
+  if (errored === episodes.length) return `the run measured nothing: all ${errored} episode(s) errored (first: ${episodes[0].error})`;
+  if (errored / episodes.length > MAX_ERRORED_SHARE) return `${errored} of ${episodes.length} episodes errored, over the declared ${MAX_ERRORED_SHARE * 100}% (first: ${episodes.find((e) => e.error).error})`;
+  return null;
+}
+
 /** What the seat's environment held (names only), so a report shows the seat ran clean (#1688's allowlist). */
 function cleanEnvReport() {
   const names = Object.keys(process.env).sort();
@@ -120,7 +131,11 @@ export function loadResult(dir) {
 
 async function main() {
   const { cmd, o } = parseArgs(process.argv.slice(2));
-  if (cmd === 'run') { await runEval(o); process.exit(0); }   // a seat's in-flight turn or timers must not hold the lock past the result
+  if (cmd === 'run') {   // a seat's in-flight turn or timers must not hold the lock past the result
+    const why = unmeasured((await runEval(o)).result.episodes);
+    if (why) log(`FAILED: ${why}`);
+    process.exit(why ? 1 : 0);
+  }
   if (cmd === 'report') {
     const dir = o._[0]; if (!dir) throw new Error('report <out> [--against <out>]');
     const a = loadResult(dir), b = o.against ? loadResult(o.against) : null;
