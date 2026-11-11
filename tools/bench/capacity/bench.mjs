@@ -26,7 +26,8 @@
 //   Soul Client (#1737): [--load client] each CLI Soul holds `serve` and `listen` and runs the 2.11 skill's minute (look and
 //        find answer from the local copy; act sends a catalog id: a far place's walk, a far spot, or sit-ground:here; say).
 //        Each Soul folder records its requests (.eden-report-on), and result.json adds `serverTiming`: per route, the
-//        world's own time from Server-Timing (n, p50, p99, max) in the active windows.
+//        world's own time from Server-Timing (n, p50, p99, max) in the active windows, and `livePush` (#1755): bytes and
+//        frames a minute per client from each folder's world-live.json, and the world's `[live-push]` cost lines.
 // Writes <out>/<arm>-r<k>/{result.json,commands.jsonl,world.log}, <out>/receipt.json and <out>/REPORT.md (report.mjs).
 // The fixture's per-run copy is deleted after each run; the fixture itself is never written.
 import { spawn, execFile, execFileSync } from 'node:child_process';
@@ -339,6 +340,18 @@ function serverTimingOf(souls, windows) {
   }
   return Object.fromEntries(Object.entries(by).sort((a, b) => b[1].client.length - a[1].client.length).map(([k, v]) => [k, { n: v.client.length, noHeader: v.noHeader, worldP50: pct(v.world, 0.5), worldP99: pct(v.world, 0.99), worldMax: v.world.length ? Math.max(...v.world) : null, queueP99: pct(v.queue, 0.99), clientP50: pct(v.client, 0.5), clientP99: pct(v.client, 0.99) }]));
 }
+/** --load client (#1755): what the world's push cost. Per client, bytes a minute from its folder's world-live.json (the
+ *  frames serve received since it began, whole pictures included); from the world's log, its `[live-push]` minute lines. */
+function livePushOf(souls, dir) {
+  const perMin = [];
+  for (const s of souls) {
+    let p; try { p = JSON.parse(readFileSync(join(s.dir, 'world-live.json'), 'utf8')).push; } catch { continue; }
+    const mins = p?.since ? (Date.now() - Date.parse(p.since)) / 60_000 : 0; if (mins > 0.5) perMin.push({bytes: p.bytes / mins, frames: p.frames / mins, wholes: p.wholes ?? 0});
+  }
+  let lines = []; try { lines = readFileSync(join(dir, 'world.log'), 'utf8').split('\n').filter((l) => l.includes('[live-push]')).map((l) => l.slice(l.indexOf('[live-push]'))); } catch { /* none */ }
+  return {clients: perMin.length, bytesPerClientMinP50: pct(perMin.map((x) => x.bytes), 0.5), bytesPerClientMinMax: perMin.length ? Math.max(...perMin.map((x) => x.bytes)) : null,
+    framesPerClientMinP50: pct(perMin.map((x) => x.frames), 0.5), wholes: perMin.reduce((n, x) => n + x.wholes, 0), world: lines};
+}
 function holdListen(run, soul) {   // the harness keeps one listen per Soul; restarts it 1 s after it exits
   soul.listens = 0;
   const start = () => {
@@ -548,7 +561,7 @@ async function oneRun(arm, rep, mode = null) {
     const result = summarize({ arm, rep, N, w, windows, cmds, health, proc, run, calibration, loadBefore, loadAfter: loadavg() });
     if (SB) Object.assign(result, stagebSummary({ key, mode, cliN, windows, cmds, proc, wstats, run, w }));
     if (VIA) result.launcher = await launcherView();
-    if (CLIENT) result.serverTiming = serverTimingOf(souls, windows);
+    if (CLIENT) { result.serverTiming = serverTimingOf(souls, windows); result.livePush = livePushOf(souls, dir); }
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1));
     log(`${key} r${rep}: ${JSON.stringify(result.headline)}${result.stageb ? ` ${JSON.stringify(result.stageb.headline)}` : ''}`);
     return result;
