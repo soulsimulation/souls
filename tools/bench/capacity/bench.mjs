@@ -246,13 +246,13 @@ const CLASS = { here: 'C2', observe: 'C2', caps: 'C2', around: 'C2', receipt: 'C
 function runCli(soul, args, deadlineMs, rec) {
   return new Promise((done) => {
     const t = now(), p = spawn(process.execPath, ['eden.mjs', ...args], { cwd: soul.dir, stdio: ['ignore', 'pipe', 'pipe'] });
-    let err = '', out = '', killed = false; p.stderr.on('data', (d) => { err = (err + d).slice(-2000); }); p.stdout.on('data', (d) => { if (args[0] === 'act') out = (out + d).slice(0, 2000); });
+    let err = '', out = '', killed = false; p.stderr.on('data', (d) => { err = (err + d).slice(-2000); }); p.stdout.on('data', (d) => { if (args[0] === 'act' || args[0] === 'receipt') out = (out + d).slice(0, 2000); });
     const k = setTimeout(() => { killed = true; p.kill('SIGKILL'); }, deadlineMs);
     p.on('exit', (code) => {
       clearTimeout(k);
       // an act the world answers `accepted: false` is a refusal, whatever the exit code (#1093: words would refuse every act)
       const outcome = killed ? 'timeout' : /"accepted":\s*false/.test(out) ? 'refused' : code === 0 ? 'ok' : /unreachable/.test(err) ? 'unreachable' : BUSY.test(err) ? 'refused' : 'error';
-      const r = { soul: soul.i, cmd: args[0], cls: CLASS[args[0]] ?? 'C0', at: t, ms: now() - t, code, outcome, ...(args[0] === 'act' && /"phase":/.test(out) ? { receiptPhase: /"phase":\s*"([\w-]+)"/.exec(out)[1] } : {}), ...(outcome === 'refused' && out ? { refusal: /"code":\s*"([^"]+)"/.exec(out)?.[1], target: args[1] } : {}), ...(outcome === 'error' ? { err: err.trim().split('\n').at(-1)?.slice(0, 200) } : {}) };
+      const r = { soul: soul.i, cmd: args[0], cls: CLASS[args[0]] ?? 'C0', at: t, ms: now() - t, code, outcome, ...((args[0] === 'act' || args[0] === 'receipt') && /"phase":/.test(out) ? { receiptPhase: /"phase":\s*"([\w-]+)"/.exec(out)[1] } : {}), ...(outcome === 'refused' && out ? { refusal: /"code":\s*"([^"]+)"/.exec(out)?.[1], target: args[1] } : {}), ...(outcome === 'error' ? { err: err.trim().split('\n').at(-1)?.slice(0, 200) } : {}) };
       rec?.(r); done(r);
     });
   });
@@ -403,12 +403,18 @@ function clientLoop(run, soul) {   // one act at a time, act start to act start 
   })();
 }
 /** Before the windows: each Soul walks to its start place (Soul i to START_IDS[i mod n], at least ten places) and the
- *  bench waits for those walks to end, up to 300 s; `reached` counts the distinct places whose walk completed. A raw Soul first fetches the catalog and live picture. */
+ *  bench waits for those walks to end, up to 300 s; `reached` counts the distinct places whose walk completed. A raw Soul first fetches the catalog and live picture.
+ *  A real-client Soul's `act --wait` waits at most 60 s whatever it is asked (#2003), so it then reads its receipt with
+ *  `receipt` every 5 s until the walk ends or the 300 s pass. */
 async function spread(run, souls) {
   const capS = 300, t = now();
   const ends = await Promise.all(souls.map(async (s) => {
     const id = START_IDS[s.i % START_IDS.length];
-    if (s.cli) { const r = await runCli(s, ['act', id, '--wait', String(capS), '--json'], (capS + 120) * 1000, run.rec); return { id, ok: r.outcome === 'ok', phase: r.receiptPhase ?? null }; }
+    if (s.cli) {
+      const r = await runCli(s, ['act', id, '--wait', String(capS), '--json'], (capS + 120) * 1000, run.rec); let phase = r.receiptPhase ?? null;
+      while (r.outcome === 'ok' && !['completed', 'failed', 'replaced'].includes(phase) && now() - t < capS * 1000) { await sleep(5000); phase = (await runCli(s, ['receipt'], 60_000, run.rec)).receiptPhase ?? phase; }
+      return { id, ok: r.outcome === 'ok', phase };
+    }
     await clientReq(run, s, 'catalog', 'GET', '/v1/edge/catalog', { auth: false });
     await clientReq(run, s, 'live', 'GET', '/v1/edge/live', { auth: false });
     const key = randomUUID(), a = await clientReq(run, s, 'act', 'POST', '/v1/edge/act', { body: { capability: id, params: {}, strict: true, clientRef: key }, key, kind: 'walk' });
