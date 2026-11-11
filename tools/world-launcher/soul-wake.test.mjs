@@ -59,7 +59,7 @@ test('A3: act-ended wakes for the agent\'s own body act that ended unwatched, af
   st.events.push({ id: 'c_9', kind: 'receipt', receipt: { id: 'r_open', phase: 'started' } });
   let r = step(rules, st, T0 + 100);
   assert.deepEqual(r.fired, [], 'an end waits out the grace: an act --wait that saw it reads the receipt within it');
-  assert.deepEqual(ruleOf(r, 'act-ended').held.map((h) => h.id), ['r_mine']);
+  assert.deepEqual(ruleOf(r, 'act-ended').held.map((h) => h.id), ['r_mine', 'r_reflex'], 'held whoever sent it: an answer can still mark it mine');
   r = step(r.rules, st, T0 + 100 + ACT_ENDED_GRACE_MS);
   assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['act-ended', 'walk:mill completed']]);
   st.events.push({ id: 'c_10', kind: 'receipt', receipt: { id: 'r_mine', phase: 'completed' } });
@@ -74,6 +74,22 @@ test('A3: act-ended wakes for the agent\'s own body act that ended unwatched, af
   r = step(r.rules, st, T0 + 20_000 + ACT_ENDED_GRACE_MS);
   assert.deepEqual(r.fired.map((f) => f.why), ['open:gate refused: locked']);
   assert.equal(change(fresh(), { remove: 'act-ended' }).removed, 'act-ended', 'on by default, and the owner can take it off');
+});
+
+test('#2054: act-ended wakes once whether the act\'s answer or the stream\'s end comes first', () => {
+  for (const order of ['answer first', 'end first']) {
+    const st = serveState(), rules = fresh().rules;
+    let r = step(rules, st, T0);
+    const answer = () => { st.receipts.r_go = { ...st.receipts.r_go, id: 'r_go', capability: 'walk:mill', mine: true, read: false }; };
+    const end = () => { st.receipts.r_go = { ...st.receipts.r_go, id: 'r_go', capability: 'walk:mill', phase: 'completed', read: false }; st.events.push({ id: 'c_2', kind: 'receipt', receipt: { id: 'r_go', phase: 'completed' } }); };
+    if (order === 'answer first') { answer(); st.receipts.r_go.phase = 'started'; r = step(r.rules, st, T0 + 100); end(); }
+    else end();
+    r = step(r.rules, st, T0 + 200);
+    if (order === 'end first') answer();
+    const woke = [];
+    for (const at of [T0 + 300, T0 + 200 + ACT_ENDED_GRACE_MS, T0 + 10_000]) { r = step(r.rules, st, at); woke.push(...r.fired); }
+    assert.deepEqual(woke.map((f) => [f.id, f.why]), [['act-ended', 'walk:mill completed']], order);
+  }
 });
 
 test('A3, A4: soul-arrives fires when the Soul arrives, and again only after it has left', () => {
