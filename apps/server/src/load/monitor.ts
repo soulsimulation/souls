@@ -139,9 +139,9 @@ export type MonitorOpts = {
   windowMs?: number;
   /** Drill only (SIM_LOAD_DRILL_LEVEL): hold this level whatever the signals say, to exercise dials and the restart path. */
   drill?: Level;
-  /** #1944 A3: where the tick windows are published (default the process's api-times buffer), the monotonic clock of tick
-   *  starts (default performance.now) and the window's length (tests shorten it). */
-  api?: Float64Array; mono?: () => number; tickWindowMs?: number;
+  /** #1944 A3: where the tick windows are published (default the process's api-times buffer) and the monotonic clock of
+   *  tick starts (default performance.now). */
+  api?: Float64Array; mono?: () => number;
 };
 
 export class LoadMonitor {
@@ -173,7 +173,7 @@ export class LoadMonitor {
   private o: MonitorOpts;
   /** #1944 A3: the open tick window: its start (wall), each tick's own ms, late ticks, the longest gap, ms at each level
    *  (by RANK) and when that was last counted; the previous tick's start and due time (mono) and whether it was late. */
-  private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false};
+  private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0};
   /** The last completed tick window (also in live.json and /healthz as `api.ticks`). */
   tickWindow: TickWindow | null = null;
   constructor(o: MonitorOpts) { this.o = o; this.a = o.shared ?? sharedLoad; this.now = o.now ?? Date.now; this.windowMs = o.windowMs ?? 5000; this.baseline = new QuietBaseline(o.baselineMs); this.state.baselineMs = this.baseline.value; }
@@ -293,6 +293,7 @@ export class LoadMonitor {
   tickDone() {
     const h = this.o.host, w = this.tw, own = h.tickMs.at(-1) ?? 0, start = (this.o.mono ? this.o.mono() : performance.now()) - own;
     const rate = (h.clockRate ?? h.baseRate) * h.pace, interval = rate > 0 ? TICK_MS / rate : 0;
+    if (interval !== w.interval) { w.interval = interval; w.prevStart = 0; }   // a new pace or rate: the next tick is due from now
     if (w.prevStart && interval) {
       const gap = start - w.prevStart, due = (w.prevLate && gap < interval / 2 ? w.prevDue : w.prevStart) + interval;
       w.prevLate = start - due > LATE_TICK_MS; if (w.prevLate) w.late++;
@@ -306,7 +307,7 @@ export class LoadMonitor {
     if (!owing) w.prevStart = 0;   // a paused or stopped clock owes no ticks: the next one is not late
     if (!w.from) { w.from = w.levelAt = now; return; }
     w.levels[RANK[this.level]] += Math.max(0, now - w.levelAt); w.levelAt = now;
-    if (now - w.from < (this.o.tickWindowMs ?? TICK_WINDOW_MS)) return;
+    if (now - w.from < TICK_WINDOW_MS) return;
     const ms = w.ms.sort((x, y) => x - y), q = (p: number) => ms.length ? ms[Math.min(ms.length - 1, Math.floor(p * ms.length))] : 0;
     const span = w.levels.reduce((x, y) => x + y, 0) || 1, share = (i: number) => w.levels[i] / span;
     this.tickWindow = {at: now, windowS: (now - w.from) / 1000, ticks: ms.length, tickMs: {p50: q(0.5), p99: q(0.99)}, lateTicks: w.late, longestGapMs: w.maxGap,

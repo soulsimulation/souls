@@ -24,7 +24,7 @@ const cliJson = async (folder, args) => { const r = await run('node', ['eden.mjs
 const readLive = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
 const pq = (q) => (q ? { p50: q.p50, p99: q.p99 } : null);
 /** #1944: the world's act parts (live.json `api.routes['edge:act']`), or null when it has none. */
-export function actPartsOfLive(live) {
+function actPartsOfLive(live) {
   const a = live?.api?.routes?.['edge:act'];
   if (!a?.parts) return null;
   return { n: a.n, queue: pq(a.queue), handler: pq(a.parts.handler), wait: pq(a.parts.wait), commit: pq(a.parts.commit), waitOver3Ticks: a.parts.waitOver3Ticks };
