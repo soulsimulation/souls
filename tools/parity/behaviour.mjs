@@ -90,7 +90,15 @@ export async function runBehaviour(input, options = {}) {
   const oldPlaces = Array.isArray(input.oldPlaces) ? input.oldPlaces : [];
   if (!oldPlaces.length) add('coverage', 'old-named-places', 'UNKNOWN', 'The complete old-world named-place input was not supplied.');
   const oldIds = new Set();
-  let probe = null;
+  // #1910: the world's word resolver is gone; an old ID or name is found in the world's public catalog, as a client finds it
+  let catalogPlaces = null, catalogError = null;
+  if (oldPlaces.length) {
+    try { catalogPlaces = (await request('/v1/edge/catalog')).places ?? []; } catch (error) { catalogError = error; }
+  }
+  const find = (by, value) => {
+    const v = String(value).trim().toLowerCase();
+    return catalogPlaces.filter((p) => String(by === 'id' ? p.id : p.name).trim().toLowerCase() === v || (p.aliases ?? []).some((a) => String(a).toLowerCase() === v));
+  };
   for (let i = 0; i < oldPlaces.length; i++) {
     const old = oldPlaces[i];
     if (!nonempty(old?.id) || !nonempty(old?.name) || oldIds.has(old.id)) {
@@ -104,20 +112,16 @@ export async function runBehaviour(input, options = {}) {
     const targetMap = runtimePlaces.filter((p) => expectedIds.has(p.id) || (ref ? p.name === ref : p.name === old.name));
     for (const p of targetMap) expectedIds.add(p.id);
     try {
-      // The /resolve limit is120/min per Soul. At most80 queries per probe; no sleeps or hidden truncation.
-      if (i % 40 === 0 || !probe) probe = await createResident(`place group ${Math.floor(i / 40) + 1}`);
+      if (catalogError) throw catalogError;
       const checks = [];
       for (const [by, value] of [['id', old.id], ['name', old.name]]) {
-        const data = await request('/v1/edge/resolve', { ...probe, body: { verb: 'go', target: { place: value } } });
-        const r = data.resolve;
-        const chosen = r?.would?.chosen?.place;
-        const cap = r?.would?.capability;
-        checks.push({ by, input: value, ok: r?.ok === true && r?.would?.available !== false && expectedIds.has(chosen),
-          resolved: chosen ?? null, capability: cap ?? null, code: r?.code ?? r?.would?.blocked?.code ?? null });
+        const hits = find(by, value), chosen = hits.length === 1 ? hits[0].id : null;
+        checks.push({ by, input: value, ok: chosen !== null && expectedIds.has(chosen),
+          resolved: chosen, capability: chosen ? `walk:${chosen}` : null, code: hits.length > 1 ? 'place.ambiguous' : hits.length ? null : 'place.unknown' });
       }
       const status = checks.every((c) => c.ok) && checks[0].resolved === checks[1].resolved ? 'PASS' : 'FAIL';
       add('place', old.id, status, status === 'PASS' ? 'Old ID and exact old name resolve to the same intended candidate place.' : 'An old ID/name is refused, unavailable, ambiguous, or resolves to a different place.',
-        { oldName: old.name, candidateRef: ref ?? null, checks, probe: probe.soulId });
+        { oldName: old.name, candidateRef: ref ?? null, checks, source: 'catalog' });
     } catch (error) { add('place', old.id, 'UNKNOWN', 'Runtime resolution could not be measured.', errorEvidence(error)); }
   }
 

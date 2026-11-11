@@ -8,7 +8,7 @@
 
 export const API_ROUTES = [
   'edge:act', 'edge:say', 'edge:converse', 'edge:objects/:id/act', 'edge:plan', 'edge:around',
-  'edge:here', 'edge:observe', 'edge:capabilities', 'edge:view', 'edge:objects', 'edge:resolve',
+  'edge:here', 'edge:observe', 'edge:capabilities', 'edge:view', 'edge:objects',
   'edge:listen', 'edge:wait', 'edge:inbox/:id', 'edge:inbox/:id/ack', 'edge:inbox/:id/result', 'edge:receipts/:id',
   'edge:catalog', 'edge:live', 'edge:public', 'edge:other', 'god:read', 'god:write', 'god:other', 'world:other',
 ] as const;

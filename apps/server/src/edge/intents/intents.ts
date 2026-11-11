@@ -378,7 +378,7 @@ export class Intents {
     return words.flatMap(w => w.split('-')).every(w => held.has(w)) ? {...out, would: {...would, resolved: `${asked} names ${would.capability}`}} : null;
   }
 
-  /** POST /v1/edge/resolve: what act would do, without doing anything. */
+  /** What act would do, without doing anything (the strict gate's check; its route is closed, #1910). */
   dryRun(soul: EdgeSoul, input: IntentInput & {capability?: unknown}): Record<string, unknown> {
     // #1152: how an owner asks ("could you ...?") is not what is asked
     if (typeof input.capability === 'string' && input.verb === undefined && !input.capability.includes(':')) input = {...input, capability: input.capability.replace(/^\s*(?:(?:that'?s\s+all|ok(?:ay)?|alright|now|then|next)[,\s]+)*(?:(?:could|can|would|will)\s+you\s+)?(?:please\s+)?(?:go\s+and\s+)?/i, '').replace(/[\s,]*(?:please)?[\s.?!]*$/i, '')};

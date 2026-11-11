@@ -41,7 +41,7 @@ export function pageCapabilities(caps: EdgeCapability[], whereOf: (c: EdgeCapabi
   if (!left.length) return {listed, omitted: null};
   const byVerb: Record<string, number> = {}; for (const c of left) byVerb[c.verb] = (byVerb[c.verb] ?? 0) + 1;
   return {listed, omitted: {count: left.length, byVerb: Object.fromEntries(Object.entries(byVerb).sort((a, b) => b[1] - a[1]).slice(0, 12)),
-    note: `${left.length} more offers farther off are not listed: act on one by id or in plain words (POST /v1/edge/resolve or /v1/edge/act), or GET /v1/edge/capabilities?all=1 for the whole list.`}};
+    note: `${left.length} more offers farther off are not listed: act on one by id or in plain words (POST /v1/edge/act), or GET /v1/edge/capabilities?all=1 for the whole list.`}};
 }
 
 /** A Soul's view of nearby objects: those here or within reach (not over), then per kind the nearest few (over ones last),

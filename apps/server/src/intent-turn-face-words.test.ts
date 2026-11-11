@@ -26,7 +26,7 @@ test('attentionWords: a second attention verb names no target; id forms parse; o
 test('F1: "turn to face the bandstand" turns toward the bandstand, also out of sight; refusals name the parsed target', {timeout: 600000}, async t => {
   const w = await coreAWorld(2); t.after(() => w.close());
   const [a, b] = w.souls;
-  const dry = async (q: string) => (await w.http(a, 'POST', '/v1/edge/resolve', {capability: q})).body.resolve;
+  const dry = async (q: string) => w.ledger.intents.dryRun(a, {capability: q}) as any;
   const act = async (s: typeof a, q: string) => (await w.http(s, 'POST', '/v1/edge/act', {capability: q})).body;
   const bearing = (id: string) => {const P = new Perception(w.ledger, a), at = P.locate(id)!.at; return {heading: headingOfYaw(yawTowards(w.pos(a), at)), sees: P.sees(at)};};
   for (const q of ['turn to face the bandstand', 'turn and face the bandstand', 'turn around and face the bandstand', 'turn to look at the bandstand', 'turn:eden-bandstand', 'turn-to:bandstand']) {

@@ -78,12 +78,12 @@ import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
  *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
 const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
 
-/** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; resolve; and
+/** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
  *  on the tick thread. World-relative paths, as admission classifies them. */
 export function servingRead(method: string, path: string, view?: string): boolean {
   if (method === 'GET') return (path === '/v1/edge/here' && view !== 'body') || path === '/v1/edge/observe' || path === '/v1/edge/capabilities' || path === '/v1/edge/around';
-  return method === 'POST' && (path === '/v1/edge/resolve' || path === '/v1/edge/act' || path === '/v1/edge/converse');
+  return method === 'POST' && (path === '/v1/edge/act' || path === '/v1/edge/converse');
 }
 /** Continuity (warm after listen): a listing read waits for a running serving warm (EdgeLedger.whenServing, which has a
  *  ceiling) before it goes on. Mounted BEFORE admission, so the wait is never a request in flight (no soul.busy for it)

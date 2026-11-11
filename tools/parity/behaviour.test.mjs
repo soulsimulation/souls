@@ -17,7 +17,7 @@ function transport({ wrongName = false, absentEffect = false, refusal = false, n
     if (path === '/v1/agent/pair') { actors.set(`secret-token-${serial}`, { serial, acted: false }); return { token: `secret-token-${serial}` }; }
     const actor = actors.get(options.token);
     if (path === '/v1/edge/capabilities') return { capabilities: caps };
-    if (path === '/v1/edge/resolve') return { resolve: { ok: true, would: { capability: 'walk:court', chosen: { place: wrongName && options.body.target.place === 'Old court' ? 'g-other' : 'g-court' } } } };
+    if (path === '/v1/edge/catalog') return { places: [{ id: 'g-court', name: wrongName ? 'Court' : 'Old court', aliases: ['old-court'] }, ...(wrongName ? [{ id: 'g-other', name: 'Old court' }] : [])] };
     if (path === '/v1/edge/act') {
       if (refusal) return { accepted: false, code: 'route.blocked' };
       actor.acted = true; actor.capability = options.body.capability;
@@ -52,14 +52,13 @@ test('unmeasured data cannot vacuously qualify migration', async () => {
   assert.equal(summarizeCases([]).status, 'UNKNOWN');
 });
 
-test('checks every old ID and name with a scripted resident; missing history stays UNKNOWN', async () => {
+test('checks every old ID and name in the catalog; missing history stays UNKNOWN', async () => {
   const { request, calls } = transport();
   const report = await runBehaviour(input(), { request });
-  assert.equal(report.cases.find((c) => c.kind === 'place').status, 'PASS');
+  const place = report.cases.find((c) => c.kind === 'place');
+  assert.equal(place.status, 'PASS');
   assert.equal(report.status, 'UNKNOWN');
-  const queries = calls.filter((c) => c.path === '/v1/edge/resolve');
-  assert.deepEqual(queries.map((c) => c.options.body.target.place), ['old-court', 'Old court']);
-  assert.ok(queries.every((c) => c.options.token));
+  assert.deepEqual(place.evidence.checks.map((c) => [c.input, c.resolved]), [['old-court', 'g-court'], ['Old court', 'g-court']]);
   assert.doesNotMatch(JSON.stringify(report), /secret-token|private-invite|private-pair/);
 });
 
@@ -70,14 +69,12 @@ test('a name that resolves to a different place is FAIL, even when both resolve 
   assert.equal(report.status, 'FAIL'); assert.equal(report.migrationEligible, false);
 });
 
-test('uses fresh probe groups so every place is checked without overflowing per-Soul resolve limit', async () => {
+test('every place is checked from one catalog read, with no Soul made for it', async () => {
   const { request, calls } = transport();
   const report = await runBehaviour({ ...input(), oldPlaces: Array.from({ length: 83 }, (_, i) => ({ id: `old-${i}`, name: `Old ${i}` })),
     candidatePlaces: Array.from({ length: 83 }, (_, i) => ({ id: `old-${i}`, entity: 'court' })) }, { request });
   assert.equal(report.cases.filter((c) => c.kind === 'place').length, 83);
-  const groups = new Map();
-  for (const c of calls.filter((c) => c.path === '/v1/edge/resolve')) groups.set(c.options.token, 1 + (groups.get(c.options.token) ?? 0));
-  assert.deepEqual([...groups.values()], [80, 80, 6]);
+  assert.deepEqual(calls.filter((c) => c.path === '/v1/edge/catalog' || c.path === '/v1/souls').map((c) => c.path), ['/v1/edge/catalog']);
 });
 
 test('fixture success measures sit/enter/use mechanisms but does not replace missing resident history', async () => {

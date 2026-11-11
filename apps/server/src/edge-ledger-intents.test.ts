@@ -12,7 +12,7 @@ test('intents: nearest free seat near a Soul, front row, go, swim, approach, tur
   const w = await coreAWorld(4); t.after(() => w.close());
   const [a, b, c, d] = w.souls;
   const act = async (s: typeof a, body: object) => (await w.http(s, 'POST', '/v1/edge/act', body)).body;
-  const dry = async (s: typeof a, body: object) => (await w.http(s, 'POST', '/v1/edge/resolve', body)).body.resolve;
+  const dry = async (s: typeof a, body: object) => w.ledger.intents.dryRun(s, body as never) as any;
   const finish = async (s: typeof a, out: any, n = 8000) => {assert.equal(out.accepted, true, JSON.stringify(out)); await w.ticks(n, () => !w.open(s, out.receipt.id)); return w.receipt(s, out.receipt.id);};
   const seatOf = (s: typeof a) => new Perception(w.ledger, s).seat();
   // here.me.seat is the native seat slot (`<entity>#<slot>`, matching a receipt's chosen.slot); compare the entity part to menu targets.

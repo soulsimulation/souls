@@ -19,8 +19,8 @@ test('strict: invented ids refuse with a reason and change nothing; real ids and
     assert.equal(out.code, 'capability.unknown', id);
     assert.match(out.reason, /not an id in this world/, id);
     assert.ok(Array.isArray(out.did_you_mean), id);
-    // the same over HTTP and as a dry run
-    const dry = (await w.http(a, 'POST', '/v1/edge/resolve', {capability: id})).body.resolve;
+    // the same as a dry run
+    const dry = w.ledger.intents.dryRun(a, {capability: id}) as any;
     assert.equal(dry.ok, false, id); assert.equal(dry.code, 'capability.unknown', id);
   }
   assert.equal(count(), before, 'no receipt was written for any invented id');

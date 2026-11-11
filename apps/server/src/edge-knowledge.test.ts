@@ -43,7 +43,7 @@ test('knowledge at scales: district summary, far names, memory of visits, look a
   // #1281: a line ends with the walk on offer; a place no walk reaches (Eden east is scenery) keeps its line without one
   assert.ok(h1.far.every((x: string) => {const [, , go, more] = x.split(' · '); return more === undefined && (go === undefined || go.startsWith('walk:'));}), `nothing visited yet: ${JSON.stringify(h1.far)}`);
   const go = h1.far.map((x: string) => x.split(' · ')[2]).filter(Boolean); assert.ok(go.length > 0, JSON.stringify(h1.far));
-  for (const id of go) assert.equal((await w.http(a, 'POST', '/v1/edge/resolve', {capability: id})).body.resolve.ok, true, id);
+  for (const id of go) assert.equal(w.ledger.intents.dryRun(a, {capability: id}).ok, true, id);
   const added = raw1.length - before.length;
   t.diagnostic(`here frame ${before.length} chars (~${Math.ceil(before.length / 4)} tokens) before, ${raw1.length} (~${Math.ceil(raw1.length / 4)} tokens) with scales: +${added} chars (~${Math.ceil(added / 4)} tokens)`);
   assert.ok(added <= 420, `scales cost ${added} chars`);
