@@ -42,7 +42,7 @@ test('Eden: a spot id\'s offer from its own sections equals the focused build of
     }
     t.diagnostic(`${where}: ${ids.length} spot ids, ${offered} offered, ${reduced} from their own sections`);
     assert.deepEqual(bad.slice(0, 8), [], `${where}: ${bad.length} of ${ids.length} spot offers differ`);
-    assert.ok(reduced > 0 && offered > 0, `${where}: the spot sections ran`);
+    assert.ok(offered > 100 && reduced === offered, `${where}: every offered spot came from its own sections (${reduced} of ${offered})`);
     return {offered, reduced};
   };
   const at0 = check('arrival');

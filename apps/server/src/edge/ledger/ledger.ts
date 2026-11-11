@@ -1630,7 +1630,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const caps: EdgeCapability[] = [], plans: Plans = new Map();
       this.activitySection(soul, me0, focus!, caps, plans, true);
       if ([...focus!.ids].every(id => caps.some(c => c.id === id))) {
-        this.profileSection(soul, focus, caps, plans);
+        this.profileSection(soul, focus, caps, plans, true);
         this.rideBlocks(soul, caps);
         if (PLAN_ONCE_ORACLE) {const full = this.bindsCoreIn(soul, focus, true), pick = (b: {caps: EdgeCapability[]; plans: Plans}) => JSON.stringify([...focus!.ids].map(id => [b.caps.find(c => c.id === id) ?? null, b.plans.get(id) ?? null])), a = pick({caps, plans}), b = pick(full); if (a !== b) {menuStats.one.oracleMiss++; console.error('[spot-bind-oracle]', soul.soulId, [...focus!.ids].join(','), a.slice(0, 300), '| full', b.slice(0, 300));}}
         return {caps, plans};
@@ -1784,10 +1784,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const courts = new Set(pick.filter(s => s.activity in GAME_ACTIVITIES).map(s => s.activity + '|' + (s.place ?? '')));
     return {...spots, spots: spots.spots.filter(s => keep.has(s.id) || courts.has(s.activity + '|' + (s.place ?? '')))};
   }
-  /** The world profile (worlds/*, the god bridge), told the focus of the build. */
-  private profileSection(soul: EdgeSoul, focus: MenuFocus | undefined, caps: EdgeCapability[], plans: Plans) {
-    if (this.worldProfile) try {this.menuFocus = focus ?? null; this.worldProfile(soul, caps, plans);} catch (e) {console.error('[edge] world profile', e instanceof Error ? e.message : e);} finally {this.menuFocus = null;}
+  /** The world profile (worlds/*, the god bridge), told the focus of the build (and whether it is #1848's spot build). */
+  private profileSection(soul: EdgeSoul, focus: MenuFocus | undefined, caps: EdgeCapability[], plans: Plans, spotOnly = false) {
+    if (this.worldProfile) try {this.menuFocus = focus ?? null; this.menuSpotOnly = spotOnly; this.worldProfile(soul, caps, plans);} catch (e) {console.error('[edge] world profile', e instanceof Error ? e.message : e);} finally {this.menuFocus = null; this.menuSpotOnly = false;}
   }
+  private menuSpotOnly = false;
+  /** #1848: the build in progress is a spot by its id, from its own sections (the bridge then skips its walk ranking). */
+  menuSpotOnlyV1(): boolean {return this.menuSpotOnly;}
   private addNativeBinding(b:HumanBindingV1,caps:EdgeCapability[],plans:Plans,secondsParam:EdgeCapability['params']={seconds:{type:'integer',min:1,max:600,default:60}}){
     const {id, verb} = edgeIdOf(b); const seconds = b.goal === 'sit' || b.goal === 'rest' || b.goal === 'hang_out';
     const target = b.targetId ? {id: b.targetId, kind: this.places.byId.has(b.targetId) ? 'place' : this.mw.world.entities[b.targetId] ? 'object' : 'place'} : undefined;
