@@ -11,6 +11,10 @@
 # #1970 adds eval-load (the eval's load mode), bench-client (the capacity bench's client load), meetup (the meetup
 # workload) and slopes-profile (the slopes walkers axis with its tick profile): fake minds, scripted Souls. For these the
 # world runs on two of the runner's four physical cores and the load generator on the other two; the artifact records it.
+# #2147: `runner` picks the runner set. eval-scripted scores pass/fail per item, so it goes to `souls-heavy` by default
+# and its starting load is recorded, not gated; every timing command stays on `souls-timed`, gated (the route job refuses
+# anything else). `arm=base` measures the main commit the ref is based on and reuses a cached result for that commit,
+# battery and seat; the artifact's timed-run.json says `base.cache` hit or miss.
 name: timed-run
 on:
   workflow_dispatch:
@@ -24,6 +28,16 @@ on:
         type: choice
         options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile]
         default: walk
+      runner:
+        description: auto (eval-scripted on souls-heavy, every timing command on souls-timed), souls-heavy or souls-timed
+        type: choice
+        options: [auto, souls-heavy, souls-timed]
+        default: auto
+      arm:
+        description: 'eval-scripted only: ref (the ref itself) or base (the main commit the ref is based on, cached)'
+        type: choice
+        options: [ref, base]
+        default: ref
       repeats:
         description: Repeats, 1 to 3
         default: '1'
@@ -32,16 +46,32 @@ on:
         default: ''
 permissions:
   contents: read
+env:
+  INPUT_REF: ${{ inputs.ref }}
+  INPUT_COMMAND: ${{ inputs.command }}
+  INPUT_RUNNER: ${{ inputs.runner }}
+  INPUT_ARM: ${{ inputs.arm }}
+  INPUT_REPEATS: ${{ inputs.repeats }}
+  INPUT_ARGS: ${{ inputs.args }}
 jobs:
-  timed:
+  # The inputs are checked and the runner set chosen before any self-hosted runner is taken.
+  route:
     if: github.repository == 'soulsimulation/souls'
-    runs-on: [self-hosted, souls-timed]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      labels: ${{ steps.route.outputs.labels }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { sparse-checkout: .github/scripts, persist-credentials: false }
+      - name: Route
+        id: route
+        run: node .github/scripts/timed-run.mjs route
+  timed:
+    needs: route
+    runs-on: ${{ fromJSON(needs.route.outputs.labels) }}
     timeout-minutes: 120
     env:
-      INPUT_REF: ${{ inputs.ref }}
-      INPUT_COMMAND: ${{ inputs.command }}
-      INPUT_REPEATS: ${{ inputs.repeats }}
-      INPUT_ARGS: ${{ inputs.args }}
       CTL: ../ctl/.github/scripts/timed-run.mjs
       # The runners share one account home, so A2's check diffs a snapshot of the home and /tmp. Not counted as the job's:
       # - any runner install (a dir holding `.runner`) and the tool cache: the runner service's own _work, _temp, _tool and
@@ -77,6 +107,7 @@ jobs:
             echo "npm_config_logs_dir=$d/npm-logs"
             echo "SIM_ASSETS_CACHE=$d/sim-assets"
           } >> "$GITHUB_ENV"
+          rm -rf base-cache
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { path: ctl, sparse-checkout: .github/scripts, persist-credentials: false }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -89,24 +120,33 @@ jobs:
         working-directory: ctl
         run: node .github/scripts/timed-run.mjs inputs
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: src, ref: '${{ steps.vet.outputs.target }}', persist-credentials: false }
+        with: { path: src, ref: '${{ steps.vet.outputs.target }}', persist-credentials: false, fetch-depth: "${{ inputs.arm == 'base' && '0' || '1' }}" }
+      # arm=base: the checkout moves to the ref's merge base with main, and the cache key names that commit.
       - name: Record the commit
+        id: commit
         working-directory: src
-        run: echo "REF_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+        run: node "$CTL" commit
+      - name: Restore a cached base arm
+        id: cache
+        if: inputs.arm == 'base'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with: { path: base-cache, key: '${{ steps.commit.outputs.key }}' }
       # pnpm's version comes from the ref's package.json `packageManager`; pnpm itself goes in the per-run dir.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with: { package_json_file: src/package.json, dest: '${{ env.PER_RUN }}/setup-pnpm' }
       - name: Install
+        if: steps.cache.outputs.cache-hit != 'true'
         working-directory: src
         run: pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir"
       - name: Pull media
+        if: steps.cache.outputs.cache-hit != 'true'
         working-directory: src
         timeout-minutes: 15
         run: |
           if [ "$INPUT_COMMAND" = walk ]; then sets=runtime,test; else sets=web,runtime; fi
           timeout 840 pnpm assets:pull --quiet --set "$sets"
       - name: Build the web bundle
-        if: env.INPUT_COMMAND != 'walk'
+        if: env.INPUT_COMMAND != 'walk' && steps.cache.outputs.cache-hit != 'true'
         working-directory: src
         run: pnpm --filter @souls/web build
       # the capacity benches' worlds refuse genesis without the viewer bundle
@@ -118,9 +158,13 @@ jobs:
         working-directory: src
         run: node "$CTL" load --record "$RECORD"
       - name: Run
+        id: run
         working-directory: src
-        run: node "$CTL" run --record "$RECORD" --out "$OUT"
+        env:
+          BASE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: node "$CTL" run --record "$RECORD" --out "$OUT" --cached ../base-cache
       - name: Stage the artifact
+        id: stage
         if: always()
         working-directory: src
         run: if [ -f "$RECORD" ]; then node "$CTL" stage --record "$RECORD" --out "$OUT" --dest "$ARTIFACT"; fi
@@ -132,16 +176,27 @@ jobs:
           path: ${{ env.ARTIFACT }}/
           if-no-files-found: warn
           retention-days: 30
+      # A2: a base arm measured here is cached from its staged (scrubbed) files, for the next candidate on the same commit.
+      - name: Keep the base arm
+        if: inputs.arm == 'base' && steps.cache.outputs.cache-hit != 'true' && steps.run.outcome == 'success' && steps.stage.outcome == 'success'
+        run: mkdir base-cache && cp -R "$ARTIFACT"/. base-cache/
+      - name: Cache the base arm
+        if: inputs.arm == 'base' && steps.cache.outputs.cache-hit != 'true' && steps.run.outcome == 'success' && steps.stage.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with: { path: base-cache, key: '${{ steps.commit.outputs.key }}' }
       # Soul tokens, world data, the ref's checkout and the per-run tool directories never outlive the job.
       - name: Clean up
         if: always()
         run: |
           if [ -n "${PER_RUN:-}" ]; then pkill -TERM -f "$PER_RUN/" || true; sleep 5; rm -rf "$PER_RUN"; fi
-          rm -rf src
+          rm -rf src base-cache
+      # On souls-heavy, CI jobs of the same account write beside the run, so the check there is advisory (warnings).
       - name: Nothing written outside the per-run directory
         if: always()
         working-directory: ctl
+        env:
+          ADVISORY: ${{ contains(needs.route.outputs.labels, 'souls-heavy') && '--advisory' || '' }}
         run: |
           if [ -z "${SNAPSHOT:-}" ] || [ ! -f "$SNAPSHOT" ]; then echo "::error::no start snapshot"; exit 1; fi
           trap 'rm -f "$SNAPSHOT"' EXIT
-          node .github/scripts/timed-run.mjs strays --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE"
+          node .github/scripts/timed-run.mjs strays --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE" $ADVISORY

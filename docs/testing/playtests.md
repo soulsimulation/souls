@@ -221,12 +221,18 @@ screenshots or transcripts. Machines without the original run folders can then r
 ## Timed runs
 
 Timed runs without a model (the walk gate, the scripted Soul eval, the eval's load mode, the capacity bench's client
-load, the meetup workload, the slopes tick profile) go to the `souls-timed` self-hosted runners through the manual
+load, the meetup workload, the slopes tick profile) go to self-hosted runners through the manual
 `timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk`, `eval-scripted`, `eval-load`,
 `bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
 own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
 put the world on two of the runner's four physical cores and the load generator on the other two, recorded in
-`timed-run.json`. The runners use a dedicated, unprivileged account: the
+`timed-run.json`. Which runners (`runner`, default `auto`): `eval-scripted` scores pass/fail per item, so it runs on
+`souls-heavy` and records its starting load without waiting for it (there, CI jobs share the account, so the check for
+files written outside the run only warns); every timing run (`walk`, `eval-load`, the
+benches and profiles) stays on `souls-timed` with the load gate, and any other choice for it is refused. `arm=base`
+(eval only) measures the main commit the `ref` is based on; its result is cached per main commit, battery version,
+seat, repeats and args, so a later candidate on the same commit reuses it, and `timed-run.json` says `base.cache` hit
+(with the run it came from) or miss. The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
 

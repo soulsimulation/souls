@@ -4,9 +4,13 @@
 // bench's client load, the meetup workload and the slopes walkers profile; for these four the world under test runs on
 // two of the runner's four physical cores and the load generator on the other two. It runs from the workflow's own commit, never
 // from the ref under measurement. The argument allowlist is not a security boundary (the ref's own scripts run); safety
-// rests on the runner's dedicated, unprivileged account.
+// rests on the runner's dedicated, unprivileged account. #2147: the scripted eval scores pass/fail per item, so it runs on
+// `souls-heavy` by default without the load gate; every timing command stays on `souls-timed`, gated. `arm=base` measures
+// the main commit the ref is based on, and a result for that commit, battery and seat is reused from the Actions cache.
 //
+//   node timed-run.mjs route                                         validate INPUT_* env; write the runner labels (`labels`)
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
+//   node timed-run.mjs commit                                        (cwd: the ref) the commit to measure; arm=base: its cache key
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
 //   node timed-run.mjs run    --record <file> --out <dir>            the command, `repeats` times (cwd: the ref)
 //   node timed-run.mjs stage  --record <file> --out <dir> --dest <dir>   allowlisted, scrubbed copy; refused on a Soul token
@@ -18,6 +22,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname, loadavg, userInfo } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
@@ -27,6 +32,27 @@ export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', '
 export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile'];
 export const LOAD_GATE = 0.25;      // mean busy fraction of the runner's own cores above which a run does not start
 export const SETTLE_WAIT_S = 300;
+/** #2147: the commands scored pass/fail per item. They need no quiet host: they run on `souls-heavy` by default and the load
+ *  gate records their starting load without holding them. Every other command is a timing run, on `souls-timed` only. */
+export const PASS_FAIL = ['eval-scripted'];
+export const RUNNERS = { 'souls-timed': ['self-hosted', 'souls-timed'], 'souls-heavy': ['self-hosted', 'souls-heavy'] };
+/** command and the `runner` input (auto, souls-heavy or souls-timed) → the runner set's name. */
+export function runnerFor(command, runner = 'auto') {
+  if (runner === 'auto') return PASS_FAIL.includes(command) ? 'souls-heavy' : 'souls-timed';
+  if (!Object.hasOwn(RUNNERS, runner)) throw new Error(`input runner=${JSON.stringify(runner)}: auto, ${Object.keys(RUNNERS).join(' or ')}`);
+  if (runner !== 'souls-timed' && !PASS_FAIL.includes(command)) throw new Error(`input runner=${runner}: ${command} is a timing run and runs on souls-timed only`);
+  return runner;
+}
+/** The battery and seat the scripted eval runs by default (soul-eval.mjs), read at the measured commit for the cache key. */
+export const EVAL_BATTERY = 'tools/playtest/eval/battery/m4-v1.json', EVAL_SEAT = 'tools/playtest/eval/seats/scripted-m4-v1.json';
+/** #2147 A2: the cache key of a base arm: the main commit, the battery's name and version (its bytes), the seat's bytes, and
+ *  the repeats and args, so a subset or a shorter run never stands in for the whole battery. */
+export function baseKey({ commit, battery, seat, repeats, args }) {
+  if (!/^[0-9a-f]{40}$/.test(String(commit))) throw new Error('base key: the commit must be a full SHA');
+  const name = JSON.parse(battery).battery, h = (x) => createHash('sha256').update(x).digest('hex').slice(0, 12);
+  if (typeof name !== 'string' || !/^[\w-]{1,40}$/.test(name)) throw new Error('base key: the battery has no name');
+  return `timed-run-eval-base-${commit}-${name}-b${h(battery)}-s${h(seat)}-r${repeats}-a${h(JSON.stringify(args))}`;
+}
 export const SAMPLE_S = 5;
 const WALK_WORLDS = ['eden-2026', 'bench-eden', 'eden-2026-genesis', 'bench-hamlet', 'fuzz'];
 const list = (re, max) => (v) => { const xs = v.split(','); return xs.length <= max && xs.every((x) => re.test(x)) && new Set(xs).size === xs.length; };
@@ -67,7 +93,11 @@ export function parseInputs(env) {
   if (!COMMANDS.includes(command)) bad('command', command, COMMANDS.join(' or '));
   const repeats = String(env.INPUT_REPEATS ?? '1');
   if (!/^[1-3]$/.test(repeats)) bad('repeats', repeats, '1, 2 or 3');
-  return { ref, command, repeats: Number(repeats), args: checkArgs(command, env.INPUT_ARGS) };
+  let runner; try { runner = runnerFor(command, String(env.INPUT_RUNNER || 'auto')); } catch (e) { bad('runner', env.INPUT_RUNNER, e.message.replace(/^input runner=\S+: /, '')); }
+  const arm = String(env.INPUT_ARM || 'ref');
+  if (arm !== 'ref' && arm !== 'base') bad('arm', arm, 'ref or base');
+  if (arm === 'base' && command !== 'eval-scripted') bad('arm', arm, 'a cached base arm is for eval-scripted only');
+  return { ref, command, repeats: Number(repeats), args: checkArgs(command, env.INPUT_ARGS), runner, arm };
 }
 
 /** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
@@ -231,30 +261,55 @@ async function main(cmd) {
     const now = snapshot([env.HOME, '/tmp'], { allow: [env.RUNNER_TOOL_CACHE, runnerRoot], exclude: (arg('exclude') ?? '').split(','), uid: process.getuid?.() ?? null });
     if (cmd === 'snapshot') { writeFileSync(file, JSON.stringify(now)); console.log(`snapshot: ${now.length} entries`); return; }
     const found = newEntries(JSON.parse(readFileSync(file, 'utf8')), now), sw = scrubWith();
-    for (const f of found.slice(0, 50)) console.log(`::error::written outside the per-run directory: ${scrub(f, sw)}`);
+    // #2147: on `souls-heavy` CI jobs of the same account write to the home and /tmp beside the run, so new entries there
+    // cannot be told apart from the run's: they are listed as warnings, not failed on.
+    const advisory = process.argv.includes('--advisory');
+    for (const f of found.slice(0, 50)) console.log(`::${advisory ? 'warning' : 'error'}::written outside the per-run directory${advisory ? ' (or by a concurrent job on this account)' : ''}: ${scrub(f, sw)}`);
+    if (found.length && advisory) { console.log(`${found.length} new entries; advisory on a shared runner set`); return; }
     if (found.length) throw new Error(`${found.length} entries written outside the per-run directory`);
     console.log('no entries written outside the per-run directory'); return;
   }
   const inp = parseInputs(process.env), rf = arg('record');
+  if (cmd === 'route') { output('labels', JSON.stringify(RUNNERS[inp.runner])); console.log(`${inp.command} runs on ${inp.runner}`); return; }
+  if (cmd === 'commit') {   // cwd: the ref's checkout (full history when arm=base)
+    const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim(), env = (k, v) => { if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `${k}=${v}\n`); };
+    if (inp.arm === 'base') {
+      const base = git('merge-base', 'HEAD', 'refs/remotes/origin/main');
+      git('checkout', '--quiet', '--detach', base);
+      const key = baseKey({ commit: base, battery: readFileSync(EVAL_BATTERY, 'utf8'), seat: readFileSync(EVAL_SEAT, 'utf8'), repeats: inp.repeats, args: inp.args });
+      env('BASE_KEY', key); output('key', key);
+      console.log(`base arm: ${inp.ref} is based on main at ${base}; cache key ${key}`);
+    }
+    env('REF_COMMIT', git('rev-parse', 'HEAD')); return;
+  }
   if (cmd === 'inputs') { output('target', checkoutRef(inp.ref)); console.log(`inputs ok: ${inp.ref}, ${inp.command} x${inp.repeats}${inp.args.length ? ` ${inp.args.join(' ')}` : ''}`); return; }
   if (cmd === 'load') {   // A3: own cores and whole machine; wait a bounded time for own cores to settle, else refuse
-    const own = ownCpus(), stat = () => parseProcStat(readFileSync('/proc/stat', 'utf8'));
+    const own = ownCpus(), stat = () => parseProcStat(readFileSync('/proc/stat', 'utf8')), gated = !PASS_FAIL.includes(inp.command);
     let f;
     for (let t = 0; ; t += 15) {
       const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own);
-      if (!f.overGate || t >= SETTLE_WAIT_S) break;
+      if (!gated || !f.overGate || t >= SETTLE_WAIT_S) break;
       console.log(`own cores busy ${f.ownBusy} above the gate ${LOAD_GATE}; waiting`); await sleep(15_000);
     }
-    const startLoad = { ...f, sampleS: SAMPLE_S, machineLoad1PerCore: +(loadavg()[0] / f.machineCores).toFixed(3) };
-    writeFileSync(rf, JSON.stringify({ schema: 'timed-run/1', workflowRun: process.env.GITHUB_RUN_ID, ref: inp.ref, commit: process.env.REF_COMMIT ?? null, inputs: inp, startLoad }, null, 1));
+    const startLoad = { ...f, gated, sampleS: SAMPLE_S, machineLoad1PerCore: +(loadavg()[0] / f.machineCores).toFixed(3) };
+    const base = inp.arm === 'base' ? { base: { of: inp.ref, commit: process.env.REF_COMMIT ?? null, key: process.env.BASE_KEY ?? null } } : {};
+    writeFileSync(rf, JSON.stringify({ schema: 'timed-run/1', workflowRun: process.env.GITHUB_RUN_ID, ref: inp.ref, commit: process.env.REF_COMMIT ?? null, inputs: inp, ...base, startLoad }, null, 1));
     console.log(`start load: own ${f.ownCores} cores busy ${f.ownBusy} (max ${f.ownBusyMax}), machine ${f.machineCores} cores busy ${f.machineBusy}, 1-min load per core ${startLoad.machineLoad1PerCore}`);
-    if (f.overGate) throw new Error(`the runner's own cores stayed above the gate (${f.ownBusy} > ${LOAD_GATE}) for ${SETTLE_WAIT_S} s; the run does not start`);
+    if (gated && f.overGate) throw new Error(`the runner's own cores stayed above the gate (${f.ownBusy} > ${LOAD_GATE}) for ${SETTLE_WAIT_S} s; the run does not start`);
     return;
   }
   if (cmd === 'run') {   // fake minds, no GitHub token
     const rec = readJ(rf), out = resolve(arg('out')), env = { ...process.env, BRAIN_MODE: 'fake' }; delete env.GH_TOKEN; delete env.GITHUB_TOKEN;
-    if (!rec.startLoad || rec.startLoad.overGate) throw new Error('no passing start-load record; the run does not start');
+    if (!rec.startLoad || (rec.startLoad.overGate && rec.startLoad.gated !== false)) throw new Error('no passing start-load record; the run does not start');
     mkdirSync(out, { recursive: true });
+    if (inp.arm === 'base' && process.env.BASE_HIT === 'true') {   // A2: the cached base arm's files, and where they came from
+      const from = arg('cached'), was = readJ(join(from, 'timed-run.json'));
+      if (!was.base || was.base.key !== rec.base?.key || !existsSync(join(from, 'eval/result.json'))) throw new Error('the cached base arm does not match its key; the run does not start');
+      for (const f of allowlist(from, inp.command).filter((f) => f !== 'timed-run.json')) { mkdirSync(join(out, f, '..'), { recursive: true }); writeFileSync(join(out, f), readFileSync(join(from, f))); }
+      writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, base: { ...rec.base, cache: 'hit', from: { workflowRun: was.workflowRun, startLoad: was.startLoad, runs: was.runs } }, runs: [] }, null, 1));
+      console.log(`base arm reused from run ${was.workflowRun} (cache hit)`); return;
+    }
+    if (rec.base) rec.base.cache = 'miss';
     // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the other
     // two. HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
     const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf) : null;
@@ -286,6 +341,6 @@ async function main(cmd) {
     const copied = stage({ out, dest: arg('dest'), command: inp.command, scrubWith: scrubWith() });
     console.log(`staged ${copied.length} file(s): ${copied.join(', ')}`); return;
   }
-  throw new Error(`unknown command ${cmd}: inputs | load | run | stage | snapshot | strays`);
+  throw new Error(`unknown command ${cmd}: route | inputs | commit | load | run | stage | snapshot | strays`);
 }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main(process.argv[2]).catch((e) => { console.log(`::error::${e.code ? `${e.syscall ?? 'file'} failed: ${e.code} (path withheld)` : e.message}`); process.exit(1); });
