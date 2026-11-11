@@ -180,7 +180,8 @@ async function walkRun(arm, rep) {
     for (let i = 0, started = []; i < arm.walkers; i += 4) {
       while (started.filter((t) => mono() - t < 60_000).length + 4 > 16) await sleep(1000);
       const k4 = Math.min(4, arm.walkers - i); started.push(...Array(k4).fill(mono()));
-      souls.push(...await Promise.all(Array.from({ length: k4 }, (_, k) => joinSoul(run, W, i + k))));
+      // a join that runs out of time while the world is busy (the join proxy answers 502 when the world drops a request) is tried twice more
+      souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
     }
     await jp.close(); jp = null;
     const caps = souls.length ? (await getJ(`${W.origin}/v1/edge/capabilities?all=1`, 60_000, { authorization: `Bearer ${souls[0].token}` })).j?.capabilities ?? [] : [];
