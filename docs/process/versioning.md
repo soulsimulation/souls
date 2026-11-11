@@ -37,7 +37,9 @@ node tools/world-launcher/soul/stamp.mjs <version>
 
 It sets `VERSION` in `eden.mjs`, the skill's two version lines, the `controllerCli` and `skill` versions in `SOURCES.json`
 and the hash of every file `SOURCES.json` lists. It takes digits and dots only, and refuses a version not above the current
-one when the client's bytes changed. `stamp.mjs --check` changes nothing and exits non-zero when anything disagrees. A
+one when the client's bytes changed. The other files `SOURCES.json` lists (`eden-agent.mjs`, `instructions.md`,
+`schema-notes.md`, the runtime) keep their own versions and are frozen: an edit to one fails the launcher tests in PR CI,
+and `stamp.mjs` refuses to re-hash it, until the same pull request moves that file's version and sha256. `stamp.mjs --check` changes nothing and exits non-zero when anything disagrees. A
 release head's full gate runs it on the candidate and blocks on a disagreement; a lane's `--scope auto` gate does not, so
 between releases `main` may hold client changes that are not stamped yet.
 
