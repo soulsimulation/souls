@@ -7,7 +7,8 @@
 #              The web build renders the public changelog page from CHANGELOG.md with this release's section already
 #              compiled in (a copy outside the tree, SIM_CHANGELOG_FILE; #393), so the page shows the release it ships
 #   publish    (real ships only) compiles changes/ into CHANGELOG.md (same section, same date), tags v<version> on the
-#              shipped commit, creates the GitHub Release
+#              shipped commit, creates the GitHub Release, and opens the changelog commit as a pull request (branch
+#              release/changelog-<version>, as publish.yml); the main ruleset refuses direct pushes (#2028)
 #
 # Receipt (real ships only): the head's publishable release-receipt.json, as the one asset of a prerelease (default tag
 # receipts-v<version>). The release owner derives it from the raw gate and V7 receipts, which carry device paths and
@@ -355,7 +356,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write        # the tag and the branch release/changelog-<version>
+      pull-requests: write   # the changelog pull request (#2028)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: main, fetch-depth: 0 }
@@ -364,6 +366,7 @@ jobs:
       - name: Changelog, tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}   # as publish.yml: CI runs on the changelog pull request
           VERSION: ${{ inputs.version }}
           DATE: ${{ needs.preflight.outputs.date }}
           SHA: ${{ needs.preflight.outputs.sha }}
@@ -376,17 +379,18 @@ jobs:
           for f in $shipped; do git show "$SHA:$f" > "$tmp/$f"; done
           if [ -f CHANGELOG.md ]; then cp CHANGELOG.md "$tmp/"; fi
           node tools/changelog/compile.mjs --root "$tmp" --version "$VERSION" --date "$DATE" --notes "$RUNNER_TEMP/notes.md"
-          cp "$tmp/CHANGELOG.md" CHANGELOG.md
-          for f in $shipped; do git rm -q --ignore-unmatch "$f"; done
-          git add CHANGELOG.md
           git tag -a "v$VERSION" "$SHA" -m "Souls $VERSION"
           git push origin "v$VERSION"
           gh release create "v$VERSION" --verify-tag --title "Souls $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
-          git commit -q -m "release: changelog for $VERSION" -m "Folds the shipped changes/ fragments into CHANGELOG.md."
-          # main may have moved during the release; replay the changelog commit on top.
-          for attempt in 1 2 3; do
-            git pull -q --rebase origin main && git push origin HEAD:main && exit 0
-            sleep 5
-          done
-          echo "::error::Released and tagged v$VERSION, but could not push the changelog commit to main (branch protection?). Open a PR from this run's diff."
-          exit 1
+          echo "Tagged v$VERSION and created the GitHub Release" >> "$GITHUB_STEP_SUMMARY"
+          # #2028: the changelog commit, as a pull request against main (the ruleset requires checks and the merge queue).
+          branch="release/changelog-$VERSION"
+          git checkout -q -b "$branch"
+          cp "$tmp/CHANGELOG.md" CHANGELOG.md
+          for f in $shipped; do git rm -q --ignore-unmatch "$f"; done
+          git add CHANGELOG.md
+          git commit -q -m "release: changelog for $VERSION" -m "Folds the shipped changes/ fragments into CHANGELOG.md (v$VERSION at ${SHA:0:12})."
+          git push -u origin "$branch"
+          GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --title "release: changelog for $VERSION" \
+            --body "Folds the fragments shipped in v$VERSION (${SHA:0:12}) into CHANGELOG.md. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
