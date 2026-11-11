@@ -52,7 +52,7 @@ export const FRAME_SLACK_K: Record<Level, number> = {green: 0.6, amber: 0.4, red
 export const FRAME_BUDGET_FLOOR_MS: Record<Level, number> = {green: 2, amber: 1, red: 0.5, black: 0};
 export const FRAME_MS = 50;
 /** The calibrated frame budget: min(cap, max(floor, k × max(0, 50 − quietTickMs))). quietTickMs = the monitor's EWMA of
- *  the tick's own ms in quiet windows (monitor.ts QuietTick; 0 = not measured yet → the caps). Production (tick 12 ms):
+ *  the tick's own ms in quiet windows, lowered by cheaper served ones (monitor.ts QuietTick; 0 = not measured yet → the caps). Production (tick 12 ms):
  *  22.8/15/7.6/0; a box ticking at 35 ms: 9/6/3/0; the laptop (tick ≤ 8 ms): 25/15/8/0. */
 export function frameBudgetMs(level: Level, quietTickMs: number): number {
   const cap = FRAME_BUDGET_MS[level];

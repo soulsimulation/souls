@@ -12,7 +12,10 @@ test('two Souls\' short acts: the second is not held behind the first beyond one
   // the quiet tick as the monitor learns it: a quiet window during Soul setup (21.4 ms ticks, #2124's measured run), then
   // the world under load, never quiet, its ticks served at 10.6 ms
   const q = new QuietTick();
-  q.window(21.4, true, true); q.window(10.6, false, true);
+  q.window(21.4, true, true);
+  assert.ok(Math.abs(q.window(10.6, false, true) - 20.32) < 1e-9, 'one light loaded window moves it by alpha, not all the way');
+  for (let i = 0; i < 19; i++) q.window(10.6, false, true);   // 100 s of load
+  assert.ok(q.value < 12, String(q.value));
   let now = 1000;
   const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => q.value});
   adm.setLoadLevel('amber');
@@ -25,9 +28,10 @@ test('two Souls\' short acts: the second is not held behind the first beyond one
     return out;
   };
   const a = ask('soul:A'), b = ask('soul:B');
-  for (let i = 0; i < 100 && !b.ran; i++) { await tick(); if (!b.ran) now += 1; }
+  await new Promise(r => setImmediate(r));   // the dispatcher's first turn runs before the fake clock moves
+  for (let i = 0; i < 100 && !b.ran; i++) { await tick(); if (a.ran && !b.ran) now += 1; }
   assert.ok(a.ran && b.ran, 'both ran');
   assert.ok(b.t.waitedMs() <= HANDLER, `B waited ${b.t.waitedMs()} ms in admission, more than one handler's time (${HANDLER} ms)`);
   adm.close();
-  assert.equal(q.window(30, false, true), 10.6, 'a loaded window never raises it');
+  const v = q.value; assert.equal(q.window(30, false, true), v, 'a loaded window never raises it');
 });

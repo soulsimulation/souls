@@ -43,7 +43,7 @@ export type LiveJson = {
   rewinds?: number;
   boot?: {stage: BootStage; tick: number; target: number};
   loop: {lastTurnAgeMs: number; delayP99Ms: number};
-  /** quietAvgMs: the tick's own average ms in quiet windows (EWMA; 0 = not measured yet), which sets the frame budget. */
+  /** quietAvgMs: the tick's own average ms in quiet windows (EWMA, lowered by cheaper served ones; 0 = not measured yet), which sets the frame budget. */
   tick?: {world: number; service5s: number; p99Ms: number; quietAvgMs: number; ageMs?: number; clockRate?: number; baseRate?: number};
   heap: {usedMb: number; limitMb: number; gcPct10s: number};
   level: Level;

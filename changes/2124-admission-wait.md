@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-In a busy world, a Soul's move no longer waits seconds behind other Souls' quick moves.
+In a busy world, the time the world gives Souls' moves follows what its own clock actually costs, not the heavier start-up.
