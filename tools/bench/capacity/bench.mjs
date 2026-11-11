@@ -252,7 +252,7 @@ function runCli(soul, args, deadlineMs, rec) {
       clearTimeout(k);
       // an act the world answers `accepted: false` is a refusal, whatever the exit code (#1093: words would refuse every act)
       const outcome = killed ? 'timeout' : /"accepted":\s*false/.test(out) ? 'refused' : code === 0 ? 'ok' : /unreachable/.test(err) ? 'unreachable' : BUSY.test(err) ? 'refused' : 'error';
-      const r = { soul: soul.i, cmd: args[0], cls: CLASS[args[0]] ?? 'C0', at: t, ms: now() - t, code, outcome, ...(outcome === 'refused' && out ? { refusal: /"code":\s*"([^"]+)"/.exec(out)?.[1], target: args[1] } : {}), ...(outcome === 'error' ? { err: err.trim().split('\n').at(-1)?.slice(0, 200) } : {}) };
+      const r = { soul: soul.i, cmd: args[0], cls: CLASS[args[0]] ?? 'C0', at: t, ms: now() - t, code, outcome, ...(args[0] === 'act' && /"phase":/.test(out) ? { receiptPhase: /"phase":\s*"([\w-]+)"/.exec(out)[1] } : {}), ...(outcome === 'refused' && out ? { refusal: /"code":\s*"([^"]+)"/.exec(out)?.[1], target: args[1] } : {}), ...(outcome === 'error' ? { err: err.trim().split('\n').at(-1)?.slice(0, 200) } : {}) };
       rec?.(r); done(r);
     });
   });
@@ -403,12 +403,12 @@ function clientLoop(run, soul) {   // one act at a time, act start to act start 
   })();
 }
 /** Before the windows: each Soul walks to its start place (Soul i to START_IDS[i mod n], at least ten places) and the
- *  bench waits for those walks to end, up to 180 s (60 s with --short). A raw Soul first fetches the catalog and live picture. */
+ *  bench waits for those walks to end, up to 300 s; `reached` counts the distinct places whose walk completed. A raw Soul first fetches the catalog and live picture. */
 async function spread(run, souls) {
-  const capS = SHORT ? 60 : 180, t = now();
+  const capS = 300, t = now();
   const ends = await Promise.all(souls.map(async (s) => {
     const id = START_IDS[s.i % START_IDS.length];
-    if (s.cli) { const r = await runCli(s, ['act', id, '--wait', String(capS)], (capS + 30) * 1000, run.rec); return { id, ok: r.outcome === 'ok' }; }
+    if (s.cli) { const r = await runCli(s, ['act', id, '--wait', String(capS), '--json'], (capS + 120) * 1000, run.rec); return { id, ok: r.outcome === 'ok', phase: r.receiptPhase ?? null }; }
     await clientReq(run, s, 'catalog', 'GET', '/v1/edge/catalog', { auth: false });
     await clientReq(run, s, 'live', 'GET', '/v1/edge/live', { auth: false });
     const key = randomUUID(), a = await clientReq(run, s, 'act', 'POST', '/v1/edge/act', { body: { capability: id, params: {}, strict: true, clientRef: key }, key, kind: 'walk' });
@@ -416,7 +416,7 @@ async function spread(run, souls) {
     while (rid && !['completed', 'failed', 'replaced'].includes(phase) && now() - t < capS * 1000) { await sleep(5000); phase = (await clientReq(run, s, 'receipt', 'GET', `/v1/edge/receipts/${encodeURIComponent(rid)}`)).data?.receipt?.phase ?? phase; }
     return { id, ok: a.data?.accepted === true, phase, raw: true };
   }));
-  return { places: new Set(ends.map((e) => e.id)).size, souls: ends.length, accepted: ends.filter((e) => e.ok).length, rawCompleted: ends.filter((e) => e.phase === 'completed').length, raw: ends.filter((e) => e.raw).length, seconds: +((now() - t) / 1000).toFixed(1) };
+  return { places: new Set(ends.map((e) => e.id)).size, souls: ends.length, accepted: ends.filter((e) => e.ok).length, reached: new Set(ends.filter((e) => e.phase === 'completed').map((e) => e.id)).size, completed: ends.filter((e) => e.phase === 'completed').length, seconds: +((now() - t) / 1000).toFixed(1) };
 }
 /** --load client, per run: per-route time (every try, real and raw), the act's Server-Timing parts, tick time, ticks behind
  *  the 20 Hz schedule, refusals by code and the acts by kind, in the active windows. */
@@ -444,8 +444,8 @@ function clientReport(results) {
   const rs = results.filter((r) => r.client), L = [], f = (x) => (x ? `${x.p50} / ${x.p99}` : '—');
   if (!rs.length) return '';
   L.push(`## Client load (#1945): profile \`${rs[0].client.profile}\`, active windows only`, '', 'Real = the real client through its own serve; raw = in-process Souls on the client\'s requests, headers and retry rules. Times in ms as p50 / p99; per-route rows count every try.', '');
-  L.push('| run | real / raw | spread: places · Souls accepted · raw walks ended | acts (by kind) | act p50 / p99 | tick ms p50 / p99 (avg per sample) · p99 max | ticks behind 20 Hz | refusals by code |', '|---|---|---|---|---|---|---|---|');
-  for (const r of rs) { const x = r.client, s = x.spread; L.push(`| ${r.arm} r${r.rep} | ${x.real} / ${x.raw} | ${s ? `${s.places} · ${s.accepted}/${s.souls} · ${s.rawCompleted}/${s.raw}` : '—'} | ${x.acts} (${Object.entries(x.actsByKind).map(([k, v]) => `${k} ${v}`).join(', ')}${Object.keys(x.mixFallback ?? {}).length ? `; sent as walks: ${Object.entries(x.mixFallback).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}) | ${f(x.actMs)} | ${f(x.tick.avgMs)} · ${x.tick.p99MaxMs ?? '—'} | ${x.tick.behind} in ${x.tick.seconds} s | ${Object.entries(x.refusals).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'} |`); }
+  L.push('| run | real / raw | spread: places · Souls accepted · walks completed · places reached | acts (by kind) | act p50 / p99 | tick ms p50 / p99 (avg per sample) · p99 max | ticks behind 20 Hz | refusals by code |', '|---|---|---|---|---|---|---|---|');
+  for (const r of rs) { const x = r.client, s = x.spread; L.push(`| ${r.arm} r${r.rep} | ${x.real} / ${x.raw} | ${s ? `${s.places} · ${s.accepted}/${s.souls} · ${s.completed}/${s.souls} · ${s.reached}` : '—'} | ${x.acts} (${Object.entries(x.actsByKind).map(([k, v]) => `${k} ${v}`).join(', ')}${Object.keys(x.mixFallback ?? {}).length ? `; sent as walks: ${Object.entries(x.mixFallback).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}) | ${f(x.actMs)} | ${f(x.tick.avgMs)} · ${x.tick.p99MaxMs ?? '—'} | ${x.tick.behind} in ${x.tick.seconds} s | ${Object.entries(x.refusals).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'} |`); }
   L.push('', '| run | route | tries (real) | client | world (Server-Timing) | queue |', '|---|---|---|---|---|---|');
   for (const r of rs) for (const [k, v] of Object.entries(r.client.routes)) L.push(`| ${r.arm} r${r.rep} | \`${k}\` | ${v.n} (${v.real}) | ${f(v.client)} | ${f(v.world)} | ${f(v.queue)} |`);
   L.push('', 'Act time by part (raw Souls\' `POST /v1/edge/act` Server-Timing; the queue / handler / wait / commit split appears once the world sends it, #1944):', '', '| run | part | n | p50 / p99 |', '|---|---|---|---|');

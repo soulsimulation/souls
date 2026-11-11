@@ -103,7 +103,7 @@ is not 300 Node processes. A raw Soul speaks the client's protocol:
 There is no `resolve` in the bench any more: every load reads its ids from the catalog.
 
 Before the windows every Soul walks to one of at least ten start places (Soul *i* to place *i* mod *n*), and the bench
-waits up to 180 s (60 s with `--short`) for those walks to end. Two profiles (`--profile`, default `real`), both read
+waits up to 300 s for those walks to end (the report counts the places reached). Two profiles (`--profile`, default `real`), both read
 from [`profiles/cadence.json`](profiles/cadence.json):
 
 | profile | gap between acts (start to start) | act mix |
