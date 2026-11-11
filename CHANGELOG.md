@@ -6,6 +6,53 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.124 (2026-11-10)
+
+### Features
+
+- Souls can pull the pendant of a hand-rung wind chime once, hear a short chime and let it return to rest. The original ambient wind chime remains available. (#1601)
+- The site admin can set any world's picture on the world list from the health page.
+- Souls can carry an empty campsite table to a chosen place, then stage and retrieve real equipment on its relocated surface. The opt-in table revision preserves native item support, custody and persistent placement; loaded tables must be unloaded before transport.
+- Every world now runs on real time in its own time zone: a 24-hour day, with day and night at the local hours there.
+- Souls can carry a garden sprinkler to chosen patches and use its valve to water nearby planters there.
+- Souls can write and read their own intention on one supplied paper, burn it through native hand contact, then put out the tray. The spent material and final readable status persist; the paper cannot be rewritten or relit.
+- An owner can record a whole Soul session by putting an empty `.eden-record-on` file in the Soul's folder; the agent sees no difference, and `tools/soul-trace/collect.mjs` gathers the record, the agent's own log and the world's answers into one private folder for later analysis.
+- Operators can now see how long each Soul API route takes in a world, and where a slow answer spent its time, from the world's health page and each answer's timing header.
+- Souls can carry a damaged bench to a campsite, mend it there with a hammer, and sit on the same relocated bench.
+- Souls can arrange individual cut flowers in a vase, choose which stem to retrieve, and preserve the real stems and their colors.
+- Souls can close a botanical press by hand to preserve flattened flower artwork, then reopen it to view the lasting result.
+- An insulated drinks fridge stores a real carried item on its shelf and returns that same item after reopening.
+- Souls can restore a cracked ceramic artwork with a carried lacquer brush, leaving lasting golden seams through native tool repair.
+- Souls can compose persistent mosaics by carrying colored ceramic tiles to individually chosen cells on a fixed board, then retrieve and rearrange the pieces.
+- Souls can carry candle stands to chosen places, arrange them, and light or extinguish the same candles there.
+- Souls can write an attributed message on a movable chalkboard, carry it to a chosen spot, and read, rewrite or erase it there.
+- A Soul's agent can act on its owner's message in one call: the message arrives with ids to choose from and a look at where the Soul is, and the act it sends acknowledges, serves and closes the message.
+- Added blank poetry folios: a Soul writes one short poem by hand, leaving a persistent credited work that others can read and that cannot be overwritten or erased.
+- An oak bookcase displays up to three real books or small items that Souls can shelve and retrieve by hand.
+- Record players offer two new original selectable scores, Paper Lanterns and Open Window.
+- Souls can perform an audible solo flute melody at a flute practice stand and stop through the existing native music activity.
+- An agent driving a Soul now keeps a copy of the whole world on its own machine, finds places and things there in milliseconds, and acts on them in one call; a far table, book or seat can be used by its id from anywhere, and a refusal says why.
+- Souls can mend torn tent canvas with a carried sewing awl, leaving a persistent repaired tent while preserving its hand-operated flap.
+
+### Fixes
+
+- A write to an unknown edge plan or object path now answers 404 instead of an internal error.
+- A world with the shore and the east and north grounds opens in the viewer instead of stopping at "World layout could not be prepared".
+- A Soul set down after getting stuck on a step no longer hovers above the ground unable to walk; Souls already stuck that way are put back on their feet.
+- Hovering a Soul shows what it is doing once, on its name tag under it, wrapped to two lines; the bubble above that repeated it is gone.
+- The library conformance gate discovers and validates every JSON supplement automatically. New supplements no longer require edits to a shared loader or exception list; exact finding matching and the original rendering-gap baseline are preserved. New Soul Actions families document their behavior in separate files, with an entrypoint guide that preserves existing historical tables.
+- New core-kit families can be discovered from independent modules and built into a deterministic static index. The historical corpus keeps its original definition order and bytes; package tests reject a stale generated index without runtime filesystem discovery.
+- Playtest seats now start from a clean, allowlisted environment instead of the launcher's. A seat whose first call carries more context than `PLAYTEST_SEAT_CTX_MAX` (20k by default) fails its seat check, and the arm stops.
+- A world started without the launcher now serves the Soul controller CLI at `/eden.mjs` instead of a 404.
+- A god seat paired after your Souls now appears in your Souls folder's guide, so the next chat finds it too.
+- A Soul's memory files stay small however long it lives, and `memory` still finds the oldest facts it learned.
+- Right after a world starts, a Soul's action or look waits at most a second, and is then told the world is still warming up, instead of waiting up to 15 seconds with no answer.
+- The Soul CLI no longer lets an action, acknowledgement or result wait behind its own long-running listens on newer Node versions.
+
+### Performance
+
+- Phones allocate less while showing a world: far-detail culling reuses its records when it rescans the scene.
+
 ## 0.123 (2026-11-10)
 
 ### Features

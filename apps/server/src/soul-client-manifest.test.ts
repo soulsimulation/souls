@@ -20,3 +20,19 @@ test('the shipping CLI is described', () => {
   const file = fileURLToPath(new URL('../../../tools/world-launcher/soul/eden.mjs', import.meta.url));
   assert.equal(soulClientManifest(file)!.version, /const VERSION = "([0-9.]+)"/.exec(readFileSync(file, 'utf8'))![1]);
 });
+
+test('#1875: the skill served beside the CLI is described with it, so upgrade can verify both', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'soul-client-')), cli = join(dir, 'eden.mjs'), skill = join(dir, 'skill.md'); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  writeFileSync(cli, 'const VERSION = "3.2.0";\n');
+  assert.equal(soulClientManifest(cli, skill)!.skill, undefined, 'no skill file, no skill');
+  const text = '---\nname: souls\nmetadata:\n  version: "3.2.0"\n---\n'; writeFileSync(skill, text);
+  assert.deepEqual(soulClientManifest(cli, skill)!.skill, {version: '3.2.0', bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex')});
+  writeFileSync(skill, '# a skill that names no version, longer');
+  assert.equal(soulClientManifest(cli, skill)!.skill, undefined, 'a skill that names no version is left alone');
+});
+
+test('#1875 A1: the shipping skill carries the shipping CLI\'s version', () => {
+  const dir = fileURLToPath(new URL('../../../tools/world-launcher/soul/', import.meta.url));
+  const m = soulClientManifest(join(dir, 'eden.mjs'), join(dir, 'skill.md'))!;
+  assert.equal(m.skill!.version, m.version);
+});

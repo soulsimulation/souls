@@ -76,7 +76,7 @@ test('link precedence: approved-waiting, connected, stopped-listening, pairing, 
   assert.equal(l.state, 'disconnected'); assert.equal(l.reason, 'stopped-listening'); assert.equal(l.since, old + 60_000); assert.ok(l.holder);
   // a repair request in the owner's window: pairing, naming the approval, the current holder kept
   const code = (await w.call('/v1/account/window-code', {}, 'gene')).data.code;
-  const repair = await w.call('/v1/agent/approval/start', { ...input('link-0002', { soulId, for: code }), name: undefined });
+  const repair = await w.call('/v1/agent/approval/start', { ...input('link-0002', { soulId, for: code }), name: undefined, move: true });
   assert.equal(repair.status, 200, JSON.stringify(repair.data));
   l = await link();
   assert.equal(l.state, 'pairing'); assert.equal(l.reason, 'pending-approval'); assert.equal(l.approvalId, repair.data.approval.id); assert.ok(l.holder);

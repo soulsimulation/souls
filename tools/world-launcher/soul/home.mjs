@@ -5,7 +5,7 @@
 // lives inside it as a generated block.
 
 import { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 export const HOME_NAME = ".souls", LEGACY_STATE = ".eden-agent.json", STATE_FILE = "state.json", CREDENTIALS = "credentials.json";
 export const RUNTIME_LOCKS = [".listen.lock", ".eden-serve.lock"];
@@ -59,6 +59,47 @@ export function findHome({ cwd, env = {}, homedir }) {
 }
 
 export function globalRoot(homedir) { return join(homedir, HOME_NAME); }
+const HOMES_FILE = "homes.json";
+/** The live Souls a home holds, read without opening it. */
+export function soulsIn(root) {
+  const c = readJsonQuietly(join(root, "config.json"));
+  return Object.entries(c?.souls ?? {}).filter(([, e]) => e?.state === "active").map(([id, e]) => ({ id, name: plainName(e.name) || id, world: e.world }));
+}
+/** The homes this machine knows of: the user-level one and the folder homes it lists. */
+export function knownHomes(homedir) {
+  const g = globalRoot(homedir), listed = readJsonQuietly(join(g, HOMES_FILE))?.homes;
+  return [...new Set([g, ...(Array.isArray(listed) ? listed.filter((r) => typeof r === "string") : [])])].filter(isHome);
+}
+/** A folder home joins the user-level home's list, and only once that exists: then another folder can say where its Souls are. */
+export function rememberHome(homedir, root) {
+  const g = globalRoot(homedir), r = real(root);
+  if (!isHome(g) || r === real(g)) return false;
+  try {
+    const was = readJsonQuietly(join(g, HOMES_FILE))?.homes, list = Array.isArray(was) ? was.filter((x) => typeof x === "string" && isHome(x)) : [];
+    if (list.includes(r)) return false;
+    writeJson(join(g, HOMES_FILE), { version: 1, homes: [...list, r] });
+    return true;
+  } catch { return false; }
+}
+/** A home with nothing in it yet: no Soul, no god seat, no approval waiting. */
+export function emptyHome(root) {
+  // Anything unreadable or unexpected counts as in use: a home that can't be read is never removed.
+  const strict = (file, fallback) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch (e) { if (e.code === "ENOENT" && fallback !== undefined) return fallback; throw e; } };
+  try {
+    const c = strict(join(root, "config.json")), creds = strict(join(root, CREDENTIALS), {}), pending = join(root, "pending");
+    const held = (o) => Object.values(o ?? {}).some((v) => v && typeof v === "object" && Object.keys(v).length);
+    const seats = existsSync(pending) ? readdirSync(pending).map((k) => strict(join(pending, k, STATE_FILE), {})) : [];
+    return !Object.keys(c.souls ?? {}).length && !Object.keys(c.gods ?? {}).length && !held(creds.souls) && !held(creds.gods) && !held(creds.approvals)
+      && !seats.some((st) => st.pendingApproval || st.pendingCreate || st.soul)
+      && !["souls", "gods", "memory", "MEMORY.md"].some((n) => existsSync(join(root, n)) && (n === "MEMORY.md" || readdirSync(join(root, n)).length));
+  } catch { return false; }
+}
+/** The skill's own version, from its frontmatter. */
+export const skillVersionOf = (text) => /^\s*version:\s*"?([0-9][0-9.]*)"?\s*$/m.exec(String(text ?? ""))?.[1] ?? null;
+/** Where a home keeps the skill: SKILL.md beside .souls/, and the project copies where a person put them. */
+export const SKILL_COPIES = ["SKILL.md", ".claude/skills/souls/SKILL.md", ".agents/skills/souls/SKILL.md"];
+/** A file is the Souls skill only when its frontmatter says so: another skill's SKILL.md is never ours to replace. */
+export const isSoulsSkill = (text) => /^---\n[\s\S]*?^name:\s*"?souls"?\s*$[\s\S]*?^---$/m.test(String(text ?? ""));
 
 function writeJson(file, value, mode = 0o600) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -136,7 +177,7 @@ export function selectSoul(cfg, sel, { cmd } = {}) {
   const named = Object.entries(cfg.souls).filter(([id, e]) => (id === who || norm(e.name) === norm(who)) && (!world || e.world === world || e.at === world));
   const live = named.filter(([, e]) => e.state === "active" || (e.state === "unpaired" && LOCAL_READS.has(cmd)));
   if (live.length === 1) return live[0][0];
-  if (live.length > 1) throw new Error(`Several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
+  if (live.length > 1) throw new Error(`soul.ambiguous: several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
   if (named.length) throw new Error(`${named[0][1].name} is ${named[0][1].state} and takes no commands here. See: list, doctor, adopt.`);
   return null;
 }
@@ -166,13 +207,13 @@ export function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) 
   if (atWorld) {
     const here = live.filter(([, e]) => (e.at ?? e.world) === atWorld);
     if (here.length === 1) return { soul: here[0][0] };
-    if (here.length > 1) throw new Error(`Several Souls are in ${atWorld}: ${here.map(([, e]) => norm(e.name)).join(", ")}. Say which.`);
+    if (here.length > 1) throw new Error(`soul.ambiguous: several Souls are in ${atWorld}: ${here.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
     return { seat: atWorld };
   }
   if (live.length === 1) return { soul: live[0][0] };
   if (live.length > 1) {
     if (cfg.default && cfg.souls[cfg.default]?.state === "active") return { soul: cfg.default };
-    throw new Error(`Several Souls live here: ${live.map(([, e]) => norm(e.name)).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
+    throw new Error(`soul.ambiguous: several Souls live here: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
   }
   const unpaired = Object.entries(cfg.souls).filter(([, e]) => e.state === "unpaired");
   if (LOCAL_READS.has(cmd) && unpaired.length === 1) return { soul: unpaired[0][0] };
@@ -497,6 +538,28 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     updateConfig((c) => { c.client = version; });
     return at("bin", "eden.mjs");
   }
+  /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
+  const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
+  const read = (file) => { try { return readFileSync(file, "utf8"); } catch { return null; } };
+  /** Each skill copy beside the home and in `also` (the folder an agent works in), and its version. */
+  const skillVersions = (also = []) => {
+    const here = real(also[0] ?? folder());   // paths are said from where the agent works, never whole
+    const said = (file) => { const r = relative(here, file); return r.startsWith("..") ? `beside the home: ${relative(real(folder()), file)}` : r; };
+    return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
+      .map((file) => ({ file, text: read(file) })).filter((c) => isSoulsSkill(c.text)).map(({ file, text }) => ({ rel: said(file), file, version: skillVersionOf(text) }));
+  };
+  /** The versioned copies older than `version`: what `upgrade` refreshes. */
+  const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
+  /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
+   *  never over one as new, never a new file. */
+  function installSkill(bytes, version, also = []) {
+    const wrote = [];
+    for (const { file, rel } of skillBehind(version, also)) {
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+    }
+    return wrote;
+  }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
   /** The guide's head, where a chat learns who lives here, rewritten in place in a guide this home wrote (CLAUDE.md, AGENTS.md
@@ -513,5 +576,5 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return wrote;
   }
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, refreshGuide, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }

@@ -13,8 +13,15 @@ checklist. Two halves: **Pause** (outgoing) and **Resume** (incoming).
 
 Private folder (ignored, never published): `.local/project/coordinator/` with `STATE.json`, `DECISIONS.md`,
 `MANIFEST.md`, `gene-morning.md`, `briefs/` and `handoffs/`. Public coordination issue: the agenda issue named in
-`STATE.json` (currently #755). Public text never carries local paths, usernames, host names or session handles
+`STATE.json` (currently #1960). Public text never carries local paths, usernames, host names or session handles
 ([publication privacy](../../../docs/process/publication-privacy.md)).
+
+## Keep it thin: state in the packet, rules in the repo
+
+The rules a coordinator works by live in `AGENTS.md` ("Development coordinator") and in the agenda issue, where
+they survive a handoff and a context compaction. A handoff packet and a takeover prompt carry **state only**: pull
+requests and heads, what is running, what waits on Gene, today's gotchas. Do not restate rules in them. A takeover
+prompt that is longer than ten lines is carrying something that belongs in the repo or in the agenda issue.
 
 ## Keep it cheap: always-current records
 

@@ -40,7 +40,7 @@ async function world(t) {
 function folder(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'soul-status-'))); t.after(() => rmSync(dir, { recursive: true, force: true }));
   copyFileSync(cli, join(dir, 'eden.mjs'));
-  const start = (...args) => spawn(process.execPath, ['eden.mjs', ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  const start = (...args) => spawn(process.execPath, ['eden.mjs', ...args], { cwd: dir, env: { ...process.env, HOME: dir }, stdio: ['ignore', 'pipe', 'pipe'] });
   const run = (...args) => new Promise((resolve) => { const t0 = Date.now(), p = start(...args); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => { let d = null; try { d = JSON.parse(out); } catch { /* not json */ } resolve({ code, d, out, err, ms: Date.now() - t0 }); }); });
   return { dir, run, start };
 }
