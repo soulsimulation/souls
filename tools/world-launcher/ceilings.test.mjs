@@ -55,6 +55,26 @@ test('ceilings: address rate, listen per Soul / account / address, account rate,
   assert.equal(c.socket('w8', '6.6.6.6'), null); many.forEach((m) => m.release()); assert.ok(c.socket('w8', '6.6.6.6'));
 });
 
+test('default ceilings (#1949): 100 Souls behind one address and one account, each holding a listen and acting every 10 s for 60 s, are never refused', () => {
+  let t = 0; const c = soulCeilings({ now: () => t, log: () => {} });
+  const ip = '203.0.113.100', N = 100;
+  const soul = (i, m) => req(m, { authorization: `Bearer sim_s_room${i}_x`, 'x-forwarded-for': ip });
+  for (let i = 0; i < N; i++) c.learn(c.soulOf(soul(i, 'GET')), 'acct-room');
+  const admitted = (r, what) => { assert.ok(r && !r.refuse && !r.hold, `${what} at ${t} ms: ${JSON.stringify(r?.refuse?.body ?? 'held')}`); return r; };
+  const listens = [];   // each Soul's listen, renewed when the world answers it at its 25 s timeout
+  const listen = (i) => ({ r: admitted(c.check(soul(i, 'GET'), 'room', '/v1/edge/inbox/listen', true, { deadlineMs: 25_000 }), `listen ${i}`), until: t + 25_000 });
+  for (let i = 0; i < N; i++) listens.push(listen(i));   // the room connects at once
+  let acts = 0;
+  for (; t < 60_000; t += 100) {
+    for (let i = 0; i < N; i++) {
+      if (t >= listens[i].until) { listens[i].r.release(); listens[i] = listen(i); }
+      if (t % 10_000 === i * 100) { admitted(c.check(soul(i, 'POST'), 'room', '/v1/edge/act', true), `act ${i}`).release(); acts++; }
+    }
+  }
+  listens.forEach((l) => l.r.release());
+  assert.equal(acts, N * 6); assert.deepEqual(c.refused('room'), {});
+});
+
 test('world budget (lane B-serve): a C2 read for the read workers skips it; chargeWorld takes it (refusing, or forced after the fact); C1 never skips', () => {
   let t = 0; const c = soulCeilings({ now: () => t, log: () => {}, limitsFor: () => ({ worldBudgetRps: 2, accountHeavyPerMin: 100000 }) });
   const get = (m = 'GET') => ({ method: m, headers: { authorization: 'Bearer sim_s_z_x' } });

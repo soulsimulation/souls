@@ -130,15 +130,18 @@ export function claimsIn(text, { soulName = null, others = [] } = {}) {
 export function runOracles(ev, ctx = {}) {
   const P = `evidence/${ev.requestId}.json`;
   const expect = ctx.expect !== undefined ? ctx.expect : expectFor(ctx.run, ev);
-  const acts = ctx.acts ?? (ctx.run ? seatActs(ctx.run, ev.seat, ev.chatTurns) : []);
   const sent = ms(ev.sentAt), cutoff = ms(ev.cutoffAt) ?? Infinity;
+  // #1774: a card request reaches the seat through its listen, so no chat turn carries it: its acts are those of the
+  // turns that started in its window (the wake turns), not none.
+  const turnIds = ev.chatTurns?.length ? ev.chatTurns : (ctx.run?.seats?.[ev.seat]?.turns ?? []).filter((t) => { const a = ms(t.startedAt); return a != null && a >= sent && a <= cutoff; }).map((t) => t.turn);
+  const acts = ctx.acts ?? (ctx.run ? seatActs(ctx.run, ev.seat, turnIds) : []);
   const all = (ev.samples ?? []).map((s, i) => ({ ...s, i, ms: ms(s.t), p: xz(s.pos) }));
   const timely = all.filter((s) => s.ms <= cutoff);
   const late = all.length - timely.length;
   const last = timely.at(-1);
   const sp = (s) => `${P}#samples[${s.i}]`;
   const receipts = ev.receipts ?? [];
-  const acted = acts.filter((a) => /\beden(-agent)?\.mjs act\b/.test(a.cmd));
+  const acted = acts.filter((a) => /\beden(-agent)?\.mjs (?:act|plan)\b/.test(a.cmd));   // #1774: a plan is acts too
   const pool = seatSamples(ctx.run, ev.seat) ?? all;
   const clk = tickClock(pool.length >= 2 ? pool : all);
   const SLACK = 1500; // tick→time estimate tolerance
@@ -248,13 +251,19 @@ export function runOracles(ev, ctx = {}) {
   out.push(!checked.length ? o('truthfulness-basic', 'pass', `no completion claim in ${ev.channel === 'chat' ? 'the chat reply' : 'ack/result'}`) : unsupported.length ? o('truthfulness-basic', 'fail', `claims ${[...new Set(unsupported.map((u) => u.id))].join(', ')} not supported by the body or a completed receipt when written: ${unsupported.slice(0, 2).map(wrote).join('; ')}`, [...new Set(unsupported.map((u) => u.ptr))]) : o('truthfulness-basic', 'pass', `claims ${[...new Set(checked)].join(', ')} supported when written`, replies.map((r) => r.ptr).slice(0, 3)));
 
   // vocabulary
-  const unk = acts.filter((a) => a.output?.code === 'capability.unknown');
+  // #1774: the new loop's words are looked up locally (`find`, `query`) and acted on by id; an act on words the world does
+  // not offer is refused `act.not-an-id` (or `capability.unknown` from an older client). The world offered a match when
+  // the refusal names one (did_you_mean, alternatives) or a lookup in the window found something.
+  const unk = acts.filter((a) => ['capability.unknown', 'act.not-an-id'].includes(a.output?.code ?? a.output?.error?.code));
   if (!unk.length) out.push(o('vocabulary', 'pass', 'no unknown capability'));
   else {
-    const offered = unk.some((a) => a.output.did_you_mean?.length) || acts.some((a) => /caps\b.*--search/.test(a.cmd) && (a.output?.matches?.length || a.output?.length));
+    const offered = unk.some((a) => a.output.did_you_mean?.length || a.output.alternatives?.length || a.output.error?.did_you_mean?.length)
+      || acts.some((a) => /\beden(-agent)?\.mjs (?:find|query)\b/.test(a.cmd) && (a.output?.found?.length || a.output?.answers?.some?.((x) => Object.values(x ?? {}).some((v) => Array.isArray(v) && v.length))))
+      || acts.some((a) => /caps\b.*--search/.test(a.cmd) && (a.output?.matches?.length || a.output?.offers?.length || a.output?.length));
     out.push(offered ? o('vocabulary', 'pass', 'unknown wording, but the world offered a match') : o('vocabulary', 'fail', `capability.unknown with no match for the player's wording "${ev.text}"`, unk.map((a) => `seats/${ev.seat}/transcript.jsonl#turn${a.turn}`)));
   }
-  const keys = acted.map((a) => a.cmd.replace(/\s+--wait(\s+\d+)?/, '').trim());
+  // #1774: a refused act that is sent again is a retry, not a duplicate; only acts the world took count
+  const keys = acted.filter((a) => a.output?.accepted !== false).map((a) => a.cmd.replace(/\s+--wait(\s+\d+)?/, '').replace(/\s+--for\s+\S+/, '').trim());
   const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
   const dupR = receipts.filter((r, i) => receipts.findIndex((x) => x.capability === r.capability) !== i);
   out.push(dup.length || dupR.length ? o('duplicate-acts', 'fail', `${dup.length + dupR.length} repeated act(s): ${[...new Set([...dup, ...dupR.map((r) => r.capability)])].join('; ')}`) : o('duplicate-acts', 'pass', `${acted.length} act(s), none repeated`));
