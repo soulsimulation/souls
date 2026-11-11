@@ -42,4 +42,6 @@ At chat start: `serve`, then `listen --follow` under Monitor, else `listen` in t
 
 To answer: `say "…" --to <name> [--gesture nod]`. A paired act invites: "invited, waiting" till it starts. `consolidation.offer` in `status`: ask your owner once, then `consolidate on`/`off`.
 
+When your owner asks how things are going, or at the end of a day: run `digest`, and tell your owner in your own words.
+
 **Reference:** `<world>/schema.md`; `help`.
