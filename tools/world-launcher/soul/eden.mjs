@@ -5094,12 +5094,18 @@ export function carryWake(wake, sameWorld) {
   for (const r0 of w.rules) {
     if (sameWorld) { rules.push(r0); continue; }
     const { inside, busy, held, was, ...r } = r0;   // who was where, the acts it was holding and a thing's state were the old world's
-    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind !== "soul-arrives" ? null
+    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind === "thing-state" ? `thing ${r.params?.thing}` : r.kind !== "soul-arrives" ? null
       : r.params?.who !== "any" ? `Soul ${r.params.who}` : r.params?.where !== "here" ? `place ${r.params.where}` : null;
     if (named) dropped.push({ id: r.id, why: `it names ${named} of the world this Soul left` });
     else rules.push(r);
   }
   return { wake: { ...soulWake.fresh(), rules, next: w.next ?? 1 }, dropped };
+}
+/** #2082: Pure: the catalog's lookups thing-state reads, built again when the copy's version (its etag) changes, whichever
+ *  process wrote it; null without a copy of this world. */
+export function wakeCatalog(cur, have, world) {
+  if (have?.world !== world || !have.catalog) return null;
+  return cur?.etag === have.etag ? cur : { etag: have.etag, ix: soulCatalog.indexCatalog(have.catalog) };
 }
 /** Pure: fold what the stream delivered into the state. */
 export function foldEvents(st, events, cursor) {
@@ -5395,9 +5401,14 @@ async function serveForeground() {
   const runWake = () => {
     try {
       const copy = readJsonFile(LIVE_FILE), before = JSON.stringify(st.wake);
-      // #1931: thing-state reads the catalog's lookups, built once per copy (syncCatalog drops them when it replaces the copy)
-      if (!CATALOG_IX && st.wake.rules.some((x) => x.kind === "thing-state")) { const have = readJsonFile(CATALOG_FILE); if (have?.world === world && have.catalog) CATALOG_IX = { etag: have.etag, ix: soulCatalog.indexCatalog(have.catalog) }; }
-      const catalog = st.wake.rules.some((x) => x.kind === "thing-state") ? CATALOG_IX?.ix ?? null : null;
+      // #1931, #2082: thing-state reads the catalog's lookups, built once per version of the copy. The file is read again only when
+      // it was written since (by this process or a command), so a copy another process replaced is not missed.
+      const things = st.wake.rules.some((x) => x.kind === "thing-state");
+      if (things) {
+        const m = lstatSync(CATALOG_FILE, { throwIfNoEntry: false })?.mtimeMs;
+        if (!CATALOG_IX || CATALOG_IX.mtime !== m) { CATALOG_IX = wakeCatalog(CATALOG_IX, readJsonFile(CATALOG_FILE), world); if (CATALOG_IX) CATALOG_IX.mtime = m; }
+      }
+      const catalog = things ? CATALOG_IX?.ix ?? null : null;
       const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul, since: Date.parse(start), catalog }, Date.now());
       st.wake = { ...soulWake.expire(st.wake, Date.now(), WAKE_HELD_MS), rules: r.rules, cursor: r.cursor };
       st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired);   // #1968: one entry per rule, with a count and the latest why
