@@ -30,11 +30,11 @@ test('#2100 owner and world caps, expiry a day after the end, windows not displa
  // A1: the owner cap counts both of ana's owner's Souls; the world cap counts every Soul's open items
  for(const [n,title] of [['ana','A1'],['ana','A2'],['ana2','A3']])assert.equal((await post(n,title,1)).status,200,title);
  for(const n of ['ana','ana2']){const r=await post(n,'over owner cap',1);assert.equal(r.status,429);assert.equal(r.body.error.code,'calendar.owner-full');assert.match(r.body.error.message,/3 calendar items/);}
- for(const title of ['B1','B2','B3'])assert.equal((await post('bob',title,1)).status,200,title);
- const full=await post('cara','over world cap',1);assert.equal(full.status,429);assert.equal(full.body.error.code,'calendar.world-full');assert.match(full.body.error.message,/6 calendar items/);
- // a steward item does not count against Souls, and is never expired
+ for(const title of ['B1','B2'])assert.equal((await post('bob',title,1)).status,200,title);
+ // a steward item does not count against Souls (and is never expired, below): with it, 6 open items, and a Soul still posts
  const steward=comms.objects.create({id:'cal-steward1',kind:'calendar-item',name:'Steward',placeId:places[0],params:{title:'Steward',placeId:places[0],startsAtTick:f.host.engine.world.tick+1,durationTicks:6}});
- assert.equal((await post('cara','still over world cap',1)).status,429);
+ assert.equal((await post('bob','B3',1)).status,200,'the sixth Soul item fits beside the steward item');
+ const full=await post('cara','over world cap',1);assert.equal(full.status,429);assert.equal(full.body.error.code,'calendar.world-full');assert.match(full.body.error.message,/6 calendar items/);
 
  // A2: ended items stay listed (as over) for a day after they end, then go; the steward's stays
  const souls=calendarIds().filter(id=>id!==steward.id);assert.equal(souls.length,6);
