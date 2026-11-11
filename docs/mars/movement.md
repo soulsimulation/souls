@@ -56,6 +56,9 @@ hit, so the hard separation layer rarely fires.
 - **wait-bound/1** (#1952, a logged runtime policy adopted at boot): off a stair flight, a programme step's walk whose body
   has not left a 0.5 m disc or changed level for 1,200 ticks (a minute) ends `route.blocked`, naming the last wait and whom
   it was for. Named waits (`traffic.yield` included) do not pause it, and a walk re-issued for the same step keeps its clock.
+- **wait-bound/2** (#1288, adopted at boot after wait-bound/1): the same bound for a step that swims or travels through
+  water (`swim_to`, `ground_travel`, `swim_in`), so a swim held behind a body treading in its way (`swim.occupied`) ends
+  `route.blocked` through the swim's own cancel, leaving the swimmer treading or standing where it is.
 
 ## Speed limits and invariants
 
