@@ -117,9 +117,9 @@ therefore **windowed**:
   doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
   does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
   the window, its later pushes run in full as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
-- **Any other label does nothing.** Its run sits in a concurrency group of its own, so it can't cancel a running CI, and
-  every job skips without taking a runner. A skipped required check reads as a pass, so in that run the `ci-ok` job carries
-  another name and can't replace a real result. The merge train ignores a run with every job skipped.
+- **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
+  without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
+  nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
   own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,

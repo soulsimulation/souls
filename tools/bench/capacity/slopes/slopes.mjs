@@ -18,6 +18,9 @@
 // those ticks (tick-spans.jsonl, profile-walk.cpuprofile). The memory axis (#1973) is that quiet arm, then the world's
 // memory: memory.json (process.memoryUsage() of the main thread and each worker thread, V8 heap spaces, a content hash of
 // every ArrayBuffer by heap snapshot id) and main.heapsnapshot. `--axis memory --repeats 2`: two worlds, one template.
+// #1972: every Soul is the raw-HTTP client Soul of #1945 (../meetup/client-soul.mjs): the catalog and live picture once
+// after it joins, acts by catalog id (strict, keyed), each act's receipt read once after it (outside the probe), the
+// client's headers and retry rules; no resolve.
 // Per arm and repeat: <out>/<arm>-r<k>/{result.json, calls.jsonl, live.jsonl, world.log, profile-*.cpuprofile}.
 // <out>/{receipt.json, results.json, REPORT.md}. No host name, user, home path or token in receipt/results/REPORT.
 import { spawn, execFileSync } from 'node:child_process';
@@ -29,6 +32,7 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { FIXTURES, outcomeOf, rng } from '../meetup/workload.mjs';
 import { withDistantInventory } from './inventory.mjs';
+import { actBody, catalogIds, clientCall, clientHeaders, startPicture } from '../meetup/client-soul.mjs';
 import { AXES, ACTS, PROBE_ROUTES, SLOPES, WALK_TICKS, WALK_EVERY_MS, tickSpanTable, subtreeTop, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText } from './report.mjs';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; }, flag = (k) => argv.includes(`--${k}`);
@@ -180,34 +184,31 @@ async function joinSoul(run, w, i) {
   const token = () => { try { return JSON.parse(readFileSync(join(dir, '.eden-agent.json'), 'utf8')).token ?? null; } catch { return null; } };
   for (const t0 = mono(); !token() && mono() - t0 < 120_000;) { const r = await runCli(dir, ['create', `Slope${i}`], 150_000); if (!token()) { log(`soul ${i} create: ${r.code} ${r.err.split(ROOT).join('.')}`); await sleep(2000); } }
   if (!token()) throw new Error(`soul ${i} did not join`);
-  return { i, token: token(), address: `198.51.100.${i + 1}` };
+  const s = { i, token: token(), address: `198.51.100.${i + 1}` }, p = await startPicture(w.origin, s);   // the client's start (#1945)
+  if (!p.catalog) throw new Error(`soul ${i}: catalog ${p.catalogStatus}`);
+  return Object.assign(s, { catalog: p.catalog, liveStatus: p.liveStatus });
 }
 function requestOf(route, n, run) {
-  const act = (capability) => ['POST', '/v1/edge/act', { capability, params: {}, clientRef: `${run.id}-${run.seq++}` }];
+  const act = (capability) => ['POST', '/v1/edge/act', actBody(capability, `${run.id}-${run.seq++}`)];
   if (route === 'here') return ['GET', '/v1/edge/here?include=doHere'];
   if (route === 'observe') return ['GET', '/v1/edge/observe'];
   if (route === 'capabilities') return ['GET', '/v1/edge/capabilities'];
   if (route.startsWith('walk:')) return act(route);
-  if (route === 'resolve') return ['POST', '/v1/edge/resolve', { capability: ['sit down', 'wave', 'look around'][n % 3], params: {} }];
   const a = ACTS[n % ACTS.length];
   return a === 'say' ? ['POST', '/v1/edge/say', { text: 'hello from the slopes bench' }] : act(a);
 }
-// The CLI's etiquette (as the meetup bench): a designed busy answer is waited out for its Retry-After, up to 3 times;
-// the waits are inside the call's time and counted (busyWaits, waitMs, refusals by code).
-const BUSY = /\b(world\.busy|world\.crowded|world\.starting|soul\.busy|soul\.slow-down|rate-limited|client\.rate|account\.rate)\b/;
-async function call(run, w, s, route, n) {
-  const [method, path, body] = requestOf(route, n, run), t = mono(), key = route === 'act' && !body.capability ? `${run.id}-${run.seq++}` : null;
-  let status = 0, code = null, d = null, bytes = 0, busy = 0, waitMs = 0; const refusals = [];
-  for (;;) {
-    try {
-      const r = await fetch(`${w.origin}${path}`, { method, headers: { authorization: `Bearer ${s.token}`, 'content-type': 'application/json', 'x-forwarded-for': s.address, ...(key ? { 'idempotency-key': key } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(60_000) });
-      const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; try { d = JSON.parse(text); } catch { d = null; } code = d?.error?.code ?? d?.code ?? null;
-      if ((status === 429 || status === 503) && BUSY.test(String(code)) && busy < 3) { busy++; refusals.push(code); const ra = Number(r.headers.get('retry-after')), w0 = mono(); await sleep(ra > 0 ? ra * 1000 : 1000 * 2 ** busy); waitMs += mono() - w0; continue; }
-    } catch (e) { status = e?.name === 'TimeoutError' ? -1 : 0; }
-    break;
-  }
-  const accepted = route === 'resolve' ? d?.resolve?.ok : d?.accepted;
-  return { route, ms: Math.round(mono() - t), bytes, status, outcome: outcomeOf({ status, code, accepted }), ...(code ? { code } : {}), ...(busy ? { busyWaits: busy, waitMs: Math.round(waitMs), refusals } : {}) };
+// The client's etiquette (client-soul.mjs clientCall): a designed busy or stalled answer is waited out for its
+// Retry-After, up to 3 times; no answer is tried again with full jitter, up to 6 tries; the waits are inside the call's
+// time and counted (busyWaits, waitMs, refusals by code). An act or say is keyed; an accepted act's receipt is read once
+// after it (receiptMs, receiptStatus; not inside the call's time), except in the probe (one route at a time).
+async function call(run, w, s, route, n, { receipt = true } = {}) {
+  const [method, path, body] = requestOf(route, n, run), t = mono(), key = body?.clientRef ?? (method === 'POST' ? `${run.id}-${run.seq++}` : null);
+  const x = await clientCall(`${w.origin}${path}`, { method, headers: clientHeaders(s, { key }), body, deadlineMs: method === 'GET' ? 60_000 : 90_000 });
+  const { status, code, data: d, bytes, busy, waitMs, refusals } = x;
+  const out = { route, ms: Math.round(mono() - t), bytes, status, outcome: outcomeOf({ status, code, accepted: d?.accepted }), ...(code ? { code } : {}), ...(busy ? { busyWaits: busy, waitMs, refusals } : {}) };
+  const rid = d?.receipt?.id;
+  if (receipt && rid && status >= 200 && status < 300) { const t1 = mono(), r = await clientCall(`${w.origin}/v1/edge/receipts/${encodeURIComponent(rid)}`, { headers: clientHeaders(s), deadlineMs: 60_000 }); Object.assign(out, { receiptMs: Math.round(mono() - t1), receiptStatus: r.status }); }
+  return out;
 }
 
 // ------------------------------------------------------------------ #1961: a walkers arm
@@ -230,9 +231,8 @@ async function walkRun(arm, rep) {
       souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
     }
     await jp.close(); jp = null;
-    const caps = souls.length ? (await getJ(`${W.origin}/v1/edge/capabilities?all=1`, 60_000, { authorization: `Bearer ${souls[0].token}` })).j?.capabilities ?? [] : [];
-    const places = caps.filter((c) => c.verb === 'walk' && c.available && c.id.startsWith('walk:')).map((c) => c.id).sort();
-    if (souls.length && !places.length) throw new Error('no walk places in the first Soul\'s menu');
+    const places = souls.length ? [...catalogIds(souls[0].catalog).walk].sort() : [];
+    if (souls.length && !places.length) throw new Error('no walk places in the first Soul\'s catalog');
     log(`${run.id}: ${souls.length} walkers joined, ${places.length} places; walking`);
     // each walker walks to another place every WALK_EVERY_MS from a seeded offset, so all are moving through the window
     const R = rng(`${SLOPES}|${run.id}|walk`); walking = true;
@@ -290,7 +290,7 @@ async function oneRun(arm, rep) {
     if (prof) await prof.start();
     const probe = {};
     for (const route of PROBE_ROUTES) {
-      const a = proc(W.pid), cs = []; for (let n = 0; n < PROBE_N; n++) cs.push(await call(run, W, souls[n % souls.length], route, n)); const b = proc(W.pid);
+      const a = proc(W.pid), cs = []; for (let n = 0; n < PROBE_N; n++) cs.push(await call(run, W, souls[n % souls.length], route, n, { receipt: false })); const b = proc(W.pid);
       probe[route] = probeRoute(cs, { cpuS: a && b ? b.cpuS - a.cpuS : null, spanMs: a && b ? b.t - a.t : null, quietCores });
       for (const c of cs) appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ phase: 'probe', ...c }) + '\n');
     }
