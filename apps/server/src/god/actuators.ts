@@ -469,6 +469,8 @@ export function farOutcome(far: FarAct, finished: boolean, soul: EdgeSoul, find:
   if (!me || !at || Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_REACH + 1) return { code: 'object.not-reached', reason: `Did not reach ${t.name}; nothing changed.` };
   // the thing may have turned private or locked, or its policy changed, during the walk: the same named refusal a near act gets
   const denied = host.access?.(far.id, soul); if (denied) return denied;
+  // #1859: someone else's hand may have started on it while the body walked (a near act is refused the same way)
+  const busy = host.busy?.(far.id, a.name); if (busy) return busy;
   const policy = host.policy?.(far.id, soul, a.name); if (policy) return policy;
   const no = whenRefusal(a, t.state, t.name); if (no) return no;
   const patch = actionPatch(t.def, a, t.state, far.params, soul);
@@ -486,7 +488,9 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // a held far act is dropped or held only once this act's transaction commits: a newer act whose admission rolls back
     // leaves the earlier far act held, so its walk still ends in the change or a named refusal
     const db = (objects as unknown as { core?: { db?: unknown } }).core?.db;
-    const committed = (f: () => void) => { if (!db) return f(); try { afterCommit(db as never, f); } catch { f(); } };
+    // #1859: inside a transaction this cannot track (afterCommit throws), nothing is held or dropped: running it now could
+    // hold an act whose admission still rolls back
+    const committed = (f: () => void) => { if (!db) return f(); try { afterCommit(db as never, f); } catch (e) { log(`far act on ${id}: not held or dropped (${(e as Error).message})`); } };
     if (host.deferFar) committed(() => host.deferFar!(soul, null));   // a newer act of this Soul's replaces a far act it held
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;

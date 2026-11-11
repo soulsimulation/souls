@@ -9,6 +9,9 @@ This is a role followed by an active session, not a scheduler or a new service. 
 
 ## Start or resume
 
+The agenda is the pinned coordination issue named in `AGENTS.md` ("Development coordinator"), which also holds the
+rules that bind across handoffs and compactions. Read both first, and again after any context compaction.
+
 First launch is **orientation-only** unless Gene explicitly requests execution in that session. Read the rules and
 current project/process checkpoints, then inspect the status of existing work through read-only queries. Summarize
 what is live, merged but unreleased, in progress or waiting; identify existing workers, jobs, CI, release activity,
@@ -40,8 +43,10 @@ read the small manifest/current state and relevant issue evidence, not the entir
 
 1. Translate new requests into outcomes and acceptance; search related issues, actual code and existing PRs first.
    Create or refine a ticket. A feature idea alone does not authorize implementation outside the agreed agenda.
-2. Select a small ready queue in priority/dependency order. Prefer useful single-digit-hour deliverables, including
-   proof. Split larger outcomes without silently discarding scope. Sequence shared-contract changes before consumers.
+2. Dispatch bounded task issues in the agenda's order: one issue per lane, each with a ceiling of 1 to 4
+   agent-hours, a Touches list, at most five acceptance items, what is not in it and a stop rule
+   ([template](../../.github/ISSUE_TEMPLATE/task.yml)). Write these yourself before dispatch; a lane never writes
+   its own. Split larger outcomes into several tasks without silently discarding scope. Sequence shared-contract changes before consumers.
 3. Compare likely touched code, assumptions and scarce resources with active work. Prefer orthogonal lanes. If work
    is coupled, serialize it or agree a small interface and explicit parent revision; do not invent permanent departments.
 4. Assign one writer per isolated worktree and test-data/port set. Reuse read-only assets and caches. A GitHub claim
@@ -83,8 +88,12 @@ Required independent diagnosis/review uses the same capacity budget; workers mus
 
 ## Operate with little coordination
 
-Keep every lane busy. A lane is either running or has a handoff the coordinator will be woken for; on every wake
-the coordinator reconciles every lane, and an idle lane is a coordinator failure. Mechanical repository work
+A lane works one task issue and ends its session at the issue's stop rule. The coordinator then reviews the pull
+request against the Acceptance and the Touches list and dispatches the next task; on every wake it reconciles every
+lane. A ceiling is a limit, not a target: send back work that goes beyond a task's acceptance, and when a lane stops
+at its ceiling or on scope, edit the issue or open a new one. Never extend a task by message. With each release,
+post a table of the tasks merged since the last one: ceiling, hours taken, and how each ended (done, stopped at the
+ceiling, stopped on scope). Mechanical repository work
 (review dispatch, merge-queue labelling, CI and merge-train triage, release-candidate summaries) belongs to a
 standing workhorse repo steward, not the frontier coordinator; the steward never deploys or runs a paid gate. Worker
 rules and per-harness mechanics: [sustaining lanes](coordinator-portability.md#sustaining-lanes).

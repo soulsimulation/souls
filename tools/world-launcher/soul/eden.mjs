@@ -5,7 +5,7 @@
 // no guards. Every command is one or two HTTP calls to the world and prints JSON.
 // Private state (world URL, Soul id, bearer token) lives in a `.souls/` home, or .eden-agent.json in a legacy folder.
 
-import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync, mkdirSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readlinkSync, realpathSync, writeFileSync, writeSync, renameSync, lstatSync, openSync, closeSync, unlinkSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { createHash, randomUUID, randomBytes } from "node:crypto";
@@ -22,7 +22,7 @@ import * as soulHome$fs from "node:fs";
 import * as soulHome$path from "node:path";
 const soulHome = (() => {
 const { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } = soulHome$fs;
-const { basename, dirname, join, resolve } = soulHome$path;
+const { basename, dirname, join, relative, resolve } = soulHome$path;
 // home.mjs: the Souls home, one `.souls/` folder holding every Soul a person keeps on this machine. No HTTP and no
 // model: `doctor` is handed its one way of asking a world. Design: docs/design/soul-context.md section 1.
 //
@@ -82,6 +82,47 @@ function findHome({ cwd, env = {}, homedir }) {
 }
 
 function globalRoot(homedir) { return join(homedir, HOME_NAME); }
+const HOMES_FILE = "homes.json";
+/** The live Souls a home holds, read without opening it. */
+function soulsIn(root) {
+  const c = readJsonQuietly(join(root, "config.json"));
+  return Object.entries(c?.souls ?? {}).filter(([, e]) => e?.state === "active").map(([id, e]) => ({ id, name: plainName(e.name) || id, world: e.world }));
+}
+/** The homes this machine knows of: the user-level one and the folder homes it lists. */
+function knownHomes(homedir) {
+  const g = globalRoot(homedir), listed = readJsonQuietly(join(g, HOMES_FILE))?.homes;
+  return [...new Set([g, ...(Array.isArray(listed) ? listed.filter((r) => typeof r === "string") : [])])].filter(isHome);
+}
+/** A folder home joins the user-level home's list, and only once that exists: then another folder can say where its Souls are. */
+function rememberHome(homedir, root) {
+  const g = globalRoot(homedir), r = real(root);
+  if (!isHome(g) || r === real(g)) return false;
+  try {
+    const was = readJsonQuietly(join(g, HOMES_FILE))?.homes, list = Array.isArray(was) ? was.filter((x) => typeof x === "string" && isHome(x)) : [];
+    if (list.includes(r)) return false;
+    writeJson(join(g, HOMES_FILE), { version: 1, homes: [...list, r] });
+    return true;
+  } catch { return false; }
+}
+/** A home with nothing in it yet: no Soul, no god seat, no approval waiting. */
+function emptyHome(root) {
+  // Anything unreadable or unexpected counts as in use: a home that can't be read is never removed.
+  const strict = (file, fallback) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch (e) { if (e.code === "ENOENT" && fallback !== undefined) return fallback; throw e; } };
+  try {
+    const c = strict(join(root, "config.json")), creds = strict(join(root, CREDENTIALS), {}), pending = join(root, "pending");
+    const held = (o) => Object.values(o ?? {}).some((v) => v && typeof v === "object" && Object.keys(v).length);
+    const seats = existsSync(pending) ? readdirSync(pending).map((k) => strict(join(pending, k, STATE_FILE), {})) : [];
+    return !Object.keys(c.souls ?? {}).length && !Object.keys(c.gods ?? {}).length && !held(creds.souls) && !held(creds.gods) && !held(creds.approvals)
+      && !seats.some((st) => st.pendingApproval || st.pendingCreate || st.soul)
+      && !["souls", "gods", "memory", "MEMORY.md"].some((n) => existsSync(join(root, n)) && (n === "MEMORY.md" || readdirSync(join(root, n)).length));
+  } catch { return false; }
+}
+/** The skill's own version, from its frontmatter. */
+const skillVersionOf = (text) => /^\s*version:\s*"?([0-9][0-9.]*)"?\s*$/m.exec(String(text ?? ""))?.[1] ?? null;
+/** Where a home keeps the skill: SKILL.md beside .souls/, and the project copies where a person put them. */
+const SKILL_COPIES = ["SKILL.md", ".claude/skills/souls/SKILL.md", ".agents/skills/souls/SKILL.md"];
+/** A file is the Souls skill only when its frontmatter says so: another skill's SKILL.md is never ours to replace. */
+const isSoulsSkill = (text) => /^---\n[\s\S]*?^name:\s*"?souls"?\s*$[\s\S]*?^---$/m.test(String(text ?? ""));
 
 function writeJson(file, value, mode = 0o600) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -159,7 +200,7 @@ function selectSoul(cfg, sel, { cmd } = {}) {
   const named = Object.entries(cfg.souls).filter(([id, e]) => (id === who || norm(e.name) === norm(who)) && (!world || e.world === world || e.at === world));
   const live = named.filter(([, e]) => e.state === "active" || (e.state === "unpaired" && LOCAL_READS.has(cmd)));
   if (live.length === 1) return live[0][0];
-  if (live.length > 1) throw new Error(`Several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
+  if (live.length > 1) throw new Error(`soul.ambiguous: several Souls answer to ${who}: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
   if (named.length) throw new Error(`${named[0][1].name} is ${named[0][1].state} and takes no commands here. See: list, doctor, adopt.`);
   return null;
 }
@@ -189,13 +230,13 @@ function chooseContext(cfg, { cmd, selector, url, seatState = () => ({}) }) {
   if (atWorld) {
     const here = live.filter(([, e]) => (e.at ?? e.world) === atWorld);
     if (here.length === 1) return { soul: here[0][0] };
-    if (here.length > 1) throw new Error(`Several Souls are in ${atWorld}: ${here.map(([, e]) => norm(e.name)).join(", ")}. Say which.`);
+    if (here.length > 1) throw new Error(`soul.ambiguous: several Souls are in ${atWorld}: ${here.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Say which.`);
     return { seat: atWorld };
   }
   if (live.length === 1) return { soul: live[0][0] };
   if (live.length > 1) {
     if (cfg.default && cfg.souls[cfg.default]?.state === "active") return { soul: cfg.default };
-    throw new Error(`Several Souls live here: ${live.map(([, e]) => norm(e.name)).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
+    throw new Error(`soul.ambiguous: several Souls live here: ${live.map(([, e]) => `${norm(e.name)}@${e.world}`).join(", ")}. Name one first, like: node eden.mjs ${norm(live[0][1].name)} ${cmd ?? "here"} (or set one: default <name>)`);
   }
   const unpaired = Object.entries(cfg.souls).filter(([, e]) => e.state === "unpaired");
   if (LOCAL_READS.has(cmd) && unpaired.length === 1) return { soul: unpaired[0][0] };
@@ -520,6 +561,28 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     updateConfig((c) => { c.client = version; });
     return at("bin", "eden.mjs");
   }
+  /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
+  const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
+  const read = (file) => { try { return readFileSync(file, "utf8"); } catch { return null; } };
+  /** Each skill copy beside the home and in `also` (the folder an agent works in), and its version. */
+  const skillVersions = (also = []) => {
+    const here = real(also[0] ?? folder());   // paths are said from where the agent works, never whole
+    const said = (file) => { const r = relative(here, file); return r.startsWith("..") ? `beside the home: ${relative(real(folder()), file)}` : r; };
+    return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
+      .map((file) => ({ file, text: read(file) })).filter((c) => isSoulsSkill(c.text)).map(({ file, text }) => ({ rel: said(file), file, version: skillVersionOf(text) }));
+  };
+  /** The versioned copies older than `version`: what `upgrade` refreshes. */
+  const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
+  /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
+   *  never over one as new, never a new file. */
+  function installSkill(bytes, version, also = []) {
+    const wrote = [];
+    for (const { file, rel } of skillBehind(version, also)) {
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+    }
+    return wrote;
+  }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
   /** The guide's head, where a chat learns who lives here, rewritten in place in a guide this home wrote (CLAUDE.md, AGENTS.md
@@ -536,9 +599,9 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     return wrote;
   }
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, refreshGuide, config, noteConsolidation, installBundle, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
-return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
+return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, isSoulsSkill, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
 // </inline home.mjs>
 
@@ -2169,7 +2232,7 @@ return { PUSHED_FRESH_MS, SPEECH_KEEP, canon, liveHash, wholeCopy, resumeFrom, a
 })();
 // </inline live.mjs>
 
-const VERSION = "2.31.0";
+const VERSION = "2.33.0";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2926,6 +2989,13 @@ const clean = (d) => {
 
 // ---------------------------------------------------------------- setup and pairing
 
+/** A second register of a world this seat knows (#1875 A6): the same seat again, and the Soul already living there. */
+function registeredBefore(prev, w) {
+  if (prev.world !== w || prev.accountAuth === undefined) return null;
+  const live = HOME ? HOME.principals().filter((p) => p.state === "active") : [], there = live.filter((p) => HOME.config().worlds[p.world]?.url === w);
+  const soul = HOME ? there[0] : prev.soul && prev.token ? { address: "" } : null;
+  return soul ? { reconnection: "already connected", next: `${CLI}${live.length > 1 ? ` ${soul.address}` : ""} status` } : { reconnection: "registered again" };
+}
 async function register(world, { asked = true } = {}) {
   const prev = load();
   if (!world && !prev.world) throw new Error("usage: register <world-url>");
@@ -2933,32 +3003,37 @@ async function register(world, { asked = true } = {}) {
   const w = (world ?? prev.world).replace(/\/+$/, "");
   if (!/^https?:\/\/.+\/w\/[a-z0-9-]+$/.test(w)) throw new Error("world must look like https://host/w/<world>");
   if (prev.world && prev.world !== w && prev.soul) throw new Error(`This folder already belongs to another world's Soul. Use a fresh folder, or move this one into a Souls home first: ${CLI} import`);
+  const again = registeredBefore(prev, w);
   save({ world: w });
   const cfg = ok(await call("/v1/config", { as: "none" }), "config");
   if (cfg.accountAuthRequired) {
     save({ accountAuth: true, worldId: cfg.worldId });
     noteWorld(w, cfg, true, named);
-    return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)` };
+    return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>" --for <CODE>   (or pair <soulId> --for <CODE>)`, ...again };
   }
   if (!cfg.devAuth) throw new Error("This world accepts neither account approvals nor self-made identities.");
   save({ accountAuth: false, identity: prev.identity ?? "agent-" + randomBytes(12).toString("hex") });
   noteWorld(w, cfg, false, named);
-  return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"` };
+  return { registered: true, world: w, worldName: cfg.worldName, next: `${CLI} create "<Name>"`, ...again };
 }
 
 function noteWorld(url, cfg, accountAuth, asked = true) {
+  SERVED = { url, version: cfg.soulClient?.version ?? null, skill: cfg.soulClient?.skill?.version ?? null };
   if (!HOME) return;
-  const c = cfg.soulClient, key = HOME.ensureWorld(url, { name: soulHome.plainName(cfg.worldName) || undefined, worldId: cfg.worldId, accountAuth, ...(c ? { contract: c.contract, bundle: c.version, minClient: c.minVersion } : {}) });
+  const c = cfg.soulClient, key = HOME.ensureWorld(url, { name: soulHome.plainName(cfg.worldName) || undefined, worldId: cfg.worldId, accountAuth, ...served(c) });
   if (c && soulHome.newerThan(c.minVersion, VERSION)) throw new Error(`This world needs eden ${c.minVersion} or newer; this is ${VERSION}. Run: ${CLI} upgrade ${key}`);
   HOME.setCurrentWorld(key);
   if (asked) HOME.madeFor(url);   // only a world a person named earns trust: a url out of an imported file never does
 }
 
+/** #1875: `--move` takes control of a Soul another folder holds now, which disconnects that folder. */
+let MOVE = false;
 function forOption(argv) {
   const rest = [];
   let code;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--for") code = argv[++i];
+    if (argv[i] === "--move") MOVE = true;
+    else if (argv[i] === "--for") code = argv[++i];
     else if (argv[i].startsWith("--for=")) code = argv[i].slice(6);
     else rest.push(argv[i]);
   }
@@ -2973,14 +3048,34 @@ function forOption(argv) {
 // Soul or a reconnection. The server mints the Soul's delegated token when approved.
 async function startApproval(input, code) {
   const s = load();
-  const pending = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input })
-    ? s.pendingApproval
-    : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
-  const r = ok(await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } }), "approval start");
-  const a = r.approval ?? r;
+  if (MOVE) input = { ...input, move: true };
+  const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
+  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
+  // #1875 A6: a Soul another folder holds now is not taken over unasked. The world refuses it (soul.held-elsewhere) before
+  // any request exists; this read, when there is a code, only lets the refusal name the Soul first.
+  if (!resumed && !MOVE && code && (input.soulId || input.name)) {
+    const list = await call("/v1/agent/approval/souls", { as: "none", body: { for: code } });
+    const it = list.status === 200 ? (list.data?.souls ?? []).find((x) => (input.soulId ? x.id === input.soulId : fold(x.name) === fold(input.name))) : null;
+    if (it?.control?.held) throw heldElsewhere(it);
+  }
+  const started = await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } });
+  if (started.status === 409 && codeOf(started.data) === "soul.held-elsewhere") throw heldElsewhere({ id: input.soulId, name: input.name });
+  const r = ok(started, "approval start"), a = r.approval ?? r;
   pending.approvalId = a.id;
   save({ pendingApproval: pending });
-  return publicApproval(a, s.world);
+  return { ...publicApproval(a, s.world), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
+}
+/** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. A
+ *  Soul this home keeps without a working token is most likely its own grant, left in an older copy of this folder. */
+function heldElsewhere(soul) {
+  const kept = HOME ? Object.entries(HOME.config().souls).find(([id, e]) => id === soul.id || (!soul.id && soulHome.norm(e.name) === soulHome.norm(soul.name))) : null;
+  const who = soul.name ?? kept?.[1].name ?? soul.id ?? "This Soul";
+  const where = kept && !HOME.load(HOME.soul(kept[0])).token ? null : soulHome.knownHomes(homedir()).filter((r) => !HOME || real(r) !== real(HOME.root)).find((r) => soulHome.soulsIn(r).some((x) => x.id === soul.id));
+  const again = [CLI, ...process.argv.slice(2).map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)), "--move"].join(" ");
+  const lost = kept && !HOME.load(HOME.soul(kept[0])).token;   // no token here at all: the live grant is likely this folder's own
+  const why = lost ? `the world still has ${who} connected, perhaps from an older copy of this folder` : `${who} is controlled from another folder ${where ? `(${tilde(resolvePath(where, ".."))})` : "on this or another machine"}`;
+  return new Error(`soul.held-elsewhere: ${why}. Run there, or add --move to take control here, which disconnects the other. Next: ${again}`);
 }
 
 function publicApproval(a, world) {
@@ -2994,10 +3089,24 @@ function publicApproval(a, world) {
   };
 }
 
+/** #1875 A6: true when this home (or legacy folder) holds a token the world accepts for Soul `id`; false when it holds
+ *  none or the world refuses it; null when the world could not say (unreachable, busy). Asks the world once. Only a false
+ *  ever leads to a new pairing, because a new pairing retires the token a running listen or serve holds. */
+async function connectedAlready(id) {
+  const kept = HOME ? HOME.config().souls[id] : null;
+  if (HOME && kept?.state !== "active") return false;
+  const s = HOME ? HOME.load(HOME.soul(id)) : load();
+  if (!s.token || !s.world || (!HOME && s.soul !== id)) return false;
+  const r = await worldOnce(`${s.world}/v1/agent/me`, { method: "GET", headers: { authorization: `Bearer ${s.token}` }, timeoutMs: 15_000 });
+  if (r.status === 200) return r.data?.soul?.id === id;
+  return r.status === 401 || r.status === 403 ? false : null;
+}
+const UNSURE = (id) => Object.assign(new Error(`The world did not say whether ${id} is still connected here, so nothing was paired again (a new pairing would retire a working token). Try once more in a minute.`), { exitCode: 75 });
+
 /** In a home, a name the account already holds here is adopted, not made again. */
 async function alreadyOwned(name, s) {
   const local = HOME.principals().find((p) => soulHome.norm(p.name) === soulHome.norm(name) && p.world === SEAT?.key && p.state === "active");
-  if (local) return { created: false, code: "already-here", soul: { id: local.id, name: local.name }, reason: `${local.name} already lives in this home.`, next: `${CLI} ${local.address} status` };
+  if (local) return { created: false, code: "already-here", soul: { id: local.id, name: local.name }, reconnection: "already connected", reason: `${local.name} already lives in this home.`, next: `${CLI} ${local.address} status` };
   if (!s.identity) return null;
   const me = await call("/v1/me", { as: "dev" });
   const soul = me.status === 200 ? (me.data?.souls ?? []).find((x) => soulHome.norm(x.name) === soulHome.norm(name)) : null;
@@ -3009,7 +3118,18 @@ async function create(...argv) {
   const { rest: [name, description], code } = forOption(argv.filter((a) => a !== "--new"));
   if (!name) throw new Error('usage: create "<Name>" ["<one-line character>"] [--for <CODE>] [--new]');
   const s = load();
-  if (HOME && !fresh && !s.pendingCreate && !s.pendingApproval) { const owned = await alreadyOwned(name, s); if (owned) return owned; }
+  if (HOME && !fresh && !s.pendingCreate && !s.pendingApproval) {
+    const owned = await alreadyOwned(name, s);
+    // A Soul this home keeps whose token the world no longer takes is paired again, never made twice.
+    const live = owned?.code === "already-here" ? await connectedAlready(owned.soul.id) : undefined;
+    if (live === null) return { ...owned, reconnection: "not checked: the world didn't answer" };
+    if (live === false) { const r = await pair(owned.soul.id, ...(code ? ["--for", code] : [])); return r.paired ? { ...r, reconnection: "reconnected" } : r; }
+    if (owned) return owned;
+  }
+  if (!HOME && !fresh && s.soul && s.token && !s.pendingApproval && (await connectedAlready(s.soul))) {
+    const me = ok(await call("/v1/agent/me"), "create").soul;
+    if (soulHome.norm(me?.name) === soulHome.norm(name)) return { created: false, code: "already-here", soul: { id: s.soul, name: me.name }, reconnection: "already connected", next: `${CLI} status` };
+  }
   if (s.accountAuth) return startApproval({ name, ...(description ? { description } : {}) }, code);
   // Legacy dev-identity world.
   // 2.5.3: a create still finishing (503 lifecycle-pending) is kept in the folder; running the same create again waits
@@ -3027,7 +3147,7 @@ async function create(...argv) {
     // own Soul. Find it and finish it; only someone else's Soul is a real "taken".
     const mine = await ownCreate(name);
     if (mine?.lifecycle) return finishCreate(keepPending(name, description, mine.lifecycle));
-    if (mine?.soulId) return paired(mine.soulId, name, s);
+    if (mine?.soulId) return paired(mine.soulId, name, s, { made: false });
     return { created: false, code: "name-taken", reason: "That name is taken. Choose another." };
   }
   const d = ok(r, "create");
@@ -3042,7 +3162,10 @@ function keepPending(name, description, lc) {
   save({ pendingCreate: p });
   return p;
 }
-async function paired(id, name, s = load()) {
+async function paired(id, name, s = load(), { made = true } = {}) {
+  const live = !made && HOME ? await connectedAlready(id) : false;
+  if (live === null) throw UNSURE(id);
+  if (live) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
   if (!(s.soul === id && s.token)) await devPair(id);
   writeGuide(name);
   return { created: true, soul: { id, name }, paired: true };
@@ -3091,6 +3214,9 @@ async function finishCreate(p, firstWaitMs) {
 async function pair(...argv) {
   const { rest: [id], code } = forOption(argv);
   if (!/^s_[A-Za-z0-9_-]+$/.test(id ?? "")) throw new Error("usage: pair <soulId> [--for <CODE>]");
+  const live = await connectedAlready(id);
+  if (live === null) throw UNSURE(id);
+  if (live) return { paired: true, soul: id, reconnection: "already connected" };
   const s = load();
   if (s.accountAuth) return startApproval({ soulId: id }, code);
   await devPair(id);
@@ -3151,6 +3277,11 @@ async function devPair(id) {
 async function approval(action = "status") {
   if (!["status", "wait", "cancel"].includes(action)) throw new Error("usage: approval [status|wait|cancel]");
   const s = load();
+  if (!s.pendingApproval && action !== "cancel" && HOME && SEAT?.kind === "seat") {
+    // A second onboarding's `approval wait`: the Soul it would wait for is already here and paired.
+    const here = HOME.principals().filter((p) => p.state === "active" && p.world === SEAT.key);
+    if (here.length === 1 && (await connectedAlready(here[0].id)) === true) return { status: "ready", soul: { id: here[0].id, name: here[0].name }, paired: true, reconnection: "already connected", next: `${CLI} status` };
+  }
   const p = need(s, "pendingApproval", "Run create or pair first.");
   const body = { approvalId: p.approvalId, pollSecret: p.input.pollSecret };
   if (action === "cancel") {
@@ -3167,7 +3298,7 @@ async function approval(action = "status") {
       if (!token.startsWith(`sim_${a.soulId}_`)) throw new Error("Approval returned a credential for a different Soul; nothing saved.");
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move ? { moved: "Control moved here; the folder that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
@@ -3195,7 +3326,7 @@ async function status() {
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
-    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>   (takes control back; the code is on your person's open world page)` };
+    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
   }
@@ -5373,9 +5504,9 @@ async function batch(json) {
 
 const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.
 
-setup     register <world-url>            create "<Name>" [--for CODE] [--new]    pair <soulId> [--for CODE]
+setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new] [--move]    pair <soulId> [--for CODE] [--move]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
@@ -5403,6 +5534,47 @@ async function inspect(id, ...flags) {
 
 // ---------------------------------------------------------------- the Souls home
 
+// #1875 A3: what each world serves, so every command in a home can say when a newer client and skill wait there (a legacy
+// folder has no `upgrade`). A world's answer is kept 10 minutes in config.json; a command that read /v1/config itself uses
+// that, and a cold one asks once, alongside the command.
+let SERVED = null;
+const UPDATE_FRESH_MS = 10 * 60_000;
+/** A world's soulClient as a home records it, with when it was read. */
+const served = (c) => ({ ...(c ? { contract: c.contract, bundle: c.version, minClient: c.minVersion, skillVersion: c.skill?.version } : {}), checkedAt: now() });
+function updateWorld() {
+  if (!HOME) return null;
+  const cfg = HOME.config(), url = (SEAT ? load().world : null) ?? cfg.worlds[cfg.currentWorld]?.url;
+  return url ? { url, key: soulHome.keyOf(cfg.worlds, url), several: Object.keys(cfg.worlds).length > 1 } : null;
+}
+function updateKept(w) {
+  const e = HOME.config().worlds[w.key];
+  return e?.checkedAt ? { url: w.url, version: e.bundle ?? null, skill: e.skillVersion ?? null, at: e.checkedAt } : null;
+}
+function startUpdateCheck(cmd) {
+  if (["upgrade", "help", "serve", "listen"].includes(cmd)) return null;
+  try {
+    const w = updateWorld(), kept = w && updateKept(w);
+    if (!w) return null;
+    if (kept && Date.now() - Date.parse(kept.at) < UPDATE_FRESH_MS) return Promise.resolve({ ...kept, w });
+    return worldOnce(`${w.url}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).then((r) => {
+      const c = r.status === 200 ? r.data?.soulClient : null, v = { url: w.url, version: c?.version ?? null, skill: c?.skill?.version ?? null, at: now() };
+      HOME.ensureWorld(w.url, c ? served(c) : { checkedAt: v.at });
+      return { ...v, w };
+    }).catch(() => null);
+  } catch { return null; }
+}
+/** `update: {from, to, run}` when the world serves a newer client, or a newer skill than a copy this home keeps. */
+async function updateNotice(pending) {
+  try {
+    const v = SERVED ?? (pending ? await pending : null), w = v?.w ?? updateWorld();
+    if (!v || !w) return null;
+    const run = `${CLI} upgrade${w.several && w.key ? ` ${w.key}` : ""}`;
+    if (soulHome.newerThan(v.version, VERSION)) return { from: VERSION, to: v.version, run };
+    const old = HOME && v.skill ? HOME.skillBehind(v.skill, [INVOKED])[0] : null;
+    return old ? { from: old.version ?? "unversioned", to: v.skill, run, what: `the skill (${old.rel})` } : null;
+  } catch { return null; }
+}
+
 const needHome = () => { if (!HOME) throw new Error(`No Souls home here. Start one with ${CLI} register <world-url>, or bring a Soul folder in with ${CLI} import`); return HOME; };
 function refreshGuide() { if (HOME.principals().some((p) => p.state === "active")) writeGuide(""); }
 const listCommand = async () => needHome().list();
@@ -5419,7 +5591,7 @@ async function doctorCommand(...argv) {
   for (const [world, w] of Object.entries(HOME.config().worlds)) {
     const { status, data } = await worldOnce(`${w.url}/v1/config`, { method: "GET", headers: {}, timeoutMs: 25_000 }), c = status === 200 ? data?.soulClient : null;
     if (!c) continue;
-    HOME.ensureWorld(w.url, { contract: c.contract, bundle: c.version, minClient: c.minVersion });
+    HOME.ensureWorld(w.url, served(c));
     if (soulHome.newerThan(c.minVersion, VERSION)) (out.needsUpgrade ??= []).push({ world, needs: c.minVersion, next: `${CLI} upgrade ${world}` });
   }
   if (out.retired.length) refreshGuide();
@@ -5465,28 +5637,38 @@ async function upgradeCommand(...argv) {
   };
   const said = await (await get("/v1/config")).json().catch(() => { throw new Error(`${key} did not answer /v1/config with JSON. Nothing changed.`); }), m = said?.soulClient;
   if (!m) throw new Error(`${key} does not say which bundle it serves, so there is nothing to verify against. Nothing changed.`);
-  const trusted = cfg.trustedOrigins ?? [], note = () => home.ensureWorld(w.url, { contract: m.contract, bundle: m.version, minClient: m.minVersion });
+  const trusted = cfg.trustedOrigins ?? [], note = () => home.ensureWorld(w.url, served(m));
   // One bundle speaks one contract. A trusted site's contract is final; any other world can say what it likes about its own,
   // so a person who names this world can go past that one.
   const clashes = Object.entries(cfg.worlds).filter(([k, v]) => k !== key && v.contract && v.contract !== m.contract), firm = clashes.find(([, v]) => trusted.includes(soulHome.originOf(v.url))), clash = firm ?? clashes[0];
   if (clash && (firm || !trust)) throw new Error(`${key} speaks ${m.contract} and ${clash[0]} speaks ${clash[1].contract}: no one bundle serves both. Nothing changed.${firm ? "" : ` ${clash[0]} is not a site this home trusts, so ask your human. Only if they agree: ${CLI} upgrade ${key} --trust`}`);
-  if (!soulHome.newerThan(m.version, VERSION)) {
+  // #1875 A2: the skill moves with the client. A world that does not describe its skill upgrades the client only.
+  const cliNewer = soulHome.newerThan(m.version, VERSION), skillOld = m.skill?.version ? home.skillBehind(m.skill.version, [INVOKED]) : [];
+  if (!cliNewer && !skillOld.length) {
     note();
     if (soulHome.newerThan(m.minVersion, VERSION)) throw new Error(`${key} needs eden ${m.minVersion} or newer but serves ${m.version}, so it has no bundle to give this home. Tell whoever keeps that world.`);
-    return { upgraded: false, world: key, version: VERSION, served: m.version, note: "This bundle is as new as what that world serves, and it still works there." };
+    return { upgraded: false, world: key, version: VERSION, served: m.version, note: "This bundle and skill are as new as what that world serves, and they still work there." };
   }
   // Whatever is installed here runs with every token in this home, for every world, so one world's say-so is not enough.
   const origin = soulHome.originOf(w.url), safe = /^https:/.test(origin) || /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|$)/.test(origin), ask = `Ask your human. Only if they agree: ${CLI} upgrade ${key} --trust`;
   if (!safe && !trust) throw new Error(`A new client runs with every Soul's token in this home, and ${origin} is plain http off this machine, so anyone between here and there could change it. ${ask}`);
   if (!trusted.includes(origin) && !trust) throw new Error(`A new client runs with every Soul's token in this home, and ${origin} is not a site this home trusts. ${ask}`);
-  const bytes = Buffer.from(await (await get("/eden.mjs")).arrayBuffer()), sha = createHash("sha256").update(bytes).digest("hex");
-  if (bytes.length !== m.bytes || sha !== m.sha256) throw new Error(`The bundle ${key} sent is not the one it describes (${bytes.length} bytes, expected ${m.bytes}; its hash ${sha === m.sha256 ? "matches" : "differs"}). Nothing changed.`);
-  const stated = /^const VERSION = "([0-9.]+)";$/m.exec(bytes.toString("utf8"))?.[1];
-  if (stated !== m.version) throw new Error(`The bundle ${key} sent calls itself ${stated ?? "nothing"}, and the world says ${m.version}. Nothing changed.`);
+  const verified = async (path, want, stated) => {
+    const bytes = Buffer.from(await (await get(path)).arrayBuffer()), sha = createHash("sha256").update(bytes).digest("hex");
+    if (bytes.length !== want.bytes || sha !== want.sha256) throw new Error(`The ${path.slice(1)} ${key} sent is not the one it describes (${bytes.length} bytes, expected ${want.bytes}; its hash ${sha === want.sha256 ? "matches" : "differs"}). Nothing changed.`);
+    const says = stated(bytes.toString("utf8"));
+    if (says !== want.version) throw new Error(`The ${path.slice(1)} ${key} sent calls itself ${says ?? "nothing"}, and the world says ${want.version}. Nothing changed.`);
+    return bytes;
+  };
+  // Both are checked before either is written.
+  const bytes = cliNewer ? await verified("/eden.mjs", m, (t) => /^const VERSION = "([0-9.]+)";$/m.exec(t)?.[1]) : null;
+  const skill = m.skill?.version && skillOld.length ? await verified("/skill.md", m.skill, (t) => (soulHome.isSoulsSkill(t) ? soulHome.skillVersionOf(t) : "another skill (its frontmatter is not name: souls)")) : null;
   note();
   if (trust) home.trustOrigin(origin);
-  if (!home.installBundle(bytes, process.argv[1], m.version)) return { upgraded: false, world: key, version: home.config().client, served: m.version, note: "This home's bundle is already as new." };
-  return { upgraded: true, world: key, from: VERSION, to: m.version, bytes: m.bytes, sha256: m.sha256 };
+  const installed = bytes ? home.installBundle(bytes, process.argv[1], m.version) : null, wrote = skill ? home.installSkill(skill, m.skill.version, [INVOKED]) : [];
+  const skillOut = skill ? { skill: { to: m.skill.version, wrote }, next: "Read SKILL.md again: it changed." } : {};
+  if (!installed) return { upgraded: !!wrote.length, world: key, version: home.config().client ?? VERSION, served: m.version, ...(bytes ? { note: "This home's bundle is already as new." } : {}), ...skillOut };
+  return { upgraded: true, world: key, from: VERSION, to: m.version, bytes: m.bytes, sha256: m.sha256, ...skillOut };
 }
 async function initCommand(...argv) {
   const global = argv.includes("--global"), root = global ? soulHome.globalRoot(homedir()) : needHome().root;
@@ -5495,14 +5677,58 @@ async function initCommand(...argv) {
 }
 
 const WORLD_URL = /^https?:\/\/.+\/w\/[a-z0-9-]+\/*$/;
+// #1875 A4: a user-level home, offered. The first register in a folder makes the home there and says so once; with the
+// owner's yes, `register <url> --global` keeps Souls in ~/.souls instead, which every folder under the home folder finds.
+let HOME_CHOICE = null;
+const real = (p) => { try { return realpathSync(p); } catch { return resolvePath(p); } };
+/** A path as a person reads it, without their home folder's name. */
+const tilde = (p) => { const h = homedir(); return p === h ? "~" : p.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p; };
+const homeRoots = (except) => soulHome.knownHomes(homedir()).filter((r) => !except || real(r) !== real(except)).map((r) => ({ root: r, souls: soulHome.soulsIn(r) })).filter((h) => h.souls.length);
+function homeChoice(root, url) {
+  const elsewhere = homeRoots(root).map((h) => ({ home: tilde(h.root), souls: h.souls.map((x) => `${soulHome.norm(x.name)}@${x.world}`) }));
+  return {
+    home: tilde(root).startsWith("~") ? tilde(root) : "./.souls", reaches: "this folder and the folders below it",
+    ask: "Ask your owner once, before create: keep Souls in this folder, or in a home every folder reaches (~/.souls)?",
+    global: `${CLI} register ${url} --global`, here: "nothing to run",
+    ...(elsewhere.length ? { elsewhere, note: "A Soul already lives in a home on this machine: reach it there rather than making it again." } : {}),
+  };
+}
+function goGlobal(found) {
+  if (process.env.SOULS_HOME) throw new Error("SOULS_HOME already names the home; leave out --global, or unset SOULS_HOME.");
+  if (found.kind === "legacy") throw new Error(`This folder is a one-Soul folder (${soulHome.LEGACY_STATE}). Bring it into a home first: ${CLI} import`);
+  const g = soulHome.globalRoot(homedir());
+  if (found.kind === "home" && real(found.root) !== real(g)) {
+    // Only a home this folder just made, still empty, gives way.
+    if (!(found.kind === "home" && soulHome.emptyHome(found.root) && real(resolvePath(found.root, "..")) === real(INVOKED)))
+      throw new Error(`Commands here find the home ${tilde(found.root)} first, and it is in use. Run register --global from a folder outside it.`);
+    rmSync(found.root, { recursive: true, force: true });
+    process.stderr.write(`Removed the empty home this folder had: ${tilde(found.root)}\n`);
+  }
+  const under = real(INVOKED) === real(homedir()) || real(INVOKED).startsWith(`${real(homedir())}/`);
+  HOME_CHOICE = { home: tilde(g), chosen: "global", reaches: under ? "every folder under your home folder" : `every folder under your home folder; from here set SOULS_HOME=${tilde(g)}` };
+  return soulHome.findHome({ cwd: INVOKED, env: { SOULS_HOME: g } });
+}
+/** A Soul command where no Soul lives, while a home this machine knows holds one: say where, and how to get there. */
+function soulsElsewhere(cmd, root) {
+  if (!cmd || !commands[cmd] || soulHome.HOME_COMMANDS.has(cmd) || soulHome.SEAT_COMMANDS.has(cmd)) return;
+  const there = homeRoots(root);
+  if (!there.length) return;
+  const at = there.map((h) => `${h.souls.map((x) => `${soulHome.norm(x.name)}@${x.world}`).join(", ")} in ${tilde(h.root)}`).join("; "), folder = tilde(resolvePath(there[0].root, ".."));
+  throw new Error(`soul.elsewhere: no Soul lives in this folder. This machine keeps ${at}. Reach it: cd ${folder} and run ${CLI} ${cmd} there, or bring it here: ${CLI} export <name> in ${folder}, then ${CLI} import <that folder> here.`);
+}
 /** Pick the home and the principal this run speaks for, before any command. Returns the command line without its selector. */
 export function enterHome(argv) {
-  const found = soulHome.findHome({ cwd: INVOKED, env: process.env, homedir: homedir() });
+  let found = soulHome.findHome({ cwd: INVOKED, env: process.env, homedir: homedir() });
+  if (argv[0] === "register" && argv.includes("--global")) { argv = argv.filter((a) => a !== "--global"); found = goGlobal(found); }
   const [first, second] = argv;
   const url = first === "register" && WORLD_URL.test(second ?? "") ? second.replace(/\/+$/, "") : null;
   const makes = (found.kind === "none" && (url || first === "import" || (first === "init" && !argv.includes("--global")))) || (found.kind === "legacy" && first === "import");
-  if (found.kind !== "home" && !makes) return argv;
-  if (found.kind !== "home") { soulHome.createHome(found.root, { cli: process.argv[1], version: VERSION }); process.stderr.write(`Made a Souls home here: ${found.root}\n`); }
+  if (found.kind !== "home" && !makes) { if (found.kind === "none") soulsElsewhere(first, null); return argv; }
+  if (found.kind !== "home") {
+    soulHome.createHome(found.root, { cli: process.argv[1], version: VERSION }); process.stderr.write(`Made a Souls home here: ${tilde(found.root)}\n`);
+    soulHome.rememberHome(homedir(), found.root);
+    if (url && !HOME_CHOICE && !process.env.SOULS_HOME && real(INVOKED) !== real(homedir())) HOME_CHOICE = homeChoice(found.root, url);
+  }
   HOME = soulHome.openHome(found.root, { reserved: new Set(Object.keys(commands)) });
   // An older copy in a folder of this home hands over to the home's bundle: `upgrade` holds for every copy.
   const bin = joinPath(found.root, "bin", "eden.mjs");
@@ -5516,6 +5742,7 @@ export function enterHome(argv) {
   const cmd = line[0];
   if (cmd === "upgrade" && selector) throw new Error(`upgrade goes by the world's name, not a Soul's or an @: ${CLI} upgrade <world>`);
   if (!cmd || !commands[cmd] || soulHome.HOME_COMMANDS.has(cmd)) return line;
+  if (!selector && !soulHome.SEAT_COMMANDS.has(cmd) && !HOME.principals().some((p) => p.state !== "retired")) soulsElsewhere(cmd, found.root);
   if (process.env.SOULS_PRINCIPAL) { SEAT = HOME.soul(process.env.SOULS_PRINCIPAL); process.chdir(SEAT.dir); return line; }
   const registering = cmd === "register" && WORLD_URL.test(line[1] ?? "") ? line[1].replace(/\/+$/, "") : null;
   if (registering) HOME.ensureWorld(registering);
@@ -5546,9 +5773,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!fn) { process.stdout.write(help()); process.exit(cmd ? 1 : 0); }
   let argv = args;
   try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
-  const before = FOLDER_MOVES.has(cmd) ? folderOf() : null;
+  const before = FOLDER_MOVES.has(cmd) ? folderOf() : null, pendingUpdate = startUpdateCheck(cmd);
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
+    if (out && typeof out === "object" && !Array.isArray(out)) {
+      if (cmd === "register" && HOME_CHOICE) out = { ...out, homeChoice: HOME_CHOICE };
+      const update = await updateNotice(pendingUpdate);
+      if (update) out = { ...out, update };
+    }
     await flushNow();
     const slowed = out && typeof out === "object" && !Array.isArray(out) ? slowedLine() : null;
     if (slowed) out = { slowed, ...out };

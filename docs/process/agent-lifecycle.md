@@ -18,6 +18,13 @@ Apply [bounded execution](planning.md#bounded-execution): prefer single-digit-ho
 outcome without routine milestone pauses, and get Gene's approval for substantial scope expansion. Use a supported
 goal for sustained execution or a durable checkpoint when unavailable; neither changes proof or approval requirements.
 
+Under a coordinator's agenda, work is cut into **task issues** ([template](../../.github/ISSUE_TEMPLATE/task.yml)).
+The coordinator writes each one before dispatch: at most five acceptance items, the files it may touch, what is not
+in it, a ceiling of 1 to 4 agent-hours and a stop rule. One lane works one task and stops. The ceiling is a limit,
+not a target. A defect found on the way becomes a new issue. With each release the coordinator posts a table of the
+tasks merged since the last one: ceiling, hours taken, and how each ended (done, stopped at the ceiling, stopped on
+scope).
+
 ## 2. Branch
 
 Claim the issue first (assign it and add `agent:claimed`), then work on one branch, `agent/<issue>-<slug>`, in its
