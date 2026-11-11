@@ -2934,7 +2934,7 @@ async function keyedWrite(path, body, { key: given, ref: givenRef, once = false 
   // #2083: a key held by a process still running is that process's write, not this one's: concurrent runs never share one
   const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent && !liveOther(x.pid));
   const key = given ?? held?.key ?? randomUUID(), ref = once ? givenRef ?? held?.ref ?? key : undefined, resent = !!held;
-  writePending([...readPending().filter((x) => x.intent !== intent || (x.key !== key && liveOther(x.pid))), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now(), pid: process.pid }]);
+  writePending([...readPending().filter((x) => x.intent !== intent || x.key !== key), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now(), pid: process.pid }]);
   const r = await call(path, { body: ref ? { ...body, clientRef: ref } : body, key, once });
   const settle = () => writePending(readPending().filter((x) => x.intent !== intent || x.key !== key));
   // a named key the world already holds: its own earlier act (same offered id) is this act's answer; another write's is not

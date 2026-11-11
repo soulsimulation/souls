@@ -112,6 +112,26 @@ test('concurrent runs of the same act send their own keys; a live run\'s pending
   assert.equal(f.receipts.size, 2, 'two acts, two receipts');
 });
 
+test('two concurrent runs left unconfirmed: each rerun takes one of their keys, and neither key is dropped (#1328 with #2083)', { timeout: 30_000 }, async t => {
+  let phase = 'flood'; const held = [];
+  const f = await fixture(t, (req, res, s, w) => {
+    if (s.url.startsWith('/v1/edge/operations/')) return json(res, 200, { state: 'unknown' });
+    if (s.url !== '/v1/edge/act') return json(res, 200, {});
+    if (phase === 'rerun') return json(res, 200, { accepted: true, receipt: receiptFor(w.receipts, s.body.clientRef), channel: 'body' });
+    if (held.length < 2) { held.push(() => unavailable(res)); if (held.length === 2) for (const answer of held) answer(); return; }
+    unavailable(res);
+  });
+  const first = f.run('act', 'wave:here');
+  while (!acts(f.seen).length) await new Promise(r => setTimeout(r, 20));
+  await Promise.all([first, f.run('act', 'wave:here')]);
+  const keys = [...new Set(acts(f.seen).map(s => s.key))];
+  assert.equal(keys.length, 2, 'two runs, two keys');
+  phase = 'rerun';
+  await f.run('act', 'wave:here'); await f.run('act', 'wave:here');
+  const reruns = acts(f.seen).slice(-2).map(s => s.key);
+  assert.deepEqual(reruns.sort(), [...keys].sort(), 'each rerun sent one of the unconfirmed keys');
+});
+
 test('check first: an unconfirmed act the world has a record of is reported with its receipt and phase, and not sent again', { timeout: 20_000 }, async t => {
   const f = await fixture(t, (req, res, s, w) => {
     if (s.url.startsWith('/v1/edge/operations/')) {
