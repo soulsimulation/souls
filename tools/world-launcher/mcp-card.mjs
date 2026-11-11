@@ -3,7 +3,7 @@
 // authenticated with the Soul token an agent gets by pairing (Authorization: Bearer sim_<soulId>_<secret>). The tool list
 // is what apps/server/src/mcp.ts registers (mcp-card.test.mjs keeps the two equal); eden_* tools exist on edge worlds.
 export const MCP_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json';
-export const MCP_TOOLS = Object.freeze(['eden_observe', 'eden_capabilities', 'eden_act', 'eden_here', 'eden_explore', 'eden_resolve', 'eden_receipt', 'eden_wait',
+export const MCP_TOOLS = Object.freeze(['eden_observe', 'eden_capabilities', 'eden_act', 'eden_here', 'eden_explore', 'eden_receipt', 'eden_wait',
   'eden_say', 'eden_converse', 'eden_object', 'eden_digest', 'eden_map', 'world_query', 'soul_perceive', 'soul_wait', 'soul_command', 'soul_mandate',
   'soul_steer', 'soul_remove_rule', 'soul_deck', 'soul_propose_cards', 'soul_status', 'soul_log', 'soul_set_intent', 'soul_intent_v2',
   'soul_intent_request_v2', 'soul_intent_history_v1']);
