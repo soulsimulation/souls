@@ -2768,6 +2768,9 @@ const pause = (ms) => sleep(ms * TIME_SCALE);
 const WAKE_HELD_MS = soulWake.HELD_MS * TIME_SCALE;   // #1968
 // How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
 const SERVE_START_MS = 60_000;
+// #2084: the longest a command's request waits in serve's queue behind this Soul's other requests before serve refuses it itself
+// (soul.busy), and the wait it states then.
+const SERVE_QUEUE_MS = 10_000 * TIME_SCALE, SERVE_REFUSAL_RETRY_MS = 2_000;
 /** Full jitter: uniform in [0, min(cap, base·2^attempt)]. */
 export const fullJitter = (attempt, rnd = Math.random) => rnd() * Math.min(RETRY.capMs, RETRY.baseMs * 2 ** attempt);
 /** A stated wait is a floor: the world counts a return before it as impolite. Up to 20 % more, so a crowd told "4 s"
@@ -5307,7 +5310,7 @@ async function serveForeground() {
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); runWake(); };
   // #1929: the wake rules, against what this process stores, every 2 s and whenever something arrives. Fired ones are queued.
   const runWake = () => {
@@ -5444,14 +5447,25 @@ async function serveForeground() {
     }
   }
   // One heavy request at a time, and soul.busy waited out here instead of handed back. Only reads and keyed writes repeat.
-  function gated(fn) { const p = gateTail.then(fn, fn); gateTail = p.catch(() => {}); return p; }
+  // #2084: a command's request waits its turn at most SERVE_QUEUE_MS (and half its own time); then serve answers it itself, soul.busy
+  // with a stated wait, so a flood of one Soul's commands is refused at once rather than left silent until the command gives up.
+  function gated(fn, waitMs = Infinity) {
+    gateWaiting++;
+    return new Promise((resolve, reject) => {
+      let waiting = true;
+      const timer = Number.isFinite(waitMs) ? setTimeout(() => { if (!waiting) return; waiting = false; gateWaiting--; resolve(queueRefusal()); }, waitMs) : null;
+      const run = () => { if (!waiting) return undefined; waiting = false; gateWaiting--; clearTimeout(timer); const p = Promise.resolve().then(fn); p.then(resolve, reject); return p; };
+      gateTail = gateTail.then(run, run).catch(() => {});
+    });
+  }
+  const queueRefusal = () => { busyRefused++; return { status: 429, retryAfterMs: SERVE_REFUSAL_RETRY_MS, data: { error: { code: "soul.busy", by: "serve", message: `this Soul's earlier requests are still being answered (${gateWaiting} more waiting); ask again in ${secs(SERVE_REFUSAL_RETRY_MS)}`, retry_after_s: SERVE_REFUSAL_RETRY_MS / 1000 } } }; };
   // A world's routes sit under its base path (/w/<slug> behind the launcher); match them without it.
   const basePath = new URL(world).pathname.replace(/\/$/, "");
   const routeOf = (url) => { const p = new URL(url).pathname; return p.startsWith(basePath) ? p.slice(basePath.length) : p; };
   async function forward(m) {
     const pathOf = routeOf(m.url) + new URL(m.url).search;
     // A response cut off partway is a world that did not answer, not a reason for this process to die.
-    const once = () => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs: m.timeoutMs, ...(m.proxied ? { recorded: m.proxied } : {}) }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
+    const once = (timeoutMs = m.timeoutMs) => worldOnce(m.url, { method: m.method, headers: m.headers, body: m.body, timeoutMs, ...(m.proxied ? { recorded: m.proxied } : {}) }).catch((e) => ({ status: 0, data: { error: { code: "unreachable", message: String(e?.message ?? e) } } }));
     const repeatable = m.method === "GET" || m.headers?.["idempotency-key"];
     // #1345: the agent's own look, turn or face holds off a reflex from the moment it is asked, not only once answered
     const attending = m.method === "POST" && routeOf(m.url) === "/v1/edge/act" && ATTENTION_ID.test(String(m.body?.capability ?? ""));
@@ -5459,11 +5473,19 @@ async function serveForeground() {
     try { return await forwardOnce(m, pathOf, repeatable, once); } finally { if (attending) attentionInFlight--; }
   }
   async function forwardOnce(m, pathOf, repeatable, once) {
+    // #2084: a command asked over the socket is answered within its own time (askedAt + timeoutMs): its turn waits a bounded time,
+    // its world call gets only what is left, and a stated wait is waited out here only when no one is queued behind it and half
+    // its time is left after; otherwise the refusal goes back and the command waits it out itself, without holding the queue.
+    const deadline = m.askedAt ? m.askedAt + m.timeoutMs : Infinity, left = () => Math.max(1, Math.min(m.timeoutMs, deadline - Date.now()));
     const r = HELD_PATH.test(pathOf) ? await once() : await gated(async () => {
-      let a = await once();
-      for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) { busyWaited++; await pause(statedJitter(a.retryAfterMs ?? 1_000)); a = await once(); }
+      let a = await once(left());
+      for (let tries = 0; repeatable && tries < RETRY.busyWaits && isBusy(a.status, a.data); tries++) {
+        const ms = statedJitter(a.retryAfterMs ?? 1_000);
+        if (m.askedAt && (gateWaiting > 0 || Date.now() + ms * TIME_SCALE > deadline - m.timeoutMs / 2)) break;
+        busyWaited++; await pause(ms); a = await once(left());
+      }
       return a;
-    });
+    }, m.askedAt ? Math.min(SERVE_QUEUE_MS, m.timeoutMs / 2) : Infinity);
     const p = pathOf.split("?")[0], inboxWrite = /^\/v1\/edge\/inbox\/([^/]+)\/(ack|result)$/.exec(p);
     if (r.status >= 200 && r.status < 300) {
       if (r.data?.receipt?.id) { noteReceipt(st, r.data.receipt, Date.now()); persist(); }
@@ -5617,7 +5639,7 @@ async function serveForeground() {
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
-      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
@@ -5640,7 +5662,7 @@ async function serveForeground() {
       }
       const planActFor = path === "/v1/edge/act" && m.method === "POST" && st.plan && m.body?.for && m.body.for === st.plan.for ? st.plan : null;
       if (planActFor) planActFor.servedByAct = (planActFor.servedByAct ?? 0) + 1;
-      const r = await forward(m);
+      const r = await forward({ ...m, askedAt: Date.now() });
       // #1929: a body act the agent sent itself; its end wakes the mind unless a wait or a read sees it first (act-ended)
       const mine = path === "/v1/edge/act" && m.method === "POST" && r.data?.accepted && r.data.receipt?.id && !["attention", "none"].includes(r.data.channel ?? r.data.receipt.channel) ? st.receipts[r.data.receipt.id] : null;
       if (mine) { mine.mine = true; if (ENDED.has(r.data.receipt.phase)) mine.waited = true; persist(); }
