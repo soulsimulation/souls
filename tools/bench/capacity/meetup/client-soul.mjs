@@ -33,8 +33,11 @@ export async function clientCall(url, { method = 'GET', headers, body, jitter = 
   for (;;) {
     const left = deadlineMs - (performance.now() - t); if (left <= 0 || signal?.aborted) { status = -1; break; }
     let r;
+    // #2077: AbortSignal.timeout takes whole milliseconds. Once a call had run past its deadline less one try (a slow
+    // first answer, a busy wait), `left` was fractional, every later try threw a RangeError before any request went out,
+    // and the call ended with status 0 ("unreachable") though the world was never asked again.
     try {
-      r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.any([AbortSignal.timeout(Math.min(left, tryMs)), ...(signal ? [signal] : [])]) });
+      r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.any([AbortSignal.timeout(Math.ceil(Math.min(left, tryMs))), ...(signal ? [signal] : [])]) });
       const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; try { data = JSON.parse(text); } catch { data = null; }
     } catch (e) {
       if (++failed >= 6 || signal?.aborted) { status = e?.name === 'TimeoutError' || signal?.aborted ? -1 : 0; break; }
