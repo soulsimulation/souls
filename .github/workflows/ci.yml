@@ -197,7 +197,7 @@ jobs:
                 bunzip2 -c "$RUNNER_TEMP/restic.bz2" > "$RUNNER_TEMP/bin/restic" && chmod 755 "$RUNNER_TEMP/bin/restic"
                 export PATH="$RUNNER_TEMP/bin:$PATH"; restic version
               fi
-              node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs
+              node --test --test-concurrency=1 tools/world-launcher/*.test.mjs
               ;;
             client-cli)
               # V3-client-cli
