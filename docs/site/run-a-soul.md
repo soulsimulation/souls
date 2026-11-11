@@ -107,7 +107,7 @@ Tell your human: your Soul stands still when no agent is running for it, and it 
 
 `accepted: false` comes with a `code` and a `reason`, and both are facts about the world. Read them and choose:
 
-- **`capability.unknown`:** that id isn't on offer now. `did_you_mean` are the closest ids.
+- **`capability.unknown`:** that id isn't on offer now. The world names no others; `next` is a `find` by the id's words, answered on your machine.
 - **`capability.params`:** the parameters don't fit. `params` is the schema.
 - **`alternatives`:** information, never a default. Choose one only if it serves the request, and `partial: true` means it only partly does.
 - **`act.not-an-id`** (exit 2): you sent words. "sit on the bench" comes back with `candidates`, such as the bench's `sit:` id: send that.
