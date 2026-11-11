@@ -40,6 +40,11 @@ function perActParts(file, t0, until) {
   for (const k of ['world', 'queue', 'handler', 'bind', 'check', 'wait', 'commit']) out[k] = qs(rows.map((x) => x[k]));
   out.routeMissesPerAct = rows.length ? Math.round(1000 * rows.reduce((n, x) => n + (x.routeMisses || 0), 0) / rows.length) / 1000 : null;
   out.waitOver150 = rows.filter((x) => x.wait > 150).length;
+  // #2124 DIAG: where each queued act's queue time went (held by state), and its bucket at the moment it ran
+  const q = rows.filter((x) => x.diag?.held); out.diag = { fast: rows.filter((x) => x.diag?.fast).length, queued: q.length, sum: {} };
+  for (const k of ['order', 'bucket', 'credit', 'inflight']) { out.diag[k] = qs(q.map((x) => x.diag.held[k] ?? 0)); out.diag.sum[k] = Math.round(q.reduce((n, x) => n + (x.diag.held[k] ?? 0), 0)); }
+  for (const k of ['tokens', 'need', 'refillPerS', 'active', 'budget', 'depth', 'credit', 'charged']) out.diag['run_' + k] = qs(q.map((x) => x.diag.atRun?.[k]));
+  out.diag.sample = q.filter((_, i) => i % Math.max(1, Math.floor(q.length / 40)) === 0).map((x) => ({ queue: Math.round(x.queue), handler: Math.round(x.handler), held: x.diag.held, atRun: x.diag.atRun }));
   return out;
 }
 /** #1971: the tick windows of one arm, summed: ticks, late ticks, the longest gap, and the share of time at each level. */
