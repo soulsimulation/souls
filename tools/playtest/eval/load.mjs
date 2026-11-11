@@ -15,9 +15,11 @@ import { run } from '../lib/proc.mjs';
 import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
+import { profilesIn, summarizeFile } from './cpu-window.mjs';   // MEASUREMENT BRANCH ONLY (agent/profile-24-*)
+const nowUs = () => Number(process.hrtime.bigint() / 1000n);
 
 // #1971 MEASUREMENT BRANCH ONLY: each size in CROWD also runs a crowded arm (every act aimed at things in one place)
-const CROWD = new Set([12]), CROWD_PLACE = 'g-eden-bandstand', CROWD_WORDS = ['bandstand', 'music', 'dance', 'sit', 'bench', 'stand', 'listen', 'play'];
+const CROWD = new Set([]), CROWD_PLACE = 'g-eden-bandstand', CROWD_WORDS = ['bandstand', 'music', 'dance', 'sit', 'bench', 'stand', 'listen', 'play'];
 const WORDS = ['bench', 'eat', 'read', 'library', 'windmill', 'bandstand', 'music', 'fire circle', 'pond', 'garden', 'sit on the floor', 'dance'];
 const REPO = resolve(new URL('../../..', import.meta.url).pathname);
 const log = (...a) => process.stderr.write(`[soul-eval load] ${a.join(' ')}\n`);
@@ -74,8 +76,9 @@ export async function runLoad(o) {
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const [n, crowd] of sizes.flatMap((n) => (CROWD.has(n) ? [[n, false], [n, true]] : [[n, false]]))) {
     const dir = join(out, `n${n}${crowd ? 'c' : ''}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
-    const souls = [];
+    const profDir = join(dir, 'server', 'prof'); mkdirSync(profDir, { recursive: true });
+    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log'), nodeArgs: ['--cpu-prof', '--cpu-prof-dir', profDir] });
+    const souls = []; let arm = null, fromUs = 0, toUs = 0;
     try {
       // setup is paced at 6 Souls per 30 s: all Souls share one address, and a world pairs at most 20 in any 60 s from one
       // address (POST /v1/agent/pair). Setup is not measured.
@@ -87,13 +90,14 @@ export async function runLoad(o) {
         souls[k] = { folder, identity, soulId: s.soulId };
       })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
-      const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
+      fromUs = nowUs(); const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       const lasts = souls.map(() => ({}));
       await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, crowd, last: lasts[k] })));
+      toUs = nowUs();
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const tw = [...tickWindows.values()].sort((x, y) => x.at - y.at);
@@ -106,10 +110,11 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); http.push(...httpSince(readJsonl(f), t0)); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, mode: crowd ? 'crowded' : 'spread', placesAtEnd: places, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push(arm = { souls: n, mode: crowd ? 'crowded' : 'spread', placesAtEnd: places, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
-      await stopWorld({ pid: w.pid });
+      const stop = await stopWorld({ pid: w.pid, graceMs: 120000 });
+      if (arm) { const pf = profilesIn(profDir); arm.cpu = { stopped: stop.stopped, main: pf.main ? summarizeFile(pf.main, { fromUs, toUs, root: serverRoot }) : null, workers: pf.workers.map((f) => { const x = summarizeFile(f, { fromUs, toUs, root: serverRoot, top: 8, folded: 0 }); return x && { busyMs: x.busyMs, sampledMs: x.sampledMs, self: x.self, error: x.error }; }) }; log(`n${n} r${rep}: main-thread profile ${arm.cpu.main ? `${arm.cpu.main.busyMs} ms busy of ${arm.cpu.main.sampledMs}` : 'missing'}; ${pf.workers.length} worker profile(s)`); }
       if (!o['keep-data']) { rmSync(join(dir, 'server', 'data'), { recursive: true, force: true }); rmSync(join(dir, 'souls'), { recursive: true, force: true }); }
     }
   }
@@ -140,6 +145,13 @@ export function renderLoad(result) {
         '| window end | ticks | tick p50 | p99 | late | longest gap | green | amber | red | black |', '|---|---|---|---|---|---|---|---|---|---|');
       for (const w of tw) L.push(`| ${new Date(w.at).toISOString().slice(11, 19)} | ${w.ticks} | ${w.tickMs.p50} | ${w.tickMs.p99} | ${w.lateTicks} | ${w.longestGapMs} | ${w.levels.green} | ${w.levels.amber} | ${w.levels.red} | ${w.levels.black} |`);
     }
+  }
+  for (const a of result.arms) { const c = a.cpu?.main; if (!c || c.error) { L.push('', `CPU profile n${a.souls} r${a.repeat}: ${c?.error ?? 'missing'}`); continue; }
+    L.push('', `## CPU, main thread, n${a.souls} r${a.repeat}: the load window only`, '', `${c.window.samplesIn} samples; sampled ${c.sampledMs} ms, idle ${c.idleMs}, busy ${c.busyMs} (GC ${c.gcMs}, program ${c.programMs}). Shares are of busy time.`, '', '| self | ms | share |', '|---|---|---|');
+    for (const x of c.self) L.push(`| \`${x.fn}\` | ${x.ms} | ${x.share} |`);
+    L.push('', '| inclusive | ms | share |', '|---|---|---|'); for (const x of c.inclusive) L.push(`| \`${x.fn}\` | ${x.ms} | ${x.share} |`);
+    L.push('', '| file (self) | ms | share |', '|---|---|---|'); for (const x of c.files) L.push(`| \`${x.fn}\` | ${x.ms} | ${x.share} |`);
+    for (const [k, wk] of (a.cpu.workers ?? []).entries()) L.push('', `Worker ${k}: busy ${wk?.busyMs} of ${wk?.sampledMs} ms; top: ${(wk?.self ?? []).slice(0, 4).map((x) => `\`${x.fn}\` ${x.ms}`).join(', ')}`);
   }
   return L.join('\n') + '\n';
 }
