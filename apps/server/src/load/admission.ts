@@ -174,12 +174,7 @@ export class Admission {
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
       settle('run'); ranAt = now;
-      // #2124: charged its own turn, as the dispatcher charges a queued job (to its first yield, or its answer if sooner),
-      // not its whole life: an act's wait for the tick and its commit leave the thread to others
-      let charged = false;
-      const charge = () => { if (charged) return; charged = true; this.charge(r.key, r.god, r.route.id, this.now() - now, now); };
-      void (this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(res => setImmediate(res))).then(charge);
-      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); charge(); finish(); this.kick(); }};
+      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
     return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
