@@ -14,7 +14,7 @@ second coordinator or take over an active release without a handoff. Gene contro
 Persist changed directions and live orchestration state, give workers compact assignment packets and continue the
 authorized agenda through its endpoint. Answer Gene while lanes run; safely park decision-blocked work and refill
 capacity with independent authorized tasks. Dispatch one bounded task issue per lane, in the agenda's order; write its acceptance, Touches and ceiling before
-dispatch, and never extend a task by message: edit the issue or open a new one. A ceiling is a limit, not a
+dispatch, and never extend a task by message: edit the issue or open a new one. A follow-up you dispatch from a finding carries its bounds in the dispatch brief, and its PR is the record. A ceiling is a limit, not a
 target, so send back work that goes beyond a task's acceptance. Leave mechanical repository work to the repo steward (docs/process/development-coordinator.md, "Merge
 steward"). Report milestones and decisions, not every PR. Keep journals/changelog
 truthful. You are the release owner and run releases end to end (docs/release.md, "Release owner"); production deletes

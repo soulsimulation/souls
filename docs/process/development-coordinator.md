@@ -92,7 +92,11 @@ outcome; a standing rule that must survive handoffs goes in the state file with 
 
 Review each pull request against its issue's Acceptance and Touches. Send back work that goes beyond the
 acceptance, however good. Outside Touches, only mechanical edits of ten lines or fewer per file, each listed in the
-pull request, are allowed. A defect a lane found is a new issue. Merges follow the
+pull request, are allowed, plus a fix listed under "Also fixed" of up to about 50 lines in the same area. A small
+defect a lane found on the way is fixed in its pull request under "Also fixed" when it keeps the tier and the area;
+otherwise it gets its own small pull request, with no issue. An issue is filed only for work that will not start
+today, needs Gene's decision or is larger than about 2 hours. A follow-up you dispatch from a finding carries its
+bounds in the dispatch brief, and its pull request is the record. Merges follow the
 [approval matrix](agent-workflow.md#the-merge-train): T0–T2 land on green; the coordinator signs T3 once the
 steward posts the bar at the current head; T4 and maintainer-reserved decisions need Gene. Keep journals and
 changelog fragments true to the acceptance, proof and release receipts; never overwrite failed evidence, and a
