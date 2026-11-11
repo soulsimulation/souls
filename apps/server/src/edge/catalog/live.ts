@@ -19,6 +19,11 @@ export const LIVE_SPEECH = 40;
 export const LIVE_THINGS = 2000;
 /** World ticks one built answer serves (10 ticks = 0.5 s at clock rate 1). */
 const KEEP_TICKS = 10;
+/** #1978: what one Soul puts in its own row, in its own words: its status line and the start of its profile, each on one
+ *  line, so one Soul adds at most these many characters to the picture. */
+export const LIVE_NOW = 140, LIVE_ABOUT = 200;
+// eslint-disable-next-line no-control-regex
+const oneLine = (s: unknown, max: number) => { if (typeof s !== 'string') return null; const t = [...s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('').trimEnd(); return t || null; };
 /** #1755: more changes missed than this (a minute at two a second) are sent as the whole picture instead, so the ring keeps
  *  just those; how often the push looks for a change, and how often it sends the picture's hash (the client's check, and
  *  the stream's sign of life). */
@@ -80,15 +85,22 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     }
     return {things, more};
   };
+  // #1978: each Soul's status line, read once per change. A change is in the key (it is pushed at once, a paused clock too).
+  const nows = new Map<string, string | null>(), nowStore = (L.host as {soulNow?: {onChange: (id: string) => void}}).soulNow;
+  let nowVer = 0;
+  if (nowStore) { const was = nowStore.onChange; nowStore.onChange = id => { was(id); nows.delete(id); nowVer++; }; }
+  const nowOf = (id: string) => { if (!nows.has(id)) nows.set(id, oneLine(L.host.nowOf?.(id)?.text, LIVE_NOW)); return nows.get(id)!; };
   const build = (tick: number): LivePicture => {
     const world = L.host.engine.world as unknown as {entities: Record<string, Body>}, r1 = (n: number) => Math.round(n * 10) / 10;
-    type Row = {id: string; name: string; at: number[] | null; place: string | null; doing: string | null};
+    type Row = {id: string; name: string; at: number[] | null; place: string | null; doing: string | null; now?: string; about?: string};
     const souls = [...L.host.minds.values()].flatMap((m): Row[] => {
       const e = world.entities[m.entityId], p = e?.pose?.p; if (!p || L.faded.has(m.soulId)) return [];
+      // what the Soul published about itself, each only when set (its own words: a client labels them untrusted)
+      const now = nowOf(m.soulId), about = oneLine(m.description, LIVE_ABOUT), own = {...(now ? {now} : {}), ...(about ? {about} : {})};
       const path = L.placePathOf(m.soulId);
       // a Soul in a secret place (or inside one's outline, on any floor) is in the world, but where is not said
-      if (path.some(x => secret(x.id)) || hidden(p[0]!, p[2]!)) return [{id: m.soulId, name: m.name, at: null, place: null, doing: null}];
-      return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null}];
+      if (path.some(x => secret(x.id)) || hidden(p[0]!, p[2]!)) return [{id: m.soulId, name: m.name, at: null, place: null, doing: null, ...own}];
+      return [{id: m.soulId, name: m.name, at: [r1(p[0]!), r1(p[2]!)], place: path.find(x => x.kind !== 'occupier')?.id ?? null, doing: e.human?.activity ?? null, ...own}];
     }).sort((a, b) => a.id < b.id ? -1 : 1);
     // a line said before its place was made secret is withheld from then on too (where its speaker stood, on any floor)
     const open = (l: Line) => { const w = saidAt.get(l); return !secret(l.place) && !w?.path.some(secret) && !(w && w.x !== null && hidden(w.x, w.z!)); };
@@ -122,7 +134,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     if (nowShown !== shown) { shown = nowShown; ring.length = 0; }
     // a pause, a rate or a day set is in the key too: the tick does not move while paused (#1918)
     const h = L.host, tick = h.engine.world.tick, clockKey = `${h.paused ? 1 : 0}|${h.clockRate}|${h.living?.origin ?? ''}|${h.living?.dayTicks ?? ''}`;
-    const key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}|${clockKey}`;
+    const key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}|${clockKey}|${nowVer}`;
     if (kept?.key === key) return kept;
     const tb = performance.now(), pic = build(tick), td = performance.now(); rec(cost.build, td - tb);
     if (!kept) { kept = {key, pic, seq: 1, body: null, hash: null}; return kept; }

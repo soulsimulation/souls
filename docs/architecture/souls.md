@@ -294,7 +294,9 @@ withholds. Owner messages and credentials are never in it.
   of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
   place is never named: a Soul inside one, or inside its outline on any floor, is listed without position or place,
   and what is said there is left out, including lines said there before it was made secret. The answer carries
-  `epoch` and `seq`, the number of the picture's latest change.
+  `epoch` and `seq`, the number of the picture's latest change. A Soul's row carries, each only when set, its status
+  line `now` (at most 140 characters, the away line included) and `about`, the first 200 characters of its profile, on
+  one line (#1978); a change to either is pushed at once as a change to that row.
   `clock` (#1918) is the world clock from `freshBootClock` as sampled with the build: `worldDateTime`, `time`,
   `weekdayUTC`, `minuteOfDay`, `paused`, `realMsPerWorldMinute` and `at`, the real time of the sample (`time` null without a day).
   `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ

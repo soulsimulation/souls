@@ -220,3 +220,37 @@ test('#1918: the live picture carries the world clock; the check frame carries i
     c.stop();
   } finally { mock.timers.reset(); w.hub.close(); }
 });
+
+test('#1978 A1: a Soul\'s row carries its status line and the start of its profile, each only when set; a change is pushed as a change to that row', async () => {
+  const w = fakeWorld(), c = follow(w.hub);
+  assert.deepEqual(c.got[0]!.data.souls.find((r: any) => r.id === 's_a'), {id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null}, 'neither set: the row as before');
+  w.host.soulNow.set('s_a', 'rowing to the mill'); await w.get();   // no tick: the clock may be paused
+  assert.deepEqual(c.got.at(-1)!.data.souls, {set: [{id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null, now: 'rowing to the mill'}], del: []}, 'pushed at once, as that row');
+  w.host.minds.get('s_b')!.description = `Bo keeps bees.\n${'b'.repeat(1200)}`; w.advance(); await w.get();
+  const bo = c.got.at(-1)!.data.souls.set[0];
+  assert.equal(bo.id, 's_b'); assert.equal([...bo.about].length, 200, 'the first 200 characters'); assert.ok(bo.about.startsWith('Bo keeps bees. b'), 'on one line');
+  assert.equal(bo.now, undefined);
+  w.host.soulNow.set('s_a', null); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls.set, [{id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null}], 'cleared: gone from the row');
+  assert.equal(liveHash(c.copy()), liveHash(await w.get()), 'the copy kept by frames agrees');
+  c.stop(); w.hub.close();
+});
+
+test('#1978 A2: the size of the live picture for 100 Souls, before and with both fields set at their longest', async () => {
+  const w = fakeWorld();
+  w.host.minds.clear();
+  for (let i = 0; i < 100; i++) {
+    const id = `s_${String(i).padStart(3, '0')}`; w.entities[`h_${i}`] = {pose: {p: [-90 + (i % 10) * 15, 0, -90 + Math.floor(i / 10) * 15]}, human: {activity: 'walk'}};
+    w.host.minds.set(id, {soulId: id, entityId: `h_${i}`, name: `Soul number ${i}`});
+  }
+  const size = async () => (await (await w.app.request('/v1/edge/live')).text()).length;
+  const before = await size();
+  for (const m of w.host.minds.values()) { w.host.soulNow.set(m.soulId, 'n'.repeat(140)); m.description = 'd'.repeat(1200); }
+  w.advance();
+  const after = await size(), pic = await w.get();
+  assert.ok(pic.souls.every((r: any) => r.now.length === 140 && r.about.length === 200));
+  console.log(`[#1978] live picture, 100 Souls: before ${before} bytes, with now and about set ${after} bytes (+${after - before}, ${(after - before) / 100} a Soul)`);
+  // `,"now":""` and `,"about":""` are 20 bytes; the tick, seq and time may add a few digits
+  assert.ok(after - before <= 100 * (140 + 200 + 20) + 32, 'one Soul adds at most its two bounded fields');
+  w.hub.close();
+});
