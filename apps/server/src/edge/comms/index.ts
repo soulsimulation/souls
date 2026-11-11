@@ -201,8 +201,9 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
   // address may read it 60 times a minute (a request with no x-forwarded-for came from this machine: no limit).
   const calendarReads = new TokenBuckets(1, 60);
   let calendarItems: {changes: number; json: string} | undefined;
-  // #1917: real minutes to ticks at the clock's current rate (20 ticks a second at rate 1).
-  const ticksPerRealMinute = () => 1200 * (deps.host.clockRate > 0 ? deps.host.clockRate : 1);
+  // #1917: real minutes to ticks at the rate the admin set (20 ticks a second at rate 1); not the effective rate, which
+  // drops for a while when the clock dilates.
+  const ticksPerRealMinute = () => 1200 * (deps.host.baseRate > 0 ? deps.host.baseRate : 1);
   const calendarOpen = () => objects.ofKind('calendar-item').filter(o => (o.state as CalendarState).phase !== 'over');
   app.get('/v1/edge/calendar', c => {
     const xff = c.req.header('x-forwarded-for'), wait = xff ? calendarReads.take(xff.split(',')[0].trim()) : 0;
