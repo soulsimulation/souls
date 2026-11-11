@@ -277,8 +277,16 @@ jobs:
         with:
           path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
           key: pw-chromium-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      # If the runner's apt mirror (azure.archive.ubuntu.com) is unreachable, point apt at archive.ubuntu.com and retry
+      # once: same packages, same browser, only the download host changes.
       - name: Install Chromium and its system libraries
-        run: pnpm --filter mars-campus-viewer exec playwright install --with-deps --only-shell chromium
+        run: |
+          pw_install() { pnpm --filter mars-campus-viewer exec playwright install --with-deps --only-shell chromium; }
+          pw_install && exit 0
+          echo "::warning::apt install failed; retrying against archive.ubuntu.com"
+          sudo sed -i 's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          pw_install
       - name: Local smoke
         timeout-minutes: 10
         run: node e2e/local-smoke.mjs --build --port 9950 --out .local/e2e/ci
