@@ -126,11 +126,6 @@ took, and the world's own times from its per-request record.
 `scenarios/session-1724-owner.json` is the shown run: #1724's five instructions, sent word for word by the
 `owner-1724` persona, on a fresh Eden 2026 world, one Sonnet seat, passive observer, deterministic review.
 
-**Background `listen`.** A Claude seat's own background commands end with its turn's process group (`claude -p` does
-not keep them), exit 143. The turn record names them (`backgroundEnded`), and the harness's own `listen` takes over
-at once, so an owner message waiting for the next chat to wake the seat is a harness fault the record shows, not the
-client's.
-
 ### Personas
 
 `personas/*.md` are character sheets: newcomer, casual, social, spectator, storyteller, boundary, pinkteam, expert,

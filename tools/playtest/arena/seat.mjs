@@ -233,7 +233,7 @@ export class Seat {
     this.save();
     for (const e of r.stream) appendJsonl(join(this.dir, 'transcript.jsonl'), { turn: n, ...e });
     const rec = { turn: n, reason, startedAt: started.t, endedAt: ended.t, startMono: started.mono, endMono: ended.mono, wallMs: r.wallMs, usage: r.usage ? { ...r.usage, costUsd: turnCost, ...(sessionCost != null ? { sessionCostUsd: sessionCost } : {}) } : r.usage, finalText: r.finalText,
-      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null, ...(r.seatCheck ? { seatCheck: r.seatCheck } : {}), ...(r.backgroundEnded?.length ? { backgroundEnded: r.backgroundEnded } : {}) };
+      toolCalls: r.toolCalls.map((c) => ({ cmd: c.cmd ?? c.name, ms: c.ms, isError: c.isError })), exit: r.exit, timedOut: r.timedOut, endedAfterResult: r.endedAfterResult ?? null, ...(r.seatCheck ? { seatCheck: r.seatCheck } : {}) };
     appendJsonl(join(this.dir, 'turns.jsonl'), rec);
     const u = r.usage ?? {};
     appendJsonl(join(this.dir, 'cost.jsonl'), { t: ended.t, mono: ended.mono, turn: n, inputTokens: u.inputTokens ?? null, cachedTokens: u.cachedTokens ?? null,
@@ -241,9 +241,6 @@ export class Seat {
       ...(hold ? { reservedUsd: hold.usd } : {}) });
     writeFileSync(join(this.dir, 'chat-as-rendered.md'), `\n<!-- turn ${n} (${reason}) ${started.t} -->\n\n${this.adapter.renderChat(r.stream)}`, { flag: 'a' });
     this.inTurn = false;
-    // #1774: an agent that put its own `listen` in the background (as the skill says) expects Claude Code to keep it and
-    // wake it; the turn's end ended it, so the harness's listen takes over now, on a seat that keeps the wake loop.
-    if (!this.waking && !this.stopped && r.backgroundEnded?.some((c) => /\blisten\b/.test(c))) this.wakeLoop();
     if (this.waking && !this.stopped) this.startListen();
     return rec;
   }

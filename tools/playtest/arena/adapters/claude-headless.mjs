@@ -118,23 +118,11 @@ export async function turn({ cwd, sessionId, resume = false, model = 'haiku', ef
   const r = await h.done; clearTimeout(grace);
   const timedOut = r.timedOut && !endedAfterResult;
   if (timedOut) stream.push({ type: 'harness_timeout', maxWallSec, _rx: Date.now() });
-  // #1774 (from #1773's A9): the agent's own background commands (its `listen`) end here with the turn's process group,
-  // exit 143, before they could deliver. Named, so a record reader sees the harness ended them, not the client or the
-  // agent; the seat's wake loop then plays Claude Code's background listen (arena/seat.mjs).
-  const backgroundEnded = endedAfterResult || timedOut ? backgroundCommands(stream) : [];
-  if (endedAfterResult) stream.push({ type: 'harness_end', reason: 'final result; background tasks ended', ...(backgroundEnded.length ? { backgroundEnded } : {}), _rx: Date.now() });
+  if (endedAfterResult) stream.push({ type: 'harness_end', reason: 'final result; background tasks ended', _rx: Date.now() });
   if (r.code !== 0 && r.stderr && !endedAfterResult) stream.push({ type: 'harness_stderr', text: r.stderr.slice(-2000), _rx: Date.now() });
   const s = summarize(stream);
   return { stream, usage: s.usage, finalText: s.finalText, sessionId: s.sessionId ?? sessionId, exit: endedAfterResult ? 0 : r.code, rawExit: r.code, wallMs: r.wallMs, timedOut, endedAfterResult,
-    toolCalls: s.toolCalls, effortApplied: effort ? effortOk : null, seatCheck, backgroundEnded };
-}
-
-/** The commands a turn started as background tasks (Bash run_in_background) that had not finished when it ended: their
- *  tool result is Claude Code's "running in background" note, never the command's own output. */
-export function backgroundCommands(stream) {
-  const out = [];
-  for (const c of toolCalls(stream)) if (c.name === 'Bash' && c.input?.run_in_background === true && c.cmd) out.push(String(c.cmd).slice(0, 200));
-  return out;
+    toolCalls: s.toolCalls, effortApplied: effort ? effortOk : null, seatCheck };
 }
 
 /** proc.run with an external kill handle: {done: Promise<{code, signal, stdout, stderr, wallMs, timedOut}>, kill()}. */

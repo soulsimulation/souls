@@ -200,17 +200,3 @@ test('G1: authStatus reads the exit code and loggedIn, and keeps none of the out
   assert.deepEqual(await authStatus({ runFn: async () => { throw new Error('spawn claude ENOENT'); } }), { ok: false, exit: null });
   assert.deepEqual(calls[0], ['claude', 'auth', 'status']);
 });
-
-test('#1774: the agent\'s own background listen, ended with its turn, is named in the turn record and the harness listen takes over', async () => {
-  const s = createSeat({ runDir: mkdtempSync(join(tmpdir(), 'pt-seat-')), seat: { id: 'bg', adapter: 'scripted-owner', wake: false }, worldBase: 'http://h/w/x' });
-  s.info.wake = true; s.authCheck = null;
-  let listens = 0; s.startListen = () => { listens += 1; };
-  s.adapter = { renderChat: () => '', turn: async () => ({ stream: [], usage: null, finalText: 'listening', sessionId: null, exit: 0, wallMs: 5, timedOut: false, endedAfterResult: true, toolCalls: [], backgroundEnded: ['node eden.mjs listen'] }) };
-  await s.chat('start listening');
-  const rec = JSON.parse(readFileSync(join(s.dir, 'turns.jsonl'), 'utf8').trim().split('\n').at(-1));
-  assert.deepEqual(rec.backgroundEnded, ['node eden.mjs listen']);
-  assert.equal(s.waking, true, 'the wake loop is on'); assert.ok(listens >= 1, 'the harness listen started');
-  s.info.wake = false; s.waking = false; listens = 0;
-  await s.chat('again');
-  assert.equal(listens, 0, 'a seat that does not wake (seat.wake false) stays as it is');
-});

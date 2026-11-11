@@ -64,12 +64,3 @@ test('claude: the early empty result of a resumed session is not the closing res
   assert.equal(claude.isFinalResult({ type: 'result', subtype: 'error_max_turns' }), true);
   assert.equal(claude.isFinalResult(fx('claude-turn.jsonl').findLast((e) => e.type === 'result')), true);
 });
-
-test('claude: #1774 the background commands a turn left running are named (they end with its process group)', () => {
-  const stream = [
-    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'node eden.mjs listen', run_in_background: true } }, { type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'node eden.mjs look' } }] } },
-    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Command running in background with ID: b1' }, { type: 'tool_result', tool_use_id: 't2', content: '{}' }] } },
-  ];
-  assert.deepEqual(claude.backgroundCommands(stream), ['node eden.mjs listen']);
-  assert.deepEqual(claude.backgroundCommands([]), []);
-});
