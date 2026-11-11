@@ -46,7 +46,7 @@ test('named-water progress reports actual swimming without prematurely completin
  assert.equal(receipt?.phase,'completed',JSON.stringify(receipt));assert.equal(E.world.entities[row.entity_id].human.activity,'tread');
  assert.deepEqual(E.runtime.violations,[]);
 });
-for(const spec of [{world:'eden-2026',water:'land-west-lake',start:[-122,26],name:'Eden west-lake jetty to swimming and back uses a real bank and finishes both legs'},{world:'mars-two',water:'campus-swimming-pond',start:[0,0],name:'Mars campus pond generic swim and standard dry bank return finish with headroom'}])test(spec.name, {timeout:180000}, async t=>{
+for(const spec of [{world:'eden-2026',water:'land-west-lake',start:[-122,26],name:'Eden west-lake jetty to swimming and back uses a real bank and finishes both legs'}])test(spec.name, {timeout:180000}, async t=>{
  const genesis=JSON.parse(readFileSync(new URL(`../../../../worlds/templates/${spec.world}.json`,import.meta.url),'utf8'));
  const w=fixture(':memory:',factory,{durableClockV1:true});w.brain.quiesce();
  if(spec.world==='eden-2026'&&process.env.SWIM_FIXTURE_SNAPSHOT){

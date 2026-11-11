@@ -21,7 +21,6 @@ aliases), and the year notes in `mars/viewer/app/history/scenes.ts`. When they d
 | **Freeside and CoLab** (`freeside`) | The north-east compound for living and making: Freeside, the living house with a reused LIBRARY façade and a kitchen enclosure, and Bodywork/CoLab with roof access and small CoLab huts. Aliases: CoLab, Bodywork, living house. | the Freeside lounge (lime sofa, mattresses), the DJ table by the speakers, the CoLab sofa, a hydroponic cart |
 | **West Racks** (`west-racks`) | A rack-built shelter at the far west edge of the campus, a landmark for finding the outlying camp. | none |
 | **OG** (`og-*`) | An outlying camp on the west side: a clubhouse with sofas and a low blue table, an outdoor kitchen with a breakfast griddle cart and a worktop, folding dinner tables and chairs, a short bus and a boat. | furniture only |
-| **Swimming pond** (`campus-swimming-pond`) | A body of water beside the main campus for swimming; approach the bank before entering. Not the water tank. | its bank |
 | **Water tank and garden** (`water-tank`, `garden-bed`) | A storage tank serving the garden area, with planted beds and a watering can beside them. | fill a can at the tank, water a bed |
 | **Desert Tire Track** (`tire-ring`) | An elliptical ring of half-buried tires marking an old dirt racetrack in the open desert: an outdoor landmark. | none |
 

@@ -4,7 +4,7 @@ import{materialize,replay}from'./materialize.mjs';
 const named=w=>[...w.entities.values()].filter(e=>e.name).map(e=>({ref:w.pathOf(e.id),def:w.resolvedDef(e.def).ref,pose:w.worldPose(e),shape:e.shape})).sort((a,b)=>a.ref.localeCompare(b.ref));
 test('patched Mars genesis replays with a different seed without detached-child references or changed poses',()=>{
  const {template,world}=materialize('mars-two');const again=replay(template,{seed:'independent-world'});
- assert.deepEqual(named(again),named(world));assert.ok(again.get('campus-swimming-pond'));
+ assert.deepEqual(named(again),named(world));assert.equal(again.get('campus-swimming-pond'),undefined,'Mars College has no pond (#1984)');
  assert.equal(again.get('presenter-timber-box').p[1],.373);
 });
 test('Eden cumulative genesis keeps subsequent furniture revisions and supports the actual pier bench',()=>{
