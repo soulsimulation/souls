@@ -50,8 +50,13 @@ export async function prepareFolder(seat, { name }) {
   await cli(f, ['serve', '--stop']).catch(() => {});
   const sv = await cli(f, ['serve']);
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
-  let lookFailed = null;   // #2047: why the client has no world copy, for the episode's error
-  for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { const l = await cli(f, ['look']); if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; break; } await sleep(500); }   // the world copy (a client before 2.25 has no look)
+  // The world copy (a client before 2.25 has no look). #2047: a world still laying out its places answers the catalog with
+  // 503 world.starting for up to 30 s after the first ask, longer than look's own retries on a slower machine: ask again.
+  let lookFailed = null;
+  for (const until = Date.now() + 90_000; !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')) && Date.now() < until; await sleep(500)) {
+    const l = await cli(f, ['look']);
+    if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503/.test(lookFailed)) break; }
+  }
   return { soulId, createdAt, lookFailed, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
 
