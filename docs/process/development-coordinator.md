@@ -158,7 +158,12 @@ or 6h>` (`--json` for scripts). It prints:
 - the PRs labelled `needs:rebase`;
 - the Actions queue by workflow.
 
-It reads GitHub only. Worker liveness and private state still come from the coordinator's own records.
+It reads GitHub only. The coordinator keeps exactly two kinds of durable state: GitHub (the agenda issue, task
+issues, PRs, labels, releases), from which `node tools/coordinator/status.mjs --agenda <issue>` computes the lane
+table, and a private state file of owner, paused, private bindings, at most twelve anchored standing rules and
+`updated_at`, which `node tools/coordinator/state.mjs check <file>` validates. No other brief, handoff folder or lane
+table is state. A successor starts from `node tools/coordinator/state.mjs checkpoint <file> --agenda <issue>`; in the
+Claude Code harness lanes are background subagents of the coordinator session, so it re-dispatches from that output.
 
 Keep PR journals and changelog fragments consistent with actual acceptance, proof and release receipts. Link visual
 evidence where available and appropriate; never convert a merged-but-unreleased feature into a shipped claim or
