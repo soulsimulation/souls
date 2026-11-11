@@ -77,7 +77,7 @@ if ((RW_MODES.length || LOAD === 'stageb' || CPUS) && !VIA) throw new Error('--l
 if (RW_MODES.some((m) => m !== 'on' && m !== 'off')) throw new Error('--read-worker off|on|off,on');
 if (CPUS && !sh0('taskset', ['-V'])) throw new Error('--cpus needs Linux taskset');
 const MODES = RW_MODES.length ? RW_MODES : [null];
-const PH = SHORT ? { warm: 10, idle: 10, active: 20, calib: 5 } : { warm: 60, idle: 30, active: 120, calib: 20 };
+const PH = SHORT ? { warm: 10, idle: 10, active: 20, calib: 5 } : { warm: 60, idle: 30, active: 480, calib: 20 };   // #460 measurement branch: 480 s (was 120)
 const TICK_HZ = 20, BUSY = /\b(world\.busy|world\.crowded|world\.starting|soul\.busy|soul\.slow-down|rate-limited|client\.rate|account\.rate)\b/;
 const TARGETS = ['the bandstand', 'the commons', 'the pond', 'the classroom', 'the orchard', 'the kitchen', 'the garden', 'the plaza'];
 const SEARCH = ['bench', 'seat', 'door', 'book', 'table'];
@@ -240,7 +240,7 @@ async function stopWorld(w) {
 }
 async function healthz(timeoutMs = 5000) {
   const t = now();
-  try { const r = await fetch(`${BASE}/healthz`, { signal: AbortSignal.timeout(timeoutMs) }); const d = r.ok ? await r.json() : null; return { ok: !!d, ms: now() - t, tick: d?.tick, tickMs: d?.tickMs, ...(d?.load ? { level: d.load.level, service5s: d.load.service5s, loopP99Ms: d.load.loopP99Ms, queueOldestMs: d.load.queue?.oldestMs ?? null, tickP99Ms: d.load.tickP99Ms, baselineMs: d.load.loopBaselineMs } : {}) }; }
+  try { const r = await fetch(`${BASE}/healthz`, { signal: AbortSignal.timeout(timeoutMs) }); const d = r.ok ? await r.json() : null; return { ok: !!d, ms: now() - t, tick: d?.tick, tickMs: d?.tickMs, ...(d?.load ? { level: d.load.level, service5s: d.load.service5s, loopP99Ms: d.load.loopP99Ms, queueOldestMs: d.load.queue?.oldestMs ?? null, tickP99Ms: d.load.tickP99Ms, baselineMs: d.load.loopBaselineMs, quietTickMs: d.load.quietTickMs } : {}), apiTicks: d?.api?.ticks ?? null }; }
   catch { return { ok: false, ms: timeoutMs, tick: null }; }
 }
 
@@ -425,7 +425,7 @@ async function spread(run, souls) {
  *  the 20 Hz schedule, refusals by code and the acts by kind, in the active windows. */
 function clientSummary({ souls, windows, cmds, health, run }) {
   const act = windows.filter((w) => w.name.startsWith('active')), inAct = (at) => act.some((w) => at >= w.from && at <= w.to);
-  const tries = run.http.filter((x) => inAct(x.at)).map((x) => ({ route: x.route, ms: x.ms, world: x.timing.world, queue: x.timing.queue, timing: x.timing, raw: true }));
+  const tries = run.http.filter((x) => inAct(x.at)).map((x) => ({ route: x.route, ms: x.ms, world: x.timing.world, queue: x.timing.queue, timing: x.timing, raw: true, status: x.status }));
   for (const s of souls.filter((x) => x.cli)) {   // the real client's own request record (.eden-report-on), Server-Timing per request
     let text = ''; try { text = readFileSync(join(s.dir, '.eden-report.jsonl'), 'utf8'); } catch { continue; }
     for (const line of text.split('\n')) { let r; try { r = JSON.parse(line); } catch { continue; } if (r.kind === 'http' && inAct(r.at)) tries.push({ route: routeKey(r.method, r.route), ms: r.durationMs, world: r.serverMs, queue: r.queuedMs, raw: false }); }
@@ -435,13 +435,15 @@ function clientSummary({ souls, windows, cmds, health, run }) {
   const routes = Object.fromEntries(Object.entries(by).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => [k, { n: v.length, real: v.filter((x) => !x.raw).length, client: q(v.map((x) => x.ms)), world: q(v.map((x) => x.world)), queue: q(v.map((x) => x.queue)) }]));
   const actTries = tries.filter((x) => x.raw && x.route === 'POST /v1/edge/act'), parts = [...new Set(actTries.flatMap((x) => Object.keys(x.timing)))];
   const actSplit = Object.fromEntries(parts.map((p) => [p, q(actTries.map((x) => x.timing[p]))]));
+  const admitted = actTries.filter((x) => x.timing.handler != null), h0 = health.filter((x) => inAct(x.at) && x.ok), tw = [...new Map(h0.filter((x) => x.apiTicks?.at).map((x) => [x.apiTicks.at, x.apiTicks])).values()].filter((t) => t.at - 1000 * t.windowS >= act[0].from);   // #460: admitted acts; the world's own 10 s tick windows
+  const admission = { tries: actTries.length, admitted: admitted.length, refused: actTries.filter((x) => x.status === 503 || x.status === 429).length, world: q(admitted.map((x) => x.timing.world)), quietTickMs: q(h0.map((x) => x.quietTickMs)), tickWindows: { n: tw.length, ticks: tw.reduce((s, t) => s + t.ticks, 0), late: tw.reduce((s, t) => s + t.lateTicks, 0), longestGapMs: Math.max(0, ...tw.map((t) => t.longestGapMs)), tickP99MaxMs: Math.max(0, ...tw.map((t) => t.tickMs.p99)), red: tw.filter((t) => t.levels.red + t.levels.black > 0).length } };
   const h = health.filter((x) => inAct(x.at) && x.ok), tickAvg = h.map((x) => x.tickMs?.avg).filter(Number.isFinite);
   let behind = 0; for (let i = 1; i < h.length; i++) if (h[i].tick != null && h[i - 1].tick != null) behind += Math.max(0, Math.round((h[i].at - h[i - 1].at) / 1000 * TICK_HZ) - (h[i].tick - h[i - 1].tick));
   const c = cmds.filter((x) => inAct(x.at)), refusals = {}, kinds = {};
   for (const x of c) { for (const t of x.refusals ?? []) refusals[t] = (refusals[t] ?? 0) + 1; if (x.cmd === 'act' && x.outcome === 'refused') { const k = `act:${x.refusal ?? 'unknown'}`; refusals[k] = (refusals[k] ?? 0) + 1; } }
   for (const x of c.filter((y) => y.cmd === 'act')) kinds[x.kind ?? '?'] = (kinds[x.kind ?? '?'] ?? 0) + 1;
   return { profile: PROFILE, real: souls.filter((x) => x.cli).length, raw: souls.filter((x) => !x.cli).length, spread: run.spread ?? null, acts: c.filter((x) => x.cmd === 'act').length, actsByKind: kinds, mixFallback: run.mixFallback,
-    actMs: q(c.filter((x) => x.cmd === 'act').map((x) => x.ms)), routes, actSplit, tick: { avgMs: q(tickAvg), p99MaxMs: Math.max(0, ...h.map((x) => x.tickP99Ms ?? 0)) || null, behind, seconds: h.length }, refusals };
+    actMs: q(c.filter((x) => x.cmd === 'act').map((x) => x.ms)), routes, actSplit, admission, tick: { avgMs: q(tickAvg), p99MaxMs: Math.max(0, ...h.map((x) => x.tickP99Ms ?? 0)) || null, behind, seconds: h.length }, refusals };
 }
 function clientReport(results) {
   const rs = results.filter((r) => r.client), L = [], f = (x) => (x ? `${x.p50} / ${x.p99}` : '—');
