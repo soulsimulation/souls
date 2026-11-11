@@ -2264,7 +2264,7 @@ const HELD_MS = 600_000;
 const SPEAKER_MS = 60_000;
 const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
 
-const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
+const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
 /** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
 function parseBudget(argv) {
   const [a, b, ...extra] = argv;
@@ -2303,6 +2303,7 @@ function change(wake, c) {
   const w = { ...fresh(), ...wake };
   if (!c) return { wake: w };
   if (c.budget) return { wake: { ...w, budget: { ...w.budget, ...c.budget } } };
+  if (c.away) return { wake: { ...w, awayOff: c.away === "off" } };
   if (c.add) {
     const rule = { id: `w${w.next ?? 1}`, ...c.add };
     return { wake: { ...w, rules: [...w.rules, rule], next: (w.next ?? 1) + 1 }, rule };
@@ -2317,7 +2318,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 /** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
 function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
 }
 
 const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
@@ -2452,7 +2453,53 @@ function evaluate(rules, state, now) {
   });
   return { rules: out, cursor, fired };
 }
-return { WAKE_EVERY_S, WAKE_QUEUE_MAX, ACT_ENDED_GRACE_MS, ALWAYS, ADDABLE, fresh, BUDGETS, HELD_MS, SPEAKER_MS, parseBudget, parseRule, change, view, budgetView, enqueue, expire, deliver, confirm, speechDue, spokeNow, evaluate };
+
+// #1933: when nobody drives the Soul, its public line says the mind is away. Serve keeps in the wake state (`mind`) when a command
+// last reached it, when an acting one did, and since when a delivered wake or an owner message has waited on an acting one.
+/** Ten minutes with nobody driving and the mind counts as away. */
+const AWAY_MS = 600_000;
+
+/** `wake away` arguments as a change. Throws the usage. */
+function parseAway(argv) {
+  if (argv.length !== 1 || !["on", "off"].includes(argv[0])) throw new Error(USAGE);
+  return { away: argv[0] };
+}
+/** Pure: the wake state after serve saw, at `now`, "command" (any agent command; a listen --follow poll is one), "acting" (act,
+ *  say, ack, result or plan), or "owed" (a wake was delivered or an owner message arrived). */
+function saw(wake, what, now) {
+  const m = { ...wake?.mind };
+  if (what === "owed") m.owed ??= now;
+  else { m.last = now; if (what === "acting") { m.acted = now; delete m.owed; } }
+  return { ...wake, mind: m };
+}
+/** Pure: since when nobody has driven, once that is `ms` or longer, else null: a wake or owner message no acting command answered,
+ *  or no command at all (`start`, serve's start, stands in for a command never seen). Null while the owner has this off. */
+function awaySince(wake, now, start, ms = AWAY_MS) {
+  const m = wake?.mind ?? {};
+  if (wake?.awayOff) return null;
+  if (m.owed != null && now - m.owed >= ms) return m.owed;
+  const last = m.last ?? start;
+  return now - last >= ms ? last : null;
+}
+const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
+/** The away line: since when, or, with a heartbeat cadence recorded ({every} minutes, kept at {at}), about when it next checks. */
+function awayText(since, heartbeat, now) {
+  const at = Date.parse(heartbeat?.at ?? ""), p = (heartbeat?.every ?? 0) * 60_000;
+  if (!(p > 0) || !Number.isFinite(at)) return `mind away since ${hhmm(since)} UTC`;
+  return `mind away, next check about ${hhmm(at + Math.max(1, Math.ceil((now - at) / p)) * p)} UTC`;
+}
+/** Pure: the mind went away: the away line that was set, and the line it replaced (null for none), kept. */
+const wentAway = (wake, since, text, stored) => ({ ...wake, mind: { ...wake?.mind, away: { since, text, stored } } });
+/** Pure: the mind is back (an acting command, serve --stop, `wake away off`). `line`: the public line now; `own`: the command sets
+ *  its own line. {wake, restore}: restore is the kept line to set again (null clears it), or undefined when nothing is set. The kept
+ *  line comes back only while the public line still says away, and a command's own line wins over it. */
+function back(wake, line, own = false) {
+  const a = wake?.mind?.away;
+  if (!a) return { wake, restore: undefined };
+  const { away: _gone, ...mind } = wake.mind;
+  return { wake: { ...wake, mind }, restore: !own && line === a.text ? a.stored : undefined };
+}
+return { WAKE_EVERY_S, WAKE_QUEUE_MAX, ACT_ENDED_GRACE_MS, ALWAYS, ADDABLE, fresh, BUDGETS, HELD_MS, SPEAKER_MS, parseBudget, parseRule, change, view, budgetView, enqueue, expire, deliver, confirm, speechDue, spokeNow, evaluate, AWAY_MS, parseAway, saw, awaySince, awayText, wentAway, back };
 })();
 // </inline wake.mjs>
 
@@ -5316,11 +5363,36 @@ async function serveForeground() {
       const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul }, Date.now());
       st.wake = { ...soulWake.expire(st.wake, Date.now(), WAKE_HELD_MS), rules: r.rules, cursor: r.cursor };
       st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired);   // #1968: one entry per rule, with a count and the latest why
+      if (r.fired.some((f) => f.kind === "owner-message")) st.wake = soulWake.saw(st.wake, "owed", Date.now());   // #1933
       for (const f of r.fired) log(`wake: ${f.id} (${f.why})`);
       if (JSON.stringify(st.wake) !== before) persist();
     } catch (e) { log(`wake: ${e?.message ?? e}`); }
   };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
+  // #1933: with nobody driving for AWAY_MS the public line says the mind is away, and keeps the line it replaced. An acting command,
+  // serve --stop or `wake away off` puts that back, only while the public line still says away; a command's own line wins.
+  const AWAY_AFTER_MS = soulWake.AWAY_MS * TIME_SCALE;
+  const lineNow = async () => { const r = await serveCall(`${world}/v1/edge/self/link`, { method: "GET", headers: auth, timeoutMs: 4_000 }); return r.status === 200 ? { line: r.data?.now ?? null } : null; };
+  const setLine = (text) => serveCall(`${world}/v1/edge/self/now`, { method: "POST", headers: auth, body: { text }, timeoutMs: 4_000 });
+  let awaying = null;
+  const awayTick = () => (awaying ??= (async () => {
+    const t = Date.now(), since = soulWake.awaySince(st.wake, t, Date.parse(start), AWAY_AFTER_MS);
+    if (since === null || st.wake.mind?.away || stopping || terminal) return;
+    const was = await lineNow();
+    if (!was) return;   // the world did not say what the line is: the next tick asks again
+    const text = soulWake.awayText(since, load().heartbeat, t), r = await setLine(text);
+    if (r.status !== 200) return;
+    st.wake = soulWake.wentAway(st.wake, since, r.data?.now ?? text, was.line); persist(); log(`away: ${text}`);
+  })().catch((e) => log(`away: ${e?.message ?? e}`)).finally(() => { awaying = null; }));
+  async function comeBack(own = false) {
+    await awaying;
+    if (!st.wake.mind?.away) return;
+    const seen = own ? { line: undefined } : await lineNow();
+    if (!seen) return;   // unread: the next acting command looks again
+    const b = soulWake.back(st.wake, seen.line, own);
+    if (b.restore !== undefined && (await setLine(b.restore)).status !== 200) return;
+    st.wake = b.wake; persist(); log(b.restore !== undefined ? "back: the line it replaced is restored" : "back");
+  }
   // #1928: a 401 or 403 is confirmed with one self/link read. Refused there as control.revoked or control.unknown, the credentials really are gone: the reason is
   // recorded and this process ends as a stop would. Answered, it carries on. One confirmation at a time for all the loops.
   let confirming = null;
@@ -5515,7 +5587,7 @@ async function serveForeground() {
       if (ambient?.wakes.length || backlog.length || stopped || speech) {
         const addressed = peek ? said : takeAddressed(st, heldFrom);
         const wakes = ambient ?? (peek ? { wakes: [] } : soulWake.deliver(st.wake, t, { free: true, heldMs: WAKE_HELD_MS, reader }));   // ambient wakes ride free with one coming anyway
-        if (!peek) { st.wake = { ...wakes.wake ?? st.wake, spoke: soulWake.spokeNow(st.wake.spoke, addressed, t) }; persist(); }
+        if (!peek) { st.wake = soulWake.saw({ ...wakes.wake ?? st.wake, spoke: soulWake.spokeNow(st.wake.spoke, addressed, t) }, "owed", t); persist(); }
         if (stopped && !peek) stopped.announced = true;   // a peek shows it but doesn't use up the wake
         const out = backlog.map(({ id, text, sentAt }) => ({ id, text, sentAt, state: "delivered" }));
         return { status: 200, data: { inbox: { connected: true, ...(out[0] ? { latest: out[0] } : {}), queued: 0 }, backlog: out, ...(stopped ? { plan: planView(stopped) } : {}), ...(addressed.length ? { addressed } : {}), ...(wakes.wakes.length ? { wakes: wakes.wakes } : {}) } };
@@ -5611,18 +5683,24 @@ async function serveForeground() {
     // #1968: a command from another process means the agent took what was handed; pending and status read without taking it.
     // #1932: pending --check is not the agent either; it asks on a copy and changes nothing.
     if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status" && m.op !== "check") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
+    // #1933: an agent command, or an acting one (act, say, ack, result, plan), which first puts back the line the away one replaced
+    if (m.op !== "check" && m.op !== "stop") {
+      const acting = m.op === "plan" || (m.op === "http" && m.method === "POST" && /^\/v1\/edge\/(act|say|inbox\/[^/]+\/(ack|result))$/.test(routeOf(m.url)));
+      if (acting) await comeBack(!!m.body && Object.hasOwn(m.body, "now"));
+      st.wake = soulWake.saw(st.wake, acting ? "acting" : "command", Date.now()); persist();
+    }
     if (moved()) { log("the folder's world, Soul or token changed: stopping"); setTimeout(() => shutdown(0), 10); return m.op === "http" ? { status: 0, data: { error: { code: "unreachable", message: "this serve stopped: the folder moved to another world or Soul" } } } : { serving: false, stopping: true, moved: true }; }
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
-    if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS, m.reader); persist(); return out; }
+    if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS, m.reader); if (out.wakes || out.addressed) st.wake = soulWake.saw(st.wake, "owed", Date.now()); persist(); return out; }
     if (m.op === "check") return { due: pendingDue(takePending(structuredClone(st), Date.now(), WAKE_HELD_MS, m.reader)) };
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
       return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
-    if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
-    if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
+    if (m.op === "stop") { await comeBack(); setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
+    if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); if (c.wake.awayOff) await comeBack(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
     if (m.op === "http") {
       if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
@@ -5686,6 +5764,7 @@ async function serveForeground() {
   server.listen(SERVE_SOCK, () => { process.umask(umask); log(`serving pid ${process.pid}, cursor ${st.cursor ?? s.cursor ?? "c_0"}`); });
   // #1737: the catalog and the live picture are kept current on disk, so find, query and look never wait on the world
   followWorld().catch(() => {}); setInterval(() => { followWorld().catch(() => {}); }, 2_000).unref();
+  setInterval(awayTick, 30_000 * TIME_SCALE).unref();   // #1933
   setInterval(() => { if (moved()) { log("the folder's world, Soul or token changed: stopping"); shutdown(0); } else writeServeLock(start); }, SERVE_BEAT_MS);
   // A resident client outlives what goes wrong around it: a loop that throws is logged and started again, and nothing unhandled ends the process.
   process.on("unhandledRejection", (e) => log(`unhandled: ${e?.message ?? e}`));
@@ -5804,7 +5883,7 @@ async function wakeCommand(...argv) {
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const [sub, ...rest] = argv;
   if (sub === "heartbeat") return heartbeat(rest);
-  const change = !sub ? null : sub === "add" ? { add: soulWake.parseRule(rest) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
+  const change = !sub ? null : sub === "add" ? { add: soulWake.parseRule(rest) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "away" ? soulWake.parseAway(rest) : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
   if (sub && !change) soulWake.parseBudget([]);   // throws the usage
   const a = await askServe({ op: "wake", change });
   if (a?.lost) throw new Error("serve stopped before it answered: run the command again");

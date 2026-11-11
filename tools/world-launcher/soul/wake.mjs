@@ -29,7 +29,7 @@ export const HELD_MS = 600_000;
 export const SPEAKER_MS = 60_000;
 const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
 
-const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
+const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
 /** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
 export function parseBudget(argv) {
   const [a, b, ...extra] = argv;
@@ -68,6 +68,7 @@ export function change(wake, c) {
   const w = { ...fresh(), ...wake };
   if (!c) return { wake: w };
   if (c.budget) return { wake: { ...w, budget: { ...w.budget, ...c.budget } } };
+  if (c.away) return { wake: { ...w, awayOff: c.away === "off" } };
   if (c.add) {
     const rule = { id: `w${w.next ?? 1}`, ...c.add };
     return { wake: { ...w, rules: [...w.rules, rule], next: (w.next ?? 1) + 1 }, rule };
@@ -82,7 +83,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 /** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
 export function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
 }
 
 const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
@@ -216,4 +217,50 @@ export function evaluate(rules, state, now) {
     return r;
   });
   return { rules: out, cursor, fired };
+}
+
+// #1933: when nobody drives the Soul, its public line says the mind is away. Serve keeps in the wake state (`mind`) when a command
+// last reached it, when an acting one did, and since when a delivered wake or an owner message has waited on an acting one.
+/** Ten minutes with nobody driving and the mind counts as away. */
+export const AWAY_MS = 600_000;
+
+/** `wake away` arguments as a change. Throws the usage. */
+export function parseAway(argv) {
+  if (argv.length !== 1 || !["on", "off"].includes(argv[0])) throw new Error(USAGE);
+  return { away: argv[0] };
+}
+/** Pure: the wake state after serve saw, at `now`, "command" (any agent command; a listen --follow poll is one), "acting" (act,
+ *  say, ack, result or plan), or "owed" (a wake was delivered or an owner message arrived). */
+export function saw(wake, what, now) {
+  const m = { ...wake?.mind };
+  if (what === "owed") m.owed ??= now;
+  else { m.last = now; if (what === "acting") { m.acted = now; delete m.owed; } }
+  return { ...wake, mind: m };
+}
+/** Pure: since when nobody has driven, once that is `ms` or longer, else null: a wake or owner message no acting command answered,
+ *  or no command at all (`start`, serve's start, stands in for a command never seen). Null while the owner has this off. */
+export function awaySince(wake, now, start, ms = AWAY_MS) {
+  const m = wake?.mind ?? {};
+  if (wake?.awayOff) return null;
+  if (m.owed != null && now - m.owed >= ms) return m.owed;
+  const last = m.last ?? start;
+  return now - last >= ms ? last : null;
+}
+const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
+/** The away line: since when, or, with a heartbeat cadence recorded ({every} minutes, kept at {at}), about when it next checks. */
+export function awayText(since, heartbeat, now) {
+  const at = Date.parse(heartbeat?.at ?? ""), p = (heartbeat?.every ?? 0) * 60_000;
+  if (!(p > 0) || !Number.isFinite(at)) return `mind away since ${hhmm(since)} UTC`;
+  return `mind away, next check about ${hhmm(at + Math.max(1, Math.ceil((now - at) / p)) * p)} UTC`;
+}
+/** Pure: the mind went away: the away line that was set, and the line it replaced (null for none), kept. */
+export const wentAway = (wake, since, text, stored) => ({ ...wake, mind: { ...wake?.mind, away: { since, text, stored } } });
+/** Pure: the mind is back (an acting command, serve --stop, `wake away off`). `line`: the public line now; `own`: the command sets
+ *  its own line. {wake, restore}: restore is the kept line to set again (null clears it), or undefined when nothing is set. The kept
+ *  line comes back only while the public line still says away, and a command's own line wins over it. */
+export function back(wake, line, own = false) {
+  const a = wake?.mind?.away;
+  if (!a) return { wake, restore: undefined };
+  const { away: _gone, ...mind } = wake.mind;
+  return { wake: { ...wake, mind }, restore: !own && line === a.text ? a.stored : undefined };
 }

@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, BUDGETS, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
+import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway } from './soul/wake.mjs';
 import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine } from './soul/eden.mjs';
 
 const T0 = 1_800_000_000_000;
@@ -146,11 +146,14 @@ test('A5: a rule fires at most once per --every window (default 300 s), queued a
 
 /** A stand-in world: an inbox that hands out what the test posts, an event stream with nothing on it. */
 async function world(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'souls-wake-')), w = { dir, inbox: [], env: {} };
+  const dir = mkdtempSync(join(tmpdir(), 'souls-wake-')), w = { dir, inbox: [], env: {}, line: null };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://w'), p = url.pathname;
-    for await (const _ of req) { /* drain */ }
+    let body = ''; for await (const c of req) body += c;
     const json = (status, v) => { if (!res.destroyed) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); } };
+    if (p === '/v1/edge/self/link') return json(200, { link: { state: 'connected' }, now: w.line });   // #1933: the public line
+    if (p === '/v1/edge/self/now') { w.line = JSON.parse(body).text; return json(200, { now: w.line }); }
+    if (/^\/v1\/edge\/inbox\/[^/]+\/ack$/.test(p)) { const b = JSON.parse(body || '{}'); if ('now' in b) w.line = b.now; return json(200, { acked: true }); }
     if (p === '/v1/edge/inbox/listen') { await new Promise((r) => setTimeout(r, Number(url.searchParams.get('timeoutMs')) > 0 ? 200 : 0)); return json(200, { inbox: { connected: true }, backlog: w.inbox }); }
     if (p === '/v1/edge/wait') { await new Promise((r) => setTimeout(r, 200)); return json(200, { events: [], cursor: url.searchParams.get('after') ?? 'c_0' }); }
     return json(404, { error: { code: 'not-found', message: p } });
@@ -413,4 +416,72 @@ test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps th
   const runs = readFileSync(mark, 'utf8').trim().split('\n');
   assert.equal(runs.length, 2, 'one run per harness');
   assert.ok(runs.every((x) => x.includes(prompt)), 'each with the heartbeat prompt');
+});
+
+// #1933: the mind is away. A fake clock: T0 is 2027-01-15 08:00 UTC.
+const MIN = 60_000;
+test('#1933 A1, A2: away after 10 minutes of a wake or owner message no acting command answered, or of no command; the line says since when or the next check', () => {
+  let w = saw(fresh(), 'command', T0);
+  assert.equal(awaySince(w, T0 + 9 * MIN, T0), null);
+  assert.equal(awaySince(w, T0 + 10 * MIN, T0), T0, 'no follower and no command for 10 minutes');
+  assert.equal(awaySince(fresh(), T0 + 10 * MIN, T0), T0, 'serve\'s start stands in for a command never seen');
+  w = saw(w, 'owed', T0 + MIN);   // an owner message arrived
+  for (let t = T0 + MIN; t < T0 + 11 * MIN; t += MIN) w = saw(w, 'command', t);   // listen --follow polls, and pending, but nothing acts
+  assert.equal(awaySince(w, T0 + 11 * MIN, T0), T0 + MIN, 'a follower keeps polling: still away, from the message');
+  assert.equal(saw(w, 'owed', T0 + 5 * MIN).mind.owed, T0 + MIN, 'the first unanswered one counts');
+  w = saw(w, 'acting', T0 + 11 * MIN);
+  assert.equal(awaySince(w, T0 + 20 * MIN, T0), null, 'an acting command answered it');
+  assert.equal(AWAY_MS, 10 * MIN);
+
+  assert.equal(awayText(T0 + MIN, undefined, T0 + 11 * MIN), 'mind away since 08:01 UTC');
+  const hb = { every: 60, at: new Date(T0 - 30 * MIN).toISOString() };   // kept at 07:30, every hour
+  assert.equal(awayText(T0 + MIN, hb, T0 + 11 * MIN), 'mind away, next check about 08:30 UTC');
+  assert.equal(awayText(T0 + MIN, hb, T0 + 31 * MIN), 'mind away, next check about 09:30 UTC', 'past 08:30: the next one');
+});
+
+test('#1933 A2, A3: going away keeps the line; the next acting command restores it, only while it still says away', () => {
+  const text = awayText(T0, undefined, T0 + 10 * MIN);
+  const away = wentAway(saw(fresh(), 'command', T0), T0, text, 'rowing to the mill');
+  assert.deepEqual(away.mind.away, { since: T0, text, stored: 'rowing to the mill' });
+  let b = back(away, text);
+  assert.equal(b.restore, 'rowing to the mill', 'restored');
+  assert.equal(b.wake.mind.away, undefined); assert.equal(b.wake.mind.last, T0, 'the rest of the mind state stays');
+  assert.equal(back(wentAway(fresh(), T0, text, null), text).restore, null, 'no line before: the line is cleared');
+  b = back(away, 'gone fishing');
+  assert.equal(b.restore, undefined, 'someone changed the line since: it stays'); assert.equal(b.wake.mind.away, undefined);
+  assert.equal(back(fresh(), text).restore, undefined, 'not away: nothing to restore');
+});
+
+test('#1933 A3: an acting command that sets its own line wins; the kept one is dropped', () => {
+  const text = awayText(T0, undefined, T0 + 10 * MIN), b = back(wentAway(fresh(), T0, text, 'rowing to the mill'), text, true);
+  assert.equal(b.restore, undefined); assert.equal(b.wake.mind.away, undefined);
+});
+
+test('#1933 A4: wake away off turns it off, and on again', () => {
+  assert.deepEqual(parseAway(['off']), { away: 'off' });
+  assert.throws(() => parseAway(['maybe']), /wake away <on\|off>/);
+  const off = change(saw(fresh(), 'command', T0), parseAway(['off'])).wake;
+  assert.equal(awaySince(off, T0 + 60 * MIN, T0), null, 'off: never away');
+  assert.equal(view(off).away, 'off');
+  const on = change(off, parseAway(['on'])).wake;
+  assert.equal(awaySince(on, T0 + 60 * MIN, T0), T0); assert.equal(view(on).away, 'on');
+});
+
+test('#1933 A2, A3: through serve: the line goes away and an acting command puts it back; one with its own line wins', async (t) => {
+  const w = await world(t);
+  w.env = { EDEN_TIME_SCALE: '0.01' };   // away after AWAY_MS × 0.01 = 6 s, looked at every 0.3 s
+  w.line = 'rowing to the mill';
+  assert.equal((await w.cli('serve')).code, 0);
+  assert.ok(await until(() => /^mind away since \d\d:\d\d UTC$/.test(w.line ?? ''), 15_000), `away: ${w.line}`);
+  assert.equal(w.state().wake.mind.away.stored, 'rowing to the mill');
+  let r = await w.cli('ack', 'msg_1', 'on my way');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(w.line, 'rowing to the mill', 'restored');
+  assert.equal(w.state().wake.mind.away, undefined);
+
+  assert.ok(await until(() => /^mind away/.test(w.line ?? ''), 15_000), 'away again');
+  r = await w.cli('ack', 'msg_2', 'coming', '--now', 'walking over');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(w.line, 'walking over', 'the command\'s own line wins');
+  assert.equal(w.state().wake.mind.away, undefined, 'the kept line is dropped');
 });
