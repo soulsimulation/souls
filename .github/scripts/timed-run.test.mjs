@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, strays, LOAD_GATE } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, globTest, LOAD_GATE } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
@@ -66,11 +66,17 @@ test('stage: only allowlisted files, scrubbed; a Soul token refuses the whole up
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
-test('strays: files written after the start outside the allowed dirs and runner installs', () => {
-  const d = mkdtempSync(join(tmpdir(), 'timed-')), old = Date.now() / 1000 - 3600;
+test('strays: entries new since the start snapshot, outside allowed dirs, runner installs and excluded globs', () => {
+  const d = mkdtempSync(join(tmpdir(), 'timed-')), touch = (p) => { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), ''); };
   try {
-    for (const p of ['home/.cache/old', 'home/.cache/new', 'home/per-run/x', 'home/runner2/.runner', 'home/runner2/_work/y']) { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), ''); }
-    utimesSync(join(d, 'home/.cache/old'), old, old);
-    assert.deepEqual(strays([join(d, 'home'), join(d, 'missing')], Date.now() - 60_000, [join(d, 'home/per-run')]), [join(d, 'home/.cache/new')]);
+    const opts = { allow: [join(d, 'home/per-run')], exclude: [join(d, 'tmp/clr-debug-pipe-*')], uid: process.getuid?.() ?? null };
+    const roots = [join(d, 'home'), join(d, 'tmp'), join(d, 'missing')];
+    touch('home/.cache/old');
+    const before = snapshot(roots, opts);
+    utimesSync(join(d, 'home/.cache/old'), new Date(), new Date());   // an old entry rewritten is not new
+    for (const p of ['home/.cache/new', 'home/per-run/x', 'home/runner2/.runner', 'home/runner2/_work/y', 'tmp/clr-debug-pipe-1-in', 'tmp/stray/f']) touch(p);
+    assert.deepEqual(newEntries(before, snapshot(roots, opts)), [join(d, 'home/.cache/new'), join(d, 'tmp/stray'), join(d, 'tmp/stray/f')]);
+    assert.equal(snapshot(roots, { ...opts, uid: -1 }).length, 0, 'another account\'s entries are never listed');
+    assert.ok(globTest('/tmp/cerr-*')('/tmp/cerr-ab12') && !globTest('/tmp/cerr-*')('/tmp/cerr-ab/agg.json') && !globTest('/tmp/cerr-*')('/tmpXcerr-a'));
   } finally { rmSync(d, { recursive: true, force: true }); }
 });

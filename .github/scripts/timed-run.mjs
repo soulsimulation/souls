@@ -8,11 +8,12 @@
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
 //   node timed-run.mjs run    --record <file> --out <dir>            the command, `repeats` times (cwd: the ref)
 //   node timed-run.mjs stage  --record <file> --out <dir> --dest <dir>   allowlisted, scrubbed copy; refused on a Soul token
-//   node timed-run.mjs strays --since <marker> --allow <dir>[,<dir>]     files written outside the per-run dirs
+//   node timed-run.mjs snapshot --snapshot <file> [--exclude <globs>]   this account's entries of the home and /tmp
+//   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot
 //
 // Pure decisions are exported for timed-run.test.mjs. Nothing here prints a path, host or user name.
 import { spawn } from 'node:child_process';
-import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname, loadavg, userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -106,22 +107,29 @@ export function stage({ out, dest, scrubWith }) {
   return texts.map(([f]) => f);
 }
 
-/** Files of `uid` under roots modified after `since` (ms), skipping allowed dirs and any runner install (a dir holding `.runner`). */
-export function strays(roots, since, allow, uid = null) {
-  const skip = allow.filter(Boolean).map((d) => resolve(d)), found = [];
-  const inside = (p) => skip.some((d) => p === d || p.startsWith(d + sep));
+/** A whole-path glob where `*` matches within one path segment → a test. */
+export const globTest = (g) => { const re = new RegExp(`^${g.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`); return (p) => re.test(p); };
+
+/** The entries of `uid` under roots (files and directories, links not followed), skipping allowed dirs, any runner
+ *  install (a dir holding `.runner`) and excluded globs. Another account's entries are never listed or entered. */
+export function snapshot(roots, { allow = [], exclude = [], uid = null } = {}) {
+  const skip = allow.filter(Boolean).map((d) => resolve(d)), ex = exclude.filter(Boolean).map(globTest), found = [];
+  const out = (p) => skip.some((d) => p === d || p.startsWith(d + sep)) || ex.some((t) => t(p));
   const walk = (d) => {
     let ents; try { ents = readdirSync(d, { withFileTypes: true }); } catch { return; }
-    if (ents.some((e) => e.name === '.runner' && e.isFile())) return;
     for (const e of ents) {
-      const p = join(d, e.name); if (inside(p)) continue;
-      if (e.isDirectory()) walk(p);
-      else { let st; try { st = lstatSync(p); } catch { continue; } if (st.mtimeMs > since && (uid == null || st.uid === uid)) found.push(p); }   // another account's entry may not be readable
+      const p = join(d, e.name); if (out(p)) continue;
+      let st; try { st = lstatSync(p); } catch { continue; }
+      if (uid != null && st.uid !== uid) continue;
+      if (st.isDirectory() && existsSync(join(p, '.runner'))) continue;   // a runner install
+      found.push(p); if (st.isDirectory()) walk(p);
     }
   };
-  for (const r of roots) if (r && existsSync(r) && !inside(resolve(r))) walk(resolve(r));
+  for (const r of roots) if (r && existsSync(r) && !out(resolve(r))) walk(resolve(r));
   return found.sort();
 }
+/** Entries in `after` that were not in the start snapshot `before`. */
+export const newEntries = (before, after) => { const b = new Set(before); return after.filter((p) => !b.has(p)); };
 
 // ------------------------------------------------------------------ impure side (the workflow's steps)
 const output = (k, v) => { if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`); };
@@ -134,15 +142,17 @@ const scrubWith = () => { const env = process.env, u = (() => { try { return use
   return { paths: [[env.PER_RUN, '<per-run>'], [env.GITHUB_WORKSPACE, '.'], [env.RUNNER_WORKSPACE, '<runner-work>'], [env.RUNNER_TEMP, '<runner-temp>'], [env.HOME, '~']], names: [[hostname(), '<host>'], [u, '<user>']] }; };
 
 async function main(cmd) {
-  if (cmd === 'strays') {
-    // The runner's own install (its _work, _temp, _tool and _diag) is the runner's, not the job's: the job's dirs there
-    // are the per-run directory and its checkout, which the clean-up step removes.
-    const env = process.env, runnerRoot = env.RUNNER_WORKSPACE ? resolve(env.RUNNER_WORKSPACE, '../..') : null;
-    const found = strays([env.HOME, '/tmp', '/var/tmp'], statSync(arg('since')).mtimeMs, [...(arg('allow') ?? '').split(','), env.RUNNER_TOOL_CACHE, runnerRoot], process.getuid?.() ?? null);
-    const sw = scrubWith();
+  if (cmd === 'snapshot' || cmd === 'strays') {   // A2: entries of the shared home and /tmp new since the job's start
+    // Skipped: the runner installs (a dir holding `.runner`: the service's _work, _temp, _tool and _diag, with every
+    // job's per-run directory and checkout), the tool cache, and the --exclude globs the workflow names with reasons.
+    // Only this account's entries are read, so no other account's path can reach the log.
+    const env = process.env, runnerRoot = env.RUNNER_WORKSPACE ? resolve(env.RUNNER_WORKSPACE, '../..') : null, file = arg('snapshot');
+    const now = snapshot([env.HOME, '/tmp'], { allow: [env.RUNNER_TOOL_CACHE, runnerRoot], exclude: (arg('exclude') ?? '').split(','), uid: process.getuid?.() ?? null });
+    if (cmd === 'snapshot') { writeFileSync(file, JSON.stringify(now)); console.log(`snapshot: ${now.length} entries`); return; }
+    const found = newEntries(JSON.parse(readFileSync(file, 'utf8')), now), sw = scrubWith();
     for (const f of found.slice(0, 50)) console.log(`::error::written outside the per-run directory: ${scrub(f, sw)}`);
-    if (found.length) throw new Error(`${found.length} file(s) written outside the per-run directory`);
-    console.log('no files written outside the per-run directory'); return;
+    if (found.length) throw new Error(`${found.length} entries written outside the per-run directory`);
+    console.log('no entries written outside the per-run directory'); return;
   }
   const inp = parseInputs(process.env), rf = arg('record');
   if (cmd === 'inputs') { output('target', checkoutRef(inp.ref)); console.log(`inputs ok: ${inp.ref}, ${inp.command} x${inp.repeats}${inp.args.length ? ` ${inp.args.join(' ')}` : ''}`); return; }
@@ -185,6 +195,6 @@ async function main(cmd) {
     const copied = stage({ out, dest: arg('dest'), scrubWith: scrubWith() });
     console.log(`staged ${copied.length} file(s): ${copied.join(', ')}`); return;
   }
-  throw new Error(`unknown command ${cmd}: inputs | load | run | stage | strays`);
+  throw new Error(`unknown command ${cmd}: inputs | load | run | stage | snapshot | strays`);
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main(process.argv[2]).catch((e) => { console.log(`::error::${e.message}`); process.exit(1); });
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main(process.argv[2]).catch((e) => { console.log(`::error::${e.code ? `${e.syscall ?? 'file'} failed: ${e.code} (path withheld)` : e.message}`); process.exit(1); });

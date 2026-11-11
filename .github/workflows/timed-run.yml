@@ -6,7 +6,8 @@
 # run), which rests on the runners' dedicated, unprivileged account. The steps follow capacity-qualify.yml: masked host
 # values, per-run tool directories, a per-run pnpm store, an artifact staged through an allowlist and scrubbed, refused
 # if it holds a Soul token. A run does not start while the runner's own cores are above the load gate. The last step
-# fails if the job wrote files outside its per-run directory. See docs/testing/playtests.md ("Timed runs").
+# fails on entries of the shared home and /tmp that are new since a snapshot at job start (exclusions are named in
+# STRAY_EXCLUDE below, each with its reason). See docs/testing/playtests.md ("Timed runs").
 name: timed-run
 on:
   workflow_dispatch:
@@ -39,6 +40,14 @@ jobs:
       INPUT_REPEATS: ${{ inputs.repeats }}
       INPUT_ARGS: ${{ inputs.args }}
       CTL: ../ctl/.github/scripts/timed-run.mjs
+      # The runners share one account home, so A2's check diffs a snapshot of the home and /tmp. Not counted as the job's:
+      # - any runner install (a dir holding `.runner`) and the tool cache: the runner service's own _work, _temp, _tool and
+      #   _diag; other concurrent jobs keep their per-run directories and checkouts there (excluded in timed-run.mjs);
+      # - /tmp/clr-debug-pipe-*, /tmp/dotnet-diagnostic-*: the runner service's .NET diagnostic pipes, one per job worker;
+      # - /tmp/cerr-*: the temp dirs of tools/world-launcher/client-errors.test.mjs, from unit-test jobs on this account
+      #   (a timed job runs no unit tests);
+      # - another account's entries: never read, so never listed.
+      STRAY_EXCLUDE: /tmp/clr-debug-pipe-*,/tmp/dotnet-diagnostic-*,/tmp/cerr-*
     steps:
       # Before anything can print them: the runner's paths, host name and user name never reach the public log.
       - name: Mask host-identifying values
@@ -51,10 +60,9 @@ jobs:
         run: |
           d="$RUNNER_TEMP/timed-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$d/tmp"
-          touch "$RUNNER_TEMP/timed-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.start"
           {
             echo "PER_RUN=$d"
-            echo "START_MARK=$RUNNER_TEMP/timed-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.start"
+            echo "SNAPSHOT=$RUNNER_TEMP/timed-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.snapshot.json"
             echo "RECORD=$d/record.json"
             echo "OUT=$d/out"
             echo "ARTIFACT=$d/artifact"
@@ -62,12 +70,17 @@ jobs:
             echo "npm_config_store_dir=$d/pnpm-store"
             echo "npm_config_cache_dir=$d/pnpm-cache"
             echo "npm_config_state_dir=$d/pnpm-state"
+            echo "npm_config_cache=$d/npm-cache"
+            echo "npm_config_logs_dir=$d/npm-logs"
             echo "SIM_ASSETS_CACHE=$d/sim-assets"
           } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { path: ctl, sparse-checkout: .github/scripts, persist-credentials: false }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
+      - name: Snapshot the shared home and /tmp
+        working-directory: ctl
+        run: node .github/scripts/timed-run.mjs snapshot --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE"
       - name: Validate inputs
         id: vet
         working-directory: ctl
@@ -121,6 +134,6 @@ jobs:
         if: always()
         working-directory: ctl
         run: |
-          if [ -z "${START_MARK:-}" ] || [ ! -f "$START_MARK" ]; then echo "::error::no start marker"; exit 1; fi
-          trap 'rm -f "$START_MARK"' EXIT
-          node .github/scripts/timed-run.mjs strays --since "$START_MARK" --allow "$GITHUB_WORKSPACE"
+          if [ -z "${SNAPSHOT:-}" ] || [ ! -f "$SNAPSHOT" ]; then echo "::error::no start snapshot"; exit 1; fi
+          trap 'rm -f "$SNAPSHOT"' EXIT
+          node .github/scripts/timed-run.mjs strays --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE"
