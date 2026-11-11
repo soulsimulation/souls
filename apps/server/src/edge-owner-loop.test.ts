@@ -86,10 +86,10 @@ test('D3: act --for links the receipt to the owner message; the world writes the
   await waiting;
 
   // `for` must name a message of this Soul
-  const bad = await req('/v1/edge/act', token, {capability: 'wave', for: 'm_nope'});
+  const bad = await req('/v1/edge/act', token, {capability: 'wave:here', for: 'm_nope'});
   assert.equal(bad.status, 400); assert.match(bad.data.error.message, /no owner message/);
   // the act's end writes the result
-  const out = (await accept(f.host, req('/v1/edge/act', token, {capability: 'wave', for: msg.id}))).data;
+  const out = (await accept(f.host, req('/v1/edge/act', token, {capability: 'wave:here', for: msg.id}))).data;
   assert.equal(out.accepted, true, JSON.stringify(out)); assert.equal(out.for, msg.id);
   for (let i = 0; i < 2000 && ['waiting', 'started', 'accepted'].includes(edge.receipt(a.id, out.receipt.id)!.phase); i++) { f.host.tickOnce(); if (i % 20 === 0) { await new Promise(r => setImmediate(r)); f.host.drainInputs(); } }
   assert.equal(edge.receipt(a.id, out.receipt.id)!.phase, 'completed');
@@ -103,7 +103,7 @@ test('D3: act --for links the receipt to the owner message; the world writes the
   assert.equal(mine.result, 'Waved at you'); assert.equal(mine.result_by, null);
   assert.equal((await req(`/v1/edge/inbox/${msg.id}/result`, token, {outcome: 'done', text: 'something else'})).status, 409);
   // a later linked act never overwrites the agent's result
-  const again = (await accept(f.host, req('/v1/edge/act', token, {capability: 'wave', for: msg.id}))).data;
+  const again = (await accept(f.host, req('/v1/edge/act', token, {capability: 'wave:here', for: msg.id}))).data;
   for (let i = 0; i < 2000 && ['waiting', 'started', 'accepted'].includes(edge.receipt(a.id, again.receipt.id)!.phase); i++) { f.host.tickOnce(); if (i % 20 === 0) { await new Promise(r => setImmediate(r)); f.host.drainInputs(); } }
   await new Promise(r => setTimeout(r, 20));
   assert.equal((f.db.db.prepare('SELECT result FROM soul_inbox_queue_v1 WHERE id=?').get(msg.id) as any).result, 'Waved at you');
@@ -111,7 +111,7 @@ test('D3: act --for links the receipt to the owner message; the world writes the
   assert.equal((await req(box, 'dev:alice', {text: 'sit down for a bit, then come back to me'})).status, 200);
   const next = (await req(`/v1/edge/inbox/listen?after=${msg.id}&timeoutMs=0`, token)).data.backlog[0];
   assert.equal((await req(`/v1/edge/inbox/${next.id}/ack`, token, {reply: 'Got it'})).status, 200);
-  const open = (await accept(f.host, req('/v1/edge/act', token, {capability: 'wave', for: next.id, forDefault: true}))).data;
+  const open = (await accept(f.host, req('/v1/edge/act', token, {capability: 'wave:here', for: next.id, forDefault: true}))).data;
   assert.equal(open.accepted, true, JSON.stringify(open)); assert.equal(open.for, next.id); assert.equal(open.open, true);
   for (let i = 0; i < 2000 && ['waiting', 'started', 'accepted'].includes(edge.receipt(a.id, open.receipt.id)!.phase); i++) { f.host.tickOnce(); if (i % 20 === 0) { await new Promise(r => setImmediate(r)); f.host.drainInputs(); } }
   await new Promise(r => setTimeout(r, 20));
