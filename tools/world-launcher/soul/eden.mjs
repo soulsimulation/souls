@@ -2962,11 +2962,14 @@ let SERVE_TOO_OLD = null;   // serve --foreground: stops on the code and records
 const upgradeRun = (run, url) => { const key = HOME && url ? soulHome.keyOf(HOME.config().worlds, url) : null; return key ? `${run} ${key}` : run; };
 const tooOldMessage = (min, run) => `This Soul client is too old for this world: it needs ${min} or newer, and this is ${VERSION}. Run: ${run}`;
 const tooOld = (d, url) => Object.assign(new Error(tooOldMessage(d?.min, upgradeRun(d?.run ?? `${CLI} upgrade`, url))), { code: UPGRADE_REQUIRED });
-/** The world this command speaks to, when the home's cached minimum for it is above this client. */
+/** The world this command speaks to, when the home's cached minimum for it is above this client: `refuse` only when that world
+ *  serves a bundle that meets it (an upgrade exists); otherwise a `warn`, and the command goes to the world. Never a lock-out. */
 function tooOldHere(cmd) {
   if (!HOME || !commands[cmd] || UPGRADE_FREE.has(cmd) || soulHome.HOME_COMMANDS.has(cmd)) return null;
-  const url = load().world, key = url ? soulHome.keyOf(HOME.config().worlds, url) : null, min = key ? HOME.config().worlds[key].minClient : null;
-  return min && soulHome.newerThan(min, VERSION) ? tooOldMessage(min, `${CLI} upgrade ${key}`) : null;
+  const url = load().world, key = url ? soulHome.keyOf(HOME.config().worlds, url) : null, w = key ? HOME.config().worlds[key] : null, min = w?.minClient;
+  if (!min || !soulHome.newerThan(min, VERSION)) return null;
+  if (w.bundle && !soulHome.newerThan(min, w.bundle)) return { refuse: tooOldMessage(min, `${CLI} upgrade ${key}`) };
+  return { warn: `${key} needs eden ${min} or newer and this is ${VERSION}, but it serves ${w.bundle ?? "no bundle"}, so there is nothing to upgrade to yet. Tell whoever keeps that world.` };
 }
 
 // Throw on non-2xx with the server's own code and message. A revoked controller token is
@@ -5837,7 +5840,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let argv = args;
   try { argv = ["act", "stop", "say", "ack", "result", "wait"].includes(cmd) ? takeNowFlag(args) : args; } catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
   const old = tooOldHere(cmd);
-  if (old) { process.stderr.write(`error: ${old}\n`); process.exit(1); }
+  if (old?.refuse) { process.stderr.write(`error: ${old.refuse}\n`); process.exit(1); }
+  if (old?.warn) process.stderr.write(`warning: ${old.warn}\n`);
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null, pendingUpdate = startUpdateCheck(cmd);
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };

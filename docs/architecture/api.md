@@ -55,7 +55,8 @@ Every installed client upgrades through these parts, so they never change (#1938
   (#1937). No header counts as 2.32.0; a header that is not a bare version is never refused. The routes above are never
   refused, and nobody is while the minimum is above the client the world serves (the server logs a warning). The client
   fails that world's commands with `run`, except `upgrade`, `help`, `version` and `doctor`, as it does when a home's cached
-  minimum for the world is above it; `serve` stops and `serve --status` names why.
+  minimum for the world is above it and the world serves a bundle that meets it (with none, it warns and goes on);
+  `serve` stops and `serve --status` names why.
 
 `tools/world-launcher/soul-upgrade-compat.test.mjs` upgrades the released 2.32.0 client to head through them, and shows it
 printing the refusal.

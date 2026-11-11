@@ -106,11 +106,22 @@ test('A3: a home\'s cached minimum fails that world\'s commands, not another wor
   for (const slug of ['old', 'other']) assert.equal((await run('register', `${w.base}/${slug}`)).code, 0);
   const file = join(d, '.souls', 'config.json'), cfg = JSON.parse(readFileSync(file, 'utf8'));
   const key = Object.keys(cfg.worlds).find(k => cfg.worlds[k].url.endsWith('/old'))!, other = Object.keys(cfg.worlds).find(k => k !== key)!;
-  cfg.worlds[key].minClient = MIN; writeFileSync(file, JSON.stringify(cfg));
+  cfg.worlds[key].minClient = MIN; cfg.worlds[key].bundle = MIN; writeFileSync(file, JSON.stringify(cfg));   // an upgrade that meets it is served
   const refused = await run(`@${key}`, 'here');
   assert.equal(refused.code, 1);
   assert.match(refused.err, new RegExp(`needs ${MIN} or newer, and this is ${HEAD}\\. Run: node eden\\.mjs upgrade ${key}\\n`));
   assert.doesNotMatch((await run(`@${other}`, 'here')).err, /too old/);
   for (const args of [['version'], ['help'], ['doctor']]) assert.doesNotMatch((await run(...args)).err, /too old/, args[0]);
   assert.doesNotMatch((await run('upgrade', key)).err, /too old for this world/);
+});
+
+test('A3: a cached minimum above the client with no newer bundle served never locks a world out: the command runs and a warning names the gap', async (t) => {
+  const w = await world(t, '1.0.0', {soulClient: {contract: 'eden-edge/1', version: HEAD, bytes: 1, sha256: 'x', minVersion: '1.0.0'}}), {d, run} = folder(t);
+  assert.equal((await run('register', `${w.base}/old`)).code, 0);
+  const file = join(d, '.souls', 'config.json'), cfg = JSON.parse(readFileSync(file, 'utf8')), key = Object.keys(cfg.worlds)[0];
+  cfg.worlds[key].minClient = MIN; cfg.worlds[key].bundle = HEAD; writeFileSync(file, JSON.stringify(cfg));
+  const r = await run(`@${key}`, 'status');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json?.world, `${w.base}/old`, 'the command ran');
+  assert.match(r.err, new RegExp(`warning: ${key} needs eden ${MIN} or newer and this is ${HEAD}, but it serves ${HEAD.replace(/\./g, '\\.')}, so there is nothing to upgrade to yet`));
 });
