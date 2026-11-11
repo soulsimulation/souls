@@ -212,26 +212,31 @@ test('greenAtHead: the newest uncancelled ci run at the head passed, and none ne
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'in_progress')], 2), true, 'a run never counts itself');
 });
 
-test('ci.yml: a window label starts a pull_request run, and no other label touches CI', () => {
+test('ci.yml: every label starts a real pull_request run with ci-ok, queued in the PR group (#2018)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const job = name => workflow.slice(workflow.indexOf(`\n  ${name}:\n`) + 1).split(/\n  [a-z-]+:\n/)[0];
-  const asked = WINDOW_LABELS.map(l => `github.event.label.name == '${l}'`).join(' || ').split(' || ').sort();
-  const wanted = text => { const m = /github\.event\.action != 'labeled' \|\| ([^)\n]*?)(?:\)|$)/m.exec(text); assert.ok(m, text.slice(0, 60)); return m[1].split(' || ').sort(); };
-  for (const name of ['scope', 'repo']) assert.deepEqual(wanted(job(name).match(/^    if: (.*)$/m)[1]), asked, name);
-  // qualify and smoke need scope, so they skip with it; ci-ok alone runs always(), and must not on another label
-  for (const name of ['qualify', 'smoke']) assert.match(job(name), /needs: scope|needs: \[scope/, name);
-  const ok = job('ci-ok'), okIf = ok.match(/^    if: (.*)$/m)[1];
-  assert.match(okIf, /^always\(\) && \(/); assert.deepEqual(wanted(okIf), asked);
-  // a skipped required check reads as a pass, so on another label this job must not be `ci-ok`
-  const name = ok.match(/^    name: (.*)$/m)[1]; assert.deepEqual(wanted(name), asked); assert.match(name, /&& 'ci-ok' \|\| 'other-label' \}\}$/);
-  // another label's run has a group of its own, so it can't cancel or displace a running CI; a window label queues, never cancels
-  const group = workflow.match(/^  group: (.*)$/m)[1];
-  assert.equal(group, "ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}");
-  for (const l of WINDOW_LABELS) assert.ok(group.includes(`github.event.label.name != '${l}'`), l);
+  // the queue reads only the newest ci run at a head: no label may leave one without a real ci-ok
+  assert.doesNotMatch(workflow, /github\.event\.label\.name|other-label/);
+  for (const name of ['scope', 'repo']) assert.doesNotMatch(job(name), /^    if: /m, name);
+  const ok = job('ci-ok');
+  assert.doesNotMatch(ok, /^    name: /m, 'the job is always named ci-ok');
+  assert.equal(ok.match(/^    if: (.*)$/m)[1], 'always()');
+  // a label run queues behind the PR's running CI and never cancels it; a push still cancels
+  assert.equal(workflow.match(/^  group: (.*)$/m)[1], 'ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}');
   assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' && github\.event\.action != 'labeled' \}\}/);
-  // a window label on a green head does no heavy work, and the head is the PR's, not the merge commit
+  // a label on a green head does no heavy work, and the head is the PR's, not the merge commit
   assert.match(job('scope'), /if: github\.event\.action == 'labeled' \|\| \(github\.event_name == 'workflow_dispatch'/);
   assert.match(job('scope'), /green --repo "\$GITHUB_REPOSITORY" --sha "\$HEAD_SHA" --self/);
+});
+
+test('#2018: merge:ready then approved:maintainer keeps a passing ci-ok without heavy work', () => {
+  const server = ['--files', 'apps/server/src/world.ts', '--event', 'pull_request', '--draft', 'false'];
+  const ready = run(...server, '--labels', '["merge:ready"]');
+  assert.deepEqual([ready.any, ready.deferred], ['true', 'false'], 'merge:ready runs the heavy jobs');
+  const green = String(greenAtHead([{ id: 1, status: 'completed', conclusion: 'failure' }, { id: 2, status: 'completed', conclusion: 'success' }], 3));
+  assert.equal(green, 'true', 'the merge:ready run passed at this head');
+  const approved = run(...server, '--labels', '["merge:ready","approved:maintainer"]', '--green-at-head', green);
+  assert.deepEqual([approved.any, approved.smoke, approved.deferred], ['false', 'false', 'false'], 'ci-ok passes on scope and repo alone');
 });
 
 test('a window label opens the window on its own pull_request run, and green at the head does no heavy work', () => {
