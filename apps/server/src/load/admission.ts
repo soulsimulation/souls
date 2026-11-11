@@ -73,12 +73,13 @@ export const SOUL_REFILL_MAX_PER_S = 200;
 const COOL_MS = 60_000, CAPACITY_MS = 2000, GOD_SHARE = 0.25, DEFAULT_EST_MS = 20, ANSWER_MARGIN_MS = 250, ACTIVE_MS = 60_000;
 
 type Job = {key: string; god: boolean; route: RouteClass; arrival: number; deadline: number; closed: () => boolean;
-  settle: (v: 'run' | 'dropped' | Refusal) => void; finished: Promise<void>; finish: () => void};
+  settle: (v: 'run' | 'dropped' | Refusal) => void; finished: Promise<void>; finish: () => void;
+  diag: {state: string; at: number; held: Record<string, number>; atRun?: Record<string, number>}};
 type Bucket = {tokens: number; at: number; seen: number};
 type Strikes = {slow: number[]; busy: number[]; coolUntil: number; retryUntil: number};
 /** Socket-independent (Stage B): a job is (key = Soul or god, class, deadline, `closed()` = "has the asker gone", and the
  *  ticket as its reply handle). The HTTP middleware below is one front end; a worker's MessagePort can be another. */
-export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Refusal>; done: () => void; waitedMs: () => number};
+export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Refusal>; done: () => void; waitedMs: () => number; diag?: () => unknown};
 
 export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>;
   /** The quiet tick ms (default: the monitor's, from the process's shared numbers, S.quietTickMs). */
@@ -173,7 +174,8 @@ export class Admission {
     const finished = new Promise<void>(res => { finish = res; });
     let ranAt = 0, isDone = false;
     const job: Job = {key: r.key, god: r.god, route: r.route, arrival: now, deadline, closed: r.closed ?? (() => false), finished, finish,
-      settle: v => { if (v === 'run') ranAt = this.now(); settle(v); }};
+      diag: {state: this.draining ? 'inflight' : 'order', at: now, held: {}},
+      settle: v => { if (v === 'run') { ranAt = this.now(); this.note(job, ranAt, 'ran'); const b = this.bucket(job.key, job.god, ranAt); job.diag.atRun = {tokens: Math.round(b.tokens), need: Math.round(this.need(job.route.id)), refillPerS: Math.round(this.refillPerS(job.god) * 10) / 10, active: this.active(), budget: Math.round(this.frameBudget() * 10) / 10, depth: this.queue.length, credit: Math.round(this.credit)}; } settle(v); }};
     this.outstanding.add(r.key);
     // fast path: nothing waiting, the dispatcher idle, frame credit left and nobody else in flight → run now, inline
     // (no hop: the quiet case costs what it did before admission). Green or amber: a lone Soul in a world that is
@@ -186,10 +188,10 @@ export class Admission {
       let charged = false;
       const charge = () => { if (charged) return; charged = true; this.charge(r.key, r.god, r.route.id, this.now() - now, now); };
       void (this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(res => setImmediate(res))).then(charge);
-      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); charge(); finish(); this.kick(); }};
+      return {turn, waitedMs: () => 0, diag: () => ({fast: true}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); charge(); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
-    return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
+    return {turn, waitedMs: () => (ranAt || this.now()) - now, diag: () => ({held: job.diag.held, atRun: job.diag.atRun}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
   }
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
@@ -230,6 +232,8 @@ export class Admission {
       }
     }
   }
+  /** #2124 DIAG: time a queued job spent in its last state, then its new state. */
+  private note(j: Job, now: number, state: string) { const d = j.diag; d.held[d.state] = Math.round((d.held[d.state] ?? 0) + now - d.at); d.state = state; d.at = now; }
   /** Next job: writes before reads, FIFO across Souls (each Soul has at most one), the god's reserve under contention. */
   private pick(now: number): number {
     const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls);
@@ -239,8 +243,9 @@ export class Admission {
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) { this.note(j, now, 'bucket'); continue; }   // short of budget: the act waits
       }
+      this.note(j, now, 'order');
       const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
     }
@@ -261,12 +266,14 @@ export class Admission {
         let now = this.now();
         this.sweep(now);
         const budget = this.frameBudget();
-        if (this.creditNow(now) <= 0) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        if (this.creditNow(now) <= 0) { for (const q of this.queue) if (q.diag.state !== 'bucket') this.note(q, now, 'credit'); this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
         const [j] = this.queue.splice(i, 1);
         j.settle('run');
+        for (const q of this.queue) if (q.diag.state === 'order') this.note(q, now, 'inflight');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
+        if (j.diag.atRun) j.diag.atRun.charged = Math.round(this.now() - now);
         this.charge(j.key, j.god, j.route.id, this.now() - now, now);
       }
     } finally { this.draining = false; }
@@ -317,11 +324,11 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   // #1944 A1: an act whose handler ran (`act`: its marks, actTiming) also says its parts after admission, which sum with
   // `queue` to `world` (less `warm`): handler, wait, commit; and inside handler, bind, check and the route searches that
   // missed the per-epoch memo (`route-miss;desc=<n>`)
-  const timed = (c: Context, t0: number, queued = 0, act?: ActTiming) => {
+  const timed = (c: Context, t0: number, queued = 0, act?: ActTiming, diag?: unknown) => {
     const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
     const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
     c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
-    if (ACT_LOG && p) actLines.push(JSON.stringify({at: Date.now(), status: c.res.status, world: ms + warm, queue: queued, warm, ...p}) + '\n');
+    if (ACT_LOG && p) actLines.push(JSON.stringify({at: Date.now(), status: c.res.status, world: ms + warm, queue: queued, warm, ...p, diag}) + '\n');
     const route = apiRoute(c.req.method, c.req.path);
     if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, undefined, p); noteAnswer(route, t0 + queued, t0 + ms); }
   };
@@ -359,7 +366,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const queued = t.waitedMs();
     let act: ActTiming | undefined;
     try { const h = run(c, next); act = h.act; await h.done; } finally { t.done(); }
-    stamp(c, lv, token); timed(c, t0, queued, act);
+    stamp(c, lv, token); timed(c, t0, queued, act, t.diag?.());
   };
 }
 
