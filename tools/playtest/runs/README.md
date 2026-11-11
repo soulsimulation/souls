@@ -95,9 +95,11 @@ continues, and `supersede` closes requests still open as failed when a later rul
 A refused or failed step stops its rule and fails the request, unless the step ends with `{"onRefused": "continue"}`
 (default `"fail"`): then the refusal is said in the transcript and the next step runs (#828). A refused final step
 fails the request even with `continue`, since no later step can recover. An argument
-`{{prev.<path>}}` (dots and `[n]`, e.g. `{{prev.did_you_mean[0].id}}`) takes a value from the previous step's JSON
-output, a refusal's included, reading own properties only, so a script can act on the world's own suggestion:
-`[["act", "fly up to the field", {"onRefused": "continue"}], ["act", "{{prev.did_you_mean[0].id}}", "--wait", "60"]]`.
+`{{prev.<path>}}` (dots and `[n]`, e.g. `{{prev.found[0].act}}`) takes a value from the previous step's JSON
+output, a refusal's included, reading own properties only, so a script can act on what a lookup found. An id the world
+cannot bind is refused with no list of others (#1948), so a script recovers as an agent does, by `find` on its words
+(`hamlet-recover`): `[["act", "walk:cottage-knoll", {"onRefused": "continue"}], ["find", "Cottage Knoll"],
+["act", "{{prev.found[0].act}}", "--wait", "60"]]`.
 The transcript shows the resolved command. A placeholder that does not resolve fails its step without running it, and
 that skipped step leaves no JSON for the step after it. It has
 no provider and no cost, and its transcript renders like a model seat's. Each CLI output is kept whole in the

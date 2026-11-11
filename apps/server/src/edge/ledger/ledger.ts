@@ -2098,7 +2098,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const spot = no.code === 'capability.unknown' && typeof input.capability === 'string' ? this.spotWhy.get(`${soul.soulId}|${input.capability.trim()}`) : undefined;
     if (spot) no = {...no, code: spot.code, reason: spot.reason};
     this.recordRefusal(soul.soulId, 'act', no.capability, no.code, no.reason);
-    return no.code === 'capability.unknown' ? this.withAlternatives(soul, no.capability, no, this.wordsMenu(soul).caps) : no;
+    // #1948: an id is refused as it is (strict.ts); words still name what the Soul can do instead
+    return no.code === 'capability.unknown' && !OFFER_ID.test(no.capability) ? this.withAlternatives(soul, no.capability, no, this.wordsMenu(soul).caps) : no;
   }
   private async actWork(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
     // PC08 (#687, PC02 §3): a member's safe stop of a running shared operation never touches the member's own receipt
@@ -3025,6 +3026,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const level = me.human?.level ?? 0, h = me.human;
     return {me: here, level, seated: !!h && (h.activity === 'sit' || h.baseActivity === 'sit'),
       gone: (spotId: string) => this.spotThingGone(spotId),
+      // #628 (knowledge/1): a spot in a secret place this Soul does not know, by its place or where it stands (as secretOffer and the catalog)
+      hidden: (spotId: string, at: [number, number]) => {if (!this.knowledge.marked().size) return false; const place = this.spotPlace(spotId); return (!!place && !this.knowledge.knows(soul.soulId, place)) || this.knowledge.hidesPoint(soul.soulId, at);},
       // read only against standing-room thresholds (≤ 0.95 m): capped at 1 m, answered without building far nav tiles (L1)
       clearance: (x: number, z: number) => level === 0 && engine.clearanceAtV1 ? (engine.clearanceUpToV1 ? engine.clearanceUpToV1(x, z, 1) : engine.clearanceAtV1(x, z)) : 0,
       open: (at: [number, number], min: number, rings: number) => level === 0 && engine.nearestStandableV1 ? engine.nearestStandableV1(at, soul.entityId, min, rings) : null,

@@ -194,6 +194,13 @@ export const MIGRATIONS: { id: number; name: string; up(db: DatabaseSync): void 
     )`);
     db.exec('CREATE INDEX glitches_by_world ON glitches_v1(world_id,rung,rule)');
   }},
+  {id:20,name:'edge client versions',up(db){
+    // #1936: one row per Soul, client (its x-soul-client header, or none) and UTC day (YYYY-MM-DD); client-version.ts writes it.
+    db.exec(`CREATE TABLE edge_clients_v1 (
+      soul_id TEXT NOT NULL, client TEXT NOT NULL, day TEXT NOT NULL, first_at INTEGER NOT NULL, last_at INTEGER NOT NULL, n INTEGER NOT NULL,
+      PRIMARY KEY(soul_id,client,day)
+    )`);
+  }},
 ];
 
 export function migrate(db: DatabaseSync): number[] {

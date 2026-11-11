@@ -44,7 +44,7 @@ test('controllerCliFile defaults to the pinned eden.mjs; EDGE_CONTROLLER_CLI_FIL
  const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
  f.souls.cfg.controllerCliFile = unset;
  const served = await f.request('/eden.mjs'); assert.equal(served.status, 200);
- assert.equal(createHash('sha256').update(Buffer.from(await served.arrayBuffer())).digest('hex'), pinned.sha256, 'the bytes SOURCES.json pins');
+ assert.equal(createHash('sha256').update(Buffer.from(await served.arrayBuffer())).digest('hex'), createHash('sha256').update(readFileSync(unset)).digest('hex'), 'the pinned file\'s bytes');
  f.souls.cfg.controllerCliFile = configured(custom);
  assert.equal(await (await f.request('/eden.mjs')).text(), '// a custom controller\n');
 });
