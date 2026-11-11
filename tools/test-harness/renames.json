@@ -153,6 +153,34 @@
       "to": "\\#1753: ack and result are retried with one key after a busy refusal and a dropped connection",
       "reason": "#1753: ack and result became keyed writes, retried with one key until answered (safe: the world answers a repeat from the message state); the old test asserted they were never retried",
       "pr": "#1762"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "restart: started receipts keep being followed, waiting receipts are re-armed (clean close)",
+      "to": "restart: in-flight receipts end at boot with a named reason; finished ones are untouched (clean close)",
+      "reason": "#2051: an act in flight at a restart now ends at boot with a named reason instead of resuming; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "mid-exit snapshot and a fresh Node process preserve claims, identity and receipt completion",
+      "to": "mid-exit snapshot and a fresh Node process preserve claims and identity; the stand ends lost-on-restart and the body stands",
+      "reason": "#2051: a stand in flight at a restart ends lost-on-restart instead of completing; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "public read:here preserves server-selected shelf content through an active native restart",
+      "to": "public read:here keeps server-selected shelf content and progress across an active native restart",
+      "reason": "#2051: the shelf read in flight at a restart ends lost-on-restart; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "the exact active native painting receipt and program survive a SQLite/snapshot restart and finish once",
+      "to": "an active native painting at a SQLite/snapshot restart ends lost-on-restart and publishes nothing",
+      "reason": "#2051: a painting in flight at a restart ends lost-on-restart instead of resuming; same test, retitled to the new contract",
+      "pr": "#2056"
     }
   ]
 }
