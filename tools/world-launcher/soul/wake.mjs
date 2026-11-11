@@ -67,7 +67,7 @@ export function parseRule(argv) {
   const id = (v) => typeof v === "string" && /^\S{1,100}$/.test(v);
   if (kind === "act-ended" || kind === "plan-finished") { if (Object.keys(p).length) throw new Error(`${kind} takes no params`); return { kind, every }; }
   if (kind === "idle") {
-    if (Object.keys(p).some((k) => k !== "minutes") || !Number.isInteger(p.minutes) || p.minutes < 1) throw new Error('idle takes {"minutes":<n ≥ 1>}');
+    if (Object.keys(p).some((k) => k !== "minutes") || !Number.isInteger(p.minutes) || p.minutes < EVERY_MIN) throw new Error(`idle takes {"minutes":<n>}, at least ${EVERY_MIN}`);
     return { kind, params: { minutes: p.minutes }, every };
   }
   if (kind === "soul-arrives") {

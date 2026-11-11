@@ -403,6 +403,8 @@ test('#1930 A2, A4: plan-finished wakes when a plan ends done or failed, never w
 test('#1930 A3, A4: idle fires once after that long with no agent command and no running plan, again only after a command; a seated Soul is idle', () => {
   assert.ok(!fresh().rules.some((x) => x.kind === 'idle'), 'off by default');
   assert.throws(() => parseRule(['idle']), /minutes/);
+  assert.throws(() => parseRule(['idle', '{"minutes":4}']), /at least 5/, 'the same 5-minute floor as every');
+  assert.equal(parseRule(['idle', '{"minutes":5}']).params.minutes, 5);
   const sit = { r_sit: { id: 'r_sit', capability: 'sit:bench', phase: 'started', mine: true, read: false } };   // a held sit stays started
   const st = serveState({ since: T0, receipts: sit, lastCommandAt: T0 + MIN }), c = clock([{ id: 'w1', ...parseRule(['idle', '{"minutes":30}']) }], st);
   assert.deepEqual(c.run(T0, T0 + 31 * MIN - 2_000), [], 'thirty minutes from the last command, not before');
