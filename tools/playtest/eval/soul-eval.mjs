@@ -3,6 +3,7 @@
 //
 //   node tools/playtest/eval/soul-eval.mjs run --battery tools/playtest/eval/battery/m4-v1.json --seat tools/playtest/eval/seats/scripted-m4-v1.json \
 //        [--world local:eden-2026] [--server-root <checkout>] [--repeats 2] [--items a,b] [--out <dir>] [--port 18760] [--max-usd 0]
+//   node tools/playtest/eval/soul-eval.mjs run --battery hostile-v1 --seat scripted [--repeats 1]   (a case battery, #1950)
 //   node tools/playtest/eval/soul-eval.mjs report <out> [--against <other out>]
 //   node tools/playtest/eval/soul-eval.mjs load --souls 12,24 ...         (tools/playtest/eval/load.mjs)
 //
@@ -16,7 +17,7 @@ import { startWorld, stopWorld } from '../arena/provision.mjs';
 import { LIVE_ADAPTERS } from '../arena/seat.mjs';
 import { validateScript } from '../arena/adapters/scripted-owner.mjs';
 import { readJson, writeJson } from '../lib/jsonl.mjs';
-import { runEpisode } from './episode.mjs';
+import { runEpisode, runCase, validateCases } from './episode.mjs';
 import { validateBattery, summarize } from './measure.mjs';
 import { renderReport } from './report.mjs';
 
@@ -36,10 +37,21 @@ export function parseArgs(argv) {
 }
 const gitHead = (dir) => { try { return execFileSync('git', ['rev-parse', '--short=9', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim(); } catch { return null; } };
 
+/** --battery and --seat take a path, or a bare name: a battery in battery/<name>.json; seat `scripted` is the scripted owner
+ *  (its script for the battery when seats/scripted-<battery>.json has one; a case battery carries its own scripts). */
+export function resolveInputs(o) {
+  const named = (v) => typeof v === 'string' && /^[\w-]+$/.test(v) && !existsSync(resolve(v));
+  const battery = readJson(named(o.battery) ? join(REPO, 'tools/playtest/eval/battery', `${o.battery}.json`) : resolve(o.battery ?? join(REPO, 'tools/playtest/eval/battery/m4-v1.json')));
+  const own = battery && join(REPO, 'tools/playtest/eval/seats', `scripted-${battery.battery}.json`);
+  const seatCfg = named(o.seat) ? (o.seat === 'scripted' ? (battery?.kind !== 'cases' && existsSync(own) ? readJson(own) : { adapter: 'scripted-owner' }) : readJson(join(REPO, 'tools/playtest/eval/seats', `${o.seat}.json`)))
+    : readJson(resolve(o.seat ?? join(REPO, 'tools/playtest/eval/seats/scripted-m4-v1.json')));
+  return { battery, seatCfg };
+}
+
 export async function runEval(o) {
-  const battery = readJson(resolve(o.battery ?? join(REPO, 'tools/playtest/eval/battery/m4-v1.json')));
-  const seatCfg = readJson(resolve(o.seat ?? join(REPO, 'tools/playtest/eval/seats/scripted-m4-v1.json')));
+  const { battery, seatCfg } = resolveInputs(o);
   if (!battery || !seatCfg) throw new Error('--battery and --seat must be readable JSON');
+  if (battery.kind === 'cases') return runCases(o, battery, seatCfg);
   const errs = validateBattery(battery);
   const catalogRef = o.catalog ? (readJson(resolve(o.catalog))?.catalog ?? readJson(resolve(o.catalog))) : null;   // for a client that keeps no world copy
   if (o.catalog && !Array.isArray(catalogRef?.places)) throw new Error('--catalog must be a saved world-catalog.json (soul-catalog/1)');
@@ -105,6 +117,46 @@ export function unmeasured(episodes) {
   return null;
 }
 
+/** A case battery (#1950): each case on its own fresh local world, its scripted Souls started and judged together. */
+async function runCases(o, battery, seatCfg) {
+  const errs = validateCases(battery);
+  if ((seatCfg.adapter ?? 'claude-headless') !== 'scripted-owner') errs.push('a case battery runs scripted seats only (--seat scripted)');
+  const world = String(o.world ?? `local:${battery.world ?? 'eden-2026'}`), genesis = GENESIS[world.slice('local:'.length)];
+  if (!world.startsWith('local:') || !genesis) errs.push('a case battery runs on a local world (it restarts it)');
+  if (errs.length) throw new Error(`invalid input:\n  ${errs.join('\n  ')}`);
+  const serverRoot = resolve(o['server-root'] ?? REPO), port = Number(o.port ?? 18760), repeats = Number(o.repeats ?? 1);
+  const pick = o.items ? new Set(String(o.items).split(',')) : null, items = battery.items.filter((it) => !pick || pick.has(it.id));
+  const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `${battery.battery}-${new Date().toISOString().replace(/[:.]/g, '-')}`));
+  mkdirSync(out, { recursive: true });
+  const meta = { schema: RESULT_SCHEMA, battery: battery.battery, kind: 'cases', world, serverCommit: gitHead(serverRoot), evalCommit: gitHead(REPO), seat: { adapter: 'scripted-owner', model: null, effort: null },
+    repeats, items: items.map((i) => i.id), startedAt: new Date().toISOString() };
+  writeJson(join(out, 'run.json'), meta);
+  const cases = []; let n = 0;
+  for (let rep = 1; rep <= repeats; rep++) for (const item of items) {
+    const dir = join(out, 'cases', `${String(++n).padStart(3, '0')}-${item.id}-r${rep}`);
+    const opts = { serverRoot, slug: 'eden-eval', port, genesis, dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') };
+    let w = null;
+    try {
+      w = await startWorld(opts);
+      const restart = async () => { await stopWorld({ pid: w.pid }); w = null; w = await startWorld({ ...opts, fresh: false }); };
+      const rec = await runCase({ dir, base: w.base, item, seatCfg, restart, log });
+      rec.repeat = rep; cases.push(rec);
+      log(`${item.id} r${rep}: ${rec.succeeded ? 'PASS' : 'FAIL'} (${rec.why}) refusals=${JSON.stringify(rec.refusals)}`);
+    } catch (e) {
+      log(`${item.id} r${rep}: ERROR ${e.message}`);
+      cases.push({ case: item.id, bar: item.bar, repeat: rep, succeeded: false, error: String(e.message).slice(0, 300), refusals: {}, souls: [] });
+    } finally {
+      if (w) await stopWorld({ pid: w.pid });
+      if (!o['keep-data']) rmSync(join(dir, 'server', 'data'), { recursive: true, force: true });
+    }
+  }
+  const result = { ...meta, endedAt: new Date().toISOString(), cases, episodes: [], summary: summarize([]) };
+  writeJson(join(out, 'result.json'), result);
+  writeFileSync(join(out, 'REPORT.md'), renderReport(result));
+  log(`wrote ${relative(process.cwd(), out)}/result.json and REPORT.md`);
+  return { out, result };
+}
+
 /** What the seat's environment held (names only), so a report shows the seat ran clean (#1688's allowlist). */
 function cleanEnvReport() {
   const names = Object.keys(process.env).sort();
@@ -132,7 +184,7 @@ export function loadResult(dir) {
 async function main() {
   const { cmd, o } = parseArgs(process.argv.slice(2));
   if (cmd === 'run') {   // a seat's in-flight turn or timers must not hold the lock past the result
-    const why = unmeasured((await runEval(o)).result.episodes);
+    const { result } = await runEval(o), why = unmeasured(result.kind === 'cases' ? result.cases : result.episodes);   // a case battery's records are its cases
     if (why) log(`FAILED: ${why}`);
     process.exit(why ? 1 : 0);
   }
