@@ -297,6 +297,8 @@ withholds. Owner messages and credentials are never in it.
   `epoch` and `seq`, the number of the picture's latest change. A Soul's row carries, each only when set, its status
   line `now` (at most 140 characters) and `about`, the first 200 characters of its profile, on one line (#1978). A
   change to `now` is pushed at once as a change to that row; a change to `about` goes with the next build, as a name does.
+  A changed row's frame carries `now` and `about` only when one of them changed (`null` when cleared), and the client
+  merges it over the row it holds.
   `clock` (#1918) is the world clock from `freshBootClock` as sampled with the build: `worldDateTime`, `time`,
   `weekdayUTC`, `minuteOfDay`, `paused`, `realMsPerWorldMinute` and `at`, the real time of the sample (`time` null without a day).
   `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ

@@ -9,7 +9,7 @@
 import type {Context, Hono} from 'hono';
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import {inPoly} from '../ledger/places.ts';
-import {liveDelta, liveHash, type LivePicture} from './live-delta.ts';
+import {liveDelta, liveHash, type LiveDelta, type LivePicture} from './live-delta.ts';
 import {freshBootClock} from '../boot/clock.ts';
 
 export const LIVE_CONTRACT = 'soul-live/1';
@@ -23,7 +23,22 @@ const KEEP_TICKS = 10;
  *  line, so one Soul adds at most these many characters to the picture. */
 export const LIVE_NOW = 140, LIVE_ABOUT = 200;
 // eslint-disable-next-line no-control-regex
-const oneLine = (s: unknown, max: number) => { if (typeof s !== 'string') return null; const t = [...s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('').trimEnd(); return t || null; };
+// (controls, zero-width and bidi marks, overrides and isolates, the Arabic letter mark, and tag characters)
+const oneLine = (s: unknown, max: number) => { if (typeof s !== 'string') return null; const t = [...s.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\u{e0000}-\u{e007f}]/gu, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('').trimEnd(); return t || null; };
+/** #1978 review: a changed row's frame carries `now` and `about` only when one changed (null when it was cleared); a client
+ *  merges the row over the one it holds. A row new to the picture, and the whole picture, carry them as they are. */
+const OWN = ['now', 'about'] as const;
+const ownChanges = (d: LiveDelta, was: LivePicture) => {
+  if (!d.souls?.set.length) return d;
+  const before = new Map(was.souls.map(r => [r.id, r as Record<string, unknown>]));
+  const set = d.souls.set.map(r => {
+    const prev = before.get(r.id); if (!prev) return r;
+    const row: Record<string, unknown> = {...r};
+    for (const k of OWN) { if (row[k] === prev[k]) delete row[k]; else if (row[k] === undefined) row[k] = null; }
+    return row as typeof r;
+  });
+  return {...d, souls: {...d.souls, set}};
+};
 /** #1755: more changes missed than this (a minute at two a second) are sent as the whole picture instead, so the ring keeps
  *  just those; how often the push looks for a change, and how often it sends the picture's hash (the client's check, and
  *  the stream's sign of life). */
@@ -138,7 +153,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     if (kept?.key === key) return kept;
     const tb = performance.now(), pic = build(tick), td = performance.now(); rec(cost.build, td - tb);
     if (!kept) { kept = {key, pic, seq: 1, body: null, hash: null}; return kept; }
-    const d = liveDelta(kept.pic, pic, kept.seq + 1);
+    const d0 = liveDelta(kept.pic, pic, kept.seq + 1), d = d0 && ownChanges(d0, kept.pic);
     if (!d) { kept = {...kept, key, pic}; kept.body = null; rec(cost.push, performance.now() - td); return kept; }   // the clock alone moved: same seq, no frame
     kept = {key, pic, seq: d.seq, body: null, hash: null};
     const frame = JSON.stringify({epoch, ...d}), sse = sseOf('live', frame);
