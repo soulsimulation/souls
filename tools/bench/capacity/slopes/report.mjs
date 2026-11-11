@@ -14,6 +14,8 @@ export const AXES = Object.freeze({
   // #1961: where a tick's time goes. Eden 2026 as authored, quiet and with 25, 50 and 100 scripted walkers (each walks to
   // another place of its menu every WALK_EVERY_MS), WALK_TICKS ticks with the world's span timers on (SOULS_TICK_SPANS).
   walkers: Object.freeze([0, 25, 50, 100].map((n) => Object.freeze({ id: `walk${n}`, placed: null, registered: n, active: 0, quiet: 0, walkers: n }))),
+  // #1973: what a quiet Eden 2026 world holds. The quiet walkers arm, then the world's memory (slopes.mjs memoryOf).
+  memory: Object.freeze([Object.freeze({ id: 'mem0', placed: null, registered: 0, active: 0, quiet: 0, walkers: 0, memory: true })]),
 });
 export const WALK_TICKS = 2000, WALK_EVERY_MS = 8000;
 export const SPAN_NAMES = Object.freeze(['drain', 'step', 'clock', 'listeners', 'broadcast']);

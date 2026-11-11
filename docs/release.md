@@ -114,7 +114,9 @@ Its jobs:
    posts the release item to the site feed (`release-client.mjs feed --ssh`, which posts on the host's loopback unless
    the item is already there). A failed post leaves the release live and prints the command to retry.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
-   the shipped commit and creates the GitHub Release.
+   the shipped commit, creates the GitHub Release and opens the changelog commit as a pull request (branch
+   `release/changelog-<version>`, as `publish.yml` does). The `main` ruleset requires checks and the merge queue, so
+   nothing in the release pushes to `main` directly; the pull request merges through the queue.
 
 **Receipt.** The workflow runs no gate: one full gate per head runs through `gate.yml` or the laptop, and the V7 walk
 needs real Chrome on a GPU, which the runner lacks. The raw gate and V7 receipts carry device paths, so they never
