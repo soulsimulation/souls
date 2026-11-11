@@ -7,11 +7,11 @@
 # CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (qualify, smoke) only for a ready PR
 # labelled merge:ready or ci:run; otherwise it runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs
 # were selected. Adding either label starts a fresh pull_request run with the window open: the merge queue reads required
-# checks from that event, so a green dispatch never clears a deferred ci-ok. It queues behind a run in progress, cancels
-# nothing, and does no heavy work if that run passes at the same head. Any other label does nothing: its run gets a group of
-# its own, so it cancels nothing, and every job skips with no runner. A skipped required check reads as a pass, so ci-ok is
-# named differently in that run and can never replace a real result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still
-# runs a PR's path-scoped CI by hand, but its checks don't count for the queue.
+# checks from that event, so a green dispatch never clears a deferred ci-ok. Any other label starts the same kind of run
+# (#2018): the queue reads only the newest ci run at a head, so a run without ci-ok would hide the real one. A label run
+# queues behind a run in progress, cancels nothing, and does no heavy work if the head's newest run passed, so its ci-ok
+# repeats that result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
+# checks don't count for the queue.
 name: ci
 on:
   pull_request:
@@ -28,14 +28,13 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}
+  group: ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' }}
 env:
   # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
   SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
 jobs:
   scope:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -76,7 +75,6 @@ jobs:
 
   # Fast, dependency-free checks of the repo's own tooling; always runs.
   repo:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -299,11 +297,9 @@ jobs:
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
   # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
   ci-ok:
-    # Skipped on another label's event, under another name: a skipped `ci-ok` would read as a pass over a deferred one.
-    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready') && 'ci-ok' || 'other-label' }}
     runs-on: ubuntu-latest
     needs: [scope, repo, qualify, smoke]
-    if: always() && (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready')
+    if: always()
     steps:
       - name: Full CI deferred
         if: needs.scope.outputs.deferred == 'true'

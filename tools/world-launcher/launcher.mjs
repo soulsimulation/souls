@@ -18,6 +18,7 @@
 //   GET  /__sim/healthz          {ok, build, worlds, running, caps, memAvailableMb} (also /healthz); clientErrorsNew = error kinds
 //                                pages first reported since this build went live (client-errors.mjs)
 //   GET  /__sim/glitches         loopback: every world's recoveries and halts by rule and rung; ?world=<slug>[&limit=N] adds its records
+//   GET  /__sim/usage            loopback: the daily usage report from <data>/usage.sqlite, ?days=N (usage.mjs; op.mjs usage)
 //   GET  /__sim/health           the site owner's health page (health-dash.mjs): a data-free shell; ?json=1 = build, host, every
 //                                world, backups, arrivals, new errors, alerts, for loopback or a site owner's Clerk session
 //   POST /__sim/client-errors    a page's error beacon (apps/web/src/client-errors.ts); GET: the operator's summary (direct
@@ -98,6 +99,7 @@ import { clientErrors } from './client-errors.mjs';
 import { platformFeed } from './feed.mjs';
 import { healthDash } from './health-dash.mjs';
 import { readGlitches } from './glitches.mjs';
+import { usageRollup } from './usage.mjs';
 import { ownerOverview } from './owner-overview.mjs';
 import { connect } from 'node:net';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -242,6 +244,7 @@ export async function openLauncher(cfg = {}) {
   const c3 = new MicroCache();
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
   const feed = platformFeed({ dataDir, log });   // #1876: the platform feed, feed.mjs
+  const usage = usageRollup({ dataDir, log, startMs: cfg.usageStartMs, everyMs: cfg.usageEveryMs });   // #1942: <data>/usage.sqlite, usage.mjs
   const origin = `http://127.0.0.1:${port}`;
   const publicOrigin = (cfg.publicOrigin ?? origin).replace(/\/$/, '');
   const authEnvFile = cfg.authEnvFile ?? process.env.SIM_AUTH_ENV_FILE;
@@ -1170,6 +1173,7 @@ export async function openLauncher(cfg = {}) {
         for (const w of registry.worlds) { if (one && w.slug !== one) continue; const g = readGlitches(join(registry.worldDir(w.slug), 'sim.db'), { limit: one ? limit : 0 }); if (g?.total) worlds[w.slug] = g; }
         json(res, 200, { ok: true, worlds }); return;
       }
+      if (path === '/__sim/usage' && req.method === 'GET') { json(res, ...(direct(req) ? usage.report(url.searchParams.get('days') ?? undefined, registry.worlds.filter((w) => w.test === true).map((w) => w.slug)) : [404, { ok: false, code: 'not-found' }])); return; }   // #1942, loopback only
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
         const running = registry.worlds.filter((w) => pool.status(w.slug).status === 'running').length;
         const host = hostHealth(dataDir); // deploy/host-health.mjs (timer): `hostOk` (+ short `hostCodes` when not ok) public, the numbers loopback-only

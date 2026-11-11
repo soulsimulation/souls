@@ -32,6 +32,10 @@ At chat start: `serve`, then `listen --follow` under Monitor, else `listen` in t
 2. `closed: true`, or a held act (sit, eat, …): done; no `ack`/`result` till the next message. `done: false`: `wait`.
 3. `stillOpen`: `result` each older one when done or dropped. A newer contradicting one wins.
 
+## Wakes
+
+Rules in `wake` also wake `listen` (`wakes`); each wake is one model turn on your owner's plan. While `status` shows `wake.chosen: false`, ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>` (4, 12, 60 or no limit an hour; `--day <n>` caps a day). Over it, wakes merge and wait.
+
 ## Refusals
 
 `accepted:false`: say the `reason`; take another id only if it serves the request; say what differs.

@@ -133,11 +133,12 @@ node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n1,n24,n
 
 `meetup/` is the near-term product as a workload: ten substantial worlds from `worlds/templates/` behind the
 checkout's own launcher, fifty fake-mind Souls, quiet periods and coordinated meetups. It reuses this bench's
-approach (the launcher in the path, the Soul CLI to join, raw HTTP with the CLI's requests and retry etiquette
-afterwards) without changing `bench.mjs`.
+approach (the launcher in the path, the Soul CLI to join, then #1945's raw-HTTP client Soul, `meetup/client-soul.mjs`:
+the catalog and live picture once, acts by catalog id, each act's receipt read once, no `resolve`; slopes uses it too).
 
-- `meetup/workload.mjs`: the workload as data, pure and seeded: fixtures, the two profiles (`even` = 5 per world;
-  `meetup` = 20 in world 0 and 30 across the other nine), account and address grouping (a three-Soul account in the
+- `meetup/workload.mjs`: the workload as data, pure and seeded: fixtures, the profiles (`even` = 5 per world;
+  `meetup` = 20 in world 0 and 30 across the other nine; `real100` = 10 per world, acts paced and mixed by the `real`
+  cadence of `profiles/cadence.json`, plus the meetups), account and address grouping (a three-Soul account in the
   meetup world, a three-world account, five Souls behind one network address; documentation addresses only), the
   declared demand (a rich read per Soul every 4 s; an act every 20 s cycling movement, attention, speech, a gesture, an
   interrupting act and an invitation to a shared action that the partner's driver accepts from its own stream; three
@@ -259,7 +260,7 @@ node tools/bench/capacity/meetup/compare.mjs .local/qualify/<baseline>/capacity-
   - boot and settle;
   - join through a loopback path-stripping proxy, because the CLI wants a `/w/<slug>` URL; the measured calls go straight to the world;
   - warm-up, then a quiet window;
-  - a per-route probe: `--probe-n` serial calls each of `here`, `observe`, `capabilities`, `resolve` and one non-moving act, one at a time and rotating over the registered Souls, each with its own CPU budget. A busy answer (`soul.slow-down`, `world.busy`) is waited out for its Retry-After, up to 3 times, as the CLI does, and the waits are counted;
+  - a per-route probe: `--probe-n` serial calls each of `here`, `observe`, `capabilities` and one non-moving act, one at a time and rotating over the registered Souls, each with its own CPU budget. A busy answer (`soul.slow-down`, `world.busy`) is waited out for its Retry-After, up to 3 times, as the CLI does, and the waits are counted;
   - an active window at CW1's per-Soul rates (a read every 4 s, an act every 20 s, one call at a time). The acts never move a Soul, so the neighbourhood is the same in every arm, and walk planning (#454) is **not** exercised.
 - **The schedule** (`cw7-slopes/2`, #951): the active window's offsets are seeded by the repeat, never the arm (`activePlan` in `slopes/report.mjs`). Within a repeat every arm replays the same phases for its first *k* Souls, so arms are compared on the same schedule, and the repeats sample different phases. The demand is strictly periodic, so a Soul's phase against the others holds for the whole window. When reads bunch, they wait for one another under the world's admission frame credit. Each `result.json` records `schedule` (the seed, each Soul's read phase, and `crowdedReadFrac`, the share of reads issued within 300 ms after another Soul's call), and REPORT.md shows the crowded share per row. Under `cw7-slopes/1`, seeded by arm, quiet10's five reads sat inside 784 ms of every period and quiet1's were spread out. In run 41972880510, a replay of those schedules through the admission frame credit, with no cost added for quiet worlds, reproduces quiet10's roughly 3× p50 and p95. A shared-schedule rerun (#443) is what confirms it.
   - **How to read it:** compare arms within a repeat. With two repeats, an absolute latency level rests on two phase samples, so read the arm-to-arm deltas, not the absolute p95s.

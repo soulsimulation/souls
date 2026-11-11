@@ -14,7 +14,7 @@
 // only when the PR is not a draft and carries merge:ready or ci:run (--draft, --labels from the event), or when CI was
 // requested for it by hand (--event request: `gh workflow run ci.yml --ref <branch> -f pr=<n>`, scoped by the PR's paths
 // against main). Outside the window a run that selected heavy jobs is deferred: none run and ci-ok fails,
-// so a skipped job never reads as a pass. A run a window label started, or a requested one, whose head already has a green
+// so a skipped job never reads as a pass. A run any label started (#2018), or a requested one, whose head already has a green
 // ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>]` prints whether the
 // head's newest ci run passed.
 import { execFileSync } from 'node:child_process';
