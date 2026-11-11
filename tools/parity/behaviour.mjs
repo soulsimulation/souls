@@ -97,7 +97,7 @@ export async function runBehaviour(input, options = {}) {
   }
   const find = (by, value) => {
     const v = String(value).trim().toLowerCase();
-    return catalogPlaces.filter((p) => String(by === 'id' ? p.id : p.name).trim().toLowerCase() === v || (p.aliases ?? []).some((a) => String(a).toLowerCase() === v));
+    return catalogPlaces.filter((p) => (by === 'id' ? [p.id, p.ref] : [p.name]).some((x) => x != null && String(x).trim().toLowerCase() === v) || (p.aliases ?? []).some((a) => String(a).toLowerCase() === v));
   };
   for (let i = 0; i < oldPlaces.length; i++) {
     const old = oldPlaces[i];
@@ -115,9 +115,9 @@ export async function runBehaviour(input, options = {}) {
       if (catalogError) throw catalogError;
       const checks = [];
       for (const [by, value] of [['id', old.id], ['name', old.name]]) {
-        const hits = find(by, value), chosen = hits.length === 1 ? hits[0].id : null;
+        const hits = find(by, value), chosen = hits.length === 1 ? hits[0].id : null, walk = hits.length === 1 ? `walk:${hits[0].ref ?? hits[0].id}` : null;
         checks.push({ by, input: value, ok: chosen !== null && expectedIds.has(chosen),
-          resolved: chosen, capability: chosen ? `walk:${chosen}` : null, code: hits.length > 1 ? 'place.ambiguous' : hits.length ? null : 'place.unknown' });
+          resolved: chosen, capability: walk, code: hits.length > 1 ? 'place.ambiguous' : hits.length ? null : 'place.unknown' });
       }
       const status = checks.every((c) => c.ok) && checks[0].resolved === checks[1].resolved ? 'PASS' : 'FAIL';
       add('place', old.id, status, status === 'PASS' ? 'Old ID and exact old name resolve to the same intended candidate place.' : 'An old ID/name is refused, unavailable, ambiguous, or resolves to a different place.',

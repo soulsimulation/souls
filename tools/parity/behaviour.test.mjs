@@ -17,7 +17,7 @@ function transport({ wrongName = false, absentEffect = false, refusal = false, n
     if (path === '/v1/agent/pair') { actors.set(`secret-token-${serial}`, { serial, acted: false }); return { token: `secret-token-${serial}` }; }
     const actor = actors.get(options.token);
     if (path === '/v1/edge/capabilities') return { capabilities: caps };
-    if (path === '/v1/edge/catalog') return { places: [{ id: 'g-court', name: wrongName ? 'Court' : 'Old court', aliases: ['old-court'] }, ...(wrongName ? [{ id: 'g-other', name: 'Old court' }] : [])] };
+    if (path === '/v1/edge/catalog') return { places: [{ id: 'g-court', ref: 'old-court', name: wrongName ? 'Court' : 'Old court' }, ...(wrongName ? [{ id: 'g-other', name: 'Old court' }] : [])] };
     if (path === '/v1/edge/act') {
       if (refusal) return { accepted: false, code: 'route.blocked' };
       actor.acted = true; actor.capability = options.body.capability;
