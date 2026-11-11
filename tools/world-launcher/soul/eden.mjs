@@ -594,7 +594,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     for (const { file, rel } of behind) { put(file, bytes, 0o644); wrote.push(rel); }
     return wrote;
   }
-  /** #1939: the kept client and skill made current again: the home's bundle, the running copy in this home's folder, and each
+  /** #1939: the kept client and skill made current again: the home's bundle, the running copy in this home's folder, the
+   *  folder's eden.mjs while it holds the version left, and each
    *  skill copy newer than the kept one. The version left is skipped until a newer one is served. Refused while a world here
    *  needs more than the kept client. */
   function rollback(running, also = []) {
@@ -605,7 +606,12 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     if (needs) throw new Error(`${needs[0]} needs eden ${needs[1].minClient} or newer, above the previous client ${prev}, so a rollback would shut this home out of it. Nothing changed.`);
     const wrote = [];
     if (skill) { const bytes = readFileSync(skill); for (const s of skillVersions(also).filter((x) => newerThan(x.version, prevSkill))) { put(s.file, bytes, 0o644); wrote.push(s.rel); } }
-    if (client) { const bytes = readFileSync(client); put(at("bin", "eden.mjs"), bytes, 0o755); if (inHomeFolder(running)) put(running, bytes, 0o755); }
+    if (client) {
+      // The folder's copy holding the version left would never hand over to an older bin, so it goes back too, whoever runs this.
+      const bytes = readFileSync(client), mine = join(folder(), "eden.mjs"), left = /^const VERSION = "([0-9.]+)";$/m.exec(read(mine) ?? "")?.[1];
+      put(at("bin", "eden.mjs"), bytes, 0o755);
+      for (const f of new Set([inHomeFolder(running) ? real(running) : null, left && left === c.client ? real(mine) : null])) if (f) put(f, bytes, 0o755);
+    }
     for (const f of [client, skill]) if (f) rmSync(f, { force: true });
     updateConfig((x) => { x.skippedClient = x.client; if (client) x.client = prev; delete x.previousClient; delete x.previousSkill; });
     return { left: c.client, client: client ? prev : null, skill: skill ? { to: prevSkill, wrote } : null };

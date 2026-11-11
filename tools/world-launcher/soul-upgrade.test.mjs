@@ -318,6 +318,14 @@ test('#1939 A1 A2 A4: an upgrade keeps the previous client and skill, and a roll
   assert.equal((await run('upgrade', 'next', '--force')).d?.upgraded, true, '--force takes it anyway');
 });
 
+test('#1939 A4: a rollback run through .souls/bin also takes the folder copy back', async (t) => {
+  const { d, run } = await upgraded(t);
+  const back = await new Promise((resolve) => { const c = spawn(process.execPath, [join(d, '.souls/bin/eden.mjs'), 'upgrade', '--rollback'], { cwd: d, env: { ...process.env, HOME: d, SOULS_HOME: '', SOULS_PRINCIPAL: '' }, stdio: ['ignore', 'pipe', 'ignore'] }); let o = ''; c.stdout.on('data', (x) => { o += x; }); c.on('exit', () => resolve(JSON.parse(o))); });
+  assert.deepEqual([back.rolledBack, back.to], [true, ours]);
+  assert.deepEqual(readFileSync(join(d, 'eden.mjs')), readFileSync(cli), 'the folder copy holds the old client');
+  assert.equal((await run('version')).d?.version, ours);
+});
+
 test('#1939 A3: a rollback is refused while a world here needs more than the previous client', async (t) => {
   const { d, run, served } = await upgraded(t);
   served.next.manifest = { ...served.next.manifest, minVersion: NEWER };
