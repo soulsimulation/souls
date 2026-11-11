@@ -16,7 +16,7 @@ test('two Souls\' short acts: the second is not held behind the first beyond one
   let now = 1000;
   const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => q.value});
   adm.setLoadLevel('amber');
-  const HANDLER = 13;
+  const HANDLER = 18;
   // another Soul's request in flight, so the two acts queue, as under load
   adm.request({key: 'soul:X', god: false, route: classify('GET', '/v1/edge/here')!});
   const ask = (key: string) => {
