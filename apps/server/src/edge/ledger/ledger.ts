@@ -550,16 +550,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (this.readOnly) return;
     // D1: the card's doing line names an edge act's approach ("walking to Kitchen chair") from this ledger's plans
     host.approachV1 = m => {const program = host.engine.programOf(m.entityId), r = program ? this.rows("soul_id=? AND phase='started' AND program_id=?", m.soulId, program)[0] : undefined; return r ? this.approachFor(m, r.receipt_id) : null;};
-    // Open receipts from a previous process: a started one whose programme the snapshot carries is still followed;
-    // a waiting one with its plan is re-armed (fresh one-minute wait); anything else cannot be followed honestly.
+    // #2051: open receipts from a previous process end here, before the world serves a request (a terminal row is
+    // already the truth and is never touched). A resumed act would read `started` for its whole remaining length
+    // (a nap, minutes) with no bound tied to the restart; its programme is stopped (a logged `edge-stop` naming it,
+    // so a newer act is never the one stopped) and a plan re-issues the step (`receipt.lost-on-restart` is resumable).
+    // A share of a running carry stays with the shared reconcile (PC05/PC10), which follows or ends it.
     for (const r of this.rows("phase IN ('waiting','started')")) {
-      const detail=r.detail?JSON.parse(r.detail):{};if(detail.contactActuatorV1?.motionV1&&!detail.contactAppliedV1||detail.doorPassageV1)this.contactPending.add(r.receipt_id);
+      if (r.phase === 'started' && this.together.sharedLive(r.receipt_id)) {const detail=r.detail?JSON.parse(r.detail):{};if(detail.contactActuatorV1?.motionV1&&!detail.contactAppliedV1||detail.doorPassageV1)this.contactPending.add(r.receipt_id);continue;}
       const m = host.minds.get(r.soul_id);
-      if (r.phase === 'started' && r.program_id && m && host.engine.programOf(m.entityId) === r.program_id) continue;
-      if (r.phase === 'started' && this.together.sharedLive(r.receipt_id)) continue;   // PC05/PC10: a share of a running carry (the shared reconcile follows or ends it)
-      const plan = r.phase === 'waiting' && r.plan ? JSON.parse(r.plan) as {label: string; steps: Program['steps']; navWarm?: true} : null;
-      if (plan && m && !this.pending.has(r.soul_id)) {this.pending.set(r.soul_id, {receipt: r.receipt_id, soul: {soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner}, steps: plan.steps, label: plan.label, deadline: host.engine.world.tick + (plan.navWarm ? NAV_WARM_WAIT_TICKS : WAIT_LIMIT_TICKS), capability: r.capability, ...(plan.navWarm ? {navWarm: true as const} : {})}); continue;}
-      this.update(r.receipt_id, {phase: 'failed', code: 'receipt.lost-on-restart', reason: 'The server restarted before this action could be followed to its end.'});
+      this.update(r.receipt_id, {phase: 'failed', code: 'receipt.lost-on-restart', reason: 'The world restarted while this action was in progress, so it was stopped; choose again.'});
+      if (r.phase === 'started' && r.program_id && m && host.engine.programOf(m.entityId) === r.program_id) try {void host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId: m.entityId, programId: r.program_id, why: 'world.restarted'}).catch(() => {/* best effort */});} catch {/* clock not ready: the programme ends on its own, unreceipted */}
     }
     // Hotfix: in an edge world an engine fault is recovered by attributing it to edge programmes (never a process exit)
     host.recoveryForEdge = true;
