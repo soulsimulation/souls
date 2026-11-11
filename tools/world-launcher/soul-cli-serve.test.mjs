@@ -29,6 +29,8 @@ async function world(t) {
     const p = url.pathname.slice('/w/test'.length);
     let body = ''; for await (const c of req) body += c;
     w.calls.push([req.method, p]);
+    if (w.deny) return void (res.writeHead(w.deny, { 'content-type': 'application/json' }), res.end(JSON.stringify({ code: 'control.revoked', reason: 'revoked', error: { code: 'control.revoked', message: 'refused' } })));
+    if (w.denyOnce === p) { w.denyOnce = null; res.writeHead(403, { 'content-type': 'application/json' }); return void res.end(JSON.stringify({ error: { code: 'forbidden', message: 'once' } })); }
     if (w.cut.delete(p)) { res.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' }); res.write('{"accepted":tr'); setTimeout(() => res.destroy(), 10); return undefined; }
     const json = (status, v, h = {}) => { if (res.destroyed) return; res.writeHead(status, { 'content-type': 'application/json', ...h }); res.end(JSON.stringify(v)); };
     if (p === '/v1/edge/inbox/listen') {
@@ -134,6 +136,41 @@ test('A1: one serve per folder: a second start finds the first, and the listen t
   assert.equal(stopped.json.stopping, true);
   assert.ok(await until(() => !existsSync(join(w.dir, '.eden-serve.sock'))), 'the socket goes with it');
   assert.equal((await w.cli('here')).json.place, 'green', 'and commands go straight to the world again');
+});
+
+// #1928: refused credentials, confirmed by one self/link read, end the resident process; a refusal it can't confirm doesn't.
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+test('#1928 A2: a world that answers 401 to everything: serve is gone within 5 s and says why afterwards', async (t) => {
+  const w = await world(t);
+  const up = await w.cli('serve');
+  assert.equal(up.json.serving, true, up.err);
+  assert.ok(await until(() => w.listens > 0));
+  w.deny = 401; flushWorld(w);
+  const t0 = Date.now();
+  assert.ok(await until(() => !alive(up.json.pid), 5_000), 'the process is gone within 5 s');
+  assert.ok(Date.now() - t0 < 5_000);
+  assert.ok(w.calls.some(([m, p]) => m === 'GET' && p === '/v1/edge/self/link'), 'it confirmed with self/link first');
+  assert.equal(existsSync(join(w.dir, '.eden-serve.sock')), false, 'the socket is removed');
+  assert.equal(existsSync(join(w.dir, '.eden-serve.lock')), false, 'the lock is released');
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.serving, false);
+  assert.equal(s.json.serveEnded?.code, 'control.revoked', s.out);
+  assert.equal((await w.cli('status')).json.serveEnded?.code, 'control.revoked');
+});
+
+test('#1928 A2: a single 403 followed by success leaves serve running', async (t) => {
+  const w = await world(t);
+  w.denyOnce = '/v1/edge/inbox/listen';
+  const up = await w.cli('serve');
+  assert.equal(up.json.serving, true, up.err);
+  assert.ok(await until(() => w.calls.some(([m, p]) => m === 'GET' && p === '/v1/edge/self/link')), 'the 403 was confirmed');
+  assert.equal(w.denyOnce, null);
+  assert.ok(await until(() => w.listens > 0), 'the inbox listen goes on');
+  await sleep(500);
+  assert.ok(alive(up.json.pid));
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.pid, up.json.pid);
+  assert.equal(s.json.ended, undefined);
 });
 
 // #1244: the start waits on the child, not a fixed 5 s. The issue's preload, blocking only in the serve child (its

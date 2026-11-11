@@ -3261,7 +3261,7 @@ async function status() {
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
-    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
+    if (r.status === 401) return { ...local, ...lastServeEnd(), paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
   }
@@ -3281,6 +3281,8 @@ async function status() {
     note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
   };
 }
+/** #1928: why the last serve here ended on its own, while none serves. */
+const lastServeEnd = () => { const e = !serveHolder() && loadServeState().ended; return e ? { serveEnded: e } : {}; };
 /** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
 function listenerNow() {
   const l = listenLockHolder(), v = serveHolder(), own = l && isOwnListen(l) ? l : null;
@@ -4912,11 +4914,21 @@ async function serveForeground() {
     st.planEnded = old ? [...ended, planView({ ...old, state: "replaced" })].slice(-PLAN_ENDED_MAX) : ended;
   }
   st.folder = folderKey(s);
+  delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
   let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
+  // #1928: a 401 or 403 is confirmed with one self/link read. Refused there too, the credentials really are gone: the reason is
+  // recorded and this process ends as a stop would. Answered, it carries on. One confirmation at a time for all the loops.
+  let confirming = null;
+  const controlEnded = (r) => (confirming ??= serveCall(`${world}/v1/edge/self/link`, { method: "GET", headers: auth, timeoutMs: 15_000 }).then((c) => {
+    if (c.status !== 401 && c.status !== 403) { log(`control: ${codeOf(r.data) ?? r.status} not confirmed by self/link (${c.status}); carrying on`); return false; }
+    terminal = c;
+    st.ended = { code: codeOf(c.data) ?? `http-${c.status}`, ...(c.data?.reason ? { reason: c.data.reason } : {}), at: new Date().toISOString() };
+    log(`control ended (${st.ended.code}${st.ended.reason ? `: ${st.ended.reason}` : ""}); stopping`); wake(); shutdown(0); return true;
+  }, () => false).finally(() => { confirming = null; }));
 
   async function inboxLoop() {
     // The first listen of this process asks with no cursor: a message the world handed over just before a kill, unsaved, comes back.
@@ -4924,8 +4936,8 @@ async function serveForeground() {
     while (!stopping && !terminal) {
       const q = new URLSearchParams({ timeoutMs: recovered ? "50000" : "0", ...(recovered && st.inboxAfter ? { after: st.inboxAfter } : {}) });
       const r = await serveCall(`${world}/v1/edge/inbox/listen?${q}`, { method: "GET", headers: auth, timeoutMs: 60_000, recoverRead: true });
-      if (r.status === 401 || r.status === 403) { terminal = r; log(`inbox: control ended (${codeOf(r.data) ?? r.status})`); wake(); return; }
-      if (r.status === 0 || r.status === 429 || r.status === 409 || r.status >= 500) {
+      if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
+      if (r.status === 0 || r.status === 401 || r.status === 403 || r.status === 429 || r.status === 409 || r.status >= 500) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
         if (next !== code) log(`inbox: ${next}; next try in ${secs(ms)}`);
@@ -4945,7 +4957,7 @@ async function serveForeground() {
     let attempt = 0, code;
     while (!stopping && !terminal) {
       const r = await serveCall(`${world}/v1/edge/wait?timeout=55&after=${encodeURIComponent(st.cursor ?? s.cursor ?? "c_0")}`, { method: "GET", headers: auth, timeoutMs: 65_000, recoverRead: true });
-      if (r.status === 401 || r.status === 403) { terminal = r; wake(); return; }
+      if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
       if (r.status < 200 || r.status >= 300) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
@@ -4996,7 +5008,7 @@ async function serveForeground() {
         const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
         if (RECORD) recordFetch(`${world}/v1/edge/events?${q}`, w0, t0, r, { body: "a stream: its speech.to-me frames show as serve's wakes" });
         if (r.status === 404) { log("addressed speech: this world has no classified stream; speech still reaches pending"); return; }
-        if (r.status === 401 || r.status === 403) return;   // the inbox loop says so and ends things
+        if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
         if (!r.ok) { code = `http-${r.status}`; ms = retryAfterMs(r.headers, null); throw new Error(code); }
         attempt = 0; code = undefined;
         let text = ""; const dec = new TextDecoder();
@@ -5288,7 +5300,7 @@ async function serve(...args) {
   args = args.filter((a) => a !== "--no-reflex" && a !== "--reflex");
   if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
-  if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, next: `${CLI} serve` };
+  if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, ...lastServeEnd(), next: `${CLI} serve` };
   if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
   if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
