@@ -97,13 +97,15 @@ async function bootWorld(dir, { slug, templateFile, port, inspect, extraEnv = {}
   // settled: the boot's perceive catch-up logged, or 30 s up with three calm ticks; cap 300 s
   for (let calm = 0, tc = mono(); !/perceive catch-up/.test(wlog) && mono() - tc < 300_000 && !(mono() - tc > 30_000 && calm >= 3);) { await sleep(1000); const h = (await getJ(`${origin}/healthz`)).j; calm = h?.ok && h.tickMs?.avg < 25 ? calm + 1 : 0; }
   LIVE.delete(booting);   // the caller adds the world it returns
-  return { slug, child, pid: nodePid(child.pid), data, origin, bootS: +bootS.toFixed(1), settledS: +((mono() - t0) / 1000).toFixed(1) };
+  return { slug, child, pid: nodePid(child.pid), data, origin, bootS: +bootS.toFixed(1), settledS: +((mono() - t0) / 1000).toFixed(1), tail: () => { const ls = wlog.trim().split('\n'), ld = ls.filter((l) => l.includes('[load]')).at(-1); return [...(ld ? [ld] : []), ...ls.slice(-3)].map((l) => l.slice(0, 200)).join(' | '); } };
 }
 async function stopWorld(w) {
   if (!w?.child || w.child.exitCode != null) return;
   w.child.kill('SIGTERM'); for (let k = 0; k < 60 && w.child.exitCode == null; k++) await sleep(500);
   if (w.child.exitCode == null) { w.child.kill('SIGKILL'); await sleep(500); }
 }
+/** #2064: a world that has stopped, named by its exit and its log's last lines (black for 60 s is a planned restart, exit 75). */
+const worldExit = (w) => (w?.child && (w.child.exitCode != null || w.child.signalCode) ? `world exited (${w.child.exitCode ?? w.child.signalCode}): ${w.tail?.().split(ROOT).join('.') ?? ''}` : null);
 const LIVE = new Set();   // worlds this process started and has not stopped yet (stopped on SIGINT/SIGTERM too)
 const liveOf = (w) => { try { return JSON.parse(readFileSync(join(w.data, 'live.json'), 'utf8')); } catch { return null; } };
 
@@ -226,9 +228,12 @@ async function walkRun(arm, rep) {
     // joins come from one address, and the world pairs at most 20 a minute per address (http.ts `pair`): 16 a minute here
     for (let i = 0, started = []; i < arm.walkers; i += 4) {
       while (started.filter((t) => mono() - t < 60_000).length + 4 > 16) await sleep(1000);
+      // #2064: on two cores a run of joins can hold the world at red or black; the next four wait for it, up to 5 min
+      for (const t0 = mono(), at = () => getJ(`${W.origin}/healthz`).then((h) => h.j?.load?.level); ['red', 'black'].includes(await at()) && mono() - t0 < 300_000;) { if (worldExit(W)) break; log(`${run.id}: world not ready for joins at ${i}; waiting`); await sleep(10_000); }
+      if (worldExit(W)) throw new Error(`${worldExit(W)}; ${i} of ${arm.walkers} joined`);
       const k4 = Math.min(4, arm.walkers - i); started.push(...Array(k4).fill(mono()));
       // a join that runs out of time while the world is busy (the join proxy answers 502 when the world drops a request) is tried twice more
-      souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
+      souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3 || worldExit(W)) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
     }
     await jp.close(); jp = null;
     const places = souls.length ? [...catalogIds(souls[0].catalog).walk].sort() : [];
@@ -241,7 +246,7 @@ async function walkRun(arm, rep) {
     const from = spanRows(spans).at(-1)?.[0] ?? 0;
     prof = PROF ? await inspector(INSPECT) : null; if (prof) await prof.start();
     const w0 = mono();
-    for (const t0 = w0; (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 900_000;) await sleep(2000);
+    for (const t0 = w0; (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 900_000 && !worldExit(W);) await sleep(2000);
     const windowS = (mono() - w0) / 1000;
     const profile = prof ? await prof.stop() : null; prof?.close(); prof = null;
     walking = false; await walkers; walkers = null;
@@ -255,6 +260,7 @@ async function walkRun(arm, rep) {
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
     log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}`);
     return result;
+  } catch (e) { const x = worldExit(W); throw x && !String(e.message).includes(x) ? new Error(`${e.message}; ${x}`) : e;
   } finally {
     walking = false; await walkers; await jp?.close(); prof?.close();
     if (W) { await stopWorld(W); LIVE.delete(W); }
