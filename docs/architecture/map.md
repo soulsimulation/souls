@@ -409,7 +409,8 @@ creator's own token. `children.mjs defaultCommand` (`:405-454`) starts `node app
 HTTP only: `GET healthz` (boot poll), `/v1/config`, `/v1/god/status`, `/v1/world/souls`, `/v1/god/claim`,
 `/v1/op/souls/*`, `/v1/op/god/*`, `/v1/site/*` with a per-run `x-sim-site-key`, plus read-only opens of the child's
 `sim.db` (`worldOwner`). Idle: `SIGSTOP` after 10 min without non-passive requests or sockets, `SIGTERM` after another
-60 min; LRU eviction against `maxRunning`/`minFreeMb`; restart backoff `min(30 s, 500·2ⁿ)`. Release handover is
+60 min. A resident client's live poll and held listen, wait and event stream are not use: while the world sleeps the
+launcher answers the poll from the last live picture and holds the long-polls until an act wakes it (#1997); LRU eviction against `maxRunning`/`minFreeMb`; restart backoff `min(30 s, 500·2ⁿ)`. Release handover is
 `keeper.mjs` holding the port and `SIGHUP` handing worlds to a new launcher generation with a `/v1/config` canary.
 
 **Auth.** `Auth` (`auth.ts`) verifies Clerk RS256 JWTs against the issuer JWKS when `ACCOUNT_AUTH_REQUIRED=1`;
