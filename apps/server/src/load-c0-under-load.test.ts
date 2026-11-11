@@ -8,11 +8,11 @@ import {fileURLToPath} from 'node:url';
 import {Agent, request} from 'node:http';
 
 const agent = new Agent({keepAlive: true});
-function call(port: number, method: string, path: string, body?: string): Promise<{status: number; ms: number}> {
+function call(port: number, method: string, path: string, body?: string): Promise<{status: number; ms: number; worldMs: number}> {
   return new Promise((resolve, reject) => {
     const t0 = performance.now();
     const req = request({host: '127.0.0.1', port, method, path, agent, headers: {authorization: 'Bearer sim_probe', ...(body ? {'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body))} : {})}}, res => {
-      res.resume(); res.on('end', () => resolve({status: res.statusCode ?? 0, ms: performance.now() - t0}));
+      res.resume(); res.on('end', () => resolve({status: res.statusCode ?? 0, ms: performance.now() - t0, worldMs: Number(/world;dur=([\d.]+)/.exec(String(res.headers['server-timing']))?.[1])}));
     });
     req.on('error', reject); req.end(body);
   });
@@ -23,11 +23,15 @@ const p99 = (xs: number[]) => pq(xs, 0.99), p95 = (xs: number[]) => pq(xs, 0.95)
 // The gate is p95 (with ~80 samples a p99 is the single worst one, and a shared machine at load ~40 moved it to 50.5 ms
 // once); p99 and max are printed. The routes here are stubs: this proves admission never queues C0 and the loop stays
 // responsive under the load, not that the real ack/result/receipt handlers are fast (#1760's `api` measures those).
+// #2073: the due long-poll's lateness is the server's own (Server-Timing world minus the 250 ms asked), from four
+// staggered long-polls (~76 samples). One long-poll had 19 samples, so its p95 was its single worst, and its wall time
+// also carried ~15 ms of this busy client's own delay (wall p95 28-40 ms vs server 15-20 ms with every core busy).
+// Being picked up late behind a hold is what the three reads' wall times measure. The wall lateness is printed.
 test('A4: ack, result, receipt reads and due long-poll returns answer within 50 ms (p95; p99 printed) while the thread is held busy for 5 s', {timeout: 60_000}, async () => {
   const child = spawn(process.execPath, [fileURLToPath(new URL('../test/c0-under-load-server.ts', import.meta.url))], {stdio: ['ignore', 'pipe', 'inherit']});
   try {
     const port = await new Promise<number>((resolve, reject) => { child.stdout.on('data', d => { const m = /port (\d+)/.exec(String(d)); if (m) resolve(Number(m[1])); }); child.once('exit', c => reject(new Error(`server exited ${c}`))); });
-    const from = performance.now() + 500, until = from + 5000, acts: number[] = [], c0: Record<string, number[]> = {receipt: [], ack: [], result: [], listenLate: []};
+    const from = performance.now() + 500, until = from + 5000, acts: number[] = [], c0: Record<string, number[]> = {receipt: [], ack: [], result: [], listenLate: []}, listenWall: number[] = [];
     const soul = async (i: number) => { while (performance.now() < until) { const r = await new Promise<{status: number; ms: number}>((resolve, reject) => {
       const body = '{"capability":"walk:x"}', t0 = performance.now();
       const req = request({host: '127.0.0.1', port, method: 'POST', path: '/v1/edge/act', agent, headers: {authorization: `Bearer sim_load_${i}`, 'content-type': 'application/json', 'content-length': String(body.length)}}, res => { res.resume(); res.on('end', () => resolve({status: res.statusCode ?? 0, ms: performance.now() - t0})); });
@@ -38,9 +42,9 @@ test('A4: ack, result, receipt reads and due long-poll returns answer within 50 
       if (!warm) { c0.receipt.push(r); c0.ack.push(a); c0.result.push(x); }
       await new Promise(r => setTimeout(r, 50));
     } };
-    const listens = async () => { while (performance.now() < until) { const warm = performance.now() < from, late = (await call(port, 'GET', '/v1/edge/inbox/listen?timeoutMs=250')).ms - 250; if (!warm) c0.listenLate.push(late); } };
-    await Promise.all([...Array.from({length: 24}, (_, i) => soul(i)), probe(), listens()]);
-    const line = Object.entries(c0).map(([k, v]) => `${k} n=${v.length} p95=${p95(v).toFixed(1)} p99=${p99(v).toFixed(1)} max=${Math.max(...v).toFixed(1)}`).join('; ');
+    const listens = async (_: unknown, k: number) => { await new Promise(r => setTimeout(r, k * 70)); while (performance.now() < until) { const warm = performance.now() < from, l = await call(port, 'GET', '/v1/edge/inbox/listen?timeoutMs=250'); if (!warm) { c0.listenLate.push(l.worldMs - 250); listenWall.push(l.ms - 250); } } };
+    await Promise.all([...Array.from({length: 24}, (_, i) => soul(i)), probe(), ...Array.from({length: 4}, listens)]);
+    const line = Object.entries({...c0, listenWall}).map(([k, v]) => `${k} n=${v.length} p95=${p95(v).toFixed(1)} p99=${p99(v).toFixed(1)} max=${Math.max(...v).toFixed(1)}`).join('; ');
     console.log(`# under load: acts n=${acts.length} p50=${[...acts].sort((a, b) => a - b)[acts.length >> 1].toFixed(0)} ms; ${line}`);
     assert.ok(acts.length > 100, `the thread was kept busy (${acts.length} acts in 5 s)`);
     for (const [k, v] of Object.entries(c0)) { assert.ok(v.length >= 10, `${k}: ${v.length} samples`); assert.ok(p95(v) <= 50, `${k} p95 ${p95(v).toFixed(1)} ms > 50 ms (${line})`); }
