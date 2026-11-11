@@ -528,15 +528,23 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return out;
   }
 
-  /** Replace the home's bundle, and the running copy when it lives in this home's folder. Never older than either. */
+  const put = (file, bytes, mode) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, bytes, { mode }); renameSync(tmp, file); };
+  /** #1939: what an upgrade replaced, one of each, beside the bundle in use: bin/eden-<version>.mjs and bin/skill-<version>.md. */
+  const kept = (prefix) => (existsSync(at("bin")) ? readdirSync(at("bin")) : []).filter((f) => f.startsWith(prefix) && !f.endsWith(".tmp")).map((f) => at("bin", f));
+  const inHomeFolder = (running) => running && dirname(real(running)) === dirname(real(root));
+  /** Replace the home's bundle, and the running copy when it lives in this home's folder. Never older than either.
+   *  The bundle replaced is kept for `upgrade --rollback`, and nothing older. */
   function installBundle(bytes, running, version) {
-    if (!newerThan(version, config().client)) return null;
+    const old = config().client, inUse = at("bin", "eden.mjs");
+    if (!newerThan(version, old)) return null;
     mkdirSync(at("bin"), { recursive: true, mode: 0o700 });
-    const write = (file) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, bytes, { mode: 0o755 }); renameSync(tmp, file); };
-    write(at("bin", "eden.mjs"));
-    if (running && dirname(real(running)) === dirname(real(root))) write(running);
-    updateConfig((c) => { c.client = version; });
-    return at("bin", "eden.mjs");
+    for (const f of [...kept("eden-"), ...kept("skill-")]) rmSync(f, { force: true });
+    const keep = /^[0-9.]+$/.test(old ?? "") && existsSync(inUse);
+    if (keep) copyFileSync(inUse, at("bin", `eden-${old}.mjs`));
+    put(inUse, bytes, 0o755);
+    if (inHomeFolder(running)) put(running, bytes, 0o755);
+    updateConfig((c) => { c.client = version; c.previousClient = keep ? old : null; delete c.previousSkill; delete c.skippedClient; });
+    return inUse;
   }
   /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
   const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
@@ -553,12 +561,31 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
    *  never over one as new, never a new file. */
   function installSkill(bytes, version, also = []) {
-    const wrote = [];
-    for (const { file, rel } of skillBehind(version, also)) {
-      const tmp = `${file}.${process.pid}.tmp`;
-      writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+    const wrote = [], behind = skillBehind(version, also);
+    if (behind.length) {   // #1939: the first copy replaced is the skill a rollback restores
+      mkdirSync(at("bin"), { recursive: true, mode: 0o700 });
+      for (const f of kept("skill-")) rmSync(f, { force: true });
+      copyFileSync(behind[0].file, at("bin", `skill-${behind[0].version}.md`));
+      updateConfig((c) => { c.previousSkill = behind[0].version; delete c.skippedClient; });
     }
+    for (const { file, rel } of behind) { put(file, bytes, 0o644); wrote.push(rel); }
     return wrote;
+  }
+  /** #1939: the kept client and skill made current again: the home's bundle, the running copy in this home's folder, and each
+   *  skill copy newer than the kept one. The version left is skipped until a newer one is served. Refused while a world here
+   *  needs more than the kept client. */
+  function rollback(running, also = []) {
+    const c = config(), prev = c.previousClient, prevSkill = c.previousSkill, file = (name) => (existsSync(at("bin", name)) ? at("bin", name) : null);
+    const client = prev ? file(`eden-${prev}.mjs`) : null, skill = prevSkill ? file(`skill-${prevSkill}.md`) : null;
+    if (!client && !skill) throw new Error("Nothing to roll back to: this home keeps no previous client or skill.");
+    const needs = client && Object.entries(c.worlds).find(([, w]) => newerThan(w.minClient, prev));
+    if (needs) throw new Error(`${needs[0]} needs eden ${needs[1].minClient} or newer, above the previous client ${prev}, so a rollback would shut this home out of it. Nothing changed.`);
+    const wrote = [];
+    if (skill) { const bytes = readFileSync(skill); for (const s of skillVersions(also).filter((x) => newerThan(x.version, prevSkill))) { put(s.file, bytes, 0o644); wrote.push(s.rel); } }
+    if (client) { const bytes = readFileSync(client); put(at("bin", "eden.mjs"), bytes, 0o755); if (inHomeFolder(running)) put(running, bytes, 0o755); }
+    for (const f of [client, skill]) if (f) rmSync(f, { force: true });
+    updateConfig((x) => { x.skippedClient = x.client; if (client) x.client = prev; delete x.previousClient; delete x.previousSkill; });
+    return { left: c.client, client: client ? prev : null, skill: skill ? { to: prevSkill, wrote } : null };
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
@@ -576,5 +603,5 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return wrote;
   }
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, refreshGuide, config, noteConsolidation, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }

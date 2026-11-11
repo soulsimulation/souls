@@ -551,15 +551,23 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     return out;
   }
 
-  /** Replace the home's bundle, and the running copy when it lives in this home's folder. Never older than either. */
+  const put = (file, bytes, mode) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, bytes, { mode }); renameSync(tmp, file); };
+  /** #1939: what an upgrade replaced, one of each, beside the bundle in use: bin/eden-<version>.mjs and bin/skill-<version>.md. */
+  const kept = (prefix) => (existsSync(at("bin")) ? readdirSync(at("bin")) : []).filter((f) => f.startsWith(prefix) && !f.endsWith(".tmp")).map((f) => at("bin", f));
+  const inHomeFolder = (running) => running && dirname(real(running)) === dirname(real(root));
+  /** Replace the home's bundle, and the running copy when it lives in this home's folder. Never older than either.
+   *  The bundle replaced is kept for `upgrade --rollback`, and nothing older. */
   function installBundle(bytes, running, version) {
-    if (!newerThan(version, config().client)) return null;
+    const old = config().client, inUse = at("bin", "eden.mjs");
+    if (!newerThan(version, old)) return null;
     mkdirSync(at("bin"), { recursive: true, mode: 0o700 });
-    const write = (file) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, bytes, { mode: 0o755 }); renameSync(tmp, file); };
-    write(at("bin", "eden.mjs"));
-    if (running && dirname(real(running)) === dirname(real(root))) write(running);
-    updateConfig((c) => { c.client = version; });
-    return at("bin", "eden.mjs");
+    for (const f of [...kept("eden-"), ...kept("skill-")]) rmSync(f, { force: true });
+    const keep = /^[0-9.]+$/.test(old ?? "") && existsSync(inUse);
+    if (keep) copyFileSync(inUse, at("bin", `eden-${old}.mjs`));
+    put(inUse, bytes, 0o755);
+    if (inHomeFolder(running)) put(running, bytes, 0o755);
+    updateConfig((c) => { c.client = version; c.previousClient = keep ? old : null; delete c.previousSkill; delete c.skippedClient; });
+    return inUse;
   }
   /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
   const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
@@ -576,12 +584,31 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
    *  never over one as new, never a new file. */
   function installSkill(bytes, version, also = []) {
-    const wrote = [];
-    for (const { file, rel } of skillBehind(version, also)) {
-      const tmp = `${file}.${process.pid}.tmp`;
-      writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+    const wrote = [], behind = skillBehind(version, also);
+    if (behind.length) {   // #1939: the first copy replaced is the skill a rollback restores
+      mkdirSync(at("bin"), { recursive: true, mode: 0o700 });
+      for (const f of kept("skill-")) rmSync(f, { force: true });
+      copyFileSync(behind[0].file, at("bin", `skill-${behind[0].version}.md`));
+      updateConfig((c) => { c.previousSkill = behind[0].version; delete c.skippedClient; });
     }
+    for (const { file, rel } of behind) { put(file, bytes, 0o644); wrote.push(rel); }
     return wrote;
+  }
+  /** #1939: the kept client and skill made current again: the home's bundle, the running copy in this home's folder, and each
+   *  skill copy newer than the kept one. The version left is skipped until a newer one is served. Refused while a world here
+   *  needs more than the kept client. */
+  function rollback(running, also = []) {
+    const c = config(), prev = c.previousClient, prevSkill = c.previousSkill, file = (name) => (existsSync(at("bin", name)) ? at("bin", name) : null);
+    const client = prev ? file(`eden-${prev}.mjs`) : null, skill = prevSkill ? file(`skill-${prevSkill}.md`) : null;
+    if (!client && !skill) throw new Error("Nothing to roll back to: this home keeps no previous client or skill.");
+    const needs = client && Object.entries(c.worlds).find(([, w]) => newerThan(w.minClient, prev));
+    if (needs) throw new Error(`${needs[0]} needs eden ${needs[1].minClient} or newer, above the previous client ${prev}, so a rollback would shut this home out of it. Nothing changed.`);
+    const wrote = [];
+    if (skill) { const bytes = readFileSync(skill); for (const s of skillVersions(also).filter((x) => newerThan(x.version, prevSkill))) { put(s.file, bytes, 0o644); wrote.push(s.rel); } }
+    if (client) { const bytes = readFileSync(client); put(at("bin", "eden.mjs"), bytes, 0o755); if (inHomeFolder(running)) put(running, bytes, 0o755); }
+    for (const f of [client, skill]) if (f) rmSync(f, { force: true });
+    updateConfig((x) => { x.skippedClient = x.client; if (client) x.client = prev; delete x.previousClient; delete x.previousSkill; });
+    return { left: c.client, client: client ? prev : null, skill: skill ? { to: prevSkill, wrote } : null };
   }
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
@@ -599,7 +626,7 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     return wrote;
   }
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, refreshGuide, config, noteConsolidation, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
 return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, isSoulsSkill, createHome, slugOf, keyOf, originOf, newerThan, plainName, norm, splitSecrets, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS };
 })();
@@ -5546,7 +5573,7 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 
 setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new] [--move]    pair <soulId> [--for CODE] [--move]
           approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
+home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust] [--force]   upgrade --rollback
           name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
 memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
           remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
@@ -5607,7 +5634,7 @@ function startUpdateCheck(cmd) {
 async function updateNotice(pending) {
   try {
     const v = SERVED ?? (pending ? await pending : null), w = v?.w ?? updateWorld();
-    if (!v || !w) return null;
+    if (!v || !w || (v.version && v.version === HOME?.config().skippedClient)) return null;   // #1939: rolled back from
     const run = `${CLI} upgrade${w.several && w.key ? ` ${w.key}` : ""}`;
     if (soulHome.newerThan(v.version, VERSION)) return { from: VERSION, to: v.version, run };
     const old = HOME && v.skill ? HOME.skillBehind(v.skill, [INVOKED])[0] : null;
@@ -5662,7 +5689,12 @@ async function importCommand(from) {
 }
 // upgrade [world]: fetch the world's bundle into the home and check it against what the world says it is.
 async function upgradeCommand(...argv) {
-  const trust = argv.includes("--trust"), [world] = argv.filter((a) => a !== "--trust");
+  if (argv.includes("--rollback")) {   // #1939: back to the client and skill the last upgrade replaced
+    const r = needHome().rollback(process.argv[1], [INVOKED]);
+    return { rolledBack: true, from: r.left, ...(r.client ? { to: r.client } : {}), ...(r.skill ? { skill: r.skill, next: "Read SKILL.md again: it changed." } : {}),
+      skipping: r.left, note: `The update notice and upgrade pass over ${r.left} until a world serves a newer one; ${CLI} upgrade <world> --force takes it anyway.` };
+  }
+  const trust = argv.includes("--trust"), force = argv.includes("--force"), [world] = argv.filter((a) => a !== "--trust" && a !== "--force");
   const home = needHome(), cfg = home.config(), key = world ?? cfg.currentWorld, w = key && Object.hasOwn(cfg.worlds, key) ? cfg.worlds[key] : null;
   if (!w) throw new Error(`usage: upgrade <world> (${Object.keys(cfg.worlds).join(", ") || "no world yet"})`);
   if (trust && !world) throw new Error(`A person's trust goes to a world they name: ${CLI} upgrade ${key} --trust`);
@@ -5678,6 +5710,7 @@ async function upgradeCommand(...argv) {
   const said = await (await get("/v1/config")).json().catch(() => { throw new Error(`${key} did not answer /v1/config with JSON. Nothing changed.`); }), m = said?.soulClient;
   if (!m) throw new Error(`${key} does not say which bundle it serves, so there is nothing to verify against. Nothing changed.`);
   const trusted = cfg.trustedOrigins ?? [], note = () => home.ensureWorld(w.url, served(m));
+  if (m.version === cfg.skippedClient && !force) { note(); return { upgraded: false, world: key, version: VERSION, served: m.version, skipped: m.version, note: `This home rolled back from ${m.version}, so upgrade passes over it until ${key} serves a newer one. To take it anyway: ${CLI} upgrade ${key} --force` }; }
   // One bundle speaks one contract. A trusted site's contract is final; any other world can say what it likes about its own,
   // so a person who names this world can go past that one.
   const clashes = Object.entries(cfg.worlds).filter(([k, v]) => k !== key && v.contract && v.contract !== m.contract), firm = clashes.find(([, v]) => trusted.includes(soulHome.originOf(v.url))), clash = firm ?? clashes[0];
