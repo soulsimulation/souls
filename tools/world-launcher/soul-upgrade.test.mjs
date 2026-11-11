@@ -238,6 +238,7 @@ test('a world this home does not trust stops an upgrade only until a person name
   const w2 = await world(t, { aa: { manifest: describe(Buffer.from('x'), '2.0.0') }, bb: { manifest: { ...describe(newer, NEWER), contract: 'eden-edge/2' }, bytes: newer } });
   const f = folder(t);
   await f.run('register', `${w2.base}/aa`); await f.run('register', `${w2.base}/bb`);
+  for (let i = 0; i < 100 && !configOf(f.d).feeds; i++) await new Promise((r) => setTimeout(r, 50));   // #1941: the feed check the second register started has claimed its site
   const before = readFileSync(join(f.d, '.souls/config.json'), 'utf8');
   const r = await f.run('upgrade', 'bb');
   assert.match(r.err, /no one bundle serves both/); assert.equal(readFileSync(join(f.d, '.souls/config.json'), 'utf8'), before, 'Nothing changed means nothing changed');
@@ -283,5 +284,5 @@ test('A5: everyday commands ask nothing about versions', async (t) => {
   await run('register', `${w.base}/old`);
   w.hits.length = 0;
   await run('list'); await run('status');
-  assert.deepEqual(w.hits, []);
+  assert.deepEqual(w.hits.filter((p) => !p.startsWith('/v1/feed')), []);   // #1941: the platform feed is news, checked on its own clock
 });
