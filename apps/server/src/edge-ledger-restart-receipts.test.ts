@@ -30,6 +30,13 @@ test('restart: in-flight receipts end at boot with a named reason; finished ones
  await run(f.host,400,()=>ledger.receipt(C.soulId,cid)!.phase==='completed');assert.equal(ledger.receipt(C.soulId,cid)!.phase,'completed','Cara finished before the restart');
  const a=await accept(f.host,ledger.act(ana,{capability:'rest:here',params:{seconds:120}}));const aid=(a as any).receipt.id;
  await run(f.host,60,()=>ledger.receipt(ana.soulId,aid)!.phase==='started');assert.equal(ledger.receipt(ana.soulId,aid)!.phase,'started');
+ // Dee: a started act whose bound hand-contact effect already landed (its row carries contactAppliedV1, as contactTicks
+ // writes it mid-programme): committed, so it must end completed, not refused.
+ const dee=await invite(f,'dee').then(()=>accept(f.host,f.souls.create('dev:dee',{name:'dee',description:'restart receipts'}))) as any;
+ const D={soulId:dee.id,entityId:dee.entity_id,name:dee.name,owner:dee.owner};
+ const d=await accept(f.host,ledger.act(D,{capability:'rest:here',params:{seconds:120}}));const did=(d as any).receipt.id;
+ await run(f.host,60,()=>ledger.receipt(D.soulId,did)!.phase==='started');assert.equal(ledger.receipt(D.soulId,did)!.phase,'started');
+ f.db.db.prepare("UPDATE edge_receipts_v1 SET detail=json_set(COALESCE(detail,'{}'),'$.contactAppliedV1',json('true')) WHERE receipt_id=?").run(did);
  await accept(f.host,f.host.enqueue('decision','fixture:sleep',{soulId:ben.soulId,entityId:ben.entityId,option:'sleep',label:'sleep on own mat',steps:[{verb:'mars:sleep',params:{mat:'commons-mat-2',duration:600,returnTo:COMMONS_PERSONAL_RESOURCES[1].sleepReturn}}],reevalTicks:1e9,fallback:false,trigger:'fixture'}));
  const W=f.host.engine.world as any;await run(f.host,3000,()=>W.entities[ben.entityId].human?.sleepPose?.standingFraction===0);assert.equal(W.entities[ben.entityId].human?.sleepPose?.standingFraction,0,'Ben asleep');
  const b=await accept(f.host,ledger.act(ben,{capability:'rest:here',params:{seconds:5}}));const bid=(b as any).receipt.id;
@@ -47,6 +54,10 @@ test('restart: in-flight receipts end at boot with a named reason; finished ones
  assert.ok(wasWaiting,'the scenario exercised a waiting receipt');
  // Nothing that committed is reported as refused.
  assert.equal(ledger.receipt(C.soulId,cid)!.phase,'completed','a finished act stays completed');
+ assert.equal(ledger.receipt(D.soulId,did)!.phase,'completed','an act whose contact effect landed ends completed');
+ // A listener that subscribes before the first tick (the event stream a client `wait` long-polls) is handed the endings.
+ const seen=new Map<string,string>();ledger.onReceipt(r=>seen.set(r.id,r.phase));
+ assert.deepEqual([seen.get(aid),seen.get(bid),seen.get(did)],['failed','failed','completed'],'boot endings reach a later subscriber');
  // The resumed rest's programme is stopped (logged edge-stop): Ana's body is free within a second of ticks.
  await run(h,40,()=>!h.engine.programOf(ana.entityId));assert.equal(h.engine.programOf(ana.entityId),null,'programme stopped');
  // And her next act is accepted.
