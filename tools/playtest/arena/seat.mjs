@@ -14,6 +14,7 @@ import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
 import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
 import { assertSeatHome } from './seat-home.mjs';
+import { recordOn } from '../record/switch.mjs';
 
 export const ADAPTERS = { 'claude-headless': claude, 'codex-headless': codex, 'scripted-owner': scriptedOwner };
 export const LIVE_ADAPTERS = new Set(['claude-headless', 'codex-headless']);
@@ -87,7 +88,7 @@ export class Seat {
       let up = true;
       for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
       if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
-      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) { await cli('import'); if (this.seat.record !== false) this.info.recordOn = recordOn(this.folder); }
       this.ownerSettings();
       if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
       this.info.sessionId = null; this.save();
@@ -340,6 +341,8 @@ export function createSeat({ runDir, seat, worldBase, rails }) {
     const identity = newIdentity();
     writeFileSync(join(s.folder, '.eden-agent.json'), JSON.stringify({ identity }) + '\n', { mode: 0o600 });
     s.info.ownerIdentity = identity;
+    // #1774: the client's full session record (#1773), on before the seat's first command; seat.record false turns it off
+    if (seat.record !== false) s.info.recordOn = recordOn(s.folder);
   }
   s.save();
   return s;

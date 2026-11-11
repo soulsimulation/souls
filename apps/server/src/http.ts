@@ -9,6 +9,7 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, WARM_WAIT_KEY, worldBlock, type Admission} from './load/admission.ts';
+import {requestRecordFile, requestRecordMiddleware} from './load/request-record.ts';
 import {apiOf, apiRoute, recordApi} from './load/api-times.ts';
 import {SERVING_BOOT_WAIT_MS, SERVING_WAIT_MS} from './edge/ledger/ledger.ts';
 import type {Level} from './load/shared.ts';
@@ -128,6 +129,9 @@ export function buildApp(d: Deps) {
   if(d.stationV2&&d.stationV2.host!==d.host)throw new Error('V2 station must belong to selected host');
   if(d.intentV2&&(d.intentV2.host!==d.host||d.intentV2.brain!==d.brain||d.intentV2.souls!==d.souls))throw new Error('intent transport must belong to selected host');
   const app = new Hono();
+  // #1774 A4: a dev world's per-request record for playtests (load/request-record.ts); unset, nothing is mounted
+  const requestRecord = requestRecordFile(process.env, d.auth.devAuth);
+  if (requestRecord) app.use('*', requestRecordMiddleware(requestRecord));
   if(d.cfg.accountAuthRequired)d.souls.accounts??=new WorldAccounts(d.host,d.souls);
   if(d.souls.accounts)d.auth.legacyOwnerAllowed=owner=>d.souls.ownedRows(owner).length>0;
   d.host.profileWorldPath=d.cfg.worldPath;

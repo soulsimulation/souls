@@ -2233,7 +2233,7 @@ return { PUSHED_FRESH_MS, SPEECH_KEEP, canon, liveHash, wholeCopy, resumeFrom, a
 })();
 // </inline live.mjs>
 
-const VERSION = "2.33.0";
+const VERSION = "2.32.0";
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -3167,7 +3167,7 @@ async function paired(id, name, s = load(), { made = true } = {}) {
   const live = !made && HOME ? await connectedAlready(id) : false;
   if (live === null) throw UNSURE(id);
   if (live) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
-  if (!(s.soul === id && s.token)) await devPair(id);
+  if (!(s.soul === id && s.token) && !(await devPair(id)) && !made) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
   writeGuide(name);
   return { created: true, soul: { id, name }, paired: true };
 }
@@ -3269,10 +3269,32 @@ async function seatFor(kept) {
   if (load().accountAuth === undefined) await register(url, { asked: false });
 }
 
+/** Pairs Soul `id` here; false when another chat in this home paired it first and its token works, so nothing was minted. */
 async function devPair(id) {
-  const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
-  const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
-  save({ token: t.token, soul: id });
+  return pairingTurn(async () => {
+    if (HOME && (await connectedAlready(id)) === true) return false;
+    const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
+    const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
+    save({ token: t.token, soul: id });
+    return true;
+  });
+}
+/** #2004: every pairing retires the token before it, so two chats pairing one Soul at once in a home could keep the
+ *  retired one: whichever saved last won, not whichever minted last. Pairing is one turn per home, minted and saved under
+ *  a lock; the second chat waits, then finds the first one's token working. A holder that died or held it a minute gives way. */
+async function pairingTurn(fn) {
+  if (!HOME) return fn();
+  const lock = joinPath(HOME.root, ".pairing.lock"), mine = String(process.pid);
+  for (let t0 = Date.now(); ;) {
+    try { const fd = openSync(lock, "wx", 0o600); writeSync(fd, mine); closeSync(fd); break; }
+    catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      let pid = 0; try { pid = Number(readFileSync(lock, "utf8")); } catch { continue; }
+      if ((pid > 0 && !pidAlive(pid)) || Date.now() - t0 > 60_000) { try { unlinkSync(lock); } catch { /* released meanwhile */ } t0 = Date.now(); continue; }
+      await sleep(50);
+    }
+  }
+  try { return await fn(); } finally { try { if (readFileSync(lock, "utf8") === mine) unlinkSync(lock); } catch { /* taken over */ } }
 }
 
 async function approval(action = "status") {
@@ -3327,7 +3349,7 @@ async function status() {
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow() };
-    if (r.status === 401) return { ...local, paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
+    if (r.status === 401) return { ...local, ...lastServeEnd(), paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
   }
@@ -3347,6 +3369,8 @@ async function status() {
     note: here.listening ? "A listen is open here: owner messages reach this folder." : `Nobody is listening here. Start: ${CLI} listen (in the background).${inbox.connected ? " The world still shows this Soul connected: that lasts about a minute after the last listen or action." : ""}`,
   };
 }
+/** #1928: why the last serve here ended on its own, while none serves. */
+const lastServeEnd = () => { const e = !serveHolder() && loadServeState().ended; return e ? { serveEnded: e } : {}; };
 /** What this folder really has open for the owner's messages. The world's `connected` also counts a recent listen or peek, so it can't say this. */
 function listenerNow() {
   const l = listenLockHolder(), v = serveHolder(), own = l && isOwnListen(l) ? l : null;
@@ -4264,6 +4288,7 @@ async function listen(...args) {
     }
     let d;
     try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
+    if (d.addressed?.length) d.addressed = d.addressed.map((a) => ({ ...a, untrusted: true }));   // #1951: another Soul's words, whatever the world says of them
     attempt = 0; lastCode = undefined; superseded = 0;
     const messages0 = messagesOf(d).filter((m) => m.id !== after), brief = messages0.length || d.addressed?.length || d.plan ? briefNow() : {};
     heard(messages0);
@@ -4861,6 +4886,8 @@ export function reconcileMessages(st, unacked) {
   return st;
 }
 /** Pure: everything since the last read, and the read cursor moves past it. Nothing is lost across agent turns. */
+/** #1951: event kinds that carry another Soul's words: speech, a mention, a conversation turn or invitation, an invite. */
+const SPOKEN = /^(speech|mention|invite|conversation\.(turn|invite))(\.|$)/;
 export function takePending(st) {
   const from = readIndex(st), rest = st.events.slice(from).filter((e) => !["receipt", "activity.observed"].includes(e?.kind));
   const shown = rest.slice(0, PENDING_EVENTS_MAX);
@@ -4869,7 +4896,7 @@ export function takePending(st) {
     ownerMessages: st.messages.filter((m) => !m.acked).map(({ id, text, sentAt }) => ({ id, text, sentAt })),
     openReceipts: receipts.filter((r) => !ENDED.has(r.phase)).map(({ id, capability, phase }) => ({ id, capability, phase })),
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
-    events: shown,
+    events: shown.map((e) => (SPOKEN.test(e?.kind ?? "") ? { ...e, untrusted: true } : e)),   // #1951: the home marks another Soul's words itself
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
     ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
@@ -5012,11 +5039,22 @@ async function serveForeground() {
     st.planEnded = old ? [...ended, planView({ ...old, state: "replaced" })].slice(-PLAN_ENDED_MAX) : ended;
   }
   st.folder = folderKey(s);
+  delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
   let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
+  // #1928: a 401 or 403 is confirmed with one self/link read. Refused there as control.revoked or control.unknown, the credentials really are gone: the reason is
+  // recorded and this process ends as a stop would. Answered, it carries on. One confirmation at a time for all the loops.
+  let confirming = null;
+  const controlEnded = (r) => (confirming ??= serveCall(`${world}/v1/edge/self/link`, { method: "GET", headers: auth, timeoutMs: 15_000 }).then((c) => {
+    // Only a world that names the token gone ends this: a 401 `unauthorized` is a valid token whose Soul is not ready yet (a restart).
+    if ((c.status !== 401 && c.status !== 403) || !["control.revoked", "control.unknown"].includes(codeOf(c.data))) { log(`control: ${codeOf(r.data) ?? r.status} not confirmed by self/link (${codeOf(c.data) ?? c.status}); carrying on`); return false; }
+    terminal = c;
+    st.ended = { code: codeOf(c.data) ?? `http-${c.status}`, ...(c.data?.reason ? { reason: c.data.reason } : {}), at: new Date().toISOString() };
+    log(`control ended (${st.ended.code}${st.ended.reason ? `: ${st.ended.reason}` : ""}); stopping`); wake(); shutdown(0); return true;
+  }, () => false).finally(() => { confirming = null; }));
 
   async function inboxLoop() {
     // The first listen of this process asks with no cursor: a message the world handed over just before a kill, unsaved, comes back.
@@ -5024,8 +5062,8 @@ async function serveForeground() {
     while (!stopping && !terminal) {
       const q = new URLSearchParams({ timeoutMs: recovered ? "50000" : "0", ...(recovered && st.inboxAfter ? { after: st.inboxAfter } : {}) });
       const r = await serveCall(`${world}/v1/edge/inbox/listen?${q}`, { method: "GET", headers: auth, timeoutMs: 60_000, recoverRead: true });
-      if (r.status === 401 || r.status === 403) { terminal = r; log(`inbox: control ended (${codeOf(r.data) ?? r.status})`); wake(); return; }
-      if (r.status === 0 || r.status === 429 || r.status === 409 || r.status >= 500) {
+      if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
+      if (r.status === 0 || r.status === 401 || r.status === 403 || r.status === 429 || r.status === 409 || r.status >= 500) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
         if (next !== code) log(`inbox: ${next}; next try in ${secs(ms)}`);
@@ -5045,7 +5083,7 @@ async function serveForeground() {
     let attempt = 0, code;
     while (!stopping && !terminal) {
       const r = await serveCall(`${world}/v1/edge/wait?timeout=55&after=${encodeURIComponent(st.cursor ?? s.cursor ?? "c_0")}`, { method: "GET", headers: auth, timeoutMs: 65_000, recoverRead: true });
-      if (r.status === 401 || r.status === 403) { terminal = r; wake(); return; }
+      if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
       if (r.status < 200 || r.status >= 300) {
         const next = codeOf(r.data) ?? `http-${r.status}`, ms = r.retryAfterMs != null ? statedJitter(r.retryAfterMs) : fullJitter(attempt);
         attempt = Math.min(attempt + 1, 6);
@@ -5098,7 +5136,7 @@ async function serveForeground() {
         const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
         if (RECORD) recordFetch(`${world}/v1/edge/events?${q}`, w0, t0, r, { body: "a stream: its speech.to-me frames show as serve's wakes" });
         if (r.status === 404) { log("addressed speech: this world has no classified stream; speech still reaches pending"); return; }
-        if (r.status === 401 || r.status === 403) return;   // the inbox loop says so and ends things
+        if ((r.status === 401 || r.status === 403) && await controlEnded(r)) return;
         if (!r.ok) { code = `http-${r.status}`; ms = retryAfterMs(r.headers, null); throw new Error(code); }
         attempt = 0; code = undefined;
         let text = ""; const dec = new TextDecoder();
@@ -5394,7 +5432,7 @@ async function serve(...args) {
   args = args.filter((a) => a !== "--no-reflex" && a !== "--reflex");
   if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
-  if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, next: `${CLI} serve` };
+  if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, ...lastServeEnd(), next: `${CLI} serve` };
   if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
   if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);

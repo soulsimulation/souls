@@ -5,11 +5,14 @@
 // production decoration (fake minds, Eyes off), in an isolated data dir under the run. Tools-only; never gated, never
 // on Modal; indicative unless run on the qualifying executor (--qualifying-executor --quiet-host).
 //
-//   node tools/bench/capacity/slopes/slopes.mjs [--axis inventory,activity,quiet] [--repeats 1] [--out <dir>]
+//   node tools/bench/capacity/slopes/slopes.mjs [--axis inventory,activity,quiet,walkers] [--repeats 1] [--out <dir>]
 //        [--root <checkout>] [--port 4600] [--heap-mb 2048] [--quiet-worlds 9] [--warm-s 30] [--quiet-s 60]
 //        [--active-s 180] [--probe-n 20] [--cpu-prof] [--slice "<command prefix>"] [--host-class laptop]
 //        [--quiet-host] [--qualifying-executor] [--short]
 //
+// The walkers axis (#1961) is not in the default list: Eden 2026 quiet and with 25/50/100 scripted walkers, WALK_TICKS
+// ticks each with the world's tick span timers on (SOULS_TICK_SPANS, world.ts) and, with --cpu-prof, a CPU profile of
+// those ticks (tick-spans.jsonl, profile-walk.cpuprofile).
 // Per arm and repeat: <out>/<arm>-r<k>/{result.json, calls.jsonl, live.jsonl, world.log, profile-*.cpuprofile}.
 // <out>/{receipt.json, results.json, REPORT.md}. No host name, user, home path or token in receipt/results/REPORT.
 import { spawn, execFileSync } from 'node:child_process';
@@ -19,9 +22,9 @@ import { cpus, loadavg, freemem, platform, arch, totalmem } from 'node:os';
 import { join, resolve, relative } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
-import { FIXTURES, outcomeOf } from '../meetup/workload.mjs';
+import { FIXTURES, outcomeOf, rng } from '../meetup/workload.mjs';
 import { withDistantInventory } from './inventory.mjs';
-import { AXES, ACTS, PROBE_ROUTES, SLOPES, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText } from './report.mjs';
+import { AXES, ACTS, PROBE_ROUTES, SLOPES, WALK_TICKS, WALK_EVERY_MS, tickSpanTable, subtreeTop, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText } from './report.mjs';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; }, flag = (k) => argv.includes(`--${k}`);
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
@@ -61,14 +64,14 @@ const otherSouls = (own = []) => (sh('pgrep', ['-f', 'apps/server/src/main.ts'])
 const nodePid = (pid) => { for (let p = pid, k = 0; p && k < 4; k++) { if (/node/.test(sh('ps', ['-o', 'comm=', '-p', String(p)]) ?? '')) return p; p = Number((sh('pgrep', ['-P', String(p)]) ?? '').split('\n')[0]) || null; } return pid; };
 
 // ------------------------------------------------------------------ worlds
-async function getJ(url, ms = 5000) { const t = mono(); try { const r = await fetch(url, { signal: AbortSignal.timeout(ms) }); return { status: r.status, j: await r.json().catch(() => null), ms: mono() - t }; } catch { return { status: 0, j: null, ms: mono() - t }; } }
-async function bootWorld(dir, { slug, templateFile, port, inspect }) {
+async function getJ(url, ms = 5000, headers = {}) { const t = mono(); try { const r = await fetch(url, { headers, signal: AbortSignal.timeout(ms) }); return { status: r.status, j: await r.json().catch(() => null), ms: mono() - t }; } catch { return { status: 0, j: null, ms: mono() - t }; } }
+async function bootWorld(dir, { slug, templateFile, port, inspect, extraEnv = {} }) {
   const data = join(dir, 'data'), library = join(dir, 'library'); mkdirSync(data, { recursive: true }); mkdirSync(library, { recursive: true });
   const soul = (f) => join(ROOT, 'tools/world-launcher/soul', f), origin = `http://127.0.0.1:${port}`;
   const base = defaultCommand({ slug, dataDir: data, name: `Slopes ${slug}`, templateFile }, port,
     { publicOrigin: origin, marsWebDir: MARS_WEB, root: ROOT, libraryDir: library, soulControllerCliFile: soul('eden.mjs'), soulCliFile: soul('eden-agent.mjs'), soulSkillFile: soul('skill.md'), soulInstructionsFile: soul('instructions.md') });
   const { cmd: node, args, env } = decorateCommand(base, { devAuth: true, publicOrigin: origin, base: '', worldHeapMb: HEAP_MB, build: 'dev' });
-  Object.assign(env, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake' });
+  Object.assign(env, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake' }, extraEnv);
   for (const k of Object.keys(env)) if (k.startsWith('EDGE_EYES')) delete env[k];   // no renders (Eyes off)
   const cmd = [...(SLICE ? SLICE.split(/\s+/) : []), node, ...(inspect ? [`--inspect=127.0.0.1:${inspect}`] : []), ...args];
   writeFileSync(join(dir, 'world-command.json'), JSON.stringify({ cmd: cmd.map((x) => String(x).split(ROOT).join('.')), env: Object.fromEntries(Object.entries(env).filter(([k]) => !/KEY|TOKEN|SECRET/.test(k)).map(([k, v]) => [k, String(v).split(ROOT).join('.')])) }, null, 1));
@@ -140,6 +143,7 @@ function requestOf(route, n, run) {
   if (route === 'here') return ['GET', '/v1/edge/here?include=doHere'];
   if (route === 'observe') return ['GET', '/v1/edge/observe'];
   if (route === 'capabilities') return ['GET', '/v1/edge/capabilities'];
+  if (route.startsWith('walk:')) return act(route);
   if (route === 'resolve') return ['POST', '/v1/edge/resolve', { capability: ['sit down', 'wave', 'look around'][n % 3], params: {} }];
   const a = ACTS[n % ACTS.length];
   return a === 'say' ? ['POST', '/v1/edge/say', { text: 'hello from the slopes bench' }] : act(a);
@@ -160,6 +164,54 @@ async function call(run, w, s, route, n) {
   }
   const accepted = route === 'resolve' ? d?.resolve?.ok : d?.accepted;
   return { route, ms: Math.round(mono() - t), bytes, status, outcome: outcomeOf({ status, code, accepted }), ...(code ? { code } : {}), ...(busy ? { busyWaits: busy, waitMs: Math.round(waitMs), refusals } : {}) };
+}
+
+// ------------------------------------------------------------------ #1961: a walkers arm
+const spanRows = (file) => { try { return readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+async function walkRun(arm, rep) {
+  const dir = join(OUT, `${arm.id}-r${rep}`); mkdirSync(dir, { recursive: true });
+  const run = { id: `${arm.id}r${rep}`, dir, seq: 0 }, spans = join(dir, 'tick-spans.jsonl'), calls = [], loadStart = loadavg().map((x) => +x.toFixed(2));
+  let W = null, jp = null, prof = null, walking = false, walkers = null;
+  try {
+    log(`${run.id}: boot Eden 2026 (span timers on)`);
+    W = await bootWorld(join(dir, 'w0'), { slug: 'sw0', templateFile: join(ROOT, 'worlds/templates/eden-2026.json'), port: PORT, inspect: PROF ? INSPECT : 0, extraEnv: { SOULS_TICK_SPANS: spans } }); LIVE.add(W);
+    const souls = []; jp = await joinProxy(W, PORT + 40); run.joinUrl = jp.url;
+    // joins come from one address, and the world pairs at most 20 a minute per address (http.ts `pair`): 16 a minute here
+    for (let i = 0, started = []; i < arm.walkers; i += 4) {
+      while (started.filter((t) => mono() - t < 60_000).length + 4 > 16) await sleep(1000);
+      const k4 = Math.min(4, arm.walkers - i); started.push(...Array(k4).fill(mono()));
+      // a join that runs out of time while the world is busy (the join proxy answers 502 when the world drops a request) is tried twice more
+      souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
+    }
+    await jp.close(); jp = null;
+    const caps = souls.length ? (await getJ(`${W.origin}/v1/edge/capabilities?all=1`, 60_000, { authorization: `Bearer ${souls[0].token}` })).j?.capabilities ?? [] : [];
+    const places = caps.filter((c) => c.verb === 'walk' && c.available && c.id.startsWith('walk:')).map((c) => c.id).sort();
+    if (souls.length && !places.length) throw new Error('no walk places in the first Soul\'s menu');
+    log(`${run.id}: ${souls.length} walkers joined, ${places.length} places; walking`);
+    // each walker walks to another place every WALK_EVERY_MS from a seeded offset, so all are moving through the window
+    const R = rng(`${SLOPES}|${run.id}|walk`); walking = true;
+    walkers = Promise.all(souls.map(async (s) => { await sleep(R() * WALK_EVERY_MS); for (let n = 0; walking; n++) { const t = mono(), c = await call(run, W, s, places[Math.floor(R() * places.length)], n); calls.push(c); await sleep(t + WALK_EVERY_MS - mono()); } }));
+    await sleep(WALK_EVERY_MS + 2000);
+    const from = spanRows(spans).at(-1)?.[0] ?? 0;
+    prof = PROF ? await inspector(INSPECT) : null; if (prof) await prof.start();
+    const w0 = mono();
+    for (const t0 = w0; (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 900_000;) await sleep(2000);
+    const windowS = (mono() - w0) / 1000;
+    const profile = prof ? await prof.stop() : null; prof?.close(); prof = null;
+    walking = false; await walkers; walkers = null;
+    if (profile) writeFileSync(join(dir, 'profile-walk.cpuprofile'), JSON.stringify(profile));
+    for (const c of calls) appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ phase: 'walk', ...c }) + '\n');
+    const rows = spanRows(spans).filter((x) => x[0] > from && x[0] <= from + WALK_TICKS);
+    const result = { arm, rep, facts: { walkers: souls.length, places: places.length, ticksPerS: +(WALK_TICKS / windowS).toFixed(1) }, ticks: tickSpanTable(rows), stepProfile: subtreeTop(profile, ROOT),
+      walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
+    if (result.ticks?.ticks !== WALK_TICKS) throw new Error(`${result.ticks?.ticks ?? 0} of ${WALK_TICKS} ticks recorded`);
+    writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
+    log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}`);
+    return result;
+  } finally {
+    walking = false; await walkers; await jp?.close(); prof?.close();
+    if (W) { await stopWorld(W); LIVE.delete(W); }
+  }
 }
 
 // ------------------------------------------------------------------ one arm
@@ -243,7 +295,7 @@ writeFileSync(join(OUT, 'receipt.json'), JSON.stringify(receipt, null, 1) + '\n'
 const results = [];
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { log(`interrupted (${sig}): stopping ${LIVE.size} world(s)`); await Promise.all([...LIVE].map(stopWorld)); process.exit(130); });
 for (let rep = 1; rep <= REPEATS; rep++) for (const axis of AXIS_LIST) for (const arm of AXES[axis]) {
-  try { results.push(await oneRun(arm, rep)); } catch (e) { log(`${arm.id}-r${rep} failed: ${String(e.message).split(ROOT).join('.')}`); results.push({ arm, rep, error: String(e.message).split(ROOT).join('.') }); }
+  try { results.push(await (arm.walkers != null ? walkRun : oneRun)(arm, rep)); } catch (e) { log(`${arm.id}-r${rep} failed: ${String(e.message).split(ROOT).join('.')}`); results.push({ arm, rep, error: String(e.message).split(ROOT).join('.') }); }
   writeFileSync(join(OUT, 'results.json'), JSON.stringify(results, null, 1) + '\n');
 }
 receipt.host.loadavgEnd = loadavg().map((x) => +x.toFixed(2)); writeFileSync(join(OUT, 'receipt.json'), JSON.stringify(receipt, null, 1) + '\n');

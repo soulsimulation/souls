@@ -39,6 +39,12 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 
 ## Release order
 
+0. **Client stamp.** When `eden.mjs` or `skill.md` changed since the last release (the newest `v*` tag) and the client
+   is not stamped, the release workflow's first dispatch stamps it (`stamp.mjs <client version>`, default the next
+   patch; input `client_version`), opens the stamp commit as a pull request (branch `release/stamp-<version>`, like
+   publish's changelog, since the `main` ruleset requires checks and the merge queue) and ends there. Once it merges,
+   the gate, the dry run and the ship run on that head. Every dispatch fails when `stamp.mjs --check` fails, and a real ship
+   refuses a client that still needs a stamp ([versioning](process/versioning.md#the-client-version)).
 1. **Gate receipt.** The candidate commit has a clean full-scope receipt from the
    [remote gate](testing/remote-gate.md) (`tools/test-harness/release-gate.sh`), combined with the V7 browser walk
    into a ship receipt (`tools/test-harness/ship-receipt.mjs`). Start the gate after the head's push-to-main CI run is
@@ -60,7 +66,11 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
    answers; afterwards `https://soul.game/__sim/healthz` shows `build`, `worlds`/`running` and `hostOk`.
 6. **Walks.** Real-Chrome arrivals on desktop and phone, the poster and stall checks.
 7. **cdn-walk.** `tools/cdn/cdn-walk.mjs` proves the live pages load mapped assets from the CDN.
-8. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
+8. **Feed.** Once the health checks pass, a real ship posts one `release` item to the site feed through the operator
+   route on the host (`/__sim/op/feed-post`, loopback only): the client version, the changelog link
+   (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release. The link
+   is the release's id: a retry that finds it in the feed posts nothing.
+9. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
 ## The release workflow
@@ -75,6 +85,7 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | `date` | today (UTC) | The release date compiled into the changelog page and `CHANGELOG.md`. The page is part of the web build, so a real ship on a later day than its dry run of the same head must pass the dry run's date, or the staged build differs and stage refuses to overwrite it |
 | `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
 | `eyes` | **laptop** | Where the browser checks (probe, walks, poster, stall) run. `laptop`: on a GPU workstation with [`ship/eyes.mjs`](#the-workstations-eyes), handed over by commit status, and ship.sh runs `--no-eyes`. `runner`: on the GitHub runner, as before; it has no GPU, so they fail there (below) |
+| `client_version` | next patch | The Soul client version stamped when the client changed since the last release and is not stamped yet |
 | `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
 
 ```sh
@@ -87,7 +98,9 @@ node tools/world-launcher/deploy/ship/eyes.mjs --sha <head, 40 hex> --run <run i
 Its jobs:
 
 1. **preflight**: the required secrets and variables exist (it names any that are missing), the head is `main`, the
-   tag does not exist yet, the inputs are sane.
+   tag does not exist yet, the inputs are sane. Then the client stamp (`tools/world-launcher/deploy/ship/release-client.mjs
+   stamp`): a dry run that has to stamp opens the stamp pull request and skips the other jobs; a real ship
+   that would have to stamp stops; `stamp.mjs --check` must pass either way.
 2. **ship**: in the `production` environment (limited to `main`). It installs, pulls media, installs Chromium at a
    known `PLAYWRIGHT_BROWSERS_PATH`, builds the Mars web overlay (`MARS_WEB_SRC`: the viewer's static site from this
    commit plus the static manifests, Draco decoders and campus model from the public origin), writes the probe god
@@ -97,7 +110,9 @@ Its jobs:
    With `eyes=laptop` the job waits up to 20 minutes for the workstation's probe before ship.sh, and up to 45 minutes
    for its verdict after it. Both waits fail closed: no pass, no publish. A stop once the host activation began (other than
    the host's own refusal) is reported as "live state unknown", with the rollback command. A real ship whose browser checks then fail is
-   live; the summary prints the [rollback](#rollback-without-ssh) command.
+   live; the summary prints the [rollback](#rollback-without-ssh) command. After the health checks pass, a real ship
+   posts the release item to the site feed (`release-client.mjs feed --ssh`, which posts on the host's loopback unless
+   the item is already there). A failed post leaves the release live and prints the command to retry.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit and creates the GitHub Release.
 

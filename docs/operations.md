@@ -114,6 +114,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
   can alert on `hostOk`.
 
+## Soul API ceilings
+
+The launcher refuses Soul API traffic past these defaults (`SOUL_CEILINGS` in `tools/world-launcher/flood.mjs`), sized
+so 100 Souls behind one address, or under one account, each holding a listen and acting every 10 s, are never refused
+(#1949): 600 requests per address in 10 s, 202 requests in flight per address, 200 listens per address, 4 per Soul,
+200 per account, and 1,200 heavy (C1/C2) requests per account a minute. The world budget is 200 heavy requests a second.
+`node tools/world-launcher/op.mjs set-limits --port <launcher port> --slug <slug> --limits '{...}'` overrides any of
+them for one world, at once (`null` restores a default).
+
 ## Backups
 
 `sim-worlds-backup@<stage>.timer` runs nightly (`deploy/backup-restic.mjs backup <stage>`). It copies every SQLite
@@ -134,6 +143,13 @@ qualified separately.
 - Visitors' page errors: pages post to `/__sim/client-errors`; `node tools/world-launcher/op.mjs client-errors --port
   <port> --base /` summarises them on the current root-only host. Use the actual configured base for other deployments.
 - Operator actions: `<data>/audit.jsonl` (`op.mjs audit`).
+
+## Platform feed
+
+Every client pulls site news from `<base>/v1/feed?after=<id>&limit=N` (public, cached 60 s, no credentials). Post from
+the host: `op.mjs feed-post --port <port> --base / --kind announcement|release|world|event --title "…" [--body …]
+[--url https://…] [--starts-at …] [--replaces <id>]`. `<data>/feed.jsonl` is append-only: correct an item by posting one
+that replaces it. `op.mjs feed-stats` prints reads per UTC day by client version (`x-soul-client`); no ids are kept.
 
 ## CDN
 
