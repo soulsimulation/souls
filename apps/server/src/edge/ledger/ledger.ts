@@ -823,6 +823,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (r.program_id) try {void this.host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId, programId: r.program_id, why: why.code}).catch(() => {/* best effort */});} catch {/* clock not ready */}
     }
   }
+  /** #2085: this body's open act's bound effect landed (a harvest pick): kept in its receipt row when it lands, so a
+   *  restart before the programme ends ends the act completed (#2051), not lost. */
+  actApplied(entityId: string, capability: string) {
+    for (const r of this.rows("capability=? AND phase IN ('waiting','started')", capability)) if (this.host.minds.get(r.soul_id)?.entityId === entityId) this.setDetail(r.receipt_id, {contactAppliedV1: {tick: this.host.engine.world.tick}});
+  }
   private onProgram(ev: {id: string; kind: string; code?: string; message?: string}) {
     if (ev.kind === 'step') return;
     const r = this.rows("program_id=? AND phase IN ('waiting','started')", ev.id)[0]; if (!r) return;
