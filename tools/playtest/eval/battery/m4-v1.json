@@ -1,0 +1,31 @@
+{
+ "battery": "m4-v1",
+ "world": "eden-2026",
+ "note": "#1752 A3: #1724's five plain instructions, then the #1097/#1098 scorecard kinds recast on Eden 2026 places. Every item starts where a new Soul arrives (the Green field). Success is read from the public Soul view and the card's state, never the agent's words; no item needs resolve.",
+ "items": [
+  { "id": "bandstand", "source": "#1724", "instruction": "Walk to the bandstand.", "start": "field", "timeoutSec": 180,
+    "check": { "place": ["g-eden-bandstand"] } },
+  { "id": "sit-down", "source": "#1724", "instruction": "Sit down.", "start": "field", "timeoutSec": 120,
+    "check": { "posture": "seated" } },
+  { "id": "windmill", "source": "#1724", "instruction": "Go to the windmill.", "start": "field", "timeoutSec": 240,
+    "check": { "placeKind": "mill" } },
+  { "id": "eat", "source": "#1724", "instruction": "Go somewhere to eat.", "start": "field", "timeoutSec": 180,
+    "check": { "receipt": { "verb": "eat" } } },
+  { "id": "library-read", "source": "#1724", "instruction": "Go to the library and read a book.", "start": "field", "timeoutSec": 240,
+    "check": { "all": [ { "place": ["g-eden-library-1", "g-region-campus-library-annex"] }, { "receipt": { "verb": "read" } } ] } },
+  { "id": "seat-bench", "source": "#1097 named seat", "instruction": "Sit on a bench.", "start": "field", "timeoutSec": 180,
+    "check": { "all": [ { "posture": "seated" }, { "receipt": { "verb": "sit", "thingKind": "core-bench" } } ] } },
+  { "id": "thing-music", "source": "#1097 thing activity", "instruction": "Play some music at the bandstand.", "start": "field", "timeoutSec": 180,
+    "check": { "receipt": { "verb": "play-music" } } },
+  { "id": "walk-fire-circle", "source": "#1097 plain walk", "instruction": "Walk to the fire circle.", "start": "field", "timeoutSec": 180,
+    "check": { "place": ["g-place-social-eden-fire-circle"] } },
+  { "id": "closed-lake", "source": "#1097 closed or unreachable place", "instruction": "Go into the West Lake.", "start": "field", "timeoutSec": 240,
+    "note": "The lake itself is not a walking offer; the jetty and the bank are. Passes on an honest failure, or on the body at an offered alternative.",
+    "check": { "any": [ { "card": "failed" }, { "place": ["g-land-west-lake-jetty", "g-land-west-lake.shore-bank", "g-land-west-lake"] } ] } },
+  { "id": "ride-unoffered", "source": "#1097 ride not offered", "instruction": "Fly to the windmill.", "start": "field", "timeoutSec": 240,
+    "note": "Nothing offers flight there. Passes on an honest failure, or on walking there (an offered alternative).",
+    "check": { "any": [ { "card": "failed" }, { "placeKind": "mill" } ] } },
+  { "id": "errand-two-step", "source": "#1097 multi-step", "instruction": "Go to the windmill, then sit down there.", "start": "field", "timeoutSec": 300,
+    "check": { "all": [ { "placeKind": "mill" }, { "posture": "seated" } ] } }
+ ]
+}
