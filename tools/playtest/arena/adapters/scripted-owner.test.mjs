@@ -64,6 +64,8 @@ test('classify reads onboarding, nudges, wakes and typed chat from the harness t
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify(fetchErr) }, { waited: true }).ok, false, 'a receipt-fetch error is not a completion');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify({ accepted: true, waited: '60s', receipt: { error: 'HTTP 503' } }) }, { waited: true }).ok, false, '--json form of the same error');
   const finishedLong = brief({ accepted: true, waited: '20s', receipt: { ...walking, phase: 'completed', done: 'walked to the hall.' }, ownerMessages: owner });
+  delete finishedLong.receipt; // #836 keeps it here; the pre-#832 output (and a failed fetch) did not
+  assert.equal(finishedLong.done, 'walked to the hall.');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify(finishedLong) }, { waited: true }).ok, false, 'even a finished sentence without its receipt is unconfirmed');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify({ accepted: true, waited: '20s', receipt: { ...walking, phase: 'completed' }, ownerMessages: owner }) }, { waited: true }).ok, true, 'output that keeps its receipt (short brief, or --json in a script) counts');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify({ ...cut, events: [{ kind: 'activity.observed', action: { status: 'executing' } }] }) }, { waited: true }).ok, false, 'activity not tied to this receipt does not count');
