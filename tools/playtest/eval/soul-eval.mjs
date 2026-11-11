@@ -128,7 +128,7 @@ async function runCases(o, battery, seatCfg) {
     try {
       w = await startWorld(opts);
       const restart = async () => { await stopWorld({ pid: w.pid }); w = null; w = await startWorld({ ...opts, fresh: false }); };
-      const rec = await runCase({ dir, base: w.base, item, seatCfg, restart, log });
+      const rec = await runCase({ dir, base: w.base, item, seatCfg, restart, serverRoot, log });
       rec.repeat = rep; cases.push(rec);
       log(`${item.id} r${rep}: ${rec.succeeded ? 'PASS' : 'FAIL'} (${rec.why}) refusals=${JSON.stringify(rec.refusals)}`);
     } catch (e) {
