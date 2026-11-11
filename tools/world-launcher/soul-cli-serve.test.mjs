@@ -29,7 +29,7 @@ async function world(t) {
     const p = url.pathname.slice('/w/test'.length);
     let body = ''; for await (const c of req) body += c;
     w.calls.push([req.method, p]);
-    if (w.deny) return void (res.writeHead(w.deny, { 'content-type': 'application/json' }), res.end(JSON.stringify({ code: 'control.revoked', reason: 'revoked', error: { code: 'control.revoked', message: 'refused' } })));
+    if (w.deny) return void (res.writeHead(w.deny, { 'content-type': 'application/json' }), res.end(JSON.stringify(w.denyCode === 'unauthorized' ? { error: { code: 'unauthorized', message: 'This Soul is not admitted and ready right now; its pairing is kept. Retry shortly.' } } : { code: 'control.revoked', reason: 'revoked', error: { code: 'control.revoked', message: 'refused' } })));
     if (w.denyOnce === p) { w.denyOnce = null; res.writeHead(403, { 'content-type': 'application/json' }); return void res.end(JSON.stringify({ error: { code: 'forbidden', message: 'once' } })); }
     if (w.cut.delete(p)) { res.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' }); res.write('{"accepted":tr'); setTimeout(() => res.destroy(), 10); return undefined; }
     const json = (status, v, h = {}) => { if (res.destroyed) return; res.writeHead(status, { 'content-type': 'application/json', ...h }); res.end(JSON.stringify(v)); };
@@ -156,6 +156,20 @@ test('#1928 A2: a world that answers 401 to everything: serve is gone within 5 s
   assert.equal(s.json.serving, false);
   assert.equal(s.json.serveEnded?.code, 'control.revoked', s.out);
   assert.equal((await w.cli('status')).json.serveEnded?.code, 'control.revoked');
+});
+
+test('#1928 review: a 401 `unauthorized` (a valid token whose Soul is not ready, as after a restart) keeps serve running', async (t) => {
+  const w = await world(t);
+  const up = await w.cli('serve');
+  assert.equal(up.json.serving, true, up.err);
+  assert.ok(await until(() => w.listens > 0));
+  w.denyCode = 'unauthorized'; w.deny = 401; flushWorld(w);
+  assert.ok(await until(() => w.calls.some(([m, p]) => m === 'GET' && p === '/v1/edge/self/link')), 'the 401 was checked with self/link');
+  await sleep(1_500);
+  assert.ok(alive(up.json.pid), 'not ended on a refusal that does not name the token gone');
+  w.deny = null; w.denyCode = null;
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.pid, up.json.pid);
 });
 
 test('#1928 A2: a single 403 followed by success leaves serve running', async (t) => {

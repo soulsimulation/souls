@@ -4920,11 +4920,12 @@ async function serveForeground() {
   let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), busyWaited = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const log = (line) => process.stderr.write(`${now()} ${line}\n`);
-  // #1928: a 401 or 403 is confirmed with one self/link read. Refused there too, the credentials really are gone: the reason is
+  // #1928: a 401 or 403 is confirmed with one self/link read. Refused there as control.revoked or control.unknown, the credentials really are gone: the reason is
   // recorded and this process ends as a stop would. Answered, it carries on. One confirmation at a time for all the loops.
   let confirming = null;
   const controlEnded = (r) => (confirming ??= serveCall(`${world}/v1/edge/self/link`, { method: "GET", headers: auth, timeoutMs: 15_000 }).then((c) => {
-    if (c.status !== 401 && c.status !== 403) { log(`control: ${codeOf(r.data) ?? r.status} not confirmed by self/link (${c.status}); carrying on`); return false; }
+    // Only a world that names the token gone ends this: a 401 `unauthorized` is a valid token whose Soul is not ready yet (a restart).
+    if ((c.status !== 401 && c.status !== 403) || !["control.revoked", "control.unknown"].includes(codeOf(c.data))) { log(`control: ${codeOf(r.data) ?? r.status} not confirmed by self/link (${codeOf(c.data) ?? c.status}); carrying on`); return false; }
     terminal = c;
     st.ended = { code: codeOf(c.data) ?? `http-${c.status}`, ...(c.data?.reason ? { reason: c.data.reason } : {}), at: new Date().toISOString() };
     log(`control ended (${st.ended.code}${st.ended.reason ? `: ${st.ended.reason}` : ""}); stopping`); wake(); shutdown(0); return true;
