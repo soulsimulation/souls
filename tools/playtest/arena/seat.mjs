@@ -325,7 +325,7 @@ export class Seat {
   /** Kept worlds only: retire the Soul as its owner. */
   async retire() {
     if (!this.info.soulId || !this.info.ownerIdentity) return { ok: false };
-    const r = await fetch(`${this.base}/v1/souls/${encodeURIComponent(this.info.soulId)}`, { method: 'DELETE', headers: { authorization: `Bearer dev:${this.info.ownerIdentity}` } });
+    const r = await fetch(`${this.base}/v1/souls/${encodeURIComponent(this.info.soulId)}`, { method: 'DELETE', headers: { 'x-soul-client': 'arena/1', authorization: `Bearer dev:${this.info.ownerIdentity}` } });
     return { ok: r.ok, status: r.status };
   }
 }
