@@ -1,6 +1,8 @@
 // Wake rules (#1929): when the resident process wakes the mind is data in serve's state, and one pure function reads what serve
 // already stores (events, receipts, the plan, the owner's messages, speech said to this Soul, the live copy) against the rules and
 // says which fire. Firing only queues {id, kind, why, at}; the budget, merging and delivery are listen's and pending's (#1968).
+// #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
+// rule over it, and stay held until another agent command reaches serve, or go back to the queue, refunded, after HELD_MS.
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
 export const WAKE_EVERY_S = 300;
@@ -18,7 +20,23 @@ export function fresh() {
   return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), { id: "act-ended", kind: "act-ended", every: 0 }], cursor: null, queue: [], next: 1 };
 }
 
-const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id>`;
+/** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
+export const BUDGETS = { quiet: 4, normal: 12, lively: 60, unlimited: null };
+/** A delivered wake no later agent command confirmed goes back to the queue after this long, and its budget is refunded. */
+export const HELD_MS = 600_000;
+/** speech-to-me: at most one wake per speaker in this long; their further lines join the next one. */
+export const SPEAKER_MS = 60_000;
+const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
+
+const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
+/** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
+export function parseBudget(argv) {
+  const [a, b, ...extra] = argv;
+  const n = (v) => /^\d{1,6}$/.test(v ?? "");
+  if (a === "--day" && (n(b) || b === "unlimited") && !extra.length) return { day: b === "unlimited" ? null : Number(b) };
+  if (a !== undefined && (a in BUDGETS || n(a)) && b === undefined) return { hour: n(a) ? Number(a) : a };
+  throw new Error(USAGE);
+}
 /** `wake add` arguments as a rule (without its id). Throws what is wrong. */
 export function parseRule(argv) {
   const rest = [];
@@ -48,6 +66,7 @@ export function parseRule(argv) {
 export function change(wake, c) {
   const w = { ...fresh(), ...wake };
   if (!c) return { wake: w };
+  if (c.budget) return { wake: { ...w, budget: { ...w.budget, ...c.budget } } };
   if (c.add) {
     const rule = { id: `w${w.next ?? 1}`, ...c.add };
     return { wake: { ...w, rules: [...w.rules, rule], next: (w.next ?? 1) + 1 }, rule };
@@ -59,10 +78,63 @@ export function change(wake, c) {
 }
 
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
-/** What `wake` prints: each rule with its last match and last firing, and how many wakes wait. */
-export function view(wake) {
+/** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
+export function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0 };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
+}
+
+const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
+/** What `status` shows: the budget, whether the owner chose it, and the ambient wakes delivered in the last hour and 24 hours. */
+export function budgetView(wake, now) {
+  const w = wake ?? {}, sent = (w.delivered ?? []).map((d) => d.at), hour = perHour(w);
+  return { budget: w.budget?.hour ?? "normal", perHour: hour, perDay: w.budget?.day ?? null, chosen: w.budget?.hour !== undefined,
+    deliveredLastHour: sent.filter((t) => now - t < HOUR_MS).length, deliveredLast24h: sent.filter((t) => now - t < DAY_MS).length };
+}
+
+/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. */
+export function enqueue(queue, fired) {
+  const q = (queue ?? []).map((x) => ({ ...x }));
+  for (const f of fired) {
+    const e = q.find((x) => x.id === f.id);
+    if (e) Object.assign(e, { why: f.why, at: f.at, count: (e.count ?? 1) + (f.count ?? 1) }); else q.push({ ...f, count: f.count ?? 1 });
+  }
+  return q.slice(-WAKE_QUEUE_MAX);
+}
+
+/** Pure: held deliveries older than heldMs go back to the queue (under what queued since) and their budget is refunded. */
+export function expire(wake, now, heldMs = HELD_MS) {
+  const w = { ...fresh(), ...wake }, old = (w.held ?? []).filter((g) => now - g.at >= heldMs);
+  if (!old.length) return w;
+  const back = old.flatMap((g) => g.wakes), refund = new Set(old.filter((g) => g.charged).map((g) => g.at));
+  const queue = enqueue(back, w.queue ?? []);   // what queued since is newer: its why stands
+  return { ...w, queue, held: w.held.filter((g) => !old.includes(g)), delivered: (w.delivered ?? []).filter((d) => !refund.has(d.at)) };
+}
+
+/** Pure: what a reader is handed now. The always-on kinds come by their own paths (the owner's messages, speech, the plan), so
+ *  their entries leave the queue; the ambient ones are handed over, all at once, when the budget allows one more delivery
+ *  (`free`: they ride with a wake that is coming anyway, and cost nothing). Handed wakes are held, not gone: confirm() ends that. */
+export function deliver(wake, now, { free = false, heldMs = HELD_MS } = {}) {
+  const w0 = expire(wake, now, heldMs), queue = (w0.queue ?? []).filter((x) => !ALWAYS.includes(x.kind));
+  const delivered = (w0.delivered ?? []).filter((d) => now - d.at < DAY_MS), w = { ...w0, queue, delivered };
+  if (!queue.length) return { wake: w, wakes: [] };
+  const hour = perHour(w), day = w.budget?.day ?? null;
+  const over = !free && ((hour !== null && delivered.filter((d) => now - d.at < HOUR_MS).length >= hour) || (day !== null && delivered.length >= day));
+  if (over) return { wake: w, wakes: [], over: true };
+  return { wake: { ...w, queue: [], held: [...(w.held ?? []), { at: now, wakes: queue, charged: !free }], delivered: free ? delivered : [...delivered, { at: now }] }, wakes: queue };
+}
+
+/** Pure: another agent command reached serve: what was handed before it was taken. */
+export const confirm = (wake) => (wake?.held?.length ? { ...wake, held: [] } : wake);
+
+const speaker = (a) => a.soulId ?? a.from ?? "someone";
+/** Pure: does any of these lines said to this Soul come from a speaker who has not woken it within SPEAKER_MS? */
+export const speechDue = (lines, spoke, now) => lines.some((a) => now - (spoke?.[speaker(a)] ?? -Infinity) >= SPEAKER_MS);
+/** Pure: the speakers' last wake, with these lines' speakers waking now. */
+export function spokeNow(spoke, lines, now) {
+  const o = Object.fromEntries(Object.entries(spoke ?? {}).filter(([, t]) => now - t < SPEAKER_MS));
+  for (const a of lines) o[speaker(a)] = now;
+  return o;
 }
 
 /** The items after the cursor's id; all of them when the id is gone (the list was cut from the front), none on a first look. */
