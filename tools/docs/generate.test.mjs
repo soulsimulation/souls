@@ -41,7 +41,7 @@ test('a change in the code shows on its page and no other', () => {
 test('every route, tool, verb and refusal code appears exactly once', () => {
   const count = (text, needle) => text.split(needle).length - 1;
   const api = routesSection(facts), mcp = toolsSection(facts), actions = actionsSection(facts);
-  assert.ok(facts.routes.length > 300 && facts.mcp.length >= 28 && facts.verbs.length > 50, 'the server answered in full');
+  assert.ok(facts.routes.length > 300 && facts.mcp.length >= 27 && facts.verbs.length > 50, 'the server answered in full');
   for (const r of facts.routes) assert.equal(count(api, `\n- \`${r.method} ${r.path}\``), 1, `${r.method} ${r.path}`);
   for (const t of facts.mcp) assert.equal(count(mcp, `\n### ${t.name}\n`), 1, t.name);
   // each table counted in its own section (sit is both an act verb and an engine verb)

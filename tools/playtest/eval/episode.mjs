@@ -93,77 +93,85 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
   if (folder) ({ seat, setup } = await attachFolder({ dir, folder, base, seatCfg, rails, refreshClient }));
   else { seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails }); setup = await prepareFolder(seat, { name: seatCfg.soulName ?? 'Wren' }); }
   const name = seat.info.soulName ?? 'Wren';
-  if (resetTo) { const r = await cli(seat.folder, ['act', `walk:${resetTo}`, '--wait', '60'], 120000); log(`${item.id}: reset to ${resetTo}: ${r.data?.receipt?.phase ?? r.data?.code ?? r.code}`); await cli(seat.folder, ['stop']).catch(() => {}); }
-  // A client before 2.25 keeps no world copy; it is then checked and judged against a saved copy of the same template's
-  // catalog (--catalog), never against nothing.
-  const own = readCatalog(seat.folder, setup.soulId), catalogFrom = own ? 'client' : catalogRef ? 'reference' : null;
-  if (!catalogFrom) { await cli(seat.folder, ['serve', '--stop']).catch(() => {}); throw new Error('the client keeps no world copy (world-catalog.json); pass --catalog <a saved copy of this template\'s catalog>'); }
-  const catalog = catalogIndex(own ?? catalogRef);
-  const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
-  if (bad.length) { await cli(seat.folder, ['serve', '--stop']).catch(() => {}); throw new Error(bad.join('; ')); }
-  const rt = runtimeDir(seat.folder, setup.soulId), traceFile = join(rt, '.eden-report.jsonl');
-  const ownerId = seat.info.ownerIdentity, soulId = setup.soulId;
-
-  const pub0 = await publicSoul({ base, soulId });
-  const before = observe(pub0), seen = new Set(before.receipts.map((r) => `${r.id}|${r.phase}`));
-  if (item.start && !before.placeIds.includes(item.start)) throw new Error(`${item.id}: the Soul starts at ${before.place}, not ${item.start}`);
-
-  const kick = await seat.chat(kickoffText(name, setup.skillFile), { reason: 'kickoff' });
-  seat.wakeLoop();
-  // --warm-sec: the instruction waits until the Soul is this old, so a run can show the steady state beside the cold start
-  if (warmSec > 0 && setup.createdAt) { const wait = setup.createdAt + warmSec * 1000 - Date.now(); if (wait > 0) await sleep(wait); }
-  const sentLocal = Date.now();
-  const chatMode = deliver === 'chat';
-  const sent = chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
-  if (chatMode) seat.chat(item.instruction, { reason: 'chat' }).catch(() => {});
-  log(`${item.id}: sent ${chatMode ? 'as chat' : sent.messageId}`);
-
-  const samples = [], deadline = sentLocal + (item.timeoutSec ?? 240) * 1000;
-  let firstMotionMs = null, successAt = null, closedAt = null, verdict = { ok: false, why: 'timeout' }, card = null, endedBy = 'timeout';
-  const priorIds = new Set(before.receipts.map((r) => r.id));
-  while (Date.now() < deadline) {
-    await sleep(sampleMs);
-    let pub, view;
-    try { [pub, view] = await Promise.all([publicSoul({ base, soulId }), chatMode ? null : cardView({ base, soulId, identity: ownerId })]); } catch (e) { samples.push({ t: Date.now() - sentLocal, error: String(e.message ?? e).slice(0, 120) }); continue; }
-    const obs = observe(pub), t = Date.now() - sentLocal;
-    card = cardSummary(view);
-    if (card.messageId && card.messageId !== sent.messageId) card = { ...card, other: true };
-    const newReceipts = obs.receipts.filter((r) => !priorIds.has(r.id) || !seen.has(`${r.id}|${r.phase}`));
-    const moved = obs.place !== before.place || obs.posture !== before.posture || newReceipts.some((r) => r.firstMotionTick != null);
-    if (firstMotionMs == null && moved) firstMotionMs = t;
-    verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog, noCard: chatMode });
-    samples.push({ t, place: obs.place, posture: obs.posture, activity: obs.activity, card: card.state, ok: verdict.ok });
-    const closed = !chatMode && !card.other && cardClosed(card);
-    if (closed && closedAt == null) closedAt = t;
-    if (verdict.ok && successAt == null) successAt = t;
-    if (!verdict.ok) successAt = null;   // a check must still hold at the end
-    if (verdict.ok && closed) { endedBy = 'success+closed'; break; }
-    if (verdict.ok && t - successAt >= holdSec * 1000) { endedBy = 'success-held'; break; }
-    if (closed && !verdict.ok && t - closedAt >= graceSec * 1000) { endedBy = 'closed-unmet'; break; }
-  }
-  const endLocal = Date.now();
-  let cap; await Promise.race([seat.stop(), new Promise((ok) => { cap = setTimeout(ok, (rails.maxTurnWallSec ?? 240) * 1000 + 5000); })]); clearTimeout(cap);
-  await cli(seat.folder, ['serve', '--stop']).catch(() => {});
-
-  const trace = readJsonl(traceFile);
-  mkdirSync(join(dir, 'trace'), { recursive: true });
-  if (existsSync(traceFile)) copyFileSync(traceFile, join(dir, 'trace', 'eden-report.jsonl'));
-  const http = httpSince(trace, sentLocal);
-  const routes = routeStats(http);
-  const nonPoll = routes.filter((r) => !r.longPoll);
-  const callsN = nonPoll.reduce((s, r) => s + r.n, 0);
-  const mean = (k) => { const xs = http.filter((r) => !isLongPoll(r.route)).map((r) => r[k]).filter(Number.isFinite); return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null; };
-  const rec = {
-    item: item.id, instruction: item.instruction, catalogFrom, sinceCreateMs: setup.createdAt ? sentLocal - setup.createdAt : null, succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: endLocal - sentLocal,
-    firstMotionMs, successMs: verdict.ok ? successAt : null, cardClosedMs: closedAt, card: card ? { state: card.state, outcome: card.outcome, acked: !!card.ackAt, closed: cardClosed(card) } : null,
-    seat: seatStats(readJsonl(join(seat.dir, 'turns.jsonl')), readJsonl(join(seat.dir, 'transcript.jsonl')), sentLocal),
-    kickoff: { costUsd: kick?.usage?.costUsd ?? null, wallMs: kick?.wallMs ?? null, refused: kick?.refused ?? null, seatCheck: seat.info.seatCheck ?? null },
-    worldCalls: callsN, longPolls: http.length - callsN, routes, refusals: refusalCounts(http), clientMsPerCall: mean('durationMs'), serverMsPerCall: mean('serverMs'),
-    client: { cli: setup.cliVersion, skill: setup.skillVersion }, samples: samples.length,
+  // #1989: the seat and its `serve` stop however the episode ends, a throw included (once; the trace is read after).
+  let stopped = false;
+  const stopSeat = async () => {
+    if (stopped) return; stopped = true;
+    let cap; await Promise.race([seat.stop(), new Promise((ok) => { cap = setTimeout(ok, (rails.maxTurnWallSec ?? 240) * 1000 + 5000); })]); clearTimeout(cap);
+    await cli(seat.folder, ['serve', '--stop']).catch(() => {});
   };
-  writeJson(join(dir, 'episode.json'), rec);
-  writeJson(join(dir, 'samples.json'), samples);
-  return rec;
+  try {
+    if (resetTo) { const r = await cli(seat.folder, ['act', `walk:${resetTo}`, '--wait', '60'], 120000); log(`${item.id}: reset to ${resetTo}: ${r.data?.receipt?.phase ?? r.data?.code ?? r.code}`); await cli(seat.folder, ['stop']).catch(() => {}); }
+    // A client before 2.25 keeps no world copy; it is then checked and judged against a saved copy of the same template's
+    // catalog (--catalog), never against nothing.
+    const own = readCatalog(seat.folder, setup.soulId), catalogFrom = own ? 'client' : catalogRef ? 'reference' : null;
+    if (!catalogFrom) throw new Error('the client keeps no world copy (world-catalog.json); pass --catalog <a saved copy of this template\'s catalog>');
+    const catalog = catalogIndex(own ?? catalogRef);
+    const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
+    if (bad.length) throw new Error(bad.join('; '));
+    const rt = runtimeDir(seat.folder, setup.soulId), traceFile = join(rt, '.eden-report.jsonl');
+    const ownerId = seat.info.ownerIdentity, soulId = setup.soulId;
+
+    const pub0 = await publicSoul({ base, soulId });
+    const before = observe(pub0), seen = new Set(before.receipts.map((r) => `${r.id}|${r.phase}`));
+    if (item.start && !before.placeIds.includes(item.start)) throw new Error(`${item.id}: the Soul starts at ${before.place}, not ${item.start}`);
+
+    const kick = await seat.chat(kickoffText(name, setup.skillFile), { reason: 'kickoff' });
+    seat.wakeLoop();
+    // --warm-sec: the instruction waits until the Soul is this old, so a run can show the steady state beside the cold start
+    if (warmSec > 0 && setup.createdAt) { const wait = setup.createdAt + warmSec * 1000 - Date.now(); if (wait > 0) await sleep(wait); }
+    const sentLocal = Date.now();
+    const chatMode = deliver === 'chat';
+    const sent = chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
+    if (chatMode) seat.chat(item.instruction, { reason: 'chat' }).catch(() => {});
+    log(`${item.id}: sent ${chatMode ? 'as chat' : sent.messageId}`);
+
+    const samples = [], deadline = sentLocal + (item.timeoutSec ?? 240) * 1000;
+    let firstMotionMs = null, successAt = null, closedAt = null, verdict = { ok: false, why: 'timeout' }, card = null, endedBy = 'timeout';
+    const priorIds = new Set(before.receipts.map((r) => r.id));
+    while (Date.now() < deadline) {
+      await sleep(sampleMs);
+      let pub, view;
+      try { [pub, view] = await Promise.all([publicSoul({ base, soulId }), chatMode ? null : cardView({ base, soulId, identity: ownerId })]); } catch (e) { samples.push({ t: Date.now() - sentLocal, error: String(e.message ?? e).slice(0, 120) }); continue; }
+      const obs = observe(pub), t = Date.now() - sentLocal;
+      card = cardSummary(view);
+      if (card.messageId && card.messageId !== sent.messageId) card = { ...card, other: true };
+      const newReceipts = obs.receipts.filter((r) => !priorIds.has(r.id) || !seen.has(`${r.id}|${r.phase}`));
+      const moved = obs.place !== before.place || obs.posture !== before.posture || newReceipts.some((r) => r.firstMotionTick != null);
+      if (firstMotionMs == null && moved) firstMotionMs = t;
+      verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog, noCard: chatMode });
+      samples.push({ t, place: obs.place, posture: obs.posture, activity: obs.activity, card: card.state, ok: verdict.ok });
+      const closed = !chatMode && !card.other && cardClosed(card);
+      if (closed && closedAt == null) closedAt = t;
+      if (verdict.ok && successAt == null) successAt = t;
+      if (!verdict.ok) successAt = null;   // a check must still hold at the end
+      if (verdict.ok && closed) { endedBy = 'success+closed'; break; }
+      if (verdict.ok && t - successAt >= holdSec * 1000) { endedBy = 'success-held'; break; }
+      if (closed && !verdict.ok && t - closedAt >= graceSec * 1000) { endedBy = 'closed-unmet'; break; }
+    }
+    const endLocal = Date.now();
+    await stopSeat();
+
+    const trace = readJsonl(traceFile);
+    mkdirSync(join(dir, 'trace'), { recursive: true });
+    if (existsSync(traceFile)) copyFileSync(traceFile, join(dir, 'trace', 'eden-report.jsonl'));
+    const http = httpSince(trace, sentLocal);
+    const routes = routeStats(http);
+    const nonPoll = routes.filter((r) => !r.longPoll);
+    const callsN = nonPoll.reduce((s, r) => s + r.n, 0);
+    const mean = (k) => { const xs = http.filter((r) => !isLongPoll(r.route)).map((r) => r[k]).filter(Number.isFinite); return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null; };
+    const rec = {
+      item: item.id, instruction: item.instruction, catalogFrom, sinceCreateMs: setup.createdAt ? sentLocal - setup.createdAt : null, succeeded: verdict.ok, why: verdict.why, endedBy, sentAt: new Date(sentLocal).toISOString(), wallMs: endLocal - sentLocal,
+      firstMotionMs, successMs: verdict.ok ? successAt : null, cardClosedMs: closedAt, card: card ? { state: card.state, outcome: card.outcome, acked: !!card.ackAt, closed: cardClosed(card) } : null,
+      seat: seatStats(readJsonl(join(seat.dir, 'turns.jsonl')), readJsonl(join(seat.dir, 'transcript.jsonl')), sentLocal),
+      kickoff: { costUsd: kick?.usage?.costUsd ?? null, wallMs: kick?.wallMs ?? null, refused: kick?.refused ?? null, seatCheck: seat.info.seatCheck ?? null },
+      worldCalls: callsN, longPolls: http.length - callsN, routes, refusals: refusalCounts(http), clientMsPerCall: mean('durationMs'), serverMsPerCall: mean('serverMs'),
+      client: { cli: setup.cliVersion, skill: setup.skillVersion }, samples: samples.length,
+    };
+    writeJson(join(dir, 'episode.json'), rec);
+    writeJson(join(dir, 'samples.json'), samples);
+    return rec;
+  } finally { await stopSeat(); }
 }
 
 // ---- cases (#1950): several scripted Souls on one world, each with its own script and checks, started and judged together
@@ -228,13 +236,16 @@ export function validateCases(battery) {
 /** runCase({dir, base, item, seatCfg, restart}) → the case record (also dir/case.json). restart() stops the world and starts
  *  it again on the same data, resolving once it answers. */
 export async function runCase({ dir, base, item, seatCfg, restart = null, log = () => {} }) {
-  const souls = [];
+  const souls = [], opened = [];   // every folder that may run a `serve`, stopped once however the case ends (as #1989)
+  const stopAll = async () => { for (const f of opened.splice(0)) await cli(f, ['serve', '--stop']).catch(() => {}); };
+  try {
   for (const s of item.souls) {   // set up together before any script runs
     const seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: s.id }, worldBase: base, rails: {} });
+    opened.push(seat.folder);
     const setup = await prepareFolder(seat, { name: s.name });
     const folders = { own: seat.folder };
     for (const f of s.folders ?? []) {
-      const p = join(dir, 'seats', `${s.id}-${f}`, 'folder'); mkdirSync(p, { recursive: true });
+      const p = join(dir, 'seats', `${s.id}-${f}`, 'folder'); mkdirSync(p, { recursive: true }); opened.push(p);
       writeFileSync(join(p, '.eden-agent.json'), JSON.stringify({ identity: seat.info.ownerIdentity }) + '\n', { mode: 0o600 });
       copyFileSync(join(seat.folder, 'eden.mjs'), join(p, 'eden.mjs'));
       const r = await cli(p, ['register', base]); if (r.code !== 0) throw new Error(`${s.id} ${f}: register exited ${r.code}`);
@@ -285,7 +296,7 @@ export async function runCase({ dir, base, item, seatCfg, restart = null, log = 
     return { soul: spec.id, name: spec.name, soulId: setup.soulId, ok: steps.every((x) => x.ok), steps };
   };
   const results = await Promise.all(souls.map(play));
-  for (const { folders } of souls) for (const f of Object.values(folders)) await cli(f, ['serve', '--stop']).catch(() => {});
+  await stopAll();
   const refusals = {};
   const add = (k) => { if (k) refusals[k] = (refusals[k] ?? 0) + 1; };
   for (const x of results) for (const st of x.steps) add(st.refusal);
@@ -299,4 +310,5 @@ export async function runCase({ dir, base, item, seatCfg, restart = null, log = 
     wallMs: Date.now() - t0, world, refusals, tracedRefusals: traced, souls: results, client: { cli: souls[0]?.setup.cliVersion ?? null, skill: souls[0]?.setup.skillVersion ?? null } };
   writeJson(join(dir, 'case.json'), rec);
   return rec;
+  } finally { await stopAll(); }
 }

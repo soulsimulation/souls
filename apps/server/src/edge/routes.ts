@@ -138,13 +138,13 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const comms = registerEdgeComms(app, deps, {stewardToken: process.env.EDGE_STEWARD_TOKEN || undefined, fading: process.env.EDGE_FADING === '1'});
   L.attachComms(comms);
   // #1737: who is where and what was said, world-wide, for a Soul's client to follow
-  mountLiveRoute(app, deps, comms as never, catalog.version);
+  const live = mountLiveRoute(app, deps, comms as never, catalog.version);
   // LINK BODY: the body follows the agent's listen presence (edge/ledger/body-rule.ts)
   const presence = deps.ownerInbox;
   if (presence?.soulPresence) L.attachPresence({soulPresence: id => presence.soulPresence!(id), onSoulListen: l => presence.onSoulListen?.(l), onSoulSend: l => presence.onSoulSend(l)});
   // EVENTS-v1 (tranche agent-minds M1/M2/M4): push stream (SSE + WS), digest, world.notice, server-side plans, schema.
   let plans: Plans | null = null;
-  const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null,
+  const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null, live,
     bootNotice: process.env.EDGE_BOOT_NOTICE === '1' ? `The world server restarted${deps.build ? ` (${deps.build})` : ''}. Plans and open acts carried on; read the digest if you missed anything.` : null});
   plans = registerEdgePlans(app, deps, comms, events, L);
   // #1313: the owner's card reads the act under way for its newest message from the world's records
@@ -154,7 +154,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   mountSchema(app);
   const capture=options.evidenceCapture?captureNativeEvidence({gate:options.evidenceCapture,db:deps.db,worldId:deps.host.worldId,comms}):null;
   const close = comms.close;
-  return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); eyes.close(); close(); }});
+  return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); live.close(); eyes.close(); close(); }});
 }
 
 /** #1295: the duration an act asked for (`params.seconds`), when it is a number. */
