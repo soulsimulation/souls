@@ -68,7 +68,12 @@ listen here from another chat in the same folder. The world keeps messages until
 
 The shipping CLI (`tools/world-launcher/soul/eden.mjs`) keeps every Soul a person pairs in one `.souls/` folder, found
 upward from the current folder like `.git`, stopping at the user's home folder (`SOULS_HOME` overrides). The first
-`register` in an empty folder makes it; `init --global` is the only way to get `~/.souls/`. Design:
+`register` in an empty folder makes it there and offers the user-level home once (`homeChoice` in its JSON): the agent
+asks its owner, and with their yes `register <url> --global` keeps Souls in `~/.souls/`, which every folder under the
+home folder finds (an empty home this folder just made gives way; one in use never does). Nothing is written outside the
+folder without that choice. Once `~/.souls/` exists it lists other folder homes in `homes.json`, so a Soul command
+run where no Soul lives fails with `soul.elsewhere`, naming the home that holds one and how to reach it (`cd`, or
+`export` there and `import` here). `init --global` makes an empty `~/.souls/`. Design:
 [Soul context](../design/soul-context.md); code: `tools/world-launcher/soul/home.mjs`.
 
 ```text
@@ -82,7 +87,23 @@ upward from the current folder like `.git`, stopping at the user's home folder (
 ```
 
 With one Soul every command works as it did. With several, name one first: `node eden.mjs mira here`, `mira@eden` when
-two share a name, `@eden create "Ivo"` to pick the world. Each run works inside that Soul's `runtime/`, so nothing
+two share a name, `@eden create "Ivo"` to pick the world. Unnamed, a Soul command refuses with `soul.ambiguous`, naming
+each `name@world`, unless one is the home's `default`; god seats refuse the same way.
+
+Reconnecting changes nothing that already works (#1875). `register` for a world the seat knows, `create <name>` for a
+Soul this home keeps, `pair` and `adopt` for a Soul whose token the world still takes, and `approval wait` with nothing
+pending once that world's Soul is paired all answer `reconnection: "already connected"` and pair nothing. A kept Soul
+whose token the world no longer takes is paired again by `create` (`"reconnected"`), never made twice; a world that
+cannot say answers `"not checked: the world didn't answer"` and pairs nothing. A second `register` with no Soul yet says
+`"registered again"`. Two folders of one home running the same `create` at once end with one Soul and one live token.
+A Soul whose control another folder holds now (its own home, on this machine or another) is never taken over unasked:
+the world refuses a repair request for it with 409 `soul.held-elsewhere` before any request exists (nothing reaches the
+owner's window), unless the request says `move: true`; the refusal says only that it is held. With a window code the CLI
+reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that account's Souls only) first, so it can name
+the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
+folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
+A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
+the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
@@ -96,9 +117,15 @@ relative files; only its own state moves. A folder with no home keeps `.eden-god
 
 One client and one project skill (`.claude/skills/souls/`, `.agents/skills/souls/`) serve every world in a home, because
 offers are data fetched from the world. `/v1/config` says which bundle a world serves: `soulClient: {contract, version,
-bytes, sha256, minVersion}`, read by `register`, so no command pays for it. A home records that per world. A world
+bytes, sha256, minVersion, skill: {version, bytes, sha256}}`, read by `register`. A home records that per world with
+when it read it. Every command in a home then carries `update: {from, to, run}` while its world serves a newer client,
+or a newer skill than a copy the home keeps; a record older than 10 minutes is read again once, alongside the command,
+so a warm one costs nothing. The skill's first rule is to run it and reread SKILL.md. The CLI and the skill carry one
+version number. A world
 needing more than this client refuses at `register` with the exact `upgrade <world>`, and `upgrade` installs the bundle
-only if its length and SHA-256 match, it is newer than the home's, and no other world in the home speaks another contract
+and the skill (every Souls skill copy present beside `.souls/` or in the working folder: `SKILL.md`, `.claude/skills/souls/`,
+`.agents/skills/souls/`, recognised by `name: souls`; it never adds one) only if each one's length, SHA-256 and stated
+version match and the served skill is the Souls skill, both checked before either is written; the bundle only if it is newer than the home's, and no other world in the home speaks another contract
 (a world on an untrusted site can be passed over with `--trust`; a trusted one can't). Every copy of the CLI in the home hands over to `bin/eden.mjs` once that is newer. A world pinned to an older bundle keeps
 working: it never downgrades the home.
 
@@ -244,7 +271,7 @@ whole world, wherever the Soul's body is. Each answer carries `scope: "public"`,
 withholds. Owner messages and credentials are never in it.
 
 - **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
-  kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
+  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A thing upstairs is
   located on its level. No place is secret (#1262): every place, what stands in it and what is done in it is listed. A `ref` two places share (a lake and its bank) is left off both, so
@@ -254,20 +281,53 @@ withholds. Owner messages and credentials are never in it.
   (a few seconds after it starts listening) the route answers `503 world.starting` with `Retry-After: 2` rather than
   publish a world with no acts; `live` names no version until then. Eden 2026: 1,510 places, 4,518 things, 1,365 acts,
   1.4 MB.
+  `kinds` ([#1751](https://github.com/soulsimulation/souls/issues/1751)) lists, per kind of thing worked by hand or
+  holding state, its acts (verb, label, Soul-facing params and the state each needs, `when`; `[]` for a thing that only
+  has state, such as a bucket another thing fills) and its default state, generated from the def's own action list and
+  declared state (`catalogActs`, `stateDefaults` in `apps/server/src/god/actuators.ts`), the list the world's object
+  kinds offer from. A thing's act is sent as `object:<thing id>:<verb>`. A revision whose acts or defaults differ has its
+  own entry, `<kind>@<revision>`, named by its things' `hands`; a revision with neither is marked `byHand: false`. A
+  thing a shut container or a hiding place keeps out of sight is left out, and opening the container makes a new
+  catalog version. Eden 2026: 26 kinds (21 with acts), 873 things, 5.8 KB more; a rebuild costs 43 ms instead of 37.
 - **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
-  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. A secret
-  place is never named: a Soul inside one is listed without position or place, and what is said there is left out,
-  including lines said there before it was made secret.
+  of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. No place is secret (#1262), so every Soul is listed with its position
+  and place. The answer carries
+  `epoch` and `seq`, the number of the picture's latest change.
+  `things` holds, for each thing whose acted-on state differs from its kind's default, only the fields that differ
+  (`{"e_…": {"on": false}}`), at most 2,000 things (`thingsMore` counts the rest). Only booleans, numbers and an enum
+  field's own values are published (a light on, a level, the record on); free text (a board's words, who wrote or
+  voted) never is: it comes with a read of the thing. Nothing kept out of sight is in it; that is checked
+  where the thing stands at each build. Eden 2026: 0.3 KB as it
+  starts, 23 KB with all 873 things changed.
+- **Live changes pushed (#1755).** `GET /v1/edge/events?live=1` (the SSE stream `serve` already holds) adds the live
+  picture to the Soul's own events: `hello` says `live: true`, then `live.full` (the whole picture) or, with
+  `liveAfter=<epoch>:<seq>`, only the changes since, then one `live` frame per change (`seq`, `base`: the seq it
+  applies on; Soul rows set and deleted, things set and deleted (a thing that goes out of sight
+  is deleted), new speech, a new catalog version) and every 5 s a
+  check (`seq`, `check`: a hash of the Souls, things and catalog version, `live-delta.ts` `liveHash`). Live frames
+  carry no SSE id, so the Soul's cursor is untouched. The world builds and diffs the picture once per change for
+  every client, serialises and encodes each frame once, keeps the last 120 changes (about a minute) for a client
+  coming back (more missed than that, or any change of secrecy or of the places since, is sent as the whole picture
+  instead), and does
+  nothing while no client holds the push. A client too slow to take its frames gets nothing more until it has caught
+  up, then the whole picture. The push carries only what the public answer carries. Each minute it runs, the world
+  logs `[live-push]` with its subscribers and its own time per run.
 - Both are C3 public reads: behind the launcher they are answered from its micro-cache, so the world's cost does not
   grow with the number of clients.
 - **The client** (`tools/world-launcher/soul/catalog.mjs`, inlined into `eden.mjs`) keeps both as files in the Soul's
-  folder. `serve` refreshes the live picture every 2 s and refetches the catalog when its version changes. `look`,
+  folder. `serve` keeps the live picture by the push (`live.mjs`): a change on the copy's seq is applied, anything
+  else (a gap, another epoch, a check that disagrees) reconnects the stream without its seq, so the whole picture comes
+  in order with the changes after it (at most once in 10 s), and a frame naming a newer catalog fetches it. A cached
+  `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
   its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
   what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
   narrow nothing; an act that needs others ranks after one done alone. A fresh folder's first `find` fetches both itself,
-  and waits out `world.starting`.
+  and waits out `world.starting`. A thing worked by hand comes with its `state` (the kind's defaults with the live picture's changes) and
+  the `act` that state allows (a lamp that is on: `switch-off`; the act its words name first; others in `also`). A verb
+  (`--verb open`) finds the things that take it now. `--in` takes a place's id or its words. The live copy is read
+  again once it is 2.5 s old, so a change reaches `find` within 3 s.
 - **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
   One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
@@ -278,10 +338,20 @@ withholds. Owner messages and credentials are never in it.
   that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
-- **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those
-  are still read with `here` and `inspect <id>`. A movable thing is listed where it stood at the last rebuild: a Soul
-  carrying or putting one down changes no version, so its position in the copy can be old until the next god edit or
-  restart (#1751).
+- **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
+  there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
+  made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a
+  hand contact (a lamp, a door) changes at the contact; any other (a chest, a candle) sent from beyond 30 m changes when
+  the act's walk ends at it, and not at all if the act is stopped or replaced first (`object.not-reached`), or if on arrival it is someone
+  else's and private, locked, in another Soul's hand or no longer takes the act (the named refusal a near act gets, such
+  as `container.in-use`, #1859); within 30 m it
+  behaves as before. A whole menu still lists only the things within 30 m. A thing in a secret place this Soul
+  has not been to or found stays unknown. A state the act does not take is refused with its reason (`object.state`:
+  "the lamp is already on").
+- **Not in the copy yet:** what a thing's text says in full (a board's notes, a notebook) and the objects of the edge
+  object framework that are not built things (chess, presentations, calendars). Those are read with `inspect <id>`. A
+  movable thing is listed where it stood at the last rebuild: a Soul carrying or putting one down changes no version, so
+  its position in the copy can be old until the next god edit or restart.
 
 The served skill is look, find the id, act in one call. `POST /v1/edge/resolve` still answers for older clients; the
 current client uses it only when `act` or a `plan` step is given words where an id belongs.
@@ -452,3 +522,12 @@ reachable. The step-out happens at most once a minute for each Soul. A Soul cut 
 the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
 not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
 isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
+
+A Soul a god edit closed in while it walked waits until the walk ends, then is asked again with warm labels. While it
+waits on cold labels the tick loop relabels every tick at 20 ms (#1499), and the Soul is asked in the tick they turn warm.
+Each engine-side static change (a door set, a ride landing) cancels the relabel in progress. So once a Soul has waited 200
+ticks (10 s) on cold labels while the static world kept changing, one relabel runs whole in a single tick, about 250 ms at
+most and at most once per 200 ticks a world. When that relabel fits in 250 ms and the Soul isn't inside its one-minute
+step-out cooldown, it is out about 10-13 s after the walk ends. The server log says
+`nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it
+(#1548). A stream of god edits re-arms the first build instead, which this doesn't cover yet (#1744).

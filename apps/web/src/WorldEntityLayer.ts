@@ -1622,6 +1622,8 @@ export class WorldEntityLayer {
     // #1664: a newly admitted surface child is already supported, not an airborne God creation.
     // Preserve construction refinement and all births without a parent that existed before this update.
     if (!existing && existingParent && !refinement && parent && pdef?.slots.some(slot => slot.id === e.in.slot && slot.kind === 'surface')) ease = false;
+    // Completed native work already committed this ordinary ground output at full size. God edits retain their creation ease.
+    if (!existing && !isWorld && !refinement && e.by === 'engine' && e.in.parent === 'world' && wp.y === 0 && !def.components.body) ease = false;
     if (existing && existing.defHash === defHash && !existing.removing && !force) {
       if (isWorld) return;
       // The parent or slot can change without changing the world pose. Resolve its host again even when no easing is needed.

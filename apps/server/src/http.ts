@@ -1,4 +1,5 @@
 import {mountSoulRuntimePublication} from './soul-runtime-publication.ts';
+import {mountClientCounter, type EdgeClients} from './client-version.ts';
 import {soulClientManifest} from './soul-client-manifest.ts';
 import {mountContextViews} from './god/context-views.ts';
 import {AutoPortraits} from './portrait/auto-portraits.ts';
@@ -9,6 +10,7 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, WARM_WAIT_KEY, worldBlock, type Admission} from './load/admission.ts';
+import {requestRecordFile, requestRecordMiddleware} from './load/request-record.ts';
 import {apiOf, apiRoute, recordApi} from './load/api-times.ts';
 import {SERVING_BOOT_WAIT_MS, SERVING_WAIT_MS} from './edge/ledger/ledger.ts';
 import type {Level} from './load/shared.ts';
@@ -127,6 +129,9 @@ export function buildApp(d: Deps) {
   if(d.stationV2&&d.stationV2.host!==d.host)throw new Error('V2 station must belong to selected host');
   if(d.intentV2&&(d.intentV2.host!==d.host||d.intentV2.brain!==d.brain||d.intentV2.souls!==d.souls))throw new Error('intent transport must belong to selected host');
   const app = new Hono();
+  // #1774 A4: a dev world's per-request record for playtests (load/request-record.ts); unset, nothing is mounted
+  const requestRecord = requestRecordFile(process.env, d.auth.devAuth);
+  if (requestRecord) app.use('*', requestRecordMiddleware(requestRecord));
   if(d.cfg.accountAuthRequired)d.souls.accounts??=new WorldAccounts(d.host,d.souls);
   if(d.souls.accounts)d.auth.legacyOwnerAllowed=owner=>d.souls.ownedRows(owner).length>0;
   d.host.profileWorldPath=d.cfg.worldPath;
@@ -175,6 +180,7 @@ export function buildApp(d: Deps) {
   slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
     load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
+  (app as unknown as {edgeClients?: EdgeClients}).edgeClients = mountClientCounter(app, d.db.db, c => d.souls.soulFromToken(bearer(c))?.id ?? null); // #1936: x-soul-client per Soul and day
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
   const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
@@ -278,7 +284,9 @@ export function buildApp(d: Deps) {
   mountWelcomeRoutes(app,d);
   // lane OPS2: operator commands for TEST Souls (the launcher only, with the site key: op-souls.ts)
   mountOperatorSouls(app,{db:d.db,worldId:d.host.worldId,souls:d.souls,inbox:ownerInbox,god:d.god,siteKey:process.env.SIM_SITE_KEY,body:()=>d.edge?.bodyRule??null});
-  if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp});
+  // #1875: whether a Soul's control is held now, so an agent in another folder asks before taking it over.
+  const controlOf=(soulId:string)=>{const row=d.db.soul(soulId);if(!row)return null;const l=soulLink(d.souls,ownerInbox,row,null);return {held:!!l.holder,state:l.state,since:l.since};};
+  if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp,control:controlOf});
   mountStationRoutesV2(app,d.stationV2);
   // lane DASH: tickMs = the last ~20 s of ticks (avg/max ms against the 50 ms budget); clockRate < 1 = the clock is dilated (behind)
   // srv-load: O(1) from the load monitor's last 250 ms sample (tick times + the `load` block); the watchdog thread's
@@ -293,7 +301,7 @@ export function buildApp(d: Deps) {
       ...(mon ? {load: mon.health()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
-  const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile); return soulClient ? {soulClient} : {}; };
+  const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile); return soulClient ? {soulClient} : {}; };
   const configOf = (c: Context) => ({ ...soulClientField(), authProvider:d.cfg.authProvider, authenticationOrigin:d.cfg.authProvider==='clerk'&&d.auth.ready?new URL(d.cfg.publicUrl).origin:'', clerkPublishableKey:d.cfg.authProvider==='clerk'?d.cfg.clerkPublishableKey:'', clerkIssuer:d.cfg.authProvider==='clerk'?d.cfg.clerkIssuer:'', ...(d.cfg.authProvider==='clerk'&&d.cfg.clerkSatelliteDomain?{clerkSatellite:{domain:d.cfg.clerkSatelliteDomain,signInUrl:d.cfg.clerkSignInUrl}}:{}), privyAppId:d.cfg.authProvider==='privy'?d.cfg.privyAppId:'', publicUrl: baseOf(c), worldURL:baseOf(c), instructionsURL:baseOf(c)+'/instructions.md', accountAuthRequired:d.cfg.accountAuthRequired, accountApproval:d.souls.accounts?{contract:'account-soul-approval/1',start:'/v1/agent/approval/start',poll:'/v1/agent/approval/poll',cancel:'/v1/agent/approval/cancel'}:null, soulProfile:{contract:'soul-profile/1',auth:'owner',edit:'PATCH /v1/souls/:id/profile',photo:'POST /v1/souls/:id/photo',resetPhoto:'DELETE /v1/souls/:id/photo',autoPortrait:portraits.enabled,photoFormat:'PNG RGB/RGBA8',maxPhotoBytes:262144,maxPhotoDimension:512}, worldId: d.host.worldId, worldKey: d.cfg.worldSlug ?? d.cfg.worldKey, worldEngine: d.cfg.worldEngine, worldName: displayWorldName, worldPath: d.cfg.worldPath, authReady: d.auth.ready, devAuth: d.auth.devAuth, inviteRequired: d.cfg.inviteRequired, build: d.cfg.build });
   app.get('/v1/config', (c) => c.json(configOf(c)));
   const safeConfig = (c: Context) => { try { return configOf(c); } catch { return null; } };  // the page never fails because of it

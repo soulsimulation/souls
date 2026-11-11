@@ -51,7 +51,7 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
 
   const app = new Hono(); let hear: (m: object) => void = () => {};
   const catalog = mountCatalogRoute(app, {ledger: L});
-  mountLiveRoute(app, {ledger: L}, {onSpectator: (l: (m: object) => void) => {hear = l;}} as never, catalog.version);
+  const live = mountLiveRoute(app, {ledger: L}, {onSpectator: (l: (m: object) => void) => {hear = l;}} as never, catalog.version);
   const get = async (path: string, headers: Record<string, string> = {}) => {const r = await app.request(path, {headers}); return {status: r.status, etag: r.headers.get('etag'), body: r.status === 200 ? await r.json() as any : null};};
 
   await t.test('until the world first has its whole structure, the catalog asks again shortly rather than publish no acts', async () => {
@@ -95,12 +95,23 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.ok(mine.length && mine.every((x: any) => y(x.id) > 1.5), `${room.id} lists its own things: ${mine.map((x: any) => x.id)}`);
   });
 
+  await t.test('each place carries its outline, and the client loads the catalog and finds in it as before (#1915)', async () => {
+    const r = await app.request('/v1/edge/catalog'), text = await r.text(), cat = JSON.parse(text);
+    assert.deepEqual(cat.places.find((p: any) => p.id === 'g-sports-football').outline, [[36, 97], [86, 97], [86, 127], [36, 127]]);
+    assert.equal(cat.places.some((p: any) => p.fixed && p.outline), false, 'no place on a carrier has one');
+    const without = JSON.stringify({...cat, places: cat.places.map(({outline: _, ...p}: any) => p)});
+    console.log(`catalog bytes: ${Buffer.byteLength(without)} without outlines, ${Buffer.byteLength(text)} with (${cat.places.length} places)`);
+    const {indexCatalog, find: findLocal} = await import(CLIENT_CATALOG) as {indexCatalog: (c: unknown) => unknown; find: (ix: unknown, w: string, o: object) => {found: {type: string; id?: string}[]}};
+    assert.ok(findLocal(indexCatalog(cat), 'football', {at: [0, 0]}).found.some(row => row.type === 'place' && row.id === 'g-sports-football'), 'find names the pitch');
+  });
+
   await t.test('every act a find row names is taken, or refused with a reason of its own', async () => {
     const {indexCatalog, find: findLocal} = await import(CLIENT_CATALOG) as {indexCatalog: (c: unknown) => unknown; find: (ix: unknown, w: string, o: object) => {found: {act?: string}[]}};
     const cat = (await get('/v1/edge/catalog')).body, ix = indexCatalog(cat), me = L.body(soul.entityId).pose.p, at = [me[0], me[2]];
     const ids = new Set<string>();
     for (const words of ['swim', 'lake', 'pond', 'jetty', 'shore', 'library', 'read a book', 'sit on the floor', 'eat', 'bench', 'kitchen', 'garden', 'dance', 'sleep', 'music', 'table', 'bandstand', 'classroom', 'river', 'sea'])
-      for (const row of findLocal(ix, words, {at}).found) if (row.act) ids.add(row.act);
+      // (a thing's hand act, `object:…`, needs the object framework this harness leaves out: god/hand-acts-far.test.ts)
+      for (const row of findLocal(ix, words, {at}).found) if (row.act && !row.act.startsWith('object:')) ids.add(row.act);
     assert.ok(ids.size >= 40, `find names ${ids.size} acts`);
     const unknown: string[] = [], unbound: string[] = [];
     for (const id of ids) {
@@ -190,17 +201,62 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
 
   await t.test('the live picture names where a Soul is, in a place with a stored secret mark too', async () => {
     const place = L.placePathOf(soul.soulId).find((p: any) => p.kind !== 'occupier').id as string;
+    // #1755: the push, held from here: what it carries is the same picture's changes
+    const frames: {event: string; data: string}[] = [], stop = live.subscribe(null, (event, data) => frames.push({event, data}));
+    t.after(() => {stop(); live.close();});
     hear({kind: 'speech', id: 'sp_open', tick: host.engine.world.tick, at: 1, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'hello out here'});
     await run(10);
     const open = await get('/v1/edge/live'), row = open.body.souls.find((s: any) => s.id === soul.soulId);
     assert.equal(open.body.contract, 'soul-live/1'); assert.equal(open.body.catalog, catalog.version());
     assert.equal(row.place, place); assert.equal(row.at.length, 2);
     assert.deepEqual(open.body.speech.map((s: any) => [s.id, s.place, s.untrusted]), [['sp_open', place, true]]);
+    await get('/v1/edge/live');
+    assert.ok(frames.some(f => f.data.includes('hello out here')), 'a line said in the open is pushed');
     markSecret(place);
     hear({kind: 'speech', id: 'sp_marked', tick: host.engine.world.tick, at: 2, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'said in the marked place'});
     await run(10);
     const marked = await get('/v1/edge/live'), still = marked.body.souls.find((s: any) => s.id === soul.soulId);
     assert.equal(still.place, place, 'where the Soul is is said'); assert.equal(still.at.length, 2);
     assert.deepEqual(marked.body.speech.map((s: any) => [s.id, s.place]), [['sp_open', place], ['sp_marked', place]], 'and what is said there');
+  });
+
+  // #1751: things worked by hand, their state, and their acts from anywhere
+  await t.test('a kind worked by hand is in the catalog with its acts, and a thing\'s changed state reaches the live picture', async () => {
+    const cat = (await get('/v1/edge/catalog')).body;
+    const lamp = cat.kinds['core-desk-lamp'];
+    assert.ok(lamp, 'desk lamps are worked by hand on Eden 2026');
+    assert.deepEqual(lamp.acts.map((a: any) => a.verb).sort(), ['switch-off', 'switch-on']);
+    assert.equal(typeof lamp.state.on, 'boolean');
+    const far = cat.things.filter((x: any) => x.kind === 'core-desk-lamp').map((x: any) => ({...x, d: Math.hypot(x.at[0] - me[0], x.at[1] - me[2])})).sort((a: any, b: any) => b.d - a.d)[0];
+    assert.ok(far.d > 40, `a lamp beyond the old 30 m sight (${Math.round(far.d)} m)`);
+    // (a far act by id walks there: actuators-catalog.test.ts; this harness has no object framework)
+    const before = (await get('/v1/edge/live')).body;
+    assert.equal(before.things[far.id], undefined, 'a thing in its default state is not in the live picture');
+    w.god.engineAct([{op: 'set', id: far.id, state: {on: !lamp.state.on}}] as never, 'test: switch');
+    await run(12);
+    assert.deepEqual((await get('/v1/edge/live')).body.things[far.id], {on: !lamp.state.on}, 'only the field that differs');
+    // a thing a shut container keeps out of sight is in neither answer, and the catalog follows it
+    const was = L.concealedThing, v1 = catalog.version(); L.concealedThing = (id: string) => id === far.id || !!was?.(id);
+    try {
+      await run(12);
+      const c2 = (await get('/v1/edge/catalog')).body;
+      assert.notEqual(catalog.version(), v1, 'a new catalog version');
+      assert.equal(c2.things.some((x: any) => x.id === far.id), false);
+      assert.equal((await get('/v1/edge/live')).body.things[far.id], undefined);
+    } finally { L.concealedThing = was; }
+    assert.equal(catalog.version(), v1, 'shown again: the first version');
+  });
+
+  await t.test('a thing upstairs is in the live picture with its state (#1751)', async () => {
+    const cat = (await get('/v1/edge/catalog')).body;
+    const up = cat.things.find((x: any) => x.kind === 'core-floor-lamp' && x.place && (L.places.byId.get(x.place)?.level ?? 0) > 0 && !L.placePathOf(soul.soulId).some((q: any) => q.id === x.place));
+    assert.ok(up, 'a floor lamp in a room above the ground floor');
+    w.god.engineAct([{op: 'set', id: up.id, state: {on: false}}] as never, 'test: switch upstairs');
+    await run(12);
+    assert.deepEqual((await get('/v1/edge/live')).body.things[up.id], {on: false});
+    // #1755: the push, held across it (the whole picture first, then each change)
+    const frames: {event: string; data: any}[] = [], stop = live.subscribe(null, (event, data) => frames.push({event, data: JSON.parse(data)}));
+    assert.deepEqual(frames[0]!.data.things[up.id], {on: false}, 'the whole picture carries it while its room is public');
+    stop();
   });
 });

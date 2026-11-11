@@ -23,11 +23,26 @@ export function indexCatalog(cat) {
   /** A place and every place inside it. */
   const within = (id) => { const root = place(id); if (!root) return new Set(); const out = new Set([root.id]), todo = [root.id]; while (todo.length) for (const k of kids.get(todo.pop()) ?? []) if (!out.has(k.id)) { out.add(k.id); todo.push(k.id); } return out; };
   const walkId = (p) => `walk:${p.ref ?? p.id}`;
+  /** #1751: what a thing takes by hand (its kind's acts and the state they read), or null. */
+  const handOf = (t) => (t && t.byHand !== false ? cat.kinds?.[t.hands ?? t.kind] ?? null : null);
   /** An id the catalog itself vouches for: a walk to a place a Soul can stand in, a published act, a seat on a thing that is one.
    *  False says only that the catalog cannot tell (an act on the spot, a thing's own offers), never that the id is wrong. */
-  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && !!things.get(rest)?.seat); };
+  const knows = (id) => { const i = id.indexOf(":"), verb = id.slice(0, i), rest = id.slice(i + 1); return acts.has(id) || (cat.anywhere ?? []).some((a) => a.id === id) || ((cat.placeVerbs ?? []).includes(verb) && !!place(rest) && !place(rest).fixed) || (verb === "sit" && !!things.get(rest)?.seat) || handVouches(id); };
+  /** `object:<thing>:<verb>`: a thing of a kind that takes that verb by hand. */
+  const handVouches = (id) => { const m = /^object:([^:]+):([^:]+)$/.exec(id); return !!m && !!handOf(things.get(m[1]))?.acts.some((a) => a.verb === m[2]); };
   const verbs = new Set(cat.acts.map((a) => a.verb));
-  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, verbs };
+  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, verbs, handOf };
+}
+
+const same = (a, b) => a === b || (a == null && b == null) || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9);
+/** #1751: a thing's state now: its kind's defaults with what the live picture says differs (`states`, by thing id). */
+export function thingState(ix, t, states) { const h = ix.handOf(t); return h ? { ...h.state, ...(states?.[t.id] ?? {}) } : null; }
+/** The acts a thing takes by hand in its state now, as ids to send (`object:<thing>:<verb>`). The world still decides. */
+export function handActs(ix, t, states) {
+  const h = ix.handOf(t), st = thingState(ix, t, states); if (!h) return [];
+  // (a field the catalog does not publish, free text, is not judged here: the world decides)
+  return h.acts.filter((a) => (a.when ?? []).every((w) => !(w.field in st) || ((!("is" in w) || same(st[w.field], w.is)) && (!("not" in w) || !same(st[w.field], w.not)))))
+    .map((a) => ({ id: `object:${t.id}:${a.verb}`, verb: a.verb, label: a.label, ...(a.params ? { params: a.params } : {}) }));
 }
 
 const WORDS = new WeakMap();
@@ -36,7 +51,7 @@ const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokens
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
-const thingWords = (t) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind) }));
+const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: (h?.acts ?? []).flatMap((a) => tokensOf(a.verb)) }));
 const RELATION = /^(.*?)\s+(near|by|beside|next to|close to|around|in|inside|at)\s+(?:the\s+)?(.+)$/i;
 /** How far "near <somewhere>" reaches, in metres. */
 export const NEAR_METRES = 80;
@@ -57,11 +72,13 @@ export function bestPlace(ix, words, at) {
 
 /** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
  *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. */
-export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8 } = {}) {
+export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
   if (near) { const anchor = bestPlace(ix, near, at); if (!anchor) return { found: [], note: `No place called "${near}" in the catalog.` }; around = anchor; }
+  // --in takes a place's id or its words ("reception"), as "in the reception" does
+  if (inPlace && !ix.place(inPlace)) inPlace = bestPlace(ix, inPlace, at)?.id ?? inPlace;
   const q = tokensOf(text), scope = inPlace ? ix.within(inPlace) : null;
   if (inPlace && !scope.size) return { found: [], note: `No place called "${inPlace}" in the catalog.` };
   const ref = around?.at ?? at, inScope = (placeId, point) => (!scope || scope.has(placeId ?? "")) && (!around || (dist(around.at, point) ?? 0) <= NEAR_METRES);
@@ -96,11 +113,21 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8 } = {
     const s = verbs.size ? (verbs.get(a.verb) && !rest.length ? verbs.get(a.verb) : 0) : score(q, w);
     if (s) out.push({ s, d: 0, row: { type: "act", act: a.id, verb: a.verb, label: a.label, in: "right here" } });
   }
-  if (!verbs.size) for (const t of ix.cat.things) {
+  for (const t of ix.cat.things) {
+    const h = ix.handOf(t); if (verbs.size && !h) continue;
     if (!inScope(t.place, t.at)) continue;
-    if (kind && !hit(stem(kind.toLowerCase()), thingWords(t).kind)) continue;
-    const s = q.length ? score(q, thingWords(t)) : kind ? 1 : 0; if (!s) continue;
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...(t.seat ? { act: `sit:${t.id}` } : {}) } });
+    if (kind && !hit(stem(kind.toLowerCase()), thingWords(t, h).kind)) continue;
+    // #1751: a thing worked by hand comes with its state and the acts that state allows (a lamp that is on: switch-off)
+    const can = h ? handActs(ix, t, states) : [];
+    let s;
+    if (verbs.size) { const v = Math.max(0, ...can.map((a) => verbs.get(a.verb) ?? 0)); s = v && rest.every((w) => hit(w, [...thingWords(t, h).name, ...thingWords(t, h).kind])) ? v : 0; }
+    else s = q.length ? score(q, thingWords(t, h)) : kind ? 1 : 0;
+    if (!s) continue;
+    // the act the words name first ("open the chest" before "lock"), else the kind's own order
+    const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
+    const pick = [...can].sort((a, b) => named(b) - named(a));
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at),
+      ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
   return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
@@ -137,12 +164,12 @@ function fit(answer, budget) {
 
 /** query: several questions in one call. Each is {find, verb?, kind?, in?, near?, limit?} | {place, depth?, verbs?, things?} |
  *  {thing}, with its own `budget` in tokens (default 600). */
-export function query(ix, questions, { at, budget = 600 } = {}) {
+export function query(ix, questions, { at, budget = 600, states } = {}) {
   return (Array.isArray(questions) ? questions : [questions]).slice(0, 12).map((qn) => {
     const b = Number.isFinite(qn?.budget) ? qn.budget : budget;
     if (qn?.place !== undefined) return fit(placeView(ix, String(qn.place), { depth: qn.depth ?? 1, verbs: qn.verbs, at, things: qn.things !== false }), b);
-    if (qn?.thing !== undefined) { const t = ix.things.get(String(qn.thing)); return t ? { ...t, path: ix.pathOf(t.place), acts: (ix.cat.acts ?? []).filter((a) => a.thing === t.id).map((a) => a.id) } : { error: `No thing with id "${qn.thing}" in the catalog.` }; }
-    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8 }), b);
+    if (qn?.thing !== undefined) { const t = ix.things.get(String(qn.thing)); return t ? { ...t, path: ix.pathOf(t.place), acts: [...(ix.cat.acts ?? []).filter((a) => a.thing === t.id).map((a) => a.id), ...handActs(ix, t, states).map((a) => a.id)], ...(ix.handOf(t) ? { state: thingState(ix, t, states) } : {}) } : { error: `No thing with id "${qn.thing}" in the catalog.` }; }
+    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8, states }), b);
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
