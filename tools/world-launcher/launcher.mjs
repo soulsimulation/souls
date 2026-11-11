@@ -664,8 +664,9 @@ export async function openLauncher(cfg = {}) {
   const clientGone = (req, res) => res.destroyed || req.socket.destroyed;
   const c3Key = (req, slug, url) => `${slug} ${url.pathname}${url.search} ${req.headers['accept-encoding'] ?? ''} ${req.headers.authorization ? short(req.headers.authorization) : ''}`;
   // ---------- #1997: a resident client lets its world sleep (see residentRead). A world sleeps when it is frozen, or stopped
-  // (exited, or never started here); one starting, held or failed is not asleep, and its resident requests go on as before.
-  const sleeping = (slug) => { const k = pool.state(slug); return !k || !!k.frozen || k.status === 'stopped'; };
+  // (exited, or never started here), or being stopped (thawed only to save and exit: resident traffic must not boot it again);
+  // one starting, held or failed is not asleep, and its resident requests go on as before.
+  const sleeping = (slug) => { const k = pool.state(slug); return !k || !!k.frozen || k.status === 'stopped' || !!k.stopped || !!k.stopping; };
   /** The last live picture each caller got (the micro-cache's key), kept to answer the poll while the world sleeps. */
   const liveKept = new Map();
   const keepLive = (key, r) => { liveKept.delete(key); liveKept.set(key, r); if (liveKept.size > 512) liveKept.delete(liveKept.keys().next().value); };

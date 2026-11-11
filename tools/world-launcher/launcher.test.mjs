@@ -266,6 +266,34 @@ test('#1997: a resident client (live poll, listen, wait, stream) lets its world 
     console.log(`#1997 measure (fake world): last use -> asleep ${idleRest} ms (no traffic: ${idleQuiet} ms); first act after the thaw answered in ${actMs} ms`);
   } finally { polling = false; await sleepy(100); await L7.close(); }
 });
+test('#1997: a world that gives its memory back is stopped once; its resident client does not boot it again, an act does', async () => {
+  // reuses the sleep launcher's ports (base+2..4), after the tests above closed theirs. A slow stop (1 s), as a real world saving its snapshot
+  const P = at(4), base = `http://127.0.0.1:${P}`, lines = [];
+  const cmd = (w, port) => { const c = command(w, port); c.env.FAKE_STOP_MS = '1000'; return c; };
+  const L8 = await openLauncher({ port: P, range: [at(2), at(3)], dataDir: join(dir, 'data-resident-exit'), webDir, templatesDir, command: cmd, sleepMs: 400, exitMs: 800, eager: 0, log: (l) => lines.push(l) });
+  const sleepy = (ms) => new Promise((r) => setTimeout(r, ms));
+  const w = (p, o = {}) => { const f = fetch(`${base}/w/gone${p}`, { ...o, headers: { authorization: 'Bearer sim_s_gone_x', ...o.headers } }); f.catch(() => {}); return f; };
+  let on = true;
+  try {
+    assert.equal((await fetch(`${base}/__sim/worlds`, { method: 'POST', body: JSON.stringify({ name: 'Gone' }) })).status, 201);
+    assert.equal((await w('/slow?ms=1')).status, 200);
+    const pids = new Set(); const watch = setInterval(() => { const pid = L8.pool.state('gone')?.child?.pid; if (pid) pids.add(pid); }, 20);
+    // the resident: a live poll every 100 ms and a listen asked again 200 ms after each answer
+    const poll = (async () => { while (on) { await w('/v1/edge/live').catch(() => null); await sleepy(100); } })();
+    const listen = (async () => { while (on) { await w('/v1/edge/inbox/listen?timeoutMs=50000').catch(() => null); await sleepy(200); } })();
+    for (let i = 0; i < 100 && L8.pool.status('gone').status !== 'asleep' || !lines.some((l) => /gave its memory back/.test(l)); i++) await sleepy(100);
+    await sleepy(3000);   // the stop is long over: anything that would boot it again has had time to
+    clearInterval(watch);
+    assert.equal(lines.filter((l) => /gone gave its memory back/.test(l)).length, 1, 'stopped exactly once');
+    assert.equal(pids.size, 1, 'never booted again by its resident client');
+    assert.equal(L8.pool.state('gone').child, null); assert.equal(L8.pool.status('gone').status, 'asleep');
+    // an act boots it (a new process) and is answered
+    const act = await w('/echo', { method: 'POST', body: 'act' });
+    assert.equal(act.status, 200); assert.equal(await act.text(), 'act');
+    assert.ok(L8.pool.state('gone').child?.pid && !pids.has(L8.pool.state('gone').child.pid), 'a new process for the act');
+    on = false; await Promise.race([Promise.all([poll, listen]), sleepy(100)]);
+  } finally { on = false; await sleepy(100); await L8.close(); }
+});
 test('the Eyes render worker (user agent EdenEyes/1) is not a watcher: its page and socket let the world sleep', async () => {
   // the Eyes launcher: base+22..24
   const P = at(24), base = `http://127.0.0.1:${P}`, UA = 'Mozilla/5.0 HeadlessChrome EdenEyes/1';
