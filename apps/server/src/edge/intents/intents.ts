@@ -89,7 +89,7 @@ export class Intents {
       case 'go': case 'walk': case 'glide': return this.go(P, s, verb);
       case 'swim': return this.swim(P, s);
       case 'approach': return this.approach(P, s);
-      case 'walk-to': return this.walkTo(s);
+      case 'walk-to': return this.walkTo(P, s);
       case 'follow': case 'walk-with': return this.follow(P, s);
       case 'turn': case 'face': return this.turn(P, verb === 'face' && s.face === undefined && s.target !== undefined ? {...s, face: s.target, target: undefined} : s);
       case 'look': return this.look(P, s);
@@ -240,10 +240,14 @@ export class Intents {
   }
 
   /** #1916 walk-to:here {at: [x, z]}: the engine's own walk to that point on the body's level (standing room, no stand-off). */
-  private walkTo(s: Record<string, unknown>): Resolution {
+  private walkTo(P: Perception, s: Record<string, unknown>): Resolution {
     const at = s.at; if (!Array.isArray(at) || at.length !== 2 || !at.every(n => typeof n === 'number' && Number.isFinite(n))) return no('capability.params', 'walk-to needs at: [x, z], two finite numbers.');
-    const to: V2 = [at[0] as number, at[1] as number];
-    return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `Walk to [${to[0]}, ${to[1]}]`, steps: [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1'}}], chosen: {at: to}};
+    const to: V2 = [at[0] as number, at[1] as number], steps: Steps = [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1'}}];
+    // a point inside a site under construction is refused as approach's target is
+    const blocked = this.planRefusal?.(P.soul, steps); if (blocked) return no(blocked.code, blocked.reason);
+    // and a point inside someone else's private building as the walk to that building is (object.private)
+    for (const p of this.L.places.containing(to[0], to[1], this.L.placeLevel(P.w.entities[P.soul.entityId]?.human?.level))) {const c = p.ref ? this.L.bindOne(P.soul, 'walk:' + p.ref)?.cap : undefined; if (c?.blocked?.code === 'object.private') return no(c.blocked.code, c.blocked.reason);}
+    return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `Walk to [${to[0]}, ${to[1]}]`, steps, chosen: {at: to}};
   }
 
   private follow(P: Perception, s: Record<string, unknown>): Resolution {
