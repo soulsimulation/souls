@@ -2473,9 +2473,11 @@ function evaluate(rules, state, now) {
       r.held = [];
       for (const h of held) {
         const x = receipts[h.id];
-        // only an act the agent sent itself, of the body, not a plan's step, that no wait saw end and pending has not shown
-        if (!x || !x.mine || x.waited || x.read || planReceipts.has(h.id)) continue;
+        // only an act the agent sent itself, of the body, not a plan's step, that no wait saw end and pending has not shown.
+        // Held through the grace before asking whose it is: the stream's end can come before the act's answer marks it mine (#2054).
+        if (x?.waited || x?.read || planReceipts.has(h.id)) continue;
         if (now - h.since < ACT_ENDED_GRACE_MS) { r.held.push(h); continue; }
+        if (!x?.mine) continue;
         done.add(h.id); fire(`${x.capability ?? "your act"} ${x.phase}${x.reason ? `: ${x.reason}` : ""}`);
       }
       r.done = [...done].slice(-FIRED_KEEP);
@@ -3874,6 +3876,12 @@ export function refusalList({ code, did_you_mean, candidates }) {
   });
   return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `resolve --json shows all ${ids.length}` } : {}) };
 }
+/** #1948: the world refuses an id it cannot bind as it is, naming no others: this machine's catalog is searched by its words. */
+export function findNext(id, { code, did_you_mean, candidates } = {}) {
+  if (code !== "capability.unknown" || typeof id !== "string" || did_you_mean?.length || candidates?.length) return {};
+  const words = id.split(/[:._/-]+/).filter((w) => w && w !== "here").join(" ");
+  return words ? { next: `${CLI} find "${words}"` } : {};
+}
 const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
 
 async function caps(...args) {
@@ -4063,7 +4071,7 @@ async function act(...argv) {
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
     if (json) return d;
-    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -5053,6 +5061,20 @@ loadServeState.fresh = () => {
   const d = { cursor: null, inboxAfter: null, readCursor: null, messages: [], receipts: {}, events: [], omitted: 0, gap: false, plan: null, planEnded: [], addressed: [], addressedSeq: 0, addressedCursor: null, wake: soulWake.fresh() };
   return d;
 };
+/** #2049: the Soul's wake rules go with it when its folder moves (travel, pairing again). In another world a rule naming a place
+ *  or a Soul of the old one stays behind, each with its reason; the rest start their change state and the engine's cursor afresh. */
+export function carryWake(wake, sameWorld) {
+  const w = { ...soulWake.fresh(), ...wake }, dropped = [], rules = [];
+  for (const r0 of w.rules) {
+    if (sameWorld) { rules.push(r0); continue; }
+    const { inside, busy, held, ...r } = r0;   // who was where, and the acts it was holding, were the old world's
+    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind !== "soul-arrives" ? null
+      : r.params?.who !== "any" ? `Soul ${r.params.who}` : r.params?.where !== "here" ? `place ${r.params.where}` : null;
+    if (named) dropped.push({ id: r.id, why: `it names ${named} of the world this Soul left` });
+    else rules.push(r);
+  }
+  return { wake: { ...soulWake.fresh(), rules, next: w.next ?? 1 }, dropped };
+}
 /** Pure: fold what the stream delivered into the state. */
 export function foldEvents(st, events, cursor) {
   for (const e of events ?? []) {
@@ -5315,12 +5337,18 @@ async function serveForeground() {
   const persist = () => { writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); };
   const s = load(), world = need(s, "world", `Run: ${CLI} register <world-url>`);
   const auth = { "content-type": "application/json", authorization: `Bearer ${need(s, "token", "No Soul yet.")}` };
+  const self = (x) => x.home?.soul ?? x.soul ?? "";
   if (st.folder && st.folder !== folderKey(s)) {
-    const old = st.plan, ended = st.planEnded ?? [];
+    const old = st.plan, ended = st.planEnded ?? [], was = st;
     st = loadServeState.fresh();
     st.planEnded = old ? [...ended, planView({ ...old, state: "replaced" })].slice(-PLAN_ENDED_MAX) : ended;
+    if ((was.self ?? was.folder.split("|")[1]) === self(s)) {   // the same Soul, moved: its wake rules go with it (#2049)
+      const c = carryWake(was.wake, was.folder.split("|")[0] === (s.world ?? ""));
+      st.wake = c.wake;
+      for (const d of c.dropped) process.stderr.write(`${now()} wake: dropped ${d.id}: ${d.why}\n`);
+    }
   }
-  st.folder = folderKey(s);
+  st.folder = folderKey(s); st.self = self(s);
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };

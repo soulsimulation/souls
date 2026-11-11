@@ -201,9 +201,11 @@ export function evaluate(rules, state, now) {
       r.held = [];
       for (const h of held) {
         const x = receipts[h.id];
-        // only an act the agent sent itself, of the body, not a plan's step, that no wait saw end and pending has not shown
-        if (!x || !x.mine || x.waited || x.read || planReceipts.has(h.id)) continue;
+        // only an act the agent sent itself, of the body, not a plan's step, that no wait saw end and pending has not shown.
+        // Held through the grace before asking whose it is: the stream's end can come before the act's answer marks it mine (#2054).
+        if (x?.waited || x?.read || planReceipts.has(h.id)) continue;
         if (now - h.since < ACT_ENDED_GRACE_MS) { r.held.push(h); continue; }
+        if (!x?.mine) continue;
         done.add(h.id); fire(`${x.capability ?? "your act"} ${x.phase}${x.reason ? `: ${x.reason}` : ""}`);
       }
       r.done = [...done].slice(-FIRED_KEEP);

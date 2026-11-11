@@ -106,7 +106,7 @@ test('active plan (#951): seeded by the repeat, never the arm; arms of a repeat 
 
 test('schedule facts (#951): read phases and the crowded-read share; the cw7-slopes/1 arm seeds reproduce the diagnosis', () => {
   // hand-made: Soul 0 reads at 0, Soul 1 at 100 (crowded), Soul 2 at 100 + CROWD_MS (not crowded), Soul 1's act at 5
-  const plan = [[{ at: 0, route: 'observe' }], [{ at: 5, route: 'act', n: 0 }, { at: 100, route: 'here' }], [{ at: 100 + CROWD_MS, route: 'resolve' }]];
+  const plan = [[{ at: 0, route: 'observe' }], [{ at: 5, route: 'act', n: 0 }, { at: 100, route: 'here' }], [{ at: 100 + CROWD_MS, route: 'capabilities' }]];
   assert.deepEqual(scheduleFacts(plan, 's'), { seed: 's', readPhasesMs: [0, 100, 400], crowdedReadFrac: 0.33 });
   assert.deepEqual(scheduleFacts([[{ at: 0, route: 'act', n: 0 }, { at: 10, route: 'here' }]], 's').crowdedReadFrac, 0, "a Soul's own call never crowds it");
   assert.equal(scheduleFacts([], 's').crowdedReadFrac, null, 'no reads (act0): unknown, not 0');
