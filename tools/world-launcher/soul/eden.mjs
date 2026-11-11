@@ -4164,6 +4164,7 @@ async function listen(...args) {
     }
     let d;
     try { d = ok(r, "listen"); } catch (e) { if (follow) { process.exitCode = e.exitCode ?? 1; return ended("error", { why: e.message }); } throw e; }
+    if (d.addressed?.length) d.addressed = d.addressed.map((a) => ({ ...a, untrusted: true }));   // #1951: another Soul's words, whatever the world says of them
     attempt = 0; lastCode = undefined; superseded = 0;
     const messages0 = messagesOf(d).filter((m) => m.id !== after), brief = messages0.length || d.addressed?.length || d.plan ? briefNow() : {};
     heard(messages0);
@@ -4769,7 +4770,7 @@ export function takePending(st) {
     ownerMessages: st.messages.filter((m) => !m.acked).map(({ id, text, sentAt }) => ({ id, text, sentAt })),
     openReceipts: receipts.filter((r) => !ENDED.has(r.phase)).map(({ id, capability, phase }) => ({ id, capability, phase })),
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
-    events: shown,
+    events: shown.map((e) => (/^speech(\.|$)/.test(e?.kind ?? "") ? { ...e, untrusted: true } : e)),   // #1951: the home marks speech itself
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
     ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
