@@ -87,8 +87,8 @@ test('taskRow: state, PR and head, who it waits on, hours since the newest claim
   assert.equal(taskRow(t, linked(pr(41, { labels: lbl('tier:T1') })), [], new Map(), NOW).waits, 'coordinator (review)');
   const m = taskRow(t, linked(pr(41, { state: 'MERGED', mergedAt: '2026-11-11T11:00:00Z' })), [], new Map(), NOW);
   assert.deepEqual([m.state, m.waits, m.hours, m.pr.state], ['merged', null, 2, 'MERGED'], 'hours stop at the merge');
-  const ready = o => taskRow({ ...t, number: 11, ...o }, { ...issue(), labels: lbl(), timelineItems: { nodes: [] } }, [], new Map([[12, 'OPEN'], [50, 'MERGED']]), NOW);
-  assert.deepEqual([ready({ depends: '#12' }).state, ready({ depends: '#12' }).waits, ready({ depends: '#12' }).hours], ['ready', 'deps #12', null]);
+  const ready = o => taskRow({ ...t, number: 11, ...o }, { ...issue(), labels: lbl() }, [], new Map([[12, 'OPEN'], [50, 'MERGED']]), NOW);
+  assert.deepEqual([ready({ depends: '#12' }).state, ready({ depends: '#12' }).waits, ready({ depends: '#12' }).hours], ['ready', 'deps #12', null], 'an old claim label event on an unclaimed task counts no hours');
   assert.equal(ready({ depends: 'PR #50 merged' }).waits, 'coordinator (dispatch)');
   assert.equal(ready({ depends: 'none · after release 2' }).waits, 'after release 2');
 });

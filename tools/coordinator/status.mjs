@@ -176,7 +176,7 @@ export function taskRow(task, issue, openPrs = [], depState = new Map(), now = D
   const claims = (issue?.timelineItems?.nodes ?? []).filter(e => e.label?.name === 'agent:claimed').map(e => e.createdAt).sort();
   const claimedAt = claims.at(-1) ?? null;
   const end = pr?.mergedAt ?? issue?.closedAt ?? null;
-  const hours = claimedAt ? Math.max(0, ((end ? Date.parse(end) : now) - Date.parse(claimedAt)) / 3_600_000) : null;
+  let hours = claimedAt ? Math.max(0, ((end ? Date.parse(end) : now) - Date.parse(claimedAt)) / 3_600_000) : null;
   const openDeps = refs(task.depends).filter(n => depState.get(n) === 'OPEN');
   let state, waits;
   if (pr?.mergedAt) [state, waits] = ['merged', null];
@@ -189,6 +189,7 @@ export function taskRow(task, issue, openPrs = [], depState = new Map(), now = D
         : prLabels.includes(READY) ? 'merge train' : 'coordinator (review)';
   } else if (labels.includes('agent:claimed')) [state, waits] = ['claimed', 'lane'];
   else [state, waits] = ['ready', openDeps.length ? `deps ${openDeps.map(n => `#${n}`).join(' ')}` : /after release \d+/i.exec(task.depends)?.[0] ?? 'coordinator (dispatch)'];
+  if (state === 'ready') hours = null; // an unclaimed task's old claim (an earlier agenda) is not running time
   return { ...task, ceiling, tier, state, waits, pr: pr ? { number: pr.number, state: pr.mergedAt ? 'MERGED' : pr.state, head: pr.headRefOid?.slice(0, 8) ?? null, mergedAt: pr.mergedAt ?? null } : null, claimedAt, hours, openDeps };
 }
 
