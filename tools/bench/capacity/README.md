@@ -211,6 +211,7 @@ node tools/bench/capacity/meetup/compare.mjs .local/qualify/<baseline>/capacity-
 | `inventory` | 5,000 vs 10,000 placed objects | 5 Souls registered and active, the scene and the acts |
 | `activity` | 0, 5 or 10 of 10 registered Souls active | the scene as authored |
 | `quiet` | the designated world alone, or with 9 quiet ticking worlds (CW1 fixtures 1–9, no Souls) | 5 active Souls in the designated world |
+| `walkers` (#1961, not in the default `--axis`) | 0, 25, 50 or 100 Souls each walking to another place every 8 s | 2,000 ticks with the world's tick span timers on (`SOULS_TICK_SPANS=<file>`, `world.ts`); REPORT.md tabulates tick p50/p99, each span's share, GC, snapshots and, with `--cpu-prof`, the engine step's top five functions |
 
 - **The distant inventory** (`slopes/inventory.mjs`, `cw7-distant/1`): deterministic copies of the template's own small furniture kinds, in the largest empty square at least 100 m from every authored object's edge. That is beyond sight (30 m) and go-near (60 m). The copies are applied as extra genesis batches of at most 256 ops each; the authored batches are unchanged.
 - **Per arm:**
