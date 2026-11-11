@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { soulClientManifest } from '../../apps/server/src/soul-client-manifest.ts';
+import { fixture } from '../../apps/server/test/native-owner-fixture.ts';
 import { stamp } from './soul/stamp.mjs';
 
 const SOUL = fileURLToPath(new URL('./soul/', import.meta.url)), RELEASED = join(SOUL, 'released/2.32.0');
@@ -19,6 +20,8 @@ const RECORDED = { 'eden.mjs': 'b714263638d766d6a272f4f2f625ec79ec7b803964fa1b27
 const released = (file) => gunzipSync(readFileSync(join(RELEASED, `${file}.gz`)));
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const HIGHER = '99.0.0';
+// The frozen `soulClient` fields (docs/architecture/api.md).
+const FIELDS = ['bytes', 'contract', 'minVersion', 'sha256', 'skill', 'version'], SKILL_FIELDS = ['bytes', 'sha256', 'version'];
 
 test('A1: the committed 2.32.0 client and skill are the bytes that release recorded', () => {
   for (const [file, hash] of Object.entries(RECORDED)) assert.equal(sha(released(file)), hash, file);
@@ -30,13 +33,14 @@ test('A2: the released 2.32.0 client upgrades itself to head from the server\'s 
   const head = tmp('souls-compat-head-');
   cpSync(SOUL, head, { recursive: true, filter: (p) => !p.includes('/released') && !p.includes('/builds') });
   stamp(HIGHER, `${head}/`);
-  const files = { '/eden.mjs': join(head, 'eden.mjs'), '/skill.md': join(head, 'skill.md') };
-  // The three frozen paths: plain GETs, no redirect, no sign-in.
-  const server = createServer((req, res) => { req.resume(); req.on('end', () => {
-    const path = req.url.replace(/^\/w\/compat/, '');
-    if (path === '/v1/config') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ devAuth: true, worldId: 'w', worldName: 'Compat', soulClient: soulClientManifest(files['/eden.mjs'], files['/skill.md']) })); }
-    if (files[path]) return res.end(readFileSync(files[path]));
-    res.writeHead(404); res.end('{}');
+  const eden = join(head, 'eden.mjs'), skill = join(head, 'skill.md'), m = soulClientManifest(eden, skill);
+  assert.deepEqual([Object.keys(m).sort(), Object.keys(m.skill).sort()], [FIELDS, SKILL_FIELDS], 'the frozen soulClient fields');
+  // The server's own routes, reached with no sign-in; a redirect reaches the client, which refuses it.
+  const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
+  f.souls.cfg.controllerCliFile = eden; f.souls.cfg.skillFile = skill;
+  const server = createServer((req, res) => { req.resume(); req.on('end', async () => {
+    const r = await f.app.request(req.url.replace(/^\/w\/compat/, ''));
+    res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(Buffer.from(await r.arrayBuffer()));
   }); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.closeAllConnections(); server.close(); });
