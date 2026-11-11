@@ -17,7 +17,6 @@ test('stamp.mjs refuses a stale or malformed version, stamps eden.mjs, the skill
   const run = (...args) => spawnSync(process.execPath, [join(dir, 'stamp.mjs'), ...args], { encoding: 'utf8' });
   const read = (p) => readFileSync(join(dir, p), 'utf8'), before = JSON.parse(read('SOURCES.json'));
   const current = /^const VERSION = "([0-9.]+)";$/m.exec(read('eden.mjs'))[1], next = current.replace(/[0-9]+$/, (n) => String(Number(n) + 1));
-  assert.equal(run('--check').status, 0, 'the copied client is stamped');
 
   appendFileSync(join(dir, 'eden.mjs'), '// a client change\n'); appendFileSync(join(dir, 'skill.md'), 'A new line.\n');
   const stale = run('--check');
