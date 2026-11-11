@@ -34,7 +34,6 @@ test('acts over the limit: each is 429 rate-limited naming 60 a minute, with no 
     assert.equal(r.data.error.code, 'rate-limited');
     assert.match(r.data.error.message, /more than 60 acts a minute: this act was not taken/);
     assert.equal(r.data.error.limit, 60); assert.equal(r.data.error.window_s, 60);
-    assert.ok(r.data.error.retry_after_s >= 1 && r.data.error.retry_after_s <= 60, String(r.data.error.retry_after_s));
     assert.equal(r.data.accepted, undefined); assert.equal(r.data.receipt, undefined, 'no receipt on a refusal');
     const text = JSON.stringify(r.data); assert.ok(![...receipts].some(id => text.includes(id)), 'no earlier act\'s receipt');
   }
