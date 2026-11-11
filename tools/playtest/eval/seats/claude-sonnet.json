@@ -1,0 +1,1 @@
+{ "adapter": "claude-headless", "model": "sonnet", "note": "Live seat. Launch under env -i with the #1688 allowlist and CLAUDE_CONFIG_DIR set to the isolated seat config." }

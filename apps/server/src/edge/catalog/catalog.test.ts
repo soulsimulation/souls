@@ -42,6 +42,12 @@ test('a place keeps its id, names its ref, and a carrier place is marked fixed',
   assert.equal(payload.places.find(p => p.id === 'basket')!.fixed, true);
 });
 
+test('a place carries its outline to 0.1 m; a place on a carrier, in the carrier\'s own frame, has none (#1915)', () => {
+  const base = input(), {payload} = buildCatalog({...base, places: base.places.map(p => p.id === 'g-library' ? {...p, polygon: [[0.04, 0], [10.06, 0], [10, 9.96], [0, 10]]} : p)});
+  assert.deepEqual(payload.places.find(p => p.id === 'g-library')!.outline, [[0, 0], [10.1, 0], [10, 10], [0, 10]]);
+  assert.equal(payload.places.find(p => p.id === 'basket')!.outline, undefined);
+});
+
 test('every spot activity is an act by id, tied to its thing and place', () => {
   const {payload} = buildCatalog(input());
   assert.deepEqual(payload.acts.filter(a => a.place === 'g-library').map(a => a.id), ['drink:eat.e_0aa1', 'eat:eat.e_0aa1']);
