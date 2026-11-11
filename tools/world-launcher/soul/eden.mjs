@@ -2210,7 +2210,8 @@ function applyFrame(copy, world, event, frame, receivedAt) {
   if (!live || live.epoch !== frame.epoch) return { whole: "epoch" };
   if (frame.check) {
     if (frame.seq !== live.seq) return frame.seq > live.seq ? { whole: "behind" } : { copy: null };
-    return liveHash(live) === frame.check ? { copy: { ...copy, receivedAt, pushed: true } } : { whole: "hash" };
+    // #1918: a check carries the world's clock; the copy keeps the newest (a whole picture carries it too)
+    return liveHash(live) === frame.check ? { copy: { ...copy, receivedAt, pushed: true, ...(frame.clock ? { live: { ...live, clock: frame.clock } } : {}) } } : { whole: "hash" };
   }
   if (frame.seq <= live.seq) return { copy: null };   // already applied
   if (frame.base !== live.seq) return { whole: "gap" };
