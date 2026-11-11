@@ -25,7 +25,8 @@ function yieldBesideWall(policy:Record<string,boolean>={}){
 /** Steps the scene. The blocker stands in the passage holding it, as a walker inside it would, and never leaves. */
 function run(e:MarsEngine,ticks:number){
   const rt=(e as any).rt,events:ProgramEvent[]=[],actions=new Set<string>();
-  let held=false,firstBlocked:number|undefined,rocks=0,last:number[]|undefined;
+  // headway: the last tick the walker's body left a 0.5 m disc round where it last made headway (the watchdog's measure)
+  let held=false,firstBlocked:number|undefined,rocks=0,last:number[]|undefined,anchor=[...e.world.entities[W].pose.p],headway=e.world.tick;
   for(let i=0;i<ticks;i++){
     events.push(...e.step().programs);
     const ex=execOf(e,W);
@@ -34,8 +35,9 @@ function run(e:MarsEngine,ticks:number){
     if(ex)actions.add(ex.id);
     if(rec?.status==='blocked'){firstBlocked??=e.world.tick;if(last&&Math.hypot(p[0]-last[0],p[2]-last[2])>0.001)rocks++;}
     last=[...p];
+    if(Math.hypot(p[0]-anchor[0],p[2]-anchor[2])>0.5){anchor=[...p];headway=e.world.tick;}
   }
-  return {events,firstBlocked,rocks,actions};
+  return {events,firstBlocked,rocks,actions,headway};
 }
 
 test('#1952 A1 without wait-bound/1: a walker yielding beside a wall rocks and is still walking past 1,200 ticks',()=>{
@@ -47,20 +49,20 @@ test('#1952 A1 without wait-bound/1: a walker yielding beside a wall rocks and i
 });
 
 test('#1952 A1/A2 wait-bound/1: the same walk ends route.blocked within 1,200 ticks of stopping and names the body it waited for',()=>{
-  const {e,id}=yieldBesideWall({waitBoundV1:true}),{events,firstBlocked}=run(e,1500);
+  const {e,id}=yieldBesideWall({waitBoundV1:true}),{events,headway}=run(e,1500);
   const failed=events.filter(x=>x.id===id&&x.kind==='failed');assert.equal(failed.length,1);
   assert.equal(failed[0].code,'route.blocked');assert.match(failed[0].message!,/wait-bound\/1/);assert.match(failed[0].message!,new RegExp(`traffic\\.yield.*${B}`));
-  assert.ok(failed[0].tick<=firstBlocked!+1200,`ended at ${failed[0].tick}, first blocked at ${firstBlocked}`);
+  assert.ok(failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
   assert.equal(e.programOf(W),null);assert.equal(execOf(e,W),undefined,'nothing left behind');assert.deepEqual(e.runtime.violations,[]);
 });
 
 test('#1952 A2 wait-bound/1 counts per programme step: step-backs (edge motion) re-issue the walk and do not extend it',()=>{
   const off=yieldBesideWall({edgeMotionV1:true}),offRun=run(off.e,1500);
   assert.ok(offRun.actions.size>1,'the walker stepped back and tried again');
-  const {e,id}=yieldBesideWall({edgeMotionV1:true,waitBoundV1:true}),{events,firstBlocked,actions}=run(e,1500);
+  const {e,id}=yieldBesideWall({edgeMotionV1:true,waitBoundV1:true}),{events,headway,actions}=run(e,1500);
   assert.ok(actions.size>1,'the walk was re-issued');
   const failed=events.filter(x=>x.id===id&&x.kind==='failed');assert.equal(failed.length,1);assert.match(failed[0].message!,/wait-bound\/1/);
-  assert.ok(failed[0].tick<=firstBlocked!+1200,`ended at ${failed[0].tick}, first blocked at ${firstBlocked}`);
+  assert.ok(failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
   const offEnd=offRun.events.find(x=>x.id===off.id&&x.kind==='failed');assert.ok(!offEnd||offEnd.tick>failed[0].tick,'without the bound the step-backs ran longer');
 });
 
