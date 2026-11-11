@@ -32,7 +32,9 @@ async function world(t) {
     }
     if (p === '/v1/edge/wait') {
       if (url.searchParams.get('after') === 'c_1') { await sleep(300); return json(200, { events: [], cursor: 'c_1' }); }
-      return json(200, { events: [{ id: 'c_1', kind: 'speech', from: { soulId: 's_bo', name: 'Bo' }, channel: 'public', text: SAID }], cursor: 'c_1' });
+      return json(200, { events: [{ id: 'c_1a', kind: 'speech', from: { soulId: 's_bo', name: 'Bo' }, channel: 'public', text: SAID },
+        { id: 'c_1b', kind: 'conversation.turn', conversation: 'cv_1', turn: { seq: 1, from: { soulId: 's_bo', name: 'Bo' }, text: SAID } },
+        { id: 'c_1', kind: 'conversation.invite', conversation: 'cv_1', from: { soulId: 's_bo', name: 'Bo' }, text: SAID }], cursor: 'c_1' });
     }
     if (p === '/v1/edge/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -71,13 +73,16 @@ test('A2: listen --follow carries speech said to this Soul as an untrusted, quot
   assert.equal(row.untrusted, true, 'listen --follow: marked untrusted');
 });
 
-test('A2: pending carries speech, from the event stream and said to this Soul, marked untrusted and quoted', async (t) => {
+test('A2: pending carries speech, a conversation turn and an invitation from the stream, and speech said to this Soul, marked untrusted and quoted', async (t) => {
   const w = await world(t);
   assert.equal((await w.cli('serve')).json?.serving, true);
   const got = { events: [], addressed: [] };   // each pending hands over what came since the last, so gather them
   assert.ok(await until(async () => { const j = (await w.cli('pending')).json ?? {}; got.events.push(...j.events ?? []); got.addressed.push(...j.addressed ?? []); return got.events.length && got.addressed.length; }), `pending showed the speech: ${JSON.stringify(got)}`);
-  const event = quotedRow(got.events.find((e) => e.kind === 'speech'), 'pending events');
-  assert.equal(event.untrusted, true, 'pending events: marked untrusted');
+  for (const kind of ['speech', 'conversation.turn', 'conversation.invite']) {
+    const e = got.events.find((x) => x.kind === kind);
+    quotedRow(kind === 'conversation.turn' ? e?.turn : e, `pending ${kind}`);
+    assert.equal(e.untrusted, true, `pending ${kind}: marked untrusted`);
+  }
   const to = quotedRow(got.addressed[0], 'pending addressed');
   assert.equal(to.untrusted, true, 'pending addressed: marked untrusted');
 });

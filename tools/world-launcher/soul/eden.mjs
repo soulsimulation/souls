@@ -4762,6 +4762,8 @@ export function reconcileMessages(st, unacked) {
   return st;
 }
 /** Pure: everything since the last read, and the read cursor moves past it. Nothing is lost across agent turns. */
+/** #1951: event kinds that carry another Soul's words: speech, a mention, a conversation turn or invitation, an invite. */
+const SPOKEN = /^(speech|mention|invite|conversation\.(turn|invite))(\.|$)/;
 export function takePending(st) {
   const from = readIndex(st), rest = st.events.slice(from).filter((e) => !["receipt", "activity.observed"].includes(e?.kind));
   const shown = rest.slice(0, PENDING_EVENTS_MAX);
@@ -4770,7 +4772,7 @@ export function takePending(st) {
     ownerMessages: st.messages.filter((m) => !m.acked).map(({ id, text, sentAt }) => ({ id, text, sentAt })),
     openReceipts: receipts.filter((r) => !ENDED.has(r.phase)).map(({ id, capability, phase }) => ({ id, capability, phase })),
     endedReceipts: receipts.filter((r) => ENDED.has(r.phase) && !r.read).map(({ id, capability, phase, reason }) => ({ id, capability, phase, ...(reason ? { reason } : {}) })),
-    events: shown.map((e) => (/^speech(\.|$)/.test(e?.kind ?? "") ? { ...e, untrusted: true } : e)),   // #1951: the home marks speech itself
+    events: shown.map((e) => (SPOKEN.test(e?.kind ?? "") ? { ...e, untrusted: true } : e)),   // #1951: the home marks another Soul's words itself
     ...(() => { const a = (st.addressed ?? []).filter((x) => !x.read); for (const x of a) { x.read = x.heard = true; } return a.length ? { addressed: a.map(addressedView) } : {}; })(),
     ...(() => { const f = (st.reflexed ?? []).filter((x) => !x.read && x.accepted !== null); for (const x of f) x.read = true; return f.length ? { faced: f.map(({ soulId, name, at, accepted, code }) => ({ soulId, name, at, accepted, ...(code ? { code } : {}) })) } : {}; })(),
     ...(rest.length > shown.length ? { moreEvents: rest.length - shown.length } : {}),
