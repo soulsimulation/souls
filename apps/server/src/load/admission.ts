@@ -106,6 +106,9 @@ export class Admission {
   /** Principals (Souls + god) with a heavy request in the last minute: the `awake` of the refill formula. */
   active() { const now = this.now(); let n = 0; for (const b of this.buckets.values()) if (now - b.seen < ACTIVE_MS) n++; return Math.max(1, n); }
   estimate(id: string) { return this.est.get(id) ?? DEFAULT_EST_MS; }
+  /** What a principal's bucket must hold to be served under contention: the route estimate, but never more than a
+   *  bucket can hold (#2080: one cold 2.1 s act set the estimate above capacity, and no contended act could run again). */
+  private need(id: string) { return Math.min(CAPACITY_MS, this.estimate(id)); }
   /** Refill of one principal's bucket, ms per s. A Soul: min(200, 20 × frameBudget / awake), so the Souls' buckets together
    *  refill at the frame budget's own throughput (20 frames/s × budget ms) and a crowd never earns more than the dispatcher
    *  can serve (srv-admission-calib: the old 500/awake × {1, .5, .25} was the laptop's green budget at every box). The god:
@@ -142,13 +145,13 @@ export class Admission {
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
     if (read && this.level === 'black') { this.shed.reads++; return this.told(r.key, r.god, now, busyRefusal(this.level)); }
-    if (read && b.tokens < est && this.contended(r.key)) {
+    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key)) {
       // §2b strike only for an impolite request: one that came back before the Retry-After it was last given had
       // elapsed. A Soul that waited and is still over budget is refused again with a Retry-After, but not struck
       // (eden2, 2026-10-31: honest Souls collected 3 strikes and a 60 s cool-down, 45-59 % of all read wall time)
       this.shed.slow++; this.shed.reads++; if (this.impolite(r.key, now)) this.strike(r.key, r.god, 'slow', now);
       const rate = this.refill(r.god);
-      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((est - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
+      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((this.need(r.route.id) - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
     }
     const deadline = now + Math.min(r.route.deadlineMs, r.hintMs && r.hintMs > 0 ? r.hintMs : Infinity);
     // a read that cannot start before its deadline (the time already queued, paid at the frame budget) is answered now,
@@ -224,7 +227,7 @@ export class Admission {
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.estimate(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
       }
       const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
