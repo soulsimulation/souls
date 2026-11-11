@@ -16,6 +16,8 @@ import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
 
+// #1971 MEASUREMENT BRANCH ONLY: each size in CROWD also runs a crowded arm (every act aimed at things in one place)
+const CROWD = new Set([12]), CROWD_PLACE = 'g-eden-bandstand', CROWD_WORDS = ['bandstand', 'music', 'dance', 'sit', 'bench', 'stand', 'listen', 'play'];
 const WORDS = ['bench', 'eat', 'read', 'library', 'windmill', 'bandstand', 'music', 'fire circle', 'pond', 'garden', 'sit on the floor', 'dance'];
 const REPO = resolve(new URL('../../..', import.meta.url).pathname);
 const log = (...a) => process.stderr.write(`[soul-eval load] ${a.join(' ')}\n`);
@@ -30,15 +32,33 @@ function actPartsOfLive(live) {
   return { n: a.n, queue: pq(a.queue), handler: pq(a.parts.handler), wait: pq(a.parts.wait), commit: pq(a.parts.commit), waitOver3Ticks: a.parts.waitOver3Ticks };
 }
 
-async function soulLoop({ folder, until, r, counts }) {
+/** #1971: exact per-act quantiles from the world's act-parts.jsonl (measurement branch), acts answered in [t0, until]. */
+const qs = (xs) => { const a = xs.filter(Number.isFinite).sort((x, y) => x - y), q = (f) => (a.length ? Math.round(10 * a[Math.min(a.length - 1, Math.ceil(f * a.length) - 1)]) / 10 : null); return { p50: q(0.5), p99: q(0.99), max: a.length ? Math.round(10 * a.at(-1)) / 10 : null }; };
+function perActParts(file, t0, until) {
+  let rows = []; try { rows = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.at >= t0 && x.at <= until + 15000); } catch { return null; }
+  const out = { n: rows.length, status: {} }; for (const x of rows) out.status[x.status] = (out.status[x.status] ?? 0) + 1;
+  for (const k of ['world', 'queue', 'handler', 'bind', 'check', 'wait', 'commit']) out[k] = qs(rows.map((x) => x[k]));
+  out.routeMissesPerAct = rows.length ? Math.round(1000 * rows.reduce((n, x) => n + (x.routeMisses || 0), 0) / rows.length) / 1000 : null;
+  out.waitOver150 = rows.filter((x) => x.wait > 150).length;
+  return out;
+}
+/** #1971: the tick windows of one arm, summed: ticks, late ticks, the longest gap, and the share of time at each level. */
+function tickSummary(tw) {
+  if (!tw.length) return null;
+  const s = tw.reduce((m, w) => ({ windows: m.windows + 1, ticks: m.ticks + w.ticks, late: m.late + w.lateTicks, longestGapMs: Math.max(m.longestGapMs, w.longestGapMs), tickP99Max: Math.max(m.tickP99Max, w.tickMs.p99) }), { windows: 0, ticks: 0, late: 0, longestGapMs: 0, tickP99Max: 0 });
+  const lv = {}; for (const k of ['green', 'amber', 'red', 'black']) lv[k] = Math.round(1000 * tw.reduce((n, w) => n + (w.levels[k] ?? 0), 0) / tw.length) / 1000;
+  return { ...s, levels: lv };
+}
+
+async function soulLoop({ folder, until, r, counts, crowd = false, last = {} }) {
   while (Date.now() < until) {
     const p = await cliJson(folder, ['pending']); counts.cmds++;
     for (const m of p.data?.ownerMessages ?? []) {
       if (!m?.id) continue;
       await cliJson(folder, ['ack', m.id, 'On it.']); await cliJson(folder, ['result', m.id, 'done', 'Done.']); counts.cmds += 2; counts.closed++;
     }
-    await cliJson(folder, ['look']); counts.cmds++;
-    const f = await cliJson(folder, ['find', WORDS[Math.floor(r() * WORDS.length)]]); counts.cmds++;
+    const lk = await cliJson(folder, ['look']); counts.cmds++; if (lk.data?.me?.place) last.place = lk.data.me.place;
+    const f = await cliJson(folder, crowd ? ['find', CROWD_WORDS[Math.floor(r() * CROWD_WORDS.length)], '--in', CROWD_PLACE] : ['find', WORDS[Math.floor(r() * WORDS.length)]]); counts.cmds++;
     const rows = (f.data?.found ?? []).filter((x) => x.act);
     if (rows.length) { const a = await cliJson(folder, ['act', rows[Math.floor(r() * Math.min(3, rows.length))].act]); counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++; }
     await sleep(3000 + Math.floor(r() * 3000));
@@ -52,8 +72,8 @@ export async function runLoad(o) {
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
-  for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
-    const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
+  for (let rep = first; rep < first + repeats; rep++) for (const [n, crowd] of sizes.flatMap((n) => (CROWD.has(n) ? [[n, false], [n, true]] : [[n, false]]))) {
+    const dir = join(out, `n${n}${crowd ? 'c' : ''}-r${rep}`); mkdirSync(dir, { recursive: true });
     const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
     const souls = [];
     try {
@@ -72,10 +92,13 @@ export async function runLoad(o) {
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
-      await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts })));
+      const lasts = souls.map(() => ({}));
+      await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, crowd, last: lasts[k] })));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
-      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      const tw = [...tickWindows.values()].sort((x, y) => x.at - y.at);
+      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: tw, perAct: perActParts(join(dir, 'server', 'data', 'act-parts.jsonl'), t0, until), ticks: tickSummary(tw) };
+      const places = {}; for (const l of lasts) places[l.place ?? 'unknown'] = (places[l.place ?? 'unknown'] ?? 0) + 1;
       const http = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
@@ -83,7 +106,7 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); http.push(...httpSince(readJsonl(f), t0)); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push({ souls: n, mode: crowd ? 'crowded' : 'spread', placesAtEnd: places, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       await stopWorld({ pid: w.pid });
@@ -99,8 +122,11 @@ export async function runLoad(o) {
 
 export function renderLoad(result) {
   const L = ['# Soul Client eval: load', '', 'Server time per call from `Server-Timing`. #1750 levels at p99.9: bookkeeping 50 ms, reads 100 ms, an act\'s acknowledgment 150 ms. Long polls have no level.'];
+  L.push('', '## #1971 split (per act, exact, from the world\'s act-parts.jsonl)', '', '| arm | acts | queue p50/p99 | bind p50/p99 | check p50/p99 | handler p50/p99 | wait p50/p99 | commit p50/p99 | world p50/p99 | route misses/act | ticks | late | longest gap | green/amber/red/black | refusals |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  for (const a of result.arms) { const p = a.server?.perAct, t = a.server?.ticks, f = (k) => (p?.[k] ? `${p[k].p50} / ${p[k].p99}` : '');
+    L.push(`| n${a.souls}${a.mode === 'crowded' ? ' crowded' : ''} r${a.repeat} | ${p?.n ?? ''} | ${f('queue')} | ${f('bind')} | ${f('check')} | ${f('handler')} | ${f('wait')} | ${f('commit')} | ${f('world')} | ${p?.routeMissesPerAct ?? ''} | ${t?.ticks ?? ''} | ${t?.late ?? ''} | ${t?.longestGapMs ?? ''} | ${t ? ['green', 'amber', 'red', 'black'].map((k) => t.levels[k]).join(' / ') : ''} | ${Object.entries(a.refusals).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'} |`); }
   for (const a of result.arms) {
-    L.push('', `## ${a.souls} Souls, repeat ${a.repeat} (${a.durationSec} s)`, '', `${a.calls} calls; ${a.counts.acts} acts (${a.counts.refused} refused); ${a.counts.closed} owner messages acknowledged and closed of ${a.counts.cards} sent. Level held on every route: **${a.held ? 'yes' : 'no'}**. Refusals: ${Object.entries(a.refusals).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}.`, '',
+    L.push('', `## ${a.souls} Souls${a.mode === 'crowded' ? ' crowded' : ''}, repeat ${a.repeat} (${a.durationSec} s)`, '', `${a.calls} calls; ${a.counts.acts} acts (${a.counts.refused} refused); ${a.counts.closed} owner messages acknowledged and closed of ${a.counts.cards} sent. Level held on every route: **${a.held ? 'yes' : 'no'}**. Refusals: ${Object.entries(a.refusals).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}.`, '',
       '| route | calls | server p50 | p99 | p99.9 | max | level | over |', '|---|---|---|---|---|---|---|---|');
     for (const x of a.routes) L.push(`| \`${x.route}\` | ${x.n} | ${x.serverMs.p50} | ${x.serverMs.p99} | ${x.serverMs.p999} | ${x.serverMs.max} | ${x.longPoll ? 'long poll' : `${x.level} ${x.levelMs} ms`} | ${x.overLevel ?? ''} |`);
     const act = a.server?.act, tw = a.server?.tickWindows ?? [];

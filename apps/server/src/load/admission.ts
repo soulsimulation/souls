@@ -4,12 +4,19 @@
 // bucket under contention (`soul.slow-down`); a job whose deadline passes is answered `world.busy` unrun, and a job
 // whose client went away is dropped. It queues, delays and refuses; it never chooses or retries an act for a Soul.
 import {createHash} from 'node:crypto';
+import {appendFile} from 'node:fs';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
 import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, type ActTiming} from './api-times.ts';
 import {noteAnswer} from './stall-log.ts';
 import type {SlowedReason} from './soul-slowed.ts';
+
+// #1971 MEASUREMENT BRANCH ONLY (never merged): each act's Server-Timing parts, one JSON line in DATA_DIR/act-parts.jsonl
+// on a DEV_AUTH world, buffered and appended every 2 s off the request path
+const ACT_LOG = process.env.DEV_AUTH === '1' && process.env.DATA_DIR ? `${process.env.DATA_DIR}/act-parts.jsonl` : null;
+let actLines: string[] = [];
+if (ACT_LOG) setInterval(() => { if (actLines.length) { const s = actLines.join(''); actLines = []; appendFile(ACT_LOG, s, () => {}); } }, 2000).unref();
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
 export type RouteClass = {cls: Cls; id: string; god: boolean; deadlineMs: number};
@@ -309,6 +316,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
     const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
     c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
+    if (ACT_LOG && p) actLines.push(JSON.stringify({at: Date.now(), status: c.res.status, world: ms + warm, queue: queued, warm, ...p}) + '\n');
     const route = apiRoute(c.req.method, c.req.path);
     if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, undefined, p); noteAnswer(route, t0 + queued, t0 + ms); }
   };
