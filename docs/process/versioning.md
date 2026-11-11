@@ -9,8 +9,8 @@ named beside each one is the authority.
 | Line | At f6c658203 | Read it from | What moves it |
 |---|---|---|---|
 | Server release | 0.119 | newest `v*` tag, top of `CHANGELOG.md` | the release owner names it at publish time |
-| Soul CLI, `eden.mjs` | 2.14.0 | `VERSION` in `tools/world-launcher/soul/eden.mjs`, `controllerCli` in `SOURCES.json` | a new published copy of the CLI |
-| Soul guide, `skill.md` | 2.9.3 | front matter of `tools/world-launcher/soul/skill.md`, `skill` in `SOURCES.json` | a new published copy of the guide |
+| Soul CLI, `eden.mjs` | 2.14.0 | `VERSION` in `tools/world-launcher/soul/eden.mjs`, `controllerCli` in `SOURCES.json` | the release owner, at release ([below](#the-client-version)) |
+| Soul guide, `skill.md` | 2.9.3 | front matter of `tools/world-launcher/soul/skill.md`, `skill` in `SOURCES.json` | stamped with the CLI: one version for both |
 | Schema notes | 2.9.3 | `schemaNotes` in `SOURCES.json` | moves with the guide |
 | Instructions | 2.0.3 | `instructions` in `SOURCES.json` | a new published capture |
 | Managed runtime | 0.1.0 | `runtime` in `SOURCES.json` | a new runtime publication |
@@ -21,9 +21,25 @@ named beside each one is the authority.
 
 `SOURCES.json` is `tools/world-launcher/soul/SOURCES.json`. `package.json` versions (0.0.1) mean nothing here.
 
-The lines are not tied together. A server release doesn't bump the CLI, and a new CLI doesn't need a server release to
-exist in the tree, though worlds only serve it after one ships. The version numbers carry no meaning beyond order: there
-is no semver promise on any line.
+The lines are not tied together. A server release stamps a new CLI version only when the client changed, and a new CLI
+doesn't need a server release to exist in the tree, though worlds only serve it after one ships. The version numbers
+carry no meaning beyond order: there is no semver promise on any line.
+
+## The client version
+
+The client version (`eden.mjs` and `skill.md`) is assigned at release by the release owner. A pull request that changes
+the client edits `eden.mjs` or `skill.md` and nothing else: no version line, no hash in `SOURCES.json`, no literal in a
+test. Before the release gate, the release owner stamps the release's client with one command:
+
+```sh
+node tools/world-launcher/soul/stamp.mjs <version>
+```
+
+It sets `VERSION` in `eden.mjs`, the skill's two version lines, the `controllerCli` and `skill` versions in `SOURCES.json`
+and the hash of every file `SOURCES.json` lists. It takes digits and dots only, and refuses a version not above the current
+one when the client's bytes changed. `stamp.mjs --check` changes nothing and exits non-zero when anything disagrees. A
+release head's full gate runs it on the candidate and blocks on a disagreement; a lane's `--scope auto` gate does not, so
+between releases `main` may hold client changes that are not stamped yet.
 
 ## How a world shows what it serves
 
