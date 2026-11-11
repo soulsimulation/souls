@@ -88,11 +88,11 @@ Release as an asset, as 0.111 and 0.113 have; raw receipts and live clips stay p
 
 - **The server doesn't check client versions.** It never refuses a client for being old. The CLI strips `contract` and
   `apiContract` from responses without acting on them.
-- **New behaviour is opt-in per request, so old clients keep working.** The pattern is strict offers (#1093): `strict:
-  true` in an act turns the check on, and `eden.mjs` 2.9.0 and later send it. A request without it keeps the older
-  free-text path, which the 1.9 line, older 2.x installs, the managed runtime, MCP `eden_act` and benches use today.
-- **A server-side switch can undo such a change for a release.** `EDGE_FREE_TEXT_ACT=1` turns the strict check off. Add
-  the same kind of switch to a change that could strand clients, and remove it once callers have moved.
+- **New behaviour is opt-in per request until callers have moved.** Strict offers (#1093) began as `strict: true` in an
+  act, sent by `eden.mjs` 2.9.0 and later. Since #1911 every act is strict: `POST /v1/edge/act` takes an offered id and
+  refuses words and `{verb, target}` intents with the gate's `capability.unknown`, whatever the request says.
+- **A server-side switch can undo such a change for a release.** `EDGE_FREE_TEXT_ACT=1` did this for strict offers until
+  #1911 removed it. Add the same kind of switch to a change that could strand clients, and remove it once callers have moved.
 - **A newer CLI against an older world** is not guarded: a command the world doesn't have fails as that world answers it.
 - **Changes to the contract** are additive within `eden-edge/1`, as `eden-edge/1.1` was. A breaking change would be a new
   contract, and none has been needed.
