@@ -12,12 +12,12 @@ Today the engine moves, checks, then undoes poses only; anything else goes to th
 Rule | Prevented before | Detected after | File that decides
 ---|---|---|---
 `collision.human-static` | Steps (step guard), placements (`placeClearV1`), arrivals; not god edits | Yes | `mars/viewer/engine/runtime/static-step.ts`, `runtime/invariants.ts`, `packages/engine-mars/src/arrival-search.ts`
-`collision.human-human` | Placements and arrivals only, each with its own spacing | Yes | `runtime/invariants.ts`
+`collision.human-human` | Placements and arrivals, each its own spacing | Yes | `runtime/invariants.ts`
 `motion.teleport`, `motion.overspeed` | No | Yes | `runtime/invariants.ts`, `packages/engine-mars/src/ground-bridge.ts`
 `support.unsupported`, `support.holder-missing` | No | Yes | `runtime/invariants.ts`
 Sleep safety | At lie-down | Yes | `mars/viewer/engine/activities/sleep.ts`
 `carry.*`, `collision.human-load` | Set-down only | Yes | `mars/viewer/engine/carry/invariants.ts`, `carry/validate.ts`
-Construction: `support.*`, `lift.*`, `frame.*`, `framing.*`, `raise.*`, `deck.*`, `stair.*` | Plan feasibility | Yes | `mars/viewer/engine/construction/`, `packages/engine-mars/src/{beam-connect,deck-install,stair-install,raise-hold}.ts`
+Construction (`support.*`, `frame.*`, `deck.*`, `stair.*` and others) | Plan feasibility | Yes | `mars/viewer/engine/construction/`, `packages/engine-mars/src/{beam-connect,deck-install,stair-install,raise-hold}.ts`
 `vehicle.*`, `forklift.*`, `carrier.alight` | Carrier landing (marks only) | Yes | `mars/viewer/engine/vehicles/`
 Object inside a solid | God admission only (`overlap.solid`, `support.none`) | No | `packages/world-compiler/src/compile.ts`
 Ways a god edit cuts off | Repaired in the same batch | No | `apps/server/src/god/buildsafe.ts`
@@ -27,18 +27,21 @@ Seat out of reach | God admission | No | `apps/server/src/god/use-check.ts`
 
 **Today.** `commitBatch` (`apps/server/src/god/god.ts`) refuses an edit only for objects and for a resident's own body.
 Residents in the way are walked out (`god/walkout.ts`, Gene's G1 rule of 15 October), and `applyWorldEditV1`
-(`engine.ts`) moves idle bodies a new solid buries and names the rest `trapped`, who then fault into the ladder.
-Authored installs (food delivery, green landmark, lecture) already do better: snapshot, add, restore a detached
-runtime, run every invariant, refuse `physical-conflict`, and commit only a fact whose hash matches the preview.
+(`engine.ts`) moves any standing body a new solid buries to clear ground; seated, sleeping and riding bodies are
+skipped, and buried upstairs bodies end `trapped`.
+Authored installs (food delivery, lecture) already check a detached copy against every invariant, refuse
+`physical-conflict`, and commit only a fact matching the preview.
 
-**Change.** God edits use that path: apply the world-edit to a detached copy, run the invariants, and refuse a batch
-that would break one, naming the body, the rule and the nearest legal alternative. No walkouts. **This reverses G1:**
-a god cannot build where a Soul stands until it moves.
+**Change.** God edits take that path: a batch that breaks a rule on the copy is refused, naming the body, the rule
+and the nearest legal alternative. No walkouts. **This reverses G1.** A Soul that does not move (asleep, seated,
+idle, or its owner away) blocks the edit for as long as it stays, and an edit to a seat, bed or item in use is
+refused too. The god can wait or build elsewhere. **Open question for Gene:** may a god
+order named Souls off a site, as an ordinary walk that is itself refused when it has no route?
 
 - **Touches:** `god/god.ts`, `god/engine-bridge.ts`, `god/walkout.ts` (retired), `engine.ts`, a rules version.
 - **Cost:** none per tick; per edit, one snapshot, restore and invariant pass (unmeasured).
-- **Proof:** tests that a wall on a standing Soul is refused with its name, an empty spot is accepted, and an undo
-  that would bury someone is refused; the walk gate. Playtest: a god builds round six Souls; bar 0 faults, 0
+- **Proof:** tests: a wall on a standing Soul is refused by name, on an empty spot accepted; a burying undo is
+  refused; the walk gate. Playtest: a god builds round six Souls; bar 0 faults, 0
   relocations.
 - **Tasks:** 1a preview a world-edit on a copy and measure it (3 h); 1b refuse in `commitBatch` under a rules
   version (4 h); 1c the god client shows the refusal (1 h).
@@ -66,17 +69,17 @@ invariant ([#1411](https://github.com/soulsimulation/souls/issues/1411), from `r
 ## 3. All checker memory inside the hashed state
 
 **Today.** `motion.teleport` compares against poses kept in a `WeakMap` outside the world (`invariants.ts`), so a
-restored runtime starts blind and is patched by `rememberPosesAfterRestore`. The server decides rungs from memory
-the hash never sees: `lastRewindTick`, `rewoundRules`, `quarantinedAt`, `wholePoses`, `faultTicks` (`world.ts`). The
-contained list, standing holds and programmes' refusals are already in hashed state.
+restored runtime starts blind (patched by `rememberPosesAfterRestore`). The server decides rungs from memory
+the hash never sees: `rewoundRules`, `quarantinedAt`, `wholePoses`, `faultTicks` (`world.ts`; only
+`lastRewindTick` is rebuilt at boot).
 
-**Change.** Previous poses become a hashed world field (part 4 later replaces it with the journal's before-values).
+**Change.** Previous poses become a hashed world field (later part 4's journal).
 Every input to a rung choice is either in engine state or in a logged event a replay reads.
 
 - **Touches:** `runtime/invariants.ts`, `engine.ts`, `world.ts`, a rules version and a conformance supplement.
 - **Cost:** hashing five numbers per moving body per tick.
-- **Proof:** a test that restores mid-run, steps both copies, and gets the same hashes and violations, including a
-  jump on the first tick after restore. Playtest: the counted scenario with a restart mid-run.
+- **Proof:** restore mid-run and step both copies: same hashes and violations, a jump on the first tick
+  included. Playtest: the counted scenario with a restart mid-run.
 - **Tasks:** 3a teleport memory into state (2 h); 3b server rung memory logged or hashed (3 h).
 
 ## 4. A tick journalled and rolled back whole
@@ -85,8 +88,7 @@ Every input to a rung choice is either in engine state or in a logged event a re
 move, and their loads, and restores them for seven rules. Supports, grips, item state, action records and holds
 written in the same tick stay. Other rules, and riders, climbers and carried bodies, go to the ladder.
 
-**Change.** The runtime journals the tick's writes: the prior value of each entity, action record and hold it
-changes. If the invariants find a new violation, the whole tick rolls back, the actions it names are refused with a
+**Change.** The runtime journals the prior value of each entity, action record and hold the tick changes. If the invariants find a new violation, the whole tick rolls back, the actions it names are refused with a
 reason, and the tick runs again without them, at most twice, then contained. The journal is taken up front from the
 entities that can change (bodies, held things, moving parts), and a fuzz test diffs full snapshots to prove nothing
 writes outside it.
@@ -103,17 +105,17 @@ writes outside it.
 
 ## What stays
 
-The ladder in `world.ts` (replay, rewind, contain, quarantine, halt) stays for:
+The ladder stays for:
 
-- **Old history.** Logs from before these rules versions replay under the rules they ran with, walkouts and
-  relocations included.
+- **Old history.** Older logs replay under their own rules, walkouts included.
 - **Corruption.** A snapshot that won't decode or a replay whose hash differs.
 - **Engine bugs.** An action or invariant that throws, or a violation no refused action explains.
-- **Durability.** A failed store write (`durability.*`) is the one halt left.
-- **New rules over old state.** A rule adopted where the world already breaks it is contained, not rolled back.
+- **Halts.** A failed store write (`durability.*`), an unhashable state (`engine.unhashable`) and a step that keeps
+  failing (`engine.step-failing`).
+- **New rules over old state.** A rule adopted over a world already breaking it is contained.
 
 BUILDSAFE stays: it is prevention already.
 
 ## Order
 
-Parts 1 and 3 are independent. Part 4 builds on part 2. About 37 agent-hours in 12 tasks, each T3.
+Parts 1 and 3 are independent. Part 4 builds on parts 2 and 3. About 37 agent-hours in 12 tasks, each T3.
