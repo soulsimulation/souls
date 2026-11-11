@@ -36,7 +36,7 @@ test('here opens with now; around?to gives directions to a place and finds a Sou
   const plain = await w.http(a, 'GET', '/v1/edge/around'); assert.equal(plain.body.route, undefined);
 });
 
-test('exact known destinations beat partial Soul names while exact Souls, ambiguity and secrecy retain their meaning', {timeout: 300000}, async t => {
+test('exact known destinations beat partial Soul names while exact Souls and ambiguity retain their meaning', {timeout: 300000}, async t => {
   const w = await coreAWorld(2); t.after(() => w.close());
   const [a, b] = w.souls, L = w.ledger, venue = L.places.byId.get('commons-deck')!, other = L.places.byId.get('eden-housing')!;
   // Authored vocabulary on real native places; only the perception names change.

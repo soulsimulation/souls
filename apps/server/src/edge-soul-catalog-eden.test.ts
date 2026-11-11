@@ -69,7 +69,7 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
   });
 
   // #1262: a stored mark, as the god's route left one, hides nothing
-  const markSecret = (id: string) => L.db.db.prepare('INSERT INTO edge_place_secrets_v1 (world_id, place_id, secret, at) VALUES (?,?,1,0) ON CONFLICT(world_id, place_id) DO UPDATE SET secret=1').run(host.worldId, id);
+  const markSecret = (id: string) => {L.db.db.prepare('INSERT INTO edge_place_secrets_v1 (world_id, place_id, secret, at) VALUES (?,?,1,0) ON CONFLICT(world_id, place_id) DO UPDATE SET secret=1').run(host.worldId, id); L.knowledge.changed();};   // changed(): as a restart or a god edit
 
   await t.test('the catalog is served by tag, and a place with a stored secret mark stays in it', async () => {
     const first = await get('/v1/edge/catalog');

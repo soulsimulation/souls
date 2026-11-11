@@ -53,10 +53,11 @@ test('every spot activity is an act by id, tied to its thing and place', () => {
   assert.equal(seesaw.label, 'Ride the see-saw (world)');
 });
 
-test('everything published is public, and the counts match', () => {
+test('everything published is public, and the counts match; a place whose data says secret is listed (#1262)', () => {
   const {payload} = buildCatalog(input());
   assert.equal(payload.scope, 'public');
-  assert.deepEqual(payload.counts, {places: 3, things: 1, acts: 3, kinds: 1});
+  assert.deepEqual(payload.counts, {places: 4, things: 2, acts: 4, kinds: 2});
+  assert.ok(payload.places.some(p => p.id === 'g-grove') && payload.things.some(t => t.id === 'e_0dd4') && payload.acts.some(a => a.place === 'g-grove'));
 });
 
 test('what can be done on the spot is published as <verb>:here, and every such verb is one the world acts on', () => {

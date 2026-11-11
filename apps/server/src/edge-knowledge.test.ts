@@ -4,7 +4,13 @@
 // more. No place is secret (#1262): a stored secret mark hides nothing. Fake minds; no network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {coreRef} from '@souls/world-compiler';
 import {coreAWorld} from '../test/core-a-fixture.ts';
+import {fixture, invite, accept, factory} from '../test/native-owner-fixture.ts';
+import {EdgeLedger} from './edge/ledger/ledger.ts';
+import {GodMode} from './god/god.ts';
+import {installEngineBridge} from './god/engine-bridge.ts';
 import {PlaceKnowledge, edgeDistance} from './edge/perception/knowledge.ts';
 
 const SCALE_KEYS = ['district', 'far', 'farMore'];
@@ -56,6 +62,7 @@ test('knowledge at scales: district summary, far names, memory of visits, look a
   // route left them, hide nothing: every listing names them as before
   const mark = L.db.db.prepare('INSERT INTO edge_place_secrets_v1 (world_id, place_id, secret, at) VALUES (?,?,1,0)');
   for (const id of ['commons-deck', 'region-park']) mark.run(L.host.worldId, id);
+  L.knowledge.changed();   // as a restart or a god edit: nothing read before the marks is kept
   assert.deepEqual(L.knowledge.secrets(), [], 'nothing is secret');
   const mapIds = L.map().map(p => p.id); assert.ok(mapIds.includes('commons-deck') && mapIds.includes('region-park'), 'on the public map');
   const hs = await here(a);
@@ -73,4 +80,34 @@ test('knowledge at scales: district summary, far names, memory of visits, look a
   t.diagnostic(`around frame ${rawA.length} chars (~${Math.ceil(rawA.length / 4)} tokens): ${ar.places.length} places, ${ar.people.length} people, ${ar.things.length} things`);
   assert.ok(rawA.length <= 4000, `around ${rawA.length} chars`);
   assert.deepEqual(w.f.host.engine.runtime.violations, []);
+});
+
+test('god world: a place is walked to by name (walk:<ref> offers, plain words)', {timeout: 300000}, async t => {
+  const f = fixture(':memory:', factory, {durableClockV1: true});
+  const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {}});
+  const L = new EdgeLedger(f.host, f.db), bridge = installEngineBridge({host: f.host, god, edge: L, log: () => {}});
+  const settle = async (n = 4) => {for (let i = 0; i < n; i++) {f.host.tickOnce(); await setImmediate(); f.host.drainInputs();}};
+  f.brain.quiesce(); t.after(() => {f.brain.quiesce(); f.host.stop(); f.db.close();});
+  await settle(2);
+  const built = god.act({ops: [
+    {op: 'place', def: coreRef('plaza'), name: 'plaza', shape: {area: [[-8, -25], [8, -25], [8, -11], [-8, -11]]}},
+    {op: 'place', def: coreRef('lawn'), name: 'grove', shape: {area: [[17, -23], [27, -23], [27, -13], [17, -13]]}},
+    {op: 'place', def: coreRef('lawn'), name: 'orchard', shape: {area: [[-40, -40], [-28, -40], [-28, -28], [-40, -28]]}},
+  ]}, 'a plaza, a grove beside it, an orchard') as {accepted: boolean};
+  assert.equal(built.accepted, true, JSON.stringify(built));
+  await settle(4); bridge.perceive.sync(true);
+  await invite(f, 'ana');
+  const row = await accept(f.host, f.souls.create('dev:ana', {name: 'Ana', description: 'curious'})) as {id: string; entity_id: string; name: string; owner: string};
+  await settle(3);
+  const soul = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner};
+  const act = async (capability: string) => await accept(f.host, L.act(soul, {capability})) as {accepted: boolean; code?: string; reason?: string; receipt?: {capability: string}};
+
+  // god-world walks are walk:<ref> (nav.ts), their target the god place g-<ref>
+  const caps0 = L.capabilities(soul);
+  assert.deepEqual(caps0.find(c => c.id === 'walk:grove')?.target, {id: 'g-grove', kind: 'place'});
+  assert.ok(caps0.find(c => c.id === 'walk:orchard')?.available, 'the orchard (an everyday word for a grove) is walkable');
+
+  // plain words reach it
+  const known = await act('walk to the grove');
+  assert.equal(known.accepted, true, JSON.stringify(known)); assert.equal(known.receipt?.capability, 'walk:grove');
 });
