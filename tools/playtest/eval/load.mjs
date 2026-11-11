@@ -36,10 +36,16 @@ function actPartsOfLive(live) {
 const qs = (xs) => { const a = xs.filter(Number.isFinite).sort((x, y) => x - y), q = (f) => (a.length ? Math.round(10 * a[Math.min(a.length - 1, Math.ceil(f * a.length) - 1)]) / 10 : null); return { p50: q(0.5), p99: q(0.99), max: a.length ? Math.round(10 * a.at(-1)) / 10 : null }; };
 function perActParts(file, t0, until) {
   let rows = []; try { rows = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.at >= t0 && x.at <= until + 15000); } catch { return null; }
+  // #2124 DIAG: every admission charge (route, fast or drain, ms, level, calibrated budget, quiet tick), summed per route and path
+  const ch = rows.filter((x) => x.charge); rows = rows.filter((x) => !x.charge);
+  const charges = {}; for (const x of ch) { const k = `${x.charge}|${x.how}`; const c = (charges[k] ??= { n: 0, ms: 0, ms_: [] }); c.n++; c.ms += x.ms; c.ms_.push(x.ms); }
+  for (const c of Object.values(charges)) { c.ms = Math.round(c.ms); c.q = qs(c.ms_); delete c.ms_; }
+  const chargeCtx = { budget: qs(ch.map((x) => x.budget)), quietTick: qs(ch.map((x) => x.quietTick)), levels: ch.reduce((m, x) => ((m[x.level] = (m[x.level] ?? 0) + 1), m), {}), spanS: ch.length ? Math.round((ch.at(-1).at - ch[0].at) / 100) / 10 : 0 };
   const out = { n: rows.length, status: {} }; for (const x of rows) out.status[x.status] = (out.status[x.status] ?? 0) + 1;
   for (const k of ['world', 'queue', 'handler', 'bind', 'check', 'wait', 'commit']) out[k] = qs(rows.map((x) => x[k]));
   out.routeMissesPerAct = rows.length ? Math.round(1000 * rows.reduce((n, x) => n + (x.routeMisses || 0), 0) / rows.length) / 1000 : null;
   out.waitOver150 = rows.filter((x) => x.wait > 150).length;
+  out.charges = charges; out.chargeCtx = chargeCtx;
   // #2124 DIAG: where each queued act's queue time went (held by state), and its bucket at the moment it ran
   const q = rows.filter((x) => x.diag?.held); out.diag = { fast: rows.filter((x) => x.diag?.fast).length, queued: q.length, sum: {} };
   for (const k of ['order', 'bucket', 'credit', 'inflight']) { out.diag[k] = qs(q.map((x) => x.diag.held[k] ?? 0)); out.diag.sum[k] = Math.round(q.reduce((n, x) => n + (x.diag.held[k] ?? 0), 0)); }

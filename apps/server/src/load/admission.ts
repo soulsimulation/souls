@@ -186,7 +186,7 @@ export class Admission {
       // #2124: charged its own turn, as the dispatcher charges a queued job (to its first yield, or its answer if sooner),
       // not its whole life: an act's wait for the tick and its commit leave the thread to others
       let charged = false;
-      const charge = () => { if (charged) return; charged = true; this.charge(r.key, r.god, r.route.id, this.now() - now, now); };
+      const charge = () => { if (charged) return; charged = true; this.charge(r.key, r.god, r.route.id, this.now() - now, now, 'fast'); };
       void (this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(res => setImmediate(res))).then(charge);
       return {turn, waitedMs: () => 0, diag: () => ({fast: true}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); charge(); finish(); this.kick(); }};
     }
@@ -196,7 +196,8 @@ export class Admission {
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
-  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number) {
+  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, how = 'drain') {
+    if (ACT_LOG) actLines.push(JSON.stringify({at: Date.now(), charge: id, how, ms: Math.round(ms * 10) / 10, level: this.level, budget: Math.round(this.frameBudget() * 10) / 10, quietTick: Math.round(this.quietTick() * 10) / 10, depth: this.queue.length, outstanding: this.outstanding.size}) + '\n');
     this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
