@@ -5870,7 +5870,7 @@ function heartbeat(argv) {
   const every = flag ? Number(v) : HEARTBEAT_EVERY_MIN, folder = real(INVOKED), script = real(process.argv[1]);
   const me = HOME && SEAT?.kind === "soul" ? HOME.principals().find((p) => p.id === SEAT.id) : null, sel = me ? ` ${me.address}` : "";
   const inside = script.startsWith(`${folder}/`) ? script.slice(folder.length + 1) : script;
-  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it reports nothing new (no owner messages, ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
+  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it holds owner messages, act on them as the skill says, then stop. If it holds none and its brief lists a goal (a line with Next:), run node ${inside}${sel} help living and take the one step it gives, then stop. If it has no owner message and no goal, and reports nothing new (no ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   save({ heartbeat: { every, at: now() } });
   return {
