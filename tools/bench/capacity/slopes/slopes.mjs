@@ -111,7 +111,10 @@ const liveOf = (w) => { try { return JSON.parse(readFileSync(join(w.data, 'live.
 
 // ------------------------------------------------------------------ the inspector: CPU profiles of the main thread
 async function inspector(port) {
-  const list = (await getJ(`http://127.0.0.1:${port}/json/list`)).j, ws = new WebSocket(list[0].webSocketDebuggerUrl), wait = new Map(), events = new Map(); let id = 0;
+  // #2064: on two cores under 100 walkers the target list can take longer than one 5 s read; read it for up to 60 s
+  let list = null; for (const t0 = mono(); !list?.[0] && mono() - t0 < 60_000;) { list = (await getJ(`http://127.0.0.1:${port}/json/list`, 15_000)).j; if (!list?.[0]) await sleep(2000); }
+  if (!list?.[0]) throw new Error(`the world's inspector listed no target in 60 s`);
+  const ws = new WebSocket(list[0].webSocketDebuggerUrl), wait = new Map(), events = new Map(); let id = 0;
   await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; });
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m?.method) events.get(m.method)?.(m.params); const done = typeof m?.id === 'number' ? wait.get(m.id) : undefined; if (typeof done === 'function') { wait.delete(m.id); done(m); } };
   ws.onclose = () => { for (const done of wait.values()) done({ error: 'inspector closed' }); wait.clear(); };
