@@ -181,6 +181,15 @@ screenshots or transcripts. Machines without the original run folders can then r
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the
   check is skipped.
 
+## Timed runs
+
+Timed runs without a model (the walk gate, the scripted Soul eval) go to the `souls-timed` self-hosted runners through
+the manual `timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk` or `eval-scripted`),
+`repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its own and takes one job; a run records its
+starting load and does not start while its own cores are busy. The runners use a dedicated, unprivileged account: the
+args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
+workstation.
+
 ## Request ceilings on local test worlds
 
 Callers launch test worlds exactly as `arena/provision.mjs` `startWorld` does: `node apps/server/src/main.ts` directly
