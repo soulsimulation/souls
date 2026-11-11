@@ -45,7 +45,8 @@ lives. The one shared seam is the resident client (`serve`), which assembles the
 `eden.mjs` finds its home the way git finds `.git`: from the current folder, walk up until a `.souls/` directory
 is found, stopping at the user's home directory (never crossing it). `SOULS_HOME=<path>` overrides. With none found,
 the first `register`, `create`, `pair` or `god` command creates `./.souls/` in the current folder and prints that it
-did. `souls init --global` is the only way `~/.souls/` comes into existence.
+did. `~/.souls/` comes into existence only when its owner chooses it (#1875): the first `register` in a new folder offers it
+(`homeChoice`), `register <url> --global` takes it, and `init --global` makes it empty.
 
 A folder holding a legacy `.eden-agent.json` or `.eden-god.json` and no `.souls/` is treated as a one-principal home.
 `import` moves it in, reusing the token; nothing is re-paired. The legacy files are left in place until the person
@@ -102,7 +103,8 @@ because the skill was prose. With schema-first offers (#1099) the per-world know
 project skill (`.claude/skills/souls/`, `.agents/skills/souls/`) and one bundle serve every world. `config.json`
 records each world's `eden-edge` contract and the bundle version it served; the CLI refuses with a clear message when
 a world needs a newer bundle and `upgrade [world]` fetches it. A world may still serve its pinned bundle; the home
-chooses the newest compatible one.
+chooses the newest compatible one. Since #1875 the skill carries the CLI's version, `/v1/config` describes both, and
+`upgrade` refreshes both.
 
 ### Unknowns decided here
 

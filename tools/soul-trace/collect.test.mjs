@@ -20,7 +20,7 @@ function world() {
       const answer = p === '/v1/edge/act' ? { accepted: true, receipt: { id: 'r_1', capability: 'walk:yes', phase: 'completed', endedTick: 9 } }
         : p === '/v1/edge/inbox/m_1' ? { message: { id: 'm_1', state: 'closed', text: 'walk to the mill' } }
         : p === '/v1/edge/receipts/r_1' ? { receipt: { id: 'r_1', phase: 'completed' }, auth: req.headers.authorization === `Bearer ${TOKEN}` }
-        : p === '/v1/config' ? { build: 'b-test', soulClient: { version: '2.29.0', sha256: 'x' } } : {};
+        : p === '/v1/config' ? { build: 'b-test', soulClient: { version: '2.32.0', sha256: 'x' } } : {};
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(answer));
     });
   });
@@ -88,7 +88,7 @@ test('a session collected: records, serve log, this folder\'s transcripts only, 
     assert.equal(ends.receipts.r_1.body.receipt.phase, 'completed'); assert.equal(ends.receipts.r_1.body.auth, true);
     assert.equal(ends.messages.m_1.body.message.state, 'closed');
     const v = JSON.parse(readFileSync(join(out, 'versions.json'), 'utf8'));
-    assert.deepEqual(v.client.recorded, ['2.29.0']); assert.equal(v.world.build, 'b-test');
+    assert.deepEqual(v.client.recorded, ['2.32.0']); assert.equal(v.world.build, 'b-test');
   } finally { s.done(); }
 });
 

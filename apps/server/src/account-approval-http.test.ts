@@ -45,7 +45,7 @@ test('mounted verified account approval creates once, delegates only ready Soul,
  assert.equal((await request('/v1/account/souls/'+sid+'/revoke',{},'bob')).status,403);
  assert.equal((await request('/v1/account/souls/'+sid+'/revoke',{},'alice')).status,200);f.host.drainInputs();await assert.rejects(pending,/invalid soul token/);
  assert.equal(f.db.soul(sid)!.name,'Account Avery');assert.equal(f.souls.soulFromToken(result.token),null);assert.equal((await request('/v1/agent/account-me',undefined,result.token)).status,401);
- const repairSecret=randomBytes(32).toString('base64url'),repair:any=await (await request('/v1/agent/approval/start',{...input,soulId:sid,name:row.name,idempotencyKey:'test-repair-0002',pollSecret:repairSecret})).json();
+ const repairSecret=randomBytes(32).toString('base64url'),repair:any=await (await request('/v1/agent/approval/start',{...input,soulId:sid,name:row.name,idempotencyKey:'test-repair-0002',pollSecret:repairSecret,move:true})).json();
  assert.equal((await request('/v1/account/approvals/'+repair.approval.id+'/approve',{},'alice')).status,200);const repaired:any=await (await request('/v1/agent/approval/poll',{approvalId:repair.approval.id,pollSecret:repairSecret})).json();assert.equal(repaired.status,'ready');assert.notEqual(repaired.token,result.token);assert.equal(repaired.soulId,sid);assert.equal(f.db.soulsOf('did:privy:alice').length,1);
  const reconstructed=new WorldAccounts(f.host,f.souls);assert.equal(reconstructed.store.resolveGrant(repaired.token)?.soulId,sid,'new service/store instance resolves durable grant');assert.equal(reconstructed.store.resolveGrant(result.token),null);
  assert.equal(f.db.paidCost(),0);assert.deepEqual(f.host.engine.runtime.violations,[]);
