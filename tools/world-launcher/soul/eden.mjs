@@ -4924,6 +4924,20 @@ loadServeState.fresh = () => {
   const d = { cursor: null, inboxAfter: null, readCursor: null, messages: [], receipts: {}, events: [], omitted: 0, gap: false, plan: null, planEnded: [], addressed: [], addressedSeq: 0, addressedCursor: null, wake: soulWake.fresh() };
   return d;
 };
+/** #2049: the Soul's wake rules go with it when its folder moves (travel, pairing again). In another world a rule naming a place
+ *  or a Soul of the old one stays behind, each with its reason; the rest start their change state and the engine's cursor afresh. */
+export function carryWake(wake, sameWorld) {
+  const w = { ...soulWake.fresh(), ...wake }, dropped = [], rules = [];
+  for (const r0 of w.rules) {
+    if (sameWorld) { rules.push(r0); continue; }
+    const { inside, busy, held, ...r } = r0;   // who was where, and the acts it was holding, were the old world's
+    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind !== "soul-arrives" ? null
+      : r.params?.who !== "any" ? `Soul ${r.params.who}` : r.params?.where !== "here" ? `place ${r.params.where}` : null;
+    if (named) dropped.push({ id: r.id, why: `it names ${named} of the world this Soul left` });
+    else rules.push(r);
+  }
+  return { wake: { ...soulWake.fresh(), rules, next: w.next ?? 1 }, dropped };
+}
 /** Pure: fold what the stream delivered into the state. */
 export function foldEvents(st, events, cursor) {
   for (const e of events ?? []) {
@@ -5182,12 +5196,18 @@ async function serveForeground() {
   const persist = () => { writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); };
   const s = load(), world = need(s, "world", `Run: ${CLI} register <world-url>`);
   const auth = { "content-type": "application/json", authorization: `Bearer ${need(s, "token", "No Soul yet.")}` };
+  const self = (x) => x.home?.soul ?? x.soul ?? "";
   if (st.folder && st.folder !== folderKey(s)) {
-    const old = st.plan, ended = st.planEnded ?? [];
+    const old = st.plan, ended = st.planEnded ?? [], was = st;
     st = loadServeState.fresh();
     st.planEnded = old ? [...ended, planView({ ...old, state: "replaced" })].slice(-PLAN_ENDED_MAX) : ended;
+    if ((was.self ?? was.folder.split("|")[1]) === self(s)) {   // the same Soul, moved: its wake rules go with it (#2049)
+      const c = carryWake(was.wake, was.folder.split("|")[0] === (s.world ?? ""));
+      st.wake = c.wake;
+      for (const d of c.dropped) process.stderr.write(`${now()} wake: dropped ${d.id}: ${d.why}\n`);
+    }
   }
-  st.folder = folderKey(s);
+  st.folder = folderKey(s); st.self = self(s);
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
