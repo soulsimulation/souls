@@ -88,6 +88,47 @@ node bench.mjs --root /srv/sim-bench/src-<sha> --fixture /srv/sim-bench/fixtures
 
 The exact eden2 recipe for a run is `eden2/run-stageb.sh` (`run-stageb-f.sh` for part F).
 
+## Client load (`--load client`, #1945)
+
+Souls 1 to `--raw-from − 1` (default 4: three Souls) run the real client, which holds its own `serve` and `listen` and
+acts with `eden.mjs act <id>`, then `eden.mjs receipt`. The rest are raw-HTTP Souls in the bench's process, so N = 100
+is not 300 Node processes. A raw Soul speaks the client's protocol:
+
+- it fetches the catalog and the live picture once;
+- then it loops: act by catalog id (the Idempotency-Key is also the clientRef), read that act's receipt once, wait;
+- it sends the client's headers with `x-soul-client: bench/1` and its own `X-Forwarded-For`, and follows the client's
+  retry rules (a busy or stalled answer waited out for its Retry-After at most 3 times; no answer, full-jitter backoff,
+  6 tries).
+
+There is no `resolve` in the bench any more: every load reads its ids from the catalog.
+
+Before the windows every Soul walks to one of at least ten start places (Soul *i* to place *i* mod *n*), and the bench
+waits up to 300 s for those walks to end (the report counts the places reached). Two profiles (`--profile`, default `real`), both read
+from [`profiles/cadence.json`](profiles/cadence.json):
+
+| profile | gap between acts (start to start) | act mix |
+|---|---|---|
+| `real` | drawn from the act-to-act gaps of the eval's live Sonnet runs (median 61.6 s, p10 2.2 s, p90 73.0 s); the first act after the instruction-to-first-act times (median 7.4 s) | walk 48 %, sit 11 %, sit on the ground 9 %, read 15 %, eat 11 %, play music 3 %, swim 3 % |
+| `stress` | uniform 3–6 s | the earlier client load: every third act `sit-ground:here`, the rest walks and spots |
+
+A kind the world does not offer is sent as a walk and counted. The `real` cadence is an upper bound on how often a
+resident Soul acts: every Soul in those runs was in the middle of an instruction. Raw Souls each present their own
+address, so per-address limits are not exercised (#1949 tests those).
+
+`n1` (without `--short`) runs its second active window until it has 300 acts; at the `real` pace that is about four
+hours. REPORT.md adds a client-load section per run: acts by kind, act p50/p99, per-route time at p50/p99 for every try
+(client wall time, the world's `Server-Timing` and its queue), the act's `Server-Timing` parts (the queue / handler /
+wait / commit split once the world sends it, #1944), tick time from `/healthz`, ticks behind the 20 Hz schedule (the
+bench's count from one `/healthz` sample a second) and refusals by code (designed refusals by who answered, and act
+refusals as `act:<code>`).
+
+```bash
+# laptop smoke (INDICATIVE): three real and three raw Souls
+node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n6 --short --out .local/bench/client-smoke
+# the measurement (#460)
+node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n1,n24,n50,n100 --raw-from 4 [--profile stress] --out <dir>
+```
+
 ## Meetup workload (CW1, #735: 50 Souls across 10 worlds)
 
 `meetup/` is the near-term product as a workload: ten substantial worlds from `worlds/templates/` behind the

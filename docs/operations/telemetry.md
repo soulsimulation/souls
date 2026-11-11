@@ -148,3 +148,124 @@ The launcher does not export process CPU, process RSS, cgroup CPU or memory pres
 ### Cost
 
 With 400 registered worlds (20 running), evaluation after each scrape takes 40 ms at the median and at most 80 ms at the end of an hour. That is under 0.6 % of one core at the 15 s cadence. The state file is about 40 KB.
+
+## Cost and the context packet
+
+Two commands, `cost` and `packet` (CW5 S2, #739), answer what is active, what it costs, where capacity is tight and
+what to do next. They read the store, the saved alert state and an optional cost file, and they write nothing.
+
+```bash
+node tools/world-launcher/telemetry.mjs cost   --dir <d> --cost <private>/cost.json [--range 24h]   # JSON
+node tools/world-launcher/telemetry.mjs packet --dir <d> [--cost <private>/cost.json] [--bench <capacity-qualify dir>] [--range 24h] [--json]
+```
+
+### The cost file
+
+The cost file (`sim-cost/1`) is the operator's **private** record. Keep it next to the launcher data, never in the
+repository. Rates, invoices and account mappings do not belong in public artifacts. The format is in
+`tools/world-launcher/telemetry/cost.example.json`, which holds placeholder numbers only. The file has a currency, a
+billing period and a list of items. Each item has:
+
+- a `kind`: compute, storage, backups, bandwidth, cdn, auth, model, render or other;
+- a `payer`: `platform` (the default) or `owner`;
+- a `basis`, with its numbers:
+  - `fixed` takes an `amount` per billing period;
+  - `metered` takes a `rate` per `unit` and the period's `usage`;
+- the rate's `source`, and optionally its `sourceDate`;
+- optionally, `billed` entries: actual invoice amounts, each for a named period.
+
+An unknown amount, rate or usage is written as `null`. A malformed file is refused, and the error names the field.
+
+### What `cost` reports
+
+`cost` gives three numbers and never adds them together:
+
+- **billed:** the invoice amounts whose periods overlap the window, listed with those periods, plus how many items
+  have any invoice recorded at all. With no invoice recorded, the amount is null, not 0.
+- **estimated:** the configured rates prorated over the part of the window inside the billing period, and projected
+  over the whole period. Each is given as `{low, high}`. While any rate or usage is unknown, `high` is `null` (open)
+  and the unknown items are listed.
+- **allocated:** the window's known estimate, split by a stated rule:
+  - covered time is split across worlds by their running world-hours (status share × covered time);
+  - covered time with no world running is shared fixed overhead;
+  - time without telemetry stays unallocated.
+
+Fixed rent stays fixed when activity drops. An allocated saving is not an invoice saving.
+
+Owner-paid costs, in particular agents' inference at the edge, are listed under `external`. They are never part of
+platform spend, and their amount is `unknown` unless one is given.
+
+### The context packet
+
+`packet` prints at most ten lines (or JSON, `sim-context-packet/1`):
+
+- **source:** the launcher build label and the tools commit;
+- **window and coverage**;
+- **what is active:** worlds and Souls;
+- **the top bottleneck:** firing alerts first, in rule order; otherwise the world with the worst loop and tick p99;
+- **the alert counts**, from `alerts-state.json`. A state whose last evaluated row is more than 5 minutes before the
+  window's end reads as **stale**, and an unreadable one as **unreadable**. Neither counts as "0 firing": the next
+  decision is to re-evaluate;
+- **cost provenance:** billed amounts with their invoice periods (an invoice for a whole month is not prorated to a
+  24 h window), the estimate ranges, unknowns, rate sources and dates, and external costs;
+- **headroom:** host memory minimum; CPU is unknown, because it is not exported; and the capacity qualification. That is
+  the #736 bench verdict when `--bench` names a capacity-qualify artifact directory. Only a qualifying `passes` reads
+  as qualified, and without `--bench` it says "unqualified (no capacity verdict given)";
+- **the next practical decision**, by a fixed rule, taking the first that applies:
+  1. evaluate the alerts first;
+  2. restore telemetry coverage (below 90 %, or a telemetry gap);
+  3. investigate the firing rule before any hardware change;
+  4. export the missing series;
+  5. review memory if the host went below 1.5 GiB;
+  6. otherwise, no capacity action.
+
+Without `--cost` the packet holds world slugs and numbers only: no Soul names, messages or user content. With `--cost`
+it also carries the operator's real cost figures, free-text rate sources and the build label, so it is **private**:
+its first line says `PRIVATE`, and the JSON has a `private` field. Do not publish it. It involves no model, UI or
+vendor account.
+
+## Unit costs and scenarios
+
+Two more commands (CW5 S3, #739) turn the cost file and measured activity into unit costs and world-count projections.
+
+```bash
+node tools/world-launcher/telemetry.mjs units     --dir <d> --cost <private>/cost.json [--range 24h]          # JSON
+node tools/world-launcher/telemetry.mjs scenarios --cost <private>/cost.json --bench <capacity-qualify dir> \
+  [--worlds 10,50,100,200,400] [--json]
+```
+
+`units` divides one numerator by three denominators and prints each of them:
+
+- **the numerator:** the window estimate from `cost`, over the covered part of the window, divided unrounded. It
+  includes every platform item. Shared fixed overhead is not dropped: its share is printed. An open high end stays
+  open. Its `provenance` names the window, the billing period and each item's rate source and source date.
+- **per world-hour:** running world-hours (status share × covered time).
+- **per active-Soul-hour:** for each world, mean `sim_world_active_souls` × that world's covered hours. Souls are not
+  humans.
+- **per accepted act:** the increase of `sim_world_requests_total{class="act",outcome="completed"}`, which counts act
+  requests answered below 400, not finished activities. Without that series (#737 S2) the result is unknown, never 0.
+
+A denominator that is not exported is unknown, with the reason. One that is zero has no unit cost. Fixed rent does not
+fall when activity does, so a lower unit cost at higher activity is not an invoice saving.
+
+`scenarios` projects resources and a platform total per cost period (`perPeriod`) for each world count. The period is
+the cost file's billing period, printed with its length in days. Amounts are not normalised to a month:
+
+- **The per-world footprint** is measured. It comes from the capacity-qualify artifact's runs (`*/result.json`): the
+  mean over runs of the fleet's mean active and quiet CPU cores and RSS per world, with the largest single world
+  alongside. RSS is each world's maximum, so the sums are upper bounds. Quiet is the cost of a world that ticks with
+  nobody acting, which is the continuous-world baseline. A phase or field the bench did not record is unknown
+  (null), never 0.
+- **The host count** keeps 30 % headroom. It uses the optional `host: {cores, memGiB}` on the fixed compute item of
+  the cost file. Each host's usable share is 70 % of its shape, less one launcher. Without a host shape, hosts and
+  compute cost are unknown.
+- **The per-period total** is hosts × the compute amount, plus the other platform items unchanged. Metered items are
+  listed as not scaled, because nothing ties their usage to the number of worlds. Owner-paid items stay external.
+- **Every row carries the bench verdict.** Only a qualifying `passes` lifts the "unqualified" label, and only for rows
+  at or below the number of worlds the bench measured (`worldsMeasured`). A larger row is marked `extrapolated`
+  ("per-world footprint measured at N worlds") and stays unqualified. A scenario is a
+  cost projection, not a capacity. More hosts pack independent worlds, but they do not fix a world whose main thread
+  is the bottleneck. The #736 verdict on run 41915686991 is exactly that case.
+
+Real rates stay in the operator's private cost file. `cost.example.json` shows the host shape with placeholder
+numbers.

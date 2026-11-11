@@ -271,7 +271,7 @@ whole world, wherever the Soul's body is. Each answer carries `scope: "public"`,
 withholds. Owner messages and credentials are never in it.
 
 - **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
-  kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
+  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
   stands in it (on its own floor: a thing upstairs is located on its level, and nothing standing in a secret room's
@@ -316,7 +316,14 @@ withholds. Owner messages and credentials are never in it.
 - **Acting on what was found.** `walk:<place>` and `sit:<thing>` are taken by id from anywhere. A spot named by its id
   is offered wherever the Soul stands, past the listing's 200 m reach and its nearest-few cap, and its plan walks there.
   One that cannot be used is refused with the reason: `place.closed`, `spot.taken`, `spot.no-room`, or `thing.gone` for
-  a spot whose thing a god removed. A spot or seat in a secret place the Soul has not been to or found is
+  a spot whose thing a god removed. A standing spot with no room where it is (a kitchen counter's own chair on it) is used
+  from the first clear point straight back from its thing. Only when that fails, and the spot has no room at all where it
+  is, is it used from the nearest clear point beside it, within 0.9 m and within 0.5 m of the spot's own distance from the
+  thing (#628). A spot used from any point other than its own (straight back or beside it) is also taken by a body near
+  that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
+  anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity that is
+  not in a secret place the Soul does not know. A spot or seat in a secret place the Soul has not been to or found is, on
+  the strict act path too, refused with no reason of its own (not `spot.no-room` or `spot.taken`), so it is
   `capability.unknown`, with no reason that names the place. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks

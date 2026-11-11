@@ -60,6 +60,8 @@ export function projectSoul({ soulId, pub, owner, inbox, world, clock = now() })
     tick: st?.tick ?? world?.tick ?? null,
     place: self.placePath?.[0]?.id ?? last?.endedAt?.place ?? null,
     placePath: (self.placePath ?? []).map((p) => p.name ?? p.id),
+    // #1774: the ids and the body's posture as #1752's checks read them (tools/playtest/eval/measure.mjs observe)
+    placeIds: (self.placePath ?? []).map((p) => p?.id).filter(Boolean), bodyPosture: self.bodyState?.posture ?? null,
     pos, posture: self.state ?? last?.endedAt?.posture ?? null,
     activity: self.activity ?? st?.activity ?? null, doing: st?.doing ?? ws?.doing ?? null,
     mood: st?.mood ?? ws?.mood ?? null, needs: st?.needs ?? null,
