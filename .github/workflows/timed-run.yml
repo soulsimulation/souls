@@ -9,7 +9,6 @@
 # fails if the job wrote files outside its per-run directory. See docs/testing/playtests.md ("Timed runs").
 name: timed-run
 on:
-  push: { branches: [agent/1943-timed-run] }   # TEMPORARY proving trigger (#1943 A5); removed before review
   workflow_dispatch:
     inputs:
       ref:
@@ -35,9 +34,9 @@ jobs:
     runs-on: [self-hosted, souls-timed]
     timeout-minutes: 120
     env:
-      INPUT_REF: ${{ inputs.ref || 'agent/1752-soul-eval' }}
-      INPUT_COMMAND: ${{ inputs.command || 'eval-scripted' }}
-      INPUT_REPEATS: ${{ inputs.repeats || '1' }}
+      INPUT_REF: ${{ inputs.ref }}
+      INPUT_COMMAND: ${{ inputs.command }}
+      INPUT_REPEATS: ${{ inputs.repeats }}
       INPUT_ARGS: ${{ inputs.args }}
       CTL: ../ctl/.github/scripts/timed-run.mjs
     steps:
