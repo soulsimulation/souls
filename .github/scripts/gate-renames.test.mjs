@@ -17,14 +17,14 @@ test('fileStep follows the gate commands in one-validation.sh; files the gate do
     'apps/server/src/a.test.ts': 'V5-server-full', 'apps/server/src/god/nested/b.test.ts': 'V5-server-full',
     'apps/web/src/x.test.tsx': 'V4-web', 'apps/web/test/y.test.ts': 'V4-web',
     'packages/kernel/src/k.test.ts': 'V3-packages', 'packages/world-compiler/src/core-kit/c.test.ts': 'V3-packages',
-    'mars/viewer/engine/test/m.test.ts': 'V3-mars-engine', 'tools/edge-skill/e.test.mjs': 'V3-client-cli', 'tools/client-eval/c.test.mjs': 'V3-client-cli',
+    'mars/viewer/engine/test/m.test.ts': 'V3-mars-engine', 'tools/client-eval/c.test.mjs': 'V3-client-cli',
     'tools/world-launcher/l.test.mjs': 'V3-launcher-unit', 'tools/test-harness/h.test.mjs': 'V3-harness',
     'tools/test-harness/walk/walk-gate.test.mjs': 'V3-walk', 'tools/test-harness/bundle-budget/budget.test.mjs': 'V3-bundle',
   };
   for (const [path, step] of Object.entries(cases)) assert.equal(fileStep(path)?.step, step, path);
   assert.equal(fileStep('packages/kernel/src/k.test.ts').prefix, 'kernel');
   for (const path of ['packages/engine-mars/src/project/p.test.ts', 'packages/client/src/c.test.ts', 'tools/soul-actions/a.test.mjs',
-    'tools/god-skill/e2e/scenarios.mjs', 'tools/world-launcher/soul/s.test.mjs', 'apps/server/src/a.ts', 'docs/x.md', 'tools/test-harness/walk/other.test.mjs'])
+    'tools/god-skill/e2e/scenarios.mjs', 'tools/world-launcher/soul/s.test.mjs', 'apps/server/src/a.ts', 'docs/x.md', 'tools/test-harness/walk/other.test.mjs', 'tools/edge-skill/e.test.mjs'])
     assert.equal(fileStep(path), null, path);
 });
 

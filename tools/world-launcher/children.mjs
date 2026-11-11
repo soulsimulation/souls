@@ -39,7 +39,7 @@ export class ChildPool {
    *           healthPath?: (slug: string) => string, onChange?: (slug: string) => void, pidFile?: string, idleMs?: number,
    *           maxRunning?: number, minFreeMb?: number, busy?: (slug: string) => boolean,
    *           decorate?: (c: { cmd: string, args: string[], env?: object }, world: object) => { cmd: string, args: string[], env?: object },
-   *           soulCliFile?: string | null, soulControllerCliFile?: string | null, soulSkillFile?: string | null, soulInstructionsFile?: string | null }} o
+   *           soulControllerCliFile?: string | null, soulSkillFile?: string | null, soulInstructionsFile?: string | null }} o
    * maxRunning / minFreeMb: before a world boots, idle worlds are put to sleep until it fits; when none can sleep the
    * boot is refused (error.code 'capacity'). busy(slug): a world with live viewers is never put to sleep.
    * stopGraceMs: how long stop() waits after SIGTERM before SIGKILL (10 s; tests shorten it).
@@ -683,10 +683,9 @@ export function defaultCommand(world, port, o) {
     // #1649: the zone chosen at creation (recorded by the world's first real-time boot), and the launcher's real-time flag
     ...(isTimeZone(world.timeZone) ? { WORLD_TIME_ZONE: world.timeZone } : {}),
     ...(process.env.SIM_REAL_TIME ? { SIM_REAL_TIME: process.env.SIM_REAL_TIME } : {}),
-    // Soul mode of the world's one skill (/SKILL.md) points at Codex's Soul skill (/skill.md) and CLI (/eden-agent.mjs),
-    // served as is from the published files when the launcher is given them (--soul-skill, --soul-cli).
+    // Soul mode of the world's one skill (/SKILL.md) points at the Soul skill (/skill.md) and client (/eden.mjs),
+    // served as is from the published files when the launcher is given them (--soul-skill).
     ...(o.soulSkillFile && existsSync(o.soulSkillFile) ? { EDGE_SKILL_FILE: resolve(o.soulSkillFile) } : {}),
-    ...(o.soulCliFile && existsSync(o.soulCliFile) ? { EDGE_CLI_FILE: resolve(o.soulCliFile) } : {}),
     ...(o.soulControllerCliFile && existsSync(o.soulControllerCliFile) ? { EDGE_CONTROLLER_CLI_FILE: resolve(o.soulControllerCliFile) } : {}),
     ...(o.soulInstructionsFile && existsSync(o.soulInstructionsFile) ? { EDGE_INSTRUCTIONS_FILE: resolve(o.soulInstructionsFile) } : {}),
     ...(marsWeb && existsSync(marsWeb) ? { MARS_WEB_DIR: marsWeb } : {}),
@@ -721,7 +720,6 @@ export function forkCommand(world, port, o) {
     ...publicAuthEnvironment(clerk), WORLD_PATH: `/w/${world.slug}`, DEV_AUTH: '0', AUTH_PROVIDER: 'clerk', ACCOUNT_AUTH_REQUIRED: '1', BODY_COLLECTION_PATH: 'local', ACCOUNT_REGISTRY_PATH: world.fork.accounts, CLERK_SATELLITE_DOMAIN: clerk.satellite?.domain ?? '', CLERK_SIGN_IN_URL: clerk.satellite?.signInUrl ?? '',
     SIM_FORK: world.slug,
     ...(o.compileCache ? { NODE_COMPILE_CACHE: o.compileCache } : {}),
-    ...(o.soulCliFile && existsSync(o.soulCliFile) ? { EDGE_CLI_FILE: resolve(o.soulCliFile) } : {}),
     ...(o.soulControllerCliFile && existsSync(o.soulControllerCliFile) ? { EDGE_CONTROLLER_CLI_FILE: resolve(o.soulControllerCliFile) } : {}),
     ...(marsWeb && existsSync(marsWeb) ? { MARS_WEB_DIR: marsWeb } : {}),
   };

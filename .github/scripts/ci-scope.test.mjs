@@ -29,7 +29,8 @@ test('launcher and client-cli changes run their own unit tests', () => {
   const launcher = names(['tools/world-launcher/launcher.mjs']);
   assert.ok(launcher.includes('launcher'), launcher.join());
   assert.ok(!launcher.includes('web') && !launcher.includes('client-cli'));
-  for (const f of ['tools/edge-skill/soul.mjs', 'tools/client-eval/eval.mjs']) assert.deepEqual(names([f]), ['client-cli'], f);
+  assert.deepEqual(names(['tools/client-eval/eval.mjs']), ['client-cli']);
+  assert.deepEqual(names(['tools/edge-skill/soul.mjs']), [], '#1754: no job runs the legacy client');
 });
 
 test('every step the scope map can select is run by some job', () => {

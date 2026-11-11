@@ -20,7 +20,7 @@ pnpm typecheck                               # every package (tsc --noEmit)
 pnpm --filter @souls/server test               # one package
 node --test apps/server/src/god/buildsafe.test.ts   # one file
 pnpm test:mars                               # the vendored engine's deterministic suite
-pnpm test:client                             # Soul client and client-eval suites
+pnpm test:client                             # the client-eval suite (the legacy client's tests no longer run, #1754)
 pnpm test                                    # everything (slow; prefer the focused forms)
 ```
 
