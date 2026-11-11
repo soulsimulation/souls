@@ -375,6 +375,7 @@ const shutdown = async (sig: string, exitCode = 0) => {
   console.log(`[world] ${sig}: snapshot saved in ${Math.round(performance.now() - saveAt)} ms (capture ${Math.round(host.snapshotMs.capture)}, write ${Math.round(host.snapshotMs.persist)})`);
   server.close(); void hub.closeClients('server restarting');
   await closeContextViews();
+  (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
   auth.close();db.close(); process.exit(exitCode);
 };
 // The launcher's wedge path sends SIGUSR2 before SIGTERM (LOAD-CONTRACT §4): a diagnostic report, if this thread can still run.

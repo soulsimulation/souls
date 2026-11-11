@@ -2168,6 +2168,8 @@ return { tokensOf, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, f
 // </inline catalog.mjs>
 
 const VERSION = "2.32.0";
+// #1936: every request this client makes says which client it is
+const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
 const CLI = "node eden.mjs";
 
@@ -2737,7 +2739,7 @@ export function worldFetch(url, { method = "GET", headers = {}, body, signal } =
     if (!h1) { reject(new Error(`unsupported protocol ${u.protocol}`)); return; }
     if (signal?.aborted) { reject(signal.reason ?? new Error("This operation was aborted")); return; }
     const data = body === undefined ? null : Buffer.from(body);
-    const req = h1[0](u, { method, agent: h1[1], headers: { ...headers, "accept-encoding": "gzip, deflate, br", ...(data ? { "content-length": String(data.length) } : {}) } }, (res) => {
+    const req = h1[0](u, { method, agent: h1[1], headers: { ...headers, ...CLIENT, "accept-encoding": "gzip, deflate, br", ...(data ? { "content-length": String(data.length) } : {}) } }, (res) => {
       const enc = String(res.headers["content-encoding"] ?? "").toLowerCase();
       const stream = enc === "gzip" ? res.pipe(createGunzip()) : enc === "deflate" ? res.pipe(createInflate()) : enc === "br" ? res.pipe(createBrotliDecompress()) : res;
       const chunks = []; let ended = null;
@@ -3319,7 +3321,7 @@ async function syncCatalog({ force = false } = {}) {
   let r = null;
   for (let tries = 0; tries < 6; tries++) {
     const t0 = performance.now(), w0 = Date.now();
-    try { r = await fetch(world + "/v1/edge/catalog", { headers: have?.etag && !force ? { "if-none-match": have.etag } : {}, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
+    try { r = await fetch(world + "/v1/edge/catalog", { headers: { ...CLIENT, ...(have?.etag && !force ? { "if-none-match": have.etag } : {}) }, signal: AbortSignal.timeout(30_000) }); } catch { r = null; if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, null); break; /* no answer: use the copy */ }
     publicReadReported(world + "/v1/edge/catalog", t0, r);
     if (RECORD) recordFetch(world + "/v1/edge/catalog", w0, t0, r, { body: "the catalog itself is kept in world-catalog.json" });
     const wait = r.status === 503 ? retryAfterMs(r.headers, null) : null;
@@ -3343,7 +3345,7 @@ async function syncLive({ force = false } = {}) {
   if (mine && !force && Date.now() - mine.receivedAt < LIVE_FRESH_MS) return mine;
   try {
     const t0 = performance.now(), w0 = Date.now();
-    const r = await fetch(world + "/v1/edge/live", { signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
+    const r = await fetch(world + "/v1/edge/live", { headers: CLIENT, signal: AbortSignal.timeout(4_000) }).catch((e) => { if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, null); throw e; });
     publicReadReported(world + "/v1/edge/live", t0, r);
     if (RECORD) recordFetch(world + "/v1/edge/live", w0, t0, r, { body: "the live picture is kept in world-live.json" });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -3564,7 +3566,7 @@ async function view(...args) {
   const d = ok(await call("/v1/edge/view" + (String(q) ? "?" + q : "")), "view");
   const res = { alt: d.alt, heading: d.heading?.compass, sees: (d.seen?.souls ?? []).map((x) => `${x.name} · ${Math.round(x.distance)}m ${x.side}`), untrusted: true };
   if (d.url && !altOnly) {
-    const img = await fetch(load().world + d.url, { signal: AbortSignal.timeout(30_000) });
+    const img = await fetch(load().world + d.url, { headers: CLIENT, signal: AbortSignal.timeout(30_000) });
     if (img.ok) {
       const file = userPath(out ?? (isMap ? "map.jpg" : "view.jpg"));
       writeFileSync(file, Buffer.from(await img.arrayBuffer()));
@@ -3603,7 +3605,7 @@ async function views(...args) {
   const url = original ? data.targets[0]?.original?.url : refs.length === 1 ? data.views[0]?.url : data.sheet?.url;
   if (!url) return { ...data, saved: null, note: original ? "No admitted original image for this target." : "Picture pending or unavailable. Request these refs again when useful; text and live queries remain available." };
   if (!url.startsWith("/v1/world/context/")) throw new Error("Invalid context picture URL");
-  const state = load(), response = await fetch(state.world + url, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {}, redirect: "error", signal: AbortSignal.timeout(30_000) });
+  const state = load(), response = await fetch(state.world + url, { headers: { ...CLIENT, ...(state.token ? { authorization: `Bearer ${state.token}` } : {}) }, redirect: "error", signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Picture expired or inaccessible (HTTP ${response.status}); request current views.`);
   const bytes = Buffer.from(await response.arrayBuffer()); if (bytes.length > 8 * 1024 * 1024) throw new Error("Picture exceeds download limit");
   const saved = userPath(out); writeFileSync(saved, bytes);
@@ -4454,7 +4456,7 @@ async function body(cmd, ...args) {
     return clean(ok(await call("/v1/edge/body/library/" + args[0] + "/public", { method: cmd === "publish" ? "PUT" : "DELETE" }), "body " + cmd));
   }
   // The kit's validate.mjs is this world's code, and a Souls home holds other worlds' tokens, so it is never run from here (as upgrade).
-  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, cli: CLI, base: INVOKED, runValidate: () => ({ skipped: "validate.mjs comes from this world and runs with your rights: read it, and run it only if you trust this world" }) });
+  if (cmd === "kit") return soulBodyKit.bodyKit(args, { load, call, fetchImpl: (u, o) => fetch(u, { ...o, headers: { ...o?.headers, ...CLIENT } }), cli: CLI, base: INVOKED, runValidate: () => ({ skipped: "validate.mjs comes from this world and runs with your rights: read it, and run it only if you trust this world" }) });
   if (cmd === "upload") return bodyUpload(args);
   if (cmd === "look") {
     if (!args.length) { const d = ok(await call("/v1/edge/body"), "body"); return { look: d.look, choices: d.lookChoices }; }
@@ -4491,7 +4493,7 @@ async function bodyUpload([path, ...args]) {
   if (opts.type === "humanoid") opts.rig = "quaternius/1";
   const form = new FormData(), s = load();
   form.set("manifest", JSON.stringify(opts)); form.set("model", new Blob([bytes], { type: "model/gltf-binary" }), "body.glb");
-  const r = await fetch(need(s, "world", "Register this folder first") + "/v1/edge/body/uploads", { method: "POST", headers: { authorization: "Bearer " + need(s, "token", "Pair your Soul first") }, body: form, signal: AbortSignal.timeout(90_000) });
+  const r = await fetch(need(s, "world", "Register this folder first") + "/v1/edge/body/uploads", { method: "POST", headers: { ...CLIENT, authorization: "Bearer " + need(s, "token", "Pair your Soul first") }, body: form, signal: AbortSignal.timeout(90_000) });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`${d.error?.code ?? "body.unavailable"}: ${d.error?.message ?? "Body upload refused"}${d.error?.details ? " " + JSON.stringify(d.error.details) : ""}`);
   return d.asset;
@@ -4993,7 +4995,7 @@ async function serveForeground() {
         beat();
         const q = new URLSearchParams({ kinds: "speech.to-me", ...(st.addressedCursor ? { after: st.addressedCursor } : {}) });
         const w0 = Date.now(), t0 = performance.now();
-        const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
+        const r = await fetch(`${world}/v1/edge/events?${q}`, { headers: { ...CLIENT, authorization: auth.authorization, accept: "text/event-stream" }, signal: ac.signal });
         if (RECORD) recordFetch(`${world}/v1/edge/events?${q}`, w0, t0, r, { body: "a stream: its speech.to-me frames show as serve's wakes" });
         if (r.status === 404) { log("addressed speech: this world has no classified stream; speech still reaches pending"); return; }
         if (r.status === 401 || r.status === 403) return;   // the inbox loop says so and ends things
@@ -5523,7 +5525,7 @@ async function upgradeCommand(...argv) {
   if (trust && !world) throw new Error(`A person's trust goes to a world they name: ${CLI} upgrade ${key} --trust`);
   // The site trusted below is the one asked: a redirect could hand this home a bundle from any other.
   const get = async (path) => {
-    const r = await fetch(w.url + path, { redirect: "error", signal: AbortSignal.timeout(30_000) }).catch((e) => {
+    const r = await fetch(w.url + path, { headers: CLIENT, redirect: "error", signal: AbortSignal.timeout(30_000) }).catch((e) => {
       const why = e?.cause?.message ?? e?.message;
       throw new Error(/^unexpected redirect/i.test(e?.cause?.message ?? "") ? `${key} redirected ${path}, and a bundle is taken only from the address this home knows. If the world moved, register its new address. Nothing changed.` : `${key} did not answer ${path} (${why}). Nothing changed.`);
     });
