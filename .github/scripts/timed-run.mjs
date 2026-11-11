@@ -38,7 +38,7 @@ export const ARG_ALLOW = {
   'eval-scripted': { '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
   'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600) },
   'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
-  meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
+  meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup', 'real100'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
 };
 
