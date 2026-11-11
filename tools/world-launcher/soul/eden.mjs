@@ -5724,7 +5724,13 @@ async function serve(...args) {
   if (flags.length > 1 || args.length > 1 || (args.length && !["--status", "--stop"].includes(args[0]))) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   if (flags.length) { need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`); save({ reflex: flags[0] === "--reflex" }); }
   if (args[0] === "--status") return (await askServe({ op: "status" })) ?? { serving: false, ...lastServeEnd(), next: `${CLI} serve` };
-  if (args[0] === "--stop") return (await askServe({ op: "stop" })) ?? { serving: false };
+  if (args[0] === "--stop") {
+    const a = await askServe({ op: "stop" });
+    // #2076: serve writes its state and releases its lock as it exits, so the answer waits for the exit (at most 5 s): the
+    // folder can be moved or removed the moment --stop returns
+    if (Number.isInteger(a?.pid)) for (let i = 0; i < 100 && pidAlive(a.pid); i++) await sleep(50);
+    return a ?? { serving: false };
+  }
   if (args.length) throw new Error("usage: serve [--status|--stop] [--no-reflex|--reflex]");
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const running = await askServe({ op: "status" });
