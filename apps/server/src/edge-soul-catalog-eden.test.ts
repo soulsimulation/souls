@@ -122,6 +122,16 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.equal(gateFull(), null, 'made public again, offered again');
   });
 
+  await t.test('each place carries its outline, and the client loads the catalog and finds in it as before (#1915)', async () => {
+    const r = await app.request('/v1/edge/catalog'), text = await r.text(), cat = JSON.parse(text);
+    assert.deepEqual(cat.places.find((p: any) => p.id === 'g-sports-football').outline, [[36, 97], [86, 97], [86, 127], [36, 127]]);
+    assert.equal(cat.places.some((p: any) => p.fixed && p.outline), false, 'no place on a carrier has one');
+    const without = JSON.stringify({...cat, places: cat.places.map(({outline: _, ...p}: any) => p)});
+    console.log(`catalog bytes: ${Buffer.byteLength(without)} without outlines, ${Buffer.byteLength(text)} with (${cat.places.length} places)`);
+    const {indexCatalog, find: findLocal} = await import(CLIENT_CATALOG) as {indexCatalog: (c: unknown) => unknown; find: (ix: unknown, w: string, o: object) => {found: {type: string; id?: string}[]}};
+    assert.ok(findLocal(indexCatalog(cat), 'football', {at: [0, 0]}).found.some(row => row.type === 'place' && row.id === 'g-sports-football'), 'find names the pitch');
+  });
+
   await t.test('every act a find row names is taken, or refused with a reason of its own', async () => {
     const {indexCatalog, find: findLocal} = await import(CLIENT_CATALOG) as {indexCatalog: (c: unknown) => unknown; find: (ix: unknown, w: string, o: object) => {found: {act?: string}[]}};
     const cat = (await get('/v1/edge/catalog')).body, ix = indexCatalog(cat), me = L.body(soul.entityId).pose.p, at = [me[0], me[2]];
