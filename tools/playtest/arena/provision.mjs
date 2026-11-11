@@ -57,7 +57,7 @@ export function marsWebDir(serverRoot, { env = process.env, exists = existsSync 
 }
 
 /** startWorld({serverRoot, slug, port, genesis, dataDir, log, fresh, onSpawn}) → {base, pid, build, healthz, child, dataDir} */
-export async function startWorld({ serverRoot, slug, port, genesis, snapshot, dataDir, log, fresh = true, kind = 'dev', bootTimeoutMs = 900000, natives = false, onSpawn = null, requestRecord = null }) {
+export async function startWorld({ serverRoot, slug, port, genesis, snapshot, dataDir, log, fresh = true, kind = 'dev', bootTimeoutMs = 900000, natives = false, onSpawn = null, requestRecord = null, nodeArgs = [] }) {
   assertKind(kind);
   const root = resolve(serverRoot);
   if (!existsSync(join(root, 'apps/server/src/main.ts'))) throw new Error(`no server under ${root}`);
@@ -81,7 +81,7 @@ export async function startWorld({ serverRoot, slug, port, genesis, snapshot, da
   if (requestRecord) { mkdirSync(resolve(requestRecord, '..'), { recursive: true }); worldEnvironment.SIM_REQUEST_RECORD = resolve(requestRecord); }
   if (log) mkdirSync(resolve(log, '..'), { recursive: true });
   const out = log ? openSync(resolve(log), 'a') : 'ignore';
-  const child = spawn(process.execPath, ['apps/server/src/main.ts'], { cwd: root, env: worldEnvironment, stdio: ['ignore', out, out], detached: true });
+  const child = spawn(process.execPath, [...nodeArgs, 'apps/server/src/main.ts'], { cwd: root, env: worldEnvironment, stdio: ['ignore', out, out], detached: true });
   child.unref();
   onSpawn?.(child); // an owning lifecycle (tools/playtest/runs/) records the process before boot, so a cancel during boot can stop it
   const t0 = Date.now();
