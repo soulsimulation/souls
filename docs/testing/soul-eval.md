@@ -70,6 +70,8 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
+`run` exits 1, after writing its result, when every episode errored or more than 20% did: a run that measured nothing
+never passes.
 
 A live seat needs `--max-usd`. The run stops before an episode once its spend reaches the cap. Measure on a quiet
 machine, two repeats per arm, and take the playtest lock where the machine is shared.
@@ -101,3 +103,13 @@ Every item starts where a new Soul arrives. Its check is one of `place`, `placeK
 
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.
+
+## Hostile cases
+
+`tools/playtest/eval/battery/hostile-v1.json` is a case battery (#1950): each case puts several scripted Souls on one fresh
+local world, each with its own script of `eden.mjs` steps, started together and judged together. Every step is a check
+(`ok`, `accepted`, `{refused}`, `{says}`; `until` a receipt ends; a world `restart`), and a case passes only when all hold.
+`double-claim`: a second folder's claim is refused `soul.held-elsewhere`, `--move` hands it over once, and the first folder's
+next command reports the move. `restart`: the world restarts during two Souls' two-minute acts; within 60 s each receipt
+ends and the next act is accepted. `soul-eval.mjs run --battery hostile-v1 --seat scripted --repeats 1` writes each case's
+result and the refusal codes seen. A failed case is a finding for a new issue; its bar stays (`episode.mjs`, `runCase`).

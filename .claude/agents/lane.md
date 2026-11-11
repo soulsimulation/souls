@@ -47,7 +47,7 @@ to that owner; do not expand the agenda or create a recursive worker pool.
   to start: that is a stop.
 - Read your PR's comments at every safe boundary; review findings arrive there.
 - When the issue's stop rule is met, stop: push, comment, end the session. Read long parent issues in slices,
-  never whole. See [sustaining lanes](../../docs/process/coordinator-portability.md#sustaining-lanes).
+  never whole. See [dispatch](../../docs/process/development-coordinator.md#dispatch).
 
 ## Done means
 1. `node tools/proof/tier.mjs` → the tier. Produce what that tier requires (the `proof` skill records clips;
