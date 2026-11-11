@@ -1,5 +1,5 @@
 // #1737 on the real Eden 2026 template (fake minds, in memory): a far spot named by its id stays on offer whatever menu
-// is cached, the two public routes never name a secret place (upstairs too), a far spot in one is not known by id, and a
+// is cached, a place with a stored secret mark is in both public routes as any place (#1262: no place is secret), and a
 // god's edit to a thing or a place is a new catalog.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +9,6 @@ import {bootEden} from '../test/eden-capabilities-timing.ts';
 import {mountCatalogRoute} from './edge/catalog/routes.ts';
 import {mountLiveRoute} from './edge/catalog/live.ts';
 import {SPOT_REACH} from './edge/ledger/activities.ts';
-import {inPoly} from './edge/ledger/places.ts';
 import {coreRef} from '@souls/world-compiler';
 // the client's own search over the catalog, as `find` runs it
 const CLIENT_CATALOG = new URL('../../../tools/world-launcher/soul/catalog.mjs', import.meta.url).href;
@@ -69,57 +68,31 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     } finally {L.structureReady = was;}
   });
 
-  await t.test('the catalog is served by tag, and a place made secret leaves it', async () => {
+  // #1262: a stored mark, as the god's route left one, hides nothing
+  const markSecret = (id: string) => L.db.db.prepare('INSERT INTO edge_place_secrets_v1 (world_id, place_id, secret, at) VALUES (?,?,1,0) ON CONFLICT(world_id, place_id) DO UPDATE SET secret=1').run(host.worldId, id);
+
+  await t.test('the catalog is served by tag, and a place with a stored secret mark stays in it', async () => {
     const first = await get('/v1/edge/catalog');
     assert.equal(first.status, 200); assert.equal(first.body.contract, 'soul-catalog/1');
     assert.equal((await get('/v1/edge/catalog', {'if-none-match': first.etag!})).status, 304);
     const hide = first.body.places.find((p: any) => p.kind === 'building' && first.body.things.some((x: any) => x.place === p.id) && !L.placePathOf(soul.soulId).some((q: any) => q.id === p.id));
     assert.ok(hide, 'a building with things in it, away from the Soul');
-    L.knowledge.setSecret(hide.id, true);
+    markSecret(hide.id);
     const second = await get('/v1/edge/catalog');
-    assert.notEqual(second.etag, first.etag, 'a new version');
-    assert.equal(second.body.places.some((p: any) => p.id === hide.id), false);
-    assert.equal(second.body.things.some((x: any) => x.place === hide.id), false);
-    assert.equal(second.body.acts.some((a: any) => a.place === hide.id), false);
-    assert.equal((await get('/v1/edge/catalog', {'if-none-match': first.etag!})).status, 200, 'the old tag no longer matches');
+    assert.equal(second.body.places.some((p: any) => p.id === hide.id), true);
+    assert.equal(second.body.things.some((x: any) => x.place === hide.id), true);
+    assert.equal(second.body.acts.some((a: any) => a.place === hide.id), first.body.acts.some((a: any) => a.place === hide.id));
   });
 
-  await t.test('a thing upstairs is in the room it stands in; a secret upstairs room takes its things, and what stands under it, out of the catalog', async () => {
+  await t.test('a thing upstairs is in the room it stands in', async () => {
     const ents = (host.engine.world as any).entities as Record<string, {pose?: {p: number[]}}>, y = (id: string) => ents[id]?.pose?.p[1] ?? 0;
     const cat = (await get('/v1/edge/catalog')).body, placeOf = new Map<string, any>(cat.places.map((p: any) => [p.id, p]));
     const upstairs = cat.things.filter((x: any) => y(x.id) > 1.5 && (placeOf.get(x.place)?.level ?? 0) > 0);
     assert.ok(upstairs.length >= 50, `things standing on upper floors are in upper-floor rooms: ${upstairs.length}`);
     // a room upstairs with things in it, away from the Soul (as the reviewer's probe: g-alpine-chalet-1.bedroom)
     const room = L.places.byId.get(upstairs.find((x: any) => !L.placePathOf(soul.soulId).some((q: any) => q.id === x.place)).place);
-    const inside = (id: string) => {const p = ents[id]?.pose?.p; return !!p && inPoly(p[0]!, p[2]!, room.polygon);};
     const mine = cat.things.filter((x: any) => x.place === room.id);
     assert.ok(mine.length && mine.every((x: any) => y(x.id) > 1.5), `${room.id} lists its own things: ${mine.map((x: any) => x.id)}`);
-    L.knowledge.setSecret(room.id, true);
-    try {
-      const hidden = (await get('/v1/edge/catalog')).body;
-      assert.equal(hidden.places.some((p: any) => p.id === room.id), false);
-      assert.deepEqual(hidden.things.filter((x: any) => x.place === room.id || inside(x.id)).map((x: any) => x.id), [], 'nothing standing in its outline, on any floor');
-      assert.equal(JSON.stringify(hidden).includes(room.id), false, 'its id is nowhere in the catalog');
-    } finally {L.knowledge.setSecret(room.id, false);}
-    assert.ok((await get('/v1/edge/catalog')).body.things.some((x: any) => x.place === room.id), 'made public again, its things come back');
-  });
-
-  await t.test('a far spot in a secret place is not known by its id to a Soul that has not been there, and the refusal does not name it', async () => {
-    const spotOf = (id: string) => (L.spots.spots as Spot[]).find(s => `${s.activity}:${s.id}` === id)!;
-    const id = far.find(f => spotOf(f).place && L.places.byId.get(spotOf(f).place)!.parent !== null)!;
-    assert.ok(id, 'a far spot on offer that is in a place');
-    const place = L.places.byId.get(spotOf(id).place!)!, gateFull = () => {L.invalidateBodies(); return L.offerGate(soul, {capability: id});};
-    assert.equal(gateFull(), null, 'offered by id before');
-    L.knowledge.setSecret(place.id, true);
-    try {
-      const no = gateFull();
-      assert.equal(no?.code, 'capability.unknown', `${id} in ${place.id}`);
-      for (const word of [place.id, place.name]) assert.equal(JSON.stringify(no).includes(word), false, `the refusal does not name ${word}`);
-      const sent = await w.edge.act(soul, {capability: id}) as any;
-      assert.equal(sent.accepted, false, 'nor is it done');
-      for (const word of [place.id, place.name]) assert.equal(JSON.stringify(sent).includes(word), false, `the act's answer does not name ${word}`);
-    } finally {L.knowledge.setSecret(place.id, false);}
-    assert.equal(gateFull(), null, 'made public again, offered again');
   });
 
   await t.test('every act a find row names is taken, or refused with a reason of its own', async () => {
@@ -208,16 +181,6 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     const unbound = [...byKind.values(), ...far].map((x: any) => `sit:${x.id}`).filter(id => {L.invalidateBodies(); return L.resolveIdV1(soul, id).kind !== 'exact';});
     assert.deepEqual(unbound, [], 'each is the world\'s own offer by that id');
     L.binds(soul); assert.equal(L.resolveIdV1(soul, `sit:${far[0].id}`).kind, 'exact', 'with the whole menu kept too');
-    // a far seat in a place made secret is not known by its id; ordinary benches stay known meanwhile
-    const hidden = far.find((x: any) => x.place && L.places.byId.get(x.place)?.parent !== null && !far.slice(0, 1).some((y: any) => y.place === x.place));
-    assert.ok(hidden, 'a far bench in a place, not the one the Soul is sent to');
-    L.knowledge.setSecret(hidden.place, true);
-    try {
-      L.invalidateBodies(); const no = L.offerGate(soul, {capability: `sit:${hidden.id}`});
-      assert.equal(L.resolveIdV1(soul, `sit:${hidden.id}`).kind, 'unknown', `sit:${hidden.id} in secret ${hidden.place}`);
-      assert.equal(JSON.stringify(no ?? {}).includes(hidden.place), false, 'no refusal names it');
-      assert.equal(L.resolveIdV1(soul, `sit:${far[0].id}`).kind, 'exact', 'a bench elsewhere is still offered');
-    } finally {L.knowledge.setSecret(hidden.place, false);}
     const from = [me[0], me[2]], acting = w.edge.act(soul, {capability: `sit:${far[0].id}`}) as Promise<any>;
     await run(20); const sent = await acting;
     assert.equal(sent.accepted, true, JSON.stringify(sent).slice(0, 400));
@@ -225,7 +188,7 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.ok(Math.hypot(now[0] - from[0]!, now[2] - from[1]!) > 1, 'and the Soul is on its way');
   });
 
-  await t.test('the live picture names where a Soul is, and never a secret place', async () => {
+  await t.test('the live picture names where a Soul is, in a place with a stored secret mark too', async () => {
     const place = L.placePathOf(soul.soulId).find((p: any) => p.kind !== 'occupier').id as string;
     hear({kind: 'speech', id: 'sp_open', tick: host.engine.world.tick, at: 1, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'hello out here'});
     await run(10);
@@ -233,14 +196,11 @@ test('Eden: far spots by id, and what the catalog and live picture publish', {ti
     assert.equal(open.body.contract, 'soul-live/1'); assert.equal(open.body.catalog, catalog.version());
     assert.equal(row.place, place); assert.equal(row.at.length, 2);
     assert.deepEqual(open.body.speech.map((s: any) => [s.id, s.place, s.untrusted]), [['sp_open', place, true]]);
-    L.knowledge.setSecret(place, true);
-    hear({kind: 'speech', id: 'sp_hidden', tick: host.engine.world.tick, at: 2, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'said in the secret place'});
+    markSecret(place);
+    hear({kind: 'speech', id: 'sp_marked', tick: host.engine.world.tick, at: 2, from: {soulId: soul.soulId, name: soul.name}, channel: {kind: 'earshot', placeId: place}, text: 'said in the marked place'});
     await run(10);
-    const shut = await get('/v1/edge/live'), hidden = shut.body.souls.find((s: any) => s.id === soul.soulId);
-    assert.deepEqual([hidden.at, hidden.place, hidden.doing], [null, null, null], 'in the world, but where is not said');
-    assert.equal(shut.body.speech.some((s: any) => s.id === 'sp_hidden'), false);
-    assert.equal(shut.body.speech.some((s: any) => s.id === 'sp_open'), false, 'nor what was said there before it was made secret');
-    assert.equal(JSON.stringify(shut.body).includes('said in the secret place'), false);
-    assert.equal(JSON.stringify(shut.body).includes(place), false, 'the secret place is not named');
+    const marked = await get('/v1/edge/live'), still = marked.body.souls.find((s: any) => s.id === soul.soulId);
+    assert.equal(still.place, place, 'where the Soul is is said'); assert.equal(still.at.length, 2);
+    assert.deepEqual(marked.body.speech.map((s: any) => [s.id, s.place]), [['sp_open', place], ['sp_marked', place]], 'and what is said there');
   });
 });

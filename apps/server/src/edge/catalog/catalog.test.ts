@@ -53,14 +53,6 @@ test('every spot activity is an act by id, tied to its thing and place', () => {
   assert.equal(seesaw.label, 'Ride the see-saw (world)');
 });
 
-test('a secret place, what stands in it and what is done in it are left out', () => {
-  const {payload, serialized} = buildCatalog(input());
-  assert.equal(payload.places.some(p => p.id === 'g-grove'), false);
-  assert.equal(payload.things.some(t => t.id === 'e_0dd4'), false);
-  assert.equal(payload.acts.some(a => a.place === 'g-grove'), false);
-  assert.equal(serialized.includes('Hidden Grove'), false);
-});
-
 test('everything published is public, and the counts match', () => {
   const {payload} = buildCatalog(input());
   assert.equal(payload.scope, 'public');

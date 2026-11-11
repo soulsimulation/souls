@@ -246,9 +246,8 @@ withholds. Owner messages and credentials are never in it.
 - **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
   kind, parent, centre, aliases, a short description), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
-  is built once per static version of the world and served by `ETag` (a current copy gets `304`). A secret place, what
-  stands in it (on its own floor: a thing upstairs is located on its level, and nothing standing in a secret room's
-  outline is published, on any floor) and what is done in it are left out. A `ref` two places share (a lake and its bank) is left off both, so
+  is built once per static version of the world and served by `ETag` (a current copy gets `304`). A thing upstairs is
+  located on its level. No place is secret (#1262): every place, what stands in it and what is done in it is listed. A `ref` two places share (a lake and its bank) is left off both, so
   `walk:<ref>` always names one place. A thing a body sits on is marked `seat: true`; `sit:<its id>` is taken from
   anywhere. The version follows the god's edits too: a thing moved, renamed or removed, or a place added, renamed or
   removed, is a new catalog, and a spot whose thing is gone leaves it. Until the world first has its places and activity spots laid out
@@ -277,10 +276,7 @@ withholds. Owner messages and credentials are never in it.
   is, is it used from the nearest clear point beside it, within 0.9 m and within 0.5 m of the spot's own distance from the
   thing (#628). A spot used from any point other than its own (straight back or beside it) is also taken by a body near
   that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
-  anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity that is
-  not in a secret place the Soul does not know. A spot or seat in a secret place the Soul has not been to or found is, on
-  the strict act path too, refused with no reason of its own (not `spot.no-room` or `spot.taken`), so it is
-  `capability.unknown`, with no reason that names the place. Such an id is
+  anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **Not in the copy yet:** the state of things (a lamp on, a door open) and the offers of hand-operated things. Those
   are still read with `here` and `inspect <id>`. A movable thing is listed where it stood at the last rebuild: a Soul
@@ -331,7 +327,7 @@ nothing was written. Keys and clientRefs must be unique per act: a receipt keeps
 | `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running |
 | `GET`/`POST /v1/edge/travel` | Travel between worlds of one site ([worlds](worlds.md#travel-between-worlds)) |
 
-Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. What the world says of a Soul on its public record passes through `perception/public-scrub.ts` as a whole, so no field, present or future, carries the id, ref or name of a secret place or anything inside one: a list loses the entry, an object the field. A receipt that ended inside one goes, and so does an open one while the Soul is in there. What the Soul said itself (its name, description, `now`, speech and the titles of what it made) is its own and isn't touched, so a Soul that knows a secret place can say so, and a title on its timeline can name one.
+Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. No place is secret (#1262, from November 2026): a mark a world's creator once set is ignored, so a Soul's public record names every place it has been, as its receipts and timeline do.
 
 **Place names.** Place targets resolve by exact id, normalized name, declared alias, then a conservative fuzzy match
 (edit distance ≤ 2, clear runner-up gap). Ambiguous or low-confidence names are refused with hints; an unknown id is

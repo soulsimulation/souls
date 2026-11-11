@@ -19,7 +19,7 @@ test('here opens with now; around?to gives directions to a place and finds a Sou
   if (h.body.here.clock) {const keys = Object.keys(h.body.here); assert.equal(keys[0], 'now'); assert.match(h.body.here.now, /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{1,2} [A-Z][a-z]{2} \d{4} · \d\d:\d\d · \w+ · world day \d+$/);}
   // a place a has not been to, by its name
   const mine = new Set(L.placePathOf(a.soulId).map(p => p.id));
-  const target = [...L.places.byId.values()].find(p => p.parent !== null && !mine.has(p.id) && !p.carrier && L.knowledge.knows(a.soulId, p.id) && /^[a-z]/i.test(p.name) && !p.name.includes('/'))!;
+  const target = [...L.places.byId.values()].find(p => p.parent !== null && !mine.has(p.id) && !p.carrier && /^[a-z]/i.test(p.name) && !p.name.includes('/'))!;
   assert.ok(target, 'a known place to ask for');
   const r = await w.http(a, 'GET', '/v1/edge/around?to=' + encodeURIComponent(target.name)); assert.equal(r.status, 200, JSON.stringify(r.body));
   const route = r.body.route; assert.equal(route.found, true, JSON.stringify(route)); assert.equal(route.place.id, target.id);
@@ -39,7 +39,6 @@ test('here opens with now; around?to gives directions to a place and finds a Sou
 test('exact known destinations beat partial Soul names while exact Souls, ambiguity and secrecy retain their meaning', {timeout: 300000}, async t => {
   const w = await coreAWorld(2); t.after(() => w.close());
   const [a, b] = w.souls, L = w.ledger, venue = L.places.byId.get('commons-deck')!, other = L.places.byId.get('eden-housing')!;
-  assert.ok(L.knowledge.knows(a.soulId, venue.id) && L.knowledge.knows(a.soulId, other.id));
   // Authored vocabulary on real native places; only the perception names change.
   venue.name = 'Cedar Hall'; venue.aliases = ['Lantern Auditorium'];
   const nameSoul = (name: string) => {b.name = name; w.f.host.minds.get(b.soulId)!.name = name;};
@@ -66,12 +65,5 @@ test('exact known destinations beat partial Soul names while exact Souls, ambigu
   venue.parts.push({id: 'second-alcove', title: 'Second Alcove', aliases: ['Copper Corner']});
   const ambiguousParts = await route('Copper Corner'); assert.equal(ambiguousParts.found, false); assert.equal(ambiguousParts.code, 'place.ambiguous'); assert.equal(ambiguousParts.candidates.length, 2);
 
-  const hidden = L.places.byId.get('region-park')!; hidden.name = 'Silver Archive'; hidden.ref = 'silver-archive';
-  assert.equal(L.knowledge.setSecret(hidden.id, true), true); assert.equal(L.knowledge.knows(a.soulId, hidden.id), false);
-  nameSoul('Silver ArchiveGuest'); const withheld = await route('Silver Archive');
-  assert.equal(withheld.soul.id, b.soulId); assert.equal(withheld.place, undefined); assert.ok(!JSON.stringify(withheld).includes(hidden.id), 'an unknown secret place cannot suppress visible partial Soul lookup');
-  venue.parts = [{id: 'hidden-alcove', title: 'Private Alcove', target: {ref: hidden.ref}}];
-  nameSoul('Private AlcoveGuest'); const withheldPart = await route('Private Alcove');
-  assert.equal(withheldPart.soul.id, b.soulId); assert.equal(withheldPart.part, undefined); assert.equal(L.knowledge.knows(a.soulId, hidden.id), false);
   assert.equal(JSON.stringify(w.body(b).pose), before, 'asking for names never moves the Soul');
 });
