@@ -113,3 +113,10 @@ test('A4: one news wake per home per item, for events and releases above this cl
   const due = deliver(over.wake, T0 + 3_600_000);
   assert.deepEqual(due.wakes.map((x) => x.kind), ['news']); assert.equal(due.wake.delivered.length, 2, 'charged as one delivery');
 });
+
+test('A2: a feed check that cannot start never throws in the command', async () => {
+  const { spawnDetached } = await import('./soul/eden.mjs');
+  const child = spawnDetached(join(tmpdir(), 'no-such-node-binary'), ['x'], {});
+  assert.equal(child.listenerCount('error'), 1);
+  await new Promise((r) => child.once('close', r));   // after the 'error' event: unhandled, it would have ended this process
+});

@@ -5971,11 +5971,24 @@ async function checkFeeds() {
   }
   return checked;
 }
+/** A detached child that can never throw in this process: a failed spawn emits 'error', said once and dropped. */
+export function spawnDetached(file, args, opts) {
+  let said = false;
+  const child = spawn(file, args, { ...opts, detached: true, stdio: "ignore" });
+  child.on("error", (e) => { if (!said) { said = true; process.stderr.write(`feed check not started: ${e?.code ?? e?.message ?? e}\n`); } });
+  child.unref();
+  return child;
+}
+const FEED_SPAWN_MS = 5 * 60_000;
 function startFeedCheck(cmd, args) {
   if (!HOME || ["upgrade", "help", "serve", "listen"].includes(cmd) || (cmd === "news" && args.includes("--fetch"))) return;   // as the update check
   try {
     if (!soulHome.feedDue(HOME.config(), Date.now()).length || Date.now() - (readServeLock()?.beatAt ?? 0) < SERVE_STALE_MS) return;   // a serve here checks
-    spawn(process.execPath, [process.argv[1], "news", "--fetch"], { cwd: INVOKED, detached: true, stdio: "ignore" }).unref();
+    // the last start is kept beside the config: a child that never claims a site (it found no home) is not started on every command
+    const mark = joinPath(HOME.root, ".feed-check");
+    try { if (Date.now() - lstatSync(mark).mtimeMs < FEED_SPAWN_MS) return; } catch { /* never started */ }
+    writeFileSync(mark, "");
+    spawnDetached(process.execPath, [process.argv[1], "news", "--fetch"], { cwd: INVOKED });
   } catch { /* the next command tries */ }
 }
 async function newsCommand(...argv) {
