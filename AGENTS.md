@@ -86,6 +86,10 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
 - Stay within the requested outcome. Prefer independently reviewable, single-digit-hour slices; finish one active
   implementation before starting another. Get Gene's approval before substantial scope expansion or an out-of-scope
   prerequisite; explain the smallest necessary addition. Routine in-scope repairs need no new permission.
+- A task issue is a lane's whole scope: its Acceptance, its Touches (the files it may change) and its ceiling in
+  agent-hours. One lane works one task issue, does what the acceptance asks and stops. The ceiling is a limit, not
+  a target: never add work to use the time. Only the coordinator changes a task's bounds, by editing the issue.
+  [Lane rules](.claude/agents/lane.md)
 - Continue to the authorized endpoint, including checks, proof and review fixes; do not stop at routine milestones
   unless Gene requested review stops. Use an available goal mechanism for sustained work, otherwise a durable issue
   checkpoint. Goals never override budgets, genuine blockers or merge/release approvals. See [bounded execution](docs/process/planning.md#bounded-execution).
@@ -105,7 +109,8 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
   adds a changelog fragment in [`changes/`](changes/README.md) unless it is labelled `no-changelog`.
 - "Done" means walked on the real URL with real input; a scripted e2e alone doesn't count. Visual evidence is uncut,
   real-speed video. [docs/process/](docs/process/agent-lifecycle.md)
-- Bug fixes need no approval. Destructive production deletes need the maintainer's explicit yes.
+- Bug fixes need no approval from Gene. A bug a lane finds while working a task is a new issue, not more work in
+  that pull request. Destructive production deletes need the maintainer's explicit yes.
 - Issues state the problem and acceptance criteria before work starts. The PR is the journal entry: acceptance with
   evidence, proof, self-audit. [docs/process/agent-lifecycle.md](docs/process/agent-lifecycle.md#5-pull-request)
 - Repo skills in `.claude/skills/` (plain Markdown, readable by any agent): `journal`, `epic`, `triage`, `finish`,

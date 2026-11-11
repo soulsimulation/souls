@@ -1,0 +1,77 @@
+name: Bounded task
+description: One lane, one issue. Written by the coordinator before dispatch, with a ceiling, a list of files and a stop rule.
+labels: ["type:task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A task is what one lane does in one session. The coordinator writes every section **before** dispatch. The
+        lane does what the acceptance asks and stops; it never edits Acceptance, Touches or the ceiling. The ceiling
+        is a limit, not a target: finishing early is the expected case. How lanes run it: `.claude/agents/lane.md`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong or missing, and for whom, in one to three sentences. Name the decision it comes from if there is one.
+    validations: { required: true }
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What is true when this is done, in one or two sentences.
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: At most five observable pass/fail criteria, one box each, with an id. Each names the test, command or number that shows it.
+      value: |
+        - [ ] **A1**
+        - [ ] **A2**
+        - [ ] **A3**
+    validations: { required: true }
+  - type: textarea
+    id: not-in
+    attributes:
+      label: Not in this task
+      description: The nearby work a lane might be tempted to do. Name the task that owns each item, or say it is not planned.
+    validations: { required: true }
+  - type: textarea
+    id: touches
+    attributes:
+      label: Touches
+      description: The files and folders this task may change. A mechanical edit of ten lines or fewer elsewhere is allowed when the change requires it, and is listed in the pull request under "Outside Touches".
+    validations: { required: true }
+  - type: textarea
+    id: proof
+    attributes:
+      label: Proof
+      description: "The tier (docs/process/PROOF-POLICY.yml) and exactly what proves the task: named tests, runs and their caps."
+    validations: { required: true }
+  - type: textarea
+    id: measure
+    attributes:
+      label: Measure
+      description: How this task shows it helped, and what that measure does not show (the machine, the sample, the load it was taken under). Leave empty when the acceptance is the measure.
+  - type: input
+    id: ceiling
+    attributes:
+      label: Ceiling
+      description: 1 to 4 agent-hours of implementation, not counting CI, review or merge. A limit, not a target.
+      placeholder: "3 agent-hours"
+    validations: { required: true }
+  - type: input
+    id: depends
+    attributes:
+      label: Depends on
+      description: Issues or pull requests that must be merged first, or "nothing".
+      placeholder: "#123, PR #456 merged"
+    validations: { required: true }
+  - type: textarea
+    id: stop
+    attributes:
+      label: Stop rule
+      description: Keep this text as it is.
+      value: |
+        Say when you started in your first comment here, and state the time you took in the pull request. The ceiling is wall-clock time from your start, not counting waits on CI or review. Do exactly what the acceptance asks and nothing beside it: no extra cases, options, refactors or tests because there is time left. Stop when any of these happens: every acceptance box is ticked, marked `unmet:` or marked `deferred:`, and the pull request is ready; the ceiling is reached; the change needs more than a mechanical edit of ten lines in a file outside Touches, or a criterion not listed here; a declared run fails twice. Then push, comment here with what is done and the exact next step, and end the session. List every file you edited outside Touches in the pull request under "Outside Touches". Do not fix what you found along the way, take another issue, or re-declare a run: a defect you discover is a new issue. Only the coordinator changes Acceptance, Touches or the ceiling, by editing this issue.
+    validations: { required: true }

@@ -13,7 +13,7 @@ checklist. Two halves: **Pause** (outgoing) and **Resume** (incoming).
 
 Private folder (ignored, never published): `.local/project/coordinator/` with `STATE.json`, `DECISIONS.md`,
 `MANIFEST.md`, `gene-morning.md`, `briefs/` and `handoffs/`. Public coordination issue: the agenda issue named in
-`STATE.json` (currently #755). Public text never carries local paths, usernames, host names or session handles
+`STATE.json` (currently #1960). Public text never carries local paths, usernames, host names or session handles
 ([publication privacy](../../../docs/process/publication-privacy.md)).
 
 ## Keep it cheap: always-current records
