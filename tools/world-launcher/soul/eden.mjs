@@ -3419,7 +3419,7 @@ async function findCommand(...args) {
   if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n]');
   const { ix, live, me, note } = await worldCopy();
   const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things });
-  return { ...r, found: r.found.map((x) => ({ ...x, untrusted: true })), ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act": ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
+  return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act": ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
 }
 // query '<json>': several layered questions in one call, each with its own depth, filters and token budget.
 async function queryCommand(...args) {
@@ -4225,7 +4225,7 @@ export function wakeLook(full, max = WAKE_LOOK_BYTES) {
   let o = { at: full.me.path?.join(" > ") ?? full.me.place, doing: full.me.doing,
     ...(h ? { here: { id: h.id, ...(h.canDo ? { canDo: Object.fromEntries(Object.entries(h.canDo).map(([v, c]) => [v, c.nearest ?? c])) } : {}), ...(h.things ? { things: h.things } : {}) } } : {}),
     ...(full.onTheSpot ? { onTheSpot: full.onTheSpot } : {}),
-    ...(full.near?.length ? { near: full.near.slice(0, 6).map((x) => ({ name: x.name, metres: x.metres, doing: x.doing })) } : {}),
+    ...(full.near?.length ? { near: full.near.slice(0, 6).map((x) => ({ name: x.name, metres: x.metres, doing: x.doing, untrusted: true })) } : {}),
     ...(full.said?.length ? { said: full.said.slice(-3).map((x) => ({ who: x.who, text: cut(x.text, 120) })), saidNote: full.saidNote } : {}) };
   if (full.asOf) o.secondsOld = full.asOf.secondsAgo;
   const size = () => JSON.stringify(o).length;

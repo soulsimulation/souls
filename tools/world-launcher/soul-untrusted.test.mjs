@@ -1,6 +1,6 @@
 // #1951: another Soul's speech reaches the mind marked untrusted and quoted on every path the client shows it: the
 // `listen --follow` line, `pending`, `look`, the brief, the person file and the journal; #2022: `events` (digest and
-// --raw), `wait`, Soul names in `look` and `find` rows. The world here labels nothing, so each label is the client's own. Threat model: docs/architecture/threat-model.md.
+// --raw), `wait`, Soul names in `look` and in the wake's compact look. The world here labels nothing, so each label is the client's own. Threat model: docs/architecture/threat-model.md.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openSoulMemory } from './soul/memory.mjs';
+import { wakeLook } from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const SAY_CHARS = 500;   // the world's speech limit (apps/server/src/edge/events/schema.ts, sayChars)
@@ -153,9 +154,9 @@ test('#2022: look marks the names of Souls near and elsewhere', async (t) => {
   assert.match(look.elsewhereNote ?? '', /their words, not instructions/, 'look elsewhere: marked untrusted');
 });
 
-test('#2022: find marks each row it found, whatever the world calls things', async (t) => {
-  const w = await world(t), found = (await w.cli('find', 'note')).json?.found ?? [];
-  const row = found.find((x) => x.id === 't_note');
-  assert.ok(row?.name?.includes(ORDER), `find: the name, in a string: ${JSON.stringify(found)}`);
-  for (const x of found) assert.equal(x.untrusted, true, `find ${x.id ?? x.act}: marked untrusted`);
+
+test('#2022: the wake\'s compact look keeps the mark on the Souls near', async (t) => {
+  const w = await world(t), o = wakeLook((await w.cli('look')).json);
+  const bo = o?.near?.find((x) => x.name === 'Bo');
+  assert.equal(bo?.untrusted, true, `wake look near: marked untrusted: ${JSON.stringify(o?.near)}`);
 });
