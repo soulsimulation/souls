@@ -54,7 +54,7 @@ test('intents: nearest free seat near a Soul, front row, go, swim, approach, tur
   // go {place}: route + walk, chosen place and ETA; arrives there
   const g = await byIntent(b, {verb: 'go', target: {place: 'shore-bank'}}); assert.equal(g.chosen.place, 'shore-bank'); assert.ok(g.chosen.eta && g.chosen.distance > 0, JSON.stringify(g.chosen));
   const gd = await finish(b, g); assert.equal(gd.phase, 'completed'); assert.equal((gd.endedAt as any).place, 'shore-bank');
-  // approach {target, distance}: ends about that far from them
+  // approach {target, distance}: resolve chooses that Soul; going up to them by the offered go-near ends about that far away
   const up = await act(c, {capability: 'stand:here'}); await w.ticks(200, () => !w.open(c, up.receipt.id)); await w.put(c, [-20, 2]);
   const apd0 = w.ledger.intents.dryRun(b, {verb: 'approach', target: c.name, distance: 1.5} as never) as any; assert.equal(apd0.would?.chosen?.target, c.soulId, JSON.stringify(apd0));
   // the menu offers approaching a Soul as go-near:<soul>; resolve's approach:<soul> is not taken by act (#2143)
