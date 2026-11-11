@@ -37,6 +37,11 @@
 //        (Kwyjibo); message/inbox/delete reach only Souls an operator approved (owner op:test-operator), by name + id.
 //        The message goes into the inbox exactly as the browser card sends it. Every use is an audit row, by operator.)
 //
+//   node tools/world-launcher/op.mjs feed-post --port 4620 [--base /worlds] --kind announcement|release|world|event --title <t>
+//        [--body <text>] [--url https://…] [--starts-at <ISO time>] [--place <text>] [--min-client <version>] [--replaces <id>]
+//   node tools/world-launcher/op.mjs feed-stats --port 4620 [--base /worlds]   (feed reads per UTC day by client version)
+//        (#1876: the platform feed every client pulls from <base>/v1/feed; feed.mjs)
+//
 // create-world: the world is born owned by that existing account (its god), exactly as if that person had created it signed in.
 // register-fork: serve the copy of an old world already in <data>/worlds/<slug>/sim.db under <base>/w/<slug> (lane FORKS).
 const argv = process.argv.slice(2);
@@ -62,7 +67,9 @@ const usage = () => {
     + '       op.mjs soul-approve --port <launcher port> [--base /worlds] --slug <test world> --request <ap_id> --name <TestName>\n'
     + '       op.mjs soul-message|soul-inbox|soul-delete --port <launcher port> [--base /worlds] --slug <test world> --soul <s_id> --name <TestName> [--text <text> (soul-message)]\n'
     + '       op.mjs god-pending --port <launcher port> [--base /worlds] --slug <test world>\n'
-    + '       op.mjs god-approve --port <launcher port> [--base /worlds] --slug <test world> --code <pairing code>');
+    + '       op.mjs god-approve --port <launcher port> [--base /worlds] --slug <test world> --code <pairing code>\n'
+    + '       op.mjs feed-post --port <launcher port> [--base /worlds] --kind <announcement|release|world|event> --title <t> [--body <b>] [--url <https url>] [--starts-at <iso>] [--place <p>] [--min-client <v>] [--replaces <id>]\n'
+    + '       op.mjs feed-stats --port <launcher port> [--base /worlds]');
   process.exit(2);
 };
 if (cmd === 'glitches' && flag('port')) {
@@ -133,6 +140,12 @@ if (cmd === 'create-world') {
 } else if (cmd === 'god-approve') {
   if (!flag('port') || !flag('slug') || !flag('code')) usage();
   body = { slug: flag('slug'), code: flag('code') };
+} else if (cmd === 'feed-post') {
+  if (!flag('port') || !flag('kind') || !flag('title')) usage();
+  body = { kind: flag('kind'), title: flag('title'), ...Object.fromEntries([['body', 'body'], ['url', 'url'], ['startsAt', 'starts-at'], ['place', 'place'], ['minClient', 'min-client'], ['replaces', 'replaces']].filter(([, f]) => flag(f) !== undefined).map(([k, f]) => [k, flag(f)])) };
+} else if (cmd === 'feed-stats') {
+  if (!flag('port')) usage();
+  body = {};
 } else usage();
 const base = (flag('base') ?? '').replace(/\/$/, '');
 const r = await fetch(`http://127.0.0.1:${Number(flag('port'))}${base}/__sim/op/${cmd}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(240_000) });

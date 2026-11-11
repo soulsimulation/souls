@@ -3101,7 +3101,7 @@ async function paired(id, name, s = load(), { made = true } = {}) {
   const live = !made && HOME ? await connectedAlready(id) : false;
   if (live === null) throw UNSURE(id);
   if (live) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
-  if (!(s.soul === id && s.token)) await devPair(id);
+  if (!(s.soul === id && s.token) && !(await devPair(id)) && !made) return { created: false, soul: { id, name }, paired: true, reconnection: "already connected" };
   writeGuide(name);
   return { created: true, soul: { id, name }, paired: true };
 }
@@ -3203,10 +3203,32 @@ async function seatFor(kept) {
   if (load().accountAuth === undefined) await register(url, { asked: false });
 }
 
+/** Pairs Soul `id` here; false when another chat in this home paired it first and its token works, so nothing was minted. */
 async function devPair(id) {
-  const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
-  const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
-  save({ token: t.token, soul: id });
+  return pairingTurn(async () => {
+    if (HOME && (await connectedAlready(id)) === true) return false;
+    const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
+    const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
+    save({ token: t.token, soul: id });
+    return true;
+  });
+}
+/** #2004: every pairing retires the token before it, so two chats pairing one Soul at once in a home could keep the
+ *  retired one: whichever saved last won, not whichever minted last. Pairing is one turn per home, minted and saved under
+ *  a lock; the second chat waits, then finds the first one's token working. A holder that died or held it a minute gives way. */
+async function pairingTurn(fn) {
+  if (!HOME) return fn();
+  const lock = joinPath(HOME.root, ".pairing.lock"), mine = String(process.pid);
+  for (let t0 = Date.now(); ;) {
+    try { const fd = openSync(lock, "wx", 0o600); writeSync(fd, mine); closeSync(fd); break; }
+    catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      let pid = 0; try { pid = Number(readFileSync(lock, "utf8")); } catch { continue; }
+      if ((pid > 0 && !pidAlive(pid)) || Date.now() - t0 > 60_000) { try { unlinkSync(lock); } catch { /* released meanwhile */ } t0 = Date.now(); continue; }
+      await sleep(50);
+    }
+  }
+  try { return await fn(); } finally { try { if (readFileSync(lock, "utf8") === mine) unlinkSync(lock); } catch { /* taken over */ } }
 }
 
 async function approval(action = "status") {
