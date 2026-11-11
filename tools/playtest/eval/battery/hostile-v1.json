@@ -52,9 +52,9 @@
   },
   {
    "id": "god-wall",
-   "bar": "#1974 A3. Four Souls walk from where they arrive to the bandstand; once they are moving, a god (eden-god.mjs, dev:admin) places a garden wall, 2 m high, 8 m ahead of them across their heading: 30 m long, or 16 m and then 10 m when the world refuses the longer one (run r2: overlap.solid). Within 90 s of the wall each walk has ended or been refused with a reason (its receipt in an end state; a reason or code unless it completed), and each Soul's next walk (to the fire circle) is accepted and moves it 1 m within 30 s. The report gives how long each Soul was held after the wall.",
+   "bar": "#1974 A3. Four Souls walk from where they arrive to the bandstand; once they are moving, a god (eden-god.mjs, dev:admin) places a 30 m garden wall, 2 m high, 8 m ahead of them across their heading. Within 90 s of the wall each walk has ended or been refused with a reason (its receipt in an end state; a reason or code unless it completed), and each Soul's next walk (to the fire circle) is accepted and moves it 1 m within 30 s. The report gives how long each Soul was held after the wall.",
    "drive": "god-wall",
-   "params": { "to": "g-eden-bandstand", "next": "g-place-social-eden-fire-circle", "def": "garden-wall", "aheadM": 8, "lengthsM": [30, 16, 10], "heightM": 2, "holdSec": 90, "nextSec": 30, "moveM": 1 },
+   "params": { "to": "g-eden-bandstand", "next": "g-place-social-eden-fire-circle", "def": "garden-wall", "aheadM": 8, "lengthM": 30, "heightM": 2, "holdSec": 90, "nextSec": 30, "moveM": 1 },
    "souls": [ { "id": "moss", "name": "Moss" }, { "id": "reed", "name": "Reed" }, { "id": "sage", "name": "Sage" }, { "id": "thorn", "name": "Thorn" } ]
   }
  ]

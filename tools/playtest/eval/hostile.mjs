@@ -57,15 +57,19 @@ async function actSpam({ souls, item, t0 }) {
   let stop = false;
   const bystand = async (s) => { while (!stop) { const b = Date.now(); await cli(s.folders.own, p.act); await sleep(Math.max(0, p.everySec * 1000 - (Date.now() - b))); } };
   const byLoops = by.map(bystand);
+  let spamStart, spam;
+  try {   // the bystanders stop however the flood ends
   await sleep(p.baselineSec * 1000);
-  const spamStart = Date.now();
-  const spam = await Promise.all(Array.from({ length: p.acts }, async (_, i) => {
+  spamStart = Date.now();
+  spam = await Promise.all(Array.from({ length: p.acts }, async (_, i) => {
     await sleep((i * p.withinSec * 1000) / p.acts);
     const b = Date.now(), r = await cli(flood.folders.own, p.act, 180000);
-    return { sentAt: b, refusal: refusalOf(r), accepted: stepVerdict('accepted', r).ok };
+    return { sentAt: b, endedAt: Date.now(), refusal: refusalOf(r), accepted: stepVerdict('accepted', r).ok };
   }));
-  const spamEnd = Date.now(), sentMs = Math.max(...spam.map((x) => x.sentAt)) - spamStart;
-  await sleep(p.everySec * 1000); stop = true; await Promise.all(byLoops);
+  await sleep(p.everySec * 1000);
+  } finally { stop = true; }
+  await Promise.all(byLoops);
+  const spamEnd = Math.max(...spam.map((x) => x.endedAt)), sentMs = Math.max(...spam.map((x) => x.sentAt)) - spamStart;
   const at = (t) => sec(t - t0);
   // the flood: what the launcher made of each act, and every answer the world (or the serve) gave to them
   const cliOut = {}; for (const x of spam) { const k = x.accepted ? 'accepted' : x.refusal ?? 'not accepted'; cliOut[k] = (cliOut[k] ?? 0) + 1; }
@@ -127,11 +131,21 @@ async function reconnectStorm({ souls, item, base, relay, t0 }) {
   return { results, measures };
 }
 
+/** What eden-god.mjs made of one `place`: {placed, code, why}. It says REFUSED and still exits 0 (run r2: overlap.solid), and
+ *  on overlap.solid it moves the thing itself (the next candidate, the server's suggestion, a nudge: "blocked (…) → …") and
+ *  exits 0. Only a wall placed where it was asked counts: a refused or a moved one is not placed. */
+export function wallVerdict(r) {
+  const said = String(r.stdout || r.stderr).trim().replace(/\s+/g, ' '), shown = said.slice(0, 200);
+  if (r.code !== 0 || /\bREFUSED\b/.test(said)) return { placed: false, code: /REFUSED:\s*([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)/.exec(said)?.[1] ?? `exit.${r.code}`, why: shown };
+  if (/blocked \(/.test(said)) return { placed: false, code: /blocked \(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)/.exec(said)?.[1] ?? 'wall.moved', why: `moved, not where asked: ${shown}` };
+  return { placed: true, code: null, why: shown };
+}
+
 /** A3: the Souls walk to `to`; once they are moving, a god places a wall (`def`, `lengthM` long, `aheadM` ahead of them, across
  *  their heading) through eden-god.mjs. Within `holdSec` of the wall each walk has ended (its receipt in an end state, with a
  *  reason when it did not complete); each Soul's next walk (to `next`) is accepted and moves it `moveM` within `nextSec`. */
 async function godWall({ souls, item, base, dir, serverRoot, t0, log }) {
-  const p = { to: 'g-eden-bandstand', next: 'g-place-social-eden-fire-circle', def: 'garden-wall', aheadM: 8, lengthM: 30, lengthsM: null, heightM: 2, holdSec: 90, nextSec: 30, moveM: 1, ...item.params };
+  const p = { to: 'g-eden-bandstand', next: 'g-place-social-eden-fire-circle', def: 'garden-wall', aheadM: 8, lengthM: 30, heightM: 2, holdSec: 90, nextSec: 30, moveM: 1, ...item.params };
   if (!serverRoot) throw new Error('god-wall needs the server root (for eden-god.mjs)');
   const at = (t) => sec(t - t0);
   const god = createGodSeat({ runDir: dir, god: { adapter: 'scripted-owner' }, worldBase: base, serverRoot, preinstall: true });
@@ -148,19 +162,11 @@ async function godWall({ souls, item, base, dir, serverRoot, t0, log }) {
   let wallAt = null, wallStep;
   if (!c0 || !(moved >= 2)) wallStep = { ok: false, why: `the walkers did not move 2 m in 15 s (${r1(moved) ?? '?'} m): no heading to put a wall across` };
   else {
-    // eden-god.mjs says REFUSED: <code> and still exits 0 (run r2: overlap.solid); a refused wall is tried shorter, from where
-    // the walkers are then, at most once per length in `lengthsM`
-    const d = [(c1[0] - c0[0]) / moved, (c1[1] - c0[1]) / moved], n = [-d[1], d[0]], tries = [];
-    for (const len of p.lengthsM ?? [p.lengthM]) {
-      const pic = await liveOf(base), c = centroid(ids.map((id) => posOf(pic, id))) ?? c1, w = [c[0] + d[0] * p.aheadM, c[1] + d[1] * p.aheadM], h = len / 2;
-      const path = [[r1(w[0] - n[0] * h), r1(w[1] - n[1] * h)], [r1(w[0] + n[0] * h), r1(w[1] + n[1] * h)]];
-      const b = Date.now(), r = await g(['place', p.def, '--path', JSON.stringify(path), '--param', `height=${p.heightM}`]);
-      const said = String(r.stdout || r.stderr).trim().replace(/\s+/g, ' '), refused = r.code !== 0 || /\bREFUSED\b/.test(said);
-      const code = refused ? (/REFUSED:\s*([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)/.exec(said)?.[1] ?? /\b([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\b/.exec(said)?.[1] ?? `exit.${r.code}`) : null;
-      tries.push(`${len} m: ${code ?? 'placed'}`);
-      wallStep = { at: at(b), cmd: `god place ${p.def} --path ${JSON.stringify(path)}`, exit: r.code, refusal: code, ok: !refused, why: `${sec(Date.now() - b)} s: ${said.slice(0, 160)} (tries: ${tries.join('; ')})` };
-      if (!refused) { wallAt = Date.now(); break; }
-    }
+    const d = [(c1[0] - c0[0]) / moved, (c1[1] - c0[1]) / moved], n = [-d[1], d[0]], w = [c1[0] + d[0] * p.aheadM, c1[1] + d[1] * p.aheadM], h = p.lengthM / 2;
+    const path = [[r1(w[0] - n[0] * h), r1(w[1] - n[1] * h)], [r1(w[0] + n[0] * h), r1(w[1] + n[1] * h)]];
+    const b = Date.now(), r = await g(['place', p.def, '--path', JSON.stringify(path), '--param', `height=${p.heightM}`]), v = wallVerdict(r);
+    wallAt = v.placed ? Date.now() : null;
+    wallStep = { at: at(b), cmd: `god place ${p.def} --path ${JSON.stringify(path)}`, exit: r.code, refusal: v.code, ok: v.placed, why: `${sec(Date.now() - b)} s: ${v.why}` };
     log(`${item.id}: wall ${wallStep.ok ? 'placed' : 'refused'} across the heading ${p.aheadM} m ahead`);
   }
   measures.push(`Wall: ${wallStep.ok ? `placed ${wallStep.why.split(':')[0]} after the call, across the walkers' heading` : `not placed (${wallStep.why})`}.`);
