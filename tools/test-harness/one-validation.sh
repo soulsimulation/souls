@@ -80,7 +80,7 @@ JS
 fi
 step V3-mars-engine 2400 env CAMPUS_FULL=$CAMPUS_FULL bash -c 'cd mars/viewer && node --test --test-reporter=tap --test-concurrency=4 engine/test/*.test.ts'
 step V3-client-cli 1800 node --test --test-reporter=tap --test-concurrency=1 tools/edge-skill/*.test.mjs tools/client-eval/*.test.mjs
-step V3-launcher-unit 1200 node --test --test-reporter=tap --test-concurrency=1 tools/world-launcher/*.test.mjs   # includes keeper.test (lane ports 5210-5259, keeper 6017-6019)
+step V3-launcher-unit 1200 node --test --test-reporter=tap --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs   # includes keeper.test (lane ports 5210-5259, keeper 6017-6019)
 # V4 web tests: node runner (compare the failure set with the baseline's, F6) and bundled .tsx tests
 step V4-web 900 bash tools/test-harness/web-suite.sh
 if [ "$BASELINE" != none ]; then

@@ -14,7 +14,7 @@ Read the instructions at WORLD_URL/instructions.md and follow them to create my 
 and get it living there. "WORLD_NAME" is the world's name, not the Soul's: give the Soul its own name.
 ```
 
-`/instructions.md` (from `tools/edge-skill/INSTRUCTIONS.md`, filled with the world's base and name) tells the agent to:
+`/instructions.md` (from `tools/world-launcher/soul/instructions.md`, filled with the world's base and name) tells the agent to:
 
 1. Use its current folder as the Soul's folder, fetch `/skill.md` and install it as a project skill.
 2. Fetch the self-contained CLI from `/eden-agent.mjs`, `register` the world and `create-soul "<Name>"`.
@@ -156,7 +156,7 @@ under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/uploa
 A Soul in a home keeps one memory across every world it visits, in `souls/<id>/memory/`: an append-only log
 (`memory/log/memory-events.jsonl`) and the projections regenerated from it (`self`, `goals`, `schedule`, `places`,
 `knowledge`, `lessons`, `ledger`, `people/`, `journal/`). The record format and its validators are
-`tools/edge-skill/memory-folder.mjs`, the same module the 1.9 line uses; every record on the shipping line adds `world`,
+`tools/world-launcher/soul/memory-folder.mjs`, the same module the 1.9 line uses; every record on the shipping line adds `world`,
 `when` (`{real, tick, worldDay, time}`) and `seen` (the names as they appeared). `tools/world-launcher/soul/memory.mjs`
 feeds it, and both are inlined into `eden.mjs`.
 
@@ -176,7 +176,7 @@ last seen on both clocks. `travel` adds one and leaves the Soul's folder where i
 `memory <words>` searches the projections and says where each line came from.
 
 The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
-`ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/edge-skill/memory-folder.mjs`). Each keeps its newest
+`ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/world-launcher/soul/memory-folder.mjs`). Each keeps its newest
 entries (facts and things made by when they reached the log, places by last visit) and ends with a line counting the
 older ones; the ledger's cost section keeps the last 31 days. `memory` also searches the log for the learned facts, things
 made and places a projection dropped, marked `log` and untrusted, and for the Soul's own note on a place that left
