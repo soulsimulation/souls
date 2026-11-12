@@ -131,6 +131,9 @@ version match and the served skill is the Souls skill, both checked before eithe
 working: it never downgrades the home. An upgrade keeps the client and skill it replaced, one version back, as
 `bin/eden-<version>.mjs` and `bin/skill-<version>.md`; `upgrade --rollback` makes them current again, unless a world in the
 home needs more, and the notice and `upgrade` then pass over the version left until a newer one is served or `--force`.
+A running `serve` follows `config.client` (#1940): on its 20 s beat, with no plan step in flight, it saves its state and starts
+the installed client's serve, which takes the lock and socket; the old one exits only once the new one answers `status`, and
+one that does not within 20 s is stopped while the old one keeps serving and names it in `serve --status` (`handoverFailed`).
 
 Platform news (#1941): a home reads the [platform feed](../operations.md#platform-feed) of each site it trusts (a world
 URL's origin and the path above `/w/<slug>`, plus `/v1/feed`), at most every 6 hours, keeping one cursor and the last 50

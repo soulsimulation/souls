@@ -5322,7 +5322,7 @@ async function guide() {
 const SERVE_SOCK = ".eden-serve.sock", SERVE_LOCK = ".eden-serve.lock", SERVE_STATE = ".eden-serve.json", SERVE_LOG = ".eden-serve.log";
 const SERVE_EVENTS_MAX = 1000, PENDING_EVENTS_MAX = 100; // the world keeps 1000 events per Soul; a read hands over at most 100
 const ADDRESSED_KEEP = 20, ADDRESSED_IDLE_MS = 45_000, ADDRESSED_BYE_MS = 60_000;   // the world beats every 15 s; a slot taken by a newer stream is left alone a while
-const SERVE_BEAT_MS = 20_000, SERVE_STALE_MS = 60_000, SERVE_CLOSED_KEEP = 50;
+const SERVE_BEAT_MS = 20_000, SERVE_STALE_MS = 60_000, SERVE_CLOSED_KEEP = 50, HANDOVER_MS = 20_000;
 const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupted", "replaced"]);
 const HELD_PATH = /^\/v1\/edge\/(wait|events)(\?|$|\/)/;  // long-polls and streams: never queued behind a heavy request
 let IS_SERVE = false;
@@ -5371,10 +5371,12 @@ function writeServeLock(start) { const tmp = `${SERVE_LOCK}.${process.pid}.tmp`;
 /** The lock file was just created and is not yet written: another serve is a moment into taking it. */
 // A writer fills it within moments, so an empty file older than 5 s is a start that died there, and counts for nothing.
 const serveLockFresh = () => { try { const st = lstatSync(SERVE_LOCK); return st.size === 0 && Date.now() - st.mtimeMs < 5_000; } catch { return false; } };
-function takeServeLock(start) {
+function takeServeLock(start, from) {
   try { closeSync(openSync(SERVE_LOCK, "wx", 0o600)); }
   catch (e) {
     if (e.code !== "EEXIST") throw e;
+    // #1940: the serve handing over to this one holds the lock until this one answers, and gives it up then
+    if (from && readServeLock()?.pid === from) { writeServeLock(start); return true; }
     if (serveHolder() || serveLockFresh()) return false;
     const h = readServeLock(); if (h?.pid && h.pid !== process.pid && pidAlive(h.pid) && serveIdentity(h.pid) === true) { try { process.kill(h.pid, "SIGTERM"); } catch { /* gone */ } }
   }
@@ -5658,12 +5660,14 @@ export function planView(p) {
 const REFLECT_FIRST_MS = 60_000, REFLECT_BUSY_MS = 600_000, REFLECT_QUIET_MS = 60_000, REFLECT_WAIT_MAX_MS = 6 * 3600_000;
 async function serveForeground() {
   IS_SERVE = true;
-  const start = now();
-  if (!takeServeLock(start)) { process.stderr.write("serve: already running in this folder\n"); process.exit(0); }
+  const start = now(), from = Number(process.env.EDEN_SERVE_HANDOVER) || null;
+  delete process.env.EDEN_SERVE_HANDOVER;
+  if (!takeServeLock(start, from)) { process.stderr.write("serve: already running in this folder\n"); process.exit(0); }
   // What this serve answers for: the state is one world's and one Soul's. A move starts clean.
   const folderKey = (x) => `${x.world ?? ""}|${x.soul ?? ""}`, soulToken = (x) => x.token ?? "";
-  let st = loadServeState();
-  const persist = () => { writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); };
+  let st = loadServeState(), handover = null, handoverFailed = null;
+  // #1940: while a newer client starts from what is on disk, this one leaves the file to it
+  const persist = () => { if (handover) return; writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); };
   const s = load(), world = need(s, "world", `Run: ${CLI} register <world-url>`);
   const auth = { "content-type": "application/json", authorization: `Bearer ${need(s, "token", "No Soul yet.")}` };
   const self = (x) => x.home?.soul ?? x.soul ?? "";
@@ -5941,7 +5945,7 @@ async function serveForeground() {
     return true;
   }
   async function planTick() {
-    if (planBusy) return;
+    if (planBusy || handover) return;   // #1940: no step starts while a newer client takes over
     planBusy = true;
     try {
       for (;;) {
@@ -6014,7 +6018,8 @@ async function serveForeground() {
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
-      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, since: start, cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+      return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, version: VERSION, since: start,
+        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
@@ -6055,7 +6060,7 @@ async function serveForeground() {
     }
     return { error: `unknown op ${m.op}` };
   }
-  const server = createServer((c) => {
+  const onConnection = (c) => {
     let text = "";
     c.on("error", () => {});
     c.on("data", (b) => {
@@ -6064,7 +6069,7 @@ async function serveForeground() {
       text = "";
       handle(m).then((out) => c.end(JSON.stringify(out) + "\n"), (e) => { log(`request: ${e.message}`); c.end(JSON.stringify({ status: 0, data: { error: { code: "unreachable", message: String(e.message) } } }) + "\n"); });
     });
-  });
+  };
   const shutdown = (code) => {
     stopping = true;
     try { persist(); } catch { /* its folder is gone: the signal still stops it, or nothing could */ }
@@ -6073,15 +6078,62 @@ async function serveForeground() {
     process.exit(code);
   };
   for (const [sig, n] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.once(sig, () => shutdown(n));
-  try { unlinkSync(SERVE_SOCK); } catch { /* none */ }
-  // Without its socket this process can do nothing: it stops rather than hold the lock.
-  server.on("error", (e) => { log(`socket: ${e?.message ?? e}; stopping`); shutdown(1); });
-  // The socket answers `pending` with the owner's messages: as private as the state file.
-  const umask = process.umask(0o177);
-  server.listen(SERVE_SOCK, () => { process.umask(umask); log(`serving pid ${process.pid}, cursor ${st.cursor ?? s.cursor ?? "c_0"}`); });
+  const listen = () => {
+    try { unlinkSync(SERVE_SOCK); } catch { /* none */ }
+    const server = createServer(onConnection);
+    // Without its socket this process can do nothing: it stops rather than hold the lock.
+    server.on("error", (e) => { log(`socket: ${e?.message ?? e}; stopping`); shutdown(1); });
+    // The socket answers `pending` with the owner's messages: as private as the state file.
+    const umask = process.umask(0o177);
+    server.listen(SERVE_SOCK, () => { process.umask(umask); log(`serving pid ${process.pid} (eden ${VERSION}), cursor ${st.cursor ?? s.cursor ?? "c_0"}`); });
+  };
+  listen();
   // #1737: the catalog and the live picture are kept current on disk, so find, query and look never wait on the world
   followWorld().catch(() => {}); setInterval(() => { followWorld().catch(() => {}); }, 2_000).unref();
-  setInterval(() => { if (moved()) { log("the folder's world, Soul or token changed: stopping"); shutdown(0); } else writeServeLock(start); }, SERVE_BEAT_MS);
+  // #1940: the client this home has installed (config.client, the copy in bin/), when it is not this one: after an upgrade or a rollback
+  const installed = () => {
+    const to = HOME?.config().client, bin = HOME ? joinPath(HOME.root, "bin", "eden.mjs") : null;
+    if (!to || to === VERSION || to === handoverFailed?.to) return null;
+    try { return /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(bin, "utf8"))?.[1] === to ? { to, bin } : null; } catch { return null; }
+  };
+  // On the beat, with no plan step in flight, the state is saved and the installed client's serve started beside this one. It takes the
+  // lock and the socket; this process exits only once it answers status there. If it does not within 20 s it is stopped, this one
+  // goes on serving, says so in status, and does not try that version again.
+  async function handOver() {
+    const next = !handover && !stopping && !terminal && !planBusy ? installed() : null;
+    if (!next) return;
+    persist();
+    handover = { to: next.to, since: now() };
+    const logFd = openSync(SERVE_LOG, "a", 0o600);
+    const child = spawn(process.execPath, [next.bin, "serve", "--foreground"], { detached: true, env: { ...process.env, EDEN_SERVE_HANDOVER: String(process.pid) }, stdio: ["ignore", logFd, logFd] });
+    child.unref(); closeSync(logFd);
+    let exited = null;
+    child.once("exit", (code, signal) => { exited = signal ?? `code ${code}`; });
+    child.once("error", (e) => { exited = e.code ?? "error"; });
+    log(`handover: starting eden ${next.to} (pid ${child.pid})`);
+    for (const until = Date.now() + HANDOVER_MS; Date.now() < until && !exited;) {
+      await sleep(200);
+      const a = await askServe({ op: "status" }, 2_000);
+      if (a?.serving && a.pid === child.pid) { log(`handover: eden ${next.to} answers as pid ${child.pid}; this one stops`); process.exit(0); }
+    }
+    // a stop asked while the new one held the socket: it removed the lock as it went, and this one goes too
+    if (exited && !readServeLock()) { log(`handover: eden ${next.to} was stopped; this one stops too`); shutdown(0); }
+    const why = exited ? `it exited (${exited}) before it answered` : `it did not answer within ${HANDOVER_MS / 1000} s`;
+    if (!exited) { try { child.kill("SIGTERM"); } catch { /* gone */ } for (let i = 0; i < 40 && !exited; i++) await sleep(50); if (!exited) { try { child.kill("SIGKILL"); } catch { /* gone */ } } }
+    handoverFailed = { to: next.to, at: now(), why };
+    handover = null;
+    log(`handover: eden ${next.to} ${why}; this one goes on serving`);
+    writeServeLock(start); persist();
+    const mine = await askServe({ op: "status" }, 2_000);
+    if (mine?.pid !== process.pid) listen();   // it took the socket before it failed
+    tick();
+  }
+  setInterval(() => {
+    if (moved()) { log("the folder's world, Soul or token changed: stopping"); shutdown(0); return; }
+    if (handover) return;   // the lock is the starting client's to take
+    writeServeLock(start);
+    handOver().catch((e) => { if (handover) handoverFailed = { to: handover.to, at: now(), why: String(e?.message ?? e) }; handover = null; log(`handover: ${e?.message ?? e}`); });
+  }, Math.max(250, SERVE_BEAT_MS * TIME_SCALE));
   // A resident client outlives what goes wrong around it: a loop that throws is logged and started again, and nothing unhandled ends the process.
   process.on("unhandledRejection", (e) => log(`unhandled: ${e?.message ?? e}`));
   process.on("uncaughtException", (e) => log(`uncaught: ${e?.message ?? e}`));
