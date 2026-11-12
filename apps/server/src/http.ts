@@ -51,7 +51,6 @@ import {mountStationRoutesV2} from './station-routes-v2.ts';
 import type {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
 import {EDGE_CONTRACT, EdgeError} from './edge/contract.ts';
-import {mountSecretPlaceRoutes} from './edge/perception/secret-routes.ts';
 import { mountGodRoutes } from './god/routes.ts';
 import { RefusalLog, floodGuard } from './flood.ts';
 import { poolOf } from './god/builds.ts';
@@ -64,7 +63,7 @@ import { mountArtRoutes } from './art/routes.ts';
 import { createPaintingService } from './art/painting-completion.ts';
 import { defaultAssetDir } from './god/assets.ts';
 import { mountEnvRoutes } from './god/world-env.ts';
-import { mountJoinRoutes, PUBLISHED_SOUL_CLI, safeWorldName } from './god/join.ts';
+import { mountJoinRoutes, safeWorldName } from './god/join.ts';
 import type { GodMode } from './god/god.ts';
 import {Travel,TravelError,launcherSite,TRAVEL_CONTRACT} from './travel/travel.ts';
 import { bodyRefResolvers } from './edge/body/routes.ts';
@@ -243,10 +242,10 @@ export function buildApp(d: Deps) {
   /** The title a visitor sees (viewer arrival card, Explore, welcome-back), served in /v1/config so the first frame never shows a slug. */
   const displayWorldName = d.god ? safeWorldName(worldName) : d.cfg.worldKey === 'littlemartians' ? 'Little Martians' : d.cfg.worldKey[0].toUpperCase() + d.cfg.worldKey.slice(1);
   // the world's one skill (/SKILL.md) and who lives here (/v1/world/souls): lane P2
-  if (d.god) { mountJoinRoutes(app, { worldName, baseOf, soulCliUrl: (c) => (d.cfg.cliFile ? baseOf(c) + '/eden-agent.mjs' : PUBLISHED_SOUL_CLI), souls: () => d.db.liveSouls(d.host.worldId).filter((s) => !travel?.isAway(s.id)), nowOf: (id) => d.host.nowOf(id), bodyOf: (id) => d.edge?.bodyRule?.view(id) ?? null, poseOf: (id) => { const p = (d.host.engine.world.entities as Record<string, { pose?: { p?: number[] } } | undefined>)[id]?.pose?.p; return p ? { x: p[0], y: p[1], z: p[2] } : null; } }); }
+  if (d.god) { mountJoinRoutes(app, { worldName, baseOf, souls: () => d.db.liveSouls(d.host.worldId).filter((s) => !travel?.isAway(s.id)), nowOf: (id) => d.host.nowOf(id), bodyOf: (id) => d.edge?.bodyRule?.view(id) ?? null, poseOf: (id) => { const p = (d.host.engine.world.entities as Record<string, { pose?: { p?: number[] } } | undefined>)[id]?.pose?.p; return p ? { x: p[0], y: p[1], z: p[2] } : null; } }); }
   const godRoutes = d.god ? mountGodRoutes(app, { god: d.god, worldName, requireUser, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, baseOf, limitIp, verifyUse: new VerifyUse(d.host, d.souls, d.god, d.edge), lookWorldUrl: `http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}` /* W2 remote looks */ }) : null;
   if(d.god&&d.edge)mountContextViews(app,{god:d.god,edge:d.edge,build:d.cfg.build,artOriginals:{dir:join(defaultAssetDir(),'art'),basePath:d.cfg.worldPath},levelAt:d.contextLevelAt,contextReady:d.contextReady,waitForContext:d.contextWait,worldUrl:`http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}`,soul:c=>{const token=bearer(c);if(!token)return null;return travelGate(edgeSoulResolver(d.host,d.souls,bearer))(c).soulId;},limit:c=>limitIp(c,'context-views',120,60000)});
-  if (d.god && d.edge) { const god = d.god; mountSecretPlaceRoutes(app, { ledger: d.edge, requireGod: (c) => { const who = god.godIdentity(bearer(c)); if (!who) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); if (who.child) throw new ApiError(403, 'helper.scope', 'helper tokens cannot change secret places'); } }); }  // knowledge/1; WD7: helpers refused
+  // #1262: the god route that marked a place secret (secret-routes.ts) is unmounted; no place is secret
   if (d.god) { const god = d.god; mountSharedLibraryRoutes(app, { god, slug: d.cfg.worldKey, dir: process.env.SIM_LIBRARY_DIR, requireGod: (c) => { if (!god.godFromToken(bearer(c))) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); } }); }  // M4 shared library
   if (d.god) { const god = d.god; mountArtRoutes(app, { model: () => god.model, godAct: (ops, note) => god.act({ ops }, note), engineAct: (ops, note) => god.engineAct(ops, note), isGod: (c) => { const w = god.godIdentity(bearer(c)); return !!w && !w.child; }, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, owner: () => god.owner, baseOf, limitIp, dir: join(defaultAssetDir(), 'art') }); }  // W6 art: frames, screens, gallery walls
   if (d.god && d.edge) {
@@ -385,7 +384,8 @@ export function buildApp(d: Deps) {
     try{const code=c.req.query('for')??null,text=fillInstructions(readFileSync(d.cfg.instructionsFile,'utf8'),baseOf(c),displayWorldName,code,publicWorldBase(d.cfg));return c.text(text,200,{'content-type':'text/markdown; charset=utf-8','cache-control':code?'no-store':'public, max-age=60'});}
     catch{return c.json({ok:false,code:'instructions-unavailable'},503);}
   });
-  app.get('/eden-agent.mjs', c => { if (!d.cfg.cliFile) throw new ApiError(404, 'not-found', 'no agent CLI is published on this world'); let js: string; try { js = readFileSync(d.cfg.cliFile, 'utf8'); } catch { throw new ApiError(404, 'not-found', 'agent CLI unavailable'); } return c.body(js, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=60' }); });
+  // #1754: the legacy client is retired. Its path answers 404 here, before the web app's catch-all, so no world serves it.
+  app.get('/eden-agent.mjs', () => { throw new ApiError(404, 'not-found', 'the legacy client is retired: fetch /eden.mjs'); });
   app.get('/eden.mjs', c => { if (!d.cfg.controllerCliFile) throw new ApiError(404, 'not-found', 'no controller CLI is published on this world'); let js: string; try { js = readFileSync(d.cfg.controllerCliFile, 'utf8'); } catch { throw new ApiError(404, 'not-found', 'controller CLI unavailable'); } return c.body(js, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=60' }); });
   mountSoulRuntimePublication(app,()=>d.cfg.controllerCliFile);
   app.get('/v1/skill.md', skill);

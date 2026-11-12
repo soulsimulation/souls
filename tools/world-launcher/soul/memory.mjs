@@ -1,4 +1,4 @@
-// memory.mjs: one memory per Soul across worlds. It keeps the record format of tools/edge-skill/memory-folder.mjs and
+// memory.mjs: one memory per Soul across worlds. It keeps the record format of memory-folder.mjs and
 // feeds it what the client already received: no HTTP, no model. Design: docs/design/soul-context.md section 2.
 //
 // Everything here comes from a world, and a world may lie: this is where its answers are bounded to what a record takes.
@@ -9,7 +9,7 @@
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join, relative } from "node:path";
-import { PROJECTION_BUDGETS, openMemoryFolder } from "../../edge-skill/memory-folder.mjs";
+import { PROJECTION_BUDGETS, openMemoryFolder } from "./memory-folder.mjs";
 import { buildBrief } from "./brief.mjs";
 import { SUMMARY } from "./consolidate.mjs";
 import { createPeople } from "./people.mjs";

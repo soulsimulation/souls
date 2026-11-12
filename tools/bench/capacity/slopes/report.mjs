@@ -50,6 +50,12 @@ export function subtreeTop(p, root = '', fn = 'stepEngine', file = 'apps/server/
   return { sampledMs: r(sampledMs, 0), gcMs: r(gcMs, 0), stepMs: r(subMs, 0), top: [...by].sort((a, b) => b[1] - a[1]).slice(0, n).map(([f, ms]) => ({ fn: f, ms: r(ms, 0), share: subMs ? r(ms / subMs, 3) : null })) };
 }
 
+/** #2077: a walkers arm's walks → how many it sent and how many the world answered and accepted (outcome ok). A walk
+ *  that got no answer, timed out, or was refused is sent but not reached. */
+export function reachedShare(calls) {
+  const sent = calls.length, ok = calls.filter((c) => c.outcome === 'ok').length;
+  return { sent, ok, share: sent ? +(ok / sent).toFixed(3) : null };
+}
 /** Walker arms → the tick time each walker adds (mean tick ms, 25 → 100 walkers) and whether it grows in a straight
  *  line: the 50 → 100 slope within 25 % of the 25 → 50 slope (the bar declared on #1961 before the run). */
 export function walkerSlope(all) {
@@ -63,8 +69,9 @@ export function walkerSlope(all) {
 // The per-route probe (serial, rotating over the registered Souls, nothing else active) and the active window's per-Soul demand: CW1's rates
 // (a read every 4 s, an act every 20 s, one call at a time) with acts that never move a Soul, so the neighbourhood
 // stays the same in every arm. Walk planning (#454) is not exercised here.
-export const PROBE_ROUTES = Object.freeze(['here', 'observe', 'capabilities', 'resolve', 'act']);
-export const ACTS = Object.freeze(['look left', 'wave', 'say', 'look right', 'nod', 'say']);
+// #1972: no resolve route; acts are catalog ids (the client of #1945 is strict): attention is a point, gestures anywhere acts
+export const PROBE_ROUTES = Object.freeze(['here', 'observe', 'capabilities', 'act']);
+export const ACTS = Object.freeze(['point:here', 'wave:here', 'say', 'point:here', 'nod:here', 'say']);
 
 // The active window's plan: per Soul, a read every 4 s and an act every 20 s from seeded offsets. The demand is strictly
 // periodic, so a Soul's phase against the others holds for the whole window and decides how often its calls queue
@@ -207,7 +214,7 @@ export function reportText(receipt, all) {
   const s = slopes(all), L = [], walks = all.filter((x) => !x.error && x.arm?.walkers != null), results = all.filter((x) => !x.error && x.arm?.walkers == null), failed = all.filter((x) => x.error);
   L.push(`# Slopes bench (${SLOPES}) — ${receipt.indicative ? 'INDICATIVE (not a qualifying run)' : 'qualifying executor'}`, '');
   L.push(`Source ${receipt.source?.commit ?? '?'}${receipt.source?.dirty ? ' (dirty)' : ''} · host class ${receipt.host?.class} · ${receipt.host?.cores} cores · quiet declared ${!!receipt.host?.quietDeclared} · repeats ${receipt.repeats} · windows quiet ${receipt.windows?.quietS} s / active ${receipt.windows?.activeS} s · fake minds`, '');
-  L.push('| arm | rep | placed | reg/active | quiet worlds | quiet cores | active cores | CPU-ms/served | served/s | e2e p95 ms | crowded reads | probe CPU-ms here/observe/caps/resolve/act | loop p99 max ms | RSS max MB | boot s |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  L.push('| arm | rep | placed | reg/active | quiet worlds | quiet cores | active cores | CPU-ms/served | served/s | e2e p95 ms | crowded reads | probe CPU-ms here/observe/caps/act | loop p99 max ms | RSS max MB | boot s |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const x of results) {
     const p = (k) => x.probe?.[k]?.cpuMsPerCall ?? '?';
     L.push(`| ${x.arm.id} | ${x.rep} | ${x.facts?.placed ?? '?'} | ${x.arm.registered}/${x.arm.active} | ${x.arm.quiet} | ${x.windows?.quiet?.cores ?? '?'} | ${x.windows?.active?.cores ?? '?'} | ${x.active?.cpuMsPerServed ?? '—'} | ${x.active?.servedPerS ?? '—'} | ${x.active?.endToEnd?.p95 ?? '—'} | ${x.schedule?.crowdedReadFrac ?? '—'} | ${PROBE_ROUTES.map(p).join(' / ')} | ${x.live?.active?.loopP99MsMax ?? '?'} | ${x.windows?.active?.rssMbMax ?? '?'} | ${x.boot?.seconds ?? '?'} |`);
@@ -217,10 +224,10 @@ export function reportText(receipt, all) {
     for (const x of failed) L.push(`| ${x.arm?.id ?? '?'} | ${x.rep ?? '?'} | ${String(x.error).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 300)} |`);
   }
   if (walks.length) {
-    L.push('', `## Where a tick's time goes (#1961): ${WALK_TICKS} ticks per arm`, '', `| arm | ticks | ticks/s | p50 ms | p99 ms | mean ms | ${SPAN_NAMES.join(' | ')} | other | GC ms of sampled | snapshot in run | engine step: top five (self ms, share of step) |`, `|---|---|---|---|---|---|${SPAN_NAMES.map(() => '---|').join('')}---|---|---|---|`);
+    L.push('', `## Where a tick's time goes (#1961): ${WALK_TICKS} ticks per arm`, '', `| arm | ticks | ticks/s | p50 ms | p99 ms | mean ms | ${SPAN_NAMES.join(' | ')} | other | GC ms of sampled | snapshot in run | walks reached | engine step: top five (self ms, share of step) |`, `|---|---|---|---|---|---|${SPAN_NAMES.map(() => '---|').join('')}---|---|---|---|---|`);
     for (const x of walks) {
       const t = x.ticks ?? {}, sh = t.shares ?? {}, p = x.stepProfile;
-      L.push(`| ${x.arm.id} | ${t.ticks ?? '?'} | ${x.facts?.ticksPerS ?? '?'} | ${t.p50Ms ?? '?'} | ${t.p99Ms ?? '?'} | ${t.meanMs ?? '?'} | ${[...SPAN_NAMES, 'other'].map((k) => sh[k] ?? '?').join(' | ')} | ${p ? `${p.gcMs} of ${p.sampledMs}` : '—'} | ${t.snapshotTicks?.length ? `yes (ticks ${t.snapshotTicks.join(', ')})` : 'no'} | ${p ? p.top.map((f) => `\`${f.fn}\` ${f.ms} (${f.share})`).join('<br>') : '—'} |`);
+      L.push(`| ${x.arm.id} | ${t.ticks ?? '?'} | ${x.facts?.ticksPerS ?? '?'} | ${t.p50Ms ?? '?'} | ${t.p99Ms ?? '?'} | ${t.meanMs ?? '?'} | ${[...SPAN_NAMES, 'other'].map((k) => sh[k] ?? '?').join(' | ')} | ${p ? `${p.gcMs} of ${p.sampledMs}` : '—'} | ${t.snapshotTicks?.length ? `yes (ticks ${t.snapshotTicks.join(', ')})` : 'no'} | ${x.reached?.sent ? `${x.reached.ok}/${x.reached.sent} (${x.reached.share})` : '—'} | ${p ? p.top.map((f) => `\`${f.fn}\` ${f.ms} (${f.share})`).join('<br>') : '—'} |`);
     }
     L.push('', `Per walker: \`${JSON.stringify(walkerSlope(walks))}\``);
   }

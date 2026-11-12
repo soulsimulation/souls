@@ -122,9 +122,15 @@ const cardOutcome = (card) => card?.outcome ?? (['done', 'failed'].includes(card
  *   {posture:"seated"}                      bodyState.posture
  *   {receipt:{verb, phases?, thingKind?}}   a receipt since the owner's message for this verb, started or completed
  *                                           (thingKind: its chosen target is a thing of that catalog kind)
- *   {card:"failed"|"done"|"closed"}         the card's state (closed: either) */
+ *   {card:"failed"|"done"|"closed"}         the card's state (closed: either)
+ *   {calendarInterest:"first"}              the first item the calendar listed for the next hour when the instruction was
+ *                                           sent (ctx.calendarFirst) lists the Soul as coming (#1924; ctx.calendar) */
 export function judge(check, ctx) {
   const { obs, newReceipts = [], card = null, catalog = null } = ctx;
+  if (check.calendarInterest) {
+    const it = (ctx.calendar ?? []).find((x) => x.id === ctx.calendarFirst), ok = !!it?.interested?.some((x) => x.soulId === ctx.soulId);
+    return ok ? { ok: true, why: `interested in ${it.id}` } : { ok: false, why: it ? `not interested in ${it.id}` : 'no first calendar item' };
+  }
   if (check.all) { for (const c of check.all) { const r = judge(c, ctx); if (!r.ok) return r; } return { ok: true, why: 'all held' }; }
   if (check.any) { const rs = check.any.map((c) => judge(c, ctx)); const hit = rs.find((r) => r.ok); return hit ?? { ok: false, why: rs.map((r) => r.why).join('; ') }; }
   if (check.place) { const hit = check.place.find((p) => obs.placeIds.includes(p)); return hit ? { ok: true, why: `in ${hit}` } : { ok: false, why: `at ${obs.place}, not in ${check.place.join('|')}` }; }
