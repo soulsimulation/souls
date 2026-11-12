@@ -760,7 +760,7 @@ export const CI_COVERED = {
   'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
   'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
   'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
-  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', defs: [], tests: true },
+  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs', defs: [], tests: true },
   'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
   'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
