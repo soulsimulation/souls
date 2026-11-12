@@ -4246,7 +4246,9 @@ async function around(...args) {
   // Directions are a sibling of the local surroundings, not part of them.
   // Never silently discard a requested destination on an older server either.
   const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use resolve "walk to <destination>" or caps --verb walk --search "<destination>".' } : undefined);
-  return { ...aroundPositions(d.around, (await syncLive())?.live?.souls), ...(route ? { route } : {}) };
+  // the live picture is fetched only when there are Souls to place
+  const souls = d.around?.souls?.length ? (await syncLive())?.live?.souls : null;
+  return { ...aroundPositions(d.around, souls), ...(route ? { route } : {}) };
 }
 /** #2225: each nearby Soul's position `[x, z]` beside its bearing ("Moss · 0.9m front-right at [3.1, 2]"), from the live
  *  picture. `around` names them in `people` and `souls` in one order; a Soul the picture does not place is left as it is. */
