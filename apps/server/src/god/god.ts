@@ -129,7 +129,7 @@ export class GodMode {
    *  Null in worlds without the engine. */
   bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[];
     /** legal-edits/1 (engine-bridge.ts legalCheck): refusals for an edit about to commit, 'pending' while its preview has not run */
-    legal?: (before: WorldModel, after: WorldModel, diff: Diff, o?: { dry?: boolean }) => Failure[] | 'pending' | null; legalRun?: () => Promise<Failure[] | null> } | null = null;
+    legal?: (before: WorldModel, after: WorldModel, diff: Diff, o?: { dry?: boolean }) => Failure[] | 'pending' | null; legalRun?: () => Promise<Failure[] | null>; legalDone?: () => void } | null = null;
   /** Bridge admission/decoration must run before the accepted receipt is persisted, and never on replay. */
   actGuard: ((batch: unknown) => Result | null) | null = null;
   finalizeAct: ((result: Result, after: WorldModel) => Result) | null = null;
@@ -404,13 +404,13 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
    *  the tick thread and run the request again with the same caller; the world may change between tries, so at most three. */
   async checked<T>(fn: () => T): Promise<T | (Result & { ok?: false })> {
     const caller = this.caller;
-    for (let round = 0; ; round++) {
+    try { for (let round = 0; ; round++) {
       const r = this.as(caller, fn);
       if (!isPending(r)) return r;
       if (round === 3 || !this.bodies?.legalRun) return { accepted: false, ok: false, failures: [{ op: -1, code: 'edit-preview.busy', field: 'legal-edits/1', detail: 'The world kept changing while this edit was checked, so it was not made.', measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }] };
       const refused = await this.bodies.legalRun();
       if (refused) return { accepted: false, ok: false, failures: refused };   // `ok`: a build rewind's refusal shape too
-    }
+    } } finally { this.bodies?.legalDone?.(); }   // a verdict never outlives the request that waited for it
   }
   /** legal-edits/1: the bridge's refusal of an edit about to commit (null: the rule is off or the edit passes). */
   private legalGate(after: WorldModel, diff: Diff, o?: { dry?: boolean }): Result | null {

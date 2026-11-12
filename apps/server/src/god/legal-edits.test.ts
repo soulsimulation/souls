@@ -88,6 +88,14 @@ test('legal-edits/1: a wall on a standing Soul is refused by name, on an empty s
   // a burying undo: the wall is removed, Bo stands where it was, the undo of the removal would put it back on Bo
   assert.equal((await w.god.checked(() => w.god.act({ ops: [{ op: 'remove', id: w.god.model.get('wall')!.id }] })) as any).accepted, true);
   await w.settle(2);
+  // a dry run's verdict never answers a later commit: dry-run a wall on an empty spot, Bo steps onto it, the commit is
+  // previewed again on the world as it is then and refused by the preview's rule
+  const spot2: [number, number] = [here[0] - 8, here[1]];
+  assert.equal((await w.god.checked(() => w.god.dryrun(wall('probe', spot2))) as any).accepted, true, 'empty spot: dry run accepted');
+  await accept(w.host, w.host.enqueue('edge-relocate', 'test:stand', { soulId: bo.soulId, entityId: bo.entityId, to: spot2, why: 'stand on the probed spot' })); await w.settle(3);
+  const late: any = await w.god.checked(() => w.god.act(wall('probe', spot2)));
+  assert.equal(late.accepted, false, JSON.stringify(late));
+  assert.ok(late.failures.some((x: any) => x.entity === bo.entityId && x.measured?.rule === 'collision.human-static'), `the commit's own preview names Bo: ${JSON.stringify(late.failures)}`);
   await accept(w.host, w.host.enqueue('edge-relocate', 'test:stand', { soulId: bo.soulId, entityId: bo.entityId, to: spot, why: 'stand where the wall was' })); await w.settle(3);
   const there = w.at(bo.entityId);
   assert.ok(Math.hypot(there[0] - spot[0], there[1] - spot[1]) < 0.3, `Bo stands on the wall's spot: ${there}`);

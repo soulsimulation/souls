@@ -399,7 +399,7 @@ export class EngineBridge {
       refuse: (after, diff, ops, o) => this.protectedBody(after, diff, ops, o?.undo === true),
       prepare: (before, after, diff, _ops, o) => { if (o?.dry !== true) { try { this.arrivalShaped = shapedIds(before, diff); } catch { this.arrivalShaped = null; } this.navShaped = this.arrivalShaped && navDoorFlips(before, diff, this.arrivalShaped); this.navBefore = this.navSpots(before, [...diff.removes, ...(this.navShaped ?? diff.upserts.map(e => e.id))]); } return this.prepareWalkouts(before, after, diff, o?.dry === true); },
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
-      legal: (before, after, diff, o) => this.legalCheck(before, after, diff, o?.dry === true), legalRun: () => this.legalRun(),
+      legal: (before, after, diff, o) => this.legalCheck(before, after, diff, o?.dry === true), legalRun: () => this.legalRun(), legalDone: () => { this.verdict = null; this.wanted = null; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
       navNote: (diff, said) => this.navNoteFor(diff, said),
       framesNote: () => this.framesNote(),
@@ -1497,11 +1497,13 @@ export class EngineBridge {
     } catch (e) { this.log(`walk-out planning: ${(e as Error).message}`); return { moved: [], warnings: [], touched: [] }; }
   }
   // ---- legal-edits/1 (legal by construction 1b, docs/design/legal-by-construction.md part 1)
-  /** The last preview's verdict, by key (the physics it applies to and the draft): what it found and the tick it was taken
-   *  at. Used once, by the request that waited for it (its retry runs as soon as the preview answers); a new preview drops it. */
-  private verdict: { key: string; tick: number; failures: Failure[] } | null = null;
+  /** The last preview's verdict, by key (the physics it applies to and the draft): what it found, the tick it was taken at,
+   *  and whether a dry run asked for it. It lives only inside the request that waited for it (`legalDone` drops it when that
+   *  request ends, and a new preview replaces it). A commit uses only a verdict a commit asked for, and uses it up; a dry run or
+   *  preview reads any verdict without using it up. So a commit is always checked against the world as it is at that commit. */
+  private verdict: { key: string; tick: number; failures: Failure[]; dry: boolean } | null = null;
   /** The edit the last check found unpreviewed: `legalRun` previews it off the tick thread. */
-  private wanted: { key: string; draft: WorldEditV1 } | null = null;
+  private wanted: { key: string; draft: WorldEditV1; dry: boolean } | null = null;
   /** Tests: how long an edit's preview may take (default edit-preview.ts PREVIEW_TIMEOUT_MS). */
   legalTimeoutMs?: number;
   /** Under legal-edits/1, a god edit, undo or redo is refused when its preview (the world-edit it would send, applied to a
@@ -1516,12 +1518,9 @@ export class EngineBridge {
     this.flush(); this.host.drainInputs();
     const draft = this.draftFor(after, diff), failures: Failure[] = [];
     if (draft) {
-      const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key ? this.verdict : null;
-      // a verdict answers the one request that waited for it: the next request is previewed on the world as it is then. A dry
-      // run or preview reads it without using it up, so a request that dry-runs and then commits the same edit (the repair
-      // walk) needs one preview
+      const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key && (dry || !this.verdict.dry) ? this.verdict : null;
       if (!dry) this.verdict = null;
-      if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft }; return 'pending'; }
+      if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft, dry }; return 'pending'; }
       failures.push(...v.failures);
     }
     const named = new Set(failures.map(f => f.entity));
@@ -1540,7 +1539,7 @@ export class EngineBridge {
     const tick = this.engine.world.tick, p = await previewWorldEditOffThreadV1(this.host, want.draft, this.legalTimeoutMs ? { timeoutMs: this.legalTimeoutMs } : {});
     if (!p.ok) return [{ op: -1, code: p.code, field: 'legal-edits/1', detail: `This edit could not be checked, so it was not made: ${'message' in p ? p.message : p.code}.`, measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }];
     const failures = p.violations.flatMap(v => this.violationFailures(v));
-    this.verdict = { key: want.key, tick, failures };
+    this.verdict = { key: want.key, tick, failures, dry: want.dry };
     return null;
   }
   private violationFailures(v: PreviewViolationV1): Failure[] {
