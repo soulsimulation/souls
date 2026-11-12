@@ -363,6 +363,13 @@
       "to": "a far hand-worked thing: left out of the whole menu, taken by id with a walk",
       "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
       "pr": "#2016"
+    },
+    {
+      "step": "V4-web",
+      "from": "social crawlers receive the Souls identity and immutable supplied halo without JavaScript",
+      "to": "social crawlers receive the Souls identity and the large starburst card without JavaScript",
+      "reason": "Same test, renamed when the social card changed from the CDN halo to the large starburst (pwa/icon-social.png)",
+      "pr": "#2177"
     }
   ]
 }
