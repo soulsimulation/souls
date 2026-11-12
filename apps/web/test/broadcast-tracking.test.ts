@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {Tracker,tracked,hotspotView,pathClear,TRACK_TYPES,GLIDE,type Scenery} from '../src/broadcast-tracking.ts';
+import {Tracker,tracked,hotspotView,pathClear,TRACK_TYPES,GLIDE,FRAME_QUERIES,type Scenery} from '../src/broadcast-tracking.ts';
 import {makeMove} from '../src/WorldTour.ts';
 
 type Box=[number,number,number,number,number,number];// minx,miny,minz,maxx,maxy,maxz
@@ -12,7 +12,9 @@ const scenery=(boxes:Box[]):Scenery=>({
       if(t0<=t1&&t0<=1)best=Math.min(best,t0*len);}return best;}});
 const inside=(p:readonly number[],b:Box)=>p[0]>b[0]&&p[0]<b[3]&&p[1]>b[1]&&p[1]<b[4]&&p[2]>b[2]&&p[2]<b[5];
 const run=(t:Tracker,s:Scenery,centre:(now:number)=>number[],from:number,to:number,dt=1/60)=>{const out:{now:number;pose:{position:number[];target:number[]}|null;type:string|null;cut:boolean}[]=[];
-  for(let now=from;now<to;now+=dt){const r=t.pose('group:a',centre(now),3,now,s);out.push({now,pose:r?.pose??null,type:r?.type??null,cut:!!r?.cut});}return out;};
+  for(let now=from;now<to;now+=dt){const q=t.pose('group:a',centre(now),3,now,s),r=q==='pending'?null:q;out.push({now,pose:r?.pose??null,type:r?.type??null,cut:!!r?.cut});}return out;};
+/** The first answer that is not 'pending' (planning is spread over frames). */
+const settle=(t:Tracker,s:Scenery)=>{for(let f=0;f<200;f++){const r=t.pose('group:a',[0,0,0],2,f/60,s);if(r!=='pending')return r;}return 'pending';};
 
 test('#2202 B2: gatherings and activity are tracked; two-shots, gestures, riders and walkers keep the solver', () => {
   assert.ok(tracked({key:'group:a',label:'group',members:['a','b','c']}));
@@ -26,8 +28,9 @@ test('#2202 B2: gatherings and activity are tracked; two-shots, gestures, riders
 });
 
 test('#2202 B2: moves ease in and out, each type in turn, and the next one glides in with no jump', () => {
-  const t=new Tracker(4),open=scenery([]),frames=run(t,open,()=>[0,0,0],0,90);
-  assert.ok(frames.every(f=>f.pose),'open ground: always a moving shot');
+  const t=new Tracker(4),open=scenery([]),all=run(t,open,()=>[0,0,0],0,90),first=all.findIndex(f=>f.pose),frames=all.slice(first);
+  assert.ok(first>=0&&first<10,'the first move is planned within a few frames: '+first);
+  assert.ok(frames.every(f=>f.pose),'open ground: then always a moving shot');
   const types=frames.map(f=>f.type).filter((x,i,a)=>x!==a[i-1]);
   assert.deepEqual(new Set(types.slice(0,4)),new Set(TRACK_TYPES),'the four types before any repeats: '+types.join());
   // eased: the eye's speed is near zero where a move starts and ends, and no frame jumps
@@ -65,11 +68,23 @@ test('#2202 B2: never through scenery: every eye is clear and no frame-to-frame 
   }
   // A closed room: no move is clear, so Broadcast keeps its solver (null), and asks again only after a pause.
   const room=scenery([[-5,-1,-5,5,0,5],[-5,4,-5,5,5,5],[-6,0,-6,-5,4,6],[5,0,-6,6,4,6],[-6,0,-6,6,4,-5],[-6,0,5,6,4,6]]);
-  assert.equal(new Tracker(1).pose('group:a',[0,0,0],2,0,room),null);
+  assert.equal(settle(new Tracker(1),room),null);
   // Under a roof on open sides (a pavilion), the framing solver is better: no moving shot.
-  assert.equal(new Tracker(1).pose('group:a',[0,0,0],2,0,scenery([[-2.5,2.6,-2.5,2.5,2.8,2.5]])),null);
+  assert.equal(settle(new Tracker(1),scenery([[-2.5,2.6,-2.5,2.5,2.8,2.5]])),null);
   // pathClear sees a wall between two samples
   const m=makeMove(hotspotView([0,0,0],2,0),'orbit',12,1),thin=scenery([[8.5,0,-.05,12,6,.05]]);
   assert.ok(pathClear(m,[0,0,0],0,1,scenery([])));
   assert.ok(!pathClear(m,[0,0,0],0,1,thin),'a thin wall across the arc');
+});
+
+test('#2202 B2: planning is spread over frames: no frame makes more than FRAME_QUERIES scenery queries', () => {
+  const walls:Box[]=[[-12,0,-12,12,8,-11],[-12,0,11,12,8,12],[-12,0,-12,-11,8,12],[7,0,-1,8,9,1]],inner=scenery(walls);
+  for(const [label,base] of [['open',scenery([])],['walled yard',inner]] as const)for(const seed of [1,2,3,4,5,6]){
+    let n=0,most=0,planning=0;const counted:Scenery={clear:p=>{n++;return base.clear(p);},reach:(a,b)=>{n++;return base.reach(a,b);}};
+    const t=new Tracker(seed);
+    for(let now=0;now<80;now+=1/60){n=0;const r=t.pose('group:a',[Math.sin(now/7)*2,0,0],3,now,counted);if(r==='pending')planning++;most=Math.max(most,n);}
+    assert.ok(most<=FRAME_QUERIES,`${label} seed ${seed}: ${most} queries in one frame (at most ${FRAME_QUERIES})`);
+    assert.ok(planning<30,`${label} seed ${seed}: the first move waited ${planning} frames`);
+  }
+  assert.ok(FRAME_QUERIES<=20);
 });

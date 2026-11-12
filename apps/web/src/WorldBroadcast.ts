@@ -105,6 +105,8 @@ export class WorldBroadcast {
   /** #2202 (B2): moving tracking shots on gatherings and activity (broadcast-tracking.ts). */
   private tracker = new Tracker();
   private trackPrepared = -Infinity;
+  /** The pose last put on screen (before the horizon lift), held while a tracking shot is planned. */
+  private shown: CameraPose | null = null;
   /** P7f: the view the arrival camera already shows (arrival-shot.ts: the phone's poster, LiveWorld's first frames), or null.
    *  The first tour shot is then that view's opening push from k = 0 (WorldTour.openingMove), even when the arrival is
    *  already over (the phone holds the broadcast until its world is filled in), so it starts exactly where the camera is.
@@ -136,7 +138,7 @@ export class WorldBroadcast {
     this.lastTick = this.lastDecisionWall = -Infinity;
     this.signature = '';
     this.semanticVersion = 0;
-    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset(); this.trackPrepared = -Infinity;
+    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset(); this.trackPrepared = -Infinity; this.shown = null;
   }
 
   /** The shot for this frame, its aim lifted toward the horizon (C1, broadcast-horizon.ts). */
@@ -144,6 +146,7 @@ export class WorldBroadcast {
     tick: number, dt: number, aspect: number, wallSeconds: number, movementDt: number,renderRoots:readonly THREE.Object3D[]=[] ) {
     const started = performance.now();
     const shot = this.direct(frame, records, scene, tick, dt, aspect, wallSeconds, movementDt, renderRoots);
+    this.shown = shot?.pose ?? null;
     // #2202: the camera's own cost per frame (ms), last 600 frames, for the cost budget (docs/design/auto-camera.md §5).
     const cost = ((globalThis as unknown as { __soulsBroadcastCost?: number[] }).__soulsBroadcastCost ??= []); cost.push(performance.now() - started); if (cost.length > 600) cost.shift();
     return shot?.pose ? { ...shot, pose: { ...shot.pose, target: liftHorizon(shot.pose.position, shot.pose.target) } } : shot;
@@ -190,7 +193,9 @@ export class WorldBroadcast {
       if (wallSeconds - this.trackPrepared >= .1 || wallSeconds < this.trackPrepared) { this.rendered.prepare(renderRoots); this.trackPrepared = wallSeconds; }
       const moving = this.rendered.evaluate(() => this.tracker.pose(choice.key, centre, spread, wallSeconds,
         { clear: p => this.rendered.clear(p, .8), reach: (a, b) => this.rendered.reach(a, b) }));
-      if (moving) { this.lastTick = tick; this.signature = ''; return { pose: moving.pose, shot: `${choice.label}:track-${moving.type}` }; }
+      // While the first move is planned (a few frames), the shot that was on screen holds; then the move cuts in.
+      if (moving === 'pending' && this.shown) { this.lastTick = tick; this.signature = ''; return { pose: this.shown, shot: `${choice.label}:track-planning` }; }
+      if (moving && moving !== 'pending') { this.lastTick = tick; this.signature = ''; return { pose: moving.pose, shot: `${choice.label}:track-${moving.type}` }; }
     } else this.tracker.reset();
     // Conversations prefer the two-shot; everything else uses the readable "clear" program.
     this.director.policy = choice.twoShot ? 'restrained' : 'clear';

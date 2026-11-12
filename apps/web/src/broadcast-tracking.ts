@@ -17,10 +17,13 @@ import { makeMove, rng, type MoveType, type TourMove, type TourPose, type TourVi
 
 export const TRACK_TYPES: readonly MoveType[] = ['orbit', 'dolly', 'crane-up', 'push'];
 export const CENTRE_EMA = 1.5, CHECK = 1, GLIDE = 2.5, MOVE_MIN = 10, MOVE_MAX = 20, RETRY = 3;
+/** Planning a move is spread over frames: at most STEPS checks a frame (a check is at most four scenery queries), so a
+ *  frame makes at most FRAME_QUERIES queries in all (with the frame's own clear and sightline check and the glide in). */
+export const STEPS = 3, FRAME_QUERIES = STEPS * 4 + 5;
 /** AIM: the height the shot aims at above the centre's feet. SKY: open sky needed above the hotspot. SIGHT_EVERY: the
  *  sightline is re-cast this often (seconds), at the decision rate. REPLANS: re-solves allowed in RETRY s. SAMPLES: where a move's
  *  path is checked. (The eye clearance radius is the scenery's.) */
-const AIM = 1.2, SKY = 40, SIGHT_EVERY = .1, REPLANS = 3, SAMPLES = [0, .2, .4, .6, .8, 1];
+const AIM = 1.2, SKY = 40, SIGHT_EVERY = .1, REPLANS = 3, LEAD = 1, SAMPLES = [0, .2, .4, .6, .8, 1];
 
 export type TrackChoice = { key: string; label: string; members: readonly string[] };
 /** Gatherings and activity get a moving shot: a group, a game, a talk circle, a Soul busy at something, and a conversation
@@ -85,36 +88,57 @@ export class Tracker {
   private failed = -Infinity;
   private shown = new Map<MoveType, number>();
   get type(): MoveType | null { return this.move?.type ?? null; }
-  reset() { this.seen = -Infinity; this.replans = []; this.key = ''; this.centre = null; this.move = null; this.from = null; this.last = null; this.failed = -Infinity; }
+  reset() { this.planning = null; this.blocked = false; this.seen = -Infinity; this.replans = []; this.key = ''; this.centre = null; this.move = null; this.from = null; this.last = null; this.failed = -Infinity; }
 
-  /** The tracking pose for hotspot `key` (members' raw centre and spread) at `now` seconds, or null when no move is clear. */
-  pose(key: string, raw: readonly number[], spread: number, now: number, s: Scenery): { pose: TourPose; type: MoveType; cut: boolean } | null {
+  /** The tracking pose for hotspot `key` (members' raw centre and spread) at `now` seconds; `'pending'` while the first
+   *  move is being planned (Broadcast holds the shot it had); null when no move is clear (Broadcast's solver takes it). */
+  pose(key: string, raw: readonly number[], spread: number, now: number, s: Scenery): { pose: TourPose; type: MoveType; cut: boolean } | 'pending' | null {
     if (key !== this.key || !this.centre) { this.reset(); this.key = key; this.centre = [...raw]; this.at = now; }
     else { const w = 1 - Math.exp(-Math.max(0, Math.min(1, now - this.at)) / CENTRE_EMA); for (let i = 0; i < 3; i++) this.centre[i] += (raw[i] - this.centre[i]) * w; this.at = now; }
     const c = this.centre;
-    if (!this.move && now < this.failed) return null;
-    let planned = false;
+    if (!this.move && !this.planning && now < this.failed) return null;
     const d = () => [c[0] - this.origin[0], c[1] - this.origin[1], c[2] - this.origin[2]];
-    let k = this.move ? (now - this.start) / this.move.seconds : 1;
-    if (!this.move || k >= 1) { if (!this.plan(c, spread, now, s)) return null; k = 0; planned = true; }
-    else if (now - this.checked >= CHECK) {
+    let steps = STEPS;
+    // The next move is planned ahead, LEAD seconds before this one ends, so it is ready when this one comes to rest.
+    if (!this.move) { if (!this.planning) this.begin(c, spread, now, false); }
+    else if (!this.planning && (now - this.start) / this.move.seconds >= 1 - LEAD / this.move.seconds) this.begin(c, spread, now, false);
+    else if (!this.planning && now - this.checked >= CHECK) {
+      // The next second of the path, still at most STEPS samples in this frame.
       this.checked = now;
-      if (!pathClear(this.move, d(), k, Math.min(1, k + CHECK / this.move.seconds), s)) { if (!this.plan(c, spread, now, s)) return null; k = 0; planned = true; }
+      const k = (now - this.start) / this.move.seconds;
+      steps -= 3;
+      if (!pathClear(this.move, d(), k, Math.min(1, k + CHECK / this.move.seconds), s)) { this.blocked = true; this.begin(c, spread, now, true); }
     }
-    let pose = this.at_(k, d(), now);
+    let cut = false;
+    if (this.planning) {
+      if (this.step(steps, s) === false) { this.move = null; this.from = null; this.planning = null; this.failed = now + RETRY; return null; }
+      // A ready move takes over when this one has come to rest at its end (or is blocked, or there is none yet).
+      const ready = this.planning?.ready;
+      if (ready && (!this.move || this.blocked || now - this.start >= this.move.seconds)) { this.commit(ready, now, s); cut = !this.from; }
+    }
+    if (!this.move) return 'pending';
+    // A blocked move holds its last good pose until the next one is planned; a finished one rests at its end.
+    let pose = this.blocked && this.last ? this.last : this.at_(Math.min(1, (now - this.start) / this.move.seconds), d(), now);
     // Every frame's eye is clear (clear points are cached by the scenery) and, at the decision rate, sees the hotspot:
-    // between the path's samples a post can cross the sightline and the centre moves. Such a frame re-solves from the last good pose; after REPLANS re-solves in RETRY s, or with no
-    // clear move, Broadcast's solver takes over for RETRY s.
-    if (!this.good(pose.position, c, now, s)) {
-      this.replans = this.replans.filter(t => now - t < RETRY);
-      if (this.replans.length >= REPLANS || !this.plan(c, spread, now, s)) { this.move = null; this.from = null; this.failed = now + RETRY; return null; }
-      this.replans.push(now); pose = this.at_(0, d(), now); planned = true;
+    // between the path's samples a post can cross the sightline and the centre moves. Such a frame holds the last good
+    // pose while the next move is planned; after REPLANS re-plans in RETRY s, Broadcast's solver takes over for RETRY s.
+    if (!(this.blocked && this.last) && !this.good(pose.position, c, now, s)) {
+      if (!this.last) return 'pending';
+      pose = this.last; this.blocked = true;
+      if (!this.planning) {
+        this.replans = this.replans.filter(t => now - t < RETRY);
+        if (this.replans.length >= REPLANS) { this.move = null; this.from = null; this.failed = now + RETRY; return null; }
+        this.replans.push(now); this.begin(c, spread, now, true);
+      }
     }
     this.last = pose;
-    return { pose, type: this.move!.type, cut: planned && !this.from };
+    return { pose, type: this.move.type, cut };
   }
   private seen = -Infinity;
   private replans: number[] = [];
+  private blocked = false;
+  /** A plan in progress: the candidate moves (built at the centre `c`), which one and which path sample is next. */
+  private planning: { c: number[]; cands: TourMove[]; i: number; j: number; sky: boolean; prev: TourPose | null; ready?: TourMove } | null = null;
   private good(eye: readonly number[], c: readonly number[], now: number, s: Scenery) {
     if (!s.clear(eye)) return false;
     if (now - this.seen < SIGHT_EVERY && now >= this.seen) return true;
@@ -129,25 +153,45 @@ export class Tracker {
     return { position: lerp3(this.from.pose.position, pose.position, b), target: lerp3(this.from.pose.target, pose.target, b), fov: this.from.pose.fov + (pose.fov - this.from.pose.fov) * b };
   }
 
-  /** The next move: the types shown least recently first, two azimuths each; the first whose whole path is clear. It glides
-   *  in from the current pose when that glide is clear too, else it is a cut. */
-  private plan(c: readonly number[], spread: number, now: number, s: Scenery): boolean {
-    const previous = this.last;
-    // Under a roof (a pavilion, a hall, a tent) a moving shot has no room: the framing solver is better there.
-    const head = [c[0], c[1] + AIM + .5, c[2]];
-    if (s.reach(head, [head[0], head[1] + SKY, head[2]]) < SKY - 1) { this.move = null; this.from = null; this.failed = now + RETRY; return false; }
+  /** The ready move runs from now, gliding in from the current pose when that glide is clear (two queries), else a cut. */
+  private commit(m: TourMove, now: number, s: Scenery) {
+    const previous = this.last, begin = m.at(0);
+    this.move = m; this.start = now; this.checked = now; this.origin = this.planning!.c; this.shown.set(m.type, now); this.planning = null; this.blocked = false;
+    this.from = previous && s.clear(lerp3(previous.position, begin.position, .5)) && open(s, previous.position, begin.position) ? { pose: previous, at: now } : null;
+  }
+  /** Starts planning the next move: the types shown least recently first, two azimuths each, from where the camera is. */
+  private begin(c: readonly number[], spread: number, now: number, blocked: boolean) {
+    const previous = this.last, current = this.move?.type;
     const types = [...TRACK_TYPES].map(t => ({ t, age: now - (this.shown.get(t) ?? -Infinity), r: this.random() }))
-      .sort((a, b) => b.age - a.age || a.r - b.r).map(x => x.t).filter(t => t !== this.move?.type || TRACK_TYPES.length === 1);
+      .sort((a, b) => b.age - a.age || a.r - b.r).map(x => x.t).filter(t => t !== current || TRACK_TYPES.length === 1);
     const base = previous ? Math.atan2(previous.position[2] - c[2], previous.position[0] - c[0]) : this.random() * 2 * Math.PI;
-    for (const type of types) for (const turn of [0, (this.random() < .5 ? 1 : -1) * Math.PI / 3]) {
-      const m = trackMove(makeMove(hotspotView(c, spread, base + turn), type, MOVE_MIN + this.random() * (MOVE_MAX - MOVE_MIN), this.random() < .5 ? 1 : -1));
-      if (!pathClear(m, [0, 0, 0], 0, 1, s)) continue;
-      this.move = m; this.start = now; this.checked = now; this.origin = [...c]; this.shown.set(type, now);
-      const begin = m.at(0);
-      this.from = previous && s.clear(lerp3(previous.position, begin.position, .5)) && open(s, previous.position, begin.position) ? { pose: previous, at: now } : null;
-      return true;
+    const cands: TourMove[] = [];
+    for (const type of types) for (const turn of [0, (this.random() < .5 ? 1 : -1) * Math.PI / 3])
+      cands.push(trackMove(makeMove(hotspotView(c, spread, base + turn), type, MOVE_MIN + this.random() * (MOVE_MAX - MOVE_MIN), this.random() < .5 ? 1 : -1)));
+    this.planning = { c: [...c], cands, i: 0, j: 0, sky: false, prev: null };
+    if (blocked) this.blocked = true;
+  }
+  /** Up to `steps` checks of the plan in progress (one check: the sky above the hotspot, one path sample of a candidate,
+   *  each at most four scenery queries). true: a move is ready; false: none is clear (or a roof); null: still planning. */
+  private step(steps: number, s: Scenery): boolean | null {
+    const pl = this.planning!;
+    if (pl.ready) return true;
+    for (; steps > 0; steps--) {
+      if (!pl.sky) {
+        // Under a roof (a pavilion, a hall, a tent) a moving shot has no room: the framing solver is better there.
+        const head = [pl.c[0], pl.c[1] + AIM + .5, pl.c[2]];
+        if (s.reach(head, [head[0], head[1] + SKY, head[2]]) < SKY - 1) return false;
+        pl.sky = true; continue;
+      }
+      if (pl.i >= pl.cands.length) return false;
+      const m = pl.cands[pl.i], pose = m.at(SAMPLES[pl.j]);
+      if (s.clear(pose.position) && sees(s, pose.position, m.view.target) && (!pl.prev || open(s, pl.prev.position, pose.position))) {
+        pl.prev = pose;
+        if (++pl.j < SAMPLES.length) continue;
+        pl.ready = m; return true;
+      }
+      pl.i++; pl.j = 0; pl.prev = null;
     }
-    this.move = null; this.from = null; this.failed = now + RETRY;
-    return false;
+    return null;
   }
 }
