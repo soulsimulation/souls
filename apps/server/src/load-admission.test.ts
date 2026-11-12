@@ -113,6 +113,21 @@ test('budget: under contention a read over its Soul budget gets soul.slow-down +
   f.adm.close();
 });
 
+test('#2080: one cold act longer than a bucket holds does not block a contended crowd: every cheap act runs before its deadline', async () => {
+  const f = fixture();
+  // the first act of the route is cold: 2.1 s, longer than any bucket can hold (2 s)
+  const cold = f.ask('A', route('POST', '/v1/edge/act'), 2100); await tick(); await tick();
+  assert.equal(cold.result, 'run'); assert.ok(f.adm.estimate('edge:act') > 2000);
+  f.advance(5000);   // the world credit the cold act overdrew is paid back
+  // contention: another Soul in flight, and a crowd of cheap acts
+  f.adm.request({key: 'X', god: false, route: route('GET', '/v1/edge/here')});
+  const start = f.now, acts = ['B', 'C', 'D', 'E', 'F'].map(k => f.ask(k, route('POST', '/v1/edge/act'), 1));
+  for (let i = 0; i < 20 && acts.some(a => a.result === undefined); i++) { await tick(); f.advance(50); await f.adm.drain(); }
+  assert.deepEqual(acts.map(a => a.result), ['run', 'run', 'run', 'run', 'run']);
+  assert.ok(f.now - start < 20_000, 'answered before the act deadline');
+  f.adm.close();
+});
+
 test('a Soul alone in a calm world is never slowed by its budget (no quiet-case regression)', async () => {
   const f = fixture();
   // back to back it is paced by the world-total frame budget (200 ms jobs, 25 of 50 ms), never refused
