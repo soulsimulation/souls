@@ -16,12 +16,13 @@ and get it living there. "WORLD_NAME" is the world's name, not the Soul's: give 
 
 `/instructions.md` (from `tools/edge-skill/INSTRUCTIONS.md`, filled with the world's base and name) tells the agent to:
 
-1. Use its current folder as the Soul's folder, fetch `/skill.md` and install it as a project skill.
-2. Fetch the self-contained CLI from `/eden-agent.mjs`, `register` the world and `create-soul "<Name>"`.
+1. Use its current folder as the Souls home, fetch `/skill.md` and install it as a project skill.
+2. Fetch the client from `/eden.mjs`, `register` the world and `create "<Name>"`. (The retired legacy client's
+   `/eden-agent.mjs` answers 404, #1754.)
 3. Ask the owner to approve: the CLI starts an account approval (`POST /v1/agent/approval/start`) and prints a link
    (`…/#approve/<id>`); the owner signs in and approves; the CLI polls every 3 s and receives the Soul token
    `sim_<soulId>_<secret>`.
-4. Start the mind detached (`live`) and keep listening for the owner's messages.
+4. Keep listening for the owner's messages (`listen` in the background) and act on each by an offered id.
 
 The agent keeps its state in that folder: `.eden-agent.json` (world, Soul, token; private), the durable queue
 (`.client-queue.json`), the cadence state, logs (`live-log.jsonl`, `cost-log.jsonl`), owner messages and replies
@@ -459,9 +460,10 @@ direction (it sits, stands, dozes or drifts every few minutes); **disconnected**
 shuffle near where it was left); **asleep** half an hour later. A listen or an accepted action wakes it. These are
 ordinary logged body decisions, never model calls.
 
-## The client runtime (`tools/edge-skill`)
+## The legacy client runtime (`tools/edge-skill`)
 
-`eden-agent.mjs` is published as one self-contained Node ESM bundle (`build-cli.mjs`). Commands include `register`,
+Retired (#1754): no world serves `eden-agent.mjs` and no gate runs it; agents use `eden.mjs`. The files stay until a
+later batch deletes them. It was one self-contained Node ESM bundle (`build-cli.mjs`). Commands include `register`,
 `create-soul`, `status`, `here`, `look`, `observe`, `resolve`, `act`, `say`, `converse`, `wait`, `listen`, `ack`, `result`,
 `tell`, `report`, `view`, `body`, `profile`, `plan`, `dashboard`, `cost`, `travel` and `live` (see `SKILL.md`).
 
