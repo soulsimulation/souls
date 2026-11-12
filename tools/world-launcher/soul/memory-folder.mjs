@@ -360,7 +360,7 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
         upcoming,
       };
     },
-    known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self]};},
+    known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self],goals:sorted(goals).map(g=>({...g}))};},
     eventValue(eventId){fresh();id(eventId);const value=seen.get(eventId);if(!value)return null;const record=JSON.parse(value);return record.kind==='event'?structuredClone(record.value):null;},
     fold: input => append({version: VERSION, kind: 'event', value: validateEvent(input)}),
     scorecard({id:cardId,at,clock,period,from,to}){instant(from);instant(to);const events=scoreEvents.filter(e=>e.at>=from&&e.at<to),sum=k=>events.reduce((n,e)=>n+(e[k]??0),0),cost=events.filter(e=>e.modelCalls!==undefined),metrics={newPlaces:sum('newPlaces'),conversations:new Set(events.filter(e=>e.conversationId).map(e=>e.conversationId)).size,people:[...new Set(events.filter(e=>e.personId).map(e=>e.personId))].slice(0,100),facts:sum('facts'),objects:sum('objects'),refusals:sum('refusals'),idleMinutes:Math.round(sum('idleMs')/600)/100,modelCalls:sum('modelCalls'),usd:!cost.length||cost.some(e=>e.usd===null)?null:cost.reduce((n,e)=>n+e.usd,0)};append({version:VERSION,kind:'event',value:validateEvent({type:'scorecard',id:cardId,at,clock,period,from,to,metrics})});return metrics;},

@@ -37,13 +37,28 @@ test('A1: the brief says who is here, this place, what is open, what I was doing
   assert.match(brief, /Self:\n- I am patient\./);
 });
 
-test('#2122: a goal recorded again under the id its brief names stays one goal', (t) => {
+test('#2122 A1: a goal recorded again under the id its brief names stays one goal', (t) => {
   const { m } = lived(t), id = /\[(\S+)\] Meet Ana at the mill\./.exec(m.brief())?.[1];
   assert.equal(id, 'mill', 'the brief names the goal with its id');
-  assert.deepEqual(m.remember('goal', id, 'Meet Ana at the mill.', { horizon: 'today', next: 'Sit by the wheel' }), { remembered: 'goal', id });
+  assert.deepEqual(m.remember('goal', id, 'Meet Ana at the mill.', { next: 'Sit by the wheel' }), { remembered: 'goal', id });
   const brief = m.brief();
   assert.equal(brief.match(/Meet Ana at the mill/g).length, 1, 'the commitment shows once');
   assert.match(brief, /- \[mill\] Meet Ana at the mill\. Next: Sit by the wheel/);
+});
+
+test('#2122 A2 A3: #2123 wake 2, the same goal under a new id, updates the open goal and points at its id', (t) => {
+  const dir = tmp(t), m = open(dir);
+  m.sawHere(frame());
+  m.remember('goal', 'friend', 'make a friend today', { horizon: 'today', metric: 'Bo or another Soul talks back and we chat', next: 'keep chatting with Bo, ask about them' });
+  const again = m.remember('goal', 'make-a-friend', 'Make a friend today.', { next: 'keep chatting with Bo, learn what they like' });
+  assert.equal(again.id, 'friend'); assert.match(again.merged, /"make-a-friend" repeats the open goal "friend".*Use "friend"/);
+  const brief = open(dir).brief();
+  assert.equal(brief.match(/make a friend today/gi).length, 1, 'the commitment shows once');
+  assert.match(brief, /- \[friend\] Make a friend today\. Next: keep chatting with Bo, learn what they like/);
+  const goals = readFileSync(join(dir, 'memory', 'goals.md'), 'utf8');
+  assert.doesNotMatch(goals, /make-a-friend/);
+  assert.match(goals, /- friend \(today\): Make a friend today\.\n  Metric: Bo or another Soul talks back and we chat; next: keep chatting with Bo, learn what they like/);
+  assert.equal(m.remember('goal', 'boats', 'Learn the boats.', { horizon: 'week' }).merged, undefined, 'a different note is a second goal');
 });
 
 test('A1: pinned SOUL.md lines stand for the self, and the owner\'s schedule is open', (t) => {
