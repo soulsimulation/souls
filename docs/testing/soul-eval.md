@@ -67,6 +67,8 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
   client before 2.25, which keeps no world copy. Each episode records `catalogFrom` (`client` or `reference`).
 - `load --first-repeat 2` numbers a load run's repeats from 2, so a stopped load run can be finished cell by cell. Load
   setup paces Souls at 6 per 30 s, under a world's 20 pairings in any 60 s from one address.
+- A load report also gives the world's own side from its `live.json`: an act's queue, handler, wait and commit at p50
+  and p99 with the acts that waited more than three ticks, and each 10-second tick window ([load.md](../architecture/load.md)).
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
