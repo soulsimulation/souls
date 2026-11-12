@@ -82,7 +82,7 @@ async function setup(t: TestContext, constitution: string, furniture = true) {
   return {f, soul, chair, sign, act, done, until, body, restart, http, edge: () => edge, host: () => host};
 }
 
-test('public read:here preserves server-selected shelf content through an active native restart', async t => {
+test('public read:here keeps server-selected shelf content and progress across an active native restart', async t => {
   const w = await setup(t, '# Eden (test)\nA small village.');
   const offer = w.edge().capabilities(w.soul).find(c => c.id === 'read:here')!;
   assert.equal(offer.target?.kind, 'spot', JSON.stringify({offer, body:w.body().pose.p, spots:w.edge().spots.spots.filter(s=>s.activity==='read')})); assert.equal(offer.target?.id, `read.${w.chair}`);
@@ -100,12 +100,18 @@ test('public read:here preserves server-selected shelf content through an active
   const rawContext = w.f.db.db.prepare('SELECT body FROM edge_outcome_contexts_v1 WHERE receipt_id=?').get(accepted.id) as {body: string};
   await w.restart();
   assert.deepEqual(w.edge().outcomes.context(accepted.id), JSON.parse(rawContext.body), 'committed source binding survives restore without recapture');
-  assert.equal(w.edge().receipt(w.soul.soulId, accepted.id)!.phase, 'started', 'same running native receipt survives');
-  const first = await w.done(accepted);
+  // #2051: the read in flight at the restart ends at boot (it no longer resumes) and teaches nothing. The stop leaves
+  // the body on the chair (read:here then offers the seat's own reading), so the next shelf read names the spot; it
+  // starts from the same durable progress.
+  const lost = w.edge().receipt(w.soul.soulId, accepted.id)!;
+  assert.equal(lost.phase, 'failed', JSON.stringify(lost)); assert.equal(lost.code, 'receipt.lost-on-restart'); assert.deepEqual(lost.outcome?.learned ?? [], []); assert.equal(lost.outcome?.detail.completedContent ?? false, false);
+  await w.until(() => !w.host().engine.programOf(w.soul.entityId));
+  const again = await w.act(`read:read.${w.chair}`, {seconds: 5});
+  const first = await w.done(again);
   assert.equal(first.outcome!.learned[0].source, 'book:gardens-guide@1#p1');
   const explicit = await w.done(await w.act(`read:read.${w.chair}`, {seconds: 5}));
-  assert.equal(explicit.outcome!.learned[0].source, 'book:gardens-guide@1#p2', 'explicit and generic shelf reads share durable progress');
-  assert.deepEqual((await w.http('/v1/edge/receipts/' + accepted.id)).receipt.outcome, first.outcome, 'old outcome is immutable after another passage');
+  assert.equal(explicit.outcome!.learned[0].source, 'book:gardens-guide@1#p2', 'shelf reads share durable progress across the restart');
+  assert.deepEqual((await w.http('/v1/edge/receipts/' + again.id)).receipt.outcome, first.outcome, 'old outcome is immutable after another passage');
   assert.equal((w.f.db.db.prepare('SELECT next_passage FROM edge_reading_progress_v1 WHERE soul_id=?').get(w.soul.soulId) as {next_passage: number}).next_passage, 2);
   assert.deepEqual(w.host().engine.runtime.violations, []);
   assert.equal(w.f.db.paidCost(), 0);
