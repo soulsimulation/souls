@@ -3019,8 +3019,6 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const level = me.human?.level ?? 0, h = me.human;
     return {me: here, level, seated: !!h && (h.activity === 'sit' || h.baseActivity === 'sit'),
       gone: (spotId: string) => this.spotThingGone(spotId),
-      // #628 (knowledge/1): a spot in a secret place this Soul does not know, by its place or where it stands (as secretOffer and the catalog)
-      hidden: (spotId: string, at: [number, number]) => {if (!this.knowledge.marked().size) return false; const place = this.spotPlace(spotId); return (!!place && !this.knowledge.knows(soul.soulId, place)) || this.knowledge.hidesPoint(soul.soulId, at);},
       // read only against standing-room thresholds (≤ 0.95 m): capped at 1 m, answered without building far nav tiles (L1)
       clearance: (x: number, z: number) => level === 0 && engine.clearanceAtV1 ? (engine.clearanceUpToV1 ? engine.clearanceUpToV1(x, z, 1) : engine.clearanceAtV1(x, z)) : 0,
       open: (at: [number, number], min: number, rings: number) => level === 0 && engine.nearestStandableV1 ? engine.nearestStandableV1(at, soul.entityId, min, rings) : null,
