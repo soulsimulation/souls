@@ -26,8 +26,12 @@ export class LevelState {
   baselineMs = 0;
   private calmSince: number | null = null;
   private starvedSince: number | null = null;   // tick service < 0.2 since
+  /** #2124: queue age raises amber on a fresh queue only. After amber steps down, the queue amber's own smaller budget left
+   *  behind does not raise it again until it has once been under 2 s: re-entering at once held amber ~94 % of a 24-Soul run. */
+  private queueArmed = true;
   enterOf(s: Signals, now: number): Level {
     const b = this.baselineMs;
+    if (s.oldestMs <= 2000) this.queueArmed = true;
     if (s.service < 0.2) this.starvedSince ??= now; else this.starvedSince = null;
     if ((s.heapFrac > 0.92 && s.gcFrac > 0.40) || (this.starvedSince !== null && now - this.starvedSince >= BLACK_SERVICE_MS)) return 'black';
     if (s.service < 0.5 || s.loopP99Ms > loopEnter(1000, b) || s.heapFrac > 0.85) return 'red';
@@ -35,7 +39,7 @@ export class LevelState {
     // 8 ms/frame, so a queue that red itself starves could keep red forever (the eden2 bench, 2026-10-31: red held for
     // whole windows at tick service 1.0 while the launcher shed every read as world.busy). Whether the thread is behind
     // is what service / loop delay / heap say.
-    if (s.service < 0.8 || s.loopP99Ms > loopEnter(200, b) || s.heapFrac > 0.70 || s.oldestMs > 2000) return 'amber';
+    if (s.service < 0.8 || s.loopP99Ms > loopEnter(200, b) || s.heapFrac > 0.70 || (this.queueArmed && s.oldestMs > 2000)) return 'amber';
     return 'green';
   }
   below(level: Level, s: Signals): boolean {
@@ -57,7 +61,7 @@ export class LevelState {
     if (RANK[enter] > RANK[this.level]) { this.level = enter; this.calmSince = null; return this.level; }
     if (this.level === 'green' || !this.below(this.level, s)) { this.calmSince = null; return this.level; }
     this.calmSince ??= now;
-    if (now - this.calmSince >= STEP_DOWN_MS) { this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null; }
+    if (now - this.calmSince >= STEP_DOWN_MS) { this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null; if (this.level === 'green') this.queueArmed = false; }
     return this.level;
   }
 }
