@@ -82,7 +82,7 @@ async function setup(t: TestContext, constitution: string, furniture = true) {
   return {f, soul, chair, sign, act, done, until, body, restart, http, edge: () => edge, host: () => host};
 }
 
-test('public read:here preserves server-selected shelf content through an active native restart', async t => {
+test('public read:here keeps server-selected shelf content and progress across an active native restart', async t => {
   const w = await setup(t, '# Eden (test)\nA small village.');
   const offer = w.edge().capabilities(w.soul).find(c => c.id === 'read:here')!;
   assert.equal(offer.target?.kind, 'spot', JSON.stringify({offer, body:w.body().pose.p, spots:w.edge().spots.spots.filter(s=>s.activity==='read')})); assert.equal(offer.target?.id, `read.${w.chair}`);
@@ -100,12 +100,18 @@ test('public read:here preserves server-selected shelf content through an active
   const rawContext = w.f.db.db.prepare('SELECT body FROM edge_outcome_contexts_v1 WHERE receipt_id=?').get(accepted.id) as {body: string};
   await w.restart();
   assert.deepEqual(w.edge().outcomes.context(accepted.id), JSON.parse(rawContext.body), 'committed source binding survives restore without recapture');
-  assert.equal(w.edge().receipt(w.soul.soulId, accepted.id)!.phase, 'started', 'same running native receipt survives');
-  const first = await w.done(accepted);
+  // #2051: the read in flight at the restart ends at boot (it no longer resumes) and teaches nothing. The stop leaves
+  // the body on the chair (read:here then offers the seat's own reading), so the next shelf read names the spot; it
+  // starts from the same durable progress.
+  const lost = w.edge().receipt(w.soul.soulId, accepted.id)!;
+  assert.equal(lost.phase, 'failed', JSON.stringify(lost)); assert.equal(lost.code, 'receipt.lost-on-restart'); assert.deepEqual(lost.outcome?.learned ?? [], []); assert.equal(lost.outcome?.detail.completedContent ?? false, false);
+  await w.until(() => !w.host().engine.programOf(w.soul.entityId));
+  const again = await w.act(`read:read.${w.chair}`, {seconds: 5});
+  const first = await w.done(again);
   assert.equal(first.outcome!.learned[0].source, 'book:gardens-guide@1#p1');
-  const explicit = await w.done(await w.act(`read:read.${w.chair}`, {seconds: 2}));
-  assert.equal(explicit.outcome!.learned[0].source, 'book:gardens-guide@1#p2', 'explicit and generic shelf reads share durable progress');
-  assert.deepEqual((await w.http('/v1/edge/receipts/' + accepted.id)).receipt.outcome, first.outcome, 'old outcome is immutable after another passage');
+  const explicit = await w.done(await w.act(`read:read.${w.chair}`, {seconds: 5}));
+  assert.equal(explicit.outcome!.learned[0].source, 'book:gardens-guide@1#p2', 'shelf reads share durable progress across the restart');
+  assert.deepEqual((await w.http('/v1/edge/receipts/' + again.id)).receipt.outcome, first.outcome, 'old outcome is immutable after another passage');
   assert.equal((w.f.db.db.prepare('SELECT next_passage FROM edge_reading_progress_v1 WHERE soul_id=?').get(w.soul.soulId) as {next_passage: number}).next_passage, 2);
   assert.deepEqual(w.host().engine.runtime.violations, []);
   assert.equal(w.f.db.paidCost(), 0);
@@ -120,12 +126,12 @@ test('non-Eden shelf reads keep constitution content; actual sign reads keep the
   assert.equal((sign.outcome!.detail.sign as {id: string}).id, w.sign);
   assert.equal((sign.outcome!.detail.sign as {text: string}).text, sign.outcome!.detail.passage);
   assert.equal(sign.outcome!.detail.book, undefined, 'sign content does not acquire a library book');
-  const alias = await w.act('read:here', {seconds: 2, target: 'read.e_forged'});
+  const alias = await w.act('read:here', {seconds: 5, target: 'read.e_forged'});
   assert.equal(w.edge().outcomes.context(alias.id)!.readSpot, `read.${w.chair}`);
   const read = await w.done(alias);
   assert.equal((read.outcome!.detail.book as {id: string}).id, 'world-constitution');
   assert.equal(read.outcome!.detail.passage, 'Be kind. This is a new world.');
-  const explicit = await w.done(await w.act(`read:read.${w.chair}`, {seconds: 2}));
+  const explicit = await w.done(await w.act(`read:read.${w.chair}`, {seconds: 5}));
   assert.equal((explicit.outcome!.detail.book as {id: string}).id, 'world-constitution');
   assert.equal((w.f.db.db.prepare('SELECT COUNT(*) n FROM edge_reading_progress_v1').get() as {n: number}).n, 0);
   assert.deepEqual((await w.http('/v1/edge/receipts/' + sign.id)).receipt.outcome, sign.outcome, 'later shelf reads do not rewrite sign content');
@@ -133,7 +139,7 @@ test('non-Eden shelf reads keep constitution content; actual sign reads keep the
 
 test('generic no-source aliases and historical contexts do not gain catalogue content', async t => {
   const w = await setup(t, '# Eden (test)\nA small village.', false);
-  const generic = await w.act('read:here', {seconds: 2, target: 'read.e_forged'});
+  const generic = await w.act('read:here', {seconds: 5, target: 'read.e_forged'});
   assert.equal(w.edge().outcomes.context(generic.id)!.readSpot, undefined);
   assert.match(w.edge().capabilities(w.soul).find(c => c.id === 'read:here')!.label, /this world's constitution/);
   const done = await w.done(generic);
@@ -148,6 +154,6 @@ test('generic no-source aliases and historical contexts do not gain catalogue co
   assert.deepEqual(w.edge().outcomes.read(legacy.id), old, 'stored historical outcome is not reinterpreted');
   // No constitution still produces the neutral new-world fallback, never an Eden passage.
   const neutral = await setup(t, '', false);
-  const read = await neutral.done(await neutral.act('read:here', {seconds: 2}));
+  const read = await neutral.done(await neutral.act('read:here', {seconds: 5}));
   assert.equal(read.outcome!.detail.passage, NEW_WORLD_LORE);
 });
