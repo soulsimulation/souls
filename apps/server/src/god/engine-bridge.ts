@@ -399,7 +399,7 @@ export class EngineBridge {
       refuse: (after, diff, ops, o) => this.protectedBody(after, diff, ops, o?.undo === true),
       prepare: (before, after, diff, _ops, o) => { if (o?.dry !== true) { try { this.arrivalShaped = shapedIds(before, diff); } catch { this.arrivalShaped = null; } this.navShaped = this.arrivalShaped && navDoorFlips(before, diff, this.arrivalShaped); this.navBefore = this.navSpots(before, [...diff.removes, ...(this.navShaped ?? diff.upserts.map(e => e.id))]); } return this.prepareWalkouts(before, after, diff, o?.dry === true); },
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
-      legal: (before, after, diff) => this.legalCheck(before, after, diff), legalRun: () => this.legalRun(),
+      legal: (before, after, diff, o) => this.legalCheck(before, after, diff, o?.dry === true), legalRun: () => this.legalRun(),
       arrivalNote: diff => this.arrivalNoteFor(diff),
       navNote: (diff, said) => this.navNoteFor(diff, said),
       framesNote: () => this.framesNote(),
@@ -1508,14 +1508,19 @@ export class EngineBridge {
    *  detached copy of the engine, edit-preview.ts) breaks a rule, naming each body with its rule and nearest legal place, and
    *  when it has a resident in its way or changes what one sits in, lies on or holds (the walk-out planner, which no longer
    *  moves anyone). 'pending': its preview has not run, or is older than VERDICT_TICKS. Null: the rule is off or the edit passes. */
-  private legalCheck(before: WorldModel, after: WorldModel, diff: Diff): Failure[] | 'pending' | null {
+  private legalCheck(before: WorldModel, after: WorldModel, diff: Diff, dry = false): Failure[] | 'pending' | null {
     if (!legalEditsV1(this.host)) return null;
+    // Known limit: `unhand` (an undo of a take sets things down at the resident's feet, prepareWalkouts) runs after this check,
+    // so that set-down is not in the preview. It rewrites the would-be world and its `touched` list is journaled by the commit
+    // that ran it; running it here would rewrite a world that a pending round throws away and leave the commit nothing to journal.
     this.flush(); this.host.drainInputs();
     const draft = this.draftFor(after, diff), failures: Failure[] = [];
     if (draft) {
       const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key ? this.verdict : null;
-      // a verdict answers the one request that waited for it: the next request is previewed on the world as it is then
-      this.verdict = null;
+      // a verdict answers the one request that waited for it: the next request is previewed on the world as it is then. A dry
+      // run or preview reads it without using it up, so a request that dry-runs and then commits the same edit (the repair
+      // walk) needs one preview
+      if (!dry) this.verdict = null;
       if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft }; return 'pending'; }
       failures.push(...v.failures);
     }

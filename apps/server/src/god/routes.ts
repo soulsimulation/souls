@@ -267,11 +267,11 @@ export function mountGodRoutes(app: Hono, d: GodDeps): { partRefs: () => { defs:
     return c.json(receipt, 200, noStore);
   });
   app.post('/v1/god/query', async (c) => { if (d.god.godFromToken(bearer(c))) limitGod(c, 'query', CREATION_LIMITS.godQueriesPerMinute); else d.limitIp(c, 'godquery', CREATION_LIMITS.queriesPerMinute, CREATION_LIMITS.rateWindowMs); const q = await body(c); if (q && typeof q === 'object' && ((q as { reach?: unknown }).reach || (q as { describe?: unknown }).describe)) await engineSettled(d.god.model); return c.json(runQuery(d.god.model, q), 200, noStore); });
-  app.post('/v1/god/preview', async (c) => { limitGod(c, 'preview', CREATION_LIMITS.previewsPerMinute); const b = await body(c); return c.json(asGod(c, b, () => d.god.preview(b)), 200, noStore); });
+  app.post('/v1/god/preview', async (c) => { limitGod(c, 'preview', CREATION_LIMITS.previewsPerMinute); const b = await body(c); return c.json(await d.god.checked(() => asGod(c, b, () => d.god.preview(b))), 200, noStore); });
   app.get('/v1/god/preview/:id', (c) => { if (!d.god.canViewPreview(c.req.param('id'), c.req.header('x-preview-key'))) requireGod(c); const v = d.god.getPreview(c.req.param('id')); if (!v) throw new ApiError(404, 'not-found', 'preview expired or unknown'); return c.json({ id: c.req.param('id'), baseEditSeq: v.baseEditSeq, expect: v.expect, subtrees: v.subtrees, diff: v.diff, failures: v.failures ?? null, ops: v.ops }, 200, noStore); });
   app.get('/v1/god/previews', (c) => { requireGod(c); return c.json({ previews: d.god.listPreviews() }, 200, noStore); });
   app.get('/v1/god/snapshot', (c) => { const who = requireGod(c), snapshot = d.god.godSnapshot(); return c.json(who.child ? { ...snapshot, prayers: [] } : snapshot, 200, noStore); });
-  app.post('/v1/god/dryrun', async (c) => { limitGod(c, 'dryrun', CREATION_LIMITS.dryrunsPerMinute); const b = await body(c); return c.json(asGod(c, b, () => d.god.dryrun(b)), 200, noStore); });
+  app.post('/v1/god/dryrun', async (c) => { limitGod(c, 'dryrun', CREATION_LIMITS.dryrunsPerMinute); const b = await body(c); return c.json(await d.god.checked(() => asGod(c, b, () => d.god.dryrun(b))), 200, noStore); });
   // G2: `mirror` (the CLI's mirror state) is not part of the batch: stripped here, answered after the commit with the delta
   // G2: `repair` (place/move candidates, see repair.ts) is not part of the batch either: the server walks them, then commits
   app.post('/v1/god/act', async (c) => {

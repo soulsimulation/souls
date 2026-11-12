@@ -129,7 +129,7 @@ export class GodMode {
    *  Null in worlds without the engine. */
   bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[];
     /** legal-edits/1 (engine-bridge.ts legalCheck): refusals for an edit about to commit, 'pending' while its preview has not run */
-    legal?: (before: WorldModel, after: WorldModel, diff: Diff) => Failure[] | 'pending' | null; legalRun?: () => Promise<Failure[] | null> } | null = null;
+    legal?: (before: WorldModel, after: WorldModel, diff: Diff, o?: { dry?: boolean }) => Failure[] | 'pending' | null; legalRun?: () => Promise<Failure[] | null> } | null = null;
   /** Bridge admission/decoration must run before the accepted receipt is persisted, and never on replay. */
   actGuard: ((batch: unknown) => Result | null) | null = null;
   finalizeAct: ((result: Result, after: WorldModel) => Result) | null = null;
@@ -383,6 +383,8 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const safe = this.applySafe({ ...parsed.data, group: admission.group } as Batch, this.opts.tick(), false, this.dryOpts(admission), []);
     if (!safe.r.result.accepted) return { accepted: false as const, failures: safe.r.result.failures };
     const diff = safe.r.diff!;
+    // legal-edits/1: a dry run answers as the commit would, refused by the same names (pending until its preview has run)
+    const legal = this.legalGate(safe.next, diff, { dry: true }); if (legal) return legal as { accepted: false; failures: Failure[] };
     const moving = this.bodies?.prepare?.(this.model, safe.next, diff, safe.batch.ops as Op[], { dry: true }) ?? NO_WALKOUTS;
     return { accepted: true as const, ids: safe.r.result.ids, warnings: [...kit.warnings, ...safe.r.result.warnings, ...(safe.repair?.lines ?? []), ...moving.warnings], diff: summarize(diff), ...(moving.moved.length ? { wouldMove: wouldMove(moving.moved) } : {}) };
   }
@@ -411,8 +413,8 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     }
   }
   /** legal-edits/1: the bridge's refusal of an edit about to commit (null: the rule is off or the edit passes). */
-  private legalGate(after: WorldModel, diff: Diff): Result | null {
-    const v = this.bodies?.legal?.(this.model, after, diff);
+  private legalGate(after: WorldModel, diff: Diff, o?: { dry?: boolean }): Result | null {
+    const v = this.bodies?.legal?.(this.model, after, diff, o);
     return !v ? null : v === 'pending' ? pendingRefusal() : { accepted: false, failures: v };
   }
   /** Only server-owned genesis import can request trusted library adoption; request JSON cannot enable it. */
@@ -767,7 +769,9 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     if (admission.failures) return { id: null, accepted: false as const, failures: admission.failures };
     // buildsafe/1: the preview shows the batch as the commit will apply it (repairs included); its ops stay as sent
     const safe = this.applySafe({ ...parsed.data, group: admission.group } as Batch, this.opts.tick(), false, this.dryOpts(admission), []);
-    const p = safe.r.result.accepted ? { ok: true as const, diff: safe.r.diff! } : { ok: false as const, failures: safe.r.result.failures };
+    let p = safe.r.result.accepted ? { ok: true as const, diff: safe.r.diff! } : { ok: false as const, failures: safe.r.result.failures };
+    // legal-edits/1: a preview answers as the commit would, refused by the same names (pending until its preview has run)
+    if (p.ok) { const legal = this.legalGate(safe.next, p.diff, { dry: true }); if (legal && isPending(legal)) return { id: null, ...legal } as { id: null; accepted: false; failures: Failure[] }; if (legal && !legal.accepted) p = { ok: false as const, failures: legal.failures }; }
     const id = 'pv_' + randomBytes(6).toString('hex'), viewKey = randomBytes(32).toString('base64url');
     for (const [k, v] of this.previews) if (this.now() - v.at >= 600_000) this.previews.delete(k);
     while (this.previews.size >= 100) this.previews.delete(this.previews.keys().next().value!);

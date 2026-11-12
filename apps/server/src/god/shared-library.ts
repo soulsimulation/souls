@@ -95,7 +95,7 @@ export function mountSharedLibraryRoutes(app: Hono, d: SharedLibraryDeps) {
       models.push({ sha: a.sha, stored: !had });
     }
     const note = `library: place ${plan.entry.id}@${plan.entry.version}`;
-    const r = p.data.dry ? god.dryrun({ ops: plan.ops }) : await god.checked(() => god.act({ ops: plan.ops }, note));   // legal-edits/1: waits for the edit's preview
+    const r = await god.checked(() => p.data.dry ? god.dryrun({ ops: plan.ops }) : god.act({ ops: plan.ops }, note));   // legal-edits/1: waits for the edit's preview
     const out = { contract: 'share/1', item: { id: plan.entry.id, version: plan.entry.version, ref: plan.entry.ref, licence: plan.entry.licence.spdx, author: plan.entry.author }, defines: plan.ops.length - 1, models, dry: !!p.data.dry, ...r };
     return c.json(out, r.accepted ? 200 : 409, noStore);
   }));

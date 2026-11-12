@@ -70,6 +70,13 @@ test('legal-edits/1: a wall on a standing Soul is refused by name, on an empty s
   assert.match(f.detail, /^Bo stands at/);
   assert.ok(f.suggest?.p && Math.hypot(f.suggest.p[0] - here[0], f.suggest.p[1] - here[1]) > 0.2, `the nearest legal place: ${JSON.stringify(f.suggest)}`);
   assert.equal(w.god.model.get('wall'), undefined, 'nothing was built'); assert.equal(w.god.model.editSeq, seq);
+  // a dry run and a preview of the same edit answer as the commit did: refused, the same bodies and reasons
+  const names = (r: any) => r.failures.map((x: any) => `${x.code}|${x.entity}|${x.measured?.rule ?? ''}`).sort();
+  const dry: any = await w.god.checked(() => w.god.dryrun(wall('wall', here)));
+  assert.equal(dry.accepted, false, JSON.stringify(dry)); assert.deepEqual(names(dry), names(over), 'dry run = commit');
+  const pv: any = await w.god.checked(() => w.god.preview(wall('wall', here)));
+  assert.equal(pv.accepted, false, JSON.stringify(pv)); assert.deepEqual(names(pv), names(over), 'preview = commit');
+  assert.equal(w.god.model.editSeq, seq, 'neither committed');
   await w.settle(2); assert.deepEqual(w.at(bo.entityId), here, 'Bo was not moved');
 
   // the same wall on an empty spot
@@ -100,6 +107,8 @@ test('legal-edits/1: a wall on a standing Soul is refused by name, on an empty s
   const seated = w.at(bo.entityId);
   const moveSeat: any = await w.god.checked(() => w.god.act({ ops: [{ op: 'move', id, p: [here[0] + 9, here[1]] }] }));
   assert.equal(moveSeat.accepted, false, JSON.stringify(moveSeat));
+  const dryMove: any = await w.god.checked(() => w.god.dryrun({ ops: [{ op: 'move', id, p: [here[0] + 9, here[1]] }] }));
+  assert.deepEqual(dryMove.failures?.map((x: any) => `${x.code}|${x.entity}`), moveSeat.failures.map((x: any) => `${x.code}|${x.entity}`), 'dry run = commit for a seat in use');
   const s = moveSeat.failures.find((x: any) => x.entity === bo.entityId);
   assert.ok(s, JSON.stringify(moveSeat.failures));
   assert.match(s.detail, /^Bo /);
