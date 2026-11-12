@@ -53,6 +53,11 @@ hit, so the hard separation layer rarely fires.
   next `LOOK` = 2.5 m and the other walker's ~1 s path chord.
 - Within 1.5 m of a driven vehicle a walker slows to 0.5 m/s (never stops; the vehicle stops for people).
 - A mutual single-file wait is released once both sides have waited `RELEASE_AFTER` (3 s).
+- **wait-bound/1** (#1952, a logged runtime policy adopted at boot): off a stair flight, a programme step's walk whose body
+  has not left a 0.5 m disc or changed level for 1,200 ticks (a minute) ends `route.blocked`, naming the last wait and whom
+  it was for. Named waits (`traffic.yield` included) do not pause it, and a walk re-issued for the same step keeps its clock.
+  Under flight-resume/1 (#1367) a walk on a stair flight is bounded too: a body whose cancelled climb cannot reach a landing
+  is released by the stall guard onto a landing, or left on the flight, where its next walk resumes it.
 
 ## Speed limits and invariants
 
