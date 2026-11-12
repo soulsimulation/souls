@@ -59,8 +59,8 @@ function from(state: RideState, v: CarrierView | null): RideState {
 }
 /** park-away/1: parked or boarding more than a metre from home (only a balloon left where it landed is). */
 function parkedAwayOf(v: CarrierView): boolean {
-  const p = v.position as number[], h = v.home as number[];
-  return (v.phase === 'parked' || v.phase === 'boarding') && Math.hypot(p[0] - h[0], p[2] - h[2]) > 1;
+  const p = v.position as number[] | undefined, h = v.home as number[] | undefined;
+  return (v.phase === 'parked' || v.phase === 'boarding') && !!p && !!h && Math.hypot(p[0] - h[0], p[2] - h[2]) > 1;
 }
 /** landing/1: a steered landing away from the ride's home (a flight home, or its own route, is none). */
 function awayLanding(v: CarrierView): RideState['landing'] {
