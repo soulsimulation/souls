@@ -96,7 +96,8 @@ const NO_WALKOUTS: WalkoutPrep = { moved: [], warnings: [], touched: [] };
  *  caller that does not wait gets this refusal (an edit is never accepted unchecked). */
 export const LEGAL_PENDING = 'edit-preview.pending';
 const pendingRefusal = (): Result => ({ accepted: false, failures: [{ op: -1, code: LEGAL_PENDING, field: 'legal-edits/1', detail: 'This edit is checked against the residents off the tick thread before it is made; this caller did not wait for that check, so it was not made.', measured: { retryable: true }, fix: 'Send it through POST /v1/god/act, /undo or /redo, which wait for the check.' }] });
-const isPending = (r: unknown) => (r as { accepted?: boolean; failures?: Failure[] } | null)?.accepted === false && (r as { failures: Failure[] }).failures?.[0]?.code === LEGAL_PENDING;
+/** A refusal (an act's, a rewind's `{ok: false}`, or an abandon's undo `causes`) that only waits for the preview. */
+const isPending = (r: unknown) => { const x = r as { accepted?: boolean; ok?: boolean; failures?: Failure[]; causes?: Failure[] } | null; return !!x && x.accepted !== true && x.ok !== true && (x.failures?.[0]?.code === LEGAL_PENDING || x.causes?.[0]?.code === LEGAL_PENDING); };
 
 export class GodMode {
   readonly store: WorldStore;

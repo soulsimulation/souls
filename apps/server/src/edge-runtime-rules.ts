@@ -1,4 +1,5 @@
 import type {WorldHost} from './world.ts';
+import { factoryDescriptorV1 } from './world-factory.ts';
 
 /** Little Martians scene worlds: the old world (WORLD_KEY `littlemartians`, also its launcher fork) and the launcher's
  *  arium (slug `little-martians-arium`, as tools/world-launcher/op-souls.mjs names it). They are excluded from Soul
@@ -37,7 +38,9 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   await host.enableStandHeightV1('world');   // #1454: each event copies the policy before it
   await host.enableNonFiniteHoldV1('world').catch((e) => console.error('[world] nonfinite-hold/1 could not be adopted:', String(e).slice(0, 300)));   // #1496
   await host.enableStandHeightV2('world').catch((e) => console.error('[world] stand-height/2 could not be adopted:', String(e).slice(0, 300)));   // #1521
-  await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b, last
+  // legal-edits/1 needs the off-thread preview, which rebuilds the world's factory from its descriptor: a world without one
+  // (Eden core reads its history from the database) would refuse every god edit, so it keeps the rules it has
+  if (factoryDescriptorV1(host.factory)) await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b, last
 }
 
 /** Legal by construction 1b (docs/design/legal-by-construction.md part 1): legal-edits/1, one logged rules event (prospective,

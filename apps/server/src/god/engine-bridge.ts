@@ -106,8 +106,9 @@ type EngineV1 = {
 };
 
 const EVACUATE_RETRY_TICKS = 400; // a closure walk-out the engine could not land is retried after this many ticks
-/** legal-edits/1: a preview verdict stands for this many ticks (10 s at 20 Hz); the walk-out planner re-checks residents at commit. */
-const VERDICT_TICKS = 200;
+/** legal-edits/1: a preview verdict stands for this many ticks (30 s at 20 Hz, past the preview's own 20 s timeout); the
+ *  walk-out planner re-checks residents at commit. */
+const VERDICT_TICKS = 600;
 /** `sent` marker for a thing a walk-out took out of a resident's hands: whatever the entity world says next (a place on
  *  the ground, or nothing: removed) differs from it, so it is always sent. */
 const RELEASED = '"released"';
@@ -1496,9 +1497,9 @@ export class EngineBridge {
     } catch (e) { this.log(`walk-out planning: ${(e as Error).message}`); return { moved: [], warnings: [], touched: [] }; }
   }
   // ---- legal-edits/1 (legal by construction 1b, docs/design/legal-by-construction.md part 1)
-  /** Previewed edits by key (the physics they apply to and the draft): what the preview found, and the tick it was taken at.
-   *  Each is used once, by the request that waited for it. */
-  private verdicts = new Map<string, { tick: number; failures: Failure[] }>();
+  /** The last preview's verdict, by key (the physics it applies to and the draft): what it found and the tick it was taken
+   *  at. Used once, by the request that waited for it (its retry runs as soon as the preview answers); a new preview drops it. */
+  private verdict: { key: string; tick: number; failures: Failure[] } | null = null;
   /** The edit the last check found unpreviewed: `legalRun` previews it off the tick thread. */
   private wanted: { key: string; draft: WorldEditV1 } | null = null;
   /** Tests: how long an edit's preview may take (default edit-preview.ts PREVIEW_TIMEOUT_MS). */
@@ -1512,9 +1513,9 @@ export class EngineBridge {
     this.flush(); this.host.drainInputs();
     const draft = this.draftFor(after, diff), failures: Failure[] = [];
     if (draft) {
-      const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdicts.get(key);
+      const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key ? this.verdict : null;
       // a verdict answers the one request that waited for it: the next request is previewed on the world as it is then
-      this.verdicts.delete(key);
+      this.verdict = null;
       if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft }; return 'pending'; }
       failures.push(...v.failures);
     }
@@ -1530,12 +1531,11 @@ export class EngineBridge {
    *  preview that could not run (no worker, a timeout, too many in flight) refuses the request with a retryable code: an edit
    *  is never accepted unchecked. */
   private async legalRun(): Promise<Failure[] | null> {
-    const want = this.wanted; this.wanted = null; if (!want) return null;
+    const want = this.wanted; this.wanted = null; this.verdict = null; if (!want) return null;
     const tick = this.engine.world.tick, p = await previewWorldEditOffThreadV1(this.host, want.draft, this.legalTimeoutMs ? { timeoutMs: this.legalTimeoutMs } : {});
     if (!p.ok) return [{ op: -1, code: p.code, field: 'legal-edits/1', detail: `This edit could not be checked, so it was not made: ${'message' in p ? p.message : p.code}.`, measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }];
     const failures = p.violations.flatMap(v => this.violationFailures(v));
-    for (const k of [...this.verdicts.keys()].slice(0, Math.max(0, this.verdicts.size - 15))) this.verdicts.delete(k);
-    this.verdicts.set(want.key, { tick, failures });
+    this.verdict = { key: want.key, tick, failures };
     return null;
   }
   private violationFailures(v: PreviewViolationV1): Failure[] {

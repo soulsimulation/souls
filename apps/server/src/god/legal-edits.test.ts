@@ -16,6 +16,7 @@ import { describedFactoryV1 } from '../world-factory.ts';
 import { GodMode, LEGAL_PENDING } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
 import { previewWorkerScriptV1 } from './edit-preview.ts';
+import { land } from './land.ts';
 
 // the off-thread preview rebuilds this factory in its worker from the descriptor (edit-preview.test.ts)
 describedFactoryV1(factory, { kind: 'mars', world: GREEN_FIELD_WORLD as never });
@@ -136,4 +137,7 @@ test('legal-edits/1: a preview that times out refuses the edit with a retryable 
   previewWorkerScriptV1(real); w.bridge.legalTimeoutMs = undefined;
   const ok: any = await w.god.checked(() => w.god.act(wall("wall", [5, 5])));
   assert.equal(ok.accepted, true, JSON.stringify(ok));
+  // a land edit (POST /v1/god/land) waits for its preview the same way
+  const raised: any = await w.god.checked(() => land(w.god, { verb: 'raise', at: [30, 30], radius: 6, amount: 0.5, force: true } as never));
+  assert.equal(raised.accepted, true, JSON.stringify(raised).slice(0, 400));
 });
