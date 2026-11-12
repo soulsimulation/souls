@@ -128,7 +128,7 @@ test('offer schema: only what it states refuses', () => {
   assert.deepEqual(Object.keys(offerParams(carry)), ['to']);
 });
 
-test('rollback through the real CLI: words exit 2 with no act until the flag is on, then they act; off again, they refuse', async t => {
+test('through the real CLI: words exit 2 with no act, with the server flag off or on; the client never sends words (#1921)', async t => {
   const w = await world(t), {capabilities} = await w.get('/v1/edge/capabilities');
   const walk = capabilities.find((c: any) => c.verb === 'walk' && c.available), words = `walk to ${walk.label}`;
   const server = createServer(getRequestListener(w.app.fetch)); await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -148,14 +148,14 @@ test('rollback through the real CLI: words exit 2 with no act until the flag is 
   assert.equal(refused.exit, 2); assert.equal(refused.code, 'act.not-an-id'); assert.equal(refused.accepted, false);
   assert.ok(refused.candidates.some((c: any) => c.id === walk.id), JSON.stringify(refused.candidates));
   assert.equal(w.receipts(), before, 'nothing happened');
+  // #1921 A2: the client reads words with its local find and never sends them, so the server's rollback flag (the HTTP test
+  // above) does not reach the CLI
   process.env.EDGE_FREE_TEXT_ACT = '1';
   try {
     const flagged = await cli('act', words);
-    assert.equal(flagged.accepted, true, JSON.stringify(flagged)); assert.equal(flagged.exit, 0);
-    assert.equal(w.receipts(), before + 1, 'the words acted');
+    assert.equal(flagged.exit, 2, JSON.stringify(flagged)); assert.equal(flagged.accepted, false);
+    assert.equal(w.receipts(), before, 'the flag does not make the client send words');
   } finally {delete process.env.EDGE_FREE_TEXT_ACT;}
-  const after = await cli('act', words);
-  assert.equal(after.exit, 2, 'off again'); assert.equal(w.receipts(), before + 1);
 });
 
 // Found by the capacity bench on eden-2026: `resolve` named `walk:place-region-vineyard-orchard`, available, and the strict
