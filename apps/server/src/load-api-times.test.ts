@@ -143,7 +143,10 @@ test('#1944 an act says its four parts: queue + handler + wait + commit = world 
   const [world, queue, handler, wait, commit] = ['world', 'queue', 'handler', 'wait', 'commit'].map(d);
   assert.ok(Math.abs(queue + handler + wait + commit - world) <= 1, st);
   assert.ok(handler >= 18 && handler < 150 && wait >= 150 && commit >= 8 && commit < 150, st);
-  assert.equal(d('bind'), 3); assert.ok(d('check') >= handler - 1 && d('check') <= handler, st); assert.match(st, /route-miss;desc=2/);
+  // check runs from the handler's check mark to the wait: the handler's 20 ms, inside handler. handler also holds the
+  // dispatch from the turn's start to that mark, which a loaded runner can stretch past 1 ms (6.3 ms in CI), so check is
+  // bounded by its own 20 ms, not by handler − 1
+  assert.equal(d('bind'), 3); assert.ok(d('check') >= 18 && d('check') <= handler, st); assert.match(st, /route-miss;desc=2/);
   const p = apiOf(sharedApi).routes['edge:act']!.parts!;
   assert.ok(p.wait.max >= 150 && p.commit.max >= 8 && p.handler.max >= 18, JSON.stringify(p));
   assert.equal(p.waitOver3TicksAll, before + 1);

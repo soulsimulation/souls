@@ -118,6 +118,7 @@ import { WorldNavigation, createWorldOrbitControls, type ManualNavigation, type 
 import {WorldPlaceCamera} from './WorldPlaceCamera.ts';
 import { composeVisibleViewport, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
 import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
+import { cardLook, fadeCard } from './WorldCardSight.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
 import {paintSpeakingDot,speakingNow} from './dialogue-speaking.ts';
 import {WorldGames} from './WorldGames.ts';
@@ -161,7 +162,9 @@ const HOUR_SECONDS = 3600;
 type Past = { tick: number; playing: boolean; chunks: Chunk[]; extending: boolean; retryAt: number; ended: boolean };
 /** What is on screen, for the panels (written by the frame loop, read on React renders). */
 type Shown = { tick: number; datetime: string | null; take: Take | null; entities: Record<string, SampledEntity> };
-type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string };  // obj sits under the body (C2); head is where speech anchors
+type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: HTMLElement; card: HTMLElement; offset: LabelOffset; text: string;
+  /** #2195: the card's eased opacity, whether it is emphasised, and its last sightline check (performance.now ms). */
+  shown: number; emphasis: boolean; occluded: boolean; checkedAt: number };  // obj sits under the body (C2); head is where speech anchors
 
 async function fetchChunks(from: number, to: number, limit: number, signal: AbortSignal): Promise<Chunk[]> {
   let out: Chunk[] = [], cursor = from;
@@ -189,7 +192,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 type ShotPin = { eye: number[]; at: number[]; lifted: number; closer: number; raised: number };
 const shotPin = (): ShotPin | null => { const p = (window as unknown as { __shotCamera?: ShotPin }).__shotCamera; return p && p.eye?.length === 3 && p.at?.length === 3 && [...p.eye, ...p.at].every(Number.isFinite) ? p : null; };
 
-export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle, onViewerState, onInitialProgress, hideControls = false, embedded = false, hideSoulInfo = false, publishSpeechAnchors = false, humanPresets = false, viewportInsets, depictionBeatAt, edenExpansion = false, edenExpected = false, localClassroomPresentation, bootWorldId }: {
+export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle, onViewerState, onInitialProgress, hideControls = false, embedded = false, hideSoulInfo = false, publishSpeechAnchors = false, humanPresets = false, viewportInsets, depictionBeatAt, edenExpansion = false, edenExpected = false, localClassroomPresentation, bootWorldId, ownedIds }: {
   sim: Souls; selected: string | null;
   /** #892: 'chip' when a touch followed this Soul: the App shows its bottom chip, not the full card. */
   onSelect(id: string | null, how?: 'chip'): void;
@@ -218,6 +221,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   localClassroomPresentation?:LocalClassroomPresentation;
   /** Lane W1: a new world's page world id; the scene then starts before the socket's welcome (scene-owner.ts). */
   bootWorldId?:string;
+  /** #2195: the viewer's own Souls: their name cards show first and stand out from a high or far camera. */
+  ownedIds?:readonly string[];
 }) {
   const mount = useRef<HTMLDivElement>(null);
   const ownerMemory = useRef<SceneOwnerMemory>({}), owner = sceneOwner(sim.conn.welcome, bootWorldId, ownerMemory.current);
@@ -250,8 +255,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
   const entitiesAt = useCallback((seq: number) => entityLayerRef.current?.entitiesAt(seq) ?? null, []);
   /** Entity worlds: the person's camera across scene re-mounts of this page (framed once, on first arrival). */
   const entityView = useRef<{eye:[number,number,number];target:[number,number,number];pending?:boolean;broadcast?:boolean}|null>(null);
-  const context = useRef({ placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation });
-  context.current = { placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation };
+  const context = useRef({ placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds });
+  context.current = { placeCard, sim, selected, onSelect, onChipNote, follow, cameraMode, setCameraMode, thing, setThing, onViewerState, loading, graphicsUnavailable, viewportInsets, manualNavigation, setManualNavigation, depictionBeatAt, publishSpeechAnchors, edenExpansion, localClassroomPresentation, ownedIds };
   const past = useRef<Past | null>(null);
   const shown = useRef<Shown>({ tick: 0, datetime: null, take: null, entities: {} });
   const drawnTick = useRef<number | null>(null);
@@ -336,7 +341,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const onContextRestored = () => setGraphicsUnavailable(null);
     renderer.domElement.addEventListener('webglcontextlost', onContextLost);
     renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
-    const speechVisibility=new WorldRenderedVisibility();
+    const speechVisibility=new WorldRenderedVisibility();const cardVisibility=new WorldRenderedVisibility();  // #2195: name-card sightlines
     const labels2d = new CSS2DRenderer();
     // P1: name tags live in their own scene, so drawing them no longer re-walks (and re-multiplies) every one of the world's
     // ~9,000 objects each frame: CSS2DRenderer.render was ~20% of an Eden 2026 frame. Tags are placed in world coordinates.
@@ -652,7 +657,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     },decodeSceneCapturePublication);
     const installScene=(info:ReturnType<typeof parseSceneInfo>,verifiedPublication?:unknown,profiles:OptionalAppearanceProfiles=ALL_OPTIONAL_APPEARANCE_PROFILES)=>{
       staticBatches.reset();batchGeometry=null;batchRevision=-1;entityBatches.reset();entityBatchRevision=-1;
-      speechVisibility.reset();
+      speechVisibility.reset();cardVisibility.reset();
       const gate=newInitialGate();locationRegions=null;depictedLocations=[];placePreviews.invalidate();
       appearanceProfiles=profiles;
       resetSocialDraw();
@@ -688,7 +693,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if(key===sceneKey&&(sceneSettled||now<sceneRetryAt))return sceneSettled;
       const request=++sceneRequest;sceneKey=key;sceneRetryAt=Infinity;sceneSettled=false;initialGate?.cancel();setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});
       staticBatches.reset();batchGeometry=null;batchRevision=-1;entityBatches.reset();entityBatchRevision=-1;
-      speechVisibility.reset();
+      speechVisibility.reset();cardVisibility.reset();
       resetSocialDraw();
       clearSocialPaths();
       clearConnectedDressing();
@@ -722,6 +727,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     // C2: name plates hang just outside this ring's drawn outer edge (read from the ring itself, never a separate constant)
     const plateRadius = () => ring.geometry.parameters.outerRadius * ring.scale.x;
     const screenDown = new THREE.Vector3();
+    // #2195: name cards show selectively (WorldCardSight.ts). Sightlines are checked a few cards at a time, every other refresh.
+    const cardForward=new THREE.Vector3(),cardFocus=new THREE.Vector3(),cardOffset=new THREE.Vector3();let cardSpeakers=new Set<string>(),cardChecks=0;
     const standInGeometry = new THREE.CapsuleGeometry(0.22, 1.2, 4, 12), standInMaterial = new THREE.MeshStandardMaterial({ color: 0x5d7f9e, roughness: 0.7 });
     const standIns = new THREE.Group(); scene.add(standIns);
     const bodyStandIns = new WorldBodyStandIns(standIns,standInGeometry,standInMaterial);
@@ -741,7 +748,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const obj = new CSS2DObject(el);
       obj.center.set(0.5, 0);  // C2: the plate hangs below its anchor under the body
       labelScene.add(obj);
-      l = { obj, head: new THREE.Vector3(), name, line, card, offset: {dx:0,dy:0}, text: '' };
+      el.style.opacity = '0';
+      l = { obj, head: new THREE.Vector3(), name, line, card, offset: {dx:0,dy:0}, text: '', shown: 0, emphasis: false, occluded: false, checkedAt: 0 };
       labels.set(soul.id, l);
       return l;
     };
@@ -972,6 +980,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       let focus: THREE.Vector3 | null = null;
       screenDown.setFromMatrixColumn(camera.matrixWorld, 1).negate();
       const ringR = plateRadius(), eye = camera.position, down = {x: screenDown.x, z: screenDown.z};
+      camera.getWorldDirection(cardForward);
+      const owned = new Set(context.current.ownedIds ?? []);
+      const focusEntity = viewing === 'broadcast' ? (broadcast.subject ? at.entities[broadcast.subject]?.p : null) : null;
+      if (focusEntity) cardFocus.set(focusEntity[0], focusEntity[1], focusEntity[2]); else cardFocus.copy(controls.target);
+      const focusAhead = viewing === 'broadcast' && !focusEntity ? null : cardOffset.copy(cardFocus).sub(eye).dot(cardForward);
+      const focusDepth = focusAhead !== null && focusAhead > 1 ? focusAhead : null;
       for (const soul of souls) {
         const pos = at.entities[soul.entityId]?.p, rec = records[soul.entityId];
         if (!pos || fadedOut.has(soul.id)) continue;   // DLG1: a faded (absent) Soul has no name tag or speech anchor
@@ -998,6 +1012,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           }
         }
         if (soul.id === soulId) focus = spot.set(pos[0], pos[1], pos[2]);
+        const depth = cardOffset.set(pos[0] - eye.x, pos[1] - eye.y, pos[2] - eye.z).dot(cardForward);
+        const look = cardLook({ mine: owned.has(soul.id), revealed: soul.id === soulId || groupSelection.has(soul.id) || hover.hoveredSoul === soul.id,
+          state: past.current ? null : soul.body?.state, speaking: cardSpeakers.has(soul.id), distance: cardOffset.length(), height: eye.y - pos[1], depth, focusDepth, occluded: l.occluded });
+        const shown = fadeCard(l.shown, look.opacity, step), el = l.obj.element as HTMLElement;
+        if (shown !== l.shown) { l.shown = shown; el.style.opacity = shown.toFixed(2); el.style.pointerEvents = shown > 0.3 ? 'auto' : 'none'; }
+        if (look.emphasis !== l.emphasis) { l.emphasis = look.emphasis; l.name.style.fontSize = look.emphasis ? '1.2em' : ''; el.style.boxShadow = look.emphasis ? '0 0 0 1.5px rgba(140,220,255,.95)' : ''; }
       }
       // W4: who can hear each recent line (spectators see all channels).
       if(refresh){const now=Date.now(),recent=past.current?[]:context.current.sim.talk.filter(t=>now-t.at<20000);
@@ -1009,6 +1029,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
         if(edgeFeed.length&&!fadeOverride.size){const wallToPerf=performance.now()-now,states=fadingFromEdge(edgeFeed,a=>a+wallToPerf);fading.setStates(states);fadedOut=past.current?new Set():beamedOut(states,performance.now());}
         const nameOf=(id:string)=>s.conn.replica.souls.get(id)?.name??'someone',latest=new Map<string,SpectatorSpeech>();
         for(const sp of speeches)if(now-sp.at<8000&&(!latest.get(sp.speaker)||latest.get(sp.speaker)!.at<sp.at))latest.set(sp.speaker,sp);
+        cardSpeakers=new Set(latest.keys());
         for(const [id,l] of labels){
           // DLG2: in dock mode the dialogue dock carries the words and who can hear; the tag only gets a small speaking dot.
           paintSpeakingDot(l.obj.element as HTMLElement,id,context.current.publishSpeechAnchors,performance.now(),camera.position.distanceTo(l.head));
@@ -1154,7 +1175,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       // separate CSS translation, so packing never changes a body's anchor.
       const hostBox = labels2d.domElement.getBoundingClientRect(), boxes: LabelBox[] = [];
       for (const [id,l] of labels) {
-        if (!l.obj.visible || l.obj.element.style.display === 'none') continue;
+        if (!l.obj.visible || l.obj.element.style.display === 'none' || l.shown < 0.04) continue;   // #2195: a faded-out card takes no room
         const b=l.obj.element.getBoundingClientRect();
         boxes.push({id,x:b.left-hostBox.left-l.offset.dx,y:b.top-hostBox.top-l.offset.dy,width:b.width,height:b.height,selected:id===soulId,previous:l.offset});
       }
@@ -1165,6 +1186,16 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
         if(!offset) continue;
         l.offset=offset; el.style.translate=`${offset.dx}px ${offset.dy}px`;
       }
+      // #2195: sightlines for a few cards every other refresh, oldest check first: a card whose Soul is hidden behind
+      // scenery fades. One evaluation (one bounds pass) for the batch, two points per body (chest, top of the head).
+      if(refresh&&!holdDraw&&(++cardChecks&1)===0)try{
+        const due:Label[]=[],ids=new Map<Label,string>();
+        for(const [id,l] of labels)if(alive.has(id)&&l.obj.visible&&l.obj.element.style.display!=='none'){due.push(l);ids.set(l,id);}
+        due.sort((a,b)=>a.checkedAt-b.checkedAt);due.length=Math.min(due.length,8);
+        if(due.length){cardVisibility.prepareFresh(visualObstructionRoots());const pose={position:camera.position.toArray(),target:controls.target.toArray(),fov:camera.fov};
+          cardVisibility.evaluate(()=>{for(const l of due){const e=at.entities[s.conn.replica.souls.get(ids.get(l)!)?.entityId??''];if(!e)continue;const p=e.p;
+            l.occluded=cardVisibility.seen(pose,['soul'],{soul:{p:[p[0],p[1],p[2]],yaw:0,points:[[p[0],p[1]+1.1,p[2]],[p[0],p[1]+1.8,p[2]]]}})===0;l.checkedAt=now;}});}
+      }catch{cardVisibility.reset();}
       // P1: a new world prepares its first frame once its layer is built (layerStarted): before, a gate whose takes and
       // assets were in hand finished while the layer still loaded its snapshot, so the card went, showed bare ground, and came back
       if(initialGate?.attached&&!entityLayer.building&&(!newWorld||layerStarted)&&preparingGeneration!==initialGate.generation){const gate=initialGate;preparingGeneration=gate.generation;const prepared=(async()=>{if(!peopleLater)await people?.appearancesSettled(new Set(initialBodyIds));if(abort.signal.aborted||initialGate!==gate||!gate.attached)return;
@@ -1276,7 +1307,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       try{nativeSocialDraw?.dispose(people);}catch{problem('Some fixture scenery could not be released.');}
       clearConnectedDressing();
       abort.abort();manager.abort();removeEarlyPoster();
-      speechVisibility.reset();
+      speechVisibility.reset();cardVisibility.reset();
       cancelAnimationFrame(frame);
       resize.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onDown);
