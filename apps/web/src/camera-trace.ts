@@ -6,7 +6,8 @@
 // and the panel shows their median and p95 (the auto-camera note's per-frame budget).
 
 export type Vec = readonly [number, number, number];
-export type CameraFrame = { mode: string; target: Vec; eye: Vec; desired?: Vec | null; rule?: { name: string; [k: string]: unknown } | null };
+/** `dt`: #2201 A2, the frame's own step (s), the one the camera moved by, so speeds and snaps are read off the trace exactly. */
+export type CameraFrame = { mode: string; target: Vec; eye: Vec; desired?: Vec | null; rule?: { name: string; [k: string]: unknown } | null; dt?: number };
 export type TraceRecord =
   | ({ t: number; kind: 'frame' } & CameraFrame)
   | { t: number; kind: 'input'; input: string; detail?: Record<string, number | string> }
@@ -64,7 +65,7 @@ export class CameraTrace {
   private push(r: TraceRecord) { if (this.records.length >= MAX_RECORDS) this.records.shift(); this.records.push(r); }
   /** One frame; kept only when something changed (a moved camera, another mode or rule). */
   frame(f: CameraFrame) {
-    const rec = { t: Math.round(this.now() * 10) / 10, kind: 'frame' as const, mode: f.mode, target: r3(f.target), eye: r3(f.eye), desired: f.desired ? r3(f.desired) : null, rule: f.rule ? { ...f.rule } : null };
+    const rec = { t: Math.round(this.now() * 10) / 10, kind: 'frame' as const, mode: f.mode, target: r3(f.target), eye: r3(f.eye), desired: f.desired ? r3(f.desired) : null, rule: f.rule ? { ...f.rule } : null, ...(f.dt !== undefined ? { dt: f.dt } : {}) };
     const key = JSON.stringify([rec.mode, rec.target, rec.eye, rec.desired, rec.rule]);
     if (key === this.last) return;
     this.last = key; this.push(rec);

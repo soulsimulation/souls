@@ -83,3 +83,9 @@ test('#2201 A1: WorldFollow counts the sightline rays of each resolve call; a de
   follow.resolve(target, offset.clone().multiplyScalar(1.5), [g], 1 / 60);
   assert.equal(follow.rays, 0);
 });
+
+test('#2201 A2: a frame keeps its own step, so speeds read off the trace use the time the camera moved by', () => {
+  const trace = new CameraTrace(() => 5);
+  trace.frame({ mode: 'follow', target: [0, 1, 0], eye: [0, 3, 8], rule: { name: 'glide' }, dt: 1 / 30 });
+  assert.equal((trace.records[0] as { dt?: number }).dt, 1 / 30);
+});
