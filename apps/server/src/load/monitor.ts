@@ -106,7 +106,7 @@ export class QuietTick {
     if (quiet || (!this.quietSeen && served)) this.value = this.value > 0 ? this.value + QUIET_TICK_ALPHA * (avgMs - this.value) : avgMs;
     // #2124: a served window whose ticks cost less lowers it, by alpha (never raises it): under steady load no window is
     // quiet, and the value learned during setup (heavier ticks) held the admission budget below what the tick leaves
-    else if (served && avgMs < this.value) this.value += QUIET_TICK_ALPHA * (avgMs - this.value);
+    // #2166 measurement base: #2128 quiet-tick rule left out
     return this.value;
   }
 }
