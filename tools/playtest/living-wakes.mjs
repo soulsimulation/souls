@@ -41,15 +41,18 @@ const stopAll = async () => {
 };
 process.on('SIGINT', async () => { await stopAll(); process.exit(130); });
 
+// The harness's own CLI calls see a user folder under the run, so a new home is never listed in a real ~/.souls.
+const userHome = join(out, 'user-home'); mkdirSync(userHome, { recursive: true });
 const cli = async (folder, ...args) => {
-  const r = await run(process.execPath, ['eden.mjs', ...args], { cwd: join(out, folder), maxWallMs: 60_000 });
+  const r = await run(process.execPath, ['eden.mjs', ...args], { cwd: join(out, folder), env: { HOME: userHome }, maxWallMs: 60_000 });
   let json = null; try { json = JSON.parse(r.stdout); } catch { /* text */ }
   return { code: r.code, json, text: r.stdout, err: r.stderr.slice(-400) };
 };
 
 try {
   for (let i = 0; i < 120; i++) { try { if ((await fetch(`${base}/healthz`)).ok) break; } catch { /* booting */ } await sleep(1000); }
-  // Two Souls, each in its own home; the dev owner identity is seeded before create, as the arena seats do.
+  // Two Souls, each in its own home; the dev owner identity is seeded before create, as the arena seats do. `import` then
+  // moves each folder into a Souls home (<folder>/.souls), as an owner's own folder is, so memory and the brief work.
   const souls = {};
   for (const [folder, name] of [['mira', 'Mira'], ['bo', 'Bo']]) {
     const dir = join(out, folder); mkdirSync(dir, { recursive: true });
@@ -59,6 +62,8 @@ try {
     const c = await cli(folder, 'create', name);
     if (!c.json?.soul?.id) throw new Error(`create ${name}: ${c.text}${c.err}`);
     souls[folder] = c.json.soul.id;
+    const im = await cli(folder, 'import');
+    if (!existsSync(join(dir, '.souls', 'config.json')) || im.code !== 0) throw new Error(`import ${name}: ${im.text}${im.err}`);
     await cli(folder, 'serve');
   }
   // The seat's skill, where a home keeps a project copy (SKILL_COPIES in eden.mjs).
