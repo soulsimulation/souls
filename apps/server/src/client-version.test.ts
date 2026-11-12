@@ -37,3 +37,26 @@ test('A3: a second flush adds to the row and keeps first_at; no header is none; 
   ]);
   db.close();
 });
+
+test('#2014 A1: a value that is not a short version string is recorded as invalid, and the request is still served', async () => {
+  const db = new DatabaseSync(':memory:'); migrate(db);
+  const counts = new EdgeClients(db, 0), app = new Hono();
+  app.use('*', clientCounter(counts, () => 's_ada'));
+  app.get('/v1/edge/here', (c) => c.json({ok: true}));
+  for (const v of ['9'.repeat(33), '<script>', '2.32.0 extra', '.2.32.0', '2.32.0']) assert.equal((await app.request('/v1/edge/here', {headers: {'x-soul-client': v}})).status, 200, v);
+  counts.flush();
+  assert.deepEqual(rows(db).map((r) => [r.client, r.n]), [['2.32.0', 1], ['invalid', 4]]);
+  db.close();
+});
+
+test('#2014 A2: 1,000 distinct junk values from one Soul in one day add at most one row', () => {
+  const db = new DatabaseSync(':memory:'); migrate(db);
+  const counts = new EdgeClients(db, 0), t0 = Date.UTC(2026, 10, 11, 12);
+  for (let i = 0; i < 1000; i++) {
+    counts.note('s_ada', i % 2 ? `${i}`.padEnd(40 + i, 'x') : `junk value ${i} <>`, t0 + i);
+    if (i % 100 === 99) counts.flush();   // across flushes too
+  }
+  counts.close();
+  assert.deepEqual(rows(db).map((r) => [r.soul_id, r.client, r.day, r.n]), [['s_ada', 'invalid', '2026-11-11', 1000]]);
+  db.close();
+});
