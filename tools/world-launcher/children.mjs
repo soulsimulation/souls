@@ -205,9 +205,11 @@ export class ChildPool {
   }
   /** Freeze idle worlds (lane P3, 2026-10-19): a running world nobody has asked anything for `sleepMs`, with no viewer
    *  and nothing in flight (busy), is stopped in place (SIGSTOP): no CPU at all, its memory and port kept, its clock
-   *  stopped (world time does not pass while it sleeps, as across a restart). The next request thaws it at once
-   *  (ensure), so waking costs nothing like a boot (Eden 2026 boots in ~8 s). Memory still comes back the old way:
-   *  makeRoom() evicts the least recently used idle world, frozen or not, when a boot needs room. */
+   *  stopped. #2235: world time must never stop, and a frozen world loses the time it is frozen (on SIGCONT the tick
+   *  loop drops all but a second of it). Freezing is allowed only for a world that proves nothing but pure time passes
+   *  before it would wake, and no world proves that yet (the audit on #2235: idle Souls' needs and reflexes change the
+   *  world every tick), so the launcher's default is off (launcher.mjs SLEEP_MS 0); this stays for explicit --sleep-ms
+   *  use only. The next request thaws it at once (ensure). */
   freezeIdle(now = Date.now()) {
     const ms = this.o.sleepMs ?? 0;
     if (!(ms > 0) || this.closing || this.fenced || this.gate) return [];
@@ -219,7 +221,8 @@ export class ChildPool {
     }
     return frozen;
   }
-  /** Give memory back (lane SLEEP, 2026-10-21): a world asleep (frozen) for `exitMs` more after it fell asleep (nobody
+  /** Give memory back (lane SLEEP, 2026-10-21; #2235: off by default with freezing, see freezeIdle; a cold boot catches
+   *  up the time it was away by ticking, apps/server/src/clock-catchup.ts): a world asleep (frozen) for `exitMs` more after it fell asleep (nobody
    *  asked anything for sleepMs + exitMs), still with no viewer and nothing in flight, is stopped: it saves its snapshot
    *  and its process exits, so its memory and its slot under maxRunning are free. Its next request cold-boots it from that
    *  snapshot (the same state), as for a world evicted under memory pressure. A world booted only for a passive read
@@ -677,8 +680,6 @@ export function defaultCommand(world, port, o) {
     SOUL_LIFECYCLE: '1',
     // Souls fade and are lifted up after an hour without an action (green → yellow → red → beam-up), as on /w/eden (R4-LIVE)
     EDGE_FADING: '1',
-    // Nobody watching or acting here for 30 s: the clock runs at a quarter of its wall pace (apps/server/src/attention.ts)
-    SIM_UNWATCHED_PACE: process.env.SIM_UNWATCHED_PACE ?? '0.25',
     // Eyes (apps/server/src/edge/eyes): a Soul's first-person picture. Off unless the launcher's own environment sets EDGE_EYES
     // (`world` = each world renders its own public page), optionally scoped by EDGE_EYES_WORLDS. The browser path,
     // GPU mode, budgets and nice level come with it; the allowlist itself is not a server setting.

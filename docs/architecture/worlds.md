@@ -101,10 +101,14 @@ switch independent. A previously saved master mute migrates to both switches off
   claims the world for its creator.
 - **Proxying.** `<base>/w/<slug>/*` is proxied to the child (HTTP, SSE and WebSocket). A request to a sleeping world
   starts it.
-- **Sleeping.** Children are restarted after a crash (with backoff), paused after a period without visitors, and may be
-  released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
-  (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
-  (`apps/server/src/clock-catchup.ts`) without simulating the gap.
+- **World time never stops (#2235).** A world's clock keeps wall pace whether anyone watches or not: no slower clock
+  when unwatched, and no idle freeze or idle exit by default (`--sleep-ms`, `SIM_WORLD_IDLE_EXIT_MIN`, both 0), because
+  no world can yet prove that nothing but pure time would pass while it slept. Children are restarted after a crash
+  (with backoff) and evicted least recently used when a boot needs room. Across a gap no world avoids (restart, deploy,
+  eviction, crash) the world is caught up exactly by ticking: on boot it runs every tick it missed through the ordinary
+  tick, before it serves, from the wall anchor in `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`).
+  The engine, needs and day reach the state a world ticked through the gap would have; listener state kept in memory
+  or on the wall clock (the edge ambient-life idle clock, the body rule's timers) does not yet (#2236).
 - **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
@@ -183,7 +187,7 @@ switch independent. A previously saved master mute migrates to both switches off
 ### What a child runs with
 
 `children.mjs` builds each child's environment: `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`, `BRAIN_MODE=fake` with empty
-provider keys, `SEED_NATIVES=0`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, `SIM_UNWATCHED_PACE=0.25`, Clerk sign-in
+provider keys, `SEED_NATIVES=0`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, Clerk sign-in
 (`AUTH_PROVIDER=clerk`, `ACCOUNT_AUTH_REQUIRED=1`, `ACCOUNT_REGISTRY_PATH`), the world's identity and paths, the
 served skill and CLI files, the site relay settings (`SIM_SITE_URL`, `SIM_SITE_KEY`), and the Eyes settings when the
 launcher's own environment sets them (see [Souls](souls.md#eyes)).

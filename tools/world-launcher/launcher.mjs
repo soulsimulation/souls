@@ -152,13 +152,15 @@ export const ROOT = resolve(here, '../..');
 /** The Soul CLI and guides every world serves unless overridden (tools/world-launcher/soul/SOURCES.json). */
 /** Keep-alive idle timeout of the public server: longer than Caddy's upstream idle timeout (2 min). */
 export const KEEP_ALIVE_MS = 130_000;
-/** Freeze a world nobody has asked anything for this long (children.mjs freezeIdle; --sleep-ms, 0 = never). Lane P3. */
-export const SLEEP_MS = 10 * 60_000;
+/** Freeze a world nobody has asked anything for this long (children.mjs freezeIdle; --sleep-ms, 0 = never). Lane P3.
+ *  #2235: 0 by default; world time must never stop, and no world yet proves it may (see freezeIdle). */
+export const SLEEP_MS = 0;
 /** A world asleep this long more exits, giving its memory back; its next visit cold-boots it (children.mjs releaseIdle;
- *  SIM_WORLD_IDLE_EXIT_MIN minutes, default 60; 0 = never; SIM_WORLD_IDLE_EXIT_FORKS=1 includes the old-engine forks). Lane SLEEP. */
+ *  SIM_WORLD_IDLE_EXIT_MIN minutes, 0 = never and the default since #2235, which also needs sleep on;
+ *  SIM_WORLD_IDLE_EXIT_FORKS=1 includes the old-engine forks). Lane SLEEP. */
 export function idleExitMs(env = process.env) {
-  const v = Number(env.SIM_WORLD_IDLE_EXIT_MIN ?? 60);
-  return Number.isFinite(v) && v >= 0 ? v * 60_000 : 60 * 60_000;
+  const v = Number(env.SIM_WORLD_IDLE_EXIT_MIN ?? 0);
+  return Number.isFinite(v) && v >= 0 ? v * 60_000 : 0;
 }
 /** Reads that only report on a world (health, config, the homepage's numbers): answered, but not a visit. */
 // the Eyes render worker inside a world (apps/server/src/edge/eyes, user agent tag EdenEyes/1, same test as isEyesAgent in
