@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import {WorldVisibilityInstances} from './WorldVisibilityInstances.ts';
 import {springAngle,springStep} from './camera-spring.ts';
-import {shotScore,walkingDrift,type ShotContext} from './shot-score.ts';
+import {SHOT_WEIGHTS,shotScore,walkingDrift,type ShotContext} from './shot-score.ts';
+/** #2201 A4: the most the sky part (.5 when not looked at, 0 or 1 when it is) moves a shot's total (the smallest weight
+ *  sum: no sun, not forced). */
+const SKY_SWING=.5*SHOT_WEIGHTS.sky/(Object.values(SHOT_WEIGHTS).reduce((a,b)=>a+b,0)-SHOT_WEIGHTS.sun)+1e-9;
 /** Camera-only sightline protection. Requested orbit/zoom survives temporary
  * obstruction; the rendered camera may move nearer or around a blocking post. */
 /** VF6: Follow zoom bounds (metres from the Soul) and how long after the last drag/zoom the viewer's view is kept as is
@@ -41,7 +44,7 @@ export class WorldFollow {
   private cast=0;
   rays=0;
   reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();
-    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.driftTo=null;this.driftAt=-Infinity;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;}
+    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.driftTo=null;this.driftAt=-Infinity;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;}
   /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
   private motion={theta:0,phi:0,radius:0};
   /** The camera's automatic speed on the last frame (m/s, relative to the Soul): the start of the acceleration cap. */
@@ -265,6 +268,7 @@ export class WorldFollow {
   }
   /** #2201 A4: where the walking drift heads (an azimuth), checked every second: the nearer side-behind view when it is
    * clear, else the nearest clear of the far side-behind and straight behind (a street lined with houses), else the nearer. */
+  private heldSky:{at:THREE.Vector3;t:number;sky:boolean}|null=null;
   private driftTo:number|null=null;
   private driftAt=-Infinity;
   private driftAim(target:THREE.Vector3,s:THREE.Spherical,roots:readonly THREE.Object3D[]){
@@ -281,11 +285,14 @@ export class WorldFollow {
     // put, the asked-for view); the sky ray is cast for the three best and the held view only. Cost is minus the score.
     const ctx:ShotContext={heading:this.heading,held:this.rendered,asked:wanted,sun:this.view.sun,daylight:this.view.daylight,fov:this.view.fov*Math.PI/180,forced:this.forced};
     const ranked=this.candidates(wanted).map(c=>({c,k:-shotScore(c,ctx).total})).sort((a,b)=>a.k-b.k);
-    for(const r of ranked.slice(0,3))r.k=-shotScore(r.c,{...ctx,sky:this.skyBehind(target,r.c)}).total;
-    ranked.sort((a,b)=>a.k-b.k);
     // Hysteresis: the previous viewpoint, while it stays clear, is kept unless a clear candidate scores .12 better.
     let best:THREE.Vector3|null=null,bestCost=Infinity;const held=!!this.chosen&&this.kept('chosen',target,this.chosen,roots);
-    if(held){best=this.chosen;bestCost=-shotScore(this.chosen!,{...ctx,sky:this.skyBehind(target,this.chosen!)}).total-.12;}
+    if(held){
+      // the held view's sky, looked at again once a second (or when the view changes)
+      if(!this.heldSky||this.heldSky.at.distanceTo(this.chosen!)>.01||this.clock-this.heldSky.t>=1)this.heldSky={at:this.chosen!.clone(),t:this.clock,sky:this.skyBehind(target,this.chosen!)};
+      best=this.chosen;bestCost=-shotScore(this.chosen!,{...ctx,sky:this.heldSky.sky}).total-.12;}
+    // the sky part moves a total by at most SKY_SWING: cast the sky rays only when the best candidates could then win
+    if(ranked[0]&&ranked[0].k-SKY_SWING<bestCost){for(const r of ranked.slice(0,3))r.k=-shotScore(r.c,{...ctx,sky:this.skyBehind(target,r.c)}).total;ranked.sort((a,b)=>a.k-b.k);}
     for(const {c,k} of ranked){if(k>=bestCost)break;if(this.clear(target,c,roots)){best=c;bestCost=k;break;}}
     // #2201 A3: a challenger to a held view that is still clear wins only at the second search running.
     if(held&&best!==this.chosen){const again=!!this.challenger&&this.challenger.distanceTo(best!)<.1;this.challenger=best!.clone();if(!again)return this.chosen!;}
