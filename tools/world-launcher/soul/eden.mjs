@@ -5723,14 +5723,16 @@ async function serveForeground() {
   }
   const pendingClose = [];
   async function handle(m) {
-    // #1968: a command from another process means the agent took what was handed; pending and status read without taking it
-    if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
-    // #1930: an agent command ends idle; reading (pending, status) and waiting (listen, wait) do not
-    if (!["pending", "status"].includes(m.op) && !(m.op === "http" && m.method !== "POST" && ["/v1/edge/inbox/listen", "/v1/edge/wait"].includes(routeOf(m.url)))) { st.lastCommandAt = Date.now(); persist(); }
+    // #1968: a command from another process means the agent took what was handed; pending and status read without taking it.
+    // #1932: pending --check is not the agent either; it asks on a copy and changes nothing.
+    if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status" && m.op !== "check") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
+    // #1930: an agent command ends idle; reading (pending, status, pending --check) and waiting (listen, wait) do not
+    if (!["pending", "status", "check"].includes(m.op) && !(m.op === "http" && m.method !== "POST" && ["/v1/edge/inbox/listen", "/v1/edge/wait"].includes(routeOf(m.url)))) { st.lastCommandAt = Date.now(); persist(); }
     if (moved()) { log("the folder's world, Soul or token changed: stopping"); setTimeout(() => shutdown(0), 10); return m.op === "http" ? { status: 0, data: { error: { code: "unreachable", message: "this serve stopped: the folder moved to another world or Soul" } } } : { serving: false, stopping: true, moved: true }; }
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
     if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS, m.reader); persist(); return out; }
+    if (m.op === "check") return { due: pendingDue(takePending(structuredClone(st), Date.now(), WAKE_HELD_MS, m.reader)) };
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
@@ -5906,8 +5908,23 @@ async function followFolder() {
   return { serve: { restarted: true, pid: again.pid } };
 }
 
+/** Whether a pending answer holds anything for the mind: a message, an ended act, an event, speech, a wake, a finished plan. */
+export const pendingDue = (p) => !!(p.ownerMessages.length || p.endedReceipts.length || p.events.length || p.addressed || p.faced || p.moreEvents || p.gap || p.omitted || p.planEnded?.length || p.wakes);
+
+// pending --check (#1932): exit 0 and print nothing when pending has something, exit 1 when not. It starts serve if none is up,
+// reads nothing and calls no model, so a scheduler can gate a run on it: `pending --check && <run>` spends no tokens when idle.
+async function pendingCheck() {
+  let a = await askServe({ op: "check" });
+  if (!a || a.lost) { await serve(); a = await askServe({ op: "check" }); }
+  if (!a || a.lost) throw new Error(`serve did not answer: ${CLI} serve --status`);
+  if (a.error) throw new Error(a.error === "unknown op check" ? `this serve predates pending --check: ${CLI} serve --stop, then ${CLI} serve` : a.error);
+  process.exitCode = a.due ? 0 : 1;
+  return "";
+}
+
 // pending: what arrived since the last read, from the serve's queue, with no world call.
-async function pending() {
+async function pending(...argv) {
+  if (argv[0] === "--check") return pendingCheck();
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
   heard(a.ownerMessages);
@@ -5919,6 +5936,7 @@ async function pending() {
 async function wakeCommand(...argv) {
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const [sub, ...rest] = argv;
+  if (sub === "heartbeat") return heartbeat(rest);
   const change = !sub ? null : sub === "add" ? { add: soulWake.parseRule(rest) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
   if (sub && !change) soulWake.parseBudget([]);   // throws the usage
   const a = await askServe({ op: "wake", change });
@@ -5928,6 +5946,25 @@ async function wakeCommand(...argv) {
   if (c.error) throw new Error(c.error);
   if (change) { st.wake = c.wake; writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); }
   return { ...soulWake.view(c.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}), serving: false };
+}
+
+// wake heartbeat [--every <minutes>] (#1932): what the owner's harness schedules to check on this Soul, (a) a prompt for a scheduled
+// task that starts in this folder, (b) one gated command for a scheduler that runs a shell. The cadence is kept in the Soul's state.
+export const HEARTBEAT_EVERY_MIN = 60;
+const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
+function heartbeat(argv) {
+  const [flag, v, ...extra] = argv;
+  if (extra.length || (flag !== undefined && (flag !== "--every" || !/^\d{1,5}$/.test(v ?? "") || Number(v) < 1))) throw new Error("usage: wake heartbeat [--every <minutes>]");
+  const every = flag ? Number(v) : HEARTBEAT_EVERY_MIN, folder = real(INVOKED), script = real(process.argv[1]);
+  const me = HOME && SEAT?.kind === "soul" ? HOME.principals().find((p) => p.id === SEAT.id) : null, sel = me ? ` ${me.address}` : "";
+  const inside = script.startsWith(`${folder}/`) ? script.slice(folder.length + 1) : script;
+  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it reports nothing new (no owner messages, ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
+  const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
+  save({ heartbeat: { every, at: now() } });
+  return {
+    heartbeat: { every, folder, prompt, command: { claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`, codex: `${check} && codex exec --skip-git-repo-check ${shq(prompt)}` } },
+    note: `(a) Schedule the prompt every ${every} minutes as a scheduled task in your harness that starts in ${folder} on this machine. (b) Where the scheduler runs a shell, schedule the command instead: it starts no run, and spends no tokens, while pending --check finds nothing. docs: /docs/run-a-soul`,
+  };
 }
 
 // plan '<ordered offered ids>' [--for <id>|none]: checked here before any step runs, then run by the serve.
