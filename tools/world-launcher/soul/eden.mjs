@@ -2287,11 +2287,13 @@ const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupt
 const FIRED_KEEP = 200;   // receipt ids act-ended has woken for, so one end wakes once (serve keeps the newest 200 ended receipts)
 /** Kinds that are always on: the three wakes serve had before rules. */
 const ALWAYS = ["owner-message", "speech-to-me", "plan-stopped"];
-/** Kinds `wake add` takes. act-ended is on by default and can be removed and added again. */
-const ADDABLE = ["act-ended", "soul-arrives", "place-busy"];
+/** Kinds `wake add` takes. act-ended and plan-finished are on by default and can be removed and added again. */
+const ADDABLE = ["act-ended", "plan-finished", "soul-arrives", "place-busy", "at", "every", "idle"];
+/** #1930: `wake add every <minutes>` takes at least this many. */
+const EVERY_MIN = 5;
 
 function fresh() {
-  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), { id: "act-ended", kind: "act-ended", every: 0 }], cursor: null, queue: [], next: 1 };
+  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), ...["act-ended", "plan-finished"].map((kind) => ({ id: kind, kind, every: 0 }))], cursor: null, queue: [], next: 1 };
 }
 
 /** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
@@ -2302,7 +2304,7 @@ const HELD_MS = 600_000;
 const SPEAKER_MS = 60_000;
 const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
 
-const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
+const USAGE = `usage: wake | wake add <${ADDABLE.filter((k) => k !== "at" && k !== "every").join("|")}> [params-json] [--every <seconds>] | wake add at <ISO time> | wake add every <minutes ≥ ${EVERY_MIN}> | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
 /** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
 function parseBudget(argv) {
   const [a, b, ...extra] = argv;
@@ -2322,11 +2324,25 @@ function parseRule(argv) {
   const [kind, text, ...extra] = rest;
   if (ALWAYS.includes(kind)) throw new Error(`${kind} is always on`);
   if (!ADDABLE.includes(kind) || extra.length) throw new Error(USAGE);
+  // #1930: a time and a period on the real clock, not JSON
+  if (kind === "at") {
+    const t = Date.parse(text ?? "");
+    if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(text ?? "") || Number.isNaN(t)) throw new Error("at takes an ISO time: wake add at 2026-11-12T09:00:00Z");
+    return { kind, params: { at: new Date(t).toISOString() }, every };
+  }
+  if (kind === "every") {
+    if (!/^\d{1,6}$/.test(text ?? "") || Number(text) < EVERY_MIN) throw new Error(`every takes whole minutes, at least ${EVERY_MIN}: wake add every 30`);
+    return { kind, params: { minutes: Number(text) }, every };
+  }
   let p = {};
   if (text !== undefined) { try { p = JSON.parse(text); } catch { throw new Error(`${kind}: params must be JSON`); } }
   if (!p || typeof p !== "object" || Array.isArray(p)) throw new Error(`${kind}: params must be a JSON object`);
   const id = (v) => typeof v === "string" && /^\S{1,100}$/.test(v);
-  if (kind === "act-ended") { if (Object.keys(p).length) throw new Error("act-ended takes no params"); return { kind, every }; }
+  if (kind === "act-ended" || kind === "plan-finished") { if (Object.keys(p).length) throw new Error(`${kind} takes no params`); return { kind, every }; }
+  if (kind === "idle") {
+    if (Object.keys(p).some((k) => k !== "minutes") || !Number.isInteger(p.minutes) || p.minutes < EVERY_MIN) throw new Error(`idle takes {"minutes":<n>}, at least ${EVERY_MIN}`);
+    return { kind, params: { minutes: p.minutes }, every };
+  }
   if (kind === "soul-arrives") {
     const params = { who: p.who ?? "any", where: p.where ?? "here" };
     if (Object.keys(p).some((k) => !["who", "where"].includes(k)) || !id(params.who) || !id(params.where)) throw new Error('soul-arrives takes {"who":"any"|"<soulId>","where":"here"|"<placeId>"}');
@@ -2355,7 +2371,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 /** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
 function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, ...(r.ended ? { ended: r.ended } : {}), lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
 }
 
 const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
@@ -2436,7 +2452,8 @@ function after(list, cursorId, first) {
 const who = (live, id) => live.souls.find((r) => r.id === id)?.name ?? id;
 
 /** Pure: the rules against serve's state at `now` (ms). state: serve's state ({events, receipts, plan, planEnded, messages,
- *  addressed, addressedSeq, wake: {cursor}}) with `live` (the live copy's picture, or null) and `me` (this Soul's id).
+ *  addressed, addressedSeq, lastCommandAt, wake: {cursor}}) with `live` (the live copy's picture, or null), `me` (this Soul's id)
+ *  and `since` (when this serve started, ms: a time that passed before it is dropped, never fired late).
  *  Returns the rules with their last match, last firing and change state, the engine's cursor, and the wakes fired now. */
 function evaluate(rules, state, now) {
   const prev = state.wake?.cursor ?? null, first = !prev;
@@ -2481,6 +2498,35 @@ function evaluate(rules, state, now) {
         done.add(h.id); fire(`${x.capability ?? "your act"} ${x.phase}${x.reason ? `: ${x.reason}` : ""}`);
       }
       r.done = [...done].slice(-FIRED_KEEP);
+    } else if (r.kind === "plan-finished") {
+      // #1930: a plan that ended done or failed; one replaced (by a newer plan or body act the agent sent) wakes no one
+      const seed = first || !r.done, done = new Set(r.done ?? []);
+      for (const p of [state.plan, ...(state.planEnded ?? [])]) {
+        if (!p?.id || !["done", "failed"].includes(p.state) || done.has(p.id)) continue;
+        done.add(p.id);
+        if (!seed) fire(`plan ${p.id} ${p.state === "done" ? "finished" : "ended failed"}`);
+      }
+      r.done = [...done].slice(-FIRED_KEEP);
+    } else if (r.kind === "at") {
+      // #1930: once, at the time; a time that passed before this serve started, or before the rule was first seen, is dropped
+      const t = Date.parse(r.params.at);
+      r.from ??= now;
+      if (!r.ended && t < Math.max(state.since ?? 0, r.from)) r.ended = "dropped";
+      else if (!r.ended && now >= t && fire(`it is ${r.params.at}`)) r.ended = "fired";
+    } else if (r.kind === "every") {
+      // #1930: every n minutes from when the rule was first seen; times that passed while serve was not running are dropped
+      const ms = r.params.minutes * 60_000;
+      r.next ??= now + ms;
+      if (now >= r.next) {
+        if (r.next >= (state.since ?? 0)) fire(`every ${r.params.minutes} minutes`);
+        r.next += Math.ceil((now - r.next + 1) / ms) * ms;
+      }
+    } else if (r.kind === "idle") {
+      // #1930: no agent command and no running plan for that long; once, until the next agent command. Receipts are not read:
+      // a held sit stays `started`, and a seated Soul is idle.
+      if (state.plan?.state === "running") r.planAt = now;
+      const key = state.lastCommandAt ?? 0, quietSince = Math.max(key, state.since ?? 0, r.planAt ?? 0);
+      if (r.idleFor !== key && now - quietSince >= r.params.minutes * 60_000 && fire(`no command for ${r.params.minutes} minutes`)) r.idleFor = key;
     } else if (r.kind === "soul-arrives" && live) {
       const place = r.params.where === "here" ? live.souls.find((x) => x.id === state.me)?.place : r.params.where;
       if (place) {
@@ -2497,7 +2543,7 @@ function evaluate(rules, state, now) {
   });
   return { rules: out, cursor, fired };
 }
-return { WAKE_EVERY_S, WAKE_QUEUE_MAX, ACT_ENDED_GRACE_MS, ALWAYS, ADDABLE, fresh, BUDGETS, HELD_MS, SPEAKER_MS, parseBudget, parseRule, change, view, budgetView, enqueue, expire, deliver, confirm, newsWakes, speechDue, spokeNow, evaluate };
+return { WAKE_EVERY_S, WAKE_QUEUE_MAX, ACT_ENDED_GRACE_MS, ALWAYS, ADDABLE, EVERY_MIN, fresh, BUDGETS, HELD_MS, SPEAKER_MS, parseBudget, parseRule, change, view, budgetView, enqueue, expire, deliver, confirm, newsWakes, speechDue, spokeNow, evaluate };
 })();
 // </inline wake.mjs>
 
@@ -5363,7 +5409,7 @@ async function serveForeground() {
   const runWake = () => {
     try {
       const copy = readJsonFile(LIVE_FILE), before = JSON.stringify(st.wake);
-      const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul }, Date.now());
+      const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul, since: Date.parse(start) }, Date.now());
       st.wake = { ...soulWake.expire(st.wake, Date.now(), WAKE_HELD_MS), rules: r.rules, cursor: r.cursor };
       st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired);   // #1968: one entry per rule, with a count and the latest why
       for (const f of r.fired) log(`wake: ${f.id} (${f.why})`);
@@ -5613,7 +5659,7 @@ async function serveForeground() {
     }
     st.planEnded = [...(st.planEnded ?? []), planView(p)].slice(-PLAN_ENDED_MAX);
     if (st.plan === p) st.plan = null;
-    persist();
+    persist(); runWake();   // #1930: plan-finished sees it before a pending can take planEnded
     return true;
   }
   async function planTick() {
@@ -5680,6 +5726,8 @@ async function serveForeground() {
     // #1968: a command from another process means the agent took what was handed; pending and status read without taking it.
     // #1932: pending --check is not the agent either; it asks on a copy and changes nothing.
     if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status" && m.op !== "check") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
+    // #1930: an agent command ends idle; reading (pending, status, pending --check) and waiting (listen, wait) do not
+    if (!["pending", "status", "check"].includes(m.op) && !(m.op === "http" && m.method !== "POST" && ["/v1/edge/inbox/listen", "/v1/edge/wait"].includes(routeOf(m.url)))) { st.lastCommandAt = Date.now(); persist(); }
     if (moved()) { log("the folder's world, Soul or token changed: stopping"); setTimeout(() => shutdown(0), 10); return m.op === "http" ? { status: 0, data: { error: { code: "unreachable", message: "this serve stopped: the folder moved to another world or Soul" } } } : { serving: false, stopping: true, moved: true }; }
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
@@ -6073,7 +6121,7 @@ const HELP = [
     `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
   ],
   ["",
-    `wake [add <act-ended|soul-arrives|place-busy> [params-json] [--every s] | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)`,
+    `wake [add <act-ended|plan-finished|soul-arrives|place-busy|idle> [params-json] [--every s] | add at <ISO time> | add every <minutes ≥ 5> | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)`,
   ],
   ["",
     `wake budget <quiet|normal|lively|unlimited|n> | wake budget --day <n>   (the owner's: rule wakes an hour (4, 12, 60, no limit) and a day; over it they merge and wait)`,
