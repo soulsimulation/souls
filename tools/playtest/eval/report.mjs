@@ -30,6 +30,7 @@ export function renderCases(a) {
   for (const c of cases) {
     L.push('', `## ${c.case} r${c.repeat}: ${c.error ? 'error' : c.succeeded ? 'pass' : 'FAIL'}`, '', `Bar: ${c.bar}`);
     if (c.world?.restartAt) L.push('', `World restarted ${c.world.restarted ? `and answered again in ${Math.round(c.world.restartMs / 100) / 10} s` : 'and did not come back'}.`);
+    if (c.measures?.length) L.push('', ...c.measures.map((m) => `- ${m}`));
     L.push('', '| Soul | at s | step | folder | exit | refusal | check | why |', '|---|---|---|---|---|---|---|---|');
     for (const s of c.souls ?? []) for (const st of s.steps) L.push(`| ${s.name} | ${st.at} | \`${st.cmd ?? `world ${st.world ?? st.await}`}\` | ${st.in ?? 'own'} | ${st.exit ?? ''} | ${st.refusal ?? ''} | ${st.ok ? 'held' : 'failed'} | ${String(st.why ?? '').replace(/\|/g, '/')} |`);
   }

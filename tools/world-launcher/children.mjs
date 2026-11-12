@@ -32,6 +32,8 @@ export function portFree(port) {
   });
 }
 
+/** #2164: live.json fresh, serving, and its main thread turned within turnAgeMs. */
+const turning = (live, now, g) => !!live && now - live.at <= g.liveStaleMs && live.phase === 'serving' && Number.isFinite(live.loop?.lastTurnAgeMs) && live.loop.lastTurnAgeMs <= g.turnAgeMs;
 export class ChildPool {
   /**
    * @param {{ root: string, range: [number, number], logDir: string, marsWebDir?: string, publicOrigin: string,
@@ -39,7 +41,7 @@ export class ChildPool {
    *           healthPath?: (slug: string) => string, onChange?: (slug: string) => void, pidFile?: string, idleMs?: number,
    *           maxRunning?: number, minFreeMb?: number, busy?: (slug: string) => boolean,
    *           decorate?: (c: { cmd: string, args: string[], env?: object }, world: object) => { cmd: string, args: string[], env?: object },
-   *           soulCliFile?: string | null, soulControllerCliFile?: string | null, soulSkillFile?: string | null, soulInstructionsFile?: string | null }} o
+   *           soulControllerCliFile?: string | null, soulSkillFile?: string | null, soulInstructionsFile?: string | null }} o
    * maxRunning / minFreeMb: before a world boots, idle worlds are put to sleep until it fits; when none can sleep the
    * boot is refused (error.code 'capacity'). busy(slug): a world with live viewers is never put to sleep.
    * stopGraceMs: how long stop() waits after SIGTERM before SIGKILL (10 s; tests shorten it).
@@ -516,16 +518,19 @@ export class ChildPool {
       const { ok, why: said } = await this.ask(k);
       if (k.child !== c || k.status !== 'running' || k.frozen || k.stopped || k.stopping || this.closing || this.fenced || this.gate) return;   // changed meanwhile
       const now = Date.now(), h = k.health ?? (k.health = { fails: 0, okAt: null });
-      if (ok) { h.fails = 0; h.okAt = now; } else h.fails++;
       k.live = k.world?.dataDir ? readLive(join(k.world.dataDir, 'live.json'), c.pid) : null;
+      // #2164: no watchdog port, the main /healthz unanswered in time, but live.json (the world's watchdog thread) fresh and
+      // its main thread turning: a busy world, not a stuck one, as its watchdog port would say. Never killed for it.
+      const busy = !ok && !k.healthPort && turning(k.live, now, g);
+      if (ok || busy) { h.fails = 0; h.okAt = now; } else h.fails++;
       // #1150: each new rung 3 is an ALERT, shown for as long as a wedge is
       if (k.rewindsSeen !== undefined && (k.live?.rewinds ?? 0) > k.rewindsSeen) k.lastRewind = { at: Date.now(), n: k.live.rewinds }; if (k.live) k.rewindsSeen = k.live.rewinds ?? 0;
       if (said) h.said = said; else if (ok) h.said = null;
       const why = this.liveWhy(k, now) ?? (h.fails >= g.failures ? `${h.said ?? '/healthz unanswered'} ${h.fails} times in a row` : null);
       if (why) void this.wedge(k, why);
-      // #1326: a halted world is restarted once per breaker window (a restart boots from the log); a second halt in the
-      // same window stays halted, its process and evidence up, for an operator
-      else if (this.halted(k) && (k.haltRestartAt == null || now - k.haltRestartAt >= g.breakerWindowMs)) void this.restartHalted(k);
+      // #1326, #2133: a halted world is restarted every time (a restart boots from its last snapshot and the log). Each
+      // restart counts toward the breaker, so one that halts again at once ends held, named, after breakerN in the window
+      else if (this.halted(k)) void this.restartHalted(k);
     } finally { k.looking = false; }
   }
   /** Is the world stuck? Its watchdog thread's /healthz (SIM_HEALTH_PORT) when it has one: 200 = fine, 503 while serving
@@ -566,13 +571,13 @@ export class ChildPool {
     if (!exited()) { this.log(`world ${k.slug} still running after SIGUSR2: SIGTERM`); try { c.kill('SIGTERM'); } catch { /* gone */ } await within(exit, g.termGraceMs); }
     if (!exited()) { this.log(`world ${k.slug} still running after SIGTERM: SIGKILL`); try { c.kill('SIGKILL'); } catch { /* gone */ } }
   }
-  /** #1326: a halted world (its clock stopped, live.json says so) is stopped and restarted once per breaker window:
+  /** #1326, #2133: a halted world (its clock stopped, live.json says so) is stopped and restarted, each time a failure for the breaker:
    *  SIGTERM (it saves what it can), SIGKILL after termGraceMs; onExit restarts it and the breaker counts it. */
   async restartHalted(k) {
     const c = k.child, g = this.g;
     if (!c || k.wedging || k.haltRestarting) return;
     k.haltRestartAt = Date.now(); k.haltRestarting = { at: k.haltRestartAt }; this.o.onChange?.(k.slug);
-    this.log(`world ${k.slug} halted: its clock has stopped; restarting it (once per ${Math.round(g.breakerWindowMs / 60_000)} min; the reason is its [world] glitch line)`);
+    this.log(`world ${k.slug} halted: its clock has stopped; restarting it (${g.breakerN} halts in ${Math.round(g.breakerWindowMs / 60_000)} min hold it; the reason is its [world] glitch line)`);
     const exited = () => c.exitCode !== null || c.signalCode !== null;
     const exit = exited() ? Promise.resolve() : new Promise((r) => c.once('exit', r));
     try { c.kill('SIGTERM'); } catch { /* gone */ }
@@ -595,7 +600,7 @@ export class ChildPool {
       else if (suspect) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} not answering: ${suspect}` });
       else if (k.lastWedge && now - k.lastWedge.at < g.wedgeShownMs) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} was wedged ${s(now - k.lastWedge.at)} ago (${k.lastWedge.reason}); restarted` });
       if (k.lastRewind && now - k.lastRewind.at < 2 * g.wedgeShownMs) out.push({ slug: k.slug, code: 'rewound', text: `${k.slug} went back to its last clean state or stopped on the spot (rewind ${k.lastRewind.n}); Souls lost what they were doing (op.mjs glitches --world ${k.slug})` });
-      if (k.haltRestarting) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestarting.at)} ago: its clock stopped; being restarted (once per ${Math.round(g.breakerWindowMs / 60_000)} min)` });
+      if (k.haltRestarting) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestarting.at)} ago: its clock stopped; being restarted (${g.breakerN} halts in ${Math.round(g.breakerWindowMs / 60_000)} min hold it)` });
       else if (k.haltRestartAt != null && !this.halted(k) && now - k.haltRestartAt < g.wedgeShownMs) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestartAt)} ago and was restarted; the reason is its [world] glitch line (op.mjs glitches --world ${k.slug})` });
       // #1326: the clock owes ticks and none has completed past its threshold, but the process still answers
       if (this.stalled(k)) out.push({ slug: k.slug, code: 'stalled', text: `${k.slug} stalled: its clock has not ticked for ${s(k.live.tick?.ageMs ?? 0)} while it should; reads say so and acts are refused until it runs again` });
@@ -683,10 +688,9 @@ export function defaultCommand(world, port, o) {
     // #1649: the zone chosen at creation (recorded by the world's first real-time boot), and the launcher's real-time flag
     ...(isTimeZone(world.timeZone) ? { WORLD_TIME_ZONE: world.timeZone } : {}),
     ...(process.env.SIM_REAL_TIME ? { SIM_REAL_TIME: process.env.SIM_REAL_TIME } : {}),
-    // Soul mode of the world's one skill (/SKILL.md) points at Codex's Soul skill (/skill.md) and CLI (/eden-agent.mjs),
-    // served as is from the published files when the launcher is given them (--soul-skill, --soul-cli).
+    // Soul mode of the world's one skill (/SKILL.md) points at the Soul skill (/skill.md) and client (/eden.mjs),
+    // served as is from the published files when the launcher is given them (--soul-skill).
     ...(o.soulSkillFile && existsSync(o.soulSkillFile) ? { EDGE_SKILL_FILE: resolve(o.soulSkillFile) } : {}),
-    ...(o.soulCliFile && existsSync(o.soulCliFile) ? { EDGE_CLI_FILE: resolve(o.soulCliFile) } : {}),
     ...(o.soulControllerCliFile && existsSync(o.soulControllerCliFile) ? { EDGE_CONTROLLER_CLI_FILE: resolve(o.soulControllerCliFile) } : {}),
     ...(o.soulInstructionsFile && existsSync(o.soulInstructionsFile) ? { EDGE_INSTRUCTIONS_FILE: resolve(o.soulInstructionsFile) } : {}),
     ...(marsWeb && existsSync(marsWeb) ? { MARS_WEB_DIR: marsWeb } : {}),
@@ -721,7 +725,6 @@ export function forkCommand(world, port, o) {
     ...publicAuthEnvironment(clerk), WORLD_PATH: `/w/${world.slug}`, DEV_AUTH: '0', AUTH_PROVIDER: 'clerk', ACCOUNT_AUTH_REQUIRED: '1', BODY_COLLECTION_PATH: 'local', ACCOUNT_REGISTRY_PATH: world.fork.accounts, CLERK_SATELLITE_DOMAIN: clerk.satellite?.domain ?? '', CLERK_SIGN_IN_URL: clerk.satellite?.signInUrl ?? '',
     SIM_FORK: world.slug,
     ...(o.compileCache ? { NODE_COMPILE_CACHE: o.compileCache } : {}),
-    ...(o.soulCliFile && existsSync(o.soulCliFile) ? { EDGE_CLI_FILE: resolve(o.soulCliFile) } : {}),
     ...(o.soulControllerCliFile && existsSync(o.soulControllerCliFile) ? { EDGE_CONTROLLER_CLI_FILE: resolve(o.soulControllerCliFile) } : {}),
     ...(marsWeb && existsSync(marsWeb) ? { MARS_WEB_DIR: marsWeb } : {}),
   };

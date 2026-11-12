@@ -412,7 +412,8 @@ export function compareRuns(baseline, candidate, manifest, candidateSourceFiles 
       }
       if (t.status === 'skip' || t.status === 'todo') {
         const entry = q.get(key(step, t.id));
-        if (before?.status !== t.status || before.directive !== t.directive || !entry || entry.status !== t.status) unexpectedSkips.push({ step, id: t.id, status: t.status });
+        // a test new since the baseline is expected to skip only when quarantine.json lists it, with its reason
+        if ((before && (before.status !== t.status || before.directive !== t.directive)) || !entry || entry.status !== t.status) unexpectedSkips.push({ step, id: t.id, status: t.status });
         else quarantined.push({ step, id: t.id, reason: entry.reason, owner: entry.owner, status: t.status });
       }
     }
@@ -718,7 +719,6 @@ export const SCOPE_RULES = [
   // Owned music inputs feed the generated web playlist as well as package composition checks.
   ['packages/music/', ['V1', 'V2', 'V3-bundle', 'V3-packages', 'V4']],
   ['packages/', ['V1', 'V3-packages', 'V3-mars-engine', 'V3-walk', 'V5']],
-  ['tools/edge-skill/', ['V3-client-cli']],
   ['tools/client-eval/', ['V3-client-cli']],
   ['tools/world-launcher/', ['V3-launcher-unit', 'V6']],
   ['tools/god-skill/', ['V6']],
@@ -821,11 +821,18 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
     && r.path === '.github/workflows/ci.yml' && (r.event !== 'push' || r.head_branch === 'main'));
   // a push to main runs every job; prefer it, then the newest. A run that went green on a re-run of failed jobs counts
   // (it ran at this sha); its attempt is recorded.
-  const run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
+  let run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
   if (!run) return none(`no successful push/merge_group ci.yml run at ${sha} (${runs.length} run(s) at this sha)`);
   let jobs;
   try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
   catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
+  // a push the merge queue covered (.github/scripts/ci-main.mjs) ran no qualify job: its merge_group run is the evidence
+  const queued = ok.filter(r => r.event === 'merge_group').at(-1);
+  if (queued && jobs.some(j => j.name === 'merge-group-covered' && j.conclusion === 'success')) {
+    run = queued;
+    try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
+    catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
+  }
   const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion])), jobId = Object.fromEntries(jobs.map(j => [j.name, j.id]));
   const ciYml = ciDefinition('ci.yml', file) || '';
   const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);

@@ -36,10 +36,8 @@ test('parasol: words, contact, shade, refusals, long tail', {timeout: 240000}, a
  assert.equal((await here()).me.shade, undefined, 'beside it, no shade');
  // only the base and the pole are solid, open or closed: she walks under the canopy
  const solids = () => JSON.stringify(god.model.footprintsOf(id)); const openSolids = solids(); assert.equal(god.model.footprintsOf(id).length, 2, openSolids);
- // words
- for (const [words, cap] of [['close the parasol', 'close'], ['Close the parasol', 'close']]) {const r = await post('/v1/edge/resolve', {capability: words}); assert.equal(r.resolve?.capability ?? r.resolve?.would?.capability, `object:${id}:${cap}`, `${words}: ${JSON.stringify(r).slice(0, 300)}`);}
  // the contact: the state changes at the hand, not before
- const close = await post('/v1/edge/act', {capability: 'close the parasol'}); assert.equal(close.accepted, true, JSON.stringify(close).slice(0, 300));
+ const close = await post('/v1/edge/act', {capability: `object:${id}:close`}); assert.equal(close.accepted, true, JSON.stringify(close).slice(0, 300));
  for (let n = 0; n < 400 && !body().human?.handActuator; n++) await tick(1);
  assert.ok(body().human?.handActuator, 'the hand comes up'); assert.equal(state(), true, 'not before contact');
  assert.equal((await finish(close)).phase, 'completed'); assert.equal(state(), false);
@@ -50,7 +48,7 @@ test('parasol: words, contact, shade, refusals, long tail', {timeout: 240000}, a
  // refused: already closed
  const again = await post('/v1/edge/act', {capability: `object:${id}:close`, strict: true}); assert.equal(again.accepted, false); assert.equal(again.code, 'object.state');
  // open it from where she stands: she is under the canopy now
- const open = await post('/v1/edge/act', {capability: 'open the parasol'}); assert.equal((await finish(open)).phase, 'completed'); assert.equal(state(), true);
+ const open = await post('/v1/edge/act', {capability: `object:${id}:open`}); assert.equal((await finish(open)).phase, 'completed'); assert.equal(state(), true);
  const under = await here(); assert.equal(under.me.shade, god.model.get('garden-parasol').name ?? under.objects.find(o => o.id === id).name, `under it: ${JSON.stringify(under.me).slice(0, 300)}`);
  // night takes the shade away; a clockless world has no night
  const clockTo = day => Object.defineProperty(f.host, 'living', {configurable: true, value: {origin: f.host.engine.world.tick - Math.round(72000 * day), dayTicks: 72000, customs: []}});

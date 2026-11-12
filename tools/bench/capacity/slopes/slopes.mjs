@@ -33,7 +33,7 @@ import { pathToFileURL } from 'node:url';
 import { FIXTURES, outcomeOf, rng } from '../meetup/workload.mjs';
 import { withDistantInventory } from './inventory.mjs';
 import { actBody, catalogIds, clientCall, clientHeaders, startPicture } from '../meetup/client-soul.mjs';
-import { AXES, ACTS, PROBE_ROUTES, SLOPES, WALK_TICKS, WALK_EVERY_MS, tickSpanTable, subtreeTop, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText } from './report.mjs';
+import { AXES, ACTS, PROBE_ROUTES, SLOPES, WALK_TICKS, WALK_EVERY_MS, tickSpanTable, subtreeTop, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText, reachedShare } from './report.mjs';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; }, flag = (k) => argv.includes(`--${k}`);
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
@@ -257,11 +257,11 @@ async function walkRun(arm, rep) {
     for (const c of calls) appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ phase: 'walk', ...c }) + '\n');
     const rows = spanRows(spans).filter((x) => x[0] > from && x[0] <= from + WALK_TICKS);
     const result = { arm, rep, facts: { walkers: souls.length, places: places.length, ticksPerS: +(WALK_TICKS / windowS).toFixed(1) }, ticks: tickSpanTable(rows), stepProfile: subtreeTop(profile, ROOT),
-      walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
+      walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), reached: reachedShare(calls), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
     if (result.ticks?.ticks !== WALK_TICKS) throw new Error(`${result.ticks?.ticks ?? 0} of ${WALK_TICKS} ticks recorded`);
     if (arm.memory) { const insp = await inspector(INSPECT); try { result.memory = await memoryOf(insp, dir); } finally { insp.close(); } }
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
-    log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}`);
+    log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}, reached ${result.reached.ok}/${result.reached.sent} (${result.reached.share ?? '—'})`);
     return result;
   } catch (e) { const x = worldExit(W); throw x && !String(e.message).includes(x) ? new Error(`${e.message}; ${x}`) : e;
   } finally {

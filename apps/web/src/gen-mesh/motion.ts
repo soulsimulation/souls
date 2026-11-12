@@ -46,8 +46,9 @@ export function animate(obj: THREE.Object3D, entity: Entity, def: StoredDef, tIn
   if (isBoat(def)) { boatStep(obj, entity, def, model, t, base, phase, routed); if (c.light || c.lights) syncLightGlow(obj, entity, def, model, t); return; }
   // VOCAB-MECH: a spinning part stops when its actuator is off (power on:false, play playing:false)
   if (c.spin && entity.state?.on !== false && entity.state?.playing !== false) {
-    const ang = (t * (c.spin.rpm / 60)) * Math.PI * 2;
-    const target = c.spin.role ? obj.getObjectByName(`role:${c.spin.role}`) : obj;
+    const target = c.spin.role ? obj.getObjectByName(`role:${c.spin.role}`) : obj, turn = (t * (c.spin.rpm / 60)) * Math.PI * 2;
+    // #2198: a wheel someone rides turns so that its gondola carries them (wheelRide, set by the live view from the ride)
+    const ang = target && target !== obj && c.spin.axis === 'z' ? turn + rideTurn(obj, target, turn, t) : turn;
     if (target) { if (c.spin.axis === 'x') target.rotation.x = ang; else if (c.spin.axis === 'z') target.rotation.z = ang; else target.rotation.y = (target === obj ? base.yaw : 0) + ang; }
     if (target && target !== obj && c.spin.axis === 'z') hangFrom(obj, target, ang);
   }
@@ -63,12 +64,52 @@ export function hangPosition(rest: readonly [number, number], ang: number): [num
   const cs = Math.cos(ang), sn = Math.sin(ang);
   return [rest[0] * cs - rest[1] * sn, rest[0] * sn + rest[1] * cs];
 }
+type Hang = { o: THREE.Object3D; rest: [number, number] };
+function hangsOf(obj: THREE.Object3D, wheel: THREE.Object3D): Hang[] {
+  const ud = wheel.userData as { hangs?: Hang[] };
+  if (!ud.hangs) { const hangs: Hang[] = []; obj.traverse((o) => { if (o.name === 'role:gondola') hangs.push({ o, rest: [o.position.x - wheel.position.x, o.position.y - wheel.position.y] }); }); ud.hangs = hangs; }
+  return ud.hangs;
+}
 /** E2: a ferris wheel's gondolas (kit role `gondola`, one group each, pivoted at its hanger point on the rim) ride round
  *  with the wheel while staying upright, as old Eden's did. */
 function hangFrom(obj: THREE.Object3D, wheel: THREE.Object3D, ang: number) {
-  const ud = wheel.userData as { hangs?: { o: THREE.Object3D; rest: [number, number] }[] };
-  if (!ud.hangs) { const hangs: { o: THREE.Object3D; rest: [number, number] }[] = []; obj.traverse((o) => { if (o.name === 'role:gondola') hangs.push({ o, rest: [o.position.x - wheel.position.x, o.position.y - wheel.position.y] }); }); ud.hangs = hangs; }
-  for (const h of ud.hangs) { const [x, y] = hangPosition(h.rest, ang); h.o.position.x = wheel.position.x + x; h.o.position.y = wheel.position.y + y; }
+  for (const h of hangsOf(obj, wheel)) { const [x, y] = hangPosition(h.rest, ang); h.o.position.x = wheel.position.x + x; h.o.position.y = wheel.position.y + y; }
+}
+
+/** #2198: where a Soul rides a big wheel (`wheelRide` on the thing's object, set by the live view from the native ride's
+ *  pose and phase): the ride goes round on the gondolas' floor circle (server god/rides.ts attractionRoute), so the wheel is
+ *  turned by `offset` from its own clock to put one gondola round the rider. A ride's `at` is the ride's floor point
+ *  relative to the hub, in the wheel's frame (x across, y up, z out of the wheel's plane). The gondola is chosen once, when
+ *  the ride leaves (the one needing the least turn); the turn eases at most 0.6 rad/s, and back to the clock after. Pure. */
+export type WheelRide = { at: readonly [number, number, number]; aloft: boolean };
+export type RideTurn = { offset: number; car: number | null };
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+export function ridingOffset(rests: readonly (readonly [number, number])[], drop: number, ride: WheelRide | undefined, turn: number, prev: RideTurn, dt: number): RideTurn {
+  if (!rests.length) return { offset: 0, car: null };
+  let target = 0, car: number | null = null;
+  if (ride?.aloft) {
+    const R = Math.hypot(rests[0][0], rests[0][1]), low = rests.reduce((b, r, i) => (r[1] < rests[b][1] ? i : b), 0), [x, y, z] = ride.at;
+    // stepping in or out (in front of the wheel, not yet on the circle): the gondola waits at the bottom
+    const a = Math.abs(z) > 0.3 || Math.abs(Math.hypot(x, y + drop) - R) > 0.5 ? Math.atan2(rests[low][1], rests[low][0]) : Math.atan2(y + drop, x);
+    const rest = (k: number) => Math.atan2(rests[k][1], rests[k][0]);
+    car = prev.car ?? rests.reduce((b, _, k) => (Math.abs(wrap(a - rest(k) - turn - prev.offset)) < Math.abs(wrap(a - rest(b) - turn - prev.offset)) ? k : b), 0);
+    target = wrap(a - rest(car) - turn);
+  }
+  const step = wrap(target - prev.offset), max = 0.6 * Math.max(0, Math.min(0.25, dt));
+  return { offset: wrap(prev.offset + Math.max(-max, Math.min(max, step))), car };
+}
+function rideTurn(obj: THREE.Object3D, wheel: THREE.Object3D, turn: number, t: number): number {
+  const ud = obj.userData as { wheelRide?: { p: readonly number[]; aloft: boolean }; rideTurn?: RideTurn & { t: number; drop: number } };
+  const ride = ud.wheelRide, prev = ud.rideTurn;
+  if (!ride && (!prev || prev.offset === 0)) return 0;
+  const hangs = hangsOf(obj, wheel); if (!hangs.length || !wheel.parent) return 0;
+  // the gondola's floor below its hanger: the lowest point of its parts (drawn about the hanger)
+  const drop = prev?.drop ?? hangs.reduce((n, h) => { let low = 0; h.o.traverse((m) => { const g = (m as THREE.Mesh).geometry; if (g) { g.boundingBox ?? g.computeBoundingBox(); low = Math.min(low, g.boundingBox!.min.y); } }); return Math.max(n, -low); }, 0);
+  let at: [number, number, number] | null = null;
+  if (ride) { wheel.parent.updateWorldMatrix(true, false); const v = wheel.parent.worldToLocal(wheel.position.clone().set(ride.p[0], ride.p[1], ride.p[2])); at = [v.x - wheel.position.x, v.y - wheel.position.y, v.z - hangs[0].o.position.z]; }
+  const next = ridingOffset(hangs.map((h) => h.rest), drop, at ? { at, aloft: ride!.aloft } : undefined, turn, prev ?? { offset: 0, car: null }, prev ? t - prev.t : 0);
+  ud.rideTurn = { ...next, t, drop };
+  return next.offset;
 }
 
 type Swing = NonNullable<StoredDef['components']['swing']>['parts'][number];
