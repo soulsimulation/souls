@@ -54,7 +54,7 @@ export type CarrierState = {
   /** together/1: places kept for invited companions (`seats`), how many of them have boarded, until when. Absent otherwise. */
   hold?: { by: string; seats: number; filled: number; untilTick: number };
   /** VEHICLE-STEER (carrier_steer): a rider's destination. `by` null = the ride flying itself home (after a hover ran out, or
-   *  empty after a landing away). `to`: where the route goes (x, cruise y, z); `land`: the ground point it lands at (absent:
+   *  empty after a landing away; park-away/1: parked away, the flight home its next rider takes). `to`: where the route goes (x, cruise y, z); `land`: the ground point it lands at (absent:
    *  it holds at `to` until `hoverUntil`, then flies itself home). `built`: the route from the pose to `to`/`land` is in
    *  `route` (a boarding ride builds it at lift-off). Absent: the ride flies its own route. */
   steer?: CarrierSteer;
@@ -291,7 +291,8 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
     if (p.holdSeats && p.holdSeats > free - keptSeats(c) - 1) return { ok: false, diagnostic: diag('full', `${e.label ?? e.id} has no room for ${p.holdSeats} more`, [e.id]) };
     const a = rt.world.entities[p.actor];
     const door = doorPoint(e)!;
-    if (hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]) > BOARD_REACH || Math.abs(a.pose.p[1] - (c.bank ? door[1] : c.home[1])) > 0.05 || (c.bank && hypot(a.pose.p[0] - door[0], a.pose.p[2] - door[2]) > 0.35) || (a.human!.level ?? 0) !== 0)
+    // park-away/1: a balloon parked where a rider left it is boarded at its floor there, not at its home's height
+    if (hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]) > BOARD_REACH || Math.abs(a.pose.p[1] - (c.bank ? door[1] : parkAway(rt) ? e.pose.p[1] : c.home[1])) > 0.05 || (c.bank && hypot(a.pose.p[0] - door[0], a.pose.p[2] - door[2]) > 0.35) || (a.human!.level ?? 0) !== 0)
       return { ok: false, diagnostic: diag('not-at-door', `${p.actor} must stand beside ${e.label ?? e.id} first`, [p.actor]) };
     return { ok: true, program: { slot } };
   },
@@ -434,7 +435,7 @@ const depart: ActionDef<{ actor: string; carrier: string }, null, DepartExec> = 
 // one generic verb for every ride. A seated rider sets a destination (x, z), asks it to land, or to stop (hold here). The
 // world flies/rows it there on a smooth route from where it is (the same Hermite curve, so viewers need nothing new). With
 // nobody steering it keeps its own route: a hold runs out after STEER_HOVER and it rejoins its route; a balloon that landed
-// away flies itself home once its riders are out. Water rides go only where open water reaches in a straight line and let
+// away flies itself home once its riders are out (park-away/1, #2196: it parks there, and its next rider flies it home). Water rides go only where open water reaches in a straight line and let
 // riders off only at their own bank. Deterministic: everything is world state, built from the pose at a tick.
 const STEER_AIR = 4, STEER_WATER = 1.2, STEER_CLIMB = 1.5, STEER_CRUISE = 35, STEER_HOVER = 120 * TPS, STEER_LAND_SEARCH = 30, STEER_RANGE = 1200;
 /** landing/1: a moved landing first climbs back to cruise height (STEER_CRUISE above the ground) before it crosses; a hover looking for
@@ -588,6 +589,15 @@ function startReturn(c: CarrierState, by: string | null = null) {
   c.steer = { by, to: [...c.home] as Vec3, land: [...c.home] as Vec3, built: false, ret: true, away: c.steer!.away, ...(c.steer?.asked ? { asked: c.steer.asked } : {}) };
 }
 
+/** park-away/1 (#2196, logged runtime policy `carrierParkAwayV1`): adopted, an empty ride that landed away parks there. */
+function parkAway(rt: Runtime): boolean { return rt.services.carrierParkAwayV1 === true; }
+/** park-away/1: parked away from home with its own route back, and a flight home waiting for the next rider (built at lift-off
+ *  from where it stands: up, across, down at home). A rider who steers it before lift-off replaces that flight. */
+function parkHere(c: CarrierState): void {
+  const own = c.steer!.away.route;
+  c.route = own;
+  c.steer = { by: null, to: [...c.home] as Vec3, land: [...c.home] as Vec3, built: false, ret: true, away: { route: own, elapsed: 0, wake: [] } };
+}
 /** A steer is over: the ride gets its own route back (a steer flew a 'steer'/'steer-return' route in its place), so the next
  *  boarding qualifies and the next unsteered trip flies the ride's own route again. */
 function endSteer(c: CarrierState): void {
@@ -712,8 +722,11 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
         if (c.bank) { delete h.shore; (rt.services.carrierBankContact as ((rt: Runtime, actor: string) => void) | undefined)?.(rt, actor); }
       }
       if (!Object.values(c.seats).some(Boolean)) {
-        // VEHICLE-STEER: a ride that landed away from home flies itself back empty once its riders are out
-        if (c.steer?.land && !same(c.steer.land, c.home)) { startReturn(c); c.phase = 'aloft'; e.phase = 'carried'; c.elapsed = 0; }
+        // VEHICLE-STEER: a ride that landed away from home flies itself back empty once its riders are out.
+        // park-away/1 (#2196): a ride never moves with nobody aboard. It parks where it landed and offers its seats there; the
+        // next rider flies it home (a flight home straight from here), or steers it anywhere else.
+        if (c.steer?.land && !same(c.steer.land, c.home) && parkAway(rt)) { parkHere(c); c.phase = 'parked'; rt.mark('carrier.parked-away', { carrier: e.id, at: [e.pose.p[0], e.pose.p[2]] }); }
+        else if (c.steer?.land && !same(c.steer.land, c.home)) { startReturn(c); c.phase = 'aloft'; e.phase = 'carried'; c.elapsed = 0; }
         else { endSteer(c); c.phase = 'parked'; }
         c.phaseTick = tick;
       }

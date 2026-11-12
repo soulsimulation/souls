@@ -74,6 +74,36 @@ test('steer the balloon to a named place and land there; the other rider is refu
  await replayExact(w);
 });
 
+// #2196 park-away/1: with the rule adopted, a balloon that landed away never moves with nobody aboard. It stays parked where its
+// rider left it, never teleports or respawns, and offers its ride right there; the rider gets back in and flies it home.
+test('park-away/1: the empty balloon stays where it landed and its rider rides it home',{timeout:600000},async t=>{
+ const w=await world(t,{balloon:true}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
+ await accept<unknown>(w.f.host,(w.f.host as any).enableCarrierParkAwayV1?.('test')??Promise.resolve());
+ await boardAndLift(w);
+ const go=await w.call(0,'POST','/v1/edge/act',{capability:'fly the balloon to the presentation deck and land there'});assert.equal(go.accepted,true,JSON.stringify(go));
+ assert.ok(await w.run(6000,()=>b().carrier.phase==='landed'),'came down: '+b().carrier.phase);
+ assert.ok(await w.run(600,()=>!w.ent(0).human.carrier&&!w.ent(1).human.carrier),'riders stepped out');
+ const parked=[...b().pose.p],yaw=b().pose.yaw;assert.ok(flat(parked,home)>15,'landed away from home');
+ // nobody aboard for five minutes: it never lifts off, never moves, never goes back home
+ let moved=0,lifted=false;
+ await w.run(6000,()=>{moved=Math.max(moved,Math.hypot(b().pose.p[0]-parked[0],b().pose.p[1]-parked[1],b().pose.p[2]-parked[2]));lifted||=b().carrier.phase==='aloft'||b().phase==='carried';return false;});
+ assert.equal(lifted,false,'never lifted off with nobody aboard');assert.equal(moved,0,'stayed exactly where it was left');
+ assert.equal(b().carrier.phase,'parked');assert.equal(b().pose.yaw,yaw);
+ // its ride is offered where it stands, and the rider who left it rides it home
+ const back=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:join'});assert.equal(back.accepted,true,JSON.stringify(back));
+ assert.ok(await w.run(3000,()=>w.ent(0).human.carrier?.phase==='seated'),'seated at the parked spot');
+ assert.ok(flat(b().pose.p,parked)<1e-9,'boarded where it was parked');
+ const st=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:start'});assert.equal(st.accepted,true,JSON.stringify(st));
+ assert.ok(await w.run(400,()=>b().carrier.phase==='aloft'),'lifted off with its rider');
+ assert.ok(await w.run(6000,()=>b().carrier.phase==='landed'||b().carrier.phase==='parked'),'came home: '+b().carrier.phase);
+ assert.ok(flat(b().pose.p,home)<.5,`landed at home ${b().pose.p}`);
+ assert.ok(await w.run(600,()=>!w.ent(0).human.carrier),'rider stepped out at home');
+ assert.ok(await w.run(200,()=>b().carrier.phase==='parked'),'parked at home');assert.equal(b().carrier.steer,undefined);
+ assert.ok(!String(b().carrier.route.id).startsWith('steer'),'its own route is back: '+b().carrier.route.id);
+ assert.deepEqual(w.f.host.engine.runtime.violations,[]);assert.equal(w.f.db.paidCost(),0);
+ await replayExact(w);
+});
+
 test('stop holds the balloon in the air, then with nobody steering it rejoins its own route and lands at home; out of bounds is refused',{timeout:600000},async t=>{
  const w=await world(t,{balloon:true}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
  await boardAndLift(w);
