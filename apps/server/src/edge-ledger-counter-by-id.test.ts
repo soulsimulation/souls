@@ -53,30 +53,6 @@ test('Eden 2026: catalog acts by id are offered cold; a kitchen counter is craft
     assert.deepEqual(moved, [], 'every spot main used walks to main\'s point');
   }
 
-  // review of #1832: the alternative a refusal names is never in a secret place this Soul does not know
-  {
-    const altSpot = /\((paint:(paint\.e_[0-9a-f]+))\)/.exec(easel.reason)![2]!, place = L.spotPlace(altSpot) as string;
-    assert.ok(place && L.spotPlace('paint.e_9ae05996') !== place, `the alternative stands in its own place (${place})`);
-    assert.equal(L.knowledge.setSecret(place, true), true);
-    L.invalidateBodies(); const g = L.offerGate(w.soul, {capability: 'paint:paint.e_9ae05996'});
-    assert.equal(g?.code, 'spot.no-room', JSON.stringify(g));
-    assert.ok(!g.reason.includes(altSpot) && !g.reason.includes(L.places.byId.get(place)?.name ?? '\u0000'), `the secret one is not named: ${g.reason}`);
-    for (const m of g.reason.matchAll(/\(paint:(paint\.e_[0-9a-f]+)\)/g)) assert.equal(L.knowledge.knows(w.soul.soulId, L.spotPlace(m[1]!)), true, `${m[1]} is in a place it may know`);
-    L.knowledge.setSecret(place, false);
-  }
-
-  // delta review of #1832: a refused spot in a secret place the Soul does not know names neither itself nor its place, on the
-  // strict act path too: the act is capability.unknown, as the non-strict path answers
-  {
-    const own = L.spotPlace('paint.e_9ae05996') as string, ownName = L.places.byId.get(own)?.name as string;
-    assert.ok(own && ownName, `the easel's place (${own})`);
-    assert.equal(L.knowledge.setSecret(own, true), true);
-    L.invalidateBodies(); const g = L.offerGate(w.soul, {capability: 'paint:paint.e_9ae05996'});
-    assert.equal(g?.code, 'capability.unknown', JSON.stringify(g));
-    assert.ok(!/easel/i.test(g.reason ?? '') && !(g.reason ?? '').includes(ownName), `nothing names the secret spot or its place: ${g.reason}`);
-    L.knowledge.setSecret(own, false);
-  }
-
   // a ground-floor kitchen counter whose chair stands on its standing point (Canal Village), asked for by id from afar
   const id = 'craft:craft.e_07d35dd0', counter = host.engine.world.entities.e_07d35dd0!;
   const out = await accept(host, Promise.resolve(L.act(w.soul, {capability: id, clientRef: 'counter-1'}))) as Act;

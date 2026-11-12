@@ -76,11 +76,12 @@ function phasedEntry(): Plugin {
 // Lane P4: the installable-app manifest and icons (src/pwa-manifest.ts). Build only, index.html only (the workbench page is
 // not an app). Icons (the supplied halo resized to pwa/icon-<size>.png; 32 is the tab favicon) are hashed files in assets/; the manifest is
 // dist/manifest.webmanifest, linked relative to the page and served beside every page (world servers and the launcher).
+// The social card (pwa/icon-social.png, 1200x630) is emitted the same way; index.html names it by absolute URL on soul.game.
 function pwa(): Plugin {
   let base = '/';
   const icons = new Map<string, Buffer>();
   const hashed = (name: string, data: Buffer) => { const file = `${name}-${createHash('sha256').update(data).digest('hex').slice(0, 10)}.png`; icons.set(file, data); return file; };
-  let names: PwaIcons;
+  let names: PwaIcons, social = '';
   return {
     name: 'souls-pwa',
     apply: 'build',
@@ -88,6 +89,7 @@ function pwa(): Plugin {
       base = c.base;
       const png = (n: number) => hashed(`sim-icon-${n}`, readFileSync(fileURLToPath(new URL(`./pwa/icon-${n}.png`, import.meta.url))));
       names = { icon32: png(32), icon180: png(180), icon192: png(192), icon512: png(512) };
+      social = hashed('sim-social', readFileSync(fileURLToPath(new URL('./pwa/icon-social.png', import.meta.url))));
     },
     generateBundle() {
       for (const [file, source] of icons) this.emitFile({ type: 'asset', fileName: `assets/${file}`, source });
@@ -96,6 +98,7 @@ function pwa(): Plugin {
     transformIndexHtml(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path)) return;
       if (!html.includes('</title>')) throw Error('index.html: no </title> to place the app manifest after');
+      if (!html.includes(`https://soul.game/assets/${social}`)) throw Error(`index.html: og:image must name the built social card, assets/${social}`);
       return html.replace('</title>', `</title>\n    ${pwaHeadTags(base, names)}`);
     },
   };

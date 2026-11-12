@@ -24,10 +24,9 @@ export function worldEnv(serverRoot) {
   return {
     INVITE_REQUIRED: '0',
     EDGE_CONTROLLER_CLI_FILE: join(root, 'tools/world-launcher/soul/eden.mjs'),
-    EDGE_CLI_FILE: join(root, 'tools/world-launcher/soul/eden-agent.mjs'),
     WEB_DIR: join(root, 'apps/web/dist'),
-    // Not in DESIGN §0 but required: without these the world serves the 1.9 eden-agent.mjs guide (skill 1.9.5)
-    // even though /eden.mjs is 2.0, and a seat following instructions.md would never touch eden.mjs.
+    // Not in DESIGN §0 but required: the world serves the guides of the checkout it runs, so a seat following
+    // instructions.md reads the same eden.mjs guide the world serves at /eden.mjs.
     EDGE_SKILL_FILE: join(root, 'tools/world-launcher/soul/skill.md'),
     EDGE_INSTRUCTIONS_FILE: join(root, 'tools/world-launcher/soul/instructions.md'),
   };
@@ -113,19 +112,19 @@ export async function stopWorld({ pid, graceMs = 10000 }) {
   return { stopped: !alive(pid) };
 }
 
-/** world.json: {kind, base, slug, port, pid, build, skill:{version, sha256}, cli:{eden.mjs, eden-agent.mjs, eden-god.mjs}, startedAt} */
+/** world.json: {kind, base, slug, port, pid, build, skill:{version, sha256}, cli:{eden.mjs, eden-god.mjs}, startedAt} */
 export async function describeWorld({ base, slug, port, pid, build, kind = 'dev', startedAt }) {
-  const fetchAll = () => Promise.all(['skill.md', 'eden.mjs', 'eden-agent.mjs', 'god/eden-god.mjs', 'instructions.md'].map((p) => served(base, p)));
+  const fetchAll = () => Promise.all(['skill.md', 'eden.mjs', 'god/eden-god.mjs', 'instructions.md'].map((p) => served(base, p)));
   let got = await fetchAll();
   for (let i = 0; i < 2 && got.some((x) => x.error); i++) { await sleep(3000); got = await fetchAll(); } // a just-booted world on a loaded machine can be slow
-  const [skill, eden, agent, god, instr] = got;
+  const [skill, eden, god, instr] = got;
   const skillVersion = skill.ok ? (skill.text.match(/^\s*version:\s*"?([^"\s]+)/m)?.[1] ?? null) : null;
   const cliVersion = eden.ok ? (eden.text.match(/const VERSION = "([^"]+)"/)?.[1] ?? null) : null;
   return {
     kind, base, slug, port, pid, build,
     skill: { version: skillVersion, sha256: skill.sha256 ?? null },
-    cli: { 'eden.mjs': eden.sha256 ?? null, 'eden.mjs.version': cliVersion, 'eden-agent.mjs': agent.sha256 ?? null, 'eden-god.mjs': god.sha256 ?? null },
-    instructions: { sha256: instr.sha256 ?? null, mentionsEdenMjs: instr.ok ? /eden\.mjs/.test(instr.text.replace(/eden-agent\.mjs/g, '')) : null },
+    cli: { 'eden.mjs': eden.sha256 ?? null, 'eden.mjs.version': cliVersion, 'eden-god.mjs': god.sha256 ?? null },
+    instructions: { sha256: instr.sha256 ?? null, mentionsEdenMjs: instr.ok ? /eden\.mjs/.test(instr.text) : null },
     startedAt,
   };
 }
