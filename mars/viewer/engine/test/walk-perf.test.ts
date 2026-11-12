@@ -12,6 +12,7 @@ import { dcos, dsin } from '../core/math.ts';
 import { findRouteReference } from './path-reference.ts';
 import { WALK_PERF } from '../locomotion/walk.ts';
 import { Spatial, narrowComponents } from '../spatial/service.ts';
+import { setNavTrustCheck } from '../spatial/nav-trust.ts';
 import { stress, buildRuntime } from '../../app/lab/scenarios.ts';
 import { WorldHistory } from '../history/store.ts';
 import { emptyWorld, addAll } from '../world/factory.ts';
@@ -131,6 +132,49 @@ test('walker fast paths off === on: stress-30 (exact: the pin; corridor: its fai
   };
   assert.equal(meal(true), '3c28879fa21e485e910eef10f0266ced8562534d3c83623232b00a94e26090eb');
   assert.equal(meal(false), meal(true));
+});
+
+/** stress-n with the walker fast paths on or off: the state hash after every tick, the violations, and how many times
+ *  anything listed the world's entity table (Object.keys on it, counted through a Proxy with the target's own keys). */
+function stressTrace(fast: boolean, n: number, ticks: number) {
+  WALK_PERF.stepSnapshot = fast;
+  WALK_PERF.lazyLinkDiagnostics = fast;
+  WALK_PERF.tickPeople = fast;
+  try {
+    const s = stress(n);
+    const rt = buildRuntime(s);
+    let listings = 0;
+    rt.world.entities = new Proxy(rt.world.entities, { ownKeys(t) { listings++; return Reflect.ownKeys(t); } });
+    s.start(rt);
+    const hashes: string[] = [];
+    for (let i = 0; i < ticks; i++) {
+      rt.step();
+      s.tick!(rt);
+      hashes.push(rt.stateHash());
+    }
+    return { hashes, violations: rt.violations.length, listings };
+  } finally {
+    WALK_PERF.stepSnapshot = true;
+    WALK_PERF.lazyLinkDiagnostics = true;
+    WALK_PERF.tickPeople = true;
+  }
+}
+
+test('#2124: 24 walkers share one people list a tick; every tick\'s state hash === fresh listings per walker', () => {
+  const slow = stressTrace(false, 24, 600);
+  // the oracle: every reuse of the tick's list is checked against a fresh listing (throws if a step changed the table)
+  setNavTrustCheck(true);
+  let checked;
+  try { checked = stressTrace(true, 24, 600); } finally { setNavTrustCheck(false); }
+  const fast = stressTrace(true, 24, 600);
+  assert.equal(slow.violations, 0);
+  for (const run of [checked, fast]) {
+    assert.equal(run.violations, slow.violations);
+    const first = run.hashes.findIndex((h, i) => h !== slow.hashes[i]);
+    assert.equal(first, -1, `state hash differs from tick ${first + 1}`);
+  }
+  // the walkers list the table about once a tick between them, not once each: (24 - 1) x 600 listings saved, less slack
+  assert.ok(slow.listings - fast.listings >= 20 * 600, `listings: ${slow.listings} fresh, ${fast.listings} shared`);
 });
 
 /** Spatial.narrow as it was before PLANNING_BUDGET.md §6, verbatim (frozen reference). */
