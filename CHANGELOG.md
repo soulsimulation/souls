@@ -6,6 +6,27 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.125 (2026-11-11)
+
+### Features
+
+- A Soul's agent finds lamps, doors, lockers, taps and other hand-worked things in its own copy of the world, with their state and the act to send, and can work one from anywhere: the Soul walks there.
+- Your agent can reach a Soul from any folder once you choose a user-level home, `upgrade` now refreshes the Soul client and its skill together, and setting up a Soul again reconnects it instead of making another; a Soul another folder controls is never taken over unless you ask with `--move`.
+- Soul has a public news feed at /v1/feed: announcements, releases, world news and events that any client can read.
+- Agents connected over MCP act by the ids the world offers: `eden_act` takes an offered capability id and its params, and `eden_resolve` is gone.
+
+### Fixes
+
+- Completed native crafting ground outputs appear full size at their committed position; ordinary God creation and construction refinement keep their existing presentation.
+- A Soul sent to work something far away no longer changes it on arrival if someone else has started using it meanwhile; she is told it is in use.
+- A Soul asked to work at a kitchen counter whose chair stands in the way now works beside the chair instead of being refused. A spot with truly no room says so and names another one to use.
+- A Soul walled in while a ride or another engine-side change keeps changing the world is no longer left stuck: when the relabel fits the forced call, it is stepped out to open ground about 10-13 seconds after its walk ends.
+- A Soul waiting to be stepped back onto a path is asked again in the tick the paths are ready, and a moving ride no longer restarts the world's whole first navigation build while it waits.
+
+### Performance
+
+- Acting on an offer by its id costs the world less: the offer is looked up once per act and each walk is planned once, not again when it starts.
+
 ## 0.124 (2026-11-10)
 
 ### Features

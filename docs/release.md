@@ -230,6 +230,7 @@ There is no host option. The host and operator paths come from the environment o
 |---|---|---|
 | `SIM_DEPLOY_HOST`, `SIM_DEPLOY_USER` | none / `root` | SSH target of the production host. ship.sh's own lines, the dry-run plan and `ROLLBACK.txt` never name it. Tools tee'd into `ship.log` can (`release.sh` prints its upload target, ssh its errors), so keep `ship.log` private |
 | `SHIP_RECEIPTS` | none; required | Folder holding the publishable `release-receipt.json` (`ship-receipt.mjs --public`), or the gate's `receipt.json` and `ship-receipt.json`, for this commit |
+| `SHIP_EXCEPTIONS` | none | An [accepted-exceptions](#accepted-exceptions) file: the preflight then passes a blocked gate whose every blocker it covers |
 | `SHIP_PROBE_CLI` | none; required | God folder of the [release-probe world](#the-release-probe-world) |
 | `PLAYWRIGHT_BROWSERS_PATH` | none; required | Browsers folder. Preflight checks that it actually holds a Chromium executable |
 | `SHIP_ORIGIN` | `https://soul.game` | Public origin |
@@ -243,7 +244,7 @@ There is no host option. The host and operator paths come from the environment o
 
 | Step | What it does | On failure |
 |---|---|---|
-| preflight | Local guards: the host is set, the tree is clean, HEAD is `--sha`, the commit is on `origin/main`, the gate and ship receipts are clean for it, the probe folder and Chromium exist, every tool is present | Refused; nothing remote ran |
+| preflight | Local guards: the host is set, the tree is clean, HEAD is `--sha`, the commit is on `origin/main`, the gate and ship receipts are clean for it (or blocked only by [accepted exceptions](#accepted-exceptions)), the probe folder and Chromium exist, every tool is present | Refused; nothing remote ran |
 | snapshot | Public healthz and read-only host metadata: stage link, config hash, registry identity, every database by name (`body-collections.sqlite` too), keeper. Writes `ROLLBACK.txt` | Stops |
 | stage | `release.sh production --no-activate` at base `/`; verifies the manifest locally and on the host; compares the host with the snapshot | Stops |
 | rehearse | `ship/host-rehearse.sh` on the host: boots a copy of every world's database with the staged tree (`boot-rehearsal.mjs`, 1200 ticks, fake minds, memory-capped scope, read-only on production; no database content leaves the host). The copies live in a `mktemp -d` directory of the run's own under `SHIP_HOST_TMP`, removed with everything in it when the run ends; nothing else is deleted. The scope keeps 3 GB free (the launcher's wake floor is 2.5 GB) and the rehearsal has `oom_score_adj` 1000. Every registered world must pass (an unreadable result is a stop, never a pass); a fork other than Eden's, or an unregistered data directory, is approximate and reported only. A boot over 60 s is flagged slow. Writes `rehearse.json`; the activation requires a passing one for this build | Stops |
@@ -279,6 +280,25 @@ name the candidate as the previous build or overwrite `ROLLBACK.txt`. A resume f
 `keeper.mjs` the next `ship.sh` refuses (`keeper source differs`, `keeper, source or active build drifted`) until a planned
 `--restart`. That is the safe failure. **`SHIP_HOST_DATA` is only partly honoured:** it reaches the snapshot and the activation,
 but `compact-backup.sh` has its own hard-coded data path.
+
+### Accepted exceptions
+
+A gate can be `blocked` only by something the maintainer accepts, such as V6 steps reworded in place or a new test
+that skips only on Modal. The receipts stay exactly as the tools wrote them. The release owner writes
+`accepted-exceptions.json` in the private release folder, never in git, and passes it as `SHIP_EXCEPTIONS`:
+
+```json
+{ "schema": "accepted-exceptions/1", "gate_sha256": "<sha256 of the gate's receipt.json>", "cut": "<full candidate sha>",
+  "accepted_by": "maintainer", "date": "YYYY-MM-DD",
+  "exceptions": [{ "kind": "removed", "tests": [{ "step": "V6-party", "id": "<id exactly as the receipt lists it>" }], "reason": "…", "ref": "#2149" }] }
+```
+
+The preflight (`root-release.mjs accepted`) reads `receipt.json` and `release-receipt.json` (or `ship-receipt.json`)
+from `SHIP_RECEIPTS`. It passes only when the file names that receipt's sha256 and this cut, `accepted_by` is
+`maintainer`, and the `removed` and `unexpectedSkips` lists match the receipt's exactly. It prints each accepted entry.
+Then the usual verdict runs as if those entries were gone. New failures, any other gate blocker, a failing V7 and a
+missing raw-receipt hash still refuse, even when listed. The release owner writes `accepted_by` as `PENDING-GENE`
+and changes it only on Gene's yes.
 
 Not done here: publishing new CDN assets first, the uncut live clip, the changelog PR, the tag and the GitHub Release.
 

@@ -81,7 +81,7 @@ test('coffee: made on the tea faculty, served by hand, drunk to empty, rinsed cl
    {op: 'place', def: 'core/camp-sink@1', name: 'sink', p: [cx + 2.2, cz + 0.1], r: Math.PI / 2},
    {op: 'place', def: 'core/table@1', name: 'table', p: [cx - 2.4, cz + 1.8]}]});
   assert.equal(sc.accepted, true, JSON.stringify(sc.failures?.slice(0, 3))); await tick(60);
-  const cap = (s, c) => { as(s); return edge.capabilities(s).find((x) => x.id === c); };
+  const cap = (s, c, where = (x) => x.id === c) => { as(s); return edge.capabilities(s).find(where); };
   const refused = (s, c, code, words) => { const x = cap(s, c); assert.ok(x && !x.available, c + ' should be refused ' + JSON.stringify(x)); assert.equal(x.blocked?.code, code, JSON.stringify(x)); if (words) assert.match(x.blocked.reason, words, JSON.stringify(x.blocked)); report.checks.push(`refused ${c.split(':').pop()} (${s.name}): ${code}: ${x.blocked.reason}`); };
   let retries = 0;
   const act = async (s, capability, want = true) => { let b; for (let k = 0; k < 20; k++) { as(s); const r = await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability})})); b = await r.json(); if (b.code !== 'object.admission-failed') break; retries++; await tick(10); } assert.equal(b.accepted, want, capability + ' ' + JSON.stringify(b).slice(0, 700)); if (want) report.words[`${s.name}: ${capability}${report.words[`${s.name}: ${capability}`] ? ' (again)' : ''}`] = b.receipt?.capability ?? b.capability ?? b.resolved ?? b.receipt?.label ?? null; return b; };
@@ -101,7 +101,7 @@ test('coffee: made on the tea faculty, served by hand, drunk to empty, rinsed cl
   report.checks.push('labels: coffee mug "Make a cup of coffee", tea mug "Make a cup of tea"');
 
   // ---- "make a cup of coffee" brews a coffee mug, though the tea mug is nearer the kettle ----
-  const cf = await said(ana, 'make a cup of coffee');
+  const cf = await said(ana, `object:${id('mug')}:brew`);
   assert.equal(state('mug').tea, 1, 'a cup of coffee'); assert.equal(state('cup').tea, 0, 'the tea mug is untouched'); assert.equal(state('mug-two').tea, 0);
   assert.match(cf.said, /Made a cup of coffee in counter\/mug/, cf.said);
   const brewed = state('mug').brewedTick; assert.ok(brewed > 0);
@@ -112,24 +112,24 @@ test('coffee: made on the tea faculty, served by hand, drunk to empty, rinsed cl
   refused(ana, `object:${id('mug')}:brew`, 'tea.cup-full', /already has coffee in it/);
 
   // ---- "make a cup of tea" brews the tea mug, not the fresh coffee mug ----
-  await said(ana, 'make a cup of tea');
+  await said(ana, `object:${id('cup')}:brew`);
   assert.equal(state('cup').tea, 1, 'a cup of tea'); assert.equal(state('mug-two').tea, 0, 'the fresh coffee mug is untouched');
   assert.deepEqual(w.bridge.tea.facts(id('cup')), {tea: 1}, 'the tea mug still says tea');
   report.checks.push('words pick the mug: "make a cup of coffee" -> mug (tea mug nearer the kettle untouched); "make a cup of tea" -> cup (coffee mug untouched)');
 
   // ---- Ana picks up the coffee, offers it to Ben; he accepts: one holder in every tick, the coffee unchanged ----
-  as(ana); report.cupSourceOffered = edge.capabilities(ana).some((c) => c.id === 'pick-up:cup'); await done(ana, 'pick up the mug'); assert.equal(ent('mug').support.by, ana.entityId, 'Ana holds the coffee');
+  as(ana); report.cupSourceOffered = edge.capabilities(ana).some((c) => c.id === 'pick-up:cup'); await done(ana, `pick-up:${id('mug')}`); assert.equal(ent('mug').support.by, ana.entityId, 'Ana holds the coffee');
   const holders = new Set();
-  const g = await act(ana, 'offer Ben the coffee'); await tick(5);
+  const g = await act(ana, `give:${ben.soulId}`); await tick(5);
   const benOffer = await here(ben); assert.match(benOffer.me?.offer ?? '', /^Ana holds out the .+ for you: accept or decline \(\d+ s\)$/, JSON.stringify(benOffer.me));
-  const a = await act(ben, 'accept');
+  const a = await act(ben, cap(ben, null, (x) => x.id.startsWith('accept:inv_')).id);
   await until([[ana, g], [ben, a]], 9000, () => { const s = ent('mug').support; assert.equal(s.kind, 'in-hand', 'never out of hand'); holders.add(s.by); });
   assert.deepEqual([...holders], [ana.entityId, ben.entityId], 'one holder at a time: Ana, then Ben');
   assert.equal(state('mug').tea, 1); assert.equal(state('mug').brewedTick, brewed, 'same coffee through the hand-over');
   report.checks.push('hand-over: "offer Ben the coffee" + "accept": holders Ana then Ben, never none; coffee 1 and brewedTick unchanged');
 
   // ---- Ben drinks the coffee at the table, in sips at the lips ----
-  const seen = [], dk = await act(ben, 'drink the coffee'); let motion = null;
+  const seen = [], dk = await act(ben, `object:${id('mug')}:drink`); let motion = null;
   await until([[ben, dk]], 9000, (s) => { const m = body(ben).human?.cupV1; if (m) motion = m; const tea = state('mug').tea; if (!seen.length || seen.at(-1).tea !== tea) seen.push({tea, tick: s.tick, atLips: m ? cupFrame(m, (s.tick - m.startTick) * (f.host.engine.dt ?? 0.05)).atLips : null, pure: m ? drinkTea(m, (s.tick - m.startTick) * (f.host.engine.dt ?? 0.05)) : null}); });
   report.summaries['Ben: drink the coffee'] = JSON.stringify(dk).match(/"(?:summary|note)":"([^"]*)"/g); assert.match(report.summaries['Ben: drink the coffee'].join(' '), /Drank the coffee in ben\/mug/);
   const drops = seen.slice(1);
@@ -140,9 +140,9 @@ test('coffee: made on the tea faculty, served by hand, drunk to empty, rinsed cl
   report.checks.push('Ben drank the coffee: 5 sips, 1 -> 0, each at the lips and equal to drinkTea');
 
   // ---- empty on the table, rinsed clean at the sink ----
-  await done(ben, 'put the mug on the table'); assert.equal(byName('mug').in.parent, id('table'));
+  await done(ben, `put-on:${id('table')}`); assert.equal(byName('mug').in.parent, id('table'));
   assert.deepEqual(w.bridge.tea.facts(id('mug')), {empty: true});
-  await said(ben, 'wash the mug');
+  await said(ben, `object:${id('mug')}:wash`);
   assert.deepEqual([state('mug').tea, state('mug').brewedTick, state('mug').bag], [0, -1, false], 'clean: no coffee, no stain, no grounds');
   assert.deepEqual(w.bridge.tea.facts(id('mug')), {clean: true});
   refused(ben, `object:${id('mug')}:wash`, 'tea.cup-clean');
@@ -153,10 +153,10 @@ test('coffee: made on the tea faculty, served by hand, drunk to empty, rinsed cl
   report.checks.push('rinsed: "wash the mug" -> tea 0, brewedTick -1, bag false; facts empty then clean');
 
   // ---- an interrupted pour leaves only what was poured ----
-  const ip = await act(ana, 'make a cup of coffee'); let partial = null;
+  const ip = await act(ana, `object:${id('mug-two')}:brew`); let partial = null;
   for (let n = 0; n < 9000 && partial === null; n++) { sample(); const t = state('mug-two').tea; if (t > 0 && t < 0.9) partial = t; else await tick(1); }
   assert.ok(partial !== null, 'the pour reached mug-two');
-  const stop = await act(ana, 'walk to the table');
+  const stop = await act(ana, 'walk:table');
   await until([[ana, stop]]); await tick(40);
   const left = state('mug-two').tea; report.interrupted = {first: partial, left, phase: phase(ana, ip)};
   assert.notEqual(phase(ana, ip), 'completed', 'the coffee act was interrupted');

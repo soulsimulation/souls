@@ -139,6 +139,13 @@ test('changing a known skip reason also requires review', () => {
   const r = pair([{ name: 'skipped', status: 'skip', directive: 'old reason' }], [{ name: 'skipped', status: 'skip', directive: 'different reason' }], [entry('skipped', { status: 'skip' })]);
   assert.equal(r.status, 'blocked');
 });
+test('a test new since the baseline that skips is expected only when quarantine.json lists it with its status', () => {
+  const nodes = [{ name: 'old' }, { name: 'new skip', status: 'skip', directive: 'root writes anywhere' }];
+  assert.equal(pair([{ name: 'old' }], nodes).unexpectedSkips.length, 1);
+  assert.equal(pair([{ name: 'old' }], nodes, [entry('new skip', { status: 'todo' })]).status, 'blocked');
+  const r = pair([{ name: 'old' }], nodes, [entry('new skip', { status: 'skip' })]);
+  assert.equal(r.status, 'quarantined'); assert.deepEqual(r.quarantined.map(q => q.id), ['new skip']);
+});
 test('truncated TAP fails closed even when the last visible assertion passes', () => {
   const broken = run(tap([{ name: 'passes' }], { omitEnd: true }));
   assert.match(broken.errors.join('\n'), /incomplete TAP/);
