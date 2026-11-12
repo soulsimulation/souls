@@ -104,6 +104,7 @@ export class WorldBroadcast {
   private ride: { azimuth: number; checked: number } | null = null;
   /** #2202 (B2): moving tracking shots on gatherings and activity (broadcast-tracking.ts). */
   private tracker = new Tracker();
+  private trackPrepared = -Infinity;
   /** P7f: the view the arrival camera already shows (arrival-shot.ts: the phone's poster, LiveWorld's first frames), or null.
    *  The first tour shot is then that view's opening push from k = 0 (WorldTour.openingMove), even when the arrival is
    *  already over (the phone holds the broadcast until its world is filled in), so it starts exactly where the camera is.
@@ -135,7 +136,7 @@ export class WorldBroadcast {
     this.lastTick = this.lastDecisionWall = -Infinity;
     this.signature = '';
     this.semanticVersion = 0;
-    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset();
+    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset(); this.trackPrepared = -Infinity;
   }
 
   /** The shot for this frame, its aim lifted toward the horizon (C1, broadcast-horizon.ts). */
@@ -185,11 +186,10 @@ export class WorldBroadcast {
     const crowd = people.filter(id => Math.hypot(frame[id].p[0] - centre[0], frame[id].p[2] - centre[2]) < 6).length;
     if (members.length && tracked(choice, crowd)) {
       const spread = Math.max(...at.map(p => Math.hypot(p[0] - centre[0], p[2] - centre[2])));
-      let prepared = false;
-      const ready = () => { if (!prepared) { this.rendered.prepare(renderRoots); prepared = true; } };
-      const moving = this.tracker.pose(choice.key, centre, spread, wallSeconds, {
-        clear: p => { ready(); return this.rendered.evaluate(() => this.rendered.clear(p, .8)); },
-        reach: (a, b) => { ready(); return this.rendered.evaluate(() => this.rendered.reach(a, b)); } });
+      // The drawn scenery is re-gathered at the decision rate (10 Hz), not every frame; one evaluate per frame.
+      if (wallSeconds - this.trackPrepared >= .1 || wallSeconds < this.trackPrepared) { this.rendered.prepare(renderRoots); this.trackPrepared = wallSeconds; }
+      const moving = this.rendered.evaluate(() => this.tracker.pose(choice.key, centre, spread, wallSeconds,
+        { clear: p => this.rendered.clear(p, .8), reach: (a, b) => this.rendered.reach(a, b) }));
       if (moving) { this.lastTick = tick; this.signature = ''; return { pose: moving.pose, shot: `${choice.label}:track-${moving.type}` }; }
     } else this.tracker.reset();
     // Conversations prefer the two-shot; everything else uses the readable "clear" program.
