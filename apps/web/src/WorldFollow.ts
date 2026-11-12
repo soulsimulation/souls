@@ -37,6 +37,7 @@ export const FOLLOW_NEAR=1;
 /** #2216: the scene the follow camera's rays look at: gathered again every `refresh` s, out to the camera's distance
  *  ×1.5 (at least `least` m) plus `margin` m, and sooner once the Soul has moved `margin` m or the camera outgrows it. */
 export const SCENE={refresh:.5,least:20,margin:3};
+const SIGHT_FRAMES=3;
 const NEAR=FOLLOW_NEAR;
 export class WorldFollow {
   private requested:THREE.Vector3|null=null;
@@ -235,18 +236,19 @@ export class WorldFollow {
   /** #2201 A3: occluder dwell. Is a held sightline (the chosen view, or the drawn one) still to be kept? A wall cuts it at
    * once; a body passing through it (bodies alone in the way) only once it has stayed in the way for DWELL. */
   private cut:{chosen:number|null;rendered:number|null}={chosen:null,rendered:null};
-  /** #2216: one frame's sightline answer for a view, reused for any other view in that frame within 1 cm of it (the held
-   * and the drawn view are the same once the camera has settled), and whether every line was clear of everything. */
-  private sight:{frame:number;at:THREE.Vector3;allowed:number;fixed:number;all:number}|null=null;
+  /** #2216: a sightline answer for a view, reused for any view within 1 cm of it for SIGHT_FRAMES frames while the Soul
+   * has moved under 10 cm (the held and the drawn view are the same once the camera has settled, so a search reuses the
+   * drawn view's look), and whether every line was clear of everything. */
+  private sight:{frame:number;at:THREE.Vector3;target:THREE.Vector3;allowed:number;fixed:number;all:number}|null=null;
   private frame=0;
   private drawnBlocked:boolean|null=null;
   private torsoClear(target:THREE.Vector3,offset:THREE.Vector3,roots:readonly THREE.Object3D[]){const need=offset.length()-.01;return this.limit(target,offset,roots,need,true)>=need;}
   clearAll=false;
   private kept(key:'chosen'|'rendered',target:THREE.Vector3,offset:THREE.Vector3,roots:readonly THREE.Object3D[]){
     const need=offset.length()-.01;let m=this.sight;
-    if(!m||m.frame!==this.frame||m.at.distanceTo(offset)>.01){
+    if(!m||this.frame-m.frame>SIGHT_FRAMES||m.at.distanceTo(offset)>.01||m.target.distanceTo(target)>.1){
       const allowed=this.limit(target,offset,roots,need,false,true);
-      m=this.sight={frame:this.frame,at:offset.clone(),allowed,fixed:this.reachStatic,all:this.reachAll};}
+      m=this.sight={frame:this.frame,at:offset.clone(),target:target.clone(),allowed,fixed:this.reachStatic,all:this.reachAll};}
     if(key==='rendered')this.clearAll=m.all>=need;
     if(m.allowed>=need){this.cut[key]=null;return true;}
     if(m.fixed<need){this.cut[key]=null;return false;}
