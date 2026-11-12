@@ -150,11 +150,13 @@ is not a gate step, so the gate's suite tree and cached baseline don't change.
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
 
-**Self-hosted runners.** The heavy `qualify` legs run on the runners named by the repository variable
-`CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners. The browser `smoke` leg
-and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a loaded shared host misses
-(#1162). One runner instance takes one job at a time, so routing is only worth it with several
-instances online. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
+**Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
+whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
+repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
+other leg, and every leg while the variable is unset, runs on GitHub-hosted runners, so one run uses both pools at
+once. The browser `smoke` leg and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a
+loaded shared host misses (#1162). One runner instance takes one job at a time, so routing is only worth it with several
+instances online; a leg moves between pools by its flag, and `ci-scope.test.mjs` pins the split. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
 systemd service under one dedicated unprivileged user, with the label, and Playwright's Chromium system packages when
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
 its header shows the one-line invocation from a workstation. The steward sets and clears `CI_HEAVY_RUNNER`.
