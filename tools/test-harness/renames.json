@@ -153,6 +153,8 @@
       "to": "\\#1753: ack and result are retried with one key after a busy refusal and a dropped connection",
       "reason": "#1753: ack and result became keyed writes, retried with one key until answered (safe: the world answers a repeat from the message state); the old test asserted they were never retried",
       "pr": "#1762"
-    }
+    },
+    {"step": "V5-server-full", "from": "resolve advises: ranked candidates with schemas and availability, and it never executes", "to": ["candidates for words: ranked, with schemas and availability, and nothing executes", "\\#1910: the resolve route is gone: 410 naming the client's find, and nothing happens"], "reason": "#1910: the resolve route answers 410; the same candidates assertions call resolveCandidates directly", "pr": "#2138"},
+    {"step": "V5-server-full", "from": "rollback through the real CLI: words exit 2 with no act until the flag is on, then they act; off again, they refuse", "to": "legacy: without strict the words still execute; the server flag lets a strict client through for one release", "reason": "#1910: the CLI read the rollback flag from resolve's answer, which is gone, and #1921 removes it from the client; the server flag stays covered by the legacy test", "pr": "#2138"}
   ]
 }
