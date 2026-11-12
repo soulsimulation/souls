@@ -1505,7 +1505,7 @@ const { PROJECTION_BUDGETS, openMemoryFolder } = soulRecords;
 const { buildBrief } = soulBrief;
 const { SUMMARY } = soulConsolidate;
 const { createPeople } = soulPeople;
-// memory.mjs: one memory per Soul across worlds. It keeps the record format of tools/edge-skill/memory-folder.mjs and
+// memory.mjs: one memory per Soul across worlds. It keeps the record format of memory-folder.mjs and
 // feeds it what the client already received: no HTTP, no model. Design: docs/design/soul-context.md section 2.
 //
 // Everything here comes from a world, and a world may lie: this is where its answers are bounded to what a record takes.
@@ -5866,12 +5866,14 @@ async function serveForeground() {
   }
   const pendingClose = [];
   async function handle(m) {
-    // #1968: a command from another process means the agent took what was handed; pending and status read without taking it
-    if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
+    // #1968: a command from another process means the agent took what was handed; pending and status read without taking it.
+    // #1932: pending --check is not the agent either; it asks on a copy and changes nothing.
+    if (st.wake?.held?.length && m.op !== "pending" && m.op !== "status" && m.op !== "check") { const c = soulWake.confirm(st.wake, m.reader); if (c !== st.wake) { st.wake = c; persist(); } }
     if (moved()) { log("the folder's world, Soul or token changed: stopping"); setTimeout(() => shutdown(0), 10); return m.op === "http" ? { status: 0, data: { error: { code: "unreachable", message: "this serve stopped: the folder moved to another world or Soul" } } } : { serving: false, stopping: true, moved: true }; }
     if (m.op === "plan") return startPlan(m);
     if (m.op === "planStatus") return st.plan ? { plan: planView(st.plan) } : { plan: null, ...(st.planEnded?.length ? { planEnded: st.planEnded } : {}) };
     if (m.op === "pending") { const out = takePending(st, Date.now(), WAKE_HELD_MS, m.reader); persist(); return out; }
+    if (m.op === "check") return { due: pendingDue(takePending(structuredClone(st), Date.now(), WAKE_HELD_MS, m.reader)) };
     if (m.op === "status") {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
@@ -6047,8 +6049,23 @@ async function followFolder() {
   return { serve: { restarted: true, pid: again.pid } };
 }
 
+/** Whether a pending answer holds anything for the mind: a message, an ended act, an event, speech, a wake, a finished plan. */
+export const pendingDue = (p) => !!(p.ownerMessages.length || p.endedReceipts.length || p.events.length || p.addressed || p.faced || p.moreEvents || p.gap || p.omitted || p.planEnded?.length || p.wakes);
+
+// pending --check (#1932): exit 0 and print nothing when pending has something, exit 1 when not. It starts serve if none is up,
+// reads nothing and calls no model, so a scheduler can gate a run on it: `pending --check && <run>` spends no tokens when idle.
+async function pendingCheck() {
+  let a = await askServe({ op: "check" });
+  if (!a || a.lost) { await serve(); a = await askServe({ op: "check" }); }
+  if (!a || a.lost) throw new Error(`serve did not answer: ${CLI} serve --status`);
+  if (a.error) throw new Error(a.error === "unknown op check" ? `this serve predates pending --check: ${CLI} serve --stop, then ${CLI} serve` : a.error);
+  process.exitCode = a.due ? 0 : 1;
+  return "";
+}
+
 // pending: what arrived since the last read, from the serve's queue, with no world call.
-async function pending() {
+async function pending(...argv) {
+  if (argv[0] === "--check") return pendingCheck();
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
   heard(a.ownerMessages);
@@ -6060,6 +6077,7 @@ async function pending() {
 async function wakeCommand(...argv) {
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const [sub, ...rest] = argv;
+  if (sub === "heartbeat") return heartbeat(rest);
   const change = !sub ? null : sub === "add" ? { add: soulWake.parseRule(rest) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
   if (sub && !change) soulWake.parseBudget([]);   // throws the usage
   const a = await askServe({ op: "wake", change });
@@ -6069,6 +6087,25 @@ async function wakeCommand(...argv) {
   if (c.error) throw new Error(c.error);
   if (change) { st.wake = c.wake; writeFileSync(SERVE_STATE + ".tmp", JSON.stringify(st), { mode: 0o600 }); renameSync(SERVE_STATE + ".tmp", SERVE_STATE); }
   return { ...soulWake.view(c.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}), serving: false };
+}
+
+// wake heartbeat [--every <minutes>] (#1932): what the owner's harness schedules to check on this Soul, (a) a prompt for a scheduled
+// task that starts in this folder, (b) one gated command for a scheduler that runs a shell. The cadence is kept in the Soul's state.
+export const HEARTBEAT_EVERY_MIN = 60;
+const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
+function heartbeat(argv) {
+  const [flag, v, ...extra] = argv;
+  if (extra.length || (flag !== undefined && (flag !== "--every" || !/^\d{1,5}$/.test(v ?? "") || Number(v) < 1))) throw new Error("usage: wake heartbeat [--every <minutes>]");
+  const every = flag ? Number(v) : HEARTBEAT_EVERY_MIN, folder = real(INVOKED), script = real(process.argv[1]);
+  const me = HOME && SEAT?.kind === "soul" ? HOME.principals().find((p) => p.id === SEAT.id) : null, sel = me ? ` ${me.address}` : "";
+  const inside = script.startsWith(`${folder}/`) ? script.slice(folder.length + 1) : script;
+  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it reports nothing new (no owner messages, ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
+  const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
+  save({ heartbeat: { every, at: now() } });
+  return {
+    heartbeat: { every, folder, prompt, command: { claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`, codex: `${check} && codex exec --skip-git-repo-check ${shq(prompt)}` } },
+    note: `(a) Schedule the prompt every ${every} minutes as a scheduled task in your harness that starts in ${folder} on this machine. (b) Where the scheduler runs a shell, schedule the command instead: it starts no run, and spends no tokens, while pending --check finds nothing. docs: /docs/run-a-soul`,
+  };
 }
 
 // plan '<ordered offered ids>' [--for <id>|none]: checked here before any step runs, then run by the serve.
@@ -6122,33 +6159,122 @@ async function batch(json) {
 
 // ---------------------------------------------------------------- help and dispatch
 
-const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.
-
-setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new] [--move]    pair <soulId> [--for CODE] [--move]
-          approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
-          news [--all]   (platform news from the sites this home trusts, unread or the last 50; checked every 6 h without asking)
-          name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
-memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
-          remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-world     look   find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]   query '<json questions>' [--budget tokens]   catalog [--refresh]
-          (the world is copied to this machine and kept current: these read the copy, make no call that waits on the world, and give the ids act takes)
-sense     here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
-          context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
-          receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          stop [receiptId]   (ends your own act under way, where you are; nothing else starts)
-          say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-          (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
-owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
-          now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
-self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
-resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
-          plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
-          wake [add <act-ended|soul-arrives|place-busy> [params-json] [--every s] | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)
-          wake budget <quiet|normal|lively|unlimited|n> | wake budget --day <n>   (the owner's: rule wakes an hour (4, 12, 60, no limit) and a day; over it they merge and wait)
-          pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
-${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
+/** The help text: one row per printed line, one entry per source line, three spaces apart unless an entry gives its gap. */
+const HELP = [
+  ["setup",
+    [`register <world-url> [--global]`, 2],
+    [`create "<Name>" [--for CODE] [--new] [--move]`, 4],
+    `pair <soulId> [--for CODE] [--move]`,
+  ],
+  ["",
+    `approval [status|wait|cancel]`,
+    [`status`, 26],
+    `guide`,
+  ],
+  ["home",
+    `list`,
+    `default <name>`,
+    `adopt <name|id> [--for CODE] [--move]`,
+    `doctor [--for CODE]`,
+    `export <name> [--out dir]`,
+    `import [folder]`,
+    `init [--global]`,
+    `upgrade [world] [--trust]`,
+  ],
+  ["",
+    `news [--all]`,
+    `(platform news from the sites this home trusts, unread or the last 50; checked every 6 h without asking)`,
+  ],
+  ["",
+    `name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"`,
+  ],
+  ["memory",
+    `memory <words>`,
+    `remember --person|--place <id|name> "<note>"`,
+    `remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]`,
+    `remember --self "<line>"`,
+    `consolidate [on|off|asked|--force]`,
+  ],
+  ["",
+    `remember --person <id|name> --promise "<what>" [--by me|them]`,
+    `remember --kept <promise id> --evidence <receipt or conversation id>`,
+  ],
+  ["world",
+    `look`,
+    `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]`,
+    `query '<json questions>' [--budget tokens]`,
+    `catalog [--refresh]`,
+  ],
+  ["",
+    `(the world is copied to this machine and kept current: these read the copy, make no call that waits on the world, and give the ids act takes)`,
+  ],
+  ["sense",
+    `here`,
+    `observe`,
+    `around|explore [place]`,
+    `caps [--search w] [--verb v] [--all] [--limit n] [--json]`,
+    `map`,
+    `view [--map|--alt-only|--out f]`,
+  ],
+  ["",
+    `context [query] [--cursor nextCursor]`,
+    `views <ref> [ref…] [--detail] [--original] [--out picture.png]`,
+  ],
+  ["",
+    `receipt [id]`,
+    `events [--since c_N] [--raw]`,
+    `conversations`,
+  ],
+  ["do",
+    `act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]`,
+    `resolve "<words>" [--json] (candidate ids)`,
+    `inspect <id> [--all]`,
+    `wait [s] [receiptId] [--json]`,
+  ],
+  ["",
+    `stop [receiptId]   (ends your own act under way, where you are; nothing else starts)`,
+  ],
+  ["",
+    `say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]`,
+    `converse <list|turns|start|say|accept|decline|leave|ask> …`,
+    `object <id> [action] [json]`,
+  ],
+  ["",
+    `(a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)`,
+  ],
+  ["owner",
+    `listen [--after id] [--once] [--take] [--follow]`,
+    `ack <id> ["reply"] [--close done|failed]`,
+    `result <id> done|failed "<text>"`,
+  ],
+  ["",
+    `now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)`,
+  ],
+  ["self",
+    `profile [name|description|photo …]`,
+    `body [presets|library|kit|upload|set|look …]`,
+    `travel [<world>|home]`,
+  ],
+  ["resident",
+    `serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)`,
+  ],
+  ["",
+    `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
+  ],
+  ["",
+    `wake [add <act-ended|soul-arrives|place-busy> [params-json] [--every s] | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)`,
+  ],
+  ["",
+    `wake budget <quiet|normal|lively|unlimited|n> | wake budget --day <n>   (the owner's: rule wakes an hour (4, 12, 60, no limit) and a day; over it they merge and wait)`,
+  ],
+  ["",
+    `pending   (what arrived since you last read, no world call)`,
+    `batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)`,
+  ],
+];
+const helpRow = ([label, ...entries]) => label.padEnd(10) + entries.map((e, i) => { const [text, gap = 3] = typeof e === "string" ? [e] : e; return i < entries.length - 1 ? text + " ".repeat(gap) : text; }).join("");
+const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.\n\n${HELP.map(helpRow).join("\n")}\n` +
+  (REPORTS ? `${helpRow(["report", `note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})`])}\n` : "");
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
@@ -6422,7 +6548,66 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { note, plan, inspect, catalog: catalogCommand, find: findCommand, query: queryCommand, look, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, news: newsCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, wake: wakeCommand, batch, help: async () => help() };
+const commands = {
+  note,
+  plan,
+  inspect,
+  catalog: catalogCommand,
+  find: findCommand,
+  query: queryCommand,
+  look,
+  now: nowLine,
+  remember,
+  memory: memoryCommand,
+  consolidate: consolidateCommand,
+  register,
+  create,
+  pair,
+  adopt,
+  list: listCommand,
+  default: defaultCommand,
+  doctor: doctorCommand,
+  export: exportCommand,
+  import: importCommand,
+  init: initCommand,
+  upgrade: upgradeCommand,
+  news: newsCommand,
+  approval,
+  status,
+  guide,
+  here,
+  observe,
+  around,
+  explore: around,
+  caps,
+  capabilities: caps,
+  map,
+  view,
+  context,
+  views,
+  receipt,
+  events,
+  conversations,
+  act,
+  stop,
+  resolve,
+  wait,
+  say,
+  converse,
+  object,
+  listen,
+  ack,
+  result,
+  profile,
+  body,
+  travel,
+  version: async () => ({ version: VERSION }),
+  serve,
+  pending,
+  wake: wakeCommand,
+  batch,
+  help: async () => help(),
+};
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;

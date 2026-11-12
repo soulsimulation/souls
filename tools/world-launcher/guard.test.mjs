@@ -126,6 +126,21 @@ test('(a) wedged, no live.json (a release before the watchdog): /healthz unanswe
   await p.closeAll();
 });
 
+test('#2164 busy, not stuck: no watchdog port, the main /healthz too slow to answer, live.json shows the main thread turning; never restarted', async () => {
+  const p = pool(R, { FAKE_LIVE: '1' });
+  const port = await p.ensure(world('wd')); const pid = p.state('wd').child.pid;
+  p.startGuard();
+  await get(port, 'wd', '/busy?ms=1000');   // each /healthz answers 1 s late (timeoutMs 150), the main thread still turns
+  await sleep(1500);   // 15 looks: past failures (6) and past liveStaleMs after up
+  assert.equal(p.state('wd').child?.pid, pid, `a busy world is not killed: ${p.lines.join('\n')}`);
+  assert.equal(p.status('wd').restarts, 0);
+  // a main thread that stops turning is still wedged, by live.json
+  await get(port, 'wd', '/wedge');
+  await until(() => p.status('wd').status === 'running' && p.status('wd').pid !== pid, 5000, 'restarted');
+  assert.match(p.status('wd').lastExit.reason, /wedged: main thread stuck/);
+  await p.closeAll();
+});
+
 test('(a) the watchdog port (SIM_HEALTH_PORT): a second port from the range, held while the world lives, answered while main is stuck', async () => {
   const p = pool(R, { FAKE_LIVE: '1' }, { healthPorts: true, guard: { ...FAST, liveStaleMs: 60_000, turnAgeMs: 60_000 } /* only the port tells */ });
   const port = await p.ensure(world('wc')); const st = p.state('wc');

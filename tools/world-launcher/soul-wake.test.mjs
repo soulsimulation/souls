@@ -4,12 +4,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ACT_ENDED_GRACE_MS, BUDGETS, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
-import { FOLLOW_MAX, followLine } from './soul/eden.mjs';
+import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine } from './soul/eden.mjs';
 
 const T0 = 1_800_000_000_000;
 /** serve's state as it stands after a first look: the engine's cursor at the end of everything. */
@@ -160,7 +160,7 @@ async function world(t) {
   w.cli = (...args) => new Promise((done) => {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./soul/eden.mjs', import.meta.url)), ...args], { cwd: dir, env: { ...process.env, ...w.env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { err += c; });
-    child.on('exit', (code) => { let j = null; try { j = JSON.parse(out); } catch { /* text */ } done({ code, err, json: j }); });
+    child.on('exit', (code) => { let j = null; try { j = JSON.parse(out); } catch { /* text */ } done({ code, err, json: j, out }); });
   });
   w.state = () => JSON.parse(readFileSync(join(dir, '.eden-serve.json'), 'utf8'));
   t.after(async () => {
@@ -362,6 +362,55 @@ test('#1968 A1, A4: wake budget and status through the CLI; a run killed after p
   assert.deepEqual([w.state().wake.held.length, w.state().wake.delivered.length], [0, 2], 'the delivery made stays counted');
   assert.deepEqual((await w.cli('pending')).json.wakes.map((x) => x.why), ['Ivo arrived at g-yard'], 'delivered again');
   assert.equal(w.state().wake.delivered.length, 3, 'and charged again: the count is the deliveries made');
+});
+
+// #1932: the heartbeat. A scheduler gates a run on `pending --check`, which answers by exit code alone and starts serve itself.
+const sh = (cmd, env) => new Promise((done) => {
+  const child = spawn('sh', ['-c', cmd], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', () => {});
+  child.on('exit', (code) => done({ code, out }));
+});
+
+test('#1932 A1: pending --check starts serve, exits 1 when there is nothing and 0, silent, when there is; it takes nothing', async (t) => {
+  const w = await world(t);
+  assert.equal((await w.cli('serve', '--status')).json.serving, false);
+  let r = await w.cli('pending', '--check');
+  assert.deepEqual([r.code, r.out], [1, ''], 'nothing to do: exit 1, nothing printed');
+  assert.equal((await w.cli('serve', '--status')).json.serving, true, 'it started serve');
+  w.inbox.push({ id: 'msg_1', text: 'come to the hall', sentAt: T0 });
+  r = await until(async () => { const x = await w.cli('pending', '--check'); return x.code === 0 && x; });
+  assert.deepEqual([r.code, r.out], [0, ''], 'an owner message: exit 0, nothing printed');
+  assert.equal((await w.cli('pending', '--check')).code, 0, 'the check read nothing: it still finds it');
+  assert.deepEqual((await w.cli('pending')).json.ownerMessages.map((m) => m.id), ['msg_1'], 'pending still hands it over');
+});
+
+test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps the cadence, and the command starts no run when idle', async (t) => {
+  const w = await world(t), folder = realpathSync(w.dir);
+  let r = await w.cli('wake', 'heartbeat');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json.heartbeat.every, HEARTBEAT_EVERY_MIN);
+  r = await w.cli('wake', 'heartbeat', '--every', '15');
+  const { every, prompt, command } = r.json.heartbeat;
+  assert.equal(every, 15);
+  assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).heartbeat.every, 15, 'the cadence is in the Soul\'s state');
+  assert.ok(prompt.split(/\s+/).length <= 120, `${prompt.split(/\s+/).length} words`);
+  assert.ok(prompt.includes(folder), 'it names the Soul\'s folder');
+  assert.match(prompt, /pending\. If it reports nothing new.*stop now.*Otherwise act on what it reports.*then stop\./);
+  assert.equal((await w.cli('wake', 'heartbeat', '--every', '0')).code, 1);
+
+  // The harness is a stand-in that leaves a mark: idle, the gated command never starts it; with a message waiting, it does.
+  const bin = join(w.dir, 'bin'), mark = join(w.dir, 'ran');
+  mkdirSync(bin);
+  for (const h of ['claude', 'codex']) { writeFileSync(join(bin, h), `#!/bin/sh\necho "$@" >> '${mark}'\n`); chmodSync(join(bin, h), 0o755); }
+  const env = { PATH: `${bin}:${process.env.PATH}` };
+  for (const h of ['claude', 'codex']) assert.equal((await sh(command[h], env)).code, 1, `${h}: idle, the check stops the line`);
+  assert.equal(existsSync(mark), false, 'no harness run started: no tokens');
+  w.inbox.push({ id: 'msg_1', text: 'come to the hall', sentAt: T0 });
+  assert.ok(await until(async () => (await w.cli('pending', '--check')).code === 0));
+  for (const h of ['claude', 'codex']) assert.equal((await sh(command[h], env)).code, 0);
+  const runs = readFileSync(mark, 'utf8').trim().split('\n');
+  assert.equal(runs.length, 2, 'one run per harness');
+  assert.ok(runs.every((x) => x.includes(prompt)), 'each with the heartbeat prompt');
 });
 
 // #2076: --stop answers only after serve has written its state and released its lock: a folder removed right after it goes,
