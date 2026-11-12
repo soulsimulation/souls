@@ -690,6 +690,26 @@ export class MarsEngine implements Engine {
   stopAllV1(why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { return this.stopWhereV1(() => true, why, from); }
   /** #1369 quarantine/1: as `stopAllV1`, for the programmes of these bodies alone. Everyone else's go on. */
   stopBodiesV1(bodies: string[], why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { const ids = new Set(bodies); return this.stopWhereV1(p => ids.has(p.actor), why, from); }
+  /** #1377: the entity an invariant that throws (`engine.thrown`, which names nobody) was reading: the one whose absence alone
+   *  stops the throw, found by halving the entity table (bodies first, then everything else). Empty when no invariant throws,
+   *  or no single entity explains it. It takes entities out of the table and puts them back while it reads, so the host calls
+   *  it on a scratch restore of the head, never on the live engine; the host logs what it found, and a replay reads that. */
+  thrownSourcesV1(): string[] {
+    const rt: any = this.rt, ents = this.ents, invs: any[] = rt.invariants ?? [];
+    const threw = (inv: any) => { try { return (inv(rt) ?? []).some((v: { code?: string }) => v?.code === 'engine.thrown'); } catch { return true; } };
+    const throwing = invs.filter(threw);
+    if (!throwing.length) return [];
+    const throws = () => throwing.some(threw);
+    const without = (ids: string[]) => { const kept = ids.map(id => [id, ents[id]] as const); for (const id of ids) delete ents[id]; try { return throws(); } finally { for (const [id, e] of kept) ents[id] = e; } };
+    const all = Object.keys(ents).sort(), bodies = all.filter(id => ents[id]?.kind === 'human');
+    for (const ids of [bodies, all.filter(id => ents[id]?.kind !== 'human')]) {
+      if (!ids.length || without(ids)) continue;   // these alone don't explain it
+      let lo = 0, hi = ids.length;                 // without ids[0..lo) it throws; without ids[0..hi) it doesn't
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (without(ids.slice(0, mid))) lo = mid; else hi = mid; }
+      if (!without([ids[hi - 1]])) return [ids[hi - 1]];
+    }
+    return [];
+  }
   /** #1369 quarantine/1: the bodies whose own state is broken (a person with no human state, a pose or level that is no finite
    *  number). Such a body can make every step throw, or the state hash, without any rule naming it. A pure read. */
   corruptBodiesV1(): { code: string; subjects: string[] }[] {

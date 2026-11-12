@@ -47,7 +47,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
-import { countGlitch, faultFacts, faultKeys, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
+import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
 
@@ -1622,6 +1622,8 @@ export class WorldHost {
       this.failCheckpoint(failure); return;
     }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
+    // #1377: an invariant that throws reading one entity: only that entity is quarantined (a rewind would stop everyone and read it again)
+    if (this.quarantineRule && this.thrownOnly(error)) return this.quarantine(error);
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
     if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
@@ -1674,8 +1676,24 @@ export class WorldHost {
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
     let corrupt: string[] = [];
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
-    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt])].sort(), corrupt };
+    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
+  /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
+   *  takes entities out there, one half at a time), at most once a tick; the quarantine event logs it, so a replay reads that. */
+  private thrownAt: {tick: number; ids: string[]} | null = null;
+  private thrownSources(error: unknown): string[] {
+    if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
+    const tick = this.engine.world.tick;
+    if (this.thrownAt?.tick !== tick) {
+      let ids: string[] = [];
+      try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
+      catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
+      this.thrownAt = {tick, ids};
+    }
+    return this.thrownAt.ids;
+  }
+  /** #1377: a fault that is only invariants that threw, and what they were reading was found: going back would read it again. */
+  private thrownOnly(error: unknown): boolean { const keys = faultKeys(error); return keys.length > 0 && keys.every(k => k.code === THROWN_RULE && !k.subjects.length) && this.thrownSources(error).length > 0; }
   /** #1369: each Soul's body's last whole pose (finite numbers), so a body whose pose breaks is held where it last stood. */
   private wholePoses = new Map<string, RecoveryPose>();
   private noteWholePoses() {
@@ -1848,7 +1866,7 @@ export class WorldHost {
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, ...(this.thrownAt?.tick === tick && this.thrownAt.ids.length ? {thrownReading: this.thrownAt.ids} : {}), stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
