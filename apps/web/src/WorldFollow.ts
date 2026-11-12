@@ -1,14 +1,19 @@
 import * as THREE from 'three';
 import {WorldVisibilityInstances} from './WorldVisibilityInstances.ts';
+import {springAngle,springStep} from './camera-spring.ts';
 /** Camera-only sightline protection. Requested orbit/zoom survives temporary
  * obstruction; the rendered camera may move nearer or around a blocking post. */
 /** VF6: Follow zoom bounds (metres from the Soul) and how long after the last drag/zoom the viewer's view is kept as is
  *  (#1316: a grace period long enough that no automatic move lands while the viewer is still between gestures). */
 export const FOLLOW_MIN=2.4,FOLLOW_MAX=40;const USER_HOLD=1.5;
-/** #1316: automatic moves are eased. Glide time constants on the sphere around the Soul (seconds; blocked: the sight is cut),
- *  the pull in through an opening, and the cap on any automatic move in metres per second (faster while the sight is cut,
- *  so a wall is never stared at for long). Viewer gestures stay immediate. */
-const GLIDE={angle:1.4,angleBlocked:.6,radius:1.8,radiusBlocked:.5,opening:.35,openingSpeed:5,speed:6,speedBlocked:12};
+/** #1316: automatic moves are eased. The pull in through an opening (time constant, seconds; speed), and the cap on any
+ *  automatic move in metres per second (faster while the sight is cut, so a wall is never stared at for long). #2201 A2:
+ *  and the most it gains speed in metres per second each second, so even a hurried move starts as a glide. Viewer
+ *  gestures stay immediate. */
+const GLIDE={opening:.35,openingSpeed:5,speed:6,speedBlocked:12,accel:6,accelBlocked:24};
+/** #2201 A2: the periods (seconds) of the critically damped spring that carries the camera on the sphere round the Soul:
+ *  calm, blocked (the sight is cut by something in the way), and returning to the asked-for view. */
+export const SPRING={calm:1.6,blocked:.6,returning:1.2};
 /** #1316: a pull out is deliberate past these, summed over one gesture (input events less than GESTURE_GAP s apart):
  *  click jitter and a slip inside a pinch stay coupled, a slow trackpad zoom out or a slow drag still decouples. */
 const PULL_OUT={ratio:1.05,angle:.05},GESTURE_GAP=.4;
@@ -25,7 +30,12 @@ export class WorldFollow {
   /** #2201 A1: sightline rays cast so far, and in the last resolve call (the camera trace's cost meter). */
   private cast=0;
   rays=0;
-  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.userAt=-Infinity;this.instances.reset();}
+  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();}
+  /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
+  private motion={theta:0,phi:0,radius:0};
+  /** The camera's automatic speed on the last frame (m/s, relative to the Soul): the start of the acceleration cap. */
+  private eyeSpeed=0;
+  private still(){this.motion.theta=this.motion.phi=this.motion.radius=0;this.eyeSpeed=0;}
   /** Same candidates as recursive intersectObjects, minus objects whose hits
    * opaque() always rejects: hidden ancestry or own cameraTransparent. */
   private collect(roots:readonly THREE.Object3D[]){
@@ -138,7 +148,7 @@ export class WorldFollow {
     // collision search had moved it away from the old preferred direction.
     this.requested.copy(after).setLength(length);
     this.rendered=after.clone().setLength(this.decoupled?length:this.requested.length());
-    this.chosen=null;this.userAt=this.clock;this.userOrbited=true;
+    this.chosen=null;this.userAt=this.clock;this.userOrbited=true;this.still();
   }
   private gesture:{turn:number;zoom:number}|null=null;
   /** #1316: true once the viewer pulled the camera out: it keeps their view, and occlusion never moves it. */
@@ -226,11 +236,11 @@ export class WorldFollow {
     }
     const wanted=this.requested!.clone();
     // #1316: decoupled, the viewer's view is the camera, exactly as they left it, carried along with the Soul.
-    if(this.decoupled){this.rendered=wanted.clone();this.rule={name:'held'};return wanted;}
+    if(this.decoupled){this.rendered=wanted.clone();this.rule={name:'held'};this.still();return wanted;}
     // While the viewer's hand is on the camera, show their view; only a wall between camera and Soul pulls it in
     // (a collision camera). Their requested distance survives, and the search resumes from their angle after.
     if(this.userActive&&this.rendered){
-      const reach=this.limit(target,this.rendered,roots),length=this.rendered.length();
+      const reach=this.limit(target,this.rendered,roots),length=this.rendered.length();this.still();
       this.rendered.setLength(this.fit(length,reach));
       this.rule=this.rendered.length()<length-1e-6?{name:'collision',reach}:{name:'user'};
       return this.inOpening(target,dt).clone();
@@ -241,32 +251,38 @@ export class WorldFollow {
       this.chosen=this.choose(target,wanted,roots).clone();this.lastSearch=this.clock;this.chosenClear=this.clear(target,this.chosen,roots);}
     const goal=this.chosen;
     this.rule={name:goal.distanceTo(wanted)>.01?'search':'glide'};
-    if(!this.rendered){this.rendered=goal.clone();this.rule={name:'start'};}
+    if(!this.rendered){this.rendered=goal.clone();this.rule={name:'start'};this.still();}
     else{
       // Glide on the sphere around the Soul (around obstacles, not through them); hurry, never jump, when blocked.
-      const blocked=!this.clear(target,this.rendered,roots),k=(tau:number)=>-Math.expm1(-dt/tau);this.rule.blocked=blocked;
+      // #2201 A2: a critically damped spring on theta, phi and radius, exact at any frame rate: the camera eases out of
+      // rest and into the goal, and its velocity carries over when the goal moves, so it never starts or stops abruptly.
+      const blocked=!this.clear(target,this.rendered,roots);this.rule.blocked=blocked;
+      const period=blocked?SPRING.blocked:this.rule.name==='glide'?SPRING.returning:SPRING.calm,m=this.motion;
       const a=new THREE.Spherical().setFromVector3(this.rendered),b=new THREE.Spherical().setFromVector3(goal);
-      let dTheta=b.theta-a.theta;dTheta=Math.atan2(Math.sin(dTheta),Math.cos(dTheta));
-      const turn=k(blocked?GLIDE.angleBlocked:GLIDE.angle);
-      a.theta+=dTheta*turn;a.phi+=(b.phi-a.phi)*turn;a.radius+=(b.radius-a.radius)*k(blocked?GLIDE.radiusBlocked:GLIDE.radius);
+      const theta=springAngle(a.theta,m.theta,b.theta,period,dt),phi=springStep(a.phi,m.phi,b.phi,period,dt),radius=springStep(a.radius,m.radius,b.radius,period,dt);
+      a.theta=theta.x;a.phi=Math.max(1e-3,Math.min(Math.PI-1e-3,phi.x));a.radius=Math.max(.01,radius.x);m.theta=theta.v;m.phi=phi.v;m.radius=radius.v;
       this.rendered.setFromSpherical(a);
       // A glide that would carry a clear camera out through a wall (growing the radius in a narrow room before it
       // turns) stops at the wall instead. Only a small correction: a house that suddenly cuts the sight is left to
       // the hurried glide above, never a jump.
       if(!blocked){const length=this.rendered.length(),fitted=this.fit(length,this.limit(target,this.rendered,roots));
-        if(fitted<length&&length-fitted<=.2)this.rendered.setLength(fitted);}
+        if(fitted<length&&length-fitted<=.2){this.rendered.setLength(fitted);this.motion.radius=Math.min(0,this.motion.radius);}}
     }
     const result=this.inOpening(target,dt);
+    if(this.rule.name==='opening')this.motion.radius=Math.min(0,this.motion.radius);  // held in at the opening: no outward push stored up
     // Angular easing alone can travel metres in one frame on a wide orbit or
     // when the visibility search switches sides. Bound automatic motion in
     // metres/second as well; actual viewer gestures above remain immediate.
     if(previous&&dt>0){
-      const limit=(this.rule.blocked?GLIDE.speedBlocked:GLIDE.speed)*dt;
+      const top=this.rule.blocked?GLIDE.speedBlocked:GLIDE.speed,accel=this.rule.blocked?GLIDE.accelBlocked:GLIDE.accel;
+      const limit=Math.min(top,this.eyeSpeed+accel*dt)*dt;
       if(previous.distanceTo(result)>limit){this.rule={...this.rule,name:'speed-cap'};
         const from=previous.length(),to=result.length(),rotation=new THREE.Quaternion().setFromUnitVectors(previous.clone().normalize(),result.clone().normalize());
         const arc=previous.angleTo(result)*Math.max(from,to)+Math.abs(to-from),fraction=Math.min(1,limit/arc);
         result.copy(previous).normalize().applyQuaternion(new THREE.Quaternion().slerp(rotation,fraction)).multiplyScalar(from+(to-from)*fraction);
+        this.motion.theta*=fraction;this.motion.phi*=fraction;this.motion.radius*=fraction;  // the spring moves on at the capped speed
       }
+      this.eyeSpeed=previous.distanceTo(result)/dt;
     }
     return result.clone();
   }
