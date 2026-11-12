@@ -11,15 +11,15 @@ const sha=value=>createHash('sha256').update(value).digest('hex');
 const validPid=n=>Number.isSafeInteger(n)&&n>1;
 const same=(a,b)=>a&&b&&a.pid===b.pid&&a.pgid===b.pgid&&a.startToken===b.startToken;
 const MAX_BYTES=262144,MAX_CONTROLLERS=16,MAX_HOSTS=128;
-// An atomic replace (writePrivate's rename) during a read shows as nlink 0 or a changed inode: re-stat and
-// retry a bounded number of times, then refuse (#2126). A link, a non-file, a wrong mode or oversize refuses at once.
-const READ_ATTEMPTS=8,unsafe=s=>!s.isFile()||s.isSymbolicLink()||s.nlink>1||s.size>MAX_BYTES||(s.mode&0o077);
+// An atomic replace (writePrivate's rename) during a read shows as nlink 0 or a changed inode between the lstat and the open
+// (#2126). Neither is unsafe: every check is made again on the opened file itself, and a file the writer renamed away after the
+// open is still a whole ledger (written and fsynced before the rename). A link, a non-file, a wrong mode or oversize refuses;
+// O_NOFOLLOW refuses a symlink swapped in after the lstat, and O_NONBLOCK keeps a non-file swapped in from blocking the open.
+const unsafe=s=>!s.isFile()||s.isSymbolicLink()||s.nlink>1||s.size>MAX_BYTES||(s.mode&0o077);
 export function readPrivate(path){
- for(let attempt=1;;attempt++){
-  const s=lstatSync(path);if(unsafe(s))throw fault('CONTROLLER_INVENTORY_UNSAFE');
-  if(s.nlink===1){const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const actual=fstatSync(fd);if(unsafe(actual))throw fault('CONTROLLER_INVENTORY_UNSAFE');if(actual.dev===s.dev&&actual.ino===s.ino&&actual.nlink===1)return JSON.parse(readFileSync(fd,'utf8'));}finally{closeSync(fd);}}
-  if(attempt>=READ_ATTEMPTS)throw fault('CONTROLLER_INVENTORY_UNSAFE');
- }
+ if(unsafe(lstatSync(path)))throw fault('CONTROLLER_INVENTORY_UNSAFE');
+ const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{if(unsafe(fstatSync(fd)))throw fault('CONTROLLER_INVENTORY_UNSAFE');return JSON.parse(readFileSync(fd,'utf8'));}finally{closeSync(fd);}
 }
 export function writePrivate(path,value,{exclusive=false}={}){const bytes=JSON.stringify(value);if(Buffer.byteLength(bytes)>MAX_BYTES)throw fault('CONTROLLER_INVENTORY_CAPACITY');const tmp=exclusive?path:path+'.'+randomUUID()+'.tmp';const fd=openSync(tmp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);try{writeFileSync(fd,bytes);fsyncSync(fd);}finally{closeSync(fd);}if(!exclusive)renameSync(tmp,path);const dir=openSync(dirname(path),constants.O_RDONLY);try{fsyncSync(dir);}finally{closeSync(dir);}}
 // lstart prints in the reader's zone, so TZ is pinned: one process has one startToken for every reader (#471).
