@@ -31,6 +31,15 @@ test('ID then exact normalized name then declared alias; low-confidence fuzzy gu
  const unknown=resolveBootPlace('region-beach',pack.index,current);assert.equal(unknown.ok,false);if(!unknown.ok){assert.deepEqual(unknown.resolvedIfName,{input:'beach',placeId:'region-harbour.beach',name:'Beach'});assert.equal(unknown.did_you_mean[0].id,'walk:region-harbour.beach');}
 });
 
+test('#2124 hints:false answers ok and chosen as before and only empties a plain refusal\'s hints',()=>{
+ const pack=buildBootStatic(fieldInput),current=caps(pack),asks=['region-harbour.beach','  BEACH  ','the beach','woods','beech','region-beach','nowhere at all',...Object.keys(fixtures.fieldRefusals)];
+ for(const kind of ['auto','id','name'] as const)for(const offers of [current,[],current.map(c=>({...c,available:false,blocked:{code:'route.blocked',reason:'blocked'}}))])for(const a of asks){
+  const full=resolveBootPlace(a,pack.index,offers,kind),bare=resolveBootPlace(a,pack.index,offers,kind,false);
+  assert.equal(bare.ok,full.ok,a);
+  if(full.ok)assert.deepEqual(bare,full,a);else if(!bare.ok){assert.deepEqual({...bare,did_you_mean:full.ambiguous?full.did_you_mean:[]},full.ambiguous?full:{...full,did_you_mean:[]},a);}
+ }
+});
+
 test('duplicate names/aliases refuse without nearest, availability or array-order tie breaking',()=>{
  const pack=buildBootStatic(fieldInput),current=caps(pack),a=pack.index.find(p=>p.id==='region-harbour.beach')!,b=pack.index.find(p=>p.id==='eden-north-woods')!;
  for(const list of [[{...a,name:'Shared'},{...b,name:'Shared'}],[{...a,aliases:['shared']},{...b,aliases:['shared']}]] as any[]){
