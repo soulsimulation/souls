@@ -17,7 +17,7 @@ function follow(hub: ReturnType<typeof fakeWorld>['hub'], after: string | null =
     assert.equal(data.base, copy.seq, 'a change applies on the seq the copy holds');
     const souls = new Map(copy.souls.map((r: any) => [r.id, r]));
     for (const id of data.souls?.del ?? []) souls.delete(id);
-    for (const r of data.souls?.set ?? []) souls.set(r.id, r);
+    for (const r of data.souls?.set ?? []) { const row: any = {...(souls.get(r.id) as object ?? {}), ...r}; for (const k of ['now', 'about']) if (row[k] === null) delete row[k]; souls.set(r.id, row); }   // merged, as the client does (#1978)
     const things = {...copy.things};
     for (const id of data.things?.del ?? []) delete things[id];
     Object.assign(things, data.things?.set ?? {});
@@ -219,4 +219,69 @@ test('#1918: the live picture carries the world clock; the check frame carries i
     assert.equal(checks[0]!.data.check, liveHash(await w.get()), 'and not in the hash');
     c.stop();
   } finally { mock.timers.reset(); w.hub.close(); }
+});
+
+test('#1978 A1: a Soul\'s row carries its status line and the start of its profile, each only when set; a change is pushed as a change to that row', async () => {
+  const w = fakeWorld(), c = follow(w.hub);
+  assert.deepEqual(c.got[0]!.data.souls.find((r: any) => r.id === 's_a'), {id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null}, 'neither set: the row as before');
+  w.host.soulNow.set('s_a', 'rowing to the mill'); await w.get();   // no tick: the clock may be paused
+  assert.deepEqual(c.got.at(-1)!.data.souls, {set: [{id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null, now: 'rowing to the mill'}], del: []}, 'pushed at once, as that row');
+  w.host.minds.get('s_b')!.description = `Bo keeps bees.\n${'b'.repeat(1200)}`; w.advance(); await w.get();
+  const bo = c.got.at(-1)!.data.souls.set[0];
+  assert.equal(bo.id, 's_b'); assert.equal([...bo.about].length, 200, 'the first 200 characters'); assert.ok(bo.about.startsWith('Bo keeps bees. b'), 'on one line');
+  assert.equal(bo.now, undefined);
+  w.host.soulNow.set('s_a', null); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls.set, [{id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null, now: null}], 'cleared: sent as null');
+  assert.deepEqual(c.copy().souls.find((r: any) => r.id === 's_a'), {id: 's_a', name: 'Ada', at: [1, 1], place: 'g-yard', doing: null}, 'and gone from the copy');
+  assert.ok(!('now' in (await w.get()).souls.find((r: any) => r.id === 's_a')), 'and from the whole picture');
+  assert.equal(liveHash(c.copy()), liveHash(await w.get()), 'the copy kept by frames agrees');
+  c.stop(); w.hub.close();
+});
+
+test('#1978 A2: the size of the live picture for 100 Souls, before and with both fields set at their longest', async () => {
+  const w = fakeWorld();
+  w.host.minds.clear();
+  for (let i = 0; i < 100; i++) {
+    const id = `s_${String(i).padStart(3, '0')}`; w.entities[`h_${i}`] = {pose: {p: [-90 + (i % 10) * 15, 0, -90 + Math.floor(i / 10) * 15]}, human: {activity: 'walk'}};
+    w.host.minds.set(id, {soulId: id, entityId: `h_${i}`, name: `Soul number ${i}`});
+  }
+  const size = async () => (await (await w.app.request('/v1/edge/live')).text()).length;
+  const before = await size();
+  for (const m of w.host.minds.values()) { w.host.soulNow.set(m.soulId, 'n'.repeat(140)); m.description = 'd'.repeat(1200); }
+  w.advance();
+  const after = await size(), pic = await w.get();
+  assert.ok(pic.souls.every((r: any) => r.now.length === 140 && r.about.length === 200));
+  console.log(`[#1978] live picture, 100 Souls: before ${before} bytes, with now and about set ${after} bytes (+${after - before}, ${(after - before) / 100} a Soul)`);
+  // `,"now":""` and `,"about":""` are 20 bytes; the tick, seq and time may add a few digits
+  assert.ok(after - before <= 100 * (140 + 200 + 20) + 32, 'one Soul adds at most its two bounded fields');
+  w.hub.close();
+});
+
+test('#1978 review: a moving Soul\'s change carries `now` and `about` only when one of them changed; the stream of 100 walking Souls', async () => {
+  const stream = async (own: boolean) => {
+    const w = fakeWorld(); w.host.minds.clear();
+    for (let i = 0; i < 100; i++) {
+      const id = `s_${String(i).padStart(3, '0')}`; w.entities[`h_${i}`] = {pose: {p: [-90 + (i % 10) * 15, 0, -90 + Math.floor(i / 10) * 15]}, human: {activity: 'walk'}};
+      w.host.minds.set(id, {soulId: id, entityId: `h_${i}`, name: `Soul number ${i}`, ...(own ? {description: 'd'.repeat(1200)} : {})});
+      if (own) w.host.soulNow.set(id, 'n'.repeat(140));
+    }
+    const c = follow(w.hub), from = c.got.length;
+    for (let f = 1; f <= 10; f++) { for (let i = 0; i < 100; i++) w.entities[`h_${i}`]!.pose.p[0]! += 1; w.advance(); await w.get(); }
+    const frames = c.got.slice(from), bytes = frames.reduce((n, g) => n + JSON.stringify(g.data).length, 0);
+    assert.equal(liveHash(c.copy()), liveHash(await w.get()), 'the copy kept by frames still agrees');
+    c.stop(); w.hub.close();
+    return {frames, bytes};
+  };
+  const without = await stream(false), withOwn = await stream(true);
+  console.log(`[#1978] stream, 100 walking Souls x 10 frames: ${without.bytes} bytes without now and about, ${withOwn.bytes} with both set`);
+  assert.equal(withOwn.frames.length, 10);
+  assert.ok(withOwn.frames.every(g => g.data.souls.set.every((r: any) => !('now' in r) && !('about' in r))), 'unchanged: neither is sent');
+  assert.equal(withOwn.bytes, without.bytes, 'the fields cost the stream nothing while they do not change');
+});
+
+test('#1978 review: the one-line cleaner removes bidi isolates, the Arabic letter mark and tag characters', async () => {
+  const w = fakeWorld();
+  w.host.soulNow.set('s_a', 'a⁦b⁧c⁨d⁩e؜f\u{E0001}g\u{E0041}\u{E007F}h');
+  assert.equal((await w.get()).souls.find((r: any) => r.id === 's_a').now, 'a b c d e f g h');
+  w.hub.close();
 });

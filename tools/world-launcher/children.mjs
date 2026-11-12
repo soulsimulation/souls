@@ -528,9 +528,9 @@ export class ChildPool {
       if (said) h.said = said; else if (ok) h.said = null;
       const why = this.liveWhy(k, now) ?? (h.fails >= g.failures ? `${h.said ?? '/healthz unanswered'} ${h.fails} times in a row` : null);
       if (why) void this.wedge(k, why);
-      // #1326: a halted world is restarted once per breaker window (a restart boots from the log); a second halt in the
-      // same window stays halted, its process and evidence up, for an operator
-      else if (this.halted(k) && (k.haltRestartAt == null || now - k.haltRestartAt >= g.breakerWindowMs)) void this.restartHalted(k);
+      // #1326, #2133: a halted world is restarted every time (a restart boots from its last snapshot and the log). Each
+      // restart counts toward the breaker, so one that halts again at once ends held, named, after breakerN in the window
+      else if (this.halted(k)) void this.restartHalted(k);
     } finally { k.looking = false; }
   }
   /** Is the world stuck? Its watchdog thread's /healthz (SIM_HEALTH_PORT) when it has one: 200 = fine, 503 while serving
@@ -571,13 +571,13 @@ export class ChildPool {
     if (!exited()) { this.log(`world ${k.slug} still running after SIGUSR2: SIGTERM`); try { c.kill('SIGTERM'); } catch { /* gone */ } await within(exit, g.termGraceMs); }
     if (!exited()) { this.log(`world ${k.slug} still running after SIGTERM: SIGKILL`); try { c.kill('SIGKILL'); } catch { /* gone */ } }
   }
-  /** #1326: a halted world (its clock stopped, live.json says so) is stopped and restarted once per breaker window:
+  /** #1326, #2133: a halted world (its clock stopped, live.json says so) is stopped and restarted, each time a failure for the breaker:
    *  SIGTERM (it saves what it can), SIGKILL after termGraceMs; onExit restarts it and the breaker counts it. */
   async restartHalted(k) {
     const c = k.child, g = this.g;
     if (!c || k.wedging || k.haltRestarting) return;
     k.haltRestartAt = Date.now(); k.haltRestarting = { at: k.haltRestartAt }; this.o.onChange?.(k.slug);
-    this.log(`world ${k.slug} halted: its clock has stopped; restarting it (once per ${Math.round(g.breakerWindowMs / 60_000)} min; the reason is its [world] glitch line)`);
+    this.log(`world ${k.slug} halted: its clock has stopped; restarting it (${g.breakerN} halts in ${Math.round(g.breakerWindowMs / 60_000)} min hold it; the reason is its [world] glitch line)`);
     const exited = () => c.exitCode !== null || c.signalCode !== null;
     const exit = exited() ? Promise.resolve() : new Promise((r) => c.once('exit', r));
     try { c.kill('SIGTERM'); } catch { /* gone */ }
@@ -600,7 +600,7 @@ export class ChildPool {
       else if (suspect) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} not answering: ${suspect}` });
       else if (k.lastWedge && now - k.lastWedge.at < g.wedgeShownMs) out.push({ slug: k.slug, code: 'wedged', text: `${k.slug} was wedged ${s(now - k.lastWedge.at)} ago (${k.lastWedge.reason}); restarted` });
       if (k.lastRewind && now - k.lastRewind.at < 2 * g.wedgeShownMs) out.push({ slug: k.slug, code: 'rewound', text: `${k.slug} went back to its last clean state or stopped on the spot (rewind ${k.lastRewind.n}); Souls lost what they were doing (op.mjs glitches --world ${k.slug})` });
-      if (k.haltRestarting) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestarting.at)} ago: its clock stopped; being restarted (once per ${Math.round(g.breakerWindowMs / 60_000)} min)` });
+      if (k.haltRestarting) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestarting.at)} ago: its clock stopped; being restarted (${g.breakerN} halts in ${Math.round(g.breakerWindowMs / 60_000)} min hold it)` });
       else if (k.haltRestartAt != null && !this.halted(k) && now - k.haltRestartAt < g.wedgeShownMs) out.push({ slug: k.slug, code: 'halted', text: `${k.slug} halted ${s(now - k.haltRestartAt)} ago and was restarted; the reason is its [world] glitch line (op.mjs glitches --world ${k.slug})` });
       // #1326: the clock owes ticks and none has completed past its threshold, but the process still answers
       if (this.stalled(k)) out.push({ slug: k.slug, code: 'stalled', text: `${k.slug} stalled: its clock has not ticked for ${s(k.live.tick?.ageMs ?? 0)} while it should; reads say so and acts are refused until it runs again` });
