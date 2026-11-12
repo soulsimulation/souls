@@ -73,6 +73,11 @@ test('what can be done on the spot is published as <verb>:here, and every such v
   for (const [verb] of ANYWHERE) assert.ok((EDGE_ACT_VERBS as readonly string[]).includes(verb), verb);
 });
 
+test('walk-to:here is published with the acts done on the spot (#1916)', () => {
+  const {payload} = buildCatalog(input());
+  assert.deepEqual(payload.anywhere.find(a => a.id === 'walk-to:here'), {id: 'walk-to:here', verb: 'walk-to', label: 'Walk to a point on your level'});
+});
+
 // #1751: what a kind of thing takes by hand, from the def's own action list (the engine bridge's thingActs)
 const switchable = {acts: [{verb: 'switch-on', label: 'Switch on', when: [{field: 'on', is: false}]}, {verb: 'switch-off', label: 'Switch off', when: [{field: 'on', is: true}]}], state: {on: true}};
 test('a kind worked by hand is published once with its acts and the state they read; a revision without them says so', () => {

@@ -64,9 +64,9 @@ export class Intents {
   private onTerminal(r: EdgeReceipt) {
     if (r.phase !== 'completed' && r.phase !== 'failed') return;
     const verb = r.capability.split(':')[0], deliver = (kind: string, body: Record<string, unknown>) => (this.L.comms as unknown as {streams?: {deliver?(s: string, k: string, t: number, b: object): void}} | undefined)?.streams?.deliver?.(r.soulId, kind, this.L.mw.world.tick, body);
-    if (!['walk', 'stroll', 'hang-out', 'approach', 'go-near', 'sit', 'swim', 'gather', 'warm-by-fire'].includes(verb) || (r.channel && r.channel !== 'body')) return;
+    if (!['walk', 'stroll', 'hang-out', 'approach', 'go-near', 'walk-to', 'sit', 'swim', 'gather', 'warm-by-fire'].includes(verb) || (r.channel && r.channel !== 'body')) return;
     const end = r.endedAt as {place?: string | null; placePath?: string[]} | undefined;
-    if (r.phase === 'completed' && ['walk', 'stroll', 'hang-out', 'approach', 'go-near'].includes(verb)) {deliver('arrive', {receipt: {id: r.id, capability: r.capability, phase: r.phase}, placeId: end?.place ?? null, placePath: end?.placePath ?? [], ...(r.chosen ? {chosen: r.chosen} : {}), endedAt: r.endedAt ?? null}); return;}
+    if (r.phase === 'completed' && ['walk', 'stroll', 'hang-out', 'approach', 'go-near', 'walk-to'].includes(verb)) {deliver('arrive', {receipt: {id: r.id, capability: r.capability, phase: r.phase}, placeId: end?.place ?? null, placePath: end?.placePath ?? [], ...(r.chosen ? {chosen: r.chosen} : {}), endedAt: r.endedAt ?? null}); return;}
     if (r.phase === 'failed' && r.code && /^(?:route\.|slot\.|seat\.|walk\.goal|reservation\.|pose\.occupied|pose\.no-room)/.test(r.code)) {
       // blocked: Core-B's envelope derives `blocked` from this receipt; Core-A adds `alternatives` = a fresh dry run of the
       // same intent, on the receipt itself (this listener runs before Comms delivers the receipt event)
@@ -89,6 +89,7 @@ export class Intents {
       case 'go': case 'walk': case 'glide': return this.go(P, s, verb);
       case 'swim': return this.swim(P, s);
       case 'approach': return this.approach(P, s);
+      case 'walk-to': return this.walkTo(P, s);
       case 'follow': case 'walk-with': return this.follow(P, s);
       case 'turn': case 'face': return this.turn(P, verb === 'face' && s.face === undefined && s.target !== undefined ? {...s, face: s.target, target: undefined} : s);
       case 'look': return this.look(P, s);
@@ -236,6 +237,17 @@ export class Intents {
     const steps: Steps = [...(seated ? [{verb: 'stand', params: {}}] : []), {verb: 'walk_to', params: {to: t.entityId ?? [t.at[0], t.at[1]], standoff: distance}}];
     const blocked = this.planRefusal?.(P.soul, steps, t.entityId ?? t.id); if (blocked) return no(blocked.code, blocked.reason);
     return {ok: true, kind: 'plan', capability: `approach:${t.id}`, label: `Approach ${t.name}`, steps, chosen: {target: t.id, name: t.name, kind: t.kind, standoff: distance, distFromYou: t.distance, ...this.eta(P, t.at)}};
+  }
+
+  /** #1916 walk-to:here {at: [x, z]}: the engine's own walk to that point on the body's level (standing room, no stand-off). */
+  private walkTo(P: Perception, s: Record<string, unknown>): Resolution {
+    const at = s.at; if (!Array.isArray(at) || at.length !== 2 || !at.every(n => typeof n === 'number' && Number.isFinite(n))) return no('capability.params', 'walk-to needs at: [x, z], two finite numbers.');
+    const to: V2 = [at[0] as number, at[1] as number], steps: Steps = [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1'}}];
+    // a point inside a site under construction is refused as approach's target is
+    const blocked = this.planRefusal?.(P.soul, steps); if (blocked) return no(blocked.code, blocked.reason);
+    // and a point inside someone else's private building as the walk to that building is (object.private)
+    for (const p of this.L.places.containing(to[0], to[1], this.L.placeLevel(P.w.entities[P.soul.entityId]?.human?.level))) {const c = p.ref ? this.L.bindOne(P.soul, 'walk:' + p.ref)?.cap : undefined; if (c?.blocked?.code === 'object.private') return no(c.blocked.code, c.blocked.reason);}
+    return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `Walk to [${to[0]}, ${to[1]}]`, steps, chosen: {at: to}};
   }
 
   private follow(P: Perception, s: Record<string, unknown>): Resolution {

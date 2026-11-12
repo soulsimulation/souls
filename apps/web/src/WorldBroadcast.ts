@@ -14,6 +14,7 @@ import { WorldTour, type TourView } from './WorldTour.ts';
 import { speakingNow } from './dialogue-speaking.ts';
 import { BALLOON } from './WorldBalloonRide.ts';
 import { liftHorizon } from './broadcast-horizon.ts';
+import { Tracker, tracked } from './broadcast-tracking.ts';
 
 export type WorldCameraMode = 'broadcast' | 'manual' | 'follow';
 export type CarrierPose = { p: readonly number[]; yaw: number };
@@ -101,6 +102,11 @@ export class WorldBroadcast {
   private emptySince: number | null = null;
   private cutAt = -Infinity;
   private ride: { azimuth: number; checked: number } | null = null;
+  /** #2202 (B2): moving tracking shots on gatherings and activity (broadcast-tracking.ts). */
+  private tracker = new Tracker();
+  private trackPrepared = -Infinity;
+  /** The pose last put on screen (before the horizon lift), held while a tracking shot is planned. */
+  private shown: CameraPose | null = null;
   /** P7f: the view the arrival camera already shows (arrival-shot.ts: the phone's poster, LiveWorld's first frames), or null.
    *  The first tour shot is then that view's opening push from k = 0 (WorldTour.openingMove), even when the arrival is
    *  already over (the phone holds the broadcast until its world is filled in), so it starts exactly where the camera is.
@@ -132,13 +138,17 @@ export class WorldBroadcast {
     this.lastTick = this.lastDecisionWall = -Infinity;
     this.signature = '';
     this.semanticVersion = 0;
-    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null;
+    this.picker.reset(); this.tour.reset(); this.godViews?.tour.reset(); this.choice = null; this.lastPick = -Infinity; this.emptySince = null; this.ride = null; this.tracker.reset(); this.trackPrepared = -Infinity; this.shown = null;
   }
 
   /** The shot for this frame, its aim lifted toward the horizon (C1, broadcast-horizon.ts). */
   sample(frame: Record<string, SampledEntity>, records: Record<string, Entity>, scene: SpatialScene | null,
     tick: number, dt: number, aspect: number, wallSeconds: number, movementDt: number,renderRoots:readonly THREE.Object3D[]=[] ) {
+    const started = performance.now();
     const shot = this.direct(frame, records, scene, tick, dt, aspect, wallSeconds, movementDt, renderRoots);
+    this.shown = shot?.pose ?? null;
+    // #2202: the camera's own cost per frame (ms), last 600 frames, for the cost budget (docs/design/auto-camera.md §5).
+    const cost = ((globalThis as unknown as { __soulsBroadcastCost?: number[] }).__soulsBroadcastCost ??= []); cost.push(performance.now() - started); if (cost.length > 600) cost.shift();
     return shot?.pose ? { ...shot, pose: { ...shot.pose, target: liftHorizon(shot.pose.position, shot.pose.target) } } : shot;
   }
   private direct(frame: Record<string, SampledEntity>, records: Record<string, Entity>, scene: SpatialScene | null,
@@ -175,6 +185,18 @@ export class WorldBroadcast {
     const ridden = frame[focus] && records[focus]?.body?.family !== 'floater' ? ridingCarrier(frame[focus].p, this.hints?.().carriers ?? []) : null;
     if (ridden) { this.lastTick = tick; this.signature = ''; return { pose: this.riderShot(ridden, frame[focus].p, wallSeconds, movementDt, renderRoots), shot: `${choice.label}:ride-side` }; }
     this.ride = null;
+    const at = members.map(id => frame[id].p), centre = [0, 1, 2].map(i => at.reduce((a, p) => a + p[i], 0) / (at.length || 1));
+    const crowd = people.filter(id => Math.hypot(frame[id].p[0] - centre[0], frame[id].p[2] - centre[2]) < 6).length;
+    if (members.length && tracked(choice, crowd)) {
+      const spread = Math.max(...at.map(p => Math.hypot(p[0] - centre[0], p[2] - centre[2])));
+      // The drawn scenery is re-gathered at the decision rate (10 Hz), not every frame; one evaluate per frame.
+      if (wallSeconds - this.trackPrepared >= .1 || wallSeconds < this.trackPrepared) { this.rendered.prepare(renderRoots); this.trackPrepared = wallSeconds; }
+      const moving = this.rendered.evaluate(() => this.tracker.pose(choice.key, centre, spread, wallSeconds,
+        { clear: p => this.rendered.clear(p, .8), reach: (a, b) => this.rendered.reach(a, b) }));
+      // While the first move is planned (a few frames), the shot that was on screen holds; then the move cuts in.
+      if (moving === 'pending' && this.shown) { this.lastTick = tick; this.signature = ''; return { pose: this.shown, shot: `${choice.label}:track-planning` }; }
+      if (moving && moving !== 'pending') { this.lastTick = tick; this.signature = ''; return { pose: moving.pose, shot: `${choice.label}:track-${moving.type}` }; }
+    } else this.tracker.reset();
     // Conversations prefer the two-shot; everything else uses the readable "clear" program.
     this.director.policy = choice.twoShot ? 'restrained' : 'clear';
     const signature = JSON.stringify([phase, focus, members, aspect]);

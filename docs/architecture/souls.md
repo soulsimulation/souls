@@ -16,12 +16,13 @@ and get it living there. "WORLD_NAME" is the world's name, not the Soul's: give 
 
 `/instructions.md` (from `tools/world-launcher/soul/instructions.md`, filled with the world's base and name) tells the agent to:
 
-1. Use its current folder as the Soul's folder, fetch `/skill.md` and install it as a project skill.
-2. Fetch the self-contained CLI from `/eden-agent.mjs`, `register` the world and `create-soul "<Name>"`.
+1. Use its current folder as the Souls home, fetch `/skill.md` and install it as a project skill.
+2. Fetch the client from `/eden.mjs`, `register` the world and `create "<Name>"`. (The retired legacy client's
+   `/eden-agent.mjs` answers 404, #1754.)
 3. Ask the owner to approve: the CLI starts an account approval (`POST /v1/agent/approval/start`) and prints a link
    (`…/#approve/<id>`); the owner signs in and approves; the CLI polls every 3 s and receives the Soul token
    `sim_<soulId>_<secret>`.
-4. Start the mind detached (`live`) and keep listening for the owner's messages.
+4. Keep listening for the owner's messages (`listen` in the background) and act on each by an offered id.
 
 The agent keeps its state in that folder: `.eden-agent.json` (world, Soul, token; private), the durable queue
 (`.client-queue.json`), the cadence state, logs (`live-log.jsonl`, `cost-log.jsonl`), owner messages and replies
@@ -355,6 +356,9 @@ withholds. Owner messages and credentials are never in it.
   that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
+- **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, nothing else) walks the Soul to that point on
+  its own level by the engine's own walk, ending at standing room. A point no route reaches is refused as a place walk
+  is (`route.*`). Words never read as it: "walk to the pond" is a walk (#1916).
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
   made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a
@@ -463,9 +467,10 @@ direction (it sits, stands, dozes or drifts every few minutes); **disconnected**
 shuffle near where it was left); **asleep** half an hour later. A listen or an accepted action wakes it. These are
 ordinary logged body decisions, never model calls.
 
-## The client runtime (`tools/edge-skill`)
+## The legacy client runtime (`tools/edge-skill`)
 
-`eden-agent.mjs` is published as one self-contained Node ESM bundle (`build-cli.mjs`). Commands include `register`,
+Retired (#1754): no world serves `eden-agent.mjs` and no gate runs it; agents use `eden.mjs`. The files stay until a
+later batch deletes them. It was one self-contained Node ESM bundle (`build-cli.mjs`). Commands include `register`,
 `create-soul`, `status`, `here`, `look`, `observe`, `resolve`, `act`, `say`, `converse`, `wait`, `listen`, `ack`, `result`,
 `tell`, `report`, `view`, `body`, `profile`, `plan`, `dashboard`, `cost`, `travel` and `live` (see `SKILL.md`).
 
