@@ -10,6 +10,8 @@ export type ContextInput = {
 };
 export type ContextRender = {
     png?: Uint8Array;
+    /** #2192: the same pixels as a compact WebP for Explore's cards; optional (the PNG stays the record's picture). */
+    thumb?: Uint8Array;
     photo?: Record<string, unknown>;
     reason?: string;
 };
@@ -21,6 +23,7 @@ export type ContextRecord = {
     attempts: number;
     reason: string | null;
     bytes: number;
+    thumbBytes: number;
     photo: Record<string, unknown> | null;
 };
 type Row = {
@@ -31,6 +34,7 @@ type Row = {
     attempts: number;
     reason: string | null;
     bytes: number;
+    thumbBytes: number;
     touched: number;
     requested: number;
     photo: string | null;
@@ -63,13 +67,15 @@ export class ContextViewCache {
             db.exec('ALTER TABLE context_views_v1 ADD COLUMN requested INTEGER NOT NULL DEFAULT 0');
         if (!columns.some(column => column.name === 'photo'))
             db.exec('ALTER TABLE context_views_v1 ADD COLUMN photo TEXT');
+        if (!columns.some(column => column.name === 'thumb'))
+            db.exec('ALTER TABLE context_views_v1 ADD COLUMN thumb BLOB');
     }
     private row(ref: string) {
-        return this.db.prepare('SELECT ref,key,revision,status,attempts,reason,COALESCE(length(png),0) bytes,touched,requested,photo FROM context_views_v1 WHERE world=? AND ref=?')
+        return this.db.prepare('SELECT ref,key,revision,status,attempts,reason,COALESCE(length(png),0) bytes,COALESCE(length(thumb),0) thumbBytes,touched,requested,photo FROM context_views_v1 WHERE world=? AND ref=?')
             .get(this.world, ref) as Row | undefined;
     }
     private summary(row: Row): ContextRecord {
-        return { ref: row.ref, key: row.key, revision: row.revision, status: row.status, attempts: row.attempts, reason: row.reason, bytes: row.bytes, photo: row.photo ? JSON.parse(row.photo) : null };
+        return { ref: row.ref, key: row.key, revision: row.revision, status: row.status, attempts: row.attempts, reason: row.reason, bytes: row.bytes, thumbBytes: row.thumbBytes, photo: row.photo ? JSON.parse(row.photo) : null };
     }
     private reconcile(ref: string, create = false): Row | null {
         const old = this.row(ref);
@@ -83,7 +89,7 @@ export class ContextViewCache {
         if (!old && !create)
             return null;
         if (!old || old.key !== current.key)
-            this.db.prepare(`INSERT INTO context_views_v1(world,ref,key,revision,status,attempts,reason,png,touched) VALUES(?,?,?,?,'pending',0,NULL,NULL,?) ON CONFLICT(world,ref) DO UPDATE SET key=excluded.key,revision=excluded.revision,status='pending',attempts=0,reason=NULL,png=NULL,requested=0,photo=NULL`).run(this.world, ref, current.key, current.revision, Date.now());
+            this.db.prepare(`INSERT INTO context_views_v1(world,ref,key,revision,status,attempts,reason,png,touched) VALUES(?,?,?,?,'pending',0,NULL,NULL,?) ON CONFLICT(world,ref) DO UPDATE SET key=excluded.key,revision=excluded.revision,status='pending',attempts=0,reason=NULL,png=NULL,thumb=NULL,requested=0,photo=NULL`).run(this.world, ref, current.key, current.revision, Date.now());
         else if (old.revision !== current.revision)
             this.db.prepare('UPDATE context_views_v1 SET revision=? WHERE world=? AND ref=?').run(current.revision, this.world, ref);
         return this.row(ref)!;
@@ -145,20 +151,29 @@ export class ContextViewCache {
             .get(this.world, ref, key) as { png: Uint8Array } | undefined;
         return image?.png ?? null;
     }
+    /** #2192: the WebP copy of a ready picture, by the same content key; null when the render made none. */
+    thumb(ref: string, key: string): Uint8Array | null {
+        const row = this.reconcile(ref);
+        if (row?.status !== 'ready' || row.key !== key || !row.thumbBytes)
+            return null;
+        const image = this.db.prepare('SELECT thumb FROM context_views_v1 WHERE world=? AND ref=? AND key=?')
+            .get(this.world, ref, key) as { thumb: Uint8Array | null } | undefined;
+        return image?.thumb ?? null;
+    }
     /** LRU order is for eviction and the maintenance fallback, never request priority. */
     private rows() {
-        return this.db.prepare('SELECT ref,key,revision,status,attempts,reason,COALESCE(length(png),0) bytes,touched,requested,photo FROM context_views_v1 WHERE world=? ORDER BY touched,ref')
+        return this.db.prepare('SELECT ref,key,revision,status,attempts,reason,COALESCE(length(png),0) bytes,COALESCE(length(thumb),0) thumbBytes,touched,requested,photo FROM context_views_v1 WHERE world=? ORDER BY touched,ref')
             .all(this.world) as Row[];
     }
     private trim(keep: string) {
         const rows = this.rows();
-        let bytes = rows.reduce((n, row) => n + row.bytes, 0);
+        let bytes = rows.reduce((n, row) => n + row.bytes + row.thumbBytes, 0);
         while (rows.length > CONTEXT_LIMITS.records || bytes > CONTEXT_LIMITS.cacheBytes) {
             const at = rows.findIndex(row => row.ref !== keep);
             if (at < 0)
                 break;
             const [row] = rows.splice(at, 1);
-            bytes -= row.bytes;
+            bytes -= row.bytes + row.thumbBytes;
             this.db.prepare('DELETE FROM context_views_v1 WHERE world=? AND ref=?').run(this.world, row.ref);
         }
     }
@@ -217,6 +232,8 @@ export class ContextViewCache {
                     throw ac.signal.reason;
                 if (result.png && result.png.byteLength > CONTEXT_LIMITS.imageBytes)
                     result = { reason: 'image exceeds storage limit' };
+                if (result.thumb && (!result.png || result.thumb.byteLength > CONTEXT_LIMITS.imageBytes))
+                    result = { ...result, thumb: undefined };
             }
             catch (e) {
                 result = { reason: e instanceof Error ? e.message : 'render failed' };
@@ -237,7 +254,7 @@ export class ContextViewCache {
                 continue;
             const retry = !result.png && current.attempts < CONTEXT_LIMITS.attempts;
             const photo = result.photo ? JSON.stringify(result.photo) : null;
-            this.db.prepare('UPDATE context_views_v1 SET status=?,png=?,reason=?,photo=? WHERE world=? AND ref=? AND key=?').run(result.png ? 'ready' : retry ? 'pending' : 'unavailable', result.png ?? null, result.reason?.slice(0, 400) ?? null, photo && photo.length <= 8192 ? photo : null, this.world, row.ref, input.key);
+            this.db.prepare('UPDATE context_views_v1 SET status=?,png=?,thumb=?,reason=?,photo=? WHERE world=? AND ref=? AND key=?').run(result.png ? 'ready' : retry ? 'pending' : 'unavailable', result.png ?? null, result.thumb ?? null, result.reason?.slice(0, 400) ?? null, photo && photo.length <= 8192 ? photo : null, this.world, row.ref, input.key);
             this.trim(row.ref);
         }
     }
