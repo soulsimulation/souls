@@ -412,7 +412,8 @@ export function compareRuns(baseline, candidate, manifest, candidateSourceFiles 
       }
       if (t.status === 'skip' || t.status === 'todo') {
         const entry = q.get(key(step, t.id));
-        if (before?.status !== t.status || before.directive !== t.directive || !entry || entry.status !== t.status) unexpectedSkips.push({ step, id: t.id, status: t.status });
+        // a test new since the baseline is expected to skip only when quarantine.json lists it, with its reason
+        if ((before && (before.status !== t.status || before.directive !== t.directive)) || !entry || entry.status !== t.status) unexpectedSkips.push({ step, id: t.id, status: t.status });
         else quarantined.push({ step, id: t.id, reason: entry.reason, owner: entry.owner, status: t.status });
       }
     }
