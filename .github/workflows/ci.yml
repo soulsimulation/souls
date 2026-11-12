@@ -189,8 +189,12 @@ jobs:
               # and the release gate runs the step on Modal.
               if [ "$(uname -m)" = x86_64 ] && ! command -v restic >/dev/null; then
                 mkdir -p "$RUNNER_TEMP/bin"
-                # #1507: the release CDN 504s at times; retry with backoff, and still fail loudly once retries run out
-                curl -fsSL --connect-timeout 20 --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/restic.bz2" \
+                # #1507: the release CDN 504s at times; retry with backoff, and still fail loudly once retries run out.
+                # #2144: the self-hosted runners' curl predates --retry-all-errors (7.71); there --retry covers 5xx and timeouts.
+                retry_all=--retry-connrefused
+                # grep reads all input (no -q): under pipefail an early exit would SIGPIPE curl and hide the option.
+                curl --help all 2>/dev/null | grep -- --retry-all-errors >/dev/null && retry_all=--retry-all-errors
+                curl -fsSL --connect-timeout 20 --retry 5 "$retry_all" --retry-delay 5 -o "$RUNNER_TEMP/restic.bz2" \
                   https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 \
                   || { echo "::error::restic download failed after 5 retries (#1507); backup-restic.test.mjs would only skip, so this job fails"; exit 1; }
                 echo "3d4d43c169a9e28ea76303b1e8b810f0dcede7478555fdaa8959971ad499e324  $RUNNER_TEMP/restic.bz2" | sha256sum -c -
