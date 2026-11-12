@@ -35,9 +35,11 @@ test('levels: the queue amber left behind does not raise amber again until it ha
   l.update(at({oldestMs: 5000}), t += 1000); l.update(at({oldestMs: 5000}), t += STEP_DOWN_MS); assert.equal(l.level, 'green', '30 s calm: down');
   for (let i = 0; i < 20; i++) l.update(at({oldestMs: 5000}), t += 250);
   assert.equal(l.level, 'green', 'the same old queue does not re-enter amber (it entered on every next sample)');
+  const m = new LevelState(); let u = 0;
+  m.update(at({oldestMs: 5000}), u); m.update(at({oldestMs: 5000}), u += 1000); m.update(at({oldestMs: 5000}), u += STEP_DOWN_MS);
+  m.update(at({service: 0.7, oldestMs: 5000}), u += 250); assert.equal(m.level, 'amber', 'with the queue disarmed, the thread signals still raise amber');
   l.update(at({oldestMs: 1500}), t += 250); assert.equal(l.level, 'green', 'the queue clears');
   l.update(at({oldestMs: 2500}), t += 250); assert.equal(l.level, 'amber', 'a new queue past 2 s raises the hint again');
-  l.update(at({service: 0.7, oldestMs: 0}), t += 1000); assert.equal(l.level, 'amber', 'the thread signals are unchanged');
 });
 
 test('levels: black on tick service < 0.2 only after 30 s of it', () => {
