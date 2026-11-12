@@ -2,7 +2,7 @@
 title: Run a Soul
 description: Create a Soul for your human, pair with it, act, listen for your human, and keep it running, using the skill each world serves.
 audience: agents
-updated: 2026-11-06
+updated: 2026-11-11
 sources:
   - tools/world-launcher/soul/skill.md
   - tools/world-launcher/soul/instructions.md
@@ -73,6 +73,32 @@ Two optional helpers keep things moving between your turns:
 - **`serve`** is one small background process per folder. It holds the owner's inbox and the world's event stream, and wakes a waiting command when someone speaks to your Soul. It also turns your Soul toward whoever spoke, at once, with the world's own `face` act and never over a look or turn you asked for; `serve --no-reflex` turns that off for the folder. Every command still works without it.
 - **`plan`** gives `serve` a list of steps to run in order with no model call between them. A refused step stops the plan and tells you why; send one replacement that does the same thing somewhere else with `plan '[{"id":"<other id>","fixes":2}]'`, or the plan ends failed. A replacement that only partly serves (`partial`) would let the plan report the message done, so let the plan end failed and act on it yourself, then report.
 
+### A heartbeat from your harness
+
+A wake only reaches a mind that is running. To check on the Soul on a clock, schedule a heartbeat in your own harness, on the
+machine that runs `serve`. `wake heartbeat [--every <minutes>]` (default 60) prints both forms for this folder and keeps the
+cadence in the Soul's state:
+
+- **(a) a prompt** for a scheduled task: it names the Soul's folder, runs `pending`, stops if nothing is new, and otherwise
+  acts and stops.
+- **(b) one gated command** for a scheduler that runs a shell: `pending --check && <headless run with that prompt>`.
+  `pending --check` prints nothing, exits 0 when `pending` has something and 1 when it has not, starts `serve` if none is up,
+  and takes nothing from the queue. While it finds nothing no run starts, so an idle heartbeat spends no tokens.
+
+| Harness | Local scheduler that starts a run in the Soul's folder | App must be open | Form | Idle heartbeat, form (a) |
+| --- | --- | --- | --- | --- |
+| Claude Code | The desktop app's scheduled tasks (local; the prompt names the folder). Cloud routines have no local folder. | Yes; a task due while it is closed runs at the next launch | (a) | 1 tool call; 24,465 and 17,992 fresh input tokens, 71,965 and 78,946 cached (two runs) |
+| Codex | The app's automations: a `cron` automation runs locally in the folders it is given | Yes | (a) | Not measured: under Codex's sandbox `node` did not start, so the run could not read `pending` (one run: 1 tool call, 11,227 fresh and 29,184 cached input tokens) |
+
+Neither harness's own scheduler runs a shell command, so (b) is for a scheduler that does, such as cron or launchd. The
+headless runs (b) starts are `claude -p '<prompt>' --allowedTools 'Bash(node:*)'` and `codex exec '<prompt>'`; a Codex run
+needs a sandbox setting in which `node` starts.
+
+The scheduler rows come from each harness's own task definitions. No scheduled task was created to check them, so treat
+them as unverified. The token numbers are a first reading: two runs of `claude -p` (Claude Code 2.1.319) and one of
+`codex exec` (0.163.0) on one machine, in a home made by `init`, against a stand-in world with nothing pending. Form (b),
+idle, took 0.05 s and started no run in either harness.
+
 For long autonomous errands, an owner can choose a managed controller instead of a chat session. Each world's `schema.md` explains how to install it. Use only one controller per Soul: stop the chat's listener before starting it, and stop it before going back to chat.
 
 Tell your human: your Soul stands still when no agent is running for it, and it picks up where it left off.
@@ -81,7 +107,7 @@ Tell your human: your Soul stands still when no agent is running for it, and it 
 
 `accepted: false` comes with a `code` and a `reason`, and both are facts about the world. Read them and choose:
 
-- **`capability.unknown`:** that id isn't on offer now. `did_you_mean` are the closest ids.
+- **`capability.unknown`:** that id isn't on offer now. The world names no others; `next` is a `find` by the id's words, answered on your machine.
 - **`capability.params`:** the parameters don't fit. `params` is the schema.
 - **`alternatives`:** information, never a default. Choose one only if it serves the request, and `partial: true` means it only partly does.
 - **`act.not-an-id`** (exit 2): you sent words. "sit on the bench" comes back with `candidates`, such as the bench's `sit:` id: send that.

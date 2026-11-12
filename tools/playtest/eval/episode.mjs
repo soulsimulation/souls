@@ -15,7 +15,7 @@ import { observe, judge, cardClosed, httpSince, routeStats, refusalCounts, seatS
 
 export const kickoffText = (name, skillFile = 'skill.md') => `Your Soul ${name} lives in this folder; it is already set up and \`serve\` is running. Your guide is ${skillFile} in this folder: read it, then start listening for my messages as it says.`;
 
-const cli = async (folder, args, maxWallMs = 60000) => {
+export const cli = async (folder, args, maxWallMs = 60000) => {
   const r = await run('node', ['eden.mjs', ...args], { cwd: folder, maxWallMs });
   let data = null; try { data = JSON.parse(r.stdout); } catch { /* plain */ }
   return { code: r.code, data, stdout: r.stdout, stderr: r.stderr };
@@ -50,14 +50,24 @@ export async function prepareFolder(seat, { name }) {
   await cli(f, ['serve', '--stop']).catch(() => {});
   const sv = await cli(f, ['serve']);
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
-  for (let i = 0; i < 60 && !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')); i++) { const l = await cli(f, ['look']); if (!l.data) break; await sleep(500); }   // the world copy (a client before 2.25 has no look)
-  return { soulId, createdAt, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
+  // The world copy (a client before 2.25 has no look). #2047: a world still laying out its places answers the catalog with
+  // 503 world.starting for up to 30 s after the first ask, longer than look's own retries on a slower machine: ask again.
+  // #2157: past those 30 s the world serves its catalog as it is, and on a busy host that is before its activity spots are
+  // laid out: a copy with no acts, where `find` finds nothing to eat. Such a copy is a world still starting: ask again.
+  let lookFailed = null;
+  for (const until = Date.now() + 90_000; !catalogHasActs(f, soulId) && Date.now() < until; await sleep(500)) {
+    const l = await cli(f, ['look']);
+    if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503/.test(lookFailed)) break; }
+  }
+  return { soulId, createdAt, lookFailed, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
 
 /** Read the client's world copy (soul-catalog/1) from the Soul's runtime folder, or null. */
 export function readCatalog(folder, soulId) {
   try { return JSON.parse(readFileSync(join(runtimeDir(folder, soulId), 'world-catalog.json'), 'utf8')).catalog ?? null; } catch { return null; }
 }
+/** #2157: the client's world copy names at least one act (a world whose structure is laid out), else false. */
+export const catalogHasActs = (folder, soulId) => (readCatalog(folder, soulId)?.acts?.length ?? 0) > 0;
 
 /** A fresh seat (new agent session, own records) on a folder an owner already paired, e.g. a production test Soul.
  *  The harness never registers, creates or pairs here: it reads `status`, turns the client's trace on and starts `serve`. */
@@ -105,7 +115,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     // A client before 2.25 keeps no world copy; it is then checked and judged against a saved copy of the same template's
     // catalog (--catalog), never against nothing.
     const own = readCatalog(seat.folder, setup.soulId), catalogFrom = own ? 'client' : catalogRef ? 'reference' : null;
-    if (!catalogFrom) throw new Error('the client keeps no world copy (world-catalog.json); pass --catalog <a saved copy of this template\'s catalog>');
+    if (!catalogFrom) throw new Error(`the client keeps no world copy (world-catalog.json)${setup.lookFailed ? ` (${setup.lookFailed})` : ''}; pass --catalog <a saved copy of this template's catalog>`);
     const catalog = catalogIndex(own ?? catalogRef);
     const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
     if (bad.length) throw new Error(bad.join('; '));
@@ -172,4 +182,154 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     writeJson(join(dir, 'samples.json'), samples);
     return rec;
   } finally { await stopSeat(); }
+}
+
+// ---- cases (#1950): several scripted Souls on one world, each with its own script and checks, started and judged together
+//
+// A case is {id, bar, souls: [{id, name, folders?: ["second"], script: [step…]}]}. Every Soul is set up as an episode's is
+// (prepareFolder), then all scripts run at once. A step is one of:
+//   {run: [eden.mjs args], in?: "second", expect, keep?: true, withinSec?, from?: "restart"}
+//        expect "ok" (exit 0), "accepted" (exit 0, not refused, no failed receipt), {refused: "<code>"} or {says: "<regex>"};
+//        keep: the step's receipt id becomes {receipt}; {soul} is this Soul's id. withinSec: the step must also end within
+//        that many seconds of the restart's start (from "restart") or of the step's own start.
+//   {until: [eden.mjs args], phase: "ended", withinSec, from?}   rerun every 2 s until the receipt it prints has ended
+//   {world: "restart", afterSec}                                    stop the world and start it again on the same data
+//   {await: "restart"}                                              wait until the restart is done
+// A folder in `folders` holds the same owner identity and is registered, never paired: its script steps say what it does.
+// Every step is judged and the script goes on; the Soul passes when every step met its check, the case when every Soul did.
+// A case with `drive` (#1974) has no scripts: a driver in hostile.mjs plays its Souls (`params` tune it) and reports the case's
+// measures; `relay: true` puts its Souls behind a relay the driver can cut.
+export const DRIVE_NAMES = ['act-spam', 'reconnect-storm', 'god-wall'];
+export const ENDED_PHASES = ['completed', 'failed', 'refused', 'cancelled', 'interrupted', 'replaced', 'expired'];
+const CODE = /\b([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+):/;
+
+/** The refusal code one CLI output carries: an answer's `accepted: false` code, else the first `a.b:` code of its error. */
+export function refusalOf(r) {
+  let d = null; try { d = JSON.parse(r.stdout); } catch { /* plain */ }
+  if (d?.accepted === false) return d.code ?? 'refused';
+  if (r.code === 0) return null;
+  return CODE.exec(String(r.stderr || r.stdout).replace(/^error: /m, ''))?.[1] ?? `exit.${r.code}`;
+}
+/** {ok, why} for one run step's output against its expect. */
+export function stepVerdict(expect, r) {
+  let d = null; try { d = JSON.parse(r.stdout); } catch { /* plain */ }
+  const code = refusalOf(r), phase = d?.receipt?.phase;
+  if (expect === 'ok') return r.code === 0 ? { ok: true, why: 'exit 0' } : { ok: false, why: `exit ${r.code} ${code ?? ''}`.trim() };
+  if (expect === 'accepted') return r.code === 0 && !code && !['failed', 'refused', 'cancelled'].includes(phase) ? { ok: true, why: `accepted${phase ? ` (${phase})` : ''}` } : { ok: false, why: `not accepted: ${code ?? phase ?? `exit ${r.code}`}` };
+  if (expect?.refused) return code === expect.refused ? { ok: true, why: `refused ${code}` } : { ok: false, why: `${code ? `refused ${code}` : `not refused (exit ${r.code})`}, not ${expect.refused}` };
+  if (expect?.says) return new RegExp(expect.says, 'i').test(`${r.stdout}\n${r.stderr}`) ? { ok: true, why: `says /${expect.says}/` } : { ok: false, why: `does not say /${expect.says}/: ${String(r.stderr || r.stdout).trim().slice(0, 160)}` };
+  throw new Error(`unknown expect ${JSON.stringify(expect)}`);
+}
+export function validateCases(battery) {
+  const errs = [];
+  if (!Array.isArray(battery?.items) || !battery.items.length) return ['battery.items[] required'];
+  for (const [i, c] of battery.items.entries()) {
+    const at = `items[${i}]${c?.id ? ` (${c.id})` : ''}`;
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(c?.id ?? '')) errs.push(`${at}.id: lowercase, digits, dashes`);
+    if (typeof c?.bar !== 'string' || !c.bar.trim()) errs.push(`${at}.bar: the case's stated bar`);
+    if (!Array.isArray(c?.souls) || !c.souls.length) { errs.push(`${at}.souls[] required`); continue; }
+    if (c.souls.filter((s) => s.script?.some((st) => st.world)).length > 1) errs.push(`${at}: one Soul's script drives the world`);
+    if (c.drive !== undefined && !DRIVE_NAMES.includes(c.drive)) errs.push(`${at}.drive: one of ${DRIVE_NAMES.join(', ')}`);
+    for (const [j, s] of c.souls.entries()) {
+      const sat = `${at}.souls[${j}]`;
+      if (!/^[a-z][a-z0-9-]*$/.test(s?.id ?? '') || typeof s?.name !== 'string') errs.push(`${sat}: id and name required`);
+      if (c.drive !== undefined) { if (s.script) errs.push(`${sat}.script: a driven case has none`); continue; }
+      if (!Array.isArray(s?.script) || !s.script.length) { errs.push(`${sat}.script[] required`); continue; }
+      for (const [k, st] of s.script.entries()) {
+        const kat = `${sat}.script[${k}]`;
+        if (st.run) { if (!Array.isArray(st.run) || !st.run.every((a) => typeof a === 'string')) errs.push(`${kat}.run: eden.mjs args`); try { stepVerdict(st.expect, { code: 0, stdout: '', stderr: '' }); } catch (e) { errs.push(`${kat}: ${e.message}`); } }
+        else if (st.until) { if (st.phase !== 'ended' || !(st.withinSec > 0)) errs.push(`${kat}: until needs phase "ended" and withinSec`); }
+        else if (st.world) { if (st.world !== 'restart') errs.push(`${kat}.world: restart`); }
+        else if (st.await !== 'restart') errs.push(`${kat}: run, until, world or await`);
+        if (st.in && !(s.folders ?? []).includes(st.in)) errs.push(`${kat}.in: ${st.in} is not in this Soul's folders`);
+      }
+    }
+  }
+  return errs;
+}
+
+/** runCase({dir, base, item, seatCfg, restart, serverRoot}) → the case record (also dir/case.json). restart() stops the world
+ *  and starts it again on the same data, resolving once it answers. */
+export async function runCase({ dir, base, item, seatCfg, restart = null, serverRoot = null, log = () => {} }) {
+  const souls = [], opened = [];   // every folder that may run a `serve`, stopped once however the case ends (as #1989)
+  const stopAll = async () => { for (const f of opened.splice(0)) await cli(f, ['serve', '--stop']).catch(() => {}); };
+  let relay = null;
+  try {
+  const hostile = item.drive ? await import('./hostile.mjs') : null;
+  if (item.relay) relay = await hostile.startRelay(base);
+  const soulBase = relay?.base ?? base;
+  for (const s of item.souls) {   // set up together before any script runs
+    const seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: s.id }, worldBase: soulBase, rails: {} });
+    opened.push(seat.folder);
+    const setup = await prepareFolder(seat, { name: s.name });
+    const folders = { own: seat.folder };
+    for (const f of s.folders ?? []) {
+      const p = join(dir, 'seats', `${s.id}-${f}`, 'folder'); mkdirSync(p, { recursive: true }); opened.push(p);
+      writeFileSync(join(p, '.eden-agent.json'), JSON.stringify({ identity: seat.info.ownerIdentity }) + '\n', { mode: 0o600 });
+      copyFileSync(join(seat.folder, 'eden.mjs'), join(p, 'eden.mjs'));
+      const r = await cli(p, ['register', soulBase]); if (r.code !== 0) throw new Error(`${s.id} ${f}: register exited ${r.code}`);
+      folders[f] = p;
+    }
+    souls.push({ spec: s, seat, setup, folders });
+  }
+  const world = { restartAt: null, restartMs: null, restarted: null };
+  let doneRestart; const restarted = new Promise((ok) => { doneRestart = ok; });
+  const t0 = Date.now();
+  const play = async ({ spec, setup, folders }) => {
+    const steps = []; let receipt = null;
+    const bind = (args) => args.map((a) => a.replaceAll('{soul}', setup.soulId).replaceAll('{receipt}', receipt ?? '{receipt}'));
+    const late = (st, began) => { if (!st.withinSec) return null; const from = st.from === 'restart' ? world.restartAt : began; const s = from == null ? null : (Date.now() - from) / 1000; return s == null ? `no ${st.from} to time from` : s > st.withinSec ? `${Math.round(s)} s after the ${st.from ?? 'step'}, over ${st.withinSec} s` : null; };
+    for (const st of spec.script) {
+      const began = Date.now(), rec = { at: Math.round((began - t0) / 100) / 10 };
+      if (st.world === 'restart') {
+        await sleep((st.afterSec ?? 0) * 1000);
+        if (!restart) { Object.assign(rec, { world: 'restart', ok: false, why: 'this world cannot be restarted (remote)' }); doneRestart(); steps.push(rec); continue; }
+        world.restartAt = Date.now(); log(`${item.id}: restarting the world`);
+        try { await restart(); world.restartMs = Date.now() - world.restartAt; world.restarted = true; Object.assign(rec, { world: 'restart', ok: true, why: `back in ${Math.round(world.restartMs / 100) / 10} s` }); }
+        catch (e) { world.restarted = false; Object.assign(rec, { world: 'restart', ok: false, why: String(e.message).slice(0, 200) }); }
+        doneRestart(); steps.push(rec); continue;
+      }
+      if (st.await) { await restarted; Object.assign(rec, { await: st.await, ok: !!world.restarted, why: world.restarted ? 'restarted' : 'the restart failed' }); steps.push(rec); continue; }
+      const args = bind(st.run ?? st.until), where = folders[st.in ?? 'own'];
+      Object.assign(rec, { cmd: args.join(' '), in: st.in ?? null });
+      if (args.some((a) => a.includes('{receipt}'))) { Object.assign(rec, { ok: false, why: 'no receipt kept by an earlier step' }); steps.push(rec); continue; }
+      let r, v;
+      if (st.until) {
+        const end = Date.now() + st.withinSec * 1000; let tries = 0;
+        for (;;) {
+          r = await cli(where, args); tries++;
+          let d = null; try { d = JSON.parse(r.stdout); } catch { /* plain */ }
+          const phase = d?.phase ?? d?.receipt?.phase ?? null;
+          v = ENDED_PHASES.includes(phase) ? { ok: true, why: `${phase}${d?.reason ? `: ${d.reason}` : ''}` } : { ok: false, why: `still ${phase ?? refusalOf(r) ?? 'unknown'} after ${tries} reads` };
+          if (v.ok || Date.now() + 2000 > end) break;
+          await sleep(2000);
+        }
+      } else {
+        r = await cli(where, args); v = stepVerdict(st.expect, r);
+        if (st.keep) { try { receipt = JSON.parse(r.stdout)?.receipt?.id ?? receipt; } catch { /* none */ } }
+      }
+      const over = v.ok ? late(st, began) : null;
+      Object.assign(rec, { exit: r.code, refusal: refusalOf(r), ok: v.ok && !over, why: over ?? v.why, ms: Date.now() - began });
+      steps.push(rec);
+    }
+    return { soul: spec.id, name: spec.name, soulId: setup.soulId, ok: steps.every((x) => x.ok), steps };
+  };
+  let results, measures = null;
+  if (item.drive) ({ results, measures } = await hostile.DRIVES[item.drive]({ dir, base, relay, serverRoot, item, souls, t0, log }));
+  else results = await Promise.all(souls.map(play));
+  await stopAll();
+  const refusals = {};
+  const add = (k) => { if (k) refusals[k] = (refusals[k] ?? 0) + 1; };
+  for (const x of results) for (const st of x.steps) add(st.refusal);
+  const traced = {};
+  for (const { spec, seat, setup } of souls) {
+    const f = join(runtimeDir(seat.folder, setup.soulId), '.eden-report.jsonl');
+    if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `${spec.id}.jsonl`)); }
+    for (const [k, v] of Object.entries(refusalCounts(httpSince(readJsonl(f), t0)))) traced[k] = (traced[k] ?? 0) + v;
+  }
+  const rec = { case: item.id, bar: item.bar, succeeded: results.every((x) => x.ok), why: results.flatMap((x) => x.steps.filter((s) => !s.ok).map((s) => `${x.soul}: ${s.cmd ?? s.world ?? s.await}: ${s.why}`)).join('; ') || 'every check held',
+    wallMs: Date.now() - t0, world, refusals, tracedRefusals: traced, ...(measures ? { measures } : {}), souls: results, client: { cli: souls[0]?.setup.cliVersion ?? null, skill: souls[0]?.setup.skillVersion ?? null } };
+  writeJson(join(dir, 'case.json'), rec);
+  return rec;
+  } finally { await stopAll(); await relay?.close(); }
 }

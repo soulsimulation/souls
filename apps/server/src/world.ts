@@ -1355,6 +1355,9 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
+   *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
+  enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.

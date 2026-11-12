@@ -16,6 +16,7 @@ export const FEED_KINDS = Object.freeze(['announcement', 'release', 'world', 'ev
 export const FEED_LIMITS = Object.freeze({ title: 120, body: 1000, url: 500, place: 120, minClient: 32, postBytes: 8192, pageDefault: 20, pageMax: 100, versionsPerDay: 64, daysKept: 60, flushMs: 5000 });
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/;
 const ID_RE = /^f([1-9]\d{0,9})$/;
+const num = (i) => Number(ID_RE.exec(i.id)[1]);
 const send = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', ...headers }).end(JSON.stringify(body)); };
 
 /** A post body checked: [null, item fields] or [message, null]. */
@@ -37,11 +38,16 @@ export function checkPost(b, has) {
 /** The feed of one launcher: its file, its read counts, and the two routes (mounted by launcher.mjs). */
 export function platformFeed({ dataDir, log = () => {}, now = () => new Date() }) {
   const file = join(dataDir, 'feed.jsonl'), statsFile = join(dataDir, 'feed-reads.json');
-  let items = [], seen = '';
+  let items = [], seen = '', lastId = 0;
   const load = () => {   // re-read only when the file changed (another launcher process may have appended during a handover)
-    let st; try { st = statSync(file); } catch { items = []; seen = ''; return items; }
+    let st; try { st = statSync(file); } catch { items = []; seen = ''; lastId = 0; return items; }
     const key = `${st.size}:${st.mtimeMs}`; if (key === seen) return items;
-    items = readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+    // Each item carries the id stored when it was posted (#1993), so a malformed line (say, truncated by a crash) is
+    // skipped without moving any other id. A line with no valid stored id gets its line number, the id it had when
+    // ids were line positions.
+    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    items = lines.flatMap((l, n) => { try { const i = JSON.parse(l); return [ID_RE.test(i.id) ? i : { ...i, id: `f${n + 1}` }]; } catch { return []; } });
+    lastId = Math.max(lines.length, ...items.map(num));
     seen = key; return items;
   };
   let days = {}; try { days = existsSync(statsFile) ? JSON.parse(readFileSync(statsFile, 'utf8')).days ?? {} : {}; } catch { days = {}; }
@@ -56,9 +62,9 @@ export function platformFeed({ dataDir, log = () => {}, now = () => new Date() }
   };
   /** One page after the cursor: replaced items left out, `next` past everything scanned. */
   const page = (after, limit) => {
-    const all = load(), from = after ? Number(ID_RE.exec(after)[1]) : 0, hidden = new Set(all.map((i) => i.replaces).filter(Boolean));
+    const all = load(), from = after ? num({ id: after }) : 0, hidden = new Set(all.map((i) => i.replaces).filter(Boolean));
     const out = []; let next = after ?? null;
-    for (const i of all.slice(from)) { if (out.length >= limit) break; next = i.id; if (!hidden.has(i.id)) out.push(i); }
+    for (const i of all.filter((x) => num(x) > from)) { if (out.length >= limit) break; next = i.id; if (!hidden.has(i.id)) out.push(i); }
     return { items: out, next };
   };
   return {
@@ -81,7 +87,7 @@ export function platformFeed({ dataDir, log = () => {}, now = () => new Date() }
       let b; try { b = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { send(res, 400, { ok: false, code: 'bad-json' }); return; }
       const all = load(), [why, fields] = checkPost(b, (id) => all.some((i) => i.id === id));
       if (why) { send(res, 400, { ok: false, code: 'bad-item', message: why }); return; }
-      const item = { id: `f${all.length + 1}`, at: now().toISOString(), ...fields };
+      const item = { id: `f${lastId + 1}`, at: now().toISOString(), ...fields };
       appendFileSync(file, `${JSON.stringify(item)}\n`); load();
       log(`feed: ${item.id} ${item.kind}${item.replaces ? ` replaces ${item.replaces}` : ''} (operator)`);
       send(res, 201, { ok: true, item });
