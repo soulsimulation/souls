@@ -76,7 +76,7 @@ test('#1150 rewound: each new rung 3 is a `rewound` problem, the world keeps run
   await p.stop('wr');
 });
 
-test('#1150, #1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator', async () => {
+test('#1150, #1326, #2133 halted: live.json says the clock stopped; a `halted` problem and a restart every time; a halt that repeats at once ends held, named, after breakerN', async () => {
   const p = pool([P0, P0 + 2], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
   let port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
   p.startGuard();
@@ -88,14 +88,19 @@ test('#1150, #1326 halted: live.json says the clock stopped; a `halted` problem,
   assert.ok(p.lines.some((l) => /world wh exited .* after it halted/.test(l)), p.lines.join('\n'));
   assert.deepEqual(p.problems().map((x) => x.code), ['halted'], 'shown for wedgeShownMs after the restart, as a wedge is');
   assert.match(p.problems()[0].text, /halted .* ago and was restarted/);
-  // a second halt inside the window: left halted, its process and evidence up
+  // #2133: a second halt inside the window is restarted too (it used to stay halted, a frozen world, until the window passed)
   const pid2 = p.state('wh').child.pid; port = p.state('wh').port ?? port;
   await sleep(300); await get(port, 'wh', '/halt');
-  await until(() => p.status('wh').halted === true, 2000, 'halted again');
-  await sleep(800);
-  assert.equal(p.state('wh').child.pid, pid2, 'not restarted twice in one window');
-  assert.deepEqual(p.problems().map((x) => x.code), ['halted']);
-  assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 1);
+  await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid2, 3000, 'restarted again in the same window');
+  // halting again at once, each time: never a silent loop; at breakerN failures in the window the world is held, named
+  for (let n = 0; n < 6 && p.state('wh').status !== 'held'; n++) {
+    const c = p.state('wh').child; await get(p.state('wh').port ?? port, 'wh', '/halt');
+    await until(() => p.state('wh').status === 'held' || (p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child !== c), 3000, 'restarted or held');
+  }
+  assert.equal(p.state('wh').status, 'held');
+  assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 5, 'one restart per halt, breakerN in all');
+  const held = p.problems().find((x) => x.code === 'held');
+  assert.ok(held, JSON.stringify(p.problems())); assert.match(held.text, /after 5 failures \(last: halted\)/);
   await p.closeAll();
 });
 
@@ -123,6 +128,21 @@ test('(a) wedged, no live.json (a release before the watchdog): /healthz unanswe
   await until(() => p.status('wb').status === 'running' && p.status('wb').pid !== pid, 5000, 'restarted');
   assert.match(p.status('wb').lastExit.reason, /healthz unanswered 6 times/);
   assert.equal(p.status('wb').restartsByReason.wedged, 1);
+  await p.closeAll();
+});
+
+test('#2164 busy, not stuck: no watchdog port, the main /healthz too slow to answer, live.json shows the main thread turning; never restarted', async () => {
+  const p = pool(R, { FAKE_LIVE: '1' });
+  const port = await p.ensure(world('wd')); const pid = p.state('wd').child.pid;
+  p.startGuard();
+  await get(port, 'wd', '/busy?ms=1000');   // each /healthz answers 1 s late (timeoutMs 150), the main thread still turns
+  await sleep(1500);   // 15 looks: past failures (6) and past liveStaleMs after up
+  assert.equal(p.state('wd').child?.pid, pid, `a busy world is not killed: ${p.lines.join('\n')}`);
+  assert.equal(p.status('wd').restarts, 0);
+  // a main thread that stops turning is still wedged, by live.json
+  await get(port, 'wd', '/wedge');
+  await until(() => p.status('wd').status === 'running' && p.status('wd').pid !== pid, 5000, 'restarted');
+  assert.match(p.status('wd').lastExit.reason, /wedged: main thread stuck/);
   await p.closeAll();
 });
 

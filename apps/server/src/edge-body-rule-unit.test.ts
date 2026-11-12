@@ -76,3 +76,19 @@ test('asleep doing follows observed posture after refusal, admission, and interr
  posture='water';now+=1000;rule.sweep();assert.equal(rule.view('s_test')!.doing,'floating');
  posture='seated';now+=1000;rule.sweep();assert.equal(rule.view('s_test')!.doing,'sitting');db.close();
 });
+
+test('#1981 A4.1: the idle reflex sits only on a seat in the same place; a nearer seat through a door is never taken',()=>{
+ // A body idles outdoors 5 m south of the house door. The house seat is 8 m away through the door and comes first in the
+ // offers; the bench outside is 4 m away. Before the fix the reflex walked the body into the house to sit.
+ const db=new DatabaseSync(':memory:'),f=fake([5,-5]);let now=1e12;
+ const seats:[number,number][]=[[5,3],[5,-9]];
+ f.port.presence=()=>({listening:true,at:now});
+ f.port.seat=(_s,radius,seconds,within)=>{const at=seats.find(([x,z])=>Math.hypot(x-f.pos.x,z-f.pos.z)<=radius&&(within?within(x,z):true));
+  return at?[{verb:'walk_to',params:{to:at}},{verb:'mars:pose_v1',params:{activity:'sit',seconds}}]:null;};
+ const rule=new BodyRule(db as any,'w',f.port,{now:()=>now});
+ for(let t=0;t<2*3600;t++){now+=1000;rule.sweep();assert.ok(!inHouse(f.pos.x,f.pos.z),`the idle reflex carried the body through the door to ${f.pos.x},${f.pos.z}`);}
+ const sits=f.decisions.filter(d=>d.option==='body:sit'&&d.steps.some(s=>s.verb==='walk_to'));
+ assert.ok(sits.length>=1,'the reflex still sits on the bench outside');
+ for(const d of sits)assert.deepEqual(d.steps[0].params.to,[5,-9]);
+ db.close();
+});

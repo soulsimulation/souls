@@ -43,10 +43,10 @@ test('hand drawer: words, slide contact, hand on the knob, refusal, interruption
    const [lx,lz]=local(b.pose.p);minFront=Math.min(minFront,Math.abs(lx)<0.45+0.28?lz-(0.25+0.28):9);steps.push(lz);}
   const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}
   return {early,maxHandOff:+maxHandOff.toFixed(4),clearOfChestBy:+minFront.toFixed(3),stepRange:steps.length?+(Math.max(...steps)-Math.min(...steps)).toFixed(3):0,swing:motion?.slide?Math.abs(motion.slide.to-motion.slide.from):null,phase:edge.receipt(soul.soulId,r.receipt.id).phase};};
- await act('close the drawer',false);await act('open the private chest',false);
- const cut=await act('open the drawer');for(let n=0;n<400&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('chest').open,false,'interrupted before the grasp: the drawer stays shut');
+ await act(`object:${id('chest')}:close`,false);await act(`object:${id('private-chest')}:open`,false);
+ const cut=await act(`object:${id('chest')}:open`);for(let n=0;n<400&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('chest').open,false,'interrupted before the grasp: the drawer stays shut');
  const results={};
- for(const [words,want] of [['open the drawer',true],['close the drawer',false],['open the drawer',true]]){
+ for(const want of [true,false,true]){const words=`object:${id('chest')}:${want?'open':'close'}`;
   const r=await act(words);assert.match(r.receipt.capability,new RegExp(`object:${id('chest')}:${want?'open':'close'}$`),words+' resolved to '+r.receipt.capability);
   assert.notEqual(state('chest').open,want,'admission changes nothing remotely');const x=await finish(r,want);
   assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.equal(x.early,false,'nothing changes before the grasp');assert.equal(state('chest').open,want);
@@ -56,6 +56,6 @@ test('hand drawer: words, slide contact, hand on the knob, refusal, interruption
  const spatial=f.host.engine.rt.services.spatial;spatial.sync(f.host.engine.world);assert.ok(spatial.scene.obstacles.some(o=>o.id===e.id||o.id.startsWith(e.id+'#')),'an open chest stays solid to navigation');
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.equal(restored.get('chest').state.open,true);
  assert.deepEqual(f.host.engine.runtime.violations,[]);
- const report={status:'pass',hereBytes:{absent:JSON.stringify(absent).length,distant100Chests:JSON.stringify(far).length,nearby:JSON.stringify(near).length},row:row_,results,checks:['plain words resolve to the drawer offers','closed drawer: close refused; private chest refused','interruption before the grasp keeps it shut','open/close/open through the slide contact','the hand stays exactly on the knob while the drawer travels','the body steps with the drawer and never enters the chest','nothing changes before the grasp','an open chest stays solid to navigation','snapshot persistence','100 distant chests: no offers','zero native violations']};
+ const report={status:'pass',hereBytes:{absent:JSON.stringify(absent).length,distant100Chests:JSON.stringify(far).length,nearby:JSON.stringify(near).length},row:row_,results,checks:['the drawer offers act by id','closed drawer: close refused; private chest refused','interruption before the grasp keeps it shut','open/close/open through the slide contact','the hand stays exactly on the knob while the drawer travels','the body steps with the drawer and never enters the chest','nothing changes before the grasp','an open chest stays solid to navigation','snapshot persistence','100 distant chests: no offers','zero native violations']};
  if(out)writeFileSync(`${out}/summary.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 });

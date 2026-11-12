@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -62,7 +63,7 @@ async function world(t) {
     if (p === '/v1/edge/live' || p === '/v1/edge/catalog') return json(404, { error: { code: 'not-found', message: 'not published here' } });
     // Everything else is heavy: at most one at a time per Soul, or soul.busy.
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
-    await sleep(10); w.heavyNow--;
+    await sleep(p === '/v1/edge/act' && w.actMs ? w.actMs : 10); w.heavyNow--;
     if (w.busyNext > 0) { w.busyNext--; return json(429, { error: { code: 'soul.busy', message: 'one at a time' } }, { 'retry-after': '0' }); }
     if (p === '/v1/edge/act') {
       const b = body ? JSON.parse(body) : {}, cap = b.capability ?? 'walk:x';
@@ -468,6 +469,49 @@ test('A4: soul.busy is waited out inside serve, and heavy requests never overlap
   w.heavyMax = 0;
   await Promise.all(Array.from({ length: 6 }, () => w.cli('here')));
   assert.equal(w.heavyMax, 1, 'six commands at once reach the world one at a time');
+});
+
+/** One request straight to serve's socket, as a command sends it: the answer and how long it took. */
+const askSock = (w, msg) => new Promise((done) => {
+  const t0 = Date.now(), c = createConnection(join(w.dir, '.eden-serve.sock'));
+  let text = '';
+  c.on('connect', () => c.write(JSON.stringify(msg) + '\n'));
+  c.on('data', (b) => { text += b; const i = text.indexOf('\n'); if (i >= 0) { c.destroy(); done({ a: JSON.parse(text.slice(0, i)), ms: Date.now() - t0 }); } });
+  c.on('error', () => done({ a: null, ms: Date.now() - t0 }));
+  c.on('close', () => done({ a: null, ms: Date.now() - t0 }));
+});
+
+test('#2084: under a flood of its Soul\'s acts every request through serve is answered within its own time, and status and stop stay quick', async (t) => {
+  const w = await world(t);
+  await w.cliEnv({ EDEN_TIME_SCALE: '0.05' }, 'serve');   // the 10 s queue bound becomes 0.5 s
+  w.actMs = 150;   // one act at a time: 40 of them take 6 s, three times what each request gives itself
+  const { world: base, token } = JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8'));
+  const act = (i, timeoutMs = 2_000) => askSock(w, { op: 'http', url: `${base}/v1/edge/act`, method: 'POST', timeoutMs,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'idempotency-key': `flood-${i}` }, body: { capability: 'wave:here', clientRef: `flood-${i}` } });
+  const flood = Array.from({ length: 40 }, (_, i) => act(i));
+  await sleep(100);
+  const t0 = Date.now(), status = await w.cli('serve', '--status'), statusMs = Date.now() - t0;
+  assert.equal(status.json?.serving, true, status.out);
+  assert.ok(statusMs < 2_000, `status answered in ${statusMs} ms during the flood`);
+  const answers = await Promise.all(flood);
+  for (const { a, ms } of answers) {
+    assert.ok(a, 'every request is answered');
+    assert.ok(ms <= 2_500, `answered within its own 2 s (a command waits 5 s more): ${ms} ms`);
+    assert.notEqual(a.status, 0, `an answer, not silence: ${JSON.stringify(a.data)}`);
+    assert.ok(a.status === 200 || (a.status === 429 && a.data.error.code === 'soul.busy' && a.retryAfterMs > 0), JSON.stringify(a));
+  }
+  const refused = answers.filter(({ a }) => a.status === 429).length;
+  assert.ok(refused > 0 && refused < 40, `some acts went through, the rest were refused by serve (${refused} refused)`);
+  assert.equal(w.heavyMax, 1, 'still one heavy request at a time');
+  assert.equal((await w.cli('serve', '--status')).json.busyRefused, refused);
+  // stop, asked in the middle of another flood, ends serve at once
+  const again = Array.from({ length: 40 }, (_, i) => act(100 + i));
+  await sleep(100);
+  const t1 = Date.now(), stop = await w.cli('serve', '--stop'), stopMs = Date.now() - t1;
+  assert.equal(stop.json?.stopping, true, stop.out);
+  assert.ok(stopMs < 2_000, `stop answered in ${stopMs} ms during the flood`);
+  assert.ok(await until(() => !existsSync(join(w.dir, '.eden-serve.sock'))), 'serve is gone');
+  await Promise.all(again);
 });
 
 test('A5 (short form): a killed serve resumes from its cursor: nothing replayed, nothing lost, an open message still pending', async (t) => {
@@ -1154,4 +1198,61 @@ test('#1345 A5: the flags are checked before anything is saved', async (t) => {
   const st = await w.cli('serve', '--status', '--no-reflex');
   assert.equal(st.code, 0, st.err);
   assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, false);
+});
+
+// #1940: serve follows the home's installed client (config.client and its copy in bin/), after an upgrade or a rollback.
+/** The serve world as a home: its Soul imported, commands run as an owner's would (HOME there, beats every second). */
+async function homeWorld(t) {
+  const w = await world(t), legacy = join(w.dir, '.eden-agent.json');
+  writeFileSync(legacy, JSON.stringify({ ...JSON.parse(readFileSync(legacy, 'utf8')), soul: 's_me' }), { mode: 0o600 });
+  w.home = (...args) => w.cliEnv({ HOME: w.dir, SOULS_HOME: '', SOULS_PRINCIPAL: '', EDEN_TIME_SCALE: '0.05' }, ...args);
+  assert.equal((await w.home('import')).code, 0);
+  /** Install a client in bin/ and name it in config.json, as upgrade and upgrade --rollback do. */
+  w.install = (version, bytes) => {
+    writeFileSync(join(w.dir, '.souls/bin/eden.mjs'), bytes, { mode: 0o755 });
+    const cfg = join(w.dir, '.souls/config.json');
+    writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), client: version }));
+  };
+  return w;
+}
+const ours = /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(cli, 'utf8'))[1];
+
+test('#1940 A1-A3: after an upgrade serve hands over to the installed client; its plan and wake rules carry on', async (t) => {
+  const w = await homeWorld(t);
+  const a = await w.home('serve');
+  assert.equal(a.json.serving, true, a.err);
+  assert.equal((await w.home('serve', '--status')).json.version, ours, 'status names the running client');
+  assert.equal((await w.home('wake', 'add', 'act-ended')).json.added, 'w1');
+  w.owner('msg_1', 'Mill then pond');
+  assert.equal((await w.home('plan', JSON.stringify(['walk:mill', 'walk:pond']), '--for', 'msg_1')).json.accepted, true);
+  assert.ok(await until(() => w.acts === 1), 'step 1 is under way in the world, none in flight here');
+  w.install('9.9.9', readFileSync(cli, 'utf8').replace(/^const VERSION = "[0-9.]+";$/m, 'const VERSION = "9.9.9";'));
+  const b = await until(async () => { const s = (await w.home('serve', '--status')).json; return s?.version === '9.9.9' ? s : null; }, 10_000);
+  assert.ok(b, 'the new client is serving within a few beats');
+  assert.notEqual(b.pid, a.json.pid);
+  assert.ok(await until(() => !alive(a.json.pid)), 'the old one exits once the new one answers');
+  assert.ok((await w.home('wake')).json.rules.some((r) => r.id === 'w1'), 'the wake rule survives');
+  const p = (await w.home('pending')).json;
+  assert.equal(p.plan?.state, 'running', JSON.stringify(p.plan)); assert.equal(p.plan.step, 1, 'the pending plan survives at its step');
+  ended(w, 'r_1');
+  assert.ok(await until(() => w.acts === 2), 'the new client runs the plan\'s next step');
+  ended(w, 'r_2');
+  assert.ok(await until(() => w.results.length === 1));
+  assert.equal(w.acts, 2, 'each step acted once across the handover');
+});
+
+test('#1940 A2/A3: a client that fails to start leaves the old serve running, and status says why', async (t) => {
+  const w = await homeWorld(t);
+  const a = await w.home('serve');
+  assert.equal(a.json.serving, true, a.err);
+  assert.equal((await w.home('wake', 'add', 'act-ended')).json.added, 'w1');
+  w.install('2.0.0', 'const VERSION = "2.0.0";\nprocess.exit(3);\n');   // a rollback to a client that cannot start
+  const s = await until(async () => { const x = (await w.home('serve', '--status')).json; return x?.handoverFailed ? x : null; }, 10_000);
+  assert.ok(s, 'the failure is reported in status');
+  assert.equal(s.pid, a.json.pid); assert.equal(s.version, ours);
+  assert.equal(s.handoverFailed.to, '2.0.0'); assert.match(s.handoverFailed.why, /exited \(code 3\) before it answered/);
+  assert.ok(alive(a.json.pid));
+  assert.ok((await w.home('wake')).json.rules.some((r) => r.id === 'w1'), 'and it still answers');
+  await sleep(1500);
+  assert.equal((await w.home('serve', '--status')).json.pid, a.json.pid, 'that version is not tried again');
 });

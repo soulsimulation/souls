@@ -37,7 +37,7 @@ export function splitRendered(md) {
   return out.map(({ turn, text }) => ({ turn, text }));
 }
 
-export const SOUL_CLI = { file: 'eden.mjs', fallbackFile: 'eden-agent.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
+export const SOUL_CLI = { file: 'eden.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
 
 export class Seat {
   constructor({ dir, seat, worldBase, rails = {}, cli = SOUL_CLI, allowedTools, kind = 'soul', budget = null, infraFile = null }) {
@@ -48,7 +48,7 @@ export class Seat {
     this.rails = { maxTurnsPerRequest: 6, maxTurnWallSec: 240, ...rails };
     // 2026-10-26 (round 2): seats sometimes call the CLI by its absolute path and write the skill under .claude/; both were
     // refused by the allowlist and the seat never paired (fix-d3d trio r1, round2 run 1). Allow them for this folder only.
-    this.allowedTools = [...(allowedTools ?? claude.DEFAULT_ALLOWED), `Bash(node ${this.folder}/eden.mjs:*)`, `Bash(node ${this.folder}/eden-agent.mjs:*)`,
+    this.allowedTools = [...(allowedTools ?? claude.DEFAULT_ALLOWED), `Bash(node ${this.folder}/eden.mjs:*)`,
       `Write(${this.folder}/.claude/**)`, `Edit(${this.folder}/.claude/**)`, 'Write(./.claude/**)', 'Edit(./.claude/**)'];
     this.turnN = 0; this.chain = Promise.resolve(); this.listener = null; this.waking = false; this.stopped = false;
     this.lastListenId = null; this.wakesSinceRequest = 0; this.cumulative = null; this.listenFailures = 0;
@@ -105,7 +105,7 @@ export class Seat {
 
   /** Run the seat's own CLI in its folder (read-only commands only: status). Never logs credentials: these print none. */
   async cliJson(args, maxWallMs = 20000) {
-    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile && existsSync(join(this.folder, this.cli.fallbackFile)) ? this.cli.fallbackFile : null;
+    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : null;
     if (!file) return { ok: false, reason: `no ${this.cli.file} in folder` };
     const r = await run('node', [file, ...args], { cwd: this.folder, maxWallMs });
     return { file, ...(this.cli.parseStatus ?? parseJsonStatus)(r.stdout, r.code, r.stderr) };
@@ -275,7 +275,7 @@ export class Seat {
     }
     this.rails.maxTurnWallSec = savedCap;
     this.info.onboard = { ok: !!paired, pairedWithinSec: paired ? Math.round(pairedMs / 1000) : null, timeoutSec, onboardTurnWallMs: turn?.wallMs ?? null, attempts,
-      cliFile: paired ? (existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile) : null, lastStatus: paired ? null : last };
+      cliFile: paired && existsSync(join(this.folder, this.cli.file)) ? this.cli.file : null, lastStatus: paired ? null : last };
     if (paired && paired.soul) { this.info.soulId = paired.soul.id; this.info.soulName = paired.soul.name ?? name; }
     this.save(); if (paired) this.ownerSettings();
     return { ok: !!paired, soulId: this.info.soulId, soulName: this.info.soulName, turn, status: paired ?? last };
@@ -294,8 +294,7 @@ export class Seat {
   wakeLoop() { if (!this.info.wake) return false; this.waking = true; this.startListen(); return true; }
   startListen() {
     if (this.listener || this.stopped || !this.waking) return;
-    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile;
-    const args = [file, ...this.cli.listen(this.lastListenId)];
+    const args = [this.cli.file, ...this.cli.listen(this.lastListenId)];
     const cmdLine = `node ${args.join(' ')}`;
     const startedAt = now();
     // Soul Runs diagnostics (#752): a traced seat's harness listen carries the same passive preload as its commands, so

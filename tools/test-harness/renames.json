@@ -153,6 +153,352 @@
       "to": "\\#1753: ack and result are retried with one key after a busy refusal and a dropped connection",
       "reason": "#1753: ack and result became keyed writes, retried with one key until answered (safe: the world answers a repeat from the message state); the old test asserted they were never retried",
       "pr": "#1762"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "restart: started receipts keep being followed, waiting receipts are re-armed (clean close)",
+      "to": "restart: in-flight receipts end at boot with a named reason; finished ones are untouched (clean close)",
+      "reason": "#2051: an act in flight at a restart now ends at boot with a named reason instead of resuming; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "mid-exit snapshot and a fresh Node process preserve claims, identity and receipt completion",
+      "to": "mid-exit snapshot and a fresh Node process preserve claims and identity; the stand ends lost-on-restart and the body stands",
+      "reason": "#2051: a stand in flight at a restart ends lost-on-restart instead of completing; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "public read:here preserves server-selected shelf content through an active native restart",
+      "to": "public read:here keeps server-selected shelf content and progress across an active native restart",
+      "reason": "#2051: the shelf read in flight at a restart ends lost-on-restart; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "the exact active native painting receipt and program survive a SQLite/snapshot restart and finish once",
+      "to": "an active native painting at a SQLite/snapshot restart ends lost-on-restart and publishes nothing",
+      "reason": "#2051: a painting in flight at a restart ends lost-on-restart instead of resuming; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1281 H4: a flag in a secret place is not named until she knows the place",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1281 H4: a flag in a secret room upstairs is not named either",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "knowledge at scales: district summary, far names, memory of visits, look around, secret places",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "Same test; its secret-place section is replaced by the check that a stored secret mark hides nothing (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "god route: mark a place secret by id or name, list, refuse unknown and root",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "The god route that marked a place secret is unmounted (#1262); the replacement shows a stored mark is ignored",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "god world: a secret place is not walked to by name (walk:<ref> offers, plain words, everyday synonyms)",
+      "to": "god world: a place is walked to by name (walk:<ref> offers, plain words)",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a refusal never names an alternative in a secret place the Soul does not know; it names the next one, or none",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "The #1832 hidden hook it tested is removed (#1262); the replacement asserts that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a spot asked for by id in a secret place the Soul does not know gets no reason: not spot.no-room, not spot.taken",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "The #1832 hidden hook it tested is removed (#1262); the replacement asserts that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: with no secret place every field is there: the control",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Same control, kept in edge-public-record.test.ts when the secret-place scrub tests were removed (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a secret place is gone from self.placePath, receipts[].endedAt and receipts[].capability, by id and by name; the rest stays",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: what is inside a secret place goes with it, and so do world rows naming it; a Soul's own words stay",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a receipt that ended inside a place built later goes by its position; an open one goes while the Soul is in there",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A2: a Soul's own token still reads everything",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a public place outlives a secret one that sounds like it; words mean nothing in a key or an enum",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a seat goes with its place, by its own id; and a receipt in a public place keeps its path and its verb",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a real seat: its occupier entry goes with the place",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: with a secret place in the world, no receipt carries a chosen target",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a new field can't bring one back: the scrub works on the answer, not on field names",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1141: a timeline field added later carries no secret place; a title is the Soul's own words and stays",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1141: on the real record, a journey's fields pass the scrub and a title doesn't",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "exact known destinations beat partial Soul names while exact Souls, ambiguity and secrecy retain their meaning",
+      "to": "exact known destinations beat partial Soul names while exact Souls and ambiguity retain their meaning",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > the catalog is served by tag, and a place made secret leaves it",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > the catalog is served by tag, and a place with a stored secret mark stays in it",
+      "reason": "Same test; a stored secret mark now leaves the place in the catalog (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > a thing upstairs is in the room it stands in; a secret upstairs room takes its things, and what stands under it, out of the catalog",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > a thing upstairs is in the room it stands in",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > a far spot in a secret place is not known by its id to a Soul that has not been there, and the refusal does not name it",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > the catalog is served by tag, and a place with a stored secret mark stays in it",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > the live picture names where a Soul is, and never a secret place",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > the live picture names where a Soul is, in a place with a stored secret mark too",
+      "reason": "Same test; a Soul in a place with a stored secret mark is now named with its position and speech (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > a thing in a secret room upstairs leaves the live picture with its state (\\#1751, the catalog's outline rule)",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > a thing upstairs is in the live picture with its state (\\#1751)",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a secret place, what stands in it and what is done in it are left out",
+      "to": "everything published is public, and the counts match; a place whose data says secret is listed (\\#1262)",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "everything published is public, and the counts match",
+      "to": "everything published is public, and the counts match; a place whose data says secret is listed (\\#1262)",
+      "reason": "Same test; a place whose data says secret is now counted and listed (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "secret ancestors, inherited private room and coordinate construction closure cannot be bypassed",
+      "to": "inherited private room and coordinate construction closure cannot be bypassed",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "protected and masked answers are unchanged: secret, private, construction, aloft, rigid body, faded",
+      "to": "protected and masked answers are unchanged: private, construction, aloft, rigid body, faded",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a far hand-worked thing: left out of the whole menu, taken by id with a walk, unknown in a secret place",
+      "to": "a far hand-worked thing: left out of the whole menu, taken by id with a walk",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "\\#1150, \\#1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator",
+      "to": "\\#1150, \\#1326, \\#2133 halted: live.json says the clock stopped; a `halted` problem and a restart every time; a halt that repeats at once ends held, named, after breakerN",
+      "reason": "Same test, renamed when a halted world restarts every time and is held only when the halt repeats at once (#2133)",
+      "pr": "#2142"
+    },
+    {
+      "step": "V4-web",
+      "from": "social crawlers receive the Souls identity and immutable supplied halo without JavaScript",
+      "to": "social crawlers receive the Souls identity and the large starburst card without JavaScript",
+      "reason": "Same test, renamed when the social card changed from the CDN halo to the large starburst (pwa/icon-social.png)",
+      "pr": "#2177"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI BODY authenticates privately and completed plans remain readable by ID",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI body look: show, seeded random, set parts and colours, classic preset, refusal",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-look-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "conversation start keeps the old single form and adds explicit unique group recipients",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "invalid group entries refuse rather than losing a recipient or inventing a target",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "published group argv sends one invitation POST, preserves backend refusals, and never accepts peers for them",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "published CLI normalizes plain words with params exactly once and preserves explicit capability IDs",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-word-params.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI look around / explore: short around frame with walk ids; --full raw; here has district and far",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-knowledge-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "pair-soul <id> from a fresh folder: owner window within one poll, real name, nobody else, Approve connects",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and pair-inwindow-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "single-controller CLI is distinct from retained legacy CLI and instructions preserve window binding",
+      "to": [
+        "single-controller CLI is served and instructions preserve window binding",
+        "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)"
+      ],
+      "reason": "#1754: the legacy CLI is no longer retained; the controller CLI and instructions assertions are kept in the renamed test, the legacy ones become the 404 test",
+      "pr": "#2137"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "new and forked worlds receive independent controller and legacy CLI paths",
+      "to": "new and forked worlds receive the controller CLI path and no legacy CLI path (\\#1754)",
+      "reason": "Same test, reversed by #1754: worlds get no legacy CLI path (EDGE_CLI_FILE) any more; the controller CLI path assertions are unchanged",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "PM-R057 vocabulary over HTTP: natural names resolve (resolved), unknown gets did_you_mean, object capabilities act via /act",
+      "to": "PM-R057 over HTTP: the walk id of a place acts, an unknown id is refused, object capabilities act via /act",
+      "reason": "Same test, renamed when acts moved from words to offered ids (#1911): a place's walk id acts and an unknown id is refused; the object-capability act via /act is kept",
+      "pr": "#2175"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "legacy: without strict the words still execute; the server flag lets a strict client through for one release",
+      "to": "\\#1911: without strict, words are refused with the gate's code and nothing happens; the offered id acts",
+      "reason": "Same test, reversed by #1911: words no longer act without strict and the server flag is gone; the replacement asserts the refusal and that the offered id acts",
+      "pr": "#2175"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "rollback through the real CLI: words exit 2 with no act until the flag is on, then they act; off again, they refuse",
+      "to": "through the real CLI: words exit 2 with no act; the offered id acts",
+      "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
+      "pr": "#2175"
     }
   ]
 }

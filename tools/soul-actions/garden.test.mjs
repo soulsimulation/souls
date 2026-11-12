@@ -33,14 +33,14 @@ test('garden sprinkler: hand contact soaks planters in reach only, at contact; p
  assert.ok(!JSON.stringify(near).includes('moisture'),'no moisture facts in here');
  const act=async(cap,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const dry=n=>assert.ok((state(n).moisture??0.1)<0.5,n+' dry');
- const cut=await act('object:sprinkler:switch-on');for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);
+ const cut=await act(`object:${god.model.get('sprinkler').id}:switch-on`);for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);
  assert.equal(state('sprinkler').on,false);for(const n of ['bed-a','bed-b','bed-far'])dry(n);
- const r=await act('object:sprinkler:switch-on');let early=false,contact=false;
+ const r=await act(`object:${god.model.get('sprinkler').id}:switch-on`);let early=false,contact=false;
  for(let n=0;n<500;n++){const m=body().human?.handActuator;if(m){contact=true;if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.6&&state('bed-a').moisture===1)early=true;}if(['completed','failed'].includes(edge.receipt(soul.soulId,r.receipt.id).phase))break;await tick(1);}
  assert.equal(edge.receipt(soul.soulId,r.receipt.id).phase,'completed');assert.ok(contact);assert.equal(early,false,'no soaking before contact');
  assert.equal(state('sprinkler').on,true);assert.equal(state('bed-a').moisture,1);assert.equal(state('bed-b').moisture,1);dry('bed-far');dry('bed-behind');
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.equal(restored.get('bed-a').state.moisture,1);
- const off=await act('object:sprinkler:switch-off');for(let n=0;n<500&&!['completed','failed'].includes(edge.receipt(soul.soulId,off.receipt.id).phase);n++)await tick(1);assert.equal(state('sprinkler').on,false);assert.equal(state('bed-a').moisture,1,'turning off keeps the soil wet');
+ const off=await act(`object:${god.model.get('sprinkler').id}:switch-off`);for(let n=0;n<500&&!['completed','failed'].includes(edge.receipt(soul.soulId,off.receipt.id).phase);n++)await tick(1);assert.equal(state('sprinkler').on,false);assert.equal(state('bed-a').moisture,1,'turning off keeps the soil wet');
  if(out){mkdirSync(out,{recursive:true});writeFileSync(`${out}/garden.json`,JSON.stringify(god.model.snapshot()));}
  assert.deepEqual(f.host.engine.runtime.violations,[]);
  const report={status:'pass',hereBytes:{absent:JSON.stringify(absent).length,distant100:JSON.stringify(far).length,nearby:JSON.stringify(near).length},checks:['interruption before contact: no spray, no soaking','in-reach planters soak at contact only','out-of-reach and behind-the-arc planters stay dry','persistence','turning off keeps the soil wet','no distant offers','no moisture facts in here','zero native violations']};

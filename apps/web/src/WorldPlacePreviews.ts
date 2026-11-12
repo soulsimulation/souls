@@ -29,7 +29,7 @@ export class WorldPlacePreviews{
  capture(id:WorldPlaceId):Promise<string|null>{return this.request(id,alive=>this.render(id,id,alive));}
  captureLocation(location:WorldLocation,sceneKey:string):Promise<string|null>{const key=sceneKey+':'+location.id;return this.request(key,alive=>this.render(location.id,key,alive,location));}
  /** Frozen server-owned scene: exact bound geometry, no browser/CDN pixel cache and no live simulation. */
- async captureContext(target: ContextPhotoTarget, entries: readonly ContextMesh[], detail = false, ground?: ContextGround): Promise<{ url?: string; photo?: PhotoChoice; reason?: string }> {
+ async captureContext(target: ContextPhotoTarget, entries: readonly ContextMesh[], detail = false, ground?: ContextGround): Promise<{ url?: string; thumb?: string; photo?: PhotoChoice; reason?: string }> {
   const selection = contextPhotoScene(target, entries);
   if (!selection) return { reason: 'needs-viewpoint: unsupported or empty subject geometry' };
   try { return await this.shootContextPhoto(selection, entries, detail ? [640, 448] : [320, 224], ground); }
@@ -83,7 +83,9 @@ export class WorldPlacePreviews{
    for (let y = 0; y < height; y++) image.data.set(data.subarray((height - 1 - y) * width * 4, (height - y) * width * 4), y * width * 4);
    context.putImageData(image, 0, 0);
    if (photo.cutaway) { context.fillStyle = '#101010'; context.fillRect(0, height - 22, 78, 22); context.font = 'bold 13px sans-serif'; context.fillStyle = '#ffffff'; context.fillText('Cutaway', 7, height - 7); }
-   return { url: canvas.toDataURL('image/png'), photo };
+   // #2192: the PNG stays the agents' picture; Explore shows this compact copy of the same pixels (WebP, as the live previews)
+   const thumb = canvas.toDataURL('image/webp', .82);
+   return { url: canvas.toDataURL('image/png'), ...(thumb.startsWith('data:image/webp') ? { thumb } : {}), photo };
   } finally {
    renderer.setRenderTarget(prior.target); renderer.setClearColor(prior.clear, prior.alpha); renderer.autoClear = prior.autoClear; renderer.localClippingEnabled = prior.clipping;
    world.overrideMaterial = prior.override; world.background = prior.background; mask.overrideMaterial = null;
