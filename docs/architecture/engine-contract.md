@@ -265,7 +265,15 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   The quarantined Soul can act again at once: it is never held or refused for the quarantine. The rule a rung 3 went back
   for stays on the head after that, and a snapshot is taken at once, so a restart never boots from the refused baseline.
 - The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies,
-  while steps are failing too (#1378). A fault that names none still stops everything in place, as above.
+  while steps are failing too (#1378). A fault that names none still stops everything in place, as above, unless it is an
+  invariant that threw and what it was reading is found (#1377, below).
+- An invariant that throws names nobody (`engine.thrown`). Under quarantine/1 the host restores the head to a scratch engine,
+  and there the engine takes entities out of the table half at a time, bodies first (`thrownSourcesV1`), to find the one
+  entity whose absence alone stops the throw (#1377). That entity is quarantined alone, at once, with no rewind, since going
+  back would read it again. Everyone else's programmes go on. The glitch row names it (`thrownReading`), and the
+  `quarantineV1` event carries it, so a replay reads the log and never probes. While steps fail, only that body is refused.
+  A throw that no single entity explains, a step that throws outside any action, or a head that won't snapshot or restore
+  keeps the stop-all, counted as before.
 - A body quarantined again within the cooldown is held whole (#1378): the event also contains every rule on it (key
   `{code: '*', subjects: [body]}`), so a fault that comes back under a new rule each tick is absorbed instead of faulting
   the step. Only a violation whose every subject is held whole is covered; one that names a free body still faults.
