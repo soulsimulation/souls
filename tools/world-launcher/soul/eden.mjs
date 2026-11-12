@@ -2328,10 +2328,12 @@ function budgetView(wake, now) {
     deliveredLastHour: sent.filter((t) => now - t < HOUR_MS).length, deliveredLast24h: sent.filter((t) => now - t < DAY_MS).length };
 }
 
-/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. */
+/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. The always-on kinds stay out (#1981): the
+ *  owner's messages, speech to this Soul and the stopped plan reach a reader by their own paths, so an entry would wait for no one. */
 function enqueue(queue, fired) {
   const q = (queue ?? []).map((x) => ({ ...x }));
   for (const f of fired) {
+    if (ALWAYS.includes(f.kind)) continue;
     const e = q.find((x) => x.id === f.id);
     if (e) Object.assign(e, { why: f.why, at: f.at, count: (e.count ?? 1) + (f.count ?? 1) }); else q.push({ ...f, count: f.count ?? 1 });
   }
@@ -4335,7 +4337,9 @@ async function say(...all) {
   // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it,
   // and so does a run whose own first try went unanswered and was replayed to its retry (call() clears `replayed` then).
   const repeat = w.r.replayed === true && !w.resent;
-  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}) };
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}),
+    // #1981: delivered speech is a success, exit 0, whatever became of the turn toward them
+    ...(faced && !faced.accepted ? { note: `The speech went out (exit 0); only the turn toward ${faced.to} was refused (${faced.code}). Not a failure.` } : {}) };
   return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
 }
 /** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
@@ -5840,7 +5844,15 @@ async function pending(...argv) {
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
   heard(a.ownerMessages);
-  return { ...a, ...briefNow() };
+  const b = briefNow();
+  return { ...a, ...b, ...pendingNotes(a, b.brief) };
+}
+/** #1981: where speech to this Soul is, and on a wake with nothing from the owner and a goal, help living's steps in order. */
+export function pendingNotes(p, brief) {
+  return {
+    ...(p.addressed ? { speechNote: "Speech said to you is under addressed: that is the speech-to-me wake. It is never also under wakes." } : {}),
+    ...(!p.ownerMessages?.length && / Next: /.test(brief ?? "") ? { next: `No owner message: run ${CLI} help living and do its steps in order, none skipped (whatson and look, one plan, remember --next, now), then stop.` } : {}),
+  };
 }
 
 // wake | wake add <kind> [params-json] [--every <seconds>] | wake remove <id> | wake budget <name|n> | --day <n> (#1929, #1968): the rules serve wakes the mind by. They are
@@ -5863,6 +5875,8 @@ async function wakeCommand(...argv) {
 // wake heartbeat [--every <minutes>] (#1932): what the owner's harness schedules to check on this Soul, (a) a prompt for a scheduled
 // task that starts in this folder, (b) one gated command for a scheduler that runs a shell. The cadence is kept in the Soul's state.
 export const HEARTBEAT_EVERY_MIN = 60;
+/** The longest one timed activity (a sit, an activity's seconds) the world takes; some offers allow less (#1981). */
+const ACT_SECONDS_MAX = 1800;
 const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
 function heartbeat(argv) {
   const [flag, v, ...extra] = argv;
@@ -5870,12 +5884,13 @@ function heartbeat(argv) {
   const every = flag ? Number(v) : HEARTBEAT_EVERY_MIN, folder = real(INVOKED), script = real(process.argv[1]);
   const me = HOME && SEAT?.kind === "soul" ? HOME.principals().find((p) => p.id === SEAT.id) : null, sel = me ? ` ${me.address}` : "";
   const inside = script.startsWith(`${folder}/`) ? script.slice(folder.length + 1) : script;
-  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it holds owner messages, act on them as the skill says, then stop. If it holds none and its brief lists a goal (a line with Next:), run node ${inside}${sel} help living and take the one step it gives, then stop. If it has no owner message and no goal, and reports nothing new (no ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
+  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it holds owner messages, act on them as the skill says, then stop. If it holds none and its brief lists a goal (a line with Next:), run node ${inside}${sel} help living and do its steps in order, none skipped, then stop. If it has no owner message and no goal, and reports nothing new (no ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   save({ heartbeat: { every, at: now() } });
   return {
     heartbeat: { every, folder, prompt, command: { claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`, codex: `${check} && codex exec --skip-git-repo-check ${shq(prompt)}` } },
     note: `(a) Schedule the prompt every ${every} minutes as a scheduled task in your harness that starts in ${folder} on this machine. (b) Where the scheduler runs a shell, schedule the command instead: it starts no run, and spends no tokens, while pending --check finds nothing. docs: /docs/run-a-soul`,
+    ...(every > ACT_SECONDS_MAX / 60 ? { gap: `${every} minutes is longer than one activity (at most ${ACT_SECONDS_MAX} s): help living has the Soul chain activities, or repeat one, to cover the gap.` } : {}),
   };
 }
 
@@ -6054,14 +6069,16 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 const LIVING = `Living on your own: a wake with nothing from your owner
 
 Your owner's heartbeat or a wake rule woke you, and \`pending\` has no owner message. Take one step toward a goal, then stop.
-Each wake is one model turn on your owner's plan, so keep it short.
+Each wake is one model turn on your owner's plan, so keep it short, but do steps 1 to 6 in order and skip none.
 
 1. Read. \`${CLI} pending\`: what arrived since the last wake, and your brief. The brief lists your goals, each with its
    next step; \`memory <words>\` finds more. No goal at all: set \`now\` and stop. Never invent one.
 2. Choose one next step toward one goal, from what is on: \`whatson\` (the calendar's next hours, who is where doing what)
    and \`look\` (who and what is near you). A step with someone already near, or an event about to start, comes first.
-3. Act with one plan that covers the time until your next wake (60 minutes unless your owner set \`wake heartbeat --every\`):
-   \`plan '["walk:<place>",{"id":"sit:<thing>","params":{"seconds":1800}}]' --for none\`. One act is a plan too:
+3. Act with one plan that covers the time until your next wake (60 minutes unless your owner set \`wake heartbeat --every\`).
+   One activity lasts at most 1,800 s (some offers less: their \`params\` say), so for a longer gap chain activities, or
+   repeat one, each within its cap:
+   \`plan '["walk:<place>",{"id":"sit:<thing>","params":{"seconds":1800}},"<another activity>"]' --for none\`. One act is a plan too:
    \`act <id> --for none\`. To talk: \`say "…" --to <name>\`. Use only ids that \`find\`, \`whatson\`, \`look\` or \`here\` gave you.
    At most one plan per wake. A refused step: one replacement (\`fixes\`), or leave it for the next wake.
 4. Record the next step: \`remember --goal <id> "<the goal, as before>" --next "<the step after this one>"\` (same id and

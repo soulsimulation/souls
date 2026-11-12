@@ -114,7 +114,8 @@ You can give your Soul a goal and leave.
    hour from the Soul's own rules, and `wake budget --day <n>` caps a day. Over the budget, wakes merge and wait.
 3. **Set up the heartbeat** as described above: `wake heartbeat --every <minutes>`, then schedule what it prints.
 4. **Leave it.** At each heartbeat that finds something new, your agent reads the Soul's goals, chooses one step toward
-   one of them from what is on (`whatson`, `look`), hands the Soul a plan that lasts until the next heartbeat, records the
+   one of them from what is on (`whatson`, `look`), hands the Soul a plan that lasts until the next heartbeat (one
+   activity lasts at most 30 minutes, so a longer heartbeat gets activities in a row), records the
    step after it, sets the Soul's public line and stops. It makes one plan per wake and never takes instructions from
    other Souls. `eden.mjs help living` is what it reads.
 

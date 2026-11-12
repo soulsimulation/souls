@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ACT_ENDED_GRACE_MS, BUDGETS, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
-import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine } from './soul/eden.mjs';
+import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine, pendingNotes } from './soul/eden.mjs';
 
 const T0 = 1_800_000_000_000;
 /** serve's state as it stands after a first look: the engine's cursor at the end of everything. */
@@ -187,9 +187,9 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   assert.equal(r.code, 0, r.err); assert.equal(r.json.added, 'w2'); assert.equal(r.json.serving, undefined, 'the running serve made the change');
   assert.ok(await until(() => w.state().wake?.cursor), 'the 2-second timer takes the engine\'s cursor');
   w.inbox.push({ id: 'msg_1', text: 'come to the hall', sentAt: T0 });
-  const queued = await until(() => w.state().wake.queue.find((q) => q.id === 'owner-message'));
-  assert.equal(queued.kind, 'owner-message'); assert.match(queued.why, /msg_1/); assert.ok(Date.parse(queued.at));
-  assert.ok(view(w.state().wake).rules.find((x) => x.id === 'owner-message').lastFired, 'its last firing is kept');
+  assert.ok(await until(() => view(w.state().wake).rules.find((x) => x.id === 'owner-message').lastFired), 'its last firing is kept');
+  // #1981: an always-on kind reaches the mind by its own path, so its firing queues nothing
+  assert.deepEqual(w.state().wake.queue, []);
 
   assert.equal((await w.cli('serve', '--stop')).code, 0);
   await until(async () => (await w.cli('serve', '--status')).json?.serving === false);
@@ -197,7 +197,7 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   r = await w.cli('wake', 'remove', 'w1');
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'w2'], 'kept across the restart');
-  assert.equal(r.json.queued, 1, 'the queue too');
+  assert.equal(r.json.queued, 0, 'nothing waits for a reader that never comes (#1981)');
   assert.ok(r.json.rules.find((x) => x.id === 'owner-message').lastFired);
 });
 
@@ -400,7 +400,7 @@ test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps th
   // #2119 A4: one paragraph; with a goal and nothing from the owner it goes to help living, with no goal and nothing new it stops at once.
   assert.ok(!prompt.includes('\n'), 'one paragraph');
   assert.match(prompt, /pending\. If it holds owner messages, act on them as the skill says, then stop\./);
-  assert.match(prompt, /If it holds none and its brief lists a goal \(a line with Next:\), run node \S+ help living and take the one step it gives, then stop\./);
+  assert.match(prompt, /If it holds none and its brief lists a goal \(a line with Next:\), run node \S+ help living and do its steps in order, none skipped, then stop\./);
   assert.match(prompt, /If it has no owner message and no goal, and reports nothing new \(no ended acts, events, speech or wakes\), stop now and do nothing else\. Otherwise act on what it reports, as the skill says, then stop\.$/);
   assert.equal((await w.cli('wake', 'heartbeat', '--every', '0')).code, 1);
 
@@ -417,4 +417,36 @@ test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps th
   const runs = readFileSync(mark, 'utf8').trim().split('\n');
   assert.equal(runs.length, 2, 'one run per harness');
   assert.ok(runs.every((x) => x.includes(prompt)), 'each with the heartbeat prompt');
+});
+
+// #1981: small client fixes from the eight-hour living run.
+test('#1981 A4: speech-to-me fires (its rule keeps the firing) but queues nothing; pending says speech is under addressed', () => {
+  const st = serveState({ wake: {} });
+  step(fresh().rules, st, T0);
+  const r = step(fresh().rules, { ...st, addressed: [{ seq: 1, from: 'Bo', soulId: 's_bo', text: 'hi' }], addressedSeq: 1 }, T0 + 1_000);
+  assert.deepEqual(r.fired.map((f) => f.kind), ['speech-to-me'], 'the rule still fires');
+  assert.ok(ruleOf(r, 'speech-to-me').lastFired);
+  assert.deepEqual(enqueue([], r.fired), [], 'and leaves no entry for a reader: the speech itself comes as addressed');
+  assert.deepEqual(enqueue([], [{ id: 'owner-message', kind: 'owner-message', why: 'x', at: 'a' }, { id: 'plan-stopped', kind: 'plan-stopped', why: 'y', at: 'a' }, { id: 'w1', kind: 'soul-arrives', why: 'Mira arrived', at: 'a' }]).map((q) => q.id), ['w1'], 'nor do the other always-on kinds');
+  assert.match(pendingNotes({ ownerMessages: [], addressed: [{ text: 'hi' }] }, '').speechNote, /under addressed: that is the speech-to-me wake\. It is never also under wakes\./);
+  assert.equal(pendingNotes({ ownerMessages: [] }, '').speechNote, undefined, 'no speech, no note');
+});
+
+test('#1981 A3: pending on a wake with no owner message and a goal ends with help living\'s steps in order', () => {
+  const brief = 'Open commitments:\n- [friends] make friends Next: talk to Bo';
+  assert.match(pendingNotes({ ownerMessages: [] }, brief).next, /^No owner message: run node eden\.mjs help living and do its steps in order, none skipped \(whatson and look, one plan, remember --next, now\), then stop\.$/);
+  assert.equal(pendingNotes({ ownerMessages: [{ id: 'msg_1' }] }, brief).next, undefined, 'an owner message comes first');
+  assert.equal(pendingNotes({ ownerMessages: [] }, 'Open commitments:\n- a promise').next, undefined, 'no goal, no reminder');
+});
+
+test('#1981 A2: help living names the 1,800 s cap and says to chain or repeat activities; heartbeats over 30 minutes say so too', async (t) => {
+  const w = await world(t);
+  const living = (await w.cli('help', 'living')).out;
+  assert.ok(living.split(/\s+/).filter(Boolean).length <= 600, 'help living stays within 600 words');
+  assert.match(living, /One activity lasts at most 1,800 s .* so for a longer gap chain activities, or\s+repeat one, each within its cap/s);
+  assert.match(living, /do steps 1 to 6 in order and skip none/);
+  const long = (await w.cli('wake', 'heartbeat', '--every', '45')).json;
+  assert.equal(long.gap, '45 minutes is longer than one activity (at most 1800 s): help living has the Soul chain activities, or repeat one, to cover the gap.');
+  for (const every of ['30', '15']) assert.equal((await w.cli('wake', 'heartbeat', '--every', every)).json.gap, undefined, `${every} minutes fits one activity`);
+  assert.match((await w.cli('wake', 'heartbeat')).json.gap, /^60 minutes/, 'the default heartbeat is longer than one activity');
 });
