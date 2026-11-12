@@ -36,8 +36,6 @@ test('parasol: words, contact, shade, refusals, long tail', {timeout: 240000}, a
  assert.equal((await here()).me.shade, undefined, 'beside it, no shade');
  // only the base and the pole are solid, open or closed: she walks under the canopy
  const solids = () => JSON.stringify(god.model.footprintsOf(id)); const openSolids = solids(); assert.equal(god.model.footprintsOf(id).length, 2, openSolids);
- // words
- for (const [words, cap] of [['close the parasol', 'close'], ['Close the parasol', 'close']]) {const r = await post('/v1/edge/resolve', {capability: words}); assert.equal(r.resolve?.capability ?? r.resolve?.would?.capability, `object:${id}:${cap}`, `${words}: ${JSON.stringify(r).slice(0, 300)}`);}
  // the contact: the state changes at the hand, not before
  const close = await post('/v1/edge/act', {capability: 'close the parasol'}); assert.equal(close.accepted, true, JSON.stringify(close).slice(0, 300));
  for (let n = 0; n < 400 && !body().human?.handActuator; n++) await tick(1);

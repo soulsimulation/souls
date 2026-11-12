@@ -28,6 +28,8 @@ function script(f: number, frame: Record<string,SampledEntity>) {
 }
 function run(sync: boolean, frames=720, seekAt=-1) {
   const roots=[village()], camera=new WorldBroadcast(), director=(camera as any).director, rendered=(camera as any).rendered;
+  // These checks pin the framing solver; #2202 films a talk circle with a moving shot, so keep the solver here.
+  (camera as any).tracker.pose=()=>null;
   // Reference: the whole decision on the frame it is due (pre-amortisation).
   if(sync)director.advance=(o:unknown,dt:number,start:boolean)=>start?director.update(o,dt):director.track(o,dt);
   const records:Record<string,Entity>={},frame:Record<string,SampledEntity>={};

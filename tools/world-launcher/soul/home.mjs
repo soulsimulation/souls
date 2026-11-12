@@ -4,7 +4,7 @@
 // Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file, so this module
 // lives inside it as a generated block.
 
-import { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, chmodSync, closeSync, constants as fsConstants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 export const HOME_NAME = ".souls", LEGACY_STATE = ".eden-agent.json", STATE_FILE = "state.json", CREDENTIALS = "credentials.json";
@@ -16,7 +16,7 @@ export const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "ap
 /** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
 export const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
-export const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version"]);
+export const HOME_COMMANDS = new Set(["list", "doctor", "default", "export", "import", "init", "upgrade", "guide", "help", "version", "news"]);
 /** What a legacy folder hands over on import. Anything else (1.9's `delegations` holds tokens) stays in its own file. */
 export const IMPORTED_FIELDS = ["world", "worldId", "accountAuth", "identity", "soul", "token", "home", "cursor", "ownerMark", "lastReceipt", "lastActAt", "lastAcked", "lastAckedAt", "lastAckedActed", "links", "pendingCreate"];
 const IMPORTED_RUNTIME = [".eden-serve.json"];
@@ -156,6 +156,24 @@ export function newerThan(a, b) {
   const p = (v) => String(v ?? "0").split(".").map(Number), x = p(a), y = p(b);
   for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d) return d > 0; }
   return false;
+}
+// #1941: the platform feed. A site is a world URL's origin and the path above its /w/<slug>; its feed is <site>/v1/feed.
+// config.json keeps one entry per site: the cursor, when it was last checked and tried, the last 50 items, and the ids read
+// and woken for. Only sites on an origin this home trusts are read.
+export const FEED_EVERY_MS = 6 * 3_600_000, FEED_RETRY_MS = 10 * 60_000, FEED_KEEP = 50;
+const FEED_FIELDS = ["id", "at", "kind", "title", "body", "url", "startsAt", "place", "minClient"];
+export const siteOf = (url) => { try { const u = new URL(url); return u.origin + u.pathname.replace(/\/w\/[^/]+\/*$/, "").replace(/\/+$/, ""); } catch { return null; } };
+const feedNum = (id) => Number(/^f(\d+)$/.exec(id ?? "")?.[1] ?? 0);
+/** The sites this home reads news from: its worlds' sites, on origins it trusts. */
+export const feedSites = (cfg) => [...new Set(Object.values(cfg.worlds ?? {}).filter((w) => (cfg.trustedOrigins ?? []).includes(originOf(w.url))).map((w) => siteOf(w.url)).filter(Boolean))];
+/** The sites checked more than 6 h ago and not tried in the last 10 minutes (a failed check is retried after that). */
+export const feedDue = (cfg, now) => feedSites(cfg).filter((s) => { const f = cfg.feeds?.[s] ?? {}; return now - (f.checkedAt ?? 0) > FEED_EVERY_MS && now - (f.triedAt ?? 0) > FEED_RETRY_MS; });
+const unreadOf = (f) => (f?.items ?? []).filter((i) => feedNum(i.id) > feedNum(f.read));
+/** What a command adds to its JSON: `{unread, update?}`; update is the newest minClient above this client among unread releases. */
+export function newsOf(cfg, version) {
+  const unread = feedSites(cfg).flatMap((s) => unreadOf(cfg.feeds?.[s]));
+  const update = unread.filter((i) => i.kind === "release" && newerThan(i.minClient, version)).map((i) => i.minClient).reduce((a, b) => (newerThan(b, a) ? b : a), null);
+  return unread.length ? { unread: unread.length, ...(update ? { update } : {}) } : null;
 }
 /** A world's name for a Soul or itself, as this home keeps it: one plain line. It reaches the guide an agent reads, and a
  *  world may be hostile, so no line breaks, control or invisible characters, and a cap well above any name a world allows. */
@@ -528,15 +546,23 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return out;
   }
 
-  /** Replace the home's bundle, and the running copy when it lives in this home's folder. Never older than either. */
+  const put = (file, bytes, mode) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, bytes, { mode }); renameSync(tmp, file); };
+  /** #1939: what an upgrade replaced, one of each, beside the bundle in use: bin/eden-<version>.mjs and bin/skill-<version>.md. */
+  const kept = (prefix) => (existsSync(at("bin")) ? readdirSync(at("bin")) : []).filter((f) => f.startsWith(prefix) && !f.endsWith(".tmp")).map((f) => at("bin", f));
+  const inHomeFolder = (running) => running && dirname(real(running)) === dirname(real(root));
+  /** Replace the home's bundle, and the running copy when it lives in this home's folder. Never older than either.
+   *  The bundle replaced is kept for `upgrade --rollback`, and nothing older. */
   function installBundle(bytes, running, version) {
-    if (!newerThan(version, config().client)) return null;
+    const old = config().client, inUse = at("bin", "eden.mjs");
+    if (!newerThan(version, old)) return null;
     mkdirSync(at("bin"), { recursive: true, mode: 0o700 });
-    const write = (file) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, bytes, { mode: 0o755 }); renameSync(tmp, file); };
-    write(at("bin", "eden.mjs"));
-    if (running && dirname(real(running)) === dirname(real(root))) write(running);
-    updateConfig((c) => { c.client = version; });
-    return at("bin", "eden.mjs");
+    for (const f of [...kept("eden-"), ...kept("skill-")]) rmSync(f, { force: true });
+    const keep = /^[0-9.]+$/.test(old ?? "") && existsSync(inUse);
+    if (keep) copyFileSync(inUse, at("bin", `eden-${old}.mjs`));
+    put(inUse, bytes, 0o755);
+    if (inHomeFolder(running)) put(running, bytes, 0o755);
+    updateConfig((c) => { c.client = version; c.previousClient = keep ? old : null; delete c.previousSkill; delete c.skippedClient; });
+    return inUse;
   }
   /** The folder a person sees: the one holding .souls/, or a SOULS_HOME itself. */
   const folder = () => (root.endsWith(`/${HOME_NAME}`) ? dirname(root) : root);
@@ -548,18 +574,78 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
       .map((file) => ({ file, text: read(file) })).filter((c) => isSoulsSkill(c.text)).map(({ file, text }) => ({ rel: said(file), file, version: skillVersionOf(text) }));
   };
-  /** The versioned copies older than `version`: what `upgrade` refreshes. */
-  const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
+  const behind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
+  /** A project copy (.claude/skills, .agents/skills) is optional: SKILL.md beside it is the fallback. */
+  const optionalCopy = (file) => SKILL_COPIES.slice(1).some((rel) => file.endsWith(`/${rel}`));
+  const unwritable = (file) => { try { accessSync(dirname(file), fsConstants.W_OK); accessSync(file, fsConstants.W_OK); return null; } catch (e) { return e.code ?? "not writable"; } };
+  /** The versioned copies older than `version`: what `upgrade` refreshes. An optional copy this process cannot write (a
+   *  read-only folder) is not counted, so it never asks for an upgrade that cannot reach it. */
+  const skillBehind = (version, also) => behind(version, also).filter((c) => !optionalCopy(c.file) || !unwritable(c.file));
   /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
-   *  never over one as new, never a new file. */
+   *  never over one as new, never a new file. An optional copy that cannot be written is a one-line note, not an error. */
   function installSkill(bytes, version, also = []) {
-    const wrote = [];
-    for (const { file, rel } of skillBehind(version, also)) {
-      const tmp = `${file}.${process.pid}.tmp`;
-      writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+    const wrote = [], notes = [], first = skillBehind(version, also)[0];
+    if (first) {   // #1939: the first copy replaced is the skill a rollback restores
+      mkdirSync(at("bin"), { recursive: true, mode: 0o700 });
+      for (const f of kept("skill-")) rmSync(f, { force: true });
+      copyFileSync(first.file, at("bin", `skill-${first.version}.md`));
+      updateConfig((c) => { c.previousSkill = first.version; delete c.skippedClient; });
     }
-    return wrote;
+    for (const { file, rel } of behind(version, also)) {
+      const tmp = `${file}.${process.pid}.tmp`;
+      try {
+        const no = optionalCopy(file) ? unwritable(file) : null;
+        if (no) throw Object.assign(new Error(no), { code: no });
+        writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+      } catch (e) {
+        if (!optionalCopy(file)) throw e;
+        try { unlinkSync(tmp); } catch { /* never written */ }
+        notes.push(`${rel} was not updated (${e.code ?? "not writable"}); SKILL.md in this folder is the current skill.`);
+      }
+    }
+    return { wrote, notes };
   }
+  /** #1939: the kept client and skill made current again: the home's bundle, the running copy in this home's folder, the
+   *  folder's eden.mjs while it holds the version left, and each
+   *  skill copy newer than the kept one. The version left is skipped until a newer one is served. Refused while a world here
+   *  needs more than the kept client. */
+  function rollback(running, also = []) {
+    const c = config(), prev = c.previousClient, prevSkill = c.previousSkill, file = (name) => (existsSync(at("bin", name)) ? at("bin", name) : null);
+    const client = prev ? file(`eden-${prev}.mjs`) : null, skill = prevSkill ? file(`skill-${prevSkill}.md`) : null;
+    if (!client && !skill) throw new Error("Nothing to roll back to: this home keeps no previous client or skill.");
+    const needs = client && Object.entries(c.worlds).find(([, w]) => newerThan(w.minClient, prev));
+    if (needs) throw new Error(`${needs[0]} needs eden ${needs[1].minClient} or newer, above the previous client ${prev}, so a rollback would shut this home out of it. Nothing changed.`);
+    const wrote = [];
+    if (skill) { const bytes = readFileSync(skill); for (const s of skillVersions(also).filter((x) => newerThan(x.version, prevSkill))) { put(s.file, bytes, 0o644); wrote.push(s.rel); } }
+    if (client) {
+      // The folder's copy holding the version left would never hand over to an older bin, so it goes back too, whoever runs this.
+      const bytes = readFileSync(client), mine = join(folder(), "eden.mjs"), left = /^const VERSION = "([0-9.]+)";$/m.exec(read(mine) ?? "")?.[1];
+      put(at("bin", "eden.mjs"), bytes, 0o755);
+      for (const f of new Set([inHomeFolder(running) ? real(running) : null, left && left === c.client ? real(mine) : null])) if (f) put(f, bytes, 0o755);
+    }
+    for (const f of [client, skill]) if (f) rmSync(f, { force: true });
+    updateConfig((x) => { x.skippedClient = x.client; if (client) x.client = prev; delete x.previousClient; delete x.previousSkill; });
+    return { left: c.client, client: client ? prev : null, skill: skill ? { to: prevSkill, wrote } : null };
+  }
+  /** #1941: claim the due sites for one check, so two processes never check one site together. */
+  const claimFeeds = (now = Date.now()) => (feedDue(config(), now).length ? updateConfig((c) => { const due = feedDue(c, now); for (const s of due) (c.feeds ??= {})[s] = { ...c.feeds[s], triedAt: now }; return due; }) : []);
+  /** A check's answer: the items after the cursor, oldest first, and the next cursor. A site's first answer wakes no one. */
+  const noteFeed = (site, items, next, now = Date.now()) => updateConfig((c) => {
+    const f = { ...(c.feeds ??= {})[site] }, gone = new Set(items.map((i) => i.replaces).filter(Boolean)), first = !f.checkedAt;
+    f.items = [...(f.items ?? []).filter((i) => !gone.has(i.id)), ...items.map((i) => Object.fromEntries(FEED_FIELDS.filter((k) => i[k] != null).map((k) => [k, i[k]])))].slice(-FEED_KEEP);
+    Object.assign(f, { cursor: next ?? f.cursor ?? null, checkedAt: now }); delete f.triedAt;
+    if (first) f.woke = f.items.at(-1)?.id ?? null;
+    c.feeds[site] = f;
+  });
+  /** `news`: the unread items (or the last 50 with `all`) of every site, oldest first; all of them are read now. */
+  const readNews = ({ all = false } = {}) => updateConfig((c) => {
+    const out = [];
+    for (const s of feedSites(c)) { const f = c.feeds?.[s]; if (!f?.items?.length) continue; out.push(...(all ? f.items : unreadOf(f)).map((i) => ({ site: s, ...i }))); f.read = f.items.at(-1).id; }
+    return out.sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-FEED_KEEP);
+  });
+  /** Items no process in this home has raised a wake for: each is handed to one caller, once. */
+  const unwoken = (c) => feedSites(c).flatMap((s) => (c.feeds?.[s]?.items ?? []).filter((i) => feedNum(i.id) > feedNum(c.feeds[s].woke)).map((i) => ({ s, i })));
+  const claimNews = () => (unwoken(config()).length ? updateConfig((c) => { const n = unwoken(c); for (const { s, i } of n) c.feeds[s].woke = i.id; return n.map(({ i }) => i); }) : []);
   const trustOrigin = (origin) => updateConfig((c) => { c.trustedOrigins = [...new Set([...(c.trustedOrigins ?? []), origin])]; });
 
   /** The guide's head, where a chat learns who lives here, rewritten in place in a guide this home wrote (CLAUDE.md, AGENTS.md
@@ -576,5 +662,5 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return wrote;
   }
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, refreshGuide, config, noteConsolidation, installBundle, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, refreshGuide, config, noteConsolidation, claimFeeds, noteFeed, readNews, claimNews, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
