@@ -4,7 +4,7 @@
 // Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file, so this module
 // lives inside it as a generated block.
 
-import { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, chmodSync, closeSync, constants as fsConstants, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 export const HOME_NAME = ".souls", LEGACY_STATE = ".eden-agent.json", STATE_FILE = "state.json", CREDENTIALS = "credentials.json";
@@ -566,17 +566,30 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     return [...new Set([folder(), ...also].map((f) => real(f)))].flatMap((dir) => SKILL_COPIES.map((rel) => join(dir, rel)))
       .map((file) => ({ file, text: read(file) })).filter((c) => isSoulsSkill(c.text)).map(({ file, text }) => ({ rel: said(file), file, version: skillVersionOf(text) }));
   };
-  /** The versioned copies older than `version`: what `upgrade` refreshes. */
-  const skillBehind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
+  const behind = (version, also) => skillVersions(also).filter((c) => c.version && newerThan(version, c.version));
+  /** A project copy (.claude/skills, .agents/skills) is optional: SKILL.md beside it is the fallback. */
+  const optionalCopy = (file) => SKILL_COPIES.slice(1).some((rel) => file.endsWith(`/${rel}`));
+  const unwritable = (file) => { try { accessSync(dirname(file), fsConstants.W_OK); accessSync(file, fsConstants.W_OK); return null; } catch (e) { return e.code ?? "not writable"; } };
+  /** The versioned copies older than `version`: what `upgrade` refreshes. An optional copy this process cannot write (a
+   *  read-only folder) is not counted, so it never asks for an upgrade that cannot reach it. */
+  const skillBehind = (version, also) => behind(version, also).filter((c) => !optionalCopy(c.file) || !unwritable(c.file));
   /** The served skill, verified by the caller, over every Souls skill copy older than it: only where one is present,
-   *  never over one as new, never a new file. */
+   *  never over one as new, never a new file. An optional copy that cannot be written is a one-line note, not an error. */
   function installSkill(bytes, version, also = []) {
-    const wrote = [];
-    for (const { file, rel } of skillBehind(version, also)) {
+    const wrote = [], notes = [];
+    for (const { file, rel } of behind(version, also)) {
       const tmp = `${file}.${process.pid}.tmp`;
-      writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+      try {
+        const no = optionalCopy(file) ? unwritable(file) : null;
+        if (no) throw Object.assign(new Error(no), { code: no });
+        writeFileSync(tmp, bytes, { mode: 0o644 }); renameSync(tmp, file); wrote.push(rel);
+      } catch (e) {
+        if (!optionalCopy(file)) throw e;
+        try { unlinkSync(tmp); } catch { /* never written */ }
+        notes.push(`${rel} was not updated (${e.code ?? "not writable"}); SKILL.md in this folder is the current skill.`);
+      }
     }
-    return wrote;
+    return { wrote, notes };
   }
   /** #1941: claim the due sites for one check, so two processes never check one site together. */
   const claimFeeds = (now = Date.now()) => (feedDue(config(), now).length ? updateConfig((c) => { const due = feedDue(c, now); for (const s of due) (c.feeds ??= {})[s] = { ...c.feeds[s], triedAt: now }; return due; }) : []);

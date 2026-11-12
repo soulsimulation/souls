@@ -12,8 +12,8 @@
 //   with bench-2, a pond with an unnamed bench by it and another unnamed bench by the fountain — and no flags;
 //   a SOUL (created and paired through the normal owner flow, acting only through /v1/edge/*) is told, by name: walk to
 //   the fountain, go into rose-house (round the house, in at its front door), walk:rose-house/kitchen, walk:plaza/bench-2,
-//   sit on the bench by the pond, then walk to the bedroom in rose-house. The plain-word acts go through the real Soul
-//   CLI (tools/edge-skill/eden-agent.mjs, unchanged) and the ledger's own vocabulary (unchanged): the world-engine side
+//   sit on the bench by the pond, then walk to the bedroom in rose-house. The CLI acts go through the Soul client
+//   (eden.mjs, by the ids the world offers) and the ledger's own vocabulary (unchanged): the world-engine side
 //   only offers `walk:<path>` capabilities and labels seats with what they are by. Where she ends up is read from the
 //   god's `where` query (room / area), not from any new edge field.
 //
@@ -169,12 +169,13 @@ async function shotDuring(name, opts, run) {
 }
 
 
-// ---------- the Soul CLI (Codex's eden-agent.mjs, unchanged), in its own private folder
+// ---------- the Soul client (eden.mjs, the launcher's pinned copy), in its own private folder; HOME is the run's folder,
+// so the client never reads or writes the machine's own Souls home
 import { execFile } from 'node:child_process';
 const cliDir = resolve(out, 'soul-cli'); mkdirSync(cliDir, { recursive: true });
-const CLI = resolve(root, 'tools/edge-skill/eden-agent.mjs');
+const CLI = resolve(root, 'tools/world-launcher/soul/eden.mjs');
 function cli(...argv) {
-  return new Promise((ok) => execFile(process.execPath, [CLI, ...argv], { cwd: cliDir, timeout: 120_000, env: { ...process.env, EDEN_AGENT_NO_DASHBOARD: '1' } }, (err, stdout, stderr) => {
+  return new Promise((ok) => execFile(process.execPath, [CLI, ...argv], { cwd: cliDir, timeout: 120_000, env: { ...process.env, HOME: out } }, (err, stdout, stderr) => {
     const s = String(stdout); let data = null; try { data = JSON.parse(s.slice(s.indexOf('{'))); } catch { }
     ok({ code: err?.code ?? 0, data, stderr: String(stderr).slice(0, 400), raw: data ? undefined : s.slice(0, 400) });
   }));
@@ -271,7 +272,7 @@ try {
     const want = ['walk:mimos', 'walk:mimos/main', 'walk:mimos/main-south', 'walk:mimos/floor', 'walk:kitchen', 'walk:kitchen/working-kitchen', 'walk:kitchen/dining-hall', 'walk:showers'];
     return { ok: want.every((w) => c.includes(w)), missing: want.filter((w) => !c.includes(w)), walks: c.filter((x) => x.startsWith('walk:')).length };
   }, { timeoutMs: 30000 }), (r) => r?.ok);
-  await step('S1 the Soul CLI (unchanged) sees them: its map lists the rooms mimos/main, mimos/floor, kitchen/working-kitchen, kitchen/dining-hall, showers/shower-1', async () => {
+  await step('S1 the Soul client sees them: its map lists the rooms mimos/main, mimos/floor, kitchen/working-kitchen, kitchen/dining-hall, showers/shower-1', async () => {
     const r = await cli('map'); const places = r.data?.places ?? [];
     const want = ['g-mimos.main', 'g-mimos.floor', 'g-kitchen.working-kitchen', 'g-kitchen.dining-hall', 'g-showers.shower-1'];
     const rooms=want.map(id=>places.find(p=>p.id===id)).filter(Boolean);
@@ -279,18 +280,18 @@ try {
       missing: want.filter(id=>!places.some(p=>p.id===id&&typeof p.name==='string'&&p.name.trim().length)), err: r.stderr || r.raw };
   }, (r) => r.code === 0 && r.missing.length === 0);
 
-  const m1 = await step('S2 CLI: act "walk to Mimos" → walk:mimos; she walks round to its open front and in, into main south', async () => {
-    const a = await cli('act', 'walk to Mimos'); const r = await follow(a.data, { maxS: 300 });
-    return { cli: { accepted: a.data?.accepted, resolved: a.data?.resolved, reason: a.data?.reason }, phase: r.phase, code: r.code, reason: r.reason, end: r.end, room: r.room, walked: +walked(r.samples).toFixed(1) };
-  }, (r) => r.cli.accepted && /walk:mimos/.test(r.cli.resolved?.to ?? '') && r.phase === 'completed' && r.room?.room === 'main-south');
+  const m1 = await step('S2 CLI: act walk:mimos; she walks round to its open front and in, into main south', async () => {
+    const a = await cli('act', 'walk:mimos'); const r = await follow(a.data, { maxS: 300 });
+    return { cli: { accepted: a.data?.accepted, reason: a.data?.reason }, phase: r.phase, code: r.code, reason: r.reason, end: r.end, room: r.room, walked: +walked(r.samples).toFixed(1) };
+  }, (r) => r.cli.accepted && r.phase === 'completed' && r.room?.room === 'main-south');
   const m2 = await step('S3 walk:mimos/floor → from main south through the pass-through racks into the tea room (Mimos floor)', async () => {
     const r = await walkTo('walk:mimos/floor'); return { ...r, inFloor: inRoom(r.end?.p, 'mimos/floor') };
   }, (r) => r.accepted && r.phase === 'completed' && r.inFloor);
   { const p = m2?.end?.p; if (p) await shots([{ name: 's3-in-mimos-floor', eye: ofs(p, -2.4, 1.9, -0.6), at: ofs(p, 2, 0.7, 0.6), wait: 5000 }]); }
-  const m3 = await step('S4 CLI: act "sit on the honey sofa" → #13 beneath the posters; she sits', async () => {
-    const a = await cli('act', 'sit on the honey sofa', '{"seconds":600}'); const r = await follow(a.data, { maxS: 200, until: (me) => me.activity === 'sit' });
-    return { cli: { accepted: a.data?.accepted, resolved: a.data?.resolved, reason: a.data?.reason }, end: r.end, inFloor: inRoom(r.end?.p, 'mimos/floor') };
-  }, (r) => r.cli.accepted && /^sit:/.test(r.cli.resolved?.to ?? '') && r.end?.activity === 'sit' && r.inFloor);
+  const m3 = await step('S4 CLI: act sit:<honey sofa> → #13 beneath the posters; she sits', async () => {
+    const a = await cli('act', `sit:${(await entity('mimos/honey-sofa-13')).entity?.id}`, '{"seconds":600}'); const r = await follow(a.data, { maxS: 200, until: (me) => me.activity === 'sit' });
+    return { cli: { accepted: a.data?.accepted, reason: a.data?.reason }, end: r.end, inFloor: inRoom(r.end?.p, 'mimos/floor') };
+  }, (r) => r.cli.accepted && r.end?.activity === 'sit' && r.inFloor);
   { const p = m3?.end?.p; if (p) await shots([{ name: 's4-on-the-honey-sofa', eye: ofs(p, 0.4, 1.7, 2.6), at: ofs(p, 0, 0.7, -0.5), wait: 5000 }]); }
   const m4 = await step('S5 walk:mimos/main → she stands, climbs the risers to the raised main (.53 m)', async () => {
     const r = await walkTo('walk:mimos/main'); return { ...r, inMain: inRoom(r.end?.p, 'mimos/main'), y: r.end?.p?.[1] };
@@ -312,12 +313,12 @@ try {
     const r = c ? await sitOn(c.id) : { accepted: false, reason: 'no sit capability for the red sofa' };
     return { cap: c?.id, ...r, inLounge: inRoom(r.end?.p, 'mimos/main-south') };
   }, (r) => r.accepted && r.end?.activity === 'sit' && r.inLounge);
-  const k1 = await step('S7 CLI: act "walk to the kitchen" → into the Chiba kitchen (out of Mimos, round to the diner steps, up through the blue door)', async () => {
-    const a = await cli('act', 'walk to the kitchen'); const r = await follow(a.data, { maxS: 300 });
+  const k1 = await step('S7 CLI: act walk:kitchen → into the Chiba kitchen (out of Mimos, round to the diner steps, up through the blue door)', async () => {
+    const a = await cli('act', 'walk:kitchen'); const r = await follow(a.data, { maxS: 300 });
     let room = r.room;
-    if (!/kitchen/.test(a.data?.resolved?.to ?? '') || r.phase !== 'completed') return { cli: { accepted: a.data?.accepted, resolved: a.data?.resolved, reason: a.data?.reason }, phase: r.phase, code: r.code, reason: r.reason, end: r.end };
-    if (!inRoom(r.end?.p, 'kitchen/working-kitchen')) { const w = await walkTo('walk:kitchen/working-kitchen'); return { cli: { accepted: a.data?.accepted, resolved: a.data?.resolved }, then: w, inKitchen: inRoom(w.end?.p, 'kitchen/working-kitchen'), y: w.end?.p?.[1] }; }
-    return { cli: { accepted: a.data?.accepted, resolved: a.data?.resolved }, phase: r.phase, end: r.end, room, inKitchen: true, y: r.end?.p?.[1] };
+    if (r.phase !== 'completed') return { cli: { accepted: a.data?.accepted, reason: a.data?.reason }, phase: r.phase, code: r.code, reason: r.reason, end: r.end };
+    if (!inRoom(r.end?.p, 'kitchen/working-kitchen')) { const w = await walkTo('walk:kitchen/working-kitchen'); return { cli: { accepted: a.data?.accepted }, then: w, inKitchen: inRoom(w.end?.p, 'kitchen/working-kitchen'), y: w.end?.p?.[1] }; }
+    return { cli: { accepted: a.data?.accepted }, phase: r.phase, end: r.end, room, inKitchen: true, y: r.end?.p?.[1] };
   }, (r) => r.cli?.accepted && r.inKitchen && r.y > 0.45);
   { const p = k1?.then?.end?.p ?? k1?.end?.p; if (p) await shots([{ name: 's7-in-the-kitchen', eye: ofs(p, 0.3, 2.3, 2.8), at: ofs(p, 0, 1.0, -3), wait: 5000 }]); }
   await step('S8 kitchen use: she takes a mixing bowl from the prep table (#15)', async () => {

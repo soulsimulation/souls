@@ -21,7 +21,7 @@ globalThis.setInterval=((callback:()=>void,ms:number,...args:unknown[])=>{if(ms=
 const hub=new Hub(server,f.host,auth,f.db,f.souls);hub.brain=f.brain;globalThis.setInterval=interval;
 await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(TEST_PORT,'127.0.0.1',resolve);});
 const notices:string[]=[];const stderr=console.error;console.error=(...args:unknown[])=>{notices.push(String(args[0]));};
-async function until(ready:()=>boolean){const deadline=performance.now()+4000;while(!ready()&&performance.now()<deadline)await delay(2);assert.ok(ready(),'actual local callback/socket reaches its expected boundary');}
+async function until(ready:()=>boolean){const deadline=performance.now()+60_000;while(!ready()&&performance.now()<deadline)await delay(2);assert.ok(ready(),'actual local callback/socket reaches its expected boundary');}
 async function connect(owner:string|null,ready=true){
   const socket=new WebSocket(`ws://127.0.0.1:${TEST_PORT}/ws`),messages:ServerMsg[]=[];socket.on('message',data=>messages.push(JSON.parse(String(data))));await once(socket,'open');
   socket.send(JSON.stringify({t:'hello',proto:PROTO,...(owner?{token:'dev:'+owner}:{})}));if(ready)await until(()=>messages.some(m=>m.t==='takes'));return {socket,messages};

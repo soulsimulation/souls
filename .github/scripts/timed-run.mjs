@@ -15,7 +15,7 @@
 //   node timed-run.mjs run    --record <file> --out <dir>            the command, `repeats` times (cwd: the ref)
 //   node timed-run.mjs stage  --record <file> --out <dir> --dest <dir>   allowlisted, scrubbed copy; refused on a Soul token
 //   node timed-run.mjs snapshot --snapshot <file> [--exclude <globs>]   this account's entries of the home and /tmp
-//   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot
+//   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot (other jobs': a warning)
 //
 // Pure decisions are exported for timed-run.test.mjs. Nothing here prints a path, host or user name.
 import { execFileSync, spawn } from 'node:child_process';
@@ -229,6 +229,16 @@ export function snapshot(roots, { allow = [], exclude = [], uid = null } = {}) {
 }
 /** Entries in `after` that were not in the start snapshot `before`. */
 export const newEntries = (before, after) => { const b = new Set(before); return after.filter((p) => !b.has(p)); };
+/** Splits new entries into the run's own strays (they fail it) and other jobs' leftovers (a warning). The measured
+ *  command runs with TMPDIR and npm's logs dir in the per-run directory, so two kinds of entry cannot be its own: a
+ *  temp dir that os.tmpdir() + mkdtemp made at the top of `tmp` (name `<prefix><sep>XXXXXX`), with its contents, from
+ *  a unit-test job on this account; and an npm debug log under `home`/.npm/_logs. Everything else under the home and
+ *  /tmp is in the measured command's reach and stays a stray. */
+export function sortStrays(found, { home, tmp = '/tmp' }) {
+  const logs = join(home, '.npm', '_logs'), top = (p) => p.startsWith(tmp + sep) ? p.slice(tmp.length + 1).split(sep)[0] : null;
+  const other = (p) => p === logs || p.startsWith(logs + sep) || /^.+[-_.][A-Za-z0-9]{6}$/.test(top(p) ?? '');
+  return { strays: found.filter((p) => !other(p)), others: found.filter(other) };
+}
 
 // ------------------------------------------------------------------ impure side (the workflow's steps)
 const output = (k, v) => { if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`); };
@@ -307,7 +317,9 @@ async function main(cmd) {
     const env = process.env, runnerRoot = env.RUNNER_WORKSPACE ? resolve(env.RUNNER_WORKSPACE, '../..') : null, file = arg('snapshot');
     const now = snapshot([env.HOME, '/tmp'], { allow: [env.RUNNER_TOOL_CACHE, runnerRoot], exclude: (arg('exclude') ?? '').split(','), uid: process.getuid?.() ?? null });
     if (cmd === 'snapshot') { writeFileSync(file, JSON.stringify(now)); console.log(`snapshot: ${now.length} entries`); return; }
-    const found = newEntries(JSON.parse(readFileSync(file, 'utf8')), now), sw = scrubWith();
+    const { strays: found, others } = sortStrays(newEntries(JSON.parse(readFileSync(file, 'utf8')), now), { home: resolve(env.HOME), tmp: '/tmp' }), sw = scrubWith();
+    for (const f of others.slice(0, 50)) console.log(`::warning::another job's leftover, not counted: ${scrub(f, sw)}`);
+    if (others.length) console.log(`::warning::${others.length} entries left by other jobs or npm's own logs, not counted`);
     for (const f of found.slice(0, 50)) console.log(`::error::written outside the per-run directory: ${scrub(f, sw)}`);
     if (found.length) throw new Error(`${found.length} entries written outside the per-run directory`);
     console.log('no entries written outside the per-run directory'); return;
