@@ -38,6 +38,7 @@ test('#2202 B2: moves ease in and out, each type in turn, and the next one glide
   assert.ok(speed[1]<.3,'the first move starts at rest');
   const mid=frames.findIndex(f=>f.now>=5);assert.ok(speed[mid]>.05,'and moves between');
   assert.ok(GLIDE>1);
+  assert.ok(Math.max(...frames.map(f=>f.pose!.position[1]))<8.5,'a crane on people stays low enough to keep them in the shot');
 });
 
 test('#2202 B2: the shot follows a smoothed centre: a member stepping away moves the camera gradually', () => {
@@ -68,7 +69,7 @@ test('#2202 B2: never through scenery: every eye is clear and no frame-to-frame 
   // Under a roof on open sides (a pavilion), the framing solver is better: no moving shot.
   assert.equal(new Tracker(1).pose('group:a',[0,0,0],2,0,scenery([[-2.5,2.6,-2.5,2.5,2.8,2.5]])),null);
   // pathClear sees a wall between two samples
-  const m=makeMove(hotspotView([0,0,0],2,0),'orbit',12,1),thin=scenery([[9.5,0,-.05,12,6,.05]]);
+  const m=makeMove(hotspotView([0,0,0],2,0),'orbit',12,1),thin=scenery([[8.5,0,-.05,12,6,.05]]);
   assert.ok(pathClear(m,[0,0,0],0,1,scenery([])));
   assert.ok(!pathClear(m,[0,0,0],0,1,thin),'a thin wall across the arc');
 });

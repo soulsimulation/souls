@@ -40,10 +40,10 @@ const open = (s: Scenery, a: readonly number[], b: readonly number[]) => s.reach
 const sees = (s: Scenery, eye: readonly number[], aim: readonly number[]) =>
   [-.15, .46].every(dy => { const at = [aim[0], aim[1] + dy, aim[2]]; return s.reach(eye, at) >= dist(eye, at) - .3; });
 
-/** The authored-style view a move is built on: the eye `r` out at `azimuth`, a little above head height, looking at the
- *  hotspot's head height. Wider for a spread-out gathering. */
+/** The authored-style view a move is built on: the eye `r` (7 to 13 m) out at `azimuth`, a little above head height,
+ *  looking at the hotspot's head height. Wider for a spread-out gathering. */
 export function hotspotView(centre: readonly number[], spread: number, azimuth: number): TourView {
-  const r = Math.min(15, Math.max(8, 8 + spread)), h = 1.5 + .12 * r, t: [number, number, number] = [centre[0], centre[1] + AIM, centre[2]];
+  const r = Math.min(13, Math.max(7, 7 + spread)), h = 1.3 + .12 * r, t: [number, number, number] = [centre[0], centre[1] + AIM, centre[2]];
   return { id: 'hotspot', label: 'hotspot', target: t, p: [t[0] + Math.cos(azimuth) * r, t[1] + h, t[2] + Math.sin(azimuth) * r] };
 }
 const shift = (p: TourPose, d: readonly number[]): TourPose => ({ position: [p.position[0] + d[0], p.position[1] + d[1], p.position[2] + d[2]], target: [p.target[0] + d[0], p.target[1] + d[1], p.target[2] + d[2]], fov: p.fov });
@@ -59,6 +59,14 @@ export function pathClear(m: TourMove, d: readonly number[], k0: number, k1: num
     prev = pose;
   }
   return true;
+}
+
+/** The tour's crane rises about 8 m, made for a town view; on people it rises CRANE of that, so they stay in the shot. */
+export const CRANE = .45;
+function trackMove(m: TourMove): TourMove {
+  if (m.type !== 'crane-up') return m;
+  const lo = m.at(0), aim = m.view.target[1];
+  return { ...m, at: k => { const p = m.at(k); return { ...p, position: [p.position[0], lo.position[1] + (p.position[1] - lo.position[1]) * CRANE, p.position[2]], target: [p.target[0], aim + (p.target[1] - aim) * CRANE, p.target[2]] }; } };
 }
 
 export class Tracker {
@@ -132,7 +140,7 @@ export class Tracker {
       .sort((a, b) => b.age - a.age || a.r - b.r).map(x => x.t).filter(t => t !== this.move?.type || TRACK_TYPES.length === 1);
     const base = previous ? Math.atan2(previous.position[2] - c[2], previous.position[0] - c[0]) : this.random() * 2 * Math.PI;
     for (const type of types) for (const turn of [0, (this.random() < .5 ? 1 : -1) * Math.PI / 3]) {
-      const m = makeMove(hotspotView(c, spread, base + turn), type, MOVE_MIN + this.random() * (MOVE_MAX - MOVE_MIN), this.random() < .5 ? 1 : -1);
+      const m = trackMove(makeMove(hotspotView(c, spread, base + turn), type, MOVE_MIN + this.random() * (MOVE_MAX - MOVE_MIN), this.random() < .5 ? 1 : -1));
       if (!pathClear(m, [0, 0, 0], 0, 1, s)) continue;
       this.move = m; this.start = now; this.checked = now; this.origin = [...c]; this.shown.set(type, now);
       const begin = m.at(0);
