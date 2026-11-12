@@ -59,6 +59,10 @@ hit, so the hard separation layer rarely fires.
 - **wait-bound/2** (#1288, adopted at boot after wait-bound/1): the same bound for a step that swims or travels through
   water (`swim_to`, `ground_travel`, `swim_in`), so a swim held behind a body treading in its way (`swim.occupied`) ends
   `route.blocked` through the swim's own cancel, leaving the swimmer treading or standing where it is.
+- **wait-bound/3** (#1367, adopted at boot after wait-bound/2): a walk's headway is getting 0.5 m nearer the way of its
+  current leg (a walk leg's end, or a flight's entry before the climb) or changing level, not leaving the disc. A shove in a
+  jam at a stair foot (a yield, a collision settle, a step-aside and its walk back) no longer restarts the clock, so a walk
+  held there by shoves or a wait cycle ends `route.blocked` within the same minute. A swim keeps wait-bound/1's disc.
 
 ## Speed limits and invariants
 
