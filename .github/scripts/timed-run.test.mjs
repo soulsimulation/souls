@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
@@ -79,6 +79,23 @@ test('strays: entries new since the start snapshot, outside allowed dirs, runner
     assert.deepEqual(newEntries(before, snapshot(roots, opts)), [join(d, 'home/.cache/new'), join(d, 'tmp/stray'), join(d, 'tmp/stray/f')]);
     assert.equal(snapshot(roots, { ...opts, uid: -1 }).length, 0, 'another account\'s entries are never listed');
     assert.ok(globTest('/tmp/cerr-*')('/tmp/cerr-ab12') && !globTest('/tmp/cerr-*')('/tmp/cerr-ab/agg.json') && !globTest('/tmp/cerr-*')('/tmpXcerr-a'));
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+test('strays: other jobs\' temp dirs and npm debug logs are a warning; the measured code\'s own strays still fail', () => {
+  const d = mkdtempSync(join(tmpdir(), 'timed-')), touch = (p) => { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), ''); };
+  try {
+    const roots = [join(d, 'home'), join(d, 'tmp')], opts = { uid: process.getuid?.() ?? null };
+    touch('home/.npm/_logs/old-debug-0.log');
+    const before = snapshot(roots, opts);
+    // other jobs on this account: a unit test's mkdtemp dirs in /tmp, npm's own debug log in the home
+    for (const p of ['tmp/b-port-8ICb1z/world.sqlite', 'tmp/eden-truth-live-RTrR4X/.soul-live.json', 'home/.npm/_logs/2026-11-11T22_54_17_780Z-debug-0.log']) touch(p);
+    // the measured code: a file in the home and one at a fixed /tmp path
+    for (const p of ['home/.souls/world.json', 'tmp/stray/f', 'tmp/report.txt']) touch(p);
+    const { strays, others } = sortStrays(newEntries(before, snapshot(roots, opts)), { home: join(d, 'home'), tmp: join(d, 'tmp') });
+    assert.deepEqual(strays, ['home/.souls', 'home/.souls/world.json', 'tmp/report.txt', 'tmp/stray', 'tmp/stray/f'].map((p) => join(d, p)));
+    assert.deepEqual(others, ['home/.npm/_logs/2026-11-11T22_54_17_780Z-debug-0.log', 'tmp/b-port-8ICb1z', 'tmp/b-port-8ICb1z/world.sqlite',
+      'tmp/eden-truth-live-RTrR4X', 'tmp/eden-truth-live-RTrR4X/.soul-live.json'].map((p) => join(d, p)));
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
