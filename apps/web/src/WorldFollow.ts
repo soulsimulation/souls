@@ -275,7 +275,8 @@ export class WorldFollow {
     // metres/second as well; actual viewer gestures above remain immediate.
     if(previous&&dt>0){
       const top=this.rule.blocked?GLIDE.speedBlocked:GLIDE.speed,accel=this.rule.blocked?GLIDE.accelBlocked:GLIDE.accel;
-      const limit=Math.min(top,this.eyeSpeed+accel*dt)*dt;
+      // the cap itself changes gently: a camera that was hurrying slows to a lower cap at the same rate, never in one frame
+      const limit=Math.min(Math.max(top,this.eyeSpeed-accel*dt),this.eyeSpeed+accel*dt)*dt;
       if(previous.distanceTo(result)>limit){this.rule={...this.rule,name:'speed-cap'};
         const from=previous.length(),to=result.length(),rotation=new THREE.Quaternion().setFromUnitVectors(previous.clone().normalize(),result.clone().normalize());
         const arc=previous.angleTo(result)*Math.max(from,to)+Math.abs(to-from),fraction=Math.min(1,limit/arc);
