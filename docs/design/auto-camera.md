@@ -119,6 +119,9 @@ Its argmax with an alphabetical tie-break becomes a seeded, weighted draw:
 - At most 2 ms median with 4× CPU throttle (the phone tier).
 - If the baseline measured in T1 is already over these numbers, the budget becomes no worse than the baseline, and
   the note is amended.
+- *Amended (#2201 A1, 12 Nov 2026):* the baseline is over. Following a walking Soul on a local Eden 2026 world with four
+  Souls, `follow.resolve` takes 8.5 ms median and 10.5 ms p95 per frame (about 21 rays median, 28 p95), and 40 ms median,
+  54 ms p95 at 4× CPU throttle. The budget for A2–A4 is therefore no worse than that baseline.
 
 **Rays**: one search is at most 160 rays, against about 180 today (26 candidates × up to 7 rays). The sky part adds one ray per candidate, and only
 the top 8 candidates get it. Recovery adds 20 rays every 0.5 s. A search is spread over frames with the same work

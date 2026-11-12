@@ -32,8 +32,9 @@ test('balloon for two: the basket waits for the invited companion, keeps their p
  const rec=(i:number,id:string)=>ledger.receipt(rows[i].id,id)!;
 
  // ana: "go for a balloon ride with ben" — joins and keeps a place for ben
- const ja=await call(0,'POST','/v1/edge/act',{capability:'go for a balloon ride with ben'});assert.equal(ja.accepted,true,JSON.stringify(ja));
- assert.equal(ja.resolved?.to,'object:ride-eden-balloon:join',JSON.stringify(ja.resolved));
+ // #1911: "go for a balloon ride with ben" is the offered join with ben invited; the act sends that id
+ const ja=await call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:join',params:{with:'ben'}});assert.equal(ja.accepted,true,JSON.stringify(ja));
+ assert.equal(ja.receipt.capability,'object:ride-eden-balloon:join',JSON.stringify(ja));
  const inv=(await call(1,'GET','/v1/edge/observe')).invites?.[0];assert.equal(inv?.what,'ride',JSON.stringify(inv));
  assert.ok(await run(3000,()=>rec(0,ja.receipt.id).phase==='completed'),'ana seated: '+JSON.stringify(rec(0,ja.receipt.id)));
  assert.equal(balloon().carrier.phase,'boarding');assert.equal(balloon().carrier.hold?.seats,1,'one place kept');
@@ -47,7 +48,7 @@ test('balloon for two: the basket waits for the invited companion, keeps their p
  assert.equal(balloon().carrier.phase,'boarding','still boarding after the refused start');
  const ride=(await (await app.request('/v1/edge/rides')).json() as any).rides[0];assert.equal(ride.hold?.for?.[0]?.name,'ben');assert.equal(ride.seatsFree,0);
  // ben accepts (plain words) and climbs in; it lifts off soon after
- const jb=await call(1,'POST','/v1/edge/act',{capability:'yes'});assert.equal(jb.accepted,true,JSON.stringify(jb));assert.match(jb.resolved?.to??'',/^accept:/);
+ const jb=await call(1,'POST','/v1/edge/act',{capability:`accept:${ledger.together.invitesFor(rows[1].id)[0]!.id}`});assert.equal(jb.accepted,true,JSON.stringify(jb));assert.match(jb.receipt.capability,/^accept:/);
  assert.ok(await run(3000,()=>rec(1,jb.receipt.id).phase==='completed'),'ben seated: '+JSON.stringify(rec(1,jb.receipt.id)));
  const seatedAt=f.host.engine.world.tick;
  assert.ok(await run(400,()=>balloon().carrier.phase==='aloft'),'lifted off with both');
