@@ -21,7 +21,10 @@ goal for sustained execution or a durable checkpoint when unavailable; neither c
 Under a coordinator's agenda, work is cut into **task issues** ([template](../../.github/ISSUE_TEMPLATE/task.yml)).
 The coordinator writes each one before dispatch: at most five acceptance items, the files it may touch, what is not
 in it, a ceiling of 1 to 4 agent-hours and a stop rule. One lane works one task and stops. The ceiling is a limit,
-not a target. A defect found on the way becomes a new issue. With each release the coordinator posts a table of the
+not a target. A defect found on the way is fixed in the same pull request, listed under "Also fixed", when the fix is
+small (about 30 minutes or 50 lines), keeps the tier and stays in the area; otherwise it gets its own small pull
+request, with no issue. An issue is filed only for work that will not start today, needs Gene's decision or is larger
+than about 2 hours. With each release the coordinator posts a table of the
 tasks merged since the last one: ceiling, hours taken, and how each ended (done, stopped at the ceiling, stopped on
 scope).
 
