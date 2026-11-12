@@ -24,7 +24,7 @@ test('here: compact, first person, bearings by heading; never other places, behi
   const here = async (s: typeof a) => {const r = await w.http(s, 'GET', '/v1/edge/here'); assert.equal(r.status, 200); return r.body.here;};
   // A on open ground facing north; B east, C west, D south of A
   await w.put(a, [14, 14]); const turn: any = await w.act(a, 'stand:here'); void turn;
-  const tr = (await w.http(a, 'POST', '/v1/edge/act', {verb: 'turn', heading: 0})).body; assert.equal(tr.accepted, true, JSON.stringify(tr)); assert.equal(tr.chosen.turned, 'body');
+  const tr = (await w.http(a, 'POST', '/v1/edge/act', {capability: 'turn:0'})).body; assert.equal(tr.accepted, true, JSON.stringify(tr)); assert.equal(tr.chosen.turned, 'body');
   assert.equal(headingOfYaw(w.body(a).pose.yaw), 0);
   const [ax, az] = w.pos(a); await w.put(b, [ax + 5, az]); await w.put(c, [ax - 5, az]); await w.put(d, [ax, az + 5]);
   const h1 = await here(a), near = new Map(h1.near.map((n: any) => [n.id, n]));
@@ -33,7 +33,7 @@ test('here: compact, first person, bearings by heading; never other places, behi
   assert.ok(typeof h1.clock === 'string' && typeof h1.light === 'string' && typeof h1.day === 'string', JSON.stringify(h1));
   assert.ok(h1.exits.length > 0 && h1.exits.every((x: any) => x.walk.startsWith('walk:') && x.dir && x.eta), JSON.stringify(h1.exits));
   // facingMe: B turns to face A
-  const fb = (await w.http(b, 'POST', '/v1/edge/act', {verb: 'turn', face: a.soulId})).body; assert.equal(fb.accepted, true, JSON.stringify(fb));
+  const fb = (await w.http(b, 'POST', '/v1/edge/act', {capability: `turn:${a.soulId}`})).body; assert.equal(fb.accepted, true, JSON.stringify(fb));
   assert.equal(((await here(a)).near.find((n: any) => n.id === b.soulId)).facingMe, true);
   // far away (> 30 m): not listed; inside the enclosed classroom: neither side sees the other
   await w.put(e, [ax + 45, az]); await w.put(f, [42, -6]);

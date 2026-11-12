@@ -39,10 +39,10 @@ test('hand-drawn curtains and blind: words, cord contact, refusal, interruption,
  for(const n of ['curtains','blind'])assert.ok(contact(n,'open')&&contact(n,'close'),n+' is a hand contact');
  const act=async(words,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:words})}));const b=await r.json();assert.equal(b.accepted,accepted,words+' '+JSON.stringify(b).slice(0,300));return b;};
  const finish=async(r,name,want,limit=600)=>{let contact=false,early=false;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){contact=true;if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.6&&state(name).open===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {contact,early,phase:edge.receipt(soul.soulId,r.receipt.id).phase};};
- await act('open the curtains',false);
- const cut=await act('close the blind');for(let n=0;n<400&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('blind').open,true,'interrupted before contact: the blind stays up');
+ await act(`object:${id('curtains')}:open`,false);
+ const cut=await act(`object:${id('blind')}:close`);for(let n=0;n<400&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('blind').open,true,'interrupted before contact: the blind stays up');
  const results={};
- for(const [name,words,want] of [['curtains','close the curtains',false],['blind','close the blind',false],['curtains','open the curtains',true],['blind','open the blind',true],['curtains','close the curtains',false]]){
+ for(const [name,words,want] of [['curtains',`object:${id('curtains')}:close`,false],['blind',`object:${id('blind')}:close`,false],['curtains',`object:${id('curtains')}:open`,true],['blind',`object:${id('blind')}:open`,true],['curtains',`object:${id('curtains')}:close`,false]]){
   const r=await act(words);assert.match(r.receipt.capability,new RegExp(`object:${id(name)}:${want?'open':'close'}$`),words+' resolved to '+r.receipt.capability);
   assert.notEqual(state(name).open,want,'admission changes nothing remotely');const x=await finish(r,name,want);
   assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.ok(x.contact,'actual hand contact ran');assert.equal(x.early,false,'nothing changes before contact');assert.equal(state(name).open,want);
