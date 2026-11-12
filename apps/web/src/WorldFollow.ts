@@ -19,8 +19,9 @@ export const SPRING={calm:1.6,blocked:.6,returning:1.2};
  *  camera probes its way back to the asked-for view, the least time between two returns, and the clearance (m) beyond
  *  the camera a rung of that ladder needs ("space allows"). */
 export const DWELL=.5,RECOVER={probe:.5,gap:1.5,margin:.5};
-/** #2201 A3: the most an automatic move's velocity (direction included) changes, in metres per second each second. */
-const TURN=40;
+/** #2201 A3: the most an automatic move's velocity (direction included) changes, in metres per second each second (A4: a
+ *  little more while the sight is cut, so the scored views still clear a row of houses in time). */
+const TURN=40,TURN_BLOCKED=55;
 /** A body (a skinned figure) or anything marked cameraTransient moves through a view; walls, fixtures and ground stay. */
 const transient=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if((p as THREE.SkinnedMesh).isSkinnedMesh||p.userData.cameraTransient===true)return true;return false;};
 /** #1316: a pull out is deliberate past these, summed over one gesture (input events less than GESTURE_GAP s apart):
@@ -392,7 +393,7 @@ export class WorldFollow {
       }
       // #2201 A3: and its velocity turns gently too. A new goal (a search, a recovery) can point the move another way while
       // the speed is capped; the change of velocity, direction included, is held to TURN m/s per second.
-      const velocity=result.clone().sub(previous).divideScalar(dt),change=velocity.clone().sub(this.eyeVelocity),most=TURN*dt;
+      const velocity=result.clone().sub(previous).divideScalar(dt),change=velocity.clone().sub(this.eyeVelocity),most=(this.rule.blocked?TURN_BLOCKED:TURN)*dt;
       if(change.length()>most){velocity.copy(this.eyeVelocity).addScaledVector(change,most/change.length());result.copy(previous).addScaledVector(velocity,dt);this.rule={...this.rule,name:'speed-cap'};}
       this.eyeVelocity.copy(velocity);this.eyeSpeed=velocity.length();
     }
