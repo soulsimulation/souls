@@ -120,3 +120,29 @@ test('channels: attention never cancels the body; speech and conversation never 
   assert.deepEqual(w.f.host.engine.runtime.violations, []);
   await w.replayExact();
 });
+
+test('walk-to:here {at}: the engine walk_to to a point on this level ends within 0.5 m and reports arrival; a point with no route is refused with a route code (#1916)', {timeout: 600000}, async t => {
+  const w = await coreAWorld(2); t.after(() => w.close());
+  const [a, b] = w.souls, goal: [number, number] = [-20, 2];
+  const act = async (body: object) => (await w.http(a, 'POST', '/v1/edge/act', body)).body;
+  const streams = (w.ledger.comms as any).streams, deliver = streams.deliver.bind(streams), arrived: any[] = [];
+  streams.deliver = (soulId: string, kind: string, tick: number, body: any) => {if (kind === 'arrive' && soulId === a.soulId) arrived.push(body); return deliver(soulId, kind, tick, body);};
+  await w.put(a, [14, 4]); await w.put(b, [21.6, 3.6]);
+  assert.ok(Math.hypot(w.pos(a)[0] - goal[0], w.pos(a)[1] - goal[1]) > 20, 'far from the goal');
+  assert.ok(Math.hypot(w.pos(b)[0] - goal[0], w.pos(b)[1] - goal[1]) > 0.8, 'no other body within 0.8 m of the goal');
+  const out = await act({capability: 'walk-to:here', params: {at: goal}});
+  assert.equal(out.accepted, true, JSON.stringify(out)); assert.equal(out.receipt.capability, 'walk-to:here'); assert.deepEqual(out.chosen.at, goal);
+  // the plan is the engine's own walk_to (standoff 0, standing room), launched as any offer is
+  const launched = (w.ledger as any).launched.get(out.receipt.id);
+  assert.deepEqual(launched?.steps.filter((s: any) => s.verb !== 'stand'), [{verb: 'walk_to', params: {to: goal, standoff: 0, stand: 'clear/1'}}]);
+  await w.ticks(8000, () => !w.open(a, out.receipt.id));
+  const done = w.receipt(a, out.receipt.id); assert.equal(done.phase, 'completed', JSON.stringify(done));
+  const off = Math.hypot(w.pos(a)[0] - goal[0], w.pos(a)[1] - goal[1]); assert.ok(off <= 0.5, `ended ${off.toFixed(2)} m from the goal`);
+  assert.equal(arrived.length, 1, 'arrival reported as for other walks'); assert.equal(arrived[0].receipt.capability, 'walk-to:here');
+  // no route: refused as a place walk is, with a route code, and the body stays put
+  const at = w.pos(a), far = await act({capability: 'walk-to:here', params: {at: [1000, 1000]}});
+  assert.equal(far.accepted, false, JSON.stringify(far)); assert.match(far.code, /^route\./, JSON.stringify(far));
+  await w.ticks(40); assert.deepEqual(w.pos(a), at);
+  assert.deepEqual(w.f.host.engine.runtime.violations, []);
+  await w.replayExact();
+});

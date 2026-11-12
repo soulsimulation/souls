@@ -14,7 +14,7 @@ named beside each one is the authority.
 | Schema notes | 2.9.3 | `schemaNotes` in `SOURCES.json` | moves with the guide |
 | Instructions | 2.0.3 | `instructions` in `SOURCES.json` | a new published capture |
 | Managed runtime | 0.1.0 | `runtime` in `SOURCES.json` | a new runtime publication |
-| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.21 | `cli` in `SOURCES.json` | retained; worlds serve a `build-cli.mjs` build of `tools/edge-skill/eden-agent.mjs` (manifest in `builds/`) |
+| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.21 | `cli` in `SOURCES.json` | retired (#1754): no world serves it; the files stay until a later batch deletes them |
 | Edge wire contract | `eden-edge/1` | `EDGE_CONTRACT` in `apps/server/src/edge/contract.ts` | a breaking wire change; none so far |
 | Edge API contract | `eden-edge/1.1` | `BOOT_API_CONTRACT` in `apps/server/src/edge/boot/routes.ts` | additive changes |
 | Build id | `we-<sha12>` | `build` in `/v1/config` and `/__sim/healthz` | every build, from the commit |
@@ -45,7 +45,7 @@ between releases `main` may hold client changes that are not stamped yet.
 
 ## How a world shows what it serves
 
-- **`/eden.mjs`, `/skill.md`, `/instructions.md`, `/eden-agent.mjs`:** every launcher world serves exact copies of the
+- **`/eden.mjs`, `/skill.md`, `/instructions.md`:** every launcher world serves exact copies of the
   files in `tools/world-launcher/soul/`, never forks, and `SOURCES.json` records each one's version, hash and origin.
 - **`/v1/config`:** the build id, among other public settings. It does not name a CLI version.
 - **`GET /v1/edge/boot`:** `apiContract`, `eden-edge/1.1`. Edge responses carry `contract`, `eden-edge/1`.

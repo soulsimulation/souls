@@ -69,3 +69,16 @@ test('strict: every terminal receipt carries endedAt (completed, replaced, faile
   assert.equal(http.receipt.endedAt.place, 'shore-bank');
   assert.deepEqual(w.f.host.engine.runtime.violations, []);
 });
+
+test('strict: walk-to:here takes exactly one param, at, as two finite numbers; any other shape is refused (#1916)', {timeout: 300000}, async t => {
+  const w = await coreAWorld(1); t.after(() => w.close());
+  const [a] = w.souls, count = () => (w.f.db.db.prepare('SELECT COUNT(*) n FROM edge_receipts_v1').get() as {n: number}).n, before = count();
+  const act = async (params: unknown) => (await w.http(a, 'POST', '/v1/edge/act', {capability: 'walk-to:here', params, strict: true})).body;
+  for (const params of [undefined, {}, {at: null}, {at: [1]}, {at: [1, 2, 3]}, {at: [1, '2']}, {at: '1,2'}, {at: {x: 1, z: 2}}, {at: [1, null]}, {at: [1, 2], seconds: 5}, {to: [1, 2]}, [1, 2]]) {
+    const out = await act(params);
+    assert.equal(out.accepted, false, JSON.stringify(params)); assert.equal(out.code, 'capability.params', JSON.stringify(params) + ' ' + JSON.stringify(out));
+    assert.deepEqual(Object.keys(out.params ?? {}), ['at'], 'the refusal carries the one-param schema');
+  }
+  assert.equal(count(), before, 'nothing was written for a refused shape');
+  const ok = await act({at: [0, 0]}); assert.equal(ok.accepted, true, JSON.stringify(ok)); assert.equal(ok.receipt.capability, 'walk-to:here');
+});
