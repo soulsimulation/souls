@@ -92,9 +92,21 @@ export function outlineOf(ix, id, limit = 24) {
   const parts = ix.within(p.id), poly = p.outline?.length >= 3 ? p.outline : null;
   const lies = (place, point) => parts.has(place ?? "") || (!!poly && !!point && inOutline(point, poly));
   const rows = [], spots = new Set();
-  for (const a of ix.cat.acts) { const key = `${a.verb}|${a.thing ?? a.id}`; if (!spots.has(key) && lies(a.place, a.at)) { spots.add(key); rows.push({ name: a.label, act: a.id, at: a.at }); } }
-  for (const t of ix.cat.things) if (lies(t.place, t.at)) rows.push({ name: t.name, id: t.id, at: t.at });
-  return { ...(p.outline ? { outline: p.outline } : {}), inside: rows.slice(0, limit), ...(rows.length > limit ? { insideMore: rows.length - limit } : {}) };
+  for (const a of ix.cat.acts) { const key = `${a.verb}|${a.thing ?? a.id}`; if (!spots.has(key) && lies(a.place, a.at)) { spots.add(key); rows.push({ kind: `act ${a.verb}`, row: { name: a.label, act: a.id, at: a.at } }); } }
+  for (const t of ix.cat.things) if (lies(t.place, t.at)) rows.push({ kind: `thing ${t.kind}`, row: { name: t.name, id: t.id, kind: t.kind, ...thingAt(ix, t) } });
+  // #2225: by kind, the fewest of a kind first: a one-of-a-kind thing (the chess table) is the one a person names, and twenty
+  // sleeping mats or eight seats at one podium no longer push it past the cap
+  const many = new Map(); for (const r of rows) many.set(r.kind, (many.get(r.kind) ?? 0) + 1);
+  rows.sort((a, b) => many.get(a.kind) - many.get(b.kind));
+  return { ...(p.outline ? { outline: p.outline } : {}), inside: rows.slice(0, limit).map((r) => r.row), ...(rows.length > limit ? { insideMore: rows.length - limit } : {}) };
+}
+
+/** #2225: where a thing stands, `[x, z]`, and its `level` when that is not the ground (its place's), from the local copy. */
+export function thingAt(ix, t) {
+  if (typeof t === "string") t = ix.things.get(t);
+  if (!t?.at) return null;
+  const level = ix.place(t.place)?.level;
+  return { at: t.at, ...(level ? { level } : {}) };
 }
 
 /** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
@@ -154,7 +166,7 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...can].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));

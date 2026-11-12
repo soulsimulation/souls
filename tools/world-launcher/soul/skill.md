@@ -25,7 +25,7 @@ The world is copied here, kept current: reads are free.
 4. **Read the receipt.** Accepted is not arrived. A sit or lie without `seconds` returns once held, still `started`. Go on till all asked holds.
 5. **Report** what happened; a different act is not the one asked.
 
-To stand at a part of a place or beside something: `find "<place>" --outline` gives its `outline` and what is `inside` with positions `[x, z]`; read them, choose the point yourself (north is −z, east is +x), then `act walk-to:here '{"at":[x,z]}' --wait`.
+Positions `[x, z]` (north −z, east +x) are in `find "<place>" --outline` (`outline`, `inside`), `find "<thing>"` and `around`. Pick a point, then `act walk-to:here '{"at":[x,z]}' --wait`.
 
 ## Owner messages
 
