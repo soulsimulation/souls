@@ -70,12 +70,16 @@ export async function runLoad(o) {
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
-      const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
+      const sig = [];   // measurement only (#2124 amber): the level's signals every 2 s from live.json
+      const watch = setInterval(() => { const L = readLive(liveFile), w = L?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w);
+        if (L && Date.now() <= until) sig.push({ s: Math.round((Date.now() - t0) / 1000), lv: L.level, loop: L.loop?.delayP99Ms, svc: L.tick?.service5s, heap: L.heap?.limitMb ? Math.round(100 * L.heap.usedMb / L.heap.limitMb) : null, old: L.queue?.oldestMs, depth: L.queue?.depth, qt: L.tick?.quietAvgMs }); }, 2000);
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts })));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
-      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      let levelLines = []; try { levelLines = readFileSync(join(dir, 'server', 'world.log'), 'utf8').split('\n').filter((l) => l.startsWith('[load]')).slice(-200); } catch { /* no log */ }
+      for (const l of levelLines) log(`n${n} r${rep} ${l}`);
+      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at), signals: sig, levelLines };
       const http = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
@@ -114,6 +118,10 @@ export function renderLoad(result) {
         '| window end | ticks | tick p50 | p99 | late | longest gap | green | amber | red | black |', '|---|---|---|---|---|---|---|---|---|---|');
       for (const w of tw) L.push(`| ${new Date(w.at).toISOString().slice(11, 19)} | ${w.ticks} | ${w.tickMs.p50} | ${w.tickMs.p99} | ${w.lateTicks} | ${w.longestGapMs} | ${w.levels.green} | ${w.levels.amber} | ${w.levels.red} | ${w.levels.black} |`);
     }
+    const sg = a.server?.signals ?? [];
+    if (sg.length) { L.push('', 'Level signals (live.json, every 2 s of the load): level, loop p99 ms, tick service, heap %, oldest queued ms, depth, quiet tick ms.', '', '| s | level | loop p99 | service | heap % | oldest | depth | quiet tick |', '|---|---|---|---|---|---|---|---|');
+      for (const x of sg) L.push(`| ${x.s} | ${x.lv} | ${x.loop} | ${x.svc} | ${x.heap} | ${x.old} | ${x.depth} | ${x.qt} |`); }
+    for (const l of a.server?.levelLines ?? []) L.push('', '`' + l + '`');
   }
   return L.join('\n') + '\n';
 }
