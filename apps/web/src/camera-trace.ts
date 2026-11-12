@@ -16,7 +16,7 @@ export type CostSummary = { frames: number; ms: { median: number; p95: number; m
 export type Override = { t: number; sinceInputMs: number; input: string; rule: string; params: Record<string, unknown>; offMetres: number; offDegrees: number };
 
 /** Automatic rules: anything that moved the camera other than the viewer's own hand. */
-const AUTOMATIC = new Set(['collision', 'opening', 'search', 'glide', 'speed-cap']);
+const AUTOMATIC = new Set(['collision', 'opening', 'search', 'glide', 'recover', 'speed-cap']);
 export const OVERRIDE_GRACE_MS = 2000, OVERRIDE_METRES = 0.25, OVERRIDE_DEGREES = 3;
 const MAX_RECORDS = 50_000, MAX_COST = 50_000;
 /** Nearest-rank percentile of `values` (0..1), 0 for none. */

@@ -14,6 +14,12 @@ const GLIDE={opening:.35,openingSpeed:5,speed:6,speedBlocked:12,accel:6,accelBlo
 /** #2201 A2: the periods (seconds) of the critically damped spring that carries the camera on the sphere round the Soul:
  *  calm, blocked (the sight is cut by something in the way), and returning to the asked-for view. */
 export const SPRING={calm:1.6,blocked:.6,returning:1.2};
+/** #2201 A3: how long (s) a passing body may cut the held sightline before the camera reacts; how often (s) a forced
+ *  camera probes its way back to the asked-for view, the least time between two returns, and the clearance (m) beyond
+ *  the camera a rung of that ladder needs ("space allows"). */
+export const DWELL=.5,RECOVER={probe:.5,gap:1.5,margin:.5};
+/** A body (a skinned figure) or anything marked cameraTransient moves through a view; walls, fixtures and ground stay. */
+const transient=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if((p as THREE.SkinnedMesh).isSkinnedMesh||p.userData.cameraTransient===true)return true;return false;};
 /** #1316: a pull out is deliberate past these, summed over one gesture (input events less than GESTURE_GAP s apart):
  *  click jitter and a slip inside a pinch stay coupled, a slow trackpad zoom out or a slow drag still decouples. */
 const PULL_OUT={ratio:1.05,angle:.05},GESTURE_GAP=.4;
@@ -30,7 +36,8 @@ export class WorldFollow {
   /** #2201 A1: sightline rays cast so far, and in the last resolve call (the camera trace's cost meter). */
   private cast=0;
   rays=0;
-  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();}
+  reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();
+    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;}
   /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
   private motion={theta:0,phi:0,radius:0};
   /** The camera's automatic speed on the last frame (m/s, relative to the Soul): the start of the acceleration cap. */
@@ -59,8 +66,12 @@ export class WorldFollow {
   }
   /** How far out along `offset` the camera still sees the Soul (metres). Stops early once below `need` (a yes/no
    * question); `torso` casts the torso line alone (a cheap estimate for the wide search). */
-  private limit(target:THREE.Vector3,offset:THREE.Vector3,roots:readonly THREE.Object3D[],need=-Infinity,torso=false){
-    const distance=offset.length(),direction=offset.clone().normalize(),right=new THREE.Vector3(direction.z,0,-direction.x).normalize();let allowed=distance;
+  /** #2201 A3: with `classify`, limit() also sets reachStatic, the reach counting walls, fixtures and ground only (not
+   * bodies), and stops early only once that is below `need`, so a body in the way can be told from a wall. Bodies then
+   * count on the torso and head lines only. */
+  private reachStatic=Infinity;
+  private limit(target:THREE.Vector3,offset:THREE.Vector3,roots:readonly THREE.Object3D[],need=-Infinity,torso=false,classify=false){
+    const distance=offset.length(),direction=offset.clone().normalize(),right=new THREE.Vector3(direction.z,0,-direction.x).normalize();let allowed=distance,fixed=distance;
     const reverse=direction.clone().negate(),far=distance+.25;
     // Torso, head and both shoulder edges. Ignore the selected body's own
     // render roots by supplying only architecture, components and fixtures.
@@ -69,18 +80,24 @@ export class WorldFollow {
       this.cast++;this.ray.set(point,direction);this.ray.near=.05;this.ray.far=far;
       // Nearest opaque hit, as intersectObjects(...).sort().find(opaque) would give.
       this.hits.length=0;for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
-      let nearest=Infinity;for(const h of this.hits)if(h.distance<nearest&&this.opaque(h.object))nearest=h.distance;this.hits.length=0;
+      let nearest=Infinity,still=Infinity;
+      for(const h of this.hits)if((h.distance<nearest||classify&&h.distance<still)&&this.opaque(h.object)){nearest=Math.min(nearest,h.distance);if(classify&&h.distance<still&&!transient(h.object))still=h.distance;}
+      this.hits.length=0;
       // A ray from the body passes through the back of a one-sided wall (a hotel room wall, a tower) whose drawn
       // face looks out at the camera: what the camera sees. Cast torso and head back from the far end too; a drawn
       // face found there blocks every camera beyond it, however close to the body it is.
       if(side===0&&height>=0){
         this.cast++;this.ray.set(point.clone().addScaledVector(direction,far),reverse);this.ray.near=0;this.ray.far=far-.05;
         for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
-        for(const h of this.hits)if(far-h.distance<nearest&&this.opaque(h.object))nearest=far-h.distance;this.hits.length=0;
+        for(const h of this.hits)if(this.opaque(h.object)){if(far-h.distance<nearest)nearest=far-h.distance;if(classify&&far-h.distance<still&&!transient(h.object))still=far-h.distance;}this.hits.length=0;
       }
+      // classify: a body that only grazes an edge of the Soul (shoulder or hip rays) does not cut the held view
+      if(classify&&(side!==0||height<0))nearest=still;
       if(nearest<Infinity)allowed=Math.min(allowed,Math.max(0,nearest-.25));
-      if(allowed<need)break;
+      if(classify&&still<Infinity)fixed=Math.min(fixed,Math.max(0,still-.25));
+      if((classify?fixed:allowed)<need)break;
     }
+    this.reachStatic=classify?fixed:allowed;
     return allowed;
   }
   /** QA2 F11: a camera that sees the Soul only through an opening (a doorway, a window) in a wall across the view
@@ -157,7 +174,7 @@ export class WorldFollow {
   get desired():THREE.Vector3|null{return this.requested;}
   private decoupled=false;
   /** #1316: what moved the camera on the last frame, and with what, for the camera trace (#1317). */
-  rule:{name:'start'|'held'|'user'|'collision'|'opening'|'search'|'glide'|'speed-cap';blocked?:boolean;reach?:number;cap?:number}={name:'start'};
+  rule:{name:'start'|'held'|'user'|'collision'|'opening'|'search'|'glide'|'recover'|'speed-cap';blocked?:boolean;reach?:number;cap?:number}={name:'start'};
   resolve(target:THREE.Vector3,actualOffset:THREE.Vector3,roots:readonly THREE.Object3D[],seconds:number):THREE.Vector3 {
     this.rays=0;if(!actualOffset.toArray().every(Number.isFinite)||actualOffset.length()<.01)return actualOffset.clone();
     if(!this.requested||!this.rendered)this.requested=actualOffset.clone();
@@ -180,6 +197,45 @@ export class WorldFollow {
   /** True while the viewer is dragging/zooming (and a moment after): their view is shown as is. */
   get userActive(){return this.clock-this.userAt<USER_HOLD;}
   private clear(target:THREE.Vector3,offset:THREE.Vector3,roots:readonly THREE.Object3D[]){const need=offset.length()-.01;return this.limit(target,offset,roots,need)>=need;}
+  /** #2201 A3: occluder dwell. Is a held sightline (the chosen view, or the drawn one) still to be kept? A wall cuts it at
+   * once; a body passing through it (bodies alone in the way) only once it has stayed in the way for DWELL. */
+  private cut:{chosen:number|null;rendered:number|null}={chosen:null,rendered:null};
+  private kept(key:'chosen'|'rendered',target:THREE.Vector3,offset:THREE.Vector3,roots:readonly THREE.Object3D[]){
+    const need=offset.length()-.01;
+    if(this.limit(target,offset,roots,need,false,true)>=need){this.cut[key]=null;return true;}
+    if(this.reachStatic<need){this.cut[key]=null;return false;}
+    this.cut[key]??=this.clock;return this.clock-this.cut[key]<DWELL;
+  }
+  /** #2201 A3: choice hysteresis: a clear view that beats the held one is taken only when the next search picks it again. */
+  private challenger:THREE.Vector3|null=null;
+  /** #2201 A3: forced is the camera held off the asked-for view because that was blocked (it rose, came in, or looked
+   * all round); `wide` marks the all-round look. The ladder lists the rungs found clear at the last probe. */
+  private forced=false;
+  private wide=false;
+  private recoverGoal:THREE.Vector3|null=null;
+  private ladder:number[]=[];
+  private lastProbe=-Infinity;
+  private lastReturn=-Infinity;
+  /** The point `f` (0..1) of the way from the held view `a` to the asked-for view `b` on the sphere round the Soul. */
+  private between(a:THREE.Vector3,b:THREE.Vector3,f:number){
+    const x=new THREE.Spherical().setFromVector3(a),y=new THREE.Spherical().setFromVector3(b),d=Math.atan2(Math.sin(y.theta-x.theta),Math.cos(y.theta-x.theta));
+    return new THREE.Vector3().setFromSpherical(new THREE.Spherical(x.radius+(y.radius-x.radius)*f,x.phi+(y.phi-x.phi)*f,x.theta+d*f));
+  }
+  /** #2201 A3 (auto-camera note §3): while forced, every RECOVER.probe s probe four rungs from the held view toward the
+   * asked-for one (25 % … 100 %). A rung counts when its sightline reaches RECOVER.margin past the camera ("space allows")
+   * at two probes running, so a brief gap in a passage does not pull the camera down; the camera then springs to the
+   * furthest such rung, at most once every RECOVER.gap s. Reaching the asked-for view ends the forced state. */
+  private recover(target:THREE.Vector3,wanted:THREE.Vector3,roots:readonly THREE.Object3D[]){
+    if(!this.forced||!this.chosen||this.clock-this.lastProbe<RECOVER.probe)return;
+    this.lastProbe=this.clock;
+    const clear=[.25,.5,.75,1].filter(f=>{const rung=this.between(this.chosen!,wanted,f),need=rung.length()+RECOVER.margin;
+      return this.limit(target,rung.setLength(need),roots,need-.01)>=need-.01;});
+    const twice=clear.filter(f=>this.ladder.includes(f));this.ladder=clear;
+    if(!twice.length||this.clock-this.lastReturn<RECOVER.gap)return;
+    const f=Math.max(...twice);
+    this.chosen=f===1?wanted.clone():this.between(this.chosen,wanted,f);this.recoverGoal=this.chosen;this.chosenClear=true;this.cut.chosen=null;
+    this.lastReturn=this.clock;this.ladder=[];this.challenger=null;if(f===1)this.forced=false;
+  }
   private candidates(wanted:THREE.Vector3){
     const s=new THREE.Spherical().setFromVector3(wanted),out:THREE.Vector3[]=[wanted.clone()];
     const at=(dTheta:number,dPhi:number,scale=1)=>new THREE.Vector3().setFromSpherical(new THREE.Spherical(s.radius*scale,Math.max(.15,Math.min(Math.PI*.48,s.phi+dPhi)),s.theta+dTheta));
@@ -194,10 +250,14 @@ export class WorldFollow {
     const cost=(c:THREE.Vector3)=>{const d=c.clone().normalize();let k=from.angleTo(d)+.6*want.angleTo(d)+.5*Math.abs(c.length()-wanted.length())/Math.max(1,wanted.length());
       if(behind){const flat=new THREE.Vector3(d.x,0,d.z);if(flat.lengthSq()>1e-6)k+=.3*(1-behind.dot(flat.normalize()));}return k;};
     // Hysteresis: the previous viewpoint, while it stays clear, is kept unless a clear candidate is clearly better.
-    let best:THREE.Vector3|null=null,bestCost=Infinity;
-    if(this.chosen&&this.clear(target,this.chosen,roots)){best=this.chosen;bestCost=cost(this.chosen)-.25;}
+    let best:THREE.Vector3|null=null,bestCost=Infinity;const held=!!this.chosen&&this.kept('chosen',target,this.chosen,roots);
+    if(held){best=this.chosen;bestCost=cost(this.chosen!)-.25;}
     for(const c of this.candidates(wanted)){const k=cost(c);if(k>=bestCost)continue;if(this.clear(target,c,roots)){best=c;bestCost=k;}}
+    // #2201 A3: a challenger to a held view that is still clear wins only at the second search running.
+    if(held&&best!==this.chosen){const again=!!this.challenger&&this.challenger.distanceTo(best!)<.1;this.challenger=best!.clone();if(!again)return this.chosen!;}
+    this.challenger=null;this.wide=false;
     if(best)return best;
+    this.wide=true;
     // Nothing near the asked-for view is clear (a narrow room, a stair well, a Soul against walls): look all round,
     // low to high, for the view that sees farthest (to 5 m), the asked-for side preferred, and come in to its nearest
     // wall (fit). Kept by the hysteresis above while it stays clear, so this wide look runs once per change.
@@ -247,17 +307,25 @@ export class WorldFollow {
     }
     const previous=this.rendered?.clone();
     // Search again every .2 s, or at once when a clear viewpoint is cut (one with no clear view waits for the next search).
-    if(!this.chosen||this.clock-this.lastSearch>=.2||this.chosenClear&&!this.clear(target,this.chosen,roots)){
-      this.chosen=this.choose(target,wanted,roots).clone();this.lastSearch=this.clock;this.chosenClear=this.clear(target,this.chosen,roots);}
+    if(!this.chosen||this.clock-this.lastSearch>=.2||this.chosenClear&&!this.kept('chosen',target,this.chosen,roots)){
+      const next=this.choose(target,wanted,roots).clone();if(!this.chosen||next.distanceTo(this.chosen)>.01)this.cut.chosen=null;
+      this.chosen=next;this.lastSearch=this.clock;this.chosenClear=this.kept('chosen',target,this.chosen,roots);
+      // #2201 A3: forced off the asked-for view (it rose more than .3 rad, came in below .7 of the distance, or looked all
+      // round) until the camera is back at it.
+      const c=new THREE.Spherical().setFromVector3(this.chosen),w=new THREE.Spherical().setFromVector3(wanted);
+      if(this.wide||c.phi<w.phi-.3||c.radius<.7*w.radius)this.forced=true;
+      else if(this.chosen.angleTo(wanted)<.02&&c.radius>.97*w.radius)this.forced=false;
+    }
+    this.recover(target,wanted,roots);
     const goal=this.chosen;
-    this.rule={name:goal.distanceTo(wanted)>.01?'search':'glide'};
+    this.rule={name:this.recoverGoal&&goal.distanceTo(this.recoverGoal)<.01?'recover':goal.distanceTo(wanted)>.01?'search':'glide'};
     if(!this.rendered){this.rendered=goal.clone();this.rule={name:'start'};this.still();}
     else{
       // Glide on the sphere around the Soul (around obstacles, not through them); hurry, never jump, when blocked.
       // #2201 A2: a critically damped spring on theta, phi and radius, exact at any frame rate: the camera eases out of
       // rest and into the goal, and its velocity carries over when the goal moves, so it never starts or stops abruptly.
-      const blocked=!this.clear(target,this.rendered,roots);this.rule.blocked=blocked;
-      const period=blocked?SPRING.blocked:this.rule.name==='glide'?SPRING.returning:SPRING.calm,m=this.motion;
+      const blocked=!this.kept('rendered',target,this.rendered,roots);this.rule.blocked=blocked;
+      const period=blocked?SPRING.blocked:this.rule.name==='glide'||this.rule.name==='recover'?SPRING.returning:SPRING.calm,m=this.motion;
       const a=new THREE.Spherical().setFromVector3(this.rendered),b=new THREE.Spherical().setFromVector3(goal);
       const theta=springAngle(a.theta,m.theta,b.theta,period,dt),phi=springStep(a.phi,m.phi,b.phi,period,dt),radius=springStep(a.radius,m.radius,b.radius,period,dt);
       a.theta=theta.x;a.phi=Math.max(1e-3,Math.min(Math.PI-1e-3,phi.x));a.radius=Math.max(.01,radius.x);m.theta=theta.v;m.phi=phi.v;m.radius=radius.v;
