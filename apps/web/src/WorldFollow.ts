@@ -46,7 +46,7 @@ export class WorldFollow {
   private cast=0;
   rays=0;
   reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.still();this.userAt=-Infinity;this.instances.reset();
-    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.driftTo=null;this.driftAt=-Infinity;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;}
+    this.cut.chosen=this.cut.rendered=null;this.challenger=null;this.forced=this.wide=false;this.heading=null;this.heldSky=null;this.recoverGoal=null;this.ladder=[];this.lastProbe=this.lastReturn=-Infinity;}
   /** #2201 A2: the spring's velocity on the sphere (rad/s for theta and phi, m/s for the radius). */
   private motion={theta:0,phi:0,radius:0};
   /** The camera's automatic speed on the last frame (m/s, relative to the Soul): the start of the acceleration cap. */
@@ -268,25 +268,13 @@ export class WorldFollow {
     for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
     const free=!this.hits.some(h=>this.opaque(h.object));this.hits.length=0;return free;
   }
-  /** #2201 A4: where the walking drift heads (an azimuth), checked every second: the nearer side-behind view when it is
-   * clear, else the nearest clear of the far side-behind and straight behind (a street lined with houses), else the nearer. */
+  /** #2201 A4: the held view's sky, as last looked at. */
   private heldSky:{at:THREE.Vector3;t:number;sky:boolean}|null=null;
   /** #2201 A4: the last search tried the asked-for view and found it blocked (no extra rays: the search's own check). */
   private askedBlocked=false;
-  private driftTo:number|null=null;
-  private driftAt=-Infinity;
-  private driftAim(target:THREE.Vector3,s:THREE.Spherical,roots:readonly THREE.Object3D[]){
-    const h=this.heading!,near=walkingDrift(h,s.theta),yaw=Math.atan2(h.x,h.z),at=(theta:number)=>new THREE.Vector3().setFromSpherical(new THREE.Spherical(s.radius,s.phi,theta));
-    // the torso line alone (two rays): a cheap look, once a second, at where the drift should head
-    const open_=(theta:number)=>{const c=at(theta),need=c.length()-.01;return this.limit(target,c,roots,need,true)>=need;};
-    if(open_(near))return near;
-    const gap=(a:number)=>Math.abs(Math.atan2(Math.sin(a-s.theta),Math.cos(a-s.theta)));
-    const open=[2*yaw-near,yaw+Math.PI].filter(open_).sort((a,b)=>gap(a)-gap(b));
-    return open[0]??near;
-  }
   private choose(target:THREE.Vector3,wanted:THREE.Vector3,roots:readonly THREE.Object3D[]){
     // #2201 A4: candidates are ranked by the shot score (face or profile, sky behind the head, the sun, framing, staying
-    // put, the asked-for view); the sky ray is cast for the three best and the held view only. Cost is minus the score.
+    // put, the asked-for view); the sky ray is cast for the three best, only when it could change the choice, and for the held view once a second. Cost is minus the score.
     const ctx:ShotContext={heading:this.heading,held:this.rendered,asked:wanted,sun:this.view.sun,daylight:this.view.daylight,fov:this.view.fov*Math.PI/180,forced:this.forced};
     const asked=this.candidates(wanted),ranked=asked.map(c=>({c,k:-shotScore(c,ctx).total})).sort((a,b)=>a.k-b.k);this.askedBlocked=false;
     // Hysteresis: the previous viewpoint, while it stays clear, is kept unless a clear candidate scores .12 better.
@@ -341,8 +329,7 @@ export class WorldFollow {
     if(speed>.6)this.heading=new THREE.Vector3(this.velocity.x,0,this.velocity.z).normalize();
     if(speed>.6&&!this.userOrbited&&dt>0){
       const s=new THREE.Spherical().setFromVector3(this.requested!);
-      if(this.driftTo===null||this.clock-this.driftAt>=1){this.driftAt=this.clock;this.driftTo=this.driftAim(target,s,roots);}
-      const side=this.driftTo;
+      const side=walkingDrift(this.heading!,s.theta);
       let d=side-s.theta;d=Math.atan2(Math.sin(d),Math.cos(d));s.theta+=Math.sign(d)*Math.min(Math.abs(d),.1*dt);this.requested!.setFromSpherical(s);
     }
     const wanted=this.requested!.clone();
