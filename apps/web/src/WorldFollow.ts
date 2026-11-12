@@ -269,6 +269,8 @@ export class WorldFollow {
   /** #2201 A4: where the walking drift heads (an azimuth), checked every second: the nearer side-behind view when it is
    * clear, else the nearest clear of the far side-behind and straight behind (a street lined with houses), else the nearer. */
   private heldSky:{at:THREE.Vector3;t:number;sky:boolean}|null=null;
+  /** #2201 A4: the last search tried the asked-for view and found it blocked (no extra rays: the search's own check). */
+  private askedBlocked=false;
   private driftTo:number|null=null;
   private driftAt=-Infinity;
   private driftAim(target:THREE.Vector3,s:THREE.Spherical,roots:readonly THREE.Object3D[]){
@@ -284,7 +286,7 @@ export class WorldFollow {
     // #2201 A4: candidates are ranked by the shot score (face or profile, sky behind the head, the sun, framing, staying
     // put, the asked-for view); the sky ray is cast for the three best and the held view only. Cost is minus the score.
     const ctx:ShotContext={heading:this.heading,held:this.rendered,asked:wanted,sun:this.view.sun,daylight:this.view.daylight,fov:this.view.fov*Math.PI/180,forced:this.forced};
-    const ranked=this.candidates(wanted).map(c=>({c,k:-shotScore(c,ctx).total})).sort((a,b)=>a.k-b.k);
+    const asked=this.candidates(wanted),ranked=asked.map(c=>({c,k:-shotScore(c,ctx).total})).sort((a,b)=>a.k-b.k);this.askedBlocked=false;
     // Hysteresis: the previous viewpoint, while it stays clear, is kept unless a clear candidate scores .12 better.
     let best:THREE.Vector3|null=null,bestCost=Infinity;const held=!!this.chosen&&this.kept('chosen',target,this.chosen,roots);
     if(held){
@@ -293,7 +295,7 @@ export class WorldFollow {
       best=this.chosen;bestCost=-shotScore(this.chosen!,{...ctx,sky:this.heldSky.sky}).total-.12;}
     // the sky part moves a total by at most SKY_SWING: cast the sky rays only when the best candidates could then win
     if(ranked[0]&&ranked[0].k-SKY_SWING<bestCost){for(const r of ranked.slice(0,3))r.k=-shotScore(r.c,{...ctx,sky:this.skyBehind(target,r.c)}).total;ranked.sort((a,b)=>a.k-b.k);}
-    for(const {c,k} of ranked){if(k>=bestCost)break;if(this.clear(target,c,roots)){best=c;bestCost=k;break;}}
+    for(const {c,k} of ranked){if(k>=bestCost)break;if(this.clear(target,c,roots)){best=c;bestCost=k;break;}if(c===asked[0])this.askedBlocked=true;}
     // #2201 A3: a challenger to a held view that is still clear wins only at the second search running.
     if(held&&best!==this.chosen){const again=!!this.challenger&&this.challenger.distanceTo(best!)<.1;this.challenger=best!.clone();if(!again)return this.chosen!;}
     this.challenger=null;this.wide=false;
@@ -352,19 +354,21 @@ export class WorldFollow {
     }
     const previous=this.rendered?.clone();
     // Search again every .2 s, or at once when a clear viewpoint is cut (one with no clear view waits for the next search).
-    if(!this.chosen||this.clock-this.lastSearch>=.2||this.chosenClear&&!this.kept('chosen',target,this.chosen,roots)){
+    const searching=!this.chosen||this.clock-this.lastSearch>=.2||this.chosenClear&&!this.kept('chosen',target,this.chosen,roots);
+    if(searching){
       const next=this.choose(target,wanted,roots).clone();if(!this.chosen||next.distanceTo(this.chosen)>.01)this.cut.chosen=null;
       this.chosen=next;this.lastSearch=this.clock;this.chosenClear=this.kept('chosen',target,this.chosen,roots);
       // #2201 A3: forced off the asked-for view (it rose more than .3 rad, came in below .7 of the distance, or looked all
       // round) until the camera is back at it.
       const c=new THREE.Spherical().setFromVector3(this.chosen),w=new THREE.Spherical().setFromVector3(wanted);
-      // #2201 A4: or turned more than .3 rad off it because it was blocked (the shot score may also turn by choice)
-      if(this.wide||c.phi<w.phi-.3||c.radius<.7*w.radius||this.chosen.angleTo(wanted)>.3&&!this.clear(target,wanted,roots)){
+      // #2201 A4: or turned more than .3 rad off it because it was blocked (the shot score may also turn by choice; the
+      // search's own look at the asked-for view says which)
+      if(this.wide||c.phi<w.phi-.3||c.radius<.7*w.radius||this.chosen.angleTo(wanted)>.3&&this.askedBlocked){
         if(!this.forced)this.lastReturn=this.clock;  // the first return, too, comes RECOVER.gap after the camera was forced
         this.forced=true;}
       else if(this.chosen.angleTo(wanted)<.02&&c.radius>.97*w.radius){if(this.forced)this.recoverGoal=this.chosen;this.forced=false;}  // the way back is a recovery too
     }
-    this.recover(target,wanted,roots);
+    if(!searching)this.recover(target,wanted,roots);  // #2201 A4: never in the same frame as a search, so the two costs don't add up
     const goal=this.chosen;
     this.rule={name:this.recoverGoal&&goal.distanceTo(this.recoverGoal)<.01?'recover':goal.distanceTo(wanted)>.01?'search':'glide'};
     if(!this.rendered){this.rendered=goal.clone();this.rule={name:'start'};this.still();}
