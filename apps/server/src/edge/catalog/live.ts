@@ -10,6 +10,7 @@ import type {Context, Hono} from 'hono';
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import {inPoly} from '../ledger/places.ts';
 import {liveDelta, liveHash, type LivePicture} from './live-delta.ts';
+import {freshBootClock} from '../boot/clock.ts';
 
 export const LIVE_CONTRACT = 'soul-live/1';
 /** Lines of speech kept and sent: the newest. A client keeps its own longer history by id. */
@@ -92,7 +93,10 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     // a line said before its place was made secret is withheld from then on too (where its speaker stood, on any floor)
     const open = (l: Line) => { const w = saidAt.get(l); return !secret(l.place) && !w?.path.some(secret) && !(w && w.x !== null && hidden(w.x, w.z!)); };
     const {things, more} = visibleThings();
-    return {contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at: Date.now(), catalog: catalogVersion(), souls, speech: speech.filter(open), things, ...(more ? {thingsMore: more} : {})};
+    // #1918: the world's clock as sampled with this build (`at`); not in the hash or a change, so it sends no frame of its own
+    const at = Date.now(), c = freshBootClock(L.host, at);
+    const clock = {worldDateTime: c.worldDateTime, time: c.time, weekdayUTC: c.weekdayUTC, minuteOfDay: c.minuteOfDay, paused: c.paused, realMsPerWorldMinute: c.realMsPerWorldMinute, at};
+    return {contract: LIVE_CONTRACT, worldId: L.host.worldId, scope: 'public', tick, at, catalog: catalogVersion(), clock, souls, speech: speech.filter(open), things, ...(more ? {thingsMore: more} : {})};
   };
 
   // ---- one picture at a time, numbered: every build that changes something a client keeps is the next seq
@@ -116,7 +120,9 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
   const current = () => {
     const nowShown = `${L.knowledge?.version ?? 0}|${L.places.version}`;
     if (nowShown !== shown) { shown = nowShown; ring.length = 0; }
-    const tick = L.host.engine.world.tick, key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}`;
+    // a pause, a rate or a day set is in the key too: the tick does not move while paused (#1918)
+    const h = L.host, tick = h.engine.world.tick, clockKey = `${h.paused ? 1 : 0}|${h.clockRate}|${h.living?.origin ?? ''}|${h.living?.dayTicks ?? ''}`;
+    const key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}|${clockKey}`;
     if (kept?.key === key) return kept;
     const tb = performance.now(), pic = build(tick), td = performance.now(); rec(cost.build, td - tb);
     if (!kept) { kept = {key, pic, seq: 1, body: null, hash: null}; return kept; }
@@ -129,7 +135,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     return kept;
   };
   const full = () => { const k = current(); return k.body ??= JSON.stringify({...k.pic, epoch, seq: k.seq}); };
-  const check = () => { const k = current(); k.hash ??= liveHash(k.pic); fanout('live', JSON.stringify({epoch, seq: k.seq, check: k.hash})); };
+  const check = () => { const k = current(); k.hash ??= liveHash(k.pic); fanout('live', JSON.stringify({epoch, seq: k.seq, check: k.hash, clock: k.pic.clock})); };
 
   // ---- the push: only while someone holds it. Its own time is measured and logged once a minute while it runs.
   let timer: ReturnType<typeof setInterval> | null = null, lastCheck = 0;
