@@ -58,6 +58,10 @@ or previous (right) Soul here; slower drags still orbit. The order is a ring mad
 then the others by the director's interest score, then by distance. A tap on the ground while following hands you the
 camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Broadcast a touch screen's chip reads
 "Now showing <name>" with a Follow button. Mouse clicks keep the card-and-button flow.
+Name plates show selectively (#2195, `WorldCardSight.ts`) and fade in and out. Your own Souls show whenever they are in
+view and not behind scenery; from a high or far camera they show anyway, emphasised. Other Souls are quieter, much
+quieter when asleep, idle or a zombie, and hide behind scenery, well behind the camera's focus, or beyond a reach that
+grows with the camera's height. A hovered, selected or grouped Soul's plate always shows.
 A press, long-press, double-tap or drag anywhere on a world page never selects text or shows a tap highlight. The
 selection, callout and highlight are off on the page, its menus, its modal dialogs and the boot arrival (#1386). Fields,
 code and the copyable start prompt keep their text. The first touch of a page on a touch screen shows three glyphs
