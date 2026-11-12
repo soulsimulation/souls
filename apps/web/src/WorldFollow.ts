@@ -263,23 +263,25 @@ export class WorldFollow {
     for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
     const free=!this.hits.some(h=>this.opaque(h.object));this.hits.length=0;return free;
   }
-  /** #2201 A4: where the walking drift heads (an azimuth), checked every .2 s: the nearer side-behind view when it is
+  /** #2201 A4: where the walking drift heads (an azimuth), checked every second: the nearer side-behind view when it is
    * clear, else the nearest clear of the far side-behind and straight behind (a street lined with houses), else the nearer. */
   private driftTo:number|null=null;
   private driftAt=-Infinity;
   private driftAim(target:THREE.Vector3,s:THREE.Spherical,roots:readonly THREE.Object3D[]){
     const h=this.heading!,near=walkingDrift(h,s.theta),yaw=Math.atan2(h.x,h.z),at=(theta:number)=>new THREE.Vector3().setFromSpherical(new THREE.Spherical(s.radius,s.phi,theta));
-    if(this.clear(target,at(near),roots))return near;
+    // the torso line alone (two rays): a cheap look, once a second, at where the drift should head
+    const open_=(theta:number)=>{const c=at(theta),need=c.length()-.01;return this.limit(target,c,roots,need,true)>=need;};
+    if(open_(near))return near;
     const gap=(a:number)=>Math.abs(Math.atan2(Math.sin(a-s.theta),Math.cos(a-s.theta)));
-    const open=[2*yaw-near,yaw+Math.PI].filter(theta=>this.clear(target,at(theta),roots)).sort((a,b)=>gap(a)-gap(b));
+    const open=[2*yaw-near,yaw+Math.PI].filter(open_).sort((a,b)=>gap(a)-gap(b));
     return open[0]??near;
   }
   private choose(target:THREE.Vector3,wanted:THREE.Vector3,roots:readonly THREE.Object3D[]){
     // #2201 A4: candidates are ranked by the shot score (face or profile, sky behind the head, the sun, framing, staying
-    // put, the asked-for view); the sky ray is cast for the four best and the held view only. Cost is minus the score.
+    // put, the asked-for view); the sky ray is cast for the three best and the held view only. Cost is minus the score.
     const ctx:ShotContext={heading:this.heading,held:this.rendered,asked:wanted,sun:this.view.sun,daylight:this.view.daylight,fov:this.view.fov*Math.PI/180,forced:this.forced};
     const ranked=this.candidates(wanted).map(c=>({c,k:-shotScore(c,ctx).total})).sort((a,b)=>a.k-b.k);
-    for(const r of ranked.slice(0,4))r.k=-shotScore(r.c,{...ctx,sky:this.skyBehind(target,r.c)}).total;
+    for(const r of ranked.slice(0,3))r.k=-shotScore(r.c,{...ctx,sky:this.skyBehind(target,r.c)}).total;
     ranked.sort((a,b)=>a.k-b.k);
     // Hysteresis: the previous viewpoint, while it stays clear, is kept unless a clear candidate scores .12 better.
     let best:THREE.Vector3|null=null,bestCost=Infinity;const held=!!this.chosen&&this.kept('chosen',target,this.chosen,roots);
@@ -326,7 +328,7 @@ export class WorldFollow {
     if(speed>.6)this.heading=new THREE.Vector3(this.velocity.x,0,this.velocity.z).normalize();
     if(speed>.6&&!this.userOrbited&&dt>0){
       const s=new THREE.Spherical().setFromVector3(this.requested!);
-      if(this.driftTo===null||this.clock-this.driftAt>=.2){this.driftAt=this.clock;this.driftTo=this.driftAim(target,s,roots);}
+      if(this.driftTo===null||this.clock-this.driftAt>=1){this.driftAt=this.clock;this.driftTo=this.driftAim(target,s,roots);}
       const side=this.driftTo;
       let d=side-s.theta;d=Math.atan2(Math.sin(d),Math.cos(d));s.theta+=Math.sign(d)*Math.min(Math.abs(d),.1*dt);this.requested!.setFromSpherical(s);
     }
