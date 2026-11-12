@@ -6,6 +6,7 @@ import {monitorEventLoopDelay, PerformanceObserver, type IntervalHistogram} from
 import v8 from 'node:v8';
 import {clockOf, LEVELS, S, sharedLoad, type ClockState, type Level} from './shared.ts';
 import {frameBudgetMs} from './admission.ts';
+import {publishTickWindow, sharedApi, type TickWindow} from './api-times.ts';
 
 export type Signals = {service: number; loopP99Ms: number; heapFrac: number; gcFrac: number; oldestMs: number};
 const RANK: Record<Level, number> = {green: 0, amber: 1, red: 2, black: 3};
@@ -106,6 +107,8 @@ export class QuietTick {
 }
 
 const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100;
+/** #1944 A3: the tick window (10 s), and how late past its due time a tick's start counts as late. */
+export const TICK_WINDOW_MS = 10_000, LATE_TICK_MS = 25;
 /** What the monitor reads from the world (WorldHost satisfies it). */
 export type HostLike = {rewinds?: number; engine: {world: {tick: number}}; tickMs: number[]; paused: boolean; pace: number; baseRate: number; readonly running: boolean; readonly clockAvailable: boolean; readonly stepFailing?: string | null;
   /** #1326: the effective rate (lower while dilated), and the host's listeners, where the monitor notes each completed tick. */
@@ -136,6 +139,9 @@ export type MonitorOpts = {
   windowMs?: number;
   /** Drill only (SIM_LOAD_DRILL_LEVEL): hold this level whatever the signals say, to exercise dials and the restart path. */
   drill?: Level;
+  /** #1944 A3: where the tick windows are published (default the process's api-times buffer) and the monotonic clock of
+   *  tick starts (default performance.now). */
+  api?: Float64Array; mono?: () => number;
 };
 
 export class LoadMonitor {
@@ -165,6 +171,11 @@ export class LoadMonitor {
   private seenTick = -1;
   private now: () => number;
   private o: MonitorOpts;
+  /** #1944 A3: the open tick window: its start (wall), each tick's own ms, late ticks, the longest gap, ms at each level
+   *  (by RANK) and when that was last counted; the previous tick's start and due time (mono) and whether it was late. */
+  private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0};
+  /** The last completed tick window (also in live.json and /healthz as `api.ticks`). */
+  tickWindow: TickWindow | null = null;
   constructor(o: MonitorOpts) { this.o = o; this.a = o.shared ?? sharedLoad; this.now = o.now ?? Date.now; this.windowMs = o.windowMs ?? 5000; this.baseline = new QuietBaseline(o.baselineMs); this.state.baselineMs = this.baseline.value; }
 
   /** The dial registry (LOAD-CONTRACT §1). A dial is told the current level at once and on every change. */
@@ -172,7 +183,7 @@ export class LoadMonitor {
   start() {
     if (this.timer) return;
     // #1326: the wall time of each completed tick, at the tick (a sample alone would lag it by up to 250 ms)
-    if (this.o.host.listeners && !this.tickHook) { this.tickHook = {afterTickComplete: () => { this.a[S.tickAt] = this.now(); }}; this.o.host.listeners.push(this.tickHook); }
+    if (this.o.host.listeners && !this.tickHook) { this.tickHook = {afterTickComplete: () => { this.a[S.tickAt] = this.now(); this.tickDone(); }}; this.o.host.listeners.push(this.tickHook); }
     this.hist = monitorEventLoopDelay({resolution: 10}); this.hist.enable(); this.histAt = this.startedAt = this.now(); this.quiet = {depth: 0, reqMs: this.o.requestMs?.() ?? 0, service: 1, tick0: this.o.host.engine.world.tick};
     try { this.obs = new PerformanceObserver(list => { for (const e of list.getEntries()) this.gc.push({at: this.now(), ms: e.duration}); }); this.obs.observe({entryTypes: ['gc']}); } catch { this.obs = null; }
     process.on('SIGCONT', this.resumed);
@@ -192,7 +203,7 @@ export class LoadMonitor {
   private resumed = () => {
     const now = this.now();
     if (this.a[S.tickAt]) this.a[S.tickAt] = now;   // #1326: time spent suspended (SIGSTOP) is not a stall
-    this.ticks = []; this.prevLoopP99 = 0; this.hist?.reset(); this.histAt = now; this.gc = [];
+    this.ticks = []; this.prevLoopP99 = 0; this.hist?.reset(); this.histAt = now; this.gc = []; this.tw.prevStart = 0;
     this.quiet = {depth: 0, reqMs: this.o.requestMs?.() ?? 0, service: 1, tick0: this.o.host.engine.world.tick};
     this.state.resumed(now);
     if (this.blackSince !== null) this.blackSince = now;
@@ -212,6 +223,7 @@ export class LoadMonitor {
     a[S.stallMs] = stallMs; a[S.clockRate] = h.clockRate ?? h.baseRate; a[S.baseRate] = h.baseRate;
     // tick service over 5 s: ticks run / ticks owed at the admin rate and the attention pace (dilation counts as missed)
     const prev = this.ticks.at(-1), owing = h.running && !h.paused && h.clockAvailable;
+    this.tickWindowSample(now, owing);
     const due = prev && owing ? (Math.min(1000, now - prev.at) * h.baseRate * h.pace) / TICK_MS : 0;
     this.ticks.push({at: now, tick: h.engine.world.tick, due});
     while (this.ticks.length > 2 && now - this.ticks[1].at > 5000) this.ticks.shift();
@@ -274,6 +286,34 @@ export class LoadMonitor {
       this.a[S.quietTickMs] = this.quietTick.window(sum / n, quiet, this.quiet.service >= 0.95);
     }
     this.quiet = {depth: 0, reqMs, service: 1, tick0: tick};
+  }
+  /** #1944 A3: one completed tick (the host's afterTickComplete; public for tests). Its start is its end less its own ms.
+   *  A tick is due one interval (50 ms at the clock's rate and pace) after the previous one started, or, while the clock
+   *  catches up on late ticks back to back, one interval after the previous one was due. Late: started > 25 ms past due. */
+  tickDone() {
+    const h = this.o.host, w = this.tw, own = h.tickMs.at(-1) ?? 0, start = (this.o.mono ? this.o.mono() : performance.now()) - own;
+    const rate = (h.clockRate ?? h.baseRate) * h.pace, interval = rate > 0 ? TICK_MS / rate : 0;
+    if (interval !== w.interval) { w.interval = interval; w.prevStart = 0; }   // a new pace or rate: the next tick is due from now
+    if (w.prevStart && interval) {
+      const gap = start - w.prevStart, due = (w.prevLate && gap < interval / 2 ? w.prevDue : w.prevStart) + interval;
+      w.prevLate = start - due > LATE_TICK_MS; if (w.prevLate) w.late++;
+      w.prevDue = due; if (gap > w.maxGap) w.maxGap = gap;
+    } else { w.prevLate = false; w.prevDue = start; }
+    w.prevStart = start; w.ms.push(own);
+  }
+  /** #1944 A3: count the time since the last sample at the level it was at; close and publish a full window. */
+  private tickWindowSample(now: number, owing: boolean) {
+    const w = this.tw;
+    if (!owing) w.prevStart = 0;   // a paused or stopped clock owes no ticks: the next one is not late
+    if (!w.from) { w.from = w.levelAt = now; return; }
+    w.levels[RANK[this.level]] += Math.max(0, now - w.levelAt); w.levelAt = now;
+    if (now - w.from < TICK_WINDOW_MS) return;
+    const ms = w.ms.sort((x, y) => x - y), q = (p: number) => ms.length ? ms[Math.min(ms.length - 1, Math.floor(p * ms.length))] : 0;
+    const span = w.levels.reduce((x, y) => x + y, 0) || 1, share = (i: number) => w.levels[i] / span;
+    this.tickWindow = {at: now, windowS: (now - w.from) / 1000, ticks: ms.length, tickMs: {p50: q(0.5), p99: q(0.99)}, lateTicks: w.late, longestGapMs: w.maxGap,
+      levels: {green: share(0), amber: share(1), red: share(2), black: share(3)}};
+    publishTickWindow(this.tickWindow, this.o.api ?? sharedApi);
+    w.from = now; w.ms = []; w.late = 0; w.maxGap = 0; w.levels = [0, 0, 0, 0];
   }
   /** Mark a main-thread turn without a full sample (after a tick). */
   turn() { this.a[S.lastTurnAt] = this.now(); }

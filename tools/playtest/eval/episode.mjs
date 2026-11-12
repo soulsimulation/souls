@@ -52,8 +52,10 @@ export async function prepareFolder(seat, { name }) {
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
   // The world copy (a client before 2.25 has no look). #2047: a world still laying out its places answers the catalog with
   // 503 world.starting for up to 30 s after the first ask, longer than look's own retries on a slower machine: ask again.
+  // #2157: past those 30 s the world serves its catalog as it is, and on a busy host that is before its activity spots are
+  // laid out: a copy with no acts, where `find` finds nothing to eat. Such a copy is a world still starting: ask again.
   let lookFailed = null;
-  for (const until = Date.now() + 90_000; !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')) && Date.now() < until; await sleep(500)) {
+  for (const until = Date.now() + 90_000; !catalogHasActs(f, soulId) && Date.now() < until; await sleep(500)) {
     const l = await cli(f, ['look']);
     if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503/.test(lookFailed)) break; }
   }
@@ -64,6 +66,8 @@ export async function prepareFolder(seat, { name }) {
 export function readCatalog(folder, soulId) {
   try { return JSON.parse(readFileSync(join(runtimeDir(folder, soulId), 'world-catalog.json'), 'utf8')).catalog ?? null; } catch { return null; }
 }
+/** #2157: the client's world copy names at least one act (a world whose structure is laid out), else false. */
+export const catalogHasActs = (folder, soulId) => (readCatalog(folder, soulId)?.acts?.length ?? 0) > 0;
 
 /** A fresh seat (new agent session, own records) on a folder an owner already paired, e.g. a production test Soul.
  *  The harness never registers, creates or pairs here: it reads `status`, turns the client's trace on and starts `serve`. */
