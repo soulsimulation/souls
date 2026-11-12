@@ -30,8 +30,10 @@ export type PreviewViolationV1 = { rule: string; subjects: string[]; bodies: Pre
 export type EditPreviewV1 =
   | { ok: true; violations: PreviewViolationV1[]; relocated: string[]; trapped: string[] }
   | { ok: false; code: 'edit-preview.resumable-boundary-required' }
-  /** off-thread only: the factory has no descriptor (Eden core), or the worker failed; the message names why */
-  | { ok: false; code: 'edit-preview.worker-unavailable'; message: string };
+  /** off-thread only: the factory has no descriptor (Eden core), or the worker failed, exited or timed out; the message names why */
+  | { ok: false; code: 'edit-preview.worker-unavailable'; message: string }
+  /** off-thread only: PREVIEW_MAX_PENDING previews are already in flight */
+  | { ok: false; code: 'edit-preview.busy'; message: string };
 
 /** A detached copy of the host's engine, restored from its snapshot as an authored install checks its own; null off a
  *  resumable boundary. Nothing done to the copy reaches the world. */
@@ -92,36 +94,61 @@ async function steppedSnapshotV1(engine: WorldHost['engine']): Promise<EngineSna
   }
 }
 
-let worker: Worker | null = null, nextId = 0;
-const waiting = new Map<number, (r: EditPreviewV1) => void>();
+/** How long one off-thread preview may take before its worker is terminated (a cold worker also builds its factory). */
+export const PREVIEW_TIMEOUT_MS = 20_000;
+/** Previews in flight at once (each holds a snapshot: about 5.8 MB on Eden); past it a preview is refused, never queued. */
+export const PREVIEW_MAX_PENDING = 2;
+type Pool = { w: Worker; waiting: Map<number, (r: EditPreviewV1) => void> };
+let live: Pool | null = null, nextId = 0, pending = 0;
+let script = new URL('./edit-preview-worker.ts', import.meta.url);
+/** Tests only: the script the next preview worker runs (returns the previous one); an idle live worker is retired. */
+export function previewWorkerScriptV1(url?: URL): URL {
+  const was = script;
+  if (url) { script = url; const old = live; live = null; if (old && !old.waiting.size) void old.w.terminate(); }
+  return was;
+}
 const unavailable = (message: string): EditPreviewV1 => ({ ok: false, code: 'edit-preview.worker-unavailable', message });
-function previewWorker(): Worker {
-  if (worker) return worker;
-  const w = new Worker(new URL('./edit-preview-worker.ts', import.meta.url), { execArgv: [] });
-  w.unref();
-  const fail = (message: string) => { if (worker === w) worker = null; for (const done of waiting.values()) done(unavailable(message)); waiting.clear(); };
-  w.on('message', (m: PreviewReplyV1) => { const done = waiting.get(m.id); waiting.delete(m.id); if (!waiting.size) w.unref(); done?.('error' in m ? unavailable(m.error) : m.result); });
-  w.on('error', e => fail(e.message));
-  w.on('exit', code => fail(`the preview worker exited (${code})`));
-  return (worker = w);
+/** Every handler belongs to its own worker: a late exit of a replaced worker never answers the new one's previews. */
+function previewPool(): Pool {
+  if (live) return live;
+  const pool: Pool = { w: new Worker(script, { execArgv: [] }), waiting: new Map() };
+  pool.w.unref();
+  const fail = (message: string) => { if (live === pool) live = null; const done = [...pool.waiting.values()]; pool.waiting.clear(); for (const d of done) d(unavailable(message)); };
+  pool.w.on('message', (m: PreviewReplyV1) => { const done = pool.waiting.get(m.id); pool.waiting.delete(m.id); if (!pool.waiting.size) pool.w.unref(); done?.('error' in m ? unavailable(m.error) : m.result); });
+  pool.w.on('error', e => fail(e.message));
+  pool.w.on('exit', code => fail(`the preview worker exited (${code})`));
+  return (live = pool);
 }
 
 /**
  * The preview of `edit` on the world as it stands now, off the world's tick thread: the same result previewWorldEditV1
  * gives on detachedEngineV1(host) at this tick. Only the stepped checkpoint runs on the world's thread.
  */
-export async function previewWorldEditOffThreadV1(host: Pick<WorldHost, 'engine' | 'factory'>, edit: WorldEditV1): Promise<EditPreviewV1> {
+export async function previewWorldEditOffThreadV1(host: Pick<WorldHost, 'engine' | 'factory'>, edit: WorldEditV1, opts: { timeoutMs?: number } = {}): Promise<EditPreviewV1> {
   const engine = host.engine;
   if (engine.canSnapshot?.() === false) return { ok: false, code: 'edit-preview.resumable-boundary-required' };
   const descriptor = factoryDescriptorV1(host.factory);
   if (!descriptor) return unavailable('the world\'s engine factory has no descriptor');
-  const hash = (engine.world as { groundV1?: { recipeHash?: string } }).groundV1?.recipeHash;
-  const recipe = hash ? groundRecipe(hash) ?? null : null;
-  const snapshot = await steppedSnapshotV1(engine);
-  const id = ++nextId, w = previewWorker();
-  return new Promise<EditPreviewV1>(resolve => {
-    waiting.set(id, resolve); w.ref();
-    try { w.postMessage({ id, descriptor, recipe, snapshot, edit } satisfies PreviewJobV1); }
-    catch (e) { waiting.delete(id); resolve(unavailable((e as Error).message)); }
-  });
+  if (pending >= PREVIEW_MAX_PENDING) return { ok: false, code: 'edit-preview.busy', message: `${pending} previews are already in flight (at most ${PREVIEW_MAX_PENDING})` };
+  pending++;
+  try {
+    const hash = (engine.world as { groundV1?: { recipeHash?: string } }).groundV1?.recipeHash;
+    const recipe = hash ? groundRecipe(hash) ?? null : null;
+    const snapshot = await steppedSnapshotV1(engine);
+    const id = ++nextId, pool = previewPool(), ms = opts.timeoutMs ?? PREVIEW_TIMEOUT_MS;
+    return await new Promise<EditPreviewV1>(resolve => {
+      // on expiry the worker is terminated and every preview it holds answered; the next preview starts a fresh worker
+      const timer = setTimeout(() => {
+        if (!pool.waiting.has(id)) return;
+        if (live === pool) live = null;
+        const done = [...pool.waiting.values()]; pool.waiting.clear();
+        for (const d of done) d(unavailable(`the preview worker gave no answer within ${ms} ms`));
+        void pool.w.terminate();
+      }, ms);
+      timer.unref();
+      pool.waiting.set(id, r => { clearTimeout(timer); resolve(r); }); pool.w.ref();
+      try { pool.w.postMessage({ id, descriptor, recipe, snapshot, edit } satisfies PreviewJobV1); }
+      catch (e) { pool.waiting.delete(id); clearTimeout(timer); resolve(unavailable((e as Error).message)); }
+    });
+  } finally { pending--; }
 }

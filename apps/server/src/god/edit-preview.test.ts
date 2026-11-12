@@ -10,7 +10,7 @@ import { fixture, invite, accept, factory } from '../../test/native-owner-fixtur
 import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
-import { detachedEngineV1, previewWorldEditOffThreadV1, previewWorldEditV1 } from './edit-preview.ts';
+import { detachedEngineV1, previewWorkerScriptV1, previewWorldEditOffThreadV1, previewWorldEditV1 } from './edit-preview.ts';
 import { describedFactoryV1 } from '../world-factory.ts';
 
 // #2140: the off-thread path rebuilds this factory in its worker from the descriptor
@@ -106,4 +106,44 @@ test('off the tick thread: the same result as the in-thread preview on the #2134
   }
   assert.ok(named >= 5, `the walls over Bo are named (${named})`);
   assert.equal(live(), was, 'the live world is unchanged');
+});
+
+test('off the tick thread: a worker that never answers times out and is replaced; a dead worker never answers its successor; past the cap a preview is refused', { timeout: 120000 }, async t => {
+  const w = world(), twin = world();
+  const worker = (body: string) => new URL(`data:text/javascript,${encodeURIComponent(`import { parentPort } from 'node:worker_threads';\n${body}`)}`);
+  const real = previewWorkerScriptV1(worker('parentPort.on("message", () => {});'));   // from here: a worker that never answers
+  t.after(() => { previewWorkerScriptV1(real); for (const x of [w, twin]) { x.brain.quiesce(); x.host.stop(); x.db.close(); } });
+  w.brain.quiesce(); twin.brain.quiesce();
+  await w.settle(2); await twin.settle(2);
+  const sent: WorldEditV1[] = [], enqueue = twin.host.enqueue.bind(twin.host);
+  (twin.host as any).enqueue = (kind: string, author: string, payload: unknown) => { if (kind === 'world-edit') sent.push(payload as WorldEditV1); return enqueue(kind as never, author as never, payload as never); };
+  assert.equal(twin.god.act({ ops: [{ op: 'place', def: coreRef('wall'), params: { w: 4, h: 2.6, d: 0.5 }, name: 'wall', p: [3, 3] }] }).accepted, true);
+  await twin.settle(2);
+  const edit = sent.filter(e => e.seq > 0).at(-1)!, expected = previewWorldEditV1(detachedEngineV1(w.host), edit);
+  const code = (r: Awaited<ReturnType<typeof previewWorldEditOffThreadV1>>) => (r.ok ? 'ok' : r.code);
+
+  // a hung worker: answered within the bound, terminated, and the next preview gets a fresh worker
+  const hung = await previewWorldEditOffThreadV1(w.host, edit, { timeoutMs: 300 });
+  assert.equal(code(hung), 'edit-preview.worker-unavailable');
+  assert.match(!hung.ok && 'message' in hung ? hung.message : '', /no answer within 300 ms/);
+
+  // the cap: two in flight, the third refused at once with a named reason, never queued
+  const a = previewWorldEditOffThreadV1(w.host, edit, { timeoutMs: 400 }), b = previewWorldEditOffThreadV1(w.host, edit, { timeoutMs: 400 });
+  const c = await previewWorldEditOffThreadV1(w.host, edit);
+  assert.equal(code(c), 'edit-preview.busy', JSON.stringify(c));
+  for (const r of await Promise.all([a, b])) assert.equal(code(r), 'edit-preview.worker-unavailable');
+
+  previewWorkerScriptV1(real);
+  assert.deepEqual(await previewWorldEditOffThreadV1(w.host, edit), expected, 'a fresh worker after the hung one');
+
+  // a worker that dies: its error answers its own preview; its exit, which comes later, never answers the successor's.
+  // The checkpoint here is taken in one step, so the successor is waiting on its new worker before that exit arrives.
+  const snap = w.host.engine.snapshot();
+  const now = { engine: Object.create(w.host.engine, { captureCheckpoint: { value: () => ({ tick: snap.tick, steps: function* () { return { snapshot: snap, physicalHash: '' }; } }) } }), factory: w.host.factory } as any;
+  previewWorkerScriptV1(worker('parentPort.on("message", () => { throw new Error("worker fault"); });'));
+  const dead = await previewWorldEditOffThreadV1(now, edit);
+  assert.equal(code(dead), 'edit-preview.worker-unavailable');
+  assert.match(!dead.ok && 'message' in dead ? dead.message : '', /worker fault/);
+  previewWorkerScriptV1(real);
+  assert.deepEqual(await previewWorldEditOffThreadV1(now, edit), expected, 'the successor answers');
 });
