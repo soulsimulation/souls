@@ -255,17 +255,20 @@ export class Intents {
     const asked: V2 = [at[0] as number, at[1] as number], name = `[${asked[0]}, ${asked[1]}]`, level = P.w.entities[P.soul.entityId]?.human?.level ?? 0, mw = this.L.mw;
     // standing ground on the body's own level within 1 m (the engine's goal check: body radius + planning margin)
     const to = mw.standableNearV1 ? mw.standableNearV1(asked, level, P.soul.entityId, WALK_TO_ROOM, WALK_TO_SNAP_RINGS) : asked;
-    if (!to) return no('route.goal-blocked', level ? `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on level ${level}, the upper floor you are on: walk-to walks only on your own level, so walk down first.` : `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on the ground (level 0): it is inside something solid or off the walkable ground.`);
-    // far on the ground the planner proves only the first hop: a point no walk joins to where the body stands is refused here
-    if (level === 0 && P.pos && dist2(P.pos, to) > PAGED_DIRECT_M && mw.navCheckV1 && mw.navWarmV1?.(WALK_TO_WARM_MS)) {
-      const [me, goal] = mw.navCheckV1([{id: 'start', p: P.pos, level: 0, tol: 0.6}, {id: 'goal', p: to, level: 0, tol: 0.6}]);
-      if (goal?.code === 'nav.disconnected' && (me?.ok || me?.area !== goal.area)) return no('route.unreachable', `No walkable route joins ${name} to where you stand: it lies in a separate area${goal.pocket ? ` of ${Math.round(goal.pocket)} m²` : ''} (behind a cliff, water, a wall or a closed door), so walk-to refuses it rather than walking part way.`);
-    }
+    if (!to) return no('route.goal-blocked', level ? `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on level ${level}, the floor you are on: walk-to stays on your own level, so for a point outdoors or on another floor, walk down or to a place there first.` : `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on the ground (level 0): it is inside something solid or off the walkable ground.`);
     const steps: Steps = [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1'}}];
     // a point inside a site under construction is refused as approach's target is
     const blocked = this.planRefusal?.(P.soul, steps); if (blocked) return no(blocked.code, blocked.reason);
     // and a point inside someone else's private building as the walk to that building is (object.private)
     for (const p of this.L.places.containing(to[0], to[1], this.L.placeLevel(level))) {const c = p.ref ? this.L.bindOne(P.soul, 'walk:' + p.ref)?.cap : undefined; if (c?.blocked?.code === 'object.private') return no(c.blocked.code, c.blocked.reason);}
+    // far on paged ground the planner proves only the first hop: a point no walk joins to where the body stands is refused
+    // here (nearer, or on unpaged ground, the planner's whole answer stands: door passage, step-out, closest approach)
+    const paged = (this.L.host.engine as {rt?: {services?: {spatial?: {ground?: {paged?: boolean}}}}}).rt?.services?.spatial?.ground?.paged === true;
+    if (paged && level === 0 && P.pos && dist2(P.pos, to) > PAGED_DIRECT_M && mw.navCheckV1 && mw.navWarmV1?.(WALK_TO_WARM_MS)) {
+      const [me, goal] = mw.navCheckV1([{id: 'start', p: P.pos, level: 0, tol: 0.6}, {id: 'goal', p: to, level: 0, tol: 0.6}]);
+      // (a body where the labels see no room, seated or in a tight spot, has no area to compare: the planner decides)
+      if (goal?.code === 'nav.disconnected' && (me?.ok || (me?.area !== undefined && me.area !== goal.area))) return no('route.unreachable', `No walkable route joins ${name} to where you stand: it lies in a separate area${goal.pocket ? ` of ${Math.round(goal.pocket)} m²` : ''} (behind a cliff, water, a wall or a closed door), so walk-to refuses it rather than walking part way.`);
+    }
     return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `Walk to ${name}`, steps, chosen: {at: asked, goal: to, short: round1(dist2(asked, to))}};
   }
 

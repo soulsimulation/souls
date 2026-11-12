@@ -361,8 +361,8 @@ withholds. Owner messages and credentials are never in it.
   (#1916). It does one of three things, and the receipt's `chosen` (`at`, `goal`, `short` in metres) says which (#1964):
   walks to the point, snapped to standing ground within 1 m; within 72 m, what a place walk does with no route (the
   closest approach and its note, or the planner's refusal); or refuses: no standing room within 1 m on the Soul's level
-  (`route.goal-blocked`, naming the level, so an outdoor point from upstairs is refused), or, beyond 72 m, no walk joins it
-  (`route.unreachable`).
+  (`route.goal-blocked`, naming the level, so an outdoor point from upstairs is refused), or, beyond 72 m on paged ground,
+  no walk joins it (`route.unreachable`).
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
   made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a

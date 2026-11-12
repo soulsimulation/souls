@@ -212,7 +212,7 @@ test('walk-to:here on Eden 2026 (paged ground): a point in a wall snaps to stand
   const up = await act('walk:g-eden-house-3-kitchen.kitchen-1'); assert.equal(up.accepted, true, JSON.stringify(up));
   assert.equal((await finish(up.receipt.id)).phase, 'completed'); before = at(); assert.equal(before.level, 4);
   const out = await act('walk-to:here', {at: [0, 0]});
-  assert.equal(out.accepted, false, JSON.stringify(out)); assert.equal(out.code, 'route.goal-blocked'); assert.match(out.reason, /on level 4, the upper floor you are on/);
+  assert.equal(out.accepted, false, JSON.stringify(out)); assert.equal(out.code, 'route.goal-blocked'); assert.match(out.reason, /on level 4, the floor you are on: walk-to stays on your own level/);
   await stays(before);
   assert.deepEqual(eng.runtime.violations, []);
 });
