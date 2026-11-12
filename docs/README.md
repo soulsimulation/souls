@@ -62,6 +62,7 @@ The code is the authority. When a doc and the code disagree, the code wins: fix 
 - [design/soul-context.md](design/soul-context.md): a durable home for Souls and god seats, one memory across worlds, relationships
 - [design/project-visibility.md](design/project-visibility.md): private progress overview and public visual release history
 - [design/cloud-workers.md](design/cloud-workers.md): proposed owner-dispatched cloud workers (not implemented)
+- [design/world-cost.md](design/world-cost.md): proposed: a world costs what moves in it, not its scenery (capacity, quiet tick, sharing)
 - [development/repository-layout.md](development/repository-layout.md): current folder responsibilities and staged first-party ownership
 - [process/planning.md](process/planning.md): intake, ready work and portable handoffs
 - [mars/](mars/README.md): the vendored deterministic engine
