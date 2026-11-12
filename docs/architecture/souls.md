@@ -357,8 +357,12 @@ withholds. Owner messages and credentials are never in it.
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, nothing else) walks the Soul to that point on
-  its own level by the engine's own walk, ending at standing room. A point no route reaches is refused as a place walk
-  is (`route.*`). Words never read as it: "walk to the pond" is a walk (#1916).
+  its own level by the engine's own walk, ending at standing room. Words never read as it: "walk to the pond" is a walk
+  (#1916). It does one of three things, and the receipt's `chosen` (`at`, `goal`, `short` in metres) says which (#1964):
+  walks to the point, snapped to standing ground within 1 m; within 72 m, what a place walk does with no route (the
+  closest approach and its note, or the planner's refusal); or refuses: no standing room within 1 m on the Soul's level
+  (`route.goal-blocked`, naming the level, so an outdoor point from upstairs is refused), or, beyond 72 m, no walk joins it
+  (`route.unreachable`).
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
   made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a

@@ -8,6 +8,8 @@ import {coreAWorld} from '../test/core-a-fixture.ts';
 import {accept} from '../test/native-owner-fixture.ts';
 import {headingOfYaw} from './edge/perception/geometry.ts';
 import {Perception} from './edge/perception/here.ts';
+import {existsSync} from 'node:fs';
+import {bootEden} from '../test/eden-capabilities-timing.ts';
 
 test('intents: nearest free seat near a Soul, front row, go, swim, approach, turn, look; resolve has no side effects', {timeout: 600000}, async t => {
   const w = await coreAWorld(4); t.after(() => w.close());
@@ -145,4 +147,72 @@ test('walk-to:here {at}: the engine walk_to to a point on this level ends within
   await w.ticks(40); assert.deepEqual(w.pos(a), at);
   assert.deepEqual(w.f.host.engine.runtime.violations, []);
   await w.replayExact();
+});
+
+test('walk-to:here, a point with no complete route nearby: the closest approach, and the receipt\'s chosen gives the goal used and the shortfall (#1964 A2 near)', {timeout: 600000}, async t => {
+  const w = await coreAWorld(1); t.after(() => w.close());
+  const [a] = w.souls, asked: [number, number] = [37, -27], eng = w.engine as any;
+  const act = async (body: object) => (await w.http(a, 'POST', '/v1/edge/act', body)).body;
+  await w.put(a, [14, 4]);
+  // the premise: a small walled-off area (standing room, no walk joins it), within the distance the planner proves whole
+  assert.equal(eng.navWarmV1(Infinity), true);
+  const v = eng.navCheckV1([{id: 'g', p: asked, level: 0, tol: 0.6}])[0]; assert.equal(v.code, 'nav.disconnected', JSON.stringify(v));
+  assert.ok(Math.hypot(w.pos(a)[0] - asked[0], w.pos(a)[1] - asked[1]) < 72);
+  const out = await act({capability: 'walk-to:here', params: {at: asked}});
+  assert.equal(out.accepted, true, JSON.stringify(out));
+  assert.match(out.receipt.reason, /^Got within [\d.]+ m of \[37, -27\]: no walkable route reaches it/, 'the existing closest-approach note');
+  const {chosen} = out.receipt; assert.deepEqual(chosen.at, asked);
+  assert.ok(Array.isArray(chosen.goal) && chosen.short > 1, JSON.stringify(chosen));
+  assert.equal(chosen.short, Math.round(Math.hypot(chosen.goal[0] - asked[0], chosen.goal[1] - asked[1]) * 10) / 10, 'the shortfall is the goal used\'s distance from the point asked');
+  await w.ticks(8000, () => !w.open(a, out.receipt.id));
+  const done = w.receipt(a, out.receipt.id); assert.equal(done.phase, 'completed', JSON.stringify(done)); assert.deepEqual(done.chosen, chosen);
+  assert.ok(Math.hypot(w.pos(a)[0] - chosen.goal[0], w.pos(a)[1] - chosen.goal[1]) <= 0.5, 'ended at the goal used');
+  assert.deepEqual(w.f.host.engine.runtime.violations, []);
+  await w.replayExact();
+});
+
+const NO_EDEN = existsSync(new URL('../../../worlds/templates/eden-2026.json', import.meta.url)) ? false : 'needs worlds/templates/eden-2026.json';
+test('walk-to:here on Eden 2026 (paged ground): a point in a wall snaps to standing ground within 1 m, one with none is refused, a walled-off point 490 m out is refused, and from an upper floor an outdoor point is refused naming the level (#1964 A1-A3)', {timeout: 900000, skip: NO_EDEN}, async t => {
+  const w = await bootEden(); t.after(() => w.close());
+  const eng = w.host.engine as any, L = w.edge, s = w.soul;
+  const at = () => {const e = eng.world.entities[s.entityId]; return {p: [e.pose.p[0], e.pose.p[2]] as [number, number], level: e.human.level ?? 0};};
+  const act = async (capability: string, params?: object) => await accept(w.host, Promise.resolve(L.act(s, {capability, ...(params ? {params} : {})}))) as any;
+  const finish = async (id: string, seconds = 600) => {const t0 = eng.world.tick; let r = L.receipt(s.soulId, id)!; while (['accepted', 'waiting', 'started'].includes(r.phase) && eng.world.tick - t0 < 20 * seconds) {await w.settle(20); r = L.receipt(s.soulId, id)!;} return r;};
+  const stays = async (before: {p: [number, number]; level: number}) => {await w.settle(20); assert.deepEqual(at(), before, 'the body never moved');};
+  // a garden wall on open ground by the Commons, and a pen of four garden walls on open ground 490 m out (corner gaps
+  // 0.25 m: no body fits). A live world's ledger warms the connectivity labels a slice a tick; the test warms them at once.
+  const wall = (name: string, path: number[][]) => ({op: 'place', def: 'core/garden-wall@1', name, shape: {path}});
+  const [px, pz] = [483, 85], h = 3, i = 0.4;
+  const built = w.god.act({ops: [wall('test-wall', [[7, 6], [13, 6]]), wall('pen-n', [[px - h + i, pz + h], [px + h - i, pz + h]]), wall('pen-s', [[px - h + i, pz - h], [px + h - i, pz - h]]),
+    wall('pen-e', [[px + h, pz - h + i], [px + h, pz + h - i]]), wall('pen-w', [[px - h, pz - h + i], [px - h, pz + h - i]])]} as never) as {accepted?: boolean};
+  assert.equal(built.accepted, true, JSON.stringify(built)); await w.settle(3);
+  assert.equal(eng.navWarmV1(Infinity), true);
+  // A1: inside the wall: snapped to standing ground within 1 m, walked there, and chosen says so
+  assert.ok(eng.clearanceAtV1(10, 6) < 0.05, 'the point is inside the wall');
+  const snap = await act('walk-to:here', {at: [10, 6]}); assert.equal(snap.accepted, true, JSON.stringify(snap));
+  const c = snap.receipt.chosen, moved = Math.hypot(c.goal[0] - 10, c.goal[1] - 6);
+  assert.deepEqual(c.at, [10, 6]); assert.ok(moved > 0 && moved <= 1, JSON.stringify(c)); assert.equal(c.short, Math.round(moved * 10) / 10);
+  assert.ok(eng.clearanceAtV1(c.goal[0], c.goal[1]) >= 0.34, 'the goal used has standing room');
+  assert.deepEqual((L as any).launched.get(snap.receipt.id)?.steps.filter((x: any) => x.verb !== 'stand'), [{verb: 'walk_to', params: {to: c.goal, standoff: 0, stand: 'clear/1'}}]);
+  const sd = await finish(snap.receipt.id); assert.equal(sd.phase, 'completed', JSON.stringify(sd));
+  assert.ok(Math.hypot(at().p[0] - c.goal[0], at().p[1] - c.goal[1]) <= 0.5, 'ended at the snapped goal');
+  // A1: the middle of the Commons pond has no standing ground within 1 m on her level: refused, not-standable
+  let before = at();
+  const pond = await act('walk-to:here', {at: [-60, 0]});
+  assert.equal(pond.accepted, false, JSON.stringify(pond)); assert.equal(pond.code, 'route.goal-blocked'); assert.match(pond.reason, /no standing room within 1 m of \[-60, 0\] on the ground \(level 0\)/i);
+  await stays(before);
+  // A2 far: the pen 490 m out on paged ground. The planner proves only the first hop there (before #1964 this walk was
+  // accepted and failed 45 m short after six minutes); the labels see no walk joins it: refused with a route code
+  const v = eng.navCheckV1([{id: 'pen', p: [px, pz], level: 0, tol: 0.6}])[0]; assert.equal(v.code, 'nav.disconnected', JSON.stringify(v));
+  assert.ok(Math.hypot(at().p[0] - px, at().p[1] - pz) > 450, 'about 500 m away');
+  const far = await act('walk-to:here', {at: [px, pz]});
+  assert.equal(far.accepted, false, JSON.stringify(far)); assert.equal(far.code, 'route.unreachable'); assert.match(far.reason, /No walkable route joins \[483, 85\]/);
+  await stays(before);
+  // A3: upstairs (Eden House 3's kitchen, level 4), an outdoor point is refused naming the level; she stays upstairs
+  const up = await act('walk:g-eden-house-3-kitchen.kitchen-1'); assert.equal(up.accepted, true, JSON.stringify(up));
+  assert.equal((await finish(up.receipt.id)).phase, 'completed'); before = at(); assert.equal(before.level, 4);
+  const out = await act('walk-to:here', {at: [0, 0]});
+  assert.equal(out.accepted, false, JSON.stringify(out)); assert.equal(out.code, 'route.goal-blocked'); assert.match(out.reason, /on level 4, the upper floor you are on/);
+  await stays(before);
+  assert.deepEqual(eng.runtime.violations, []);
 });
