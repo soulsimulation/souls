@@ -7,6 +7,7 @@
 // #1931: speech in earshot not said to this Soul, an interested event starting, and a thing's state changing are three more
 // ambient kinds, through the same budget and delivery. A wake carrying another Soul's words is marked untrusted.
 import { thingState } from "./catalog.mjs";
+import { newerThan } from "./home.mjs";
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
 export const WAKE_EVERY_S = 300;
@@ -160,6 +161,13 @@ export function deliver(wake, now, { free = false, heldMs = HELD_MS, reader = nu
 export function confirm(wake, reader) {
   const held = (wake?.held ?? []).filter((g) => reader != null && g.reader === reader);
   return held.length === (wake?.held?.length ?? 0) ? wake : { ...wake, held };
+}
+
+/** #1941: platform news serve raises as one ambient wake, within the budget: events, and releases this client is too old for.
+ *  The feed's text is the platform's, not a Soul's: the wake names the newest title and points at `news`. */
+export function newsWakes(items, version, at) {
+  const due = items.filter((i) => i.kind === "event" || (i.kind === "release" && newerThan(i.minClient, version)));
+  return due.length ? [{ id: "news", kind: "news", why: `platform news: ${due.at(-1).title} (read it with news)`, at, count: due.length }] : [];
 }
 
 const speaker = (a) => a.soulId ?? a.from ?? "someone";

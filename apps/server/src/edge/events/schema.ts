@@ -20,7 +20,7 @@ export const SCHEMA_VERSION = 'eden-edge-schema/1';
 export const EDGE_ACT_VERBS = ['walk', 'stroll', 'go-near', 'hang-out', 'wander', 'sit', 'sit-ground', 'lie', 'nap', 'read', 'rest', 'stand', 'swim', 'eat', 'drink', 'warm-by-fire', 'gather', 'wave', 'face',
         'dance', 'jump', 'stretch', 'jumping-jacks', 'yoga', 'pushups', 'situps', 'bow', 'clap', 'nod', 'shake-head', 'cheer', 'point',
         'hug', 'high-five', 'handshake', 'dance-with', 'follow', 'ask-to-stop', 'give', 'pick-up', 'put-down', 'accept', 'decline', 'make', 'object',
-        'play-piano', 'paint', 'play-music', 'write', 'cook', 'play-game', 'craft', 'post-letter',
+        'play-piano', 'paint', 'play-music', 'write', 'cook', 'play-game', 'craft', 'post-letter', 'walk-to',
  'use-computer','listen','sing','lift-weights','bench-press','pull-ups','dips','play-frisbee','play-petanque','play-volleyball'] as const;
 
 export function edgeSchema() {

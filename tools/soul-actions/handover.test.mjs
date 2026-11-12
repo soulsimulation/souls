@@ -63,6 +63,7 @@ test('consensual hand-over: offer, accept, decline, withdraw, lapse; one owner a
   await tick(60);
   const lantern = named('lantern'), bowl = named('bowl'), item = id => W().entities[id];
   let retries = 0;
+  const answer = (s, verb) => {soul = s; return edge.capabilities(s).find(c => c.id.startsWith(verb + ':inv_'))?.id ?? verb;};
   const act = async (s, capability, params, want = true) => {let b; for (let k = 0; k < 20; k++) {soul = s; const r = await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability, ...(params ? {params} : {})})})); b = await r.json(); if (b.code !== 'object.admission-failed') break; retries++; await tick(10);} assert.equal(b.accepted, want, capability + ' ' + JSON.stringify(b).slice(0, 500)); return b;};
   const receipt = (s, b) => edge.receipt(s.soulId, b.receipt.id);
   const until = async (cond, limit = 1200) => {for (let n = 0; n < limit; n++) {if (cond()) return n; await tick(1);} return -1;};
@@ -95,7 +96,7 @@ test('consensual hand-over: offer, accept, decline, withdraw, lapse; one owner a
   };
   // ---- 1) declined
   const cyBefore = await here(cy), benBefore = await here(ben);
-  const g1 = await act(ana, 'give the lantern to Ben');
+  const g1 = await act(ana, `give:${ben.soulId}`);
   assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
   const benOffer = await here(ben); report.lines.offer = benOffer.me.offer;
   assert.match(benOffer.me.offer ?? '', /^Ana holds out the lantern for you: accept or decline \(\d+ s\)$/);
@@ -109,20 +110,20 @@ test('consensual hand-over: offer, accept, decline, withdraw, lapse; one owner a
   {const d = Math.hypot(at(ana)[0] - at(ben)[0], at(ana)[1] - at(ben)[1]); report.offerDistance = +d.toFixed(3); assert.ok(d >= .8 && d <= .95, 'facing at a hand-over distance ' + d);}
   assert.deepEqual(at(ben), benAt0, 'Ben does not move before answering'); assert.equal(body(ben).pose.yaw, benYaw0);
   report.refusals.otherPickUp = (await act(cy, 'pick-up:' + lantern, undefined, false)).code;
-  const d1 = await act(ben, 'decline'); const l1 = await watch([[ana, g1]]);
+  const d1 = await act(ben, answer(ben, 'decline')); const l1 = await watch([[ana, g1]]);
   assert.equal(receipt(ana, g1).code, 'invite.declined'); report.kept = {declined: keptCheck(l1, 'declined')};
-  const afterDecline = await act(ben, 'accept', undefined, false); report.refusals.acceptAfterDecline = afterDecline.code; assert.equal(afterDecline.code, 'invite.none');
+  const afterDecline = await act(ben, 'accept:' + d1.receipt.capability.slice('decline:'.length), undefined, false); report.refusals.acceptAfterDecline = afterDecline.code; assert.equal(afterDecline.code, 'capability.unknown');
   assert.ok(!(await here(ben)).me.offer, 'the declined offer line is gone');
   // ---- 2) withdrawn
   await tick(30);
-  const g2 = await act(ana, 'give the lantern to Ben'); assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
+  const g2 = await act(ana, `give:${ben.soulId}`); assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
   assert.ok(await until(() => body(ana).human.itemTransferV1?.hold === true, 900) >= 0); await tick(30);
-  await act(ana, 'withdraw my offer'); const l2 = await watch([[ana, g2]]);
+  await act(ana, answer(ana, 'withdraw')); const l2 = await watch([[ana, g2]]);
   assert.equal(receipt(ana, g2).code, 'invite.withdrawn'); report.kept.withdrawn = keptCheck(l2, 'withdrawn');
   assert.match(messages(ben).at(-1)?.text ?? '', /withdrew the offer \(the lantern\)/);
   // ---- 3) lapsed
   await tick(30);
-  const g3 = await act(ana, 'give the lantern to Ben'); const l3 = await watch([[ana, g3]], 1400);
+  const g3 = await act(ana, `give:${ben.soulId}`); const l3 = await watch([[ana, g3]], 1400);
   assert.equal(receipt(ana, g3).code, 'invite.expired'); report.kept.lapsed = keptCheck(l3, 'lapsed');
   assert.ok(!(await here(ben)).me.offer, 'the lapsed offer line is gone');
   assert.deepEqual(at(ben), benAt0, 'Ben was never moved by the three offers'); assert.equal(body(ben).pose.yaw, benYaw0);
@@ -158,10 +159,10 @@ test('consensual hand-over: offer, accept, decline, withdraw, lapse; one owner a
   };
   // ---- 4) accepted: the hand-over
   await tick(30);
-  const g4 = await act(ana, 'give the lantern to Ben'); assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
+  const g4 = await act(ana, `give:${ben.soulId}`); assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
   assert.ok(await until(() => body(ana).human.itemTransferV1?.hold === true, 900) >= 0); await tick(10);
   const offering = await here(ben); report.hereBytes.offereeWithOffer = sz(offering);
-  const a4 = await act(ben, 'accept'); const l4 = await watch([[ana, g4], [ben, a4]]);
+  const a4 = await act(ben, answer(ben, 'accept')); const l4 = await watch([[ana, g4], [ben, a4]]);
   assert.equal(receipt(ana, g4).phase, 'completed', JSON.stringify(receipt(ana, g4))); assert.equal(receipt(ben, a4).phase, 'completed', JSON.stringify(receipt(ben, a4)));
   report.handOvers.push({what: 'lantern Ana → Ben', ...handOverCheck(l4, lantern, ana, ben, 'lantern')});
   assert.equal(holder(lantern), ben.entityId);
@@ -171,26 +172,26 @@ test('consensual hand-over: offer, accept, decline, withdraw, lapse; one owner a
   const benHolding = await here(ben); assert.match(benHolding.me.holding ?? '', /lantern$/); assert.ok(!(await here(ana)).me.holding);
   report.hereBytes.takerHolding = sz(benHolding);
   // ---- refusals: hands empty, hands full, nobody else picks it up
-  report.refusals.giveEmptyHanded = (await act(ana, 'give the lantern to Ben', undefined, false)).code; assert.equal(report.refusals.giveEmptyHanded, 'hands.empty');
+  report.refusals.giveEmptyHanded = (await act(ana, `give:${ben.soulId}`, undefined, false)).code; assert.equal(report.refusals.giveEmptyHanded, 'capability.unknown');
   assert.equal(report.refusals.otherPickUp, 'capability.unknown', 'a held lantern is offered to nobody else');
   // ---- 5) back to Ana; Ana stops mid-reach (the lantern stays with Ben); then "take the lantern"
-  const g5 = await act(ben, 'give the lantern to Ana'); assert.ok(await until(() => edge.together.invitesFor(ana.soulId).length > 0) >= 0);
-  const a5 = await act(ana, 'accept');
+  const g5 = await act(ben, `give:${ana.soulId}`); assert.ok(await until(() => edge.together.invitesFor(ana.soulId).length > 0) >= 0);
+  const a5 = await act(ana, answer(ana, 'accept'));
   assert.ok(await until(() => body(ana).human.itemTransferV1?.mode === 'take' && W().tick > body(ana).human.itemTransferV1.reachTick + 8, 900) >= 0, 'Ana reaches for it');
   const stop = await act(ana, 'stand:here'); const l5 = await watch([[ben, g5], [ana, a5]]);
   assert.ok(l5.every(s => s.lantern === ben.entityId), 'a receiver who stops mid-reach leaves it with the giver');
   report.receiverStops = {giver: receipt(ben, g5).code, receiver: receipt(ana, a5).phase + ' ' + (receipt(ana, a5).code ?? '')};
   assert.equal(receipt(ben, g5).phase, 'failed');
   await tick(40);
-  const g6 = await act(ben, 'give the lantern to Ana'); assert.ok(await until(() => edge.together.invitesFor(ana.soulId).length > 0) >= 0);
-  const a6 = await act(ana, 'take the lantern'); const l6 = await watch([[ben, g6], [ana, a6]]);
+  const g6 = await act(ben, `give:${ana.soulId}`); assert.ok(await until(() => edge.together.invitesFor(ana.soulId).length > 0) >= 0);
+  const a6 = await act(ana, answer(ana, 'accept')); const l6 = await watch([[ben, g6], [ana, a6]]);
   assert.equal(receipt(ben, g6).phase, 'completed'); assert.equal(receipt(ana, a6).phase, 'completed');
   report.handOvers.push({what: 'lantern Ben → Ana ("take the lantern")', ...handOverCheck(l6, lantern, ben, ana, 'lantern back')});
   // ---- 6) the bowl: Cy picks it up and gives it to Ben (the same action, a different object); Ana's full hands refuse
   const pb = await act(cy, 'pick-up:' + bowl); assert.ok(await until(() => ended(cy, pb)) >= 0); assert.equal(holder(bowl), cy.entityId);
-  report.refusals.takerHandsFull = (await act(cy, 'give the bowl to Ana', undefined, false)).code; assert.equal(report.refusals.takerHandsFull, 'hands.full');
-  const g7 = await act(cy, 'give the bowl to Ben'); assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
-  const a7 = await act(ben, 'accept'); const l7 = await watch([[cy, g7], [ben, a7]]);
+  report.refusals.takerHandsFull = (await act(cy, `give:${ana.soulId}`, undefined, false)).code; assert.equal(report.refusals.takerHandsFull, 'hands.full');
+  const g7 = await act(cy, `give:${ben.soulId}`); assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0) >= 0);
+  const a7 = await act(ben, answer(ben, 'accept')); const l7 = await watch([[cy, g7], [ben, a7]]);
   assert.equal(receipt(cy, g7).phase, 'completed'); assert.equal(receipt(ben, a7).phase, 'completed');
   report.handOvers.push({what: 'bowl Cy → Ben', ...handOverCheck(l7, bowl, cy, ben, 'bowl')});
   assert.deepEqual(f.host.engine.runtime.violations, []);
