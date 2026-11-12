@@ -26,3 +26,6 @@ apps/server/test/fixtures/old-world-takes/eden.jsonl.br
 apps/server/test/fixtures/old-world-takes/littlemartians.jsonl.br
 apps/server/test/fixtures/old-world-takes/mars.jsonl.br
 apps/server/test/fixtures/sample-texture.jpg
+# The released Soul client 2.32.0, gzipped, for the upgrade compatibility test (#1938).
+tools/world-launcher/soul/released/2.32.0/eden.mjs.gz
+tools/world-launcher/soul/released/2.32.0/skill.md.gz

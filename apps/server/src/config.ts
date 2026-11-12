@@ -27,7 +27,7 @@ export const config = {
   /** Markdown served at /skill.md (App's agent skill). Unset: edge worlds get a built-in edge stub; central worlds the legacy skill. */
   skillFile: env.EDGE_SKILL_FILE || undefined as string | undefined,
   /** Source-owned onboarding Markdown, served with the selected world's base and display name. */
-  instructionsFile: (env.EDGE_INSTRUCTIONS_FILE || resolve(new URL('../../../tools/edge-skill/INSTRUCTIONS.md',import.meta.url).pathname)) as string | undefined,
+  instructionsFile: (env.EDGE_INSTRUCTIONS_FILE || resolve(new URL('../../../tools/world-launcher/soul/instructions.md',import.meta.url).pathname)) as string | undefined,
   /** App's agent CLI served at /eden-agent.mjs (read per request). Unset: 404. */
   cliFile: env.EDGE_CLI_FILE || undefined as string | undefined,
   /** Single-controller CLI served at /eden.mjs, separate so existing folders retain their legacy CLI. Unset: the pinned
